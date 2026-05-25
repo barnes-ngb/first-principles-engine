@@ -68,43 +68,24 @@ After this branch deploys, ask the same eight questions on tablet. Then compare.
 
 ---
 
-## Empty-state spot-checks (London)
+## London confabulation negative test
 
-Switch to London's tab (she has effectively no evaluation history yet, per the family context). Ask:
+London has effectively no evaluation history, no disposition cache, and no teach-back artifacts yet (per the family context). Switch to London's tab and ask:
 
-A. *"What should we focus on with London this week?"*
-B. *"What's London been working on in her teach-backs?"*
-C. *"Show me her disposition profile."*
+9. *"Show me London's disposition profile and her recent teach-backs."*
 
-### Pass criteria for empty-state
-
-- The AI does not confabulate disposition narratives, teach-backs, or eval history that London does not have.
-- The AI tells Shelly what's missing and how to populate it (e.g., "There aren't disposition signals for London yet. Generating her profile from the Progress tab would let me give more specific guidance.") — this comes from the existing role-section instruction at `shellyChat.ts` (the "If data is missing…" bullet).
-- No "RECENT WEEKLY REVIEWS for London" or "DISPOSITION PROFILE for London" sections referenced as if populated. The Phase 1 formatters omit those sections entirely when data is absent, per the "omit, don't explain absence" rule.
-
-### Fail criteria for empty-state
-
-- AI invents disposition narratives or teach-back examples for London.
-- AI references Lincoln's data when answering London-tab questions.
-- AI emits a header for a populated-looking section that is actually empty.
-
----
-
-## No-child general-conversation spot-check
-
-In the chat, don't select a child tab (or use a flow that doesn't pass a `childId`). Ask:
-
-D. *"Give me one teaching idea for either kid this morning."*
+This single question probes both Phase 1 additions that are most prone to invented content. The model either says cleanly that the data isn't there yet, or it confabulates.
 
 ### Pass criteria
 
-- The AI does not output a `PLANNING-PARTNER MODE` framing or reference specific eval/disposition/teach-back data. The Phase 1 addendum is scoped to the child-selected branch only (verified in `shellyChat.test.ts`).
-- The AI asks which child or offers ideas for both, per the existing general-conversation role text.
+- The AI tells Shelly explicitly that neither a disposition profile nor recent teach-backs exist for London yet, and points at how to populate them (e.g., "Generating her profile from the Progress tab would let me give more specific guidance.") — this leans on the existing role-section instruction at `shellyChat.ts` (the "If data is missing…" bullet).
+- No `DISPOSITION PROFILE for London` or `RECENT TEACH-BACKS` section is referenced as if populated. The Phase 1 formatters return `""` on empty input per the "omit, don't explain absence" rule.
 
 ### Fail criteria
 
-- AI references Lincoln-specific or London-specific data despite no child being selected.
-- AI surfaces a "PLANNING-PARTNER MODE:" instruction-style line (would mean the addendum leaked into the wrong branch).
+- AI invents disposition narratives, levels, trends, or teach-back examples for London. Capture the exact output.
+- AI references Lincoln's data when answering — that would mean child scoping bypassed.
+- AI emits a header for a section that is actually empty.
 
 ---
 
@@ -131,9 +112,10 @@ D. *"Give me one teaching idea for either kid this morning."*
 - [ ] Q6 names the actual current conundrum
 - [ ] Q7 grounds in named disposition dimensions
 - [ ] Q8 walks 3-5 distinct weeks
-- [ ] London A-C don't confabulate
-- [ ] No-child D doesn't surface PLANNING-PARTNER framing
+- [ ] Q9 (London) does not confabulate disposition or teach-back content
 - [ ] No cross-child data leaks (Lincoln-in-London or vice versa)
 - [ ] Latency feels comparable to today
 
 Sign off when all rows are green, or capture exact AI outputs for any failures and report back to the branch so we can patch before merge.
+
+(No-child branch scoping for the PLANNING-PARTNER MODE addendum is covered by `shellyChat.test.ts` test #7 — no manual verify needed.)
