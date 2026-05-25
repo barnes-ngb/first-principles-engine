@@ -222,35 +222,48 @@ function effectiveScore(
   return score;
 }
 
+export interface ModePlacement {
+  kid: PhotoRef[];
+  parent: PhotoRef[];
+}
+
 export interface SectionPlacement {
   /** Up to MAX_PHOTOS_PER_SECTION.whatYouLoved photos for the celebration page. */
-  whatYouLoved: PhotoRef[];
+  whatYouLoved: ModePlacement;
   /** Up to MAX_PHOTOS_PER_SECTION.workedThrough photos — prefer resolved-blocker evidence. */
-  workedThrough: PhotoRef[];
+  workedThrough: ModePlacement;
   /** Remaining curated photos for the "More Photos" tray, capped at 30 total kept. */
   more: PhotoRef[];
 }
 
 /**
- * Photo caps per section. Tuned upward from the original PR 1 values after
- * real-use feedback that sections looked text-dominant; "What You Loved" is
- * the photo-dominant page and benefits most from a higher cap.
+ * Photo caps per section per mode. Kid mode aggressively includes creative
+ * artifacts (high cap, often won't be hit). Parent mode is the analytical
+ * view with a tighter cap.
  */
 export const MAX_PHOTOS_PER_SECTION = {
-  whatYouLoved: 6,
-  workedThrough: 3,
+  whatYouLoved: { kid: 8, parent: 6 },
+  workedThrough: { kid: 4, parent: 4 },
   cover: 1,
 } as const;
 
 /**
- * Workbook-scan policy per section. Cover excludes them entirely (worksheet
- * pages should never be the artifact's first impression). "What You Loved" is
- * a celebration page so creative work wins ties. "Worked Through" allows them
- * — workbook captures are real evidence of effort.
+ * Workbook-scan placement policy.
+ *
+ * - Kid mode is celebration only — workbook scans never appear in kid mode.
+ *   Even the evidence page reads as creative-work-only for the child.
+ * - Parent mode is analytical — workbook scans are real evidence of effort,
+ *   but only on the "What He Worked Through" page. Other parent-mode sections
+ *   stay creative-work-first.
+ *
+ * The cover hero is selected separately via `pickHeroPhoto` and excludes
+ * workbook scans across both modes.
  */
-export const SECTION_WORKBOOK_POLICY = {
+export const KID_MODE_WORKBOOK_POLICY = "exclude_everywhere" as const;
+export const PARENT_MODE_WORKBOOK_POLICY = {
   cover: "exclude",
-  whatYouLoved: "deprioritize",
+  monthInSentence: "exclude",
+  whatYouLoved: "exclude",
   workedThrough: "allow",
   byTheNumbers: "exclude",
 } as const;
@@ -264,43 +277,96 @@ export function assignPhotosToSections(
   },
 ): SectionPlacement {
   const resolvedIds = context.resolvedBlockerEvidenceIds ?? new Set<string>();
-  const selected: ScoredPhoto[] = [];
 
-  // "What You Loved" deprioritizes workbook scans: prefer non-workbook photos,
-  // and only fall back to workbook scans if the non-workbook pool is empty.
-  const lovedNonWorkbook = scored.filter((p) => !p.isWorkbookScan);
-  const whatYouLoved = selectTopN(
-    lovedNonWorkbook,
-    selected,
-    MAX_PHOTOS_PER_SECTION.whatYouLoved,
+  // Kid mode never sees workbook scans anywhere.
+  const kidEligible = scored.filter((p) => !p.isWorkbookScan);
+  // Parent mode "whatYouLoved" also excludes workbook scans (celebration-first).
+  const parentLovedEligible = scored.filter((p) => !p.isWorkbookScan);
+
+  const kidSelected: ScoredPhoto[] = [];
+  const parentSelected: ScoredPhoto[] = [];
+
+  const lovedKid = selectTopN(
+    kidEligible,
+    kidSelected,
+    MAX_PHOTOS_PER_SECTION.whatYouLoved.kid,
   );
-  selected.push(...whatYouLoved);
+  kidSelected.push(...lovedKid);
+
+  const lovedParent = selectTopN(
+    parentLovedEligible,
+    parentSelected,
+    MAX_PHOTOS_PER_SECTION.whatYouLoved.parent,
+  );
+  parentSelected.push(...lovedParent);
 
   // Worked-through prefers resolved-blocker evidence first.
-  const workedPriority = scored.filter((p) => resolvedIds.has(p.id));
-  const workedRest = scored.filter(
-    (p) =>
-      !resolvedIds.has(p.id) && !whatYouLoved.some((w) => w.id === p.id),
-  );
-  const workedCap = MAX_PHOTOS_PER_SECTION.workedThrough;
-  const workedPicked = selectTopN(workedPriority, selected, workedCap);
-  selected.push(...workedPicked);
-  if (workedPicked.length < workedCap) {
-    const filler = selectTopN(
-      workedRest,
-      selected,
-      workedCap - workedPicked.length,
-    );
-    selected.push(...filler);
-    workedPicked.push(...filler);
-  }
+  // Kid mode: still no workbook scans. Parent mode: workbook scans allowed.
+  const workedCapKid = MAX_PHOTOS_PER_SECTION.workedThrough.kid;
+  const workedCapParent = MAX_PHOTOS_PER_SECTION.workedThrough.parent;
 
-  const placedIds = new Set(selected.map((s) => s.id));
+  const workedKid = pickWorkedThrough({
+    eligible: kidEligible,
+    alreadySelected: kidSelected,
+    excludedIds: new Set(lovedKid.map((p) => p.id)),
+    resolvedIds,
+    cap: workedCapKid,
+  });
+  kidSelected.push(...workedKid);
+
+  const workedParent = pickWorkedThrough({
+    eligible: scored, // parent worked-through allows workbook scans
+    alreadySelected: parentSelected,
+    excludedIds: new Set(lovedParent.map((p) => p.id)),
+    resolvedIds,
+    cap: workedCapParent,
+  });
+  parentSelected.push(...workedParent);
+
+  // "More" pool: any curated photo not placed in either mode, capped at 30.
+  const placedIds = new Set<string>([
+    ...kidSelected.map((s) => s.id),
+    ...parentSelected.map((s) => s.id),
+  ]);
   const remaining = scored.filter((p) => !placedIds.has(p.id)).slice(0, 30);
 
   return {
-    whatYouLoved: whatYouLoved.map(strip),
-    workedThrough: workedPicked.map(strip),
+    whatYouLoved: {
+      kid: lovedKid.map(strip),
+      parent: lovedParent.map(strip),
+    },
+    workedThrough: {
+      kid: workedKid.map(strip),
+      parent: workedParent.map(strip),
+    },
     more: remaining.map(strip),
   };
+}
+
+interface PickWorkedThroughInput {
+  eligible: ScoredPhoto[];
+  alreadySelected: ScoredPhoto[];
+  excludedIds: Set<string>;
+  resolvedIds: Set<string>;
+  cap: number;
+}
+
+function pickWorkedThrough(input: PickWorkedThroughInput): ScoredPhoto[] {
+  const { eligible, alreadySelected, excludedIds, resolvedIds, cap } = input;
+  // Resolved-blocker evidence is allowed to repeat across sections —
+  // a photo that resolved a blocker can also be celebrated.
+  const priority = eligible.filter((p) => resolvedIds.has(p.id));
+  const rest = eligible.filter(
+    (p) => !resolvedIds.has(p.id) && !excludedIds.has(p.id),
+  );
+  const picked = selectTopN(priority, alreadySelected, cap);
+  if (picked.length < cap) {
+    const filler = selectTopN(
+      rest,
+      [...alreadySelected, ...picked],
+      cap - picked.length,
+    );
+    picked.push(...filler);
+  }
+  return picked;
 }

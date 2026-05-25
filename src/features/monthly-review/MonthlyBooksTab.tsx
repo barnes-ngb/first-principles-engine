@@ -9,15 +9,19 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 
+import ChildFilterChips, {
+  CHILD_FILTER_ALL,
+} from '../../components/ChildFilterChips'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useMonthlyReviews } from '../../core/hooks/useMonthlyReviews'
-import type { MonthlyReview } from '../../core/types'
+import type { MonthlyReview, MonthlyReviewPage } from '../../core/types'
 import { MonthlyReviewStatus } from '../../core/types/enums'
 import { GenerateNowDialog } from './GenerateNowDialog'
 import { MonthlyPhoto } from './MonthlyPhoto'
+import { getModePhotos } from './photoRefs'
 
-const ALL = '__all__'
+const ALL = CHILD_FILTER_ALL
 
 function formatMonthLabel(month: string): string {
   const [y, m] = month.split('-')
@@ -79,25 +83,13 @@ export default function MonthlyBooksTab() {
         </Button>
       </Stack>
 
-      {children.length > 1 && (
-        <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap' }}>
-          <Chip
-            label="All"
-            color={filterChildId === ALL ? 'primary' : 'default'}
-            variant={filterChildId === ALL ? 'filled' : 'outlined'}
-            onClick={() => setFilterChildId(ALL)}
-          />
-          {children.map((c) => (
-            <Chip
-              key={c.id}
-              label={c.name}
-              color={filterChildId === c.id ? 'primary' : 'default'}
-              variant={filterChildId === c.id ? 'filled' : 'outlined'}
-              onClick={() => setFilterChildId(c.id)}
-            />
-          ))}
-        </Stack>
-      )}
+      <Box sx={{ mb: 2 }}>
+        <ChildFilterChips
+          children={children}
+          selectedChildId={filterChildId}
+          onSelect={setFilterChildId}
+        />
+      </Box>
 
       {loading && (
         <Stack alignItems="center" sx={{ py: 6 }}>
@@ -165,13 +157,23 @@ interface ReviewCardProps {
   onOpen: () => void
 }
 
+function firstPagePhoto(pages: MonthlyReviewPage[]) {
+  for (const page of pages) {
+    const kid = getModePhotos(page, 'kid')
+    if (kid.length) return kid[0]
+    const parent = getModePhotos(page, 'parent')
+    if (parent.length) return parent[0]
+  }
+  return undefined
+}
+
 function ReviewCard({ review, childName, onOpen }: ReviewCardProps) {
   const isPublished = review.status === MonthlyReviewStatus.Published
   const isGenerating = review.status === MonthlyReviewStatus.Generating
   const hero =
     review.heroPhotoRef ??
     review.curatedPhotos?.[0] ??
-    review.pages.find((p) => p.photoRefs?.length)?.photoRefs[0]
+    firstPagePhoto(review.pages)
 
   return (
     <Box
