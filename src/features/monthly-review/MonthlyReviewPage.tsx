@@ -152,19 +152,50 @@ const STAT_LABELS: Record<string, string> = {
   totalDiamonds: 'Diamonds',
 }
 
-const STAT_KEYS: Array<keyof MonthStats> = [
+// Kid mode leads with diamonds (his motivator). Parent mode leads with hours
+// (the compliance signal Shelly scans for first).
+const KID_MODE_TILE_ORDER: Array<keyof MonthStats> = [
   'totalDiamonds',
-  'totalHours',
   'booksRead',
   'booksCompleted',
+  'quests',
+  'totalHours',
+  'dadLabCount',
+  'blockersResolved',
+]
+
+const PARENT_MODE_TILE_ORDER: Array<keyof MonthStats> = [
+  'totalHours',
+  'totalDiamonds',
+  'booksCompleted',
+  'booksRead',
   'quests',
   'dadLabCount',
   'blockersResolved',
 ]
 
+// In kid mode, zero-value tiles are a soft anti-pattern on a celebration
+// artifact — a 10-year-old reading "0 Dad Lab" or "0 Blockers beat" reads
+// as scolding. Always show diamonds/hours/quests (zero there is meaningful
+// or improbable); hide the rest when they're zero.
+const KID_MODE_ALWAYS_SHOW: ReadonlyArray<keyof MonthStats> = [
+  'totalDiamonds',
+  'totalHours',
+  'quests',
+]
+
 function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
   const content = getContent(page, mode)
   const stats = review.stats
+
+  const orderedKeys =
+    mode === 'kid' ? KID_MODE_TILE_ORDER : PARENT_MODE_TILE_ORDER
+  const visibleKeys = orderedKeys.filter((key) => {
+    if (mode === 'parent') return true
+    if (KID_MODE_ALWAYS_SHOW.includes(key)) return true
+    const raw = stats[key]
+    return typeof raw === 'number' && raw > 0
+  })
 
   return (
     <Stack spacing={3} sx={{ px: 1, py: 2 }}>
@@ -185,7 +216,7 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
           gap: 2,
         }}
       >
-        {STAT_KEYS.map((key) => {
+        {visibleKeys.map((key) => {
           const raw = stats[key]
           if (typeof raw !== 'number') return null
           const value =
