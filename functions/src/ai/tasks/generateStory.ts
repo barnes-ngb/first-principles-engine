@@ -196,7 +196,8 @@ export const handleGenerateStory = async (
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: 4096,
+    maxTokens: 6144,
+    temperature: 0.7,
     systemPrompt: storySystemPrompt,
     messages: [{ role: "user", content: "Generate the story now." }],
   });

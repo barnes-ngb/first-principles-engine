@@ -88,6 +88,28 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.shellyChat).toContain("dayToday");
     expect(TASK_CONTEXT.shellyChat).toContain("dadLabReports");
   });
+
+  // ── Story Generation V2 Phase 1: generateStory slice list ──
+
+  it("generateStory wires childProfile, sightWords, wordMastery, and skillSnapshot", () => {
+    expect(TASK_CONTEXT.generateStory).toContain("childProfile");
+    expect(TASK_CONTEXT.generateStory).toContain("sightWords");
+    expect(TASK_CONTEXT.generateStory).toContain("wordMastery");
+    // Phase 1 adds skillSnapshot so the AI can calibrate vocabulary from
+    // the child's actual reading level rather than the old binary isYounger.
+    expect(TASK_CONTEXT.generateStory).toContain("skillSnapshot");
+  });
+
+  it("generateStory cross-task isolation guard: does not pull planner-scoped slices", () => {
+    // Story generation should NOT see engagement history, hours, weekly focus,
+    // workbook paces, or recent eval — those are planner/shellyChat scope.
+    // If this test fails, a slice from another task leaked into generateStory.
+    expect(TASK_CONTEXT.generateStory).not.toContain("engagement");
+    expect(TASK_CONTEXT.generateStory).not.toContain("hoursProgress");
+    expect(TASK_CONTEXT.generateStory).not.toContain("weekFocus");
+    expect(TASK_CONTEXT.generateStory).not.toContain("workbookPaces");
+    expect(TASK_CONTEXT.generateStory).not.toContain("recentEval");
+  });
 });
 
 // ── compressEngagement ─────────────────────────────────────────
