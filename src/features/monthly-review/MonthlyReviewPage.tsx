@@ -10,9 +10,8 @@ import type {
 } from '../../core/types'
 import { SectionType, SubjectBucketLabel } from '../../core/types/enums'
 import { MonthlyPhoto } from './MonthlyPhoto'
+import { getModePhotos, type ReaderMode } from './photoRefs'
 import { usePhotoUrl } from './usePhotoUrl'
-
-type ReaderMode = 'kid' | 'parent'
 
 interface MonthlyReviewPageProps {
   page: MonthlyReviewPageType
@@ -53,7 +52,7 @@ export function MonthlyReviewPage({
 
 function CoverLayout({ page, review, mode }: MonthlyReviewPageProps) {
   const content = getContent(page, mode)
-  const hero = review.heroPhotoRef ?? page.photoRefs[0]
+  const hero = review.heroPhotoRef ?? getModePhotos(page, mode)[0]
   const { url: heroUrl, failed } = usePhotoUrl(hero?.storagePath)
   const monthLabel = formatMonthLabel(review.month)
 
@@ -309,7 +308,14 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
 
 function StandardLayout({ page, mode }: MonthlyReviewPageProps) {
   const content = getContent(page, mode)
-  const photos = page.photoRefs ?? []
+  const photos = getModePhotos(page, mode)
+
+  // Stop touch events from bubbling to MonthlyReviewReader's swipe handler.
+  // Without this, a horizontal scroll inside the photo strip would flip the
+  // page instead of scrolling photos.
+  const stopTouchPropagation = (e: React.TouchEvent) => {
+    e.stopPropagation()
+  }
 
   return (
     <Stack spacing={2.5} sx={{ px: 1, py: 2 }}>
@@ -328,6 +334,9 @@ function StandardLayout({ page, mode }: MonthlyReviewPageProps) {
 
       {photos.length > 0 && (
         <Box
+          onTouchStart={stopTouchPropagation}
+          onTouchMove={stopTouchPropagation}
+          onTouchEnd={stopTouchPropagation}
           sx={{
             display: 'flex',
             gap: 1.5,

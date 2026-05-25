@@ -14,6 +14,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { MonthlyReview } from '../../core/types'
 import { MonthlyReviewStatus } from '../../core/types/enums'
 import { MonthlyPhoto } from './MonthlyPhoto'
+import { getModePhotos } from './photoRefs'
 
 function formatShortMonth(month: string): string {
   const [y, m] = month.split('-')
@@ -117,7 +118,9 @@ export default function KidBooksAboutMePage() {
             const hero =
               review.heroPhotoRef ??
               review.curatedPhotos?.[0] ??
-              review.pages.find((p) => p.photoRefs?.length)?.photoRefs[0]
+              review.pages
+                .map((p) => getModePhotos(p, 'kid')[0])
+                .find((p) => p !== undefined)
             return (
               <Box
                 key={review.id}

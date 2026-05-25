@@ -30,6 +30,17 @@ export interface PageContent {
   audioRef?: string
 }
 
+/**
+ * Per-mode photo refs. Kid mode and parent mode render different photo
+ * sets per page (workbook scans only appear in parent mode on the
+ * "What He Worked Through" evidence page). Legacy reviews stored a single
+ * `PhotoRef[]` here; the renderer normalizes via `getModePhotos`.
+ */
+export interface PageModePhotos {
+  kid: PhotoRef[]
+  parent: PhotoRef[]
+}
+
 export interface MonthlyReviewPage {
   id: string
   sectionType: SectionType
@@ -38,7 +49,11 @@ export interface MonthlyReviewPage {
   kidMode: PageContent
   parentMode: PageContent
 
-  photoRefs: PhotoRef[]
+  /**
+   * Per-mode photo refs. Legacy reviews wrote a flat `PhotoRef[]`; the
+   * renderer reads through `getModePhotos` to support both shapes.
+   */
+  photoRefs: PageModePhotos | PhotoRef[]
   stickers?: unknown[]
 
   /** Parent can hide a section (defaults false). */

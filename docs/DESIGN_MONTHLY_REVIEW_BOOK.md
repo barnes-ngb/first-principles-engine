@@ -536,4 +536,53 @@ Same page, same photos, two readings. That's the whole shape of the feature.
 
 ---
 
-*Last updated: March 31, 2026*
+## Refinement Notes
+
+### v1.2 — May 25, 2026 — Per-mode photo policy
+
+The "same photos, two readings" shape above was right for text but wrong for
+photos. Real-use feedback from Lincoln's April 2026 book surfaced that kid
+mode was picking up workbook scans on its celebration pages — a 10-year-old
+flipping through "his book about him" should not be looking at worksheet
+captures next to his Lego builds.
+
+Photos are now per-mode. `MonthlyReviewPage.photoRefs` accepts either a flat
+`PhotoRef[]` (legacy reviews) or a `{ kid: PhotoRef[]; parent: PhotoRef[] }`
+shape. The renderer reads through `getModePhotos(page, mode)` so both shapes
+keep rendering — old draft reviews don't break, new reviews use the per-mode
+shape.
+
+Placement policy:
+
+- **Kid mode** is celebration-only. Workbook scans are excluded everywhere
+  in kid mode — even on the "Worked Through" page. If kid mode for a section
+  has no eligible photos, the section renders text-only in kid view.
+- **Parent mode** keeps workbook scans on `workedThrough` (evidence page)
+  and only there. Other parent-mode sections stay creative-work-first so the
+  parent view doesn't lead with worksheets either.
+- **Cover hero** is selected via `pickHeroPhoto` (already workbook-aware) and
+  the same hero is used for both modes.
+
+Caps were raised so kid mode aggressively includes creative artifacts: kid
+`whatYouLoved` is 8 (was 6), kid `workedThrough` is 4 (was 3). Parent caps
+hold at 6 / 4 — the parent view stays analytical, not photo-dense. The kid
+caps act as safety upper bounds, not targets; the curator includes all
+eligible artifacts up to the cap.
+
+Text content (kid vs parent voice) is still the same per-mode pattern from
+the original design. Only photo placement diverges by mode.
+
+### v1.2 — May 25, 2026 — Parent-mode tone correction
+
+After regenerating Lincoln's April book under the previous PR's "be
+analytical" instruction, parent mode read like a quarterly business review
+("ambient rather than acute", "the thinness of engagement feedback",
+"developmental shift worth naming"). Charter-aligned voice is analytical
+AND warm, never clinical. The system prompt now lists explicit anti-patterns
+and includes the rewrite test: would Shelly read this and feel like the AI
+saw her son, or would she feel like she's reading a curriculum vendor's
+PDF? Length was not reduced — only the voice quality.
+
+---
+
+*Last updated: May 25, 2026*

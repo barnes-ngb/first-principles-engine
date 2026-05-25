@@ -29,6 +29,11 @@ interface PageContent {
   audioRef?: string;
 }
 
+interface PageModePhotos {
+  kid: PhotoRef[];
+  parent: PhotoRef[];
+}
+
 interface MonthlyReviewPage {
   id: string;
   sectionType:
@@ -40,7 +45,7 @@ interface MonthlyReviewPage {
   order: number;
   kidMode: PageContent;
   parentMode: PageContent;
-  photoRefs: PhotoRef[];
+  photoRefs: PageModePhotos;
   hidden?: boolean;
 }
 
@@ -305,6 +310,36 @@ shame, no comparisons between children).
   - Surfaces patterns Shelly might miss without this artifact
   - Frames growth as observation, not measurement
   - Never grades, never says "ahead" or "behind" or "should be"
+
+PARENT MODE — TONE CORRECTION
+
+Parent mode is analytical AND warm. It is NOT a business analyst's report.
+Specific anti-patterns to avoid:
+
+  - Jargon-y abstractions: "ambient rather than acute", "the thinness of",
+    "engagement feedback", "developmental shift worth naming",
+    "concentration was driven by", "logged minutes"
+  - Hedging analyst language: "which means", "suggests that", "indicates",
+    "reflects a pattern of"
+  - Quarterly-review verbs: "claimed", "demonstrated", "exhibited", "produced"
+  - Abstract noun phrases where a concrete observation would work better
+
+Instead:
+
+  - Talk like a parent who reads a lot and pays attention. Not like a clinician.
+  - Specific moments and direct observations: "Lincoln finished 'Papa Hut'
+    on April 8 — fourteen pages, no help." (not: "Reading endurance demonstrated
+    notable extension this period.")
+  - Reference dates and source data, but in context: "The week of April 19
+    he didn't open the checklist once — but he wrote 12 pages of his own
+    book that week, so something was clearly working."
+  - When data points are interesting, name what's interesting in plain words.
+    "Language arts took 154 minutes this month — more than any other subject
+    because that's where he wanted to be."
+
+The test: would Shelly read this and feel like the AI saw her son, or would
+she feel like she's reading a curriculum vendor's PDF? If the latter, the
+voice is wrong.
 
 HARD RULE: If the kid mode for a section is more than 80% of the parent
 mode length, you're doing it wrong. Kid mode should be roughly half the
@@ -578,26 +613,49 @@ function formatPhotoSection(
   } else {
     lines.push("Hero (cover): none — write a text-only cover.");
   }
-  if (placement.whatYouLoved.length) {
+
+  // Captions can target any photoId the AI sees — union the modes so the
+  // prompt lists every photo exactly once and the AI can caption all of them.
+  const loved = unionByPhotoId(
+    placement.whatYouLoved.kid,
+    placement.whatYouLoved.parent,
+  );
+  const worked = unionByPhotoId(
+    placement.workedThrough.kid,
+    placement.workedThrough.parent,
+  );
+
+  if (loved.length) {
     lines.push("whatYouLoved section photos:");
-    for (const p of placement.whatYouLoved) {
+    for (const p of loved) {
       lines.push(
         `  - photoId="${p.id}", subject=${p.subjectTag ?? "?"}, captured=${p.capturedAt.slice(0, 10)}`,
       );
     }
   }
-  if (placement.workedThrough.length) {
+  if (worked.length) {
     lines.push("workedThrough section photos:");
-    for (const p of placement.workedThrough) {
+    for (const p of worked) {
       lines.push(
         `  - photoId="${p.id}", subject=${p.subjectTag ?? "?"}, captured=${p.capturedAt.slice(0, 10)}`,
       );
     }
   }
-  if (!placement.whatYouLoved.length && !placement.workedThrough.length && !hero) {
+  if (!loved.length && !worked.length && !hero) {
     lines.push("(no photos available for this month)");
   }
   return lines.join("\n");
+}
+
+function unionByPhotoId(a: PhotoRef[], b: PhotoRef[]): PhotoRef[] {
+  const seen = new Set<string>();
+  const out: PhotoRef[] = [];
+  for (const p of [...a, ...b]) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    out.push(p);
+  }
+  return out;
 }
 
 // ── JSON parsing ──────────────────────────────────────────────
@@ -679,10 +737,22 @@ function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload {
 
   const pages: MonthlyReviewPage[] = SECTION_ORDER.map((sectionType, idx) => {
     const section = parsed.sections[sectionType] ?? {};
-    let photoRefs: PhotoRef[] = [];
-    if (sectionType === "cover" && hero) photoRefs = [hero];
-    if (sectionType === "whatYouLoved") photoRefs = placement.whatYouLoved;
-    if (sectionType === "workedThrough") photoRefs = placement.workedThrough;
+    let photoRefs: PageModePhotos = { kid: [], parent: [] };
+    if (sectionType === "cover" && hero) {
+      photoRefs = { kid: [hero], parent: [hero] };
+    }
+    if (sectionType === "whatYouLoved") {
+      photoRefs = {
+        kid: placement.whatYouLoved.kid,
+        parent: placement.whatYouLoved.parent,
+      };
+    }
+    if (sectionType === "workedThrough") {
+      photoRefs = {
+        kid: placement.workedThrough.kid,
+        parent: placement.workedThrough.parent,
+      };
+    }
 
     return {
       id: `${id}_${sectionType}`,
