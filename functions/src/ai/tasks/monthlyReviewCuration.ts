@@ -23,6 +23,13 @@ export interface PhotoCurationContext {
    * mark the photo as `isWorkbookScan` for placement policies.
    */
   workbookArtifactIds?: Set<string>;
+  /**
+   * Scan doc IDs where the AI recognized real curriculum content (e.g.
+   * `results.subject` was set). Used to qualify scans for kid-mode placement
+   * and the cover-hero allowlist; an unclassified incidental photo never
+   * shows up to the kid.
+   */
+  classifiedScanIds?: Set<string>;
 }
 
 export interface ScoredPhoto extends PhotoRef {
@@ -109,8 +116,14 @@ export function scorePhotos(
       score += 2;
     }
 
+    // A scan is treated as a workbook capture unless it was successfully
+    // classified by the scan pipeline (subject recognized). Classified scans
+    // are real curriculum evidence — they pass the kid-mode filter and can
+    // qualify as cover heroes. An artifact uploaded with type "Worksheet"
+    // is always a workbook capture.
     const isWorkbookScan =
-      photo.source === "scan" ||
+      (photo.source === "scan" &&
+        !context.classifiedScanIds?.has(photo.sourceDocId)) ||
       (photo.source === "artifact" &&
         !!context.workbookArtifactIds?.has(photo.sourceDocId));
 
@@ -131,12 +144,106 @@ export function scorePhotos(
   return scored;
 }
 
+// ── Positive kid-mode signal ────────────────────────────────────
+
+/**
+ * Returns true if `photo` has at least one positive signal that qualifies it
+ * for kid-mode placement: engagement, a creative-artifact tag, a classified
+ * scan, or resolved-blocker evidence. Photos that fail this filter are
+ * considered incidental and excluded from kid-mode sections entirely.
+ *
+ * Workbook scans are still rejected separately via `isWorkbookScan` — this
+ * filter runs *after* that check.
+ */
+export function hasPositiveKidModeSignal(
+  photo: PhotoRef,
+  context: PhotoCurationContext,
+): boolean {
+  // Engagement signal — 😊 (engaged) or 😐 (okay) both count as real signal.
+  const day = context.dayLogEngagement[dateKey(photo.capturedAt)];
+  if (day) {
+    const emoji = day[photo.sourceDocId];
+    if (emoji === "engaged" || emoji === "okay") return true;
+  }
+
+  // Creative artifact tags
+  if (
+    photo.source === "artifact" &&
+    context.bookArtifactIds.has(photo.sourceDocId)
+  )
+    return true;
+  if (
+    photo.source === "artifact" &&
+    context.sketchArtifactIds.has(photo.sourceDocId)
+  )
+    return true;
+  if (
+    photo.source === "artifact" &&
+    context.dadLabArtifactIds.has(photo.sourceDocId)
+  )
+    return true;
+
+  // Classified scan (the AI recognized real curriculum content)
+  if (
+    photo.source === "scan" &&
+    context.classifiedScanIds?.has(photo.sourceDocId)
+  )
+    return true;
+
+  // Resolved-blocker evidence
+  if (context.resolvedBlockerEvidenceIds.has(photo.id)) return true;
+
+  return false;
+}
+
 // ── Selection / placement ───────────────────────────────────────
 
 /**
- * Returns the highest-scored photo that is NOT a workbook scan. If the pool
- * contains only workbook scans, returns `undefined` — the cover should render
- * a text/decorative fallback rather than a worksheet image.
+ * Predicates that qualify a photo for cover-hero placement. The cover should
+ * never be an unclassified incidental photo — it must be a recognizable piece
+ * of creative work or curriculum.
+ */
+const COVER_HERO_ALLOWED = [
+  (p: ScoredPhoto, c: PhotoCurationContext) =>
+    p.source === "artifact" && c.bookArtifactIds.has(p.sourceDocId),
+  (p: ScoredPhoto, c: PhotoCurationContext) =>
+    p.source === "artifact" && c.sketchArtifactIds.has(p.sourceDocId),
+  (p: ScoredPhoto, c: PhotoCurationContext) =>
+    p.source === "artifact" && c.dadLabArtifactIds.has(p.sourceDocId),
+  (p: ScoredPhoto, c: PhotoCurationContext) =>
+    p.source === "scan" &&
+    !p.isWorkbookScan &&
+    !!c.classifiedScanIds?.has(p.sourceDocId),
+];
+
+/**
+ * Pick a cover-hero photo for the given mode. The cover allowlist is strict:
+ * book artifact, sketch artifact, Dad Lab artifact, or classified scan. If
+ * no photo qualifies, returns `undefined` and the Cover layout renders the
+ * theme word on a gradient background instead.
+ *
+ * The chosen photo is added to `alreadyPlaced` so the same photo can't be
+ * placed again in another section of the same mode.
+ */
+export function pickHeroForMode(
+  _mode: "kid" | "parent",
+  pool: ScoredPhoto[],
+  alreadyPlaced: Set<string>,
+  context: PhotoCurationContext,
+): PhotoRef | undefined {
+  const qualified = pool
+    .filter((p) => !alreadyPlaced.has(p.id))
+    .filter((p) => COVER_HERO_ALLOWED.some((check) => check(p, context)));
+  if (qualified.length === 0) return undefined;
+  const hero = qualified[0]; // pool is already sorted by score desc
+  alreadyPlaced.add(hero.id);
+  return strip(hero);
+}
+
+/**
+ * @deprecated Prefer `pickHeroForMode` — strict allowlist + dedup tracking.
+ * Kept for the legacy callsite. Returns the highest-scored non-workbook
+ * photo, regardless of whether it's an "incidental" capture.
  */
 export function pickHeroPhoto(scored: ScoredPhoto[]): PhotoRef | undefined {
   for (const p of scored) {
@@ -228,6 +335,8 @@ export interface ModePlacement {
 }
 
 export interface SectionPlacement {
+  /** Cover hero per mode (strict allowlist; may be empty). */
+  cover: ModePlacement;
   /** Up to MAX_PHOTOS_PER_SECTION.whatYouLoved photos for the celebration page. */
   whatYouLoved: ModePlacement;
   /** Up to MAX_PHOTOS_PER_SECTION.workedThrough photos — prefer resolved-blocker evidence. */
@@ -270,45 +379,78 @@ export const PARENT_MODE_WORKBOOK_POLICY = {
 
 export function assignPhotosToSections(
   scored: ScoredPhoto[],
-  context: {
+  context: PhotoCurationContext & {
     hasBookCompletions: boolean;
     hasDadLab: boolean;
+    /** Override on top of context.resolvedBlockerEvidenceIds (legacy callers). */
     resolvedBlockerEvidenceIds?: Set<string>;
   },
 ): SectionPlacement {
-  const resolvedIds = context.resolvedBlockerEvidenceIds ?? new Set<string>();
+  const resolvedIds =
+    context.resolvedBlockerEvidenceIds ?? new Set<string>();
 
-  // Kid mode never sees workbook scans anywhere.
-  const kidEligible = scored.filter((p) => !p.isWorkbookScan);
-  // Parent mode "whatYouLoved" also excludes workbook scans (celebration-first).
+  // Kid mode: must pass positive-signal filter AND not be a workbook scan.
+  // Parent mode: workbook scans excluded from celebration sections only.
+  const kidEligible = scored.filter(
+    (p) => !p.isWorkbookScan && hasPositiveKidModeSignal(p, context),
+  );
   const parentLovedEligible = scored.filter((p) => !p.isWorkbookScan);
 
-  const kidSelected: ScoredPhoto[] = [];
-  const parentSelected: ScoredPhoto[] = [];
+  // Resolved-blocker evidence is reserved for workedThrough — it's the
+  // evidence-of-effort photo, not the celebration photo. Keeping it out of
+  // whatYouLoved means dedup won't steal it before workedThrough runs.
+  const kidLovedEligible = kidEligible.filter((p) => !resolvedIds.has(p.id));
+  const parentLovedEligibleFinal = parentLovedEligible.filter(
+    (p) => !resolvedIds.has(p.id),
+  );
 
-  const lovedKid = selectTopN(
-    kidEligible,
+  // Track placed IDs per mode so a photo placed as cover never reappears in
+  // whatYouLoved/workedThrough within that mode.
+  const kidPlacedIds = new Set<string>();
+  const parentPlacedIds = new Set<string>();
+
+  // 1. Cover heroes first (highest precedence; strict allowlist).
+  const kidHero = pickHeroForMode("kid", kidEligible, kidPlacedIds, context);
+  const parentHero = pickHeroForMode(
+    "parent",
+    parentLovedEligible,
+    parentPlacedIds,
+    context,
+  );
+
+  // 2. whatYouLoved — celebration page, dedup against cover.
+  const kidSelected: ScoredPhoto[] = scored.filter((s) =>
+    kidPlacedIds.has(s.id),
+  );
+  const parentSelected: ScoredPhoto[] = scored.filter((s) =>
+    parentPlacedIds.has(s.id),
+  );
+
+  const lovedKid = selectTopNWithDedup(
+    kidLovedEligible,
     kidSelected,
+    kidPlacedIds,
     MAX_PHOTOS_PER_SECTION.whatYouLoved.kid,
   );
   kidSelected.push(...lovedKid);
 
-  const lovedParent = selectTopN(
-    parentLovedEligible,
+  const lovedParent = selectTopNWithDedup(
+    parentLovedEligibleFinal,
     parentSelected,
+    parentPlacedIds,
     MAX_PHOTOS_PER_SECTION.whatYouLoved.parent,
   );
   parentSelected.push(...lovedParent);
 
-  // Worked-through prefers resolved-blocker evidence first.
-  // Kid mode: still no workbook scans. Parent mode: workbook scans allowed.
+  // 3. workedThrough — prefer resolved-blocker evidence, dedup against
+  // whatever's been placed so far.
   const workedCapKid = MAX_PHOTOS_PER_SECTION.workedThrough.kid;
   const workedCapParent = MAX_PHOTOS_PER_SECTION.workedThrough.parent;
 
   const workedKid = pickWorkedThrough({
     eligible: kidEligible,
     alreadySelected: kidSelected,
-    excludedIds: new Set(lovedKid.map((p) => p.id)),
+    alreadyPlacedIds: kidPlacedIds,
     resolvedIds,
     cap: workedCapKid,
   });
@@ -317,20 +459,21 @@ export function assignPhotosToSections(
   const workedParent = pickWorkedThrough({
     eligible: scored, // parent worked-through allows workbook scans
     alreadySelected: parentSelected,
-    excludedIds: new Set(lovedParent.map((p) => p.id)),
+    alreadyPlacedIds: parentPlacedIds,
     resolvedIds,
     cap: workedCapParent,
   });
   parentSelected.push(...workedParent);
 
   // "More" pool: any curated photo not placed in either mode, capped at 30.
-  const placedIds = new Set<string>([
-    ...kidSelected.map((s) => s.id),
-    ...parentSelected.map((s) => s.id),
-  ]);
-  const remaining = scored.filter((p) => !placedIds.has(p.id)).slice(0, 30);
+  const allPlaced = new Set<string>([...kidPlacedIds, ...parentPlacedIds]);
+  const remaining = scored.filter((p) => !allPlaced.has(p.id)).slice(0, 30);
 
   return {
+    cover: {
+      kid: kidHero ? [kidHero] : [],
+      parent: parentHero ? [parentHero] : [],
+    },
     whatYouLoved: {
       kid: lovedKid.map(strip),
       parent: lovedParent.map(strip),
@@ -343,29 +486,53 @@ export function assignPhotosToSections(
   };
 }
 
+/**
+ * Like selectTopN but skips any candidate already in `placedIds` and adds
+ * each chosen photo to `placedIds` so subsequent sections in the same mode
+ * don't pick it up again.
+ */
+function selectTopNWithDedup(
+  candidates: ScoredPhoto[],
+  selected: ScoredPhoto[],
+  placedIds: Set<string>,
+  n: number,
+): ScoredPhoto[] {
+  const filtered = candidates.filter((p) => !placedIds.has(p.id));
+  const chosen = selectTopN(filtered, selected, n);
+  for (const p of chosen) placedIds.add(p.id);
+  return chosen;
+}
+
 interface PickWorkedThroughInput {
   eligible: ScoredPhoto[];
   alreadySelected: ScoredPhoto[];
-  excludedIds: Set<string>;
+  alreadyPlacedIds: Set<string>;
   resolvedIds: Set<string>;
   cap: number;
 }
 
 function pickWorkedThrough(input: PickWorkedThroughInput): ScoredPhoto[] {
-  const { eligible, alreadySelected, excludedIds, resolvedIds, cap } = input;
-  // Resolved-blocker evidence is allowed to repeat across sections —
-  // a photo that resolved a blocker can also be celebrated.
-  const priority = eligible.filter((p) => resolvedIds.has(p.id));
+  const { eligible, alreadySelected, alreadyPlacedIds, resolvedIds, cap } =
+    input;
+  // Resolved-blocker evidence wins priority. Dedup against alreadyPlacedIds
+  // so the photo placed in cover or whatYouLoved within this mode doesn't
+  // reappear here. (Cross-mode duplication is fine: a kid hero may show up
+  // as parent-mode evidence in workedThrough.)
+  const priority = eligible.filter(
+    (p) => resolvedIds.has(p.id) && !alreadyPlacedIds.has(p.id),
+  );
   const rest = eligible.filter(
-    (p) => !resolvedIds.has(p.id) && !excludedIds.has(p.id),
+    (p) => !resolvedIds.has(p.id) && !alreadyPlacedIds.has(p.id),
   );
   const picked = selectTopN(priority, alreadySelected, cap);
+  for (const p of picked) alreadyPlacedIds.add(p.id);
   if (picked.length < cap) {
     const filler = selectTopN(
       rest,
       [...alreadySelected, ...picked],
       cap - picked.length,
     );
+    for (const p of filler) alreadyPlacedIds.add(p.id);
     picked.push(...filler);
   }
   return picked;

@@ -1,6 +1,8 @@
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import PhotoLibraryOutlinedIcon from '@mui/icons-material/PhotoLibraryOutlined'
 
 import type {
   MonthlyReview,
@@ -309,6 +311,8 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
 function StandardLayout({ page, mode }: MonthlyReviewPageProps) {
   const content = getContent(page, mode)
   const photos = getModePhotos(page, mode)
+  const hasPhotos = photos.length > 0
+  const isParentMode = mode === 'parent'
 
   // Stop touch events from bubbling to MonthlyReviewReader's swipe handler.
   // Without this, a horizontal scroll inside the photo strip would flip the
@@ -318,7 +322,17 @@ function StandardLayout({ page, mode }: MonthlyReviewPageProps) {
   }
 
   return (
-    <Stack spacing={2.5} sx={{ px: 1, py: 2 }}>
+    <Stack
+      spacing={2.5}
+      sx={{
+        px: 1,
+        py: 2,
+        minHeight: '100%',
+        // Center vertically when there are no photos so the body doesn't
+        // float in a sea of empty white space.
+        justifyContent: hasPhotos ? 'flex-start' : 'center',
+      }}
+    >
       {content.headline && (
         <Typography
           variant="h4"
@@ -332,7 +346,7 @@ function StandardLayout({ page, mode }: MonthlyReviewPageProps) {
         </Typography>
       )}
 
-      {photos.length > 0 && (
+      {hasPhotos ? (
         <Box
           onTouchStart={stopTouchPropagation}
           onTouchMove={stopTouchPropagation}
@@ -361,7 +375,15 @@ function StandardLayout({ page, mode }: MonthlyReviewPageProps) {
             </Box>
           ))}
         </Box>
-      )}
+      ) : isParentMode ? (
+        <Alert
+          severity="info"
+          icon={<PhotoLibraryOutlinedIcon />}
+          sx={{ my: 1 }}
+        >
+          No photos for this section — consider adding one or regenerating.
+        </Alert>
+      ) : null}
 
       {content.body && (
         <Typography
