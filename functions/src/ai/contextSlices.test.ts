@@ -28,6 +28,22 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.chat).toEqual(["charter", "childProfile"]);
   });
 
+  it("chat task slice list is unchanged by chat-link Phase 1 (cross-task isolation)", () => {
+    // Phase 1 added context only to shellyChat. The `chat` task is used by
+    // kid-facing utilities (StoryGuidePage, useComprehensionQuestions) — it
+    // must not gain Lincoln's eval trajectory, disposition cache, or
+    // teach-back history. If this test fails, a shellyChat change leaked.
+    expect(TASK_CONTEXT.chat).toEqual(["charter", "childProfile"]);
+    expect(TASK_CONTEXT.chat).not.toContain("recentHistoryByDomain");
+    expect(TASK_CONTEXT.chat).not.toContain("skillSnapshot");
+    expect(TASK_CONTEXT.chat).not.toContain("dayToday");
+    expect(TASK_CONTEXT.chat).not.toContain("dadLabReports");
+    expect(TASK_CONTEXT.chat).not.toContain("recentEval");
+    expect(TASK_CONTEXT.chat).not.toContain("engagement");
+    // `generate` is dispatched through handleChat too — keep it at parity.
+    expect(TASK_CONTEXT.generate).toEqual(["charter", "childProfile"]);
+  });
+
   it("evaluate does not include enriched context slices", () => {
     expect(TASK_CONTEXT.evaluate).toContain("charter");
     expect(TASK_CONTEXT.evaluate).toContain("childProfile");
