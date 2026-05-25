@@ -13,7 +13,8 @@ export type AiModel = (typeof AiModel)[keyof typeof AiModel];
 
 /** Image generation models. */
 export const ImageModel = {
-  DallE3: "dall-e-3",
+  GptImage15: "gpt-image-1.5",
+  /** @deprecated retires 2026-10-23; retained for historical aiUsage row labels. */
   GptImage1: "gpt-image-1",
 } as const;
 export type ImageModel = (typeof ImageModel)[keyof typeof ImageModel];

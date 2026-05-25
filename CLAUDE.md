@@ -248,7 +248,7 @@ All under `families/{familyId}/`:
 6. **Model selection by task:**
    - Complex reasoning (plan, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat): Claude Sonnet (`claude-sonnet-4-6`)
    - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
-   - Image generation: DALL-E 3 (scenes, armor sheets) + gpt-image-1 (transparent stickers, photo transform)
+   - Image generation: gpt-image-1.5 (scenes, armor sheets, base character, starter avatar, transparent stickers, photo transform, armor pieces, sketch enhancement)
 
 ### Testing AI Logic
 - Co-locate tests with logic files (e.g., `skipAdvisor.logic.test.ts`, `pace.logic.test.ts`)

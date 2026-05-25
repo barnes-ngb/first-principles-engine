@@ -69,13 +69,13 @@ RULES:
       // Proceed with original on rewrite failure
     }
 
-    // ── Generate with DALL-E 3 ──────────────────────────────────
+    // ── Generate with gpt-image-1.5 ─────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
     let imageResponse;
     try {
       imageResponse = await provider.generateImage(
         `${safePrompt}. Safe for children, family-friendly.`,
-        { model: "dall-e-3", size: "1024x1024", quality: "standard" },
+        { model: "gpt-image-1.5", size: "1024x1024", quality: "medium" },
       );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -105,7 +105,7 @@ RULES:
       metadata: {
         contentType: "image/png",
         metadata: {
-          generatedBy: "dall-e-3",
+          generatedBy: "gpt-image-1.5",
           childId,
           themeStyle,
           firebaseStorageDownloadTokens: downloadToken,
@@ -119,7 +119,7 @@ RULES:
     const db = getFirestore();
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "starter-avatar-generation",
-      model: "dall-e-3",
+      model: "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
       childId,

@@ -4,7 +4,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 
-// ── New Armor Piece Generation (gpt-image-1, transparent PNG) ────
+// ── New Armor Piece Generation (gpt-image-1.5, transparent PNG) ──
 
 export interface NewArmorPieceRequest {
   familyId: string
@@ -21,7 +21,7 @@ export interface NewArmorPieceResponse {
 }
 
 /**
- * Generate a single armor piece item image using gpt-image-1.
+ * Generate a single armor piece item image using gpt-image-1.5.
  * Pieces are transparent-background PNG items intended to be layered over the base character.
  * Storage path: families/{familyId}/avatars/{childId}/{pieceId}-{tier}.png
  */
@@ -62,14 +62,14 @@ RULES:
       // Proceed with original on rewrite failure
     }
 
-    // ── Generate with gpt-image-1 (native transparent background) ─
+    // ── Generate with gpt-image-1.5 (native transparent background) ─
     let resultBase64: string;
     try {
       const { default: OpenAI } = await import("openai");
       const openai = new OpenAI({ apiKey: openaiApiKey.value() });
 
       const response = await openai.images.generate({
-        model: "gpt-image-1",
+        model: "gpt-image-1.5",
         prompt: `${safePrompt}. Safe for children, family-friendly.`,
         n: 1,
         size: "1024x1024",
@@ -78,7 +78,7 @@ RULES:
       } as Parameters<typeof openai.images.generate>[0]);
 
       const b64 = response.data?.[0]?.b64_json;
-      if (!b64) throw new Error("No image data returned from gpt-image-1.");
+      if (!b64) throw new Error("No image data returned from gpt-image-1.5.");
       resultBase64 = b64;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -97,7 +97,7 @@ RULES:
       metadata: {
         contentType: "image/png",
         metadata: {
-          generatedBy: "gpt-image-1",
+          generatedBy: "gpt-image-1.5",
           pieceId,
           tier,
           childId,
@@ -113,7 +113,7 @@ RULES:
     const db = getFirestore();
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "armor-piece-generation",
-      model: "gpt-image-1",
+      model: "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
       childId,

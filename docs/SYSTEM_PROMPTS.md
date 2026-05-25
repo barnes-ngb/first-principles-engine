@@ -107,8 +107,8 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `weeklyReview` / `generateWeeklyReviewNow` | `claude-sonnet-4-6` |
 | `analyzeEvaluationPatterns` | `claude-sonnet-4-6` |
 | `extractFeatures` | `claude-sonnet-4-6` |
-| Image generation | `gpt-image-1` or `dall-e-3` |
-| `enhanceSketch` | `gpt-image-1` (image editing) |
+| Image generation | `gpt-image-1.5` |
+| `enhanceSketch` | `gpt-image-1.5` (image editing) |
 | Image prompts (Claude describes scene) | `claude-sonnet-4-6` |
 
 ---
@@ -299,7 +299,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 **Standalone onCall function** (image generation, not task-dispatched).
 
 - Downloads child's sketch from Firebase Storage
-- Enhances into polished children's book illustration via gpt-image-1 `editImage()`
+- Enhances into polished children's book illustration via gpt-image-1.5 `editImage()`
 - 4 style options: storybook (default), comic, realistic, minecraft
 - Saves enhanced image back to Storage, returns download URL
 - Logs usage to aiUsage collection
