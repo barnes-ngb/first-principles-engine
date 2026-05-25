@@ -1,5 +1,56 @@
 import type { Firestore } from "firebase-admin/firestore";
 
+/**
+ * Firestore composite indexes required by this module.
+ *
+ * Each query that combines an equality filter with a range filter (or two
+ * equalities + a range) needs a composite index. Without an explicit
+ * `orderBy`, Firestore implicitly orders by the range field in ASCENDING
+ * order, so the inequality field in the index must be ASC even though some
+ * collections also have a DESC variant used elsewhere in the app.
+ *
+ * Single-field range filters (e.g. `where('date', '>=', s).where('date', '<=', e)`)
+ * are served by Firestore's default single-field indexes and need no entry.
+ *
+ *   weeklyReviews:
+ *     (childId ASC, weekKey ASC)
+ *       — loadWeeklyReviewsForMonth (childId equality + weekKey range)
+ *
+ *   books:
+ *     (childId ASC, status ASC, updatedAt ASC)
+ *       — loadCompletedBooksInMonth (childId + status equalities + updatedAt range)
+ *
+ *   scans:
+ *     (childId ASC, createdAt ASC)
+ *       — loadPhotosForMonth/scans (childId equality + createdAt range)
+ *
+ *   artifacts:
+ *     (childId ASC, createdAt ASC)
+ *       — loadPhotosForMonth/artifacts (childId equality + createdAt range)
+ *
+ *   xpLedger:
+ *     (childId ASC, awardedAt ASC)
+ *       — loadDiamondsForMonth (childId equality + awardedAt range)
+ *
+ *   evaluationSessions:
+ *     (childId ASC, status ASC, evaluatedAt ASC)
+ *       — loadQuestCountForMonth (childId + status equalities + evaluatedAt range)
+ *
+ *   dadLabReports:
+ *     (status ASC, date ASC) — loadDadLabReportsInMonth — already present
+ *   hours:
+ *     (childId ASC, date ASC) — loadHoursForMonth — already present
+ *   days:
+ *     date single-field (fieldOverride) — loadDayLogsForMonth — already present
+ *   weeks:
+ *     startDate single-field (auto) — loadConundrumsForMonth — no entry needed
+ *   skillSnapshots:
+ *     direct doc fetch — loadBlockers — no index needed
+ *
+ * All indexes are defined in `firestore.indexes.json`. If you add a new query
+ * here, also add the index there and update this list.
+ */
+
 // ── Types (mirror src/core/types/monthlyReview.ts but kept local to functions) ──
 
 export interface PhotoRef {
