@@ -1796,6 +1796,68 @@ export interface StoryGenInput {
   };
 }
 
+/**
+ * Build the structural beat template for a story of the given page count.
+ *
+ * - ≤6 pages: 6-beat arc (truncated to first N beats when fewer).
+ * - 7–10 pages: 10-beat arc (truncated to first N).
+ * - >10 pages: proportional scaling — rising-action expands, climax/resolution
+ *   stay anchored at the end (Tension peaks → Overcome → Resolution → Close).
+ */
+export function buildPageBeats(pageCount: number): string {
+  const SIX_BEAT = [
+    "Meet the hero. Show what they want or are missing.",
+    "The problem arrives (something the hero notices or that happens to them).",
+    "The hero tries something. It doesn't work, or makes things harder.",
+    "A helper appears, or the hero realizes something new.",
+    "The hero solves the problem, using what they learned.",
+    "The happy ending. Show how the hero (or their world) has changed.",
+  ];
+
+  const TEN_BEAT = [
+    "Meet the hero in their world. Show what their normal looks like.",
+    "Set up what they want or what's missing.",
+    "The challenge arrives — a quest, a danger, a discovery.",
+    "The hero takes the first step. Show stakes.",
+    "A setback. Something the hero didn't expect.",
+    "The hero learns something or finds an ally.",
+    "The hero faces the main obstacle. Tension peaks.",
+    "The hero overcomes — using their wits, courage, or new knowledge.",
+    "The resolution. What changed in the world.",
+    "A satisfying close. The hero is changed, the world is changed.",
+  ];
+
+  let beats: string[];
+  if (pageCount <= 6) {
+    beats = SIX_BEAT.slice(0, Math.max(1, pageCount));
+  } else if (pageCount <= 10) {
+    beats = TEN_BEAT.slice(0, pageCount);
+  } else {
+    // Proportional scaling. Anchor the last 4 beats (Tension peaks, Overcome,
+    // Resolution, Close) and expand the rising-action middle to fill.
+    const anchoredTail = TEN_BEAT.slice(-4); // last 4 of the 10-beat arc
+    const opening = [
+      "Meet the hero in their world. Show what their normal looks like.",
+      "Set up what they want or what's missing.",
+      "The challenge arrives — a quest, a danger, a discovery.",
+    ];
+    const middleCount = pageCount - opening.length - anchoredTail.length;
+    const middle: string[] = [];
+    for (let i = 0; i < middleCount; i++) {
+      middle.push(
+        `Rising action beat ${i + 1}: the hero faces another step of the journey — a new obstacle, ally, discovery, or setback that raises the stakes.`,
+      );
+    }
+    beats = [...opening, ...middle, ...anchoredTail];
+  }
+
+  const lines = ["PAGE BEATS:"];
+  for (let i = 0; i < beats.length; i++) {
+    lines.push(`${i + 1}. ${beats[i]}`);
+  }
+  return lines.join("\n");
+}
+
 export function buildStoryPrompt(input: StoryGenInput): string {
   const {
     storyIdea,
@@ -1808,19 +1870,46 @@ export function buildStoryPrompt(input: StoryGenInput): string {
     themeGuidance,
   } = input;
   const hasWords = words.length > 0;
+  const age = childAge ?? 10;
 
-  // Child-specific context
-  const isYounger = (childAge ?? 10) <= 7;
+  // Interests fallback by age bracket (kept narrow — the AI calibrates from
+  // the context slices above; this is only used when no interests are given).
   const interests =
     childInterests ||
-    (isYounger
+    (age <= 7
       ? "animals, drawing, fairy tales"
       : "Minecraft, adventures, quests");
-  const level = readingLevel || (isYounger ? "pre-K to kindergarten" : "1st grade");
 
-  const wordSection = hasWords
-    ? `\nWORDS TO INCLUDE (use every word at least once, common words multiple times):\n${words.join(", ")}\n`
-    : "";
+  // Reading level fallback. The AI primarily calibrates vocabulary from the
+  // WORD MASTERY + SKILL SNAPSHOT sections of the system prompt (already
+  // attached by buildContextForTask). This string is a soft hint only.
+  const level = readingLevel || (age <= 7 ? "pre-K to kindergarten" : "1st grade");
+
+  // Sentence target by age — calibrated to read-aloud cadence, not to the
+  // child's decoding ceiling (the AI handles that from the context above).
+  const sentenceTarget =
+    age <= 7
+      ? "1-2 short sentences (5-9 words each)"
+      : "2-4 sentences (8-14 words each)";
+
+  // Content stakes guidance — separate from vocabulary calibration.
+  // Vocabulary follows WORD MASTERY / SKILL SNAPSHOT; stakes follow age.
+  const contentStakes =
+    age <= 7
+      ? "Warm, gentle, and encouraging. Think picture book — feelings, friendship, small problems with reassuring resolutions."
+      : "Content stakes are age-appropriate — real problems, real heroes, no toddler scenarios. Heroes solve things, take risks, and grow. Action vocabulary (build, craft, explore, defeat) is welcome.";
+
+  const sightWordSection = hasWords
+    ? `
+SIGHT WORDS ${childName.toUpperCase()} IS PRACTICING:
+${words.join(", ")}
+
+These are words ${childName} is still working on. Weave 3-5 of them into the story where they fit naturally — in dialogue, as everyday words a character would say, or in a refrain that repeats. DO NOT force every word in. If a word doesn't fit, leave it out. Natural language matters more than coverage. Calibrate the rest of the vocabulary against the WORD MASTERY and (if present) SKILL SNAPSHOT sections above.
+`
+    : `
+VOCABULARY:
+Calibrate vocabulary against the WORD MASTERY and (if present) SKILL SNAPSHOT sections above. Use words ${childName} can decode comfortably with 1-2 stretch words sprinkled in if they're already in the mastered set.
+`;
 
   const themeSection = themeGuidance
     ? `
@@ -1833,20 +1922,44 @@ Write the story as if it takes place in this world with this tone. Scene descrip
 `
     : "";
 
-  return `You are a children's story writer creating an illustrated book for ${childName}, a ${childAge ?? 10}-year-old child who loves ${interests}.
+  const fallbackIdea =
+    age <= 7
+      ? "A fun story with animals and a happy ending"
+      : "A fun adventure — surprise me!";
 
-STORY IDEA: ${storyIdea || (isYounger ? "A fun story with animals and a happy ending" : "A fun adventure — surprise me!")}
-${wordSection}${themeSection}
+  const pageBeatsBlock = buildPageBeats(pageCount);
+
+  const exampleText =
+    age <= 7
+      ? "A little cat sat in the sun."
+      : "The sun was up. Marco and his cat raced across the park.";
+  const exampleScene =
+    age <= 7
+      ? "A cozy sunny garden with flowers and a fluffy orange cat curled up on a stone path."
+      : "A bright sunny park with green grass, a wooden bench, and tall trees.";
+
+  return `You are a children's story writer creating an illustrated book for ${childName}, a ${age}-year-old who loves ${interests}.
+
+STORY IDEA: ${storyIdea || fallbackIdea}
+${sightWordSection}${themeSection}
 RULES:
-- Write a ${pageCount}-page story. Each page has ${isYounger ? "1-2 short sentences" : "2-4 short sentences"}.
-- ${isYounger ? "Use very simple words. Short sentences only. Lots of repetition is good." : "Keep sentences simple and readable. CVC words are great."}
-- Reading level: ${level}
-- Each page should be a story beat — beginning, ${isYounger ? "middle, happy ending" : "rising action, climax, resolution"}.
-- Make it ${isYounger ? "warm, gentle, and encouraging. Think picture book for a young reader." : "exciting and fun. Adventures, quests, discoveries."}
-- For each page, write a short image description (1-2 sentences) describing what the SCENE looks like. Focus on the environment/setting, not characters.
-${hasWords ? "- You MUST use every word from the word list at least once in the story." : ""}
-${hasWords ? "- On each page, list which provided words appear on that page." : ""}
-- Do NOT use words significantly above ${level} level unless they are in the word list.
+- Write a ${pageCount}-page story. Each page has ${sentenceTarget}.
+- Reading level (soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): ${level}
+- ${contentStakes}
+- For each page, write a short image description (1-2 sentences) describing what the SCENE looks like. Focus on environment/setting, not characters.
+${hasWords ? "- On each page, list which provided sight words actually appear on that page.\n" : ""}
+${pageBeatsBlock}
+
+These beats are a structural floor, not a cage. Deviate when the story demands it — but every page should advance the arc.
+
+WRITING QUALITY:
+- Read each page aloud in your head before writing it. If a sentence sounds awkward or stumbly when spoken, rewrite it.
+- Use natural dialogue. Characters talk like real people, not like textbook examples. Contractions are fine. "I can't fly!" not "I cannot fly!"
+- Consistent character names. If the dragon is named Ember on page 1, she's Ember on every page. No nickname drift.
+- Each page should advance the story. A page where nothing changes is filler — cut it.
+- Avoid run-on sentences. Two short sentences are almost always better than one long one for this reader.
+- No typos. No misspellings. No subject-verb disagreements.
+- The ending should answer the beginning. If the dragon couldn't fly in page 1, the resolution involves flight (literal or metaphorical) somehow.
 
 COPYRIGHT — IMPORTANT:
 - Never use copyrighted character names (Mario, Luigi, Peach, Bowser, Link, Zelda, Pikachu, Elsa, Spider-Man, Batman, Sonic, etc.) or franchise/brand names (Nintendo, Disney, Marvel, Minecraft, Pokemon, Fortnite, etc.).
@@ -1859,10 +1972,11 @@ OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
   "pages": [
     {
       "pageNumber": 1,
-      "text": "${isYounger ? "A little cat sat in the sun." : "The sun was up. Link and his cat were at the park."}",
-      "sceneDescription": "${isYounger ? "A cozy sunny garden with flowers and a fluffy orange cat curled up on a stone path." : "A bright sunny park with green grass, a wooden bench, and tall trees."}"${hasWords ? ',\n      "wordsOnPage": ["the", "sun", "cat"]' : ""}
+      "text": "${exampleText}",
+      "sceneDescription": "${exampleScene}"${hasWords ? ',\n      "wordsOnPage": ["the", "sun", "cat"]' : ""}
     }
-  ]${hasWords ? ',\n  "allWordsUsed": ["the", "sun", "cat"],\n  "missedWords": []' : ""}
+  ]${hasWords ? ',\n  "allWordsUsed": ["the", "sun", "cat"],\n  "missedWords": [],' : ","}
+  "qualityNotes": "Brief debug note on craft choices — sight words actually used, character name(s), beat handling. Not shown to the reader."
 }`;
 }
 

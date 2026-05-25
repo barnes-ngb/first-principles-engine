@@ -66,6 +66,8 @@ export async function callClaude(opts: {
   maxTokens: number;
   systemPrompt: string;
   messages: Array<{ role: string; content: string }>;
+  /** Optional temperature override; when omitted, Anthropic's default applies. */
+  temperature?: number;
 }): Promise<{ text: string; inputTokens: number; outputTokens: number; stopReason: string }> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey: opts.apiKey });
@@ -78,6 +80,7 @@ export async function callClaude(opts: {
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
+    ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
   });
 
   const firstBlock = completion.content[0];
