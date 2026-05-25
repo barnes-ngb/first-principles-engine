@@ -77,6 +77,7 @@ See [`CLAUDE.md`](./CLAUDE.md) for full coding conventions.
 ## Deployment
 
 - **Push to `main`**: CI runs tests. If `firestore.indexes.json` changed, indexes auto-deploy.
-- **Push to `deploy` branch**: Full deploy — hosting, functions, Firestore rules + indexes, Storage rules + CORS.
+- **Push to `deploy` branch**: Full deploy — hosting, functions (when `functions/` changed), Firestore rules + indexes, Storage rules + CORS.
+- **Manual trigger**: Actions tab → **Deploy to Firebase** → **Run workflow**. Manual runs always deploy Cloud Functions, useful when functions were merged previously and need to be pushed live without a fresh code change.
 
 See [`docs/08_RUNBOOK.md`](./docs/08_RUNBOOK.md) for operational details.

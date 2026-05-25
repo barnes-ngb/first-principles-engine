@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - deploy
+  # Manual trigger from the Actions tab (Run workflow button).
+  # Use this when functions need to be redeployed without pushing a code change
+  # (e.g., redeploying already-merged Cloud Functions like the monthly review set:
+  # generateMonthlyReview, generateMonthlyReviewNow, publishMonthlyReview,
+  # unpublishMonthlyReview). Manual runs force a full functions deploy
+  # regardless of whether functions/ changed in the latest commit.
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -115,10 +122,17 @@ jobs:
           echo "Verifying CORS config:"
           gcloud storage buckets describe "gs://$BUCKET" --format="json(cors_config)"
 
-      # ── Cloud Functions (when functions/ has changes) ────────────
+      # ── Cloud Functions (when functions/ has changes, or on manual run) ──
+      # On manual workflow_dispatch we always deploy functions — the diff-based
+      # check below would miss anything merged in a previous push, which is
+      # exactly the case where Nathan reaches for the "Run workflow" button.
       - name: Check for functions changes
         id: functions-changed
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Compare functions/ against the merge base to catch all changes
           # even when multiple PRs are merged at once
           MERGE_BASE=$(git merge-base HEAD HEAD~1 2>/dev/null || echo "HEAD~1")
