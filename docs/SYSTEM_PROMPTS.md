@@ -211,12 +211,21 @@ src/core/ai/useAI.ts              functions/src/ai/
 ### `generateStory` (tasks/generateStory.ts)
 
 **System prompt assembly:**
-1. Context slices for "generateStory"
-2. `buildStoryPrompt(input)` — sight word story generator
+1. Context slices for "generateStory": charter, childProfile, sightWords, wordMastery, skillSnapshot
+2. `buildStoryPrompt(input)` — sight word story generator (V2)
 
 **Input:** storyIdea, words[], pageCount, childName, childAge, childInterests, readingLevel
 
-**Output:** JSON with title, pages[] (pageNumber, text, sceneDescription, wordsOnPage), allWordsUsed, missedWords
+**Key behaviors (V2):**
+- **Per-child calibration:** vocabulary level driven by WORD MASTERY + SKILL SNAPSHOT context slices (loaded per-request), not by a binary age switch. Content stakes (emotional weight, conflict complexity) calibrated separately by `childAge`. No "CVC words" instruction for older children — Lincoln (10) gets age-appropriate prose even when his decoding lags.
+- **Sight-word integration is a soft rule:** "weave 3-5 naturally; leave words out if they don't fit." Not "MUST use every word" — forced injection produced awkward sentences. `missedWords` in the output captures words intentionally skipped.
+- **PAGE BEATS templates:** explicit per-page story arc emitted by exported `buildPageBeats(pageCount)` helper. 6-beat arc for ≤6 pages, 10-beat arc for 7-10 pages, proportional expansion beyond. Gives the model a story-shape scaffold instead of free-form pacing.
+- **WRITING QUALITY guardrails:** read-aloud sanity check (does it sound right spoken?), natural dialogue with contractions, consistent character names across pages, no run-ons / no typos, ending answers the beginning's question.
+- **COPYRIGHT block preserved:** trademarked character names rewritten to original equivalents (Mario → Marco, Peach → Coral, etc.). The JSON example was updated to use an original character name in place of "Link".
+
+**Output:** JSON with `title`, `pages[]` (`pageNumber`, `text`, `sceneDescription`, `wordsOnPage`), `allWordsUsed`, `missedWords`, plus new optional `qualityNotes` field (debug-only — logged to aiUsage, not rendered in the book).
+
+**Model:** `claude-sonnet-4-6` · **maxTokens:** 6144 · **temperature:** 0.7
 
 ### `workshop` (tasks/workshop.ts)
 
