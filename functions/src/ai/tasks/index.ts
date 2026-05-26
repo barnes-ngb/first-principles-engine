@@ -4,6 +4,7 @@ import { handleChat } from "./chatHandler.js";
 import { handleEvaluate } from "./evaluate.js";
 import { handleQuest } from "./quest.js";
 import { handleGenerateStory } from "./generateStory.js";
+import { handleReviseStory } from "./reviseStory.js";
 import { handleWorkshop } from "./workshop.js";
 import { handleAnalyzeWorkbook } from "./analyzeWorkbook.js";
 import { handleDisposition } from "./disposition.js";
@@ -23,6 +24,7 @@ export const CHAT_TASKS: Record<string, ChatTaskHandler> = {
   evaluate: handleEvaluate,
   quest: handleQuest,
   generateStory: handleGenerateStory,
+  reviseStory: handleReviseStory,
   workshop: handleWorkshop,
   analyzeWorkbook: handleAnalyzeWorkbook,
   disposition: handleDisposition,

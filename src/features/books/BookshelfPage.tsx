@@ -13,7 +13,6 @@ import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import ListItemIcon from '@mui/material/ListItemIcon'
 import ListItemText from '@mui/material/ListItemText'
-import Slider from '@mui/material/Slider'
 import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
@@ -24,7 +23,6 @@ import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
-import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver'
 import BarChartIcon from '@mui/icons-material/BarChart'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
@@ -40,13 +38,12 @@ import { useProfile } from '../../core/profile/useProfile'
 import { SubjectBucket, UserProfile } from '../../core/types/enums'
 import type { Book, BookTheme, StickerTag } from '../../core/types'
 import { BOOK_THEMES, STICKER_TAG_LABELS } from '../../core/types'
-import { COVER_STYLES, GENERATION_STYLES } from './bookTypes'
+import { COVER_STYLES } from './bookTypes'
 import { useBookshelf } from './useBook'
-import { useBookGenerator } from './useBookGenerator'
+import BookGenerateChat from './BookGenerateChat'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
-import GenerationProgress from './GenerationProgress'
 import EvaluationBookBanner from './EvaluationBookBanner'
 import { useEvaluationBookSuggestions } from './useEvaluationBookSuggestions'
 import CreateThemeDialog from './CreateThemeDialog'
@@ -67,7 +64,6 @@ export default function BookshelfPage() {
 
   const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId, isParent)
   const [childFilter, setChildFilter] = useState<string>('all')
-  const { generateBook, progress, generating, resetProgress } = useBookGenerator()
   const { suggestions: evalSuggestions } = useEvaluationBookSuggestions(
     isParent ? familyId : '',
     isParent ? childId : '',
@@ -78,7 +74,8 @@ export default function BookshelfPage() {
   const [themeFilter, setThemeFilter] = useState<BookTheme | 'all'>('all')
   const [stickerTagFilter, setStickerTagFilter] = useState<StickerTag | 'all'>('all')
   const [showNewDialog, setShowNewDialog] = useState(false)
-  const [dialogTab, setDialogTab] = useState(0) // 0 = Blank, 1 = Generate
+  const [dialogTab, setDialogTab] = useState(1) // Default to Generate (Story Gen V2 PR-A)
+  const [resumeBookId, setResumeBookId] = useState<string | undefined>(undefined)
 
   // Blank book state
   const [newTitle, setNewTitle] = useState('')
@@ -86,12 +83,6 @@ export default function BookshelfPage() {
     isLincoln ? 'minecraft' : 'storybook',
   )
   const [creating, setCreating] = useState(false)
-
-  // Generate book state
-  const [genStoryIdea, setGenStoryIdea] = useState('')
-  const [genWords, setGenWords] = useState('')
-  const [genStyle, setGenStyle] = useState(isLincoln ? 'minecraft' : 'storybook')
-  const [genPageCount, setGenPageCount] = useState(isLincoln ? 10 : 6)
 
   // Menu state
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
@@ -146,59 +137,18 @@ export default function BookshelfPage() {
     }
   }, [newTitle, newCoverStyle, createBook, navigate, isParent, childId])
 
-  const handleGenerateBook = useCallback(async () => {
-    if (!genStoryIdea.trim() && !genWords.trim()) return
-    setShowNewDialog(false)
-
-    const words = genWords
-      .split(/[,\n]+/)
-      .map((w) => w.trim().toLowerCase())
-      .filter(Boolean)
-
-    const attribution = isParent && childId
-      ? { createdBy: 'parent' as const, createdFor: childId }
-      : childId
-        ? { createdBy: childId, createdFor: childId }
-        : undefined
-    const bookId = await generateBook(
-      familyId,
-      childId,
-      genStoryIdea.trim(),
-      words,
-      genStyle,
-      genPageCount,
-      undefined,
-      attribution,
-    )
-
-    if (bookId) {
-      // Brief delay so user sees "done" state
-      setTimeout(() => {
-        resetProgress()
-        navigate(`/books/${bookId}`)
-      }, 1500)
-    }
-  }, [
-    genStoryIdea,
-    genWords,
-    genStyle,
-    genPageCount,
-    familyId,
-    childId,
-    generateBook,
-    resetProgress,
-    navigate,
-    isParent,
-  ])
-
   const handleCloseNewDialog = useCallback(() => {
     setShowNewDialog(false)
-    setDialogTab(0)
+    setDialogTab(1)
     setNewTitle('')
-    setGenStoryIdea('')
-    setGenWords('')
-    setGenPageCount(isLincoln ? 10 : 6)
-  }, [isLincoln])
+    setResumeBookId(undefined)
+  }, [])
+
+  const handleResumeDraft = useCallback((bookId: string) => {
+    setResumeBookId(bookId)
+    setDialogTab(1)
+    setShowNewDialog(true)
+  }, [])
 
   const formatRelativeTime = (iso: string) => {
     try {
@@ -304,22 +254,6 @@ export default function BookshelfPage() {
     )
   }
 
-  // Show generation progress overlay when generating
-  if (progress && progress.phase !== 'done') {
-    return (
-      <Page>
-        <GenerationProgress progress={progress} isLincoln={isLincoln} />
-        {progress.phase === 'error' && (
-          <Stack alignItems="center" sx={{ mt: 2 }}>
-            <Button variant="outlined" onClick={resetProgress}>
-              Back to Bookshelf
-            </Button>
-          </Stack>
-        )}
-      </Page>
-    )
-  }
-
   return (
     <Page>
       <CreativeTimer
@@ -338,28 +272,6 @@ export default function BookshelfPage() {
       >
         My Books
       </Typography>
-
-      {/* Tell a Story — primary CTA (kids) / secondary for parents */}
-      <Button
-        variant={isParent ? 'outlined' : 'contained'}
-        size="large"
-        startIcon={<RecordVoiceOverIcon />}
-        onClick={() => navigate('/books/story-guide')}
-        sx={{
-          minHeight: isParent ? 44 : 56,
-          textTransform: 'none',
-          fontWeight: 700,
-          ...(isParent
-            ? {}
-            : {
-                fontSize: '1.05rem',
-                bgcolor: isLincoln ? '#4caf50' : '#f06292',
-                '&:hover': { bgcolor: isLincoln ? '#388e3c' : '#e91e8c' },
-              }),
-        }}
-      >
-        {isLincoln ? 'Tell a Story 🎮' : 'Tell a Story ✨'}
-      </Button>
 
       {/* Evaluation-based book suggestions (parent view only) */}
       {isParent && evalSuggestions.length > 0 && (
@@ -573,6 +485,33 @@ export default function BookshelfPage() {
             gap: 2,
           }}
         >
+          {/* New book card — first position (Story Gen V2 PR-A) */}
+          <Box
+            data-testid="new-book-tile"
+            onClick={() => {
+              setResumeBookId(undefined)
+              setShowNewDialog(true)
+            }}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: '2px dashed',
+              borderColor: 'divider',
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: 140,
+              '&:hover': { borderColor: 'primary.light', bgcolor: 'action.hover' },
+            }}
+          >
+            <AddIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
+            <Typography variant="body2" color="text.secondary">
+              New book
+            </Typography>
+          </Box>
+
           {sortedBooks.map((book) => {
             const coverUrl =
               book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
@@ -580,20 +519,29 @@ export default function BookshelfPage() {
             const creatorLabel = by === 'parent'
               ? 'By Mom'
               : `By ${allChildren.find((c) => c.id === by)?.name ?? 'Kid'}`
+            const isInProgressDraft = book.reviewState?.generateChatState === 'in-progress'
 
             return (
               <Box
                 key={book.id}
-                onClick={() =>
+                onClick={() => {
+                  if (isInProgressDraft && book.id) {
+                    handleResumeDraft(book.id)
+                    return
+                  }
                   navigate(
                     book.status === 'complete' ? `/books/${book.id}/read` : `/books/${book.id}`,
                   )
-                }
+                }}
                 sx={{
                   p: 2,
                   borderRadius: 2,
-                  border: '1px solid',
-                  borderColor: book.isTogetherBook ? 'info.300' : 'divider',
+                  border: isInProgressDraft ? '2px dashed' : '1px solid',
+                  borderColor: isInProgressDraft
+                    ? 'warning.main'
+                    : book.isTogetherBook
+                      ? 'info.300'
+                      : 'divider',
                   bgcolor: isLincoln ? 'grey.900' : '#fff8f0',
                   color: isLincoln ? 'grey.100' : '#3d3d3d',
                   cursor: 'pointer',
@@ -761,6 +709,19 @@ export default function BookshelfPage() {
                         fontWeight: 600,
                       }}
                     />
+                  ) : isInProgressDraft ? (
+                    <Chip
+                      label="Continue making this story →"
+                      size="small"
+                      sx={{
+                        ml: 'auto',
+                        height: 22,
+                        fontSize: '0.65rem',
+                        bgcolor: 'warning.100',
+                        color: 'warning.900',
+                        fontWeight: 700,
+                      }}
+                    />
                   ) : (
                     <Chip
                       label="Draft"
@@ -779,29 +740,6 @@ export default function BookshelfPage() {
               </Box>
             )
           })}
-
-          {/* New book card */}
-          <Box
-            onClick={() => setShowNewDialog(true)}
-            sx={{
-              p: 2,
-              borderRadius: 2,
-              border: '2px dashed',
-              borderColor: 'divider',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: 140,
-              '&:hover': { borderColor: 'primary.light', bgcolor: 'action.hover' },
-            }}
-          >
-            <AddIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
-            <Typography variant="body2" color="text.secondary">
-              New book
-            </Typography>
-          </Box>
         </Box>
       )}
 
@@ -954,114 +892,55 @@ export default function BookshelfPage() {
             </Stack>
           )}
 
-          {/* Tab 1: Generate a Book */}
+          {/* Tab 1: Generate a Book — chat surface (Story Gen V2 PR-A) */}
           {dialogTab === 1 && (
-            <Stack spacing={3} sx={{ pt: 1 }}>
-              {/* Story Guide shortcut */}
-              <Button
-                variant="outlined"
-                startIcon={<RecordVoiceOverIcon />}
-                onClick={() => {
-                  handleCloseNewDialog()
-                  navigate('/books/story-guide')
-                }}
-                sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
-              >
-                Use Story Guide (guided questions)
-              </Button>
-              <TextField
-                label="What's your story about?"
-                placeholder={
-                  isLincoln
-                    ? 'A Minecraft adventure with a cat and a dragon...'
-                    : 'A princess who finds a magic garden with talking animals...'
-                }
-                value={genStoryIdea}
-                onChange={(e) => setGenStoryIdea(e.target.value)}
-                fullWidth
-                multiline
-                minRows={2}
-                maxRows={4}
-                autoFocus
-              />
-              <TextField
-                label="Words to include (optional)"
-                placeholder={
-                  isLincoln
-                    ? 'the, is, was, cat, dog, run, water, where...'
-                    : 'cat, dog, big, little, happy, love, my, the...'
-                }
-                helperText="These words will appear in the story and be highlighted when reading"
-                value={genWords}
-                onChange={(e) => setGenWords(e.target.value)}
-                fullWidth
-                multiline
-                minRows={2}
-                maxRows={3}
-              />
+            <Stack spacing={1.5} sx={{ pt: 1 }}>
+              {/* Story Guide buried fallback */}
               <Box>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  Illustration style
-                </Typography>
-                <ToggleButtonGroup
-                  value={genStyle}
-                  exclusive
-                  onChange={(_, val) => {
-                    if (val) setGenStyle(val)
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => {
+                    handleCloseNewDialog()
+                    navigate('/books/story-guide')
                   }}
-                  sx={{ flexWrap: 'wrap' }}
+                  sx={{
+                    textTransform: 'none',
+                    color: 'text.secondary',
+                    fontWeight: 400,
+                    p: 0,
+                    minHeight: 0,
+                  }}
                 >
-                  {GENERATION_STYLES.map((style) => (
-                    <ToggleButton
-                      key={style.value}
-                      value={style.value}
-                      sx={{ textTransform: 'none', px: 2, minHeight: 48 }}
-                    >
-                      {style.label}
-                    </ToggleButton>
-                  ))}
-                </ToggleButtonGroup>
+                  Use Story Guide (guided questions)
+                </Button>
               </Box>
-              <Box>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  Pages: {genPageCount}
-                </Typography>
-                <Slider
-                  value={genPageCount}
-                  onChange={(_, v) => setGenPageCount(v as number)}
-                  min={5}
-                  max={15}
-                  step={1}
-                  marks
-                  valueLabelDisplay="auto"
-                />
-              </Box>
+              <BookGenerateChat
+                resumeBookId={resumeBookId}
+                onCommit={(bookId) => {
+                  handleCloseNewDialog()
+                  navigate(`/books/${bookId}`)
+                }}
+                onAbandon={handleCloseNewDialog}
+              />
             </Stack>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseNewDialog}>Cancel</Button>
           {dialogTab === 0 ? (
-            <Button
-              variant="contained"
-              onClick={() => {
-                void handleCreateBook()
-              }}
-              disabled={!newTitle.trim() || creating}
-            >
-              {creating ? 'Creating...' : 'Create'}
-            </Button>
-          ) : (
-            <Button
-              variant="contained"
-              onClick={() => {
-                void handleGenerateBook()
-              }}
-              disabled={(!genStoryIdea.trim() && !genWords.trim()) || generating}
-            >
-              {generating ? 'Generating...' : 'Generate!'}
-            </Button>
-          )}
+            <>
+              <Button onClick={handleCloseNewDialog}>Cancel</Button>
+              <Button
+                variant="contained"
+                onClick={() => {
+                  void handleCreateBook()
+                }}
+                disabled={!newTitle.trim() || creating}
+              >
+                {creating ? 'Creating...' : 'Create'}
+              </Button>
+            </>
+          ) : null}
         </DialogActions>
       </Dialog>
 

@@ -110,6 +110,25 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.generateStory).not.toContain("workbookPaces");
     expect(TASK_CONTEXT.generateStory).not.toContain("recentEval");
   });
+
+  // ── Story Generation V2 Phase 2 PR-A: reviseStory slice list ──
+
+  it("reviseStory wires childProfile, sightWords, wordMastery, and skillSnapshot", () => {
+    // Matches generateStory — same per-child calibration needs.
+    expect(TASK_CONTEXT.reviseStory).toContain("childProfile");
+    expect(TASK_CONTEXT.reviseStory).toContain("sightWords");
+    expect(TASK_CONTEXT.reviseStory).toContain("wordMastery");
+    expect(TASK_CONTEXT.reviseStory).toContain("skillSnapshot");
+  });
+
+  it("reviseStory cross-task isolation guard: does not pull planner-scoped slices", () => {
+    // If this test fails, a slice from another task leaked into reviseStory.
+    expect(TASK_CONTEXT.reviseStory).not.toContain("engagement");
+    expect(TASK_CONTEXT.reviseStory).not.toContain("hoursProgress");
+    expect(TASK_CONTEXT.reviseStory).not.toContain("weekFocus");
+    expect(TASK_CONTEXT.reviseStory).not.toContain("workbookPaces");
+    expect(TASK_CONTEXT.reviseStory).not.toContain("recentEval");
+  });
 });
 
 // ── compressEngagement ─────────────────────────────────────────

@@ -5,9 +5,11 @@ import {
   buildPageBeats,
   buildQuestPrompt,
   buildRecentCurriculumSection,
+  buildReviseStoryPrompt,
   buildStoryPrompt,
   getWeekMonday,
 } from "./chat.js";
+import type { ReviseStoryInput } from "./chat.js";
 import { MATH_CONCEPT_BANDS } from "./levelDefinitions.js";
 
 // ── getWeekMonday ──────────────────────────────────────────────
@@ -510,5 +512,160 @@ describe("buildStoryPrompt", () => {
     // And uses the age-10 calibration (no CVC anywhere)
     expect(p).not.toContain("CVC");
     expect(p).toContain("real problems, real heroes");
+  });
+});
+
+// ── Story Generation V2 Phase 2 PR-A: buildReviseStoryPrompt ───
+
+describe("buildReviseStoryPrompt", () => {
+  const baseLondon: ReviseStoryInput = {
+    chatHistory: [
+      { role: "kid", content: "a dragon who can't fly" },
+      { role: "ai", content: "Here's your story!" },
+    ],
+    currentStory: {
+      title: "Ember the Dragon",
+      pages: [
+        {
+          pageNumber: 1,
+          text: "Ember the dragon could not fly.",
+          sceneDescription: "A small green dragon on a mossy hill at dawn.",
+          wordsOnPage: ["the", "and"],
+        },
+        {
+          pageNumber: 2,
+          text: "She flapped her tiny wings, but stayed on the ground.",
+          sceneDescription: "The dragon flapping her wings hard in a meadow.",
+        },
+      ],
+    },
+    childCalibration: {
+      childAge: 6,
+      childName: "London",
+      illustrationStyle: "storybook",
+      pageCount: 6,
+    },
+    newFeedback: "Make the dragon a girl named Sparkle.",
+  };
+
+  const baseLincoln: ReviseStoryInput = {
+    ...baseLondon,
+    childCalibration: {
+      childAge: 10,
+      childName: "Lincoln",
+      illustrationStyle: "minecraft",
+      pageCount: 10,
+    },
+  };
+
+  it("opens with the child's name and age", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("London");
+    expect(p).toContain("age 6");
+  });
+
+  it("embeds the CHAT HISTORY section with each turn", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("CHAT HISTORY:");
+    expect(p).toContain("a dragon who can't fly");
+    expect(p).toContain("Here's your story!");
+  });
+
+  it("renders an empty CHAT HISTORY block when no prior turns exist", () => {
+    const p = buildReviseStoryPrompt({ ...baseLondon, chatHistory: [] });
+    expect(p).toContain("CHAT HISTORY:");
+    expect(p).toContain("(no prior turns)");
+  });
+
+  it("includes a LATEST MESSAGE section with the new feedback verbatim", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("LATEST MESSAGE FROM London:");
+    expect(p).toContain("Make the dragon a girl named Sparkle.");
+  });
+
+  it("embeds every current-story page with its text and scene", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("PAGE 1:");
+    expect(p).toContain("Ember the dragon could not fly.");
+    expect(p).toContain("A small green dragon on a mossy hill at dawn.");
+    expect(p).toContain("PAGE 2:");
+    expect(p).toContain("She flapped her tiny wings, but stayed on the ground.");
+    expect(p).toContain("The dragon flapping her wings hard in a meadow.");
+  });
+
+  it("includes wordsOnPage for pages that have one", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("WORDS ON PAGE: the, and");
+  });
+
+  it("reuses the WRITING QUALITY guardrails block", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("WRITING QUALITY:");
+    expect(p).toContain("Consistent character names");
+    expect(p).toContain("No typos. No misspellings");
+  });
+
+  it("reuses the COPYRIGHT block (Mario → Marco example present)", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("COPYRIGHT — IMPORTANT:");
+    expect(p).toContain("Mario");
+    expect(p).toContain("Marco");
+  });
+
+  it("calibrates London (age 6) with short-sentence target", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("1-2 short sentences (5-9 words each)");
+  });
+
+  it("calibrates Lincoln (age 10) with longer sentence + content-stakes language", () => {
+    const p = buildReviseStoryPrompt(baseLincoln);
+    expect(p).toContain("2-4 sentences (8-14 words each)");
+    expect(p).toContain("real problems, real heroes");
+  });
+
+  it("never calibrates Lincoln with CVC-style infantilizing language", () => {
+    const p = buildReviseStoryPrompt(baseLincoln);
+    expect(p).not.toContain("CVC");
+  });
+
+  it("includes the illustration style and page count in the prompt", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain("ILLUSTRATION STYLE: storybook");
+    expect(p).toContain("PAGE COUNT: 6");
+  });
+
+  it("instructs the AI not to change page count", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toMatch(/do not add or remove pages/i);
+  });
+
+  it("describes the conversational-vs-revision dispatch", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toMatch(/conversational/i);
+    expect(p).toContain('storyUpdated to false');
+  });
+
+  it("output schema declares humanResponse, storyUpdated, updatedStory, pagesNeedingImageRegen", () => {
+    const p = buildReviseStoryPrompt(baseLondon);
+    expect(p).toContain('"humanResponse"');
+    expect(p).toContain('"storyUpdated"');
+    expect(p).toContain('"updatedStory"');
+    expect(p).toContain('"pagesNeedingImageRegen"');
+  });
+
+  it("uses the full chat history (does not silently drop turns)", () => {
+    const p = buildReviseStoryPrompt({
+      ...baseLondon,
+      chatHistory: [
+        { role: "kid", content: "first turn" },
+        { role: "ai", content: "second turn" },
+        { role: "kid", content: "third turn" },
+        { role: "ai", content: "fourth turn" },
+      ],
+    });
+    expect(p).toContain("first turn");
+    expect(p).toContain("second turn");
+    expect(p).toContain("third turn");
+    expect(p).toContain("fourth turn");
   });
 });
