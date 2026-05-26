@@ -738,6 +738,12 @@ const SECTION_ORDER: MonthlyReviewPage["sectionType"][] = [
 const EMPTY_CONTENT: PageContent = {};
 
 /**
+ * Minimum overflow photos required before the moreFromMonth gallery is added.
+ * A 1-photo gallery feels lonely; 2 reads as intentional.
+ */
+const MIN_OVERFLOW_TO_SHOW_GALLERY = 2;
+
+/**
  * Auto-generated content for the moreFromMonth gallery. No AI call — the
  * section is a photo grid with a fixed headline + soft body line. Kid mode
  * only; parent mode is filtered out at the renderer.
@@ -760,7 +766,7 @@ export function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload 
     // kid mode has overflow photos to show. No AI content; fixed headline +
     // body. Filtered out entirely in parent mode at the renderer.
     if (sectionType === "moreFromMonth") {
-      if (placement.moreFromMonth.kid.length === 0) continue;
+      if (placement.moreFromMonth.kid.length < MIN_OVERFLOW_TO_SHOW_GALLERY) continue;
       pages.push({
         id: `${id}_${sectionType}`,
         sectionType,
