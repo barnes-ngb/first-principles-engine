@@ -11,6 +11,7 @@ import type {
   PageContent,
 } from '../../core/types'
 import { SectionType, SubjectBucketLabel } from '../../core/types/enums'
+import { formatSubjectMinutes } from './formatSubjectMinutes'
 import { MonthlyPhoto } from './MonthlyPhoto'
 import { getModePhotos, type ReaderMode } from './photoRefs'
 import { usePhotoUrl } from './usePhotoUrl'
@@ -280,7 +281,7 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
           >
             {Object.entries(stats.hoursBySubject)
               .sort((a, b) => b[1] - a[1])
-              .map(([subject, hours], idx, arr) => (
+              .map(([subject, minutes], idx, arr) => (
                 <Stack
                   key={subject}
                   direction="row"
@@ -297,7 +298,7 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
                     {SubjectBucketLabel[subject as keyof typeof SubjectBucketLabel] ?? subject}
                   </Typography>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {hours.toFixed(1)}h
+                    {formatSubjectMinutes(minutes)}
                   </Typography>
                 </Stack>
               ))}

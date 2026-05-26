@@ -9,6 +9,7 @@ import {
   MonthlyReviewStatus,
   SectionType,
 } from '../../core/types/enums'
+import { formatSubjectMinutes } from './formatSubjectMinutes'
 import { MonthlyReviewPage } from './MonthlyReviewPage'
 
 function makePage(
@@ -135,6 +136,41 @@ describe('MonthlyReviewPage — empty-section UX', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('renders hours-by-subject correctly when values are in minutes (parent mode)', () => {
+    const page = makePage({
+      id: 'stats',
+      sectionType: SectionType.ByTheNumbers,
+      kidMode: { headline: 'By the Numbers' },
+      parentMode: { headline: 'By the Numbers' },
+    })
+    const review = makeReview({
+      stats: {
+        daysWithActivity: 12,
+        totalHours: 5.2,
+        hoursBySubject: {
+          'Language Arts': 154,
+          Science: 90,
+          Art: 61,
+          Reading: 5,
+        },
+        booksCompleted: 0,
+        booksRead: 0,
+        quests: 0,
+        blockersResolved: 0,
+        blockersActive: 0,
+        teachBackCount: 0,
+        dadLabCount: 0,
+        totalDiamonds: 0,
+      },
+    })
+    render(<MonthlyReviewPage page={page} review={review} mode="parent" />)
+    expect(screen.getByText('2.6h')).toBeInTheDocument()
+    expect(screen.getByText('1.5h')).toBeInTheDocument()
+    expect(screen.getByText('1.0h')).toBeInTheDocument()
+    expect(screen.getByText('5m')).toBeInTheDocument()
+    expect(screen.queryByText('154.0h')).not.toBeInTheDocument()
+  })
+
   it('does not show the notice when a section has photos (parent mode)', () => {
     const page = makePage({
       photoRefs: {
@@ -155,5 +191,23 @@ describe('MonthlyReviewPage — empty-section UX', () => {
     expect(
       screen.queryByText(/No photos for this section/i),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('formatSubjectMinutes', () => {
+  it('shows minutes when under 60', () => {
+    expect(formatSubjectMinutes(5)).toBe('5m')
+    expect(formatSubjectMinutes(59)).toBe('59m')
+  })
+
+  it('shows whole hours when clean', () => {
+    expect(formatSubjectMinutes(60)).toBe('1h')
+    expect(formatSubjectMinutes(180)).toBe('3h')
+  })
+
+  it('shows decimal hours when not clean', () => {
+    expect(formatSubjectMinutes(154)).toBe('2.6h')
+    expect(formatSubjectMinutes(90)).toBe('1.5h')
+    expect(formatSubjectMinutes(61)).toBe('1.0h')
   })
 })

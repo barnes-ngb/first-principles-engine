@@ -1,8 +1,64 @@
 import { describe, it, expect } from "vitest";
+import type { Firestore } from "firebase-admin/firestore";
 import {
   getMonthBounds,
   getPreviousMonth,
+  loadDadLabReportsInMonth,
 } from "./monthlyReviewData.js";
+
+// ── Minimal Firestore mock for chained `.where().where().get()` queries ──
+
+interface FakeDoc {
+  id: string;
+  data: Record<string, unknown>;
+}
+
+interface WhereClause {
+  field: string;
+  op: string;
+  value: unknown;
+}
+
+function makeFakeDb(docsByCollection: Record<string, FakeDoc[]>): Firestore {
+  function makeQuery(path: string, clauses: WhereClause[]): unknown {
+    return {
+      where: (field: string, op: string, value: unknown) =>
+        makeQuery(path, [...clauses, { field, op, value }]),
+      get: async () => {
+        const docs = docsByCollection[path] ?? [];
+        const matched = docs.filter((doc) =>
+          clauses.every((c) => {
+            const v = doc.data[c.field];
+            switch (c.op) {
+              case "==":
+                return v === c.value;
+              case ">=":
+                return typeof v === "string" && typeof c.value === "string"
+                  ? v >= c.value
+                  : (v as number) >= (c.value as number);
+              case "<=":
+                return typeof v === "string" && typeof c.value === "string"
+                  ? v <= c.value
+                  : (v as number) <= (c.value as number);
+              default:
+                return false;
+            }
+          }),
+        );
+        return {
+          docs: matched.map((doc) => ({
+            id: doc.id,
+            data: () => doc.data,
+          })),
+          empty: matched.length === 0,
+        };
+      },
+    };
+  }
+  return {
+    collection: (path: string) => makeQuery(path, []),
+  } as unknown as Firestore;
+}
 
 describe("getMonthBounds", () => {
   it("returns full month range for April (30 days)", () => {
@@ -50,5 +106,85 @@ describe("getPreviousMonth", () => {
 
   it("returns previous month even on the last day", () => {
     expect(getPreviousMonth(new Date(2026, 2, 31))).toBe("2026-02");
+  });
+});
+
+describe("loadDadLabReportsInMonth", () => {
+  const path = "families/fam/dadLabReports";
+
+  it("includes an in-month session even when status is not 'complete'", async () => {
+    // The Bridge Test reproducer: real-use feedback found that families
+    // don't always advance a session to 'complete' even after the kid did
+    // the work. The loader must count it as long as the child contributed.
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-bridge",
+          data: {
+            date: "2026-04-04",
+            status: "active",
+            title: "The Bridge Test",
+            question: "Can it hold the weight?",
+            childReports: {
+              lincoln: { prediction: "yes", explanation: "trusses" },
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(db, "fam", "lincoln", "2026-04-01", "2026-04-30");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("The Bridge Test");
+    expect(result[0].hasPrediction).toBe(true);
+    expect(result[0].hasExplanation).toBe(true);
+  });
+
+  it("excludes sessions where the queried child did not contribute", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-london-only",
+          data: {
+            date: "2026-04-10",
+            status: "complete",
+            title: "London's Solo Lab",
+            childReports: { london: { prediction: "maybe" } },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(db, "fam", "lincoln", "2026-04-01", "2026-04-30");
+    expect(result).toHaveLength(0);
+  });
+
+  it("excludes sessions outside the month window", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-march",
+          data: {
+            date: "2026-03-30",
+            status: "complete",
+            title: "March lab",
+            childReports: { lincoln: { prediction: "x" } },
+          },
+        },
+        {
+          id: "lab-may",
+          data: {
+            date: "2026-05-01",
+            status: "complete",
+            title: "May lab",
+            childReports: { lincoln: { prediction: "x" } },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(db, "fam", "lincoln", "2026-04-01", "2026-04-30");
+    expect(result).toHaveLength(0);
   });
 });

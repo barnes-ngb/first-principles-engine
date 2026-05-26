@@ -740,6 +740,71 @@ between Week Focus and Chapter Question Pool, wrapped in
 notifications or external delivery — the card is purely an in-app
 heads-up.
 
+### v1.6 — May 26, 2026 — Real-use bug fixes from Lincoln's first sitting
+
+Three discrete fixes surfaced when Nathan sat with Lincoln and walked
+through his April book for the first time. None are new features —
+strictly fixes to bring the existing artifact to working state.
+
+**Minutes-stored, hours-displayed.** The Stats page's "Hours by subject"
+table displayed minutes with an `h` suffix (Language Arts at 154 minutes
+read as "154.0h" — about 60× off). The AI prose narrates correctly in
+minutes; only the table display was wrong. Convention going forward:
+`MonthStats.hoursBySubject` stays in minutes — that's the native unit
+from per-item `actualMinutes` accumulation and the `hours` collection's
+`minutes` field. Converting at write time would lose integer precision
+and force a back-migration on every existing review document. Display
+layer is the right place. `MonthStats.totalHours` is the exception — it
+was already stored in hours (`Math.round((totalMinutes / 60) * 10) / 10`)
+and the top-of-page tile renders it correctly; no change needed there.
+New `formatSubjectMinutes` helper in
+`src/features/monthly-review/formatSubjectMinutes.ts` shows minutes
+under 60 ("5m") and hours above with a whole-vs-decimal split ("3h",
+"2.6h"). The helper lives in its own file so `MonthlyReviewPage.tsx`
+stays component-only (Fast Refresh).
+
+**Dad Lab loader counts contributions, not lifecycle.** April's "The
+Bridge Test" never reached `stats.dadLabCount` because
+`loadDadLabReportsInMonth` filtered by `status == "complete"`, but
+families don't always advance a session past 'active' once the kid did
+the work. The status filter was the wrong gate; the
+`childReports[childId]` presence check (already in the loader) is the
+real participation signal. Filter removed. The existing
+`(status ASC, date ASC)` composite index on `dadLabReports` is no
+longer required by this query but stays in `firestore.indexes.json` for
+other callers — Firestore serves the new date-range-only query from its
+default single-field index.
+
+**Voice-note schema slot, no UI.** Lincoln's strongest positive signal
+during the sitting was on the "More from this month" gallery: he
+started talking about his work, photo by photo. Voice capture per page
+is clearly the next natural addition — Lincoln has speech challenges,
+and the gallery format invites narration without forcing reading.
+We're not building the recording UI in this PR, but we are reserving
+the schema slot so the future PR doesn't require a migration. New
+`VoiceNote` type in `src/core/types/monthlyReview.ts` (id, audioUrl,
+durationMs, recordedBy, recordedAt, optional transcription) and a new
+optional field on `MonthlyReviewPage`:
+
+```ts
+voiceNotes?: {
+  kid?: VoiceNote[]
+  parent?: VoiceNote[]
+}
+```
+
+When PR H lands, it will reuse the existing `useAudioRecorder` hook,
+add long-press tap-to-record on the gallery, surface a "Lincoln has
+notes on this page" badge in parent mode, and start surfacing voice
+material in the next month's prose synthesis.
+
+**What was deliberately not touched.** The system prompt, curation
+rules, cover-hero policy, section list, and page composer all stay
+unchanged. The AI prose already narrates hours correctly (it works
+from raw minutes in `data.hours.minutesBySubject`); only the display
+suffix was wrong. Old draft documents render under the same fix
+because the unit conversion is purely at the renderer.
+
 ---
 
 *Last updated: May 26, 2026*
