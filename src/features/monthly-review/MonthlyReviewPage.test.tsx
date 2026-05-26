@@ -76,6 +76,65 @@ describe('MonthlyReviewPage — empty-section UX', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('renders moreFromMonth headline in kid mode when overflow photos exist', () => {
+    const page = makePage({
+      id: 'more',
+      sectionType: SectionType.MoreFromMonth,
+      kidMode: {
+        headline: 'More from this month',
+        body: 'Look at everything you made.',
+      },
+      parentMode: {},
+      photoRefs: {
+        kid: [
+          {
+            id: 'photo-1',
+            storagePath: 'gs://x/photo1.jpg',
+            source: 'artifact',
+            sourceDocId: 'doc-1',
+            capturedAt: '2026-04-10T12:00:00Z',
+          },
+        ],
+        parent: [],
+      },
+    })
+    const review = makeReview()
+    render(<MonthlyReviewPage page={page} review={review} mode="kid" />)
+    expect(screen.getByText(/More from this month/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Look at everything you made\./i),
+    ).toBeInTheDocument()
+  })
+
+  it('renders nothing for moreFromMonth in parent mode (no parent photos)', () => {
+    const page = makePage({
+      id: 'more',
+      sectionType: SectionType.MoreFromMonth,
+      kidMode: {
+        headline: 'More from this month',
+        body: 'Look at everything you made.',
+      },
+      parentMode: {},
+      photoRefs: {
+        kid: [
+          {
+            id: 'photo-1',
+            storagePath: 'gs://x/photo1.jpg',
+            source: 'artifact',
+            sourceDocId: 'doc-1',
+            capturedAt: '2026-04-10T12:00:00Z',
+          },
+        ],
+        parent: [],
+      },
+    })
+    const review = makeReview()
+    render(<MonthlyReviewPage page={page} review={review} mode="parent" />)
+    expect(
+      screen.queryByText(/More from this month/i),
+    ).not.toBeInTheDocument()
+  })
+
   it('does not show the notice when a section has photos (parent mode)', () => {
     const page = makePage({
       photoRefs: {

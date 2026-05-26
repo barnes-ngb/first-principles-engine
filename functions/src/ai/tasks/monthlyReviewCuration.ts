@@ -15,6 +15,13 @@ export interface PhotoCurationContext {
   sketchArtifactIds: Set<string>;
   /** Artifact IDs tied to a Dad Lab session with explanation present (boost). */
   dadLabArtifactIds: Set<string>;
+  /**
+   * Source-doc IDs of every artifact that is NOT a workbook scan. Used for
+   * artifact-default placement: anything in here qualifies for kid-mode
+   * placement without requiring engagement signal. `bookArtifactIds`,
+   * `sketchArtifactIds`, and `dadLabArtifactIds` are subsets.
+   */
+  allArtifactIds?: Set<string>;
   /** Photo IDs (PhotoRef.id) tied to resolved-blocker evidence (boost). */
   resolvedBlockerEvidenceIds: Set<string>;
   /**
@@ -147,13 +154,13 @@ export function scorePhotos(
 // ── Positive kid-mode signal ────────────────────────────────────
 
 /**
- * Returns true if `photo` has at least one positive signal that qualifies it
- * for kid-mode placement: engagement, a creative-artifact tag, a classified
- * scan, or resolved-blocker evidence. Photos that fail this filter are
- * considered incidental and excluded from kid-mode sections entirely.
+ * Returns true if `photo` has at least one positive signal: engagement, a
+ * creative-artifact tag, a classified scan, or resolved-blocker evidence.
  *
- * Workbook scans are still rejected separately via `isWorkbookScan` — this
- * filter runs *after* that check.
+ * As of the v1.4 artifact-default policy this no longer gates kid-mode
+ * placement — any non-workbook photo qualifies. The helper is kept as a
+ * ranking heuristic for callers that want to surface photos with explicit
+ * positive signal first (existing score-based sorting already favors them).
  */
 export function hasPositiveKidModeSignal(
   photo: PhotoRef,
@@ -204,6 +211,14 @@ export function hasPositiveKidModeSignal(
  * of creative work or curriculum.
  */
 const COVER_HERO_ALLOWED = [
+  // Broad artifact allowlist — covers books, sketches, Dad Lab, and any other
+  // non-workbook artifact (family activities, finished work, etc.).
+  (p: ScoredPhoto, c: PhotoCurationContext) =>
+    p.source === "artifact" &&
+    !p.isWorkbookScan &&
+    !!c.allArtifactIds?.has(p.sourceDocId),
+  // Legacy fallback: when allArtifactIds isn't populated, fall back to the
+  // narrow creative-artifact subsets so older callers still work.
   (p: ScoredPhoto, c: PhotoCurationContext) =>
     p.source === "artifact" && c.bookArtifactIds.has(p.sourceDocId),
   (p: ScoredPhoto, c: PhotoCurationContext) =>
@@ -341,6 +356,11 @@ export interface SectionPlacement {
   whatYouLoved: ModePlacement;
   /** Up to MAX_PHOTOS_PER_SECTION.workedThrough photos — prefer resolved-blocker evidence. */
   workedThrough: ModePlacement;
+  /**
+   * Overflow gallery — every kid-eligible photo that didn't land in cover /
+   * whatYouLoved / workedThrough. Kid mode only; parent is always empty.
+   */
+  moreFromMonth: ModePlacement;
   /** Remaining curated photos for the "More Photos" tray, capped at 30 total kept. */
   more: PhotoRef[];
 }
@@ -353,6 +373,7 @@ export interface SectionPlacement {
 export const MAX_PHOTOS_PER_SECTION = {
   whatYouLoved: { kid: 8, parent: 6 },
   workedThrough: { kid: 4, parent: 4 },
+  moreFromMonth: { kid: 20, parent: 0 },
   cover: 1,
 } as const;
 
@@ -375,6 +396,7 @@ export const PARENT_MODE_WORKBOOK_POLICY = {
   whatYouLoved: "exclude",
   workedThrough: "allow",
   byTheNumbers: "exclude",
+  moreFromMonth: "exclude",
 } as const;
 
 export function assignPhotosToSections(
@@ -389,11 +411,11 @@ export function assignPhotosToSections(
   const resolvedIds =
     context.resolvedBlockerEvidenceIds ?? new Set<string>();
 
-  // Kid mode: must pass positive-signal filter AND not be a workbook scan.
-  // Parent mode: workbook scans excluded from celebration sections only.
-  const kidEligible = scored.filter(
-    (p) => !p.isWorkbookScan && hasPositiveKidModeSignal(p, context),
-  );
+  // Artifact-default policy (v1.4): every photo that's not a workbook scan
+  // qualifies for kid-mode placement. Engagement signal still affects ranking
+  // via score, but no longer gates inclusion. Workbook scans are still
+  // excluded from kid mode everywhere.
+  const kidEligible = scored.filter((p) => !p.isWorkbookScan);
   const parentLovedEligible = scored.filter((p) => !p.isWorkbookScan);
 
   // Resolved-blocker evidence is reserved for workedThrough — it's the
@@ -465,6 +487,15 @@ export function assignPhotosToSections(
   });
   parentSelected.push(...workedParent);
 
+  // 4. moreFromMonth — overflow gallery for kid mode. Any kid-eligible photo
+  // that didn't land in cover / whatYouLoved / workedThrough goes here, up
+  // to the cap. Score order is preserved so the strongest leftovers lead.
+  const moreFromMonthCap = MAX_PHOTOS_PER_SECTION.moreFromMonth.kid;
+  const moreFromMonthKid = kidEligible
+    .filter((p) => !kidPlacedIds.has(p.id))
+    .slice(0, moreFromMonthCap);
+  for (const p of moreFromMonthKid) kidPlacedIds.add(p.id);
+
   // "More" pool: any curated photo not placed in either mode, capped at 30.
   const allPlaced = new Set<string>([...kidPlacedIds, ...parentPlacedIds]);
   const remaining = scored.filter((p) => !allPlaced.has(p.id)).slice(0, 30);
@@ -481,6 +512,10 @@ export function assignPhotosToSections(
     workedThrough: {
       kid: workedKid.map(strip),
       parent: workedParent.map(strip),
+    },
+    moreFromMonth: {
+      kid: moreFromMonthKid.map(strip),
+      parent: [],
     },
     more: remaining.map(strip),
   };

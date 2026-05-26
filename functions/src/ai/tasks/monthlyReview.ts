@@ -40,7 +40,8 @@ interface MonthlyReviewPage {
     | "monthInSentence"
     | "whatYouLoved"
     | "workedThrough"
-    | "byTheNumbers";
+    | "byTheNumbers"
+    | "moreFromMonth";
   order: number;
   kidMode: PageContent;
   parentMode: PageContent;
@@ -260,6 +261,7 @@ function buildCurationContext(data: MonthAggregate): PhotoCurationContext {
     resolvedBlockerEvidenceIds,
     workbookArtifactIds: data.workbookArtifactIds,
     classifiedScanIds: data.classifiedScanIds,
+    allArtifactIds: data.allArtifactIds,
   };
 }
 
@@ -730,15 +732,49 @@ const SECTION_ORDER: MonthlyReviewPage["sectionType"][] = [
   "whatYouLoved",
   "workedThrough",
   "byTheNumbers",
+  "moreFromMonth",
 ];
 
 const EMPTY_CONTENT: PageContent = {};
+
+/**
+ * Auto-generated content for the moreFromMonth gallery. No AI call — the
+ * section is a photo grid with a fixed headline + soft body line. Kid mode
+ * only; parent mode is filtered out at the renderer.
+ */
+const MORE_FROM_MONTH_KID_CONTENT: PageContent = {
+  headline: "More from this month",
+  body: "Look at everything you made.",
+  highlights: [],
+  captions: {},
+};
 
 export function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload {
   const { familyId, childId, month, data, hero, scored, placement, parsed } = input;
   const id = `${childId}_${month}`;
 
-  const pages: MonthlyReviewPage[] = SECTION_ORDER.map((sectionType, idx) => {
+  const pages: MonthlyReviewPage[] = [];
+  let order = 0;
+  for (const sectionType of SECTION_ORDER) {
+    // moreFromMonth is a photo-gallery overflow section — only included when
+    // kid mode has overflow photos to show. No AI content; fixed headline +
+    // body. Filtered out entirely in parent mode at the renderer.
+    if (sectionType === "moreFromMonth") {
+      if (placement.moreFromMonth.kid.length === 0) continue;
+      pages.push({
+        id: `${id}_${sectionType}`,
+        sectionType,
+        order: order++,
+        kidMode: MORE_FROM_MONTH_KID_CONTENT,
+        parentMode: EMPTY_CONTENT,
+        photoRefs: {
+          kid: placement.moreFromMonth.kid,
+          parent: placement.moreFromMonth.parent,
+        },
+      });
+      continue;
+    }
+
     const section = parsed.sections[sectionType] ?? {};
     let photoRefs: PageModePhotos = { kid: [], parent: [] };
     if (sectionType === "cover") {
@@ -760,15 +796,15 @@ export function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload 
       };
     }
 
-    return {
+    pages.push({
       id: `${id}_${sectionType}`,
       sectionType,
-      order: idx,
+      order: order++,
       kidMode: section.kidMode ?? EMPTY_CONTENT,
       parentMode: section.parentMode ?? EMPTY_CONTENT,
       photoRefs,
-    };
-  });
+    });
+  }
 
   // Build PhotoRefs without explicit `undefined` fields — Firestore rejects
   // undefined values, so optional fields are only set when defined.
