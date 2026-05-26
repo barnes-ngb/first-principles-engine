@@ -282,6 +282,10 @@ The Behavior Log and every other user-facing surface speak in a deliberate vocab
 
 This vocabulary will be swept through `features/today/`, `features/records/`, and `features/avatar/` as step 1 of the Design Pass v1 Implementation Queue (see MASTER_OUTLINE.md). The copy pass is small in code surface area and large in emotional surface area — it's the cheapest, highest-leverage move in the design pass.
 
+### Scope clarification
+
+> Language directed *at* the learner needs care. Language describing app state (errors, failures, network issues) needs accuracy. The no-judge rule applies to the first, not the second. A terse "Photo upload failed" is not a judgment on the learner; it's the app being honest about itself.
+
 ---
 
 ## Quest Complete mom-note guardrail

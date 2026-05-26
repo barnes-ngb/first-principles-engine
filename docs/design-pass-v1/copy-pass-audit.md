@@ -151,3 +151,10 @@ _Generated 2026-05-26. Review, edit `Proposed` cells as needed, mark `Decision` 
 ## Reviewer notes
 
 <!-- Free-form: pattern decisions, omissions, deferred work. -->
+
+## Applied
+
+- Total applied: 4 (T4, R8, R9, R10)
+- Total skipped: 38
+- Total drifted-and-skipped: 0
+- Date: 2026-05-26

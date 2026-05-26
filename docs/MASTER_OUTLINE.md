@@ -152,6 +152,8 @@ Ordered smallest → largest per `/docs/design-pass-v1/README.md` §Suggested im
 7. [ ] Not started — **Knowledge Mine depth meter + ore-block tasks.** Replaces existing quest list rendering in `KnowledgeMinePage.tsx`.
 8. [ ] Not started — **Shelly AI "build a test" action.** Wire the chat to create a `Quest` record from a natural-language directive (e.g. "Build a long-A check").
 9. [ ] Not started — **Quest Complete celebration screen.** Modal/route reached from `/quest`. Mom-note required (or graceful "Mom will see this tonight." fallback — never AI praise).
+10. **Error-message tone audit (deferred / queued for review only)** — Survey system error strings (save/load/upload/AI/network failures) across user-facing surfaces. Per the design-v1 scope clarification, this is NOT a no-judge issue — the app being terse about its own state is acceptable. This pass exists to confirm consistency and warmth where natural, not to force rewrites. May be a no-op. Status: queued, no timeline.
+11. **Data-field string audit (deferred)** — Strings written into Firestore records that don't directly render in today/records/avatar but flow downstream (AI prompts, learning map, planner). Known instances: `scanBlocker.ts` T24/T25 ("behind snapshot" in ConceptualBlock evidence/rationale). Scope expands as discovered. Should be done before any major rework of the surfaces that consume these fields. Status: queued.
 
 ## What's Not Built Yet — Priority Queue
 1. **Banner Rally missions (Hero Hub Phase 2)** — adaptive reading missions in Stonebridge.
