@@ -31,6 +31,12 @@ interface HookState {
   pendingIdea: string
   pendingRefinement: string | null
   canStartStory: boolean
+  illustrationProgress: {
+    phase: 'idle' | 'illustrating' | 'done'
+    currentPage: number
+    totalPages: number
+    lastImageUrl?: string
+  }
 }
 
 let hookState: HookState = {
@@ -44,6 +50,11 @@ let hookState: HookState = {
   pendingIdea: '',
   pendingRefinement: null,
   canStartStory: false,
+  illustrationProgress: {
+    phase: 'idle',
+    currentPage: 0,
+    totalPages: 0,
+  },
 }
 
 vi.mock('../useBookGenerateChat', () => ({
@@ -143,6 +154,11 @@ beforeEach(() => {
     pendingIdea: '',
     pendingRefinement: null,
     canStartStory: false,
+    illustrationProgress: {
+      phase: 'idle',
+      currentPage: 0,
+      totalPages: 0,
+    },
   }
 })
 
@@ -436,6 +452,45 @@ describe('BookGenerateChat', () => {
     expect(ttsSpeakMock).toHaveBeenCalledWith(
       expect.stringMatching(/here's what i heard/i),
     )
+  })
+
+  it('shows an "Illustrating page X of Y…" strip and disables the composer/commit during illustration', () => {
+    hookState = {
+      ...hookState,
+      currentStory: {
+        title: 'A Story',
+        pages: [
+          { pageNumber: 1, text: 'Page 1.', sceneDescription: 'a field' },
+          { pageNumber: 2, text: 'Page 2.', sceneDescription: 'a tree' },
+        ],
+      },
+      chatHistory: [
+        { role: 'kid', content: 'a dragon', ts: 1 },
+        { role: 'ai', content: 'Here you go!', ts: 2 },
+      ],
+      illustrationProgress: {
+        phase: 'illustrating',
+        currentPage: 1,
+        totalPages: 2,
+        lastImageUrl: 'https://example.com/preview.png',
+      },
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(screen.getByText(/illustrating page 1 of 2/i)).toBeTruthy()
+    const preview = screen.getByAltText(/latest illustration preview/i) as HTMLImageElement
+    expect(preview.src).toContain('preview.png')
+
+    // Composer disabled.
+    const input = screen.getByLabelText(/type or tap mic/i) as HTMLInputElement
+    expect(input.disabled).toBe(true)
+
+    // Commit button disabled while illustrating.
+    const commitBtn = screen.getByRole('button', { name: /i like the whole story/i })
+    expect(commitBtn.hasAttribute('disabled')).toBe(true)
   })
 
   it('renders story pages with per-page read-aloud buttons once a draft exists', () => {
