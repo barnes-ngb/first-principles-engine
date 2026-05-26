@@ -2,8 +2,8 @@
 
 **Status:** Design proposal, not yet built
 **Author:** Design chat (Claude + Nathan), May 2026
-**Decisions locked:** single-prompt entry default, review-after-not-before, review is opt-in not a gate, Story Guide wizard retired in Phase 3, prompt quality fixes ship Phase 1 standalone
-**Phases in this doc:** Phase 1 (prompt quality) and Phase 2 (review chat) in detail. Phase 3 (retire Story Guide) sketched.
+**Decisions locked:** chat-based entry inside "+ New Book" dialog (Path A primary), two review surfaces (Generate Chat + Per-Page Review), Per-Page Review auto-opens for kid-generated books (Paths A/B) and is on-demand for Shelly-authored books (Path C), Story Guide wizard buried as fallback (not deleted), prompt quality fixes ship Phase 1 standalone
+**Phases in this doc:** Phase 1 (prompt quality) and Phase 2 (Generate Chat + Per-Page Review + dialog rewire) in detail. Phase 3 (polish) sketched.
 **Builds on:** Book Builder (`src/features/books/`), AI Chat infrastructure (`functions/src/ai/chat.ts`, `tasks/generateStory.ts`), `useTTS`, `useSpeechRecognition`, `useBookGenerator` progressive-save pattern
 **Out of scope:** Image generation (working, untouched), book editor (working, untouched), manual page-by-page creation (preserved), sticker generation, scene generation in editor
 
@@ -54,38 +54,56 @@ V2 is not one flow but **three**, all landing in the same destination — a real
 
 The book exists after step 2 in every path. London (or Shelly) can stop there. Step 3 is for catching errors, not gating completion.
 
-### 3.1 Single-prompt entry — the new "Tell a Story" screen
+### 3.1 Primary entry — "+ New Book" dialog with chat-based Generate
 
-Replaces the 5-question wizard. Route stays `/books/story-guide` (so the Bookshelf CTA doesn't move) but the page is rewritten. One hero input, one mic button, one big button at the bottom.
+V2's primary entry is NOT a dedicated page. The entry consolidates around the existing "+ New Book" dialog with four concrete changes:
+
+- **The "+ New Book" button relocates to the TOP of the Bookshelf grid.** Today it sits at the bottom of the grid; for families with many books (Lincoln has 32) this requires scrolling. Moving it to the top makes generation the first thing visible.
+- **The dialog opens by default to the "Generate a Book" tab.** Currently the "Blank Book" tab is the default; flipping this surfaces generation as the primary intent.
+- **The "Use Story Guide (guided questions)" button stays at the top of the Generate tab but is restyled as a secondary/text button** — a buried fallback path for kids who prefer the structured questions. The wizard itself is unchanged (see §6.2).
+- **The Generate tab body is rewritten as a CHAT surface, not a form.** The current "What's your story about? / Words to include / Illustration style chips / Pages slider" form fields are replaced with:
+  - A scrolling chat thread showing alternating kid + AI turns
+  - A composer at the bottom: text input + mic button + send button
+  - An illustration-style icon strip immediately below the composer (Minecraft / Garden Battle / Storybook / Platformer / Comic / Realistic). Tappable to change style mid-conversation. Default derived from active child profile (London → Storybook; Lincoln → Minecraft).
+  - Page count is derived from active child profile (London: 6, Lincoln: 10). Override is buried (Shelly path).
+
+The "Tell a Story 🎮/✨" Bookshelf CTA is REMOVED in Phase 2. Its job is absorbed by the relocated "+ New Book" button being prominent at the top of the grid.
 
 ```
-┌─────────────────────────────────────────────┐
-│  ← Bookshelf                                │
-│                                             │
-│        What's your story about?             │
-│                                             │
-│   ┌─────────────────────────────────────┐   │
-│   │                                     │   │
-│   │  a dragon who can't fly             │   │
-│   │                                     │   │
-│   └─────────────────────────────────────┘   │
-│                                             │
-│              [   🎤  Tap to talk  ]         │
-│                                             │
-│                                             │
-│      [   ✨  Make my book!   ]              │
-│                                             │
-│      ⚙️  Change style or length             │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│  ✕                Craft a New Book              │
+│  ┌──────────────┐ ┌────────────────────────┐   │
+│  │  Blank Book  │ │  Generate a Book  ✓    │   │
+│  └──────────────┘ └────────────────────────┘   │
+│                                                │
+│  Use Story Guide (guided questions)  ← buried  │
+│                                                │
+│  ┌──────────────────────────────────────────┐  │
+│  │ You: a minecraft adventure with a cat    │  │
+│  │      and a dragon                        │  │
+│  │                                          │  │
+│  │ AI:  Here's your story! (reading...)     │  │
+│  │      Page 1: Marco the cat found a...    │  │
+│  │      Page 2: He climbed a tall block...  │  │
+│  │      ▶ Tap to hear it                    │  │
+│  │                                          │  │
+│  │ You: make the dragon a girl named        │  │
+│  │      Sparkle                             │  │
+│  │                                          │  │
+│  │ AI:  Fixed! Here's page 3 now...         │  │
+│  │      ▶ Tap to hear it                    │  │
+│  └──────────────────────────────────────────┘  │
+│                                                │
+│  [ Type or tap mic 🎤 ]            [ Send ]    │
+│                                                │
+│  Style: 🟦Minecraft 🌸Garden 📖Storybook       │
+│         🎮Platformer 💥Comic   📷Realistic     │
+│                                                │
+│  [    ✓  I like the whole story!    ]          │
+└────────────────────────────────────────────────┘
 ```
 
-Behavioral specifics:
-
-- **Voice input** uses the shared `useSpeechRecognition` hook (not the local re-implementation Story Guide currently has). Tap-and-talk; interim transcript shows as it arrives; transcript drops into the textarea on stop so the kid can see what was heard before generating. No required typing.
-- **Style and page count are derived from the active child profile** — no picker in the default flow. London → storybook style, 6 pages. Lincoln → minecraft style, 10 pages. (Override link is below the fold for parents who want it.)
-- **TTS auto-reads the prompt label** ("What's your story about?") on page load using `useTTS` so London can hear what to do.
-- **Empty prompt is allowed.** Tapping "Make my book!" with no input generates with the existing fallback ("A fun story with animals and a happy ending" for London, "A fun adventure — surprise me!" for Lincoln). London can mash the button and still get a book.
-- **No AI shaping step.** The optional follow-up question Story Guide does today gets removed — that's friction that doesn't earn its place when the kid hasn't seen any output yet.
+**Note on grid-position gut-check.** Shelly may have a different preference for the "+ New Book" relocation. Bookshelf grids commonly grow downward with the add affordance at the end; pinning it to top as the first grid item is a deliberate departure. If Shelly pushes back on this after testing, an alternative is a separate top-bar button outside the grid rather than a grid item. Flagged in §9 question 7.
 
 ### 3.2 Generation phase — unchanged structurally, improved on prompt
 
@@ -97,11 +115,18 @@ The change is purely inside `buildStoryPrompt` — see §4.
 
 After generation completes, navigation goes to `/books/:id` (the existing book editor) exactly as today. The book is already saved, illustrations are filling in, the kid can flip through pages.
 
-One new element on the editor toolbar (for kid mode only, when the book was AI-generated and not yet been reviewed): a **"Read it to me 🎧"** button. Tapping it opens the review chat (§5). If the kid never taps it, the book is just done — no nag, no badge, no required step.
+Auto-open behavior for the per-page review:
 
-### 3.4 Review chat — opt-in, page-by-page, voice-driven
+- For books generated by the kid via **Path A** (chat-based Generate), the per-page review opens AUTOMATICALLY after the kid says "I like the whole story" in the Generate Chat. The book editor sees the book with `reviewState` already in flight.
+- For books generated by **Shelly** (or imported from Path C), the per-page review does NOT auto-open. The **"Read it to me 🎧"** button on the editor toolbar remains available for on-demand review.
+- **Shelly can trigger the per-page review at any time, including on a book the kid has already approved (parent post-hoc review — §9 Q3).** The button surfaces on the parent profile view regardless of `reviewState.completedAt`.
 
-Detailed in §5.
+### 3.4 Two review surfaces — Generate Chat then Per-Page Review
+
+The review experience splits into two distinct surfaces, both detailed in §5:
+
+- **§5.A — The Generate Chat** (NEW): a conversational draft + revise loop that operates on the whole story before any per-page work begins. Lives inside the "+ New Book" dialog. This is where most kid revision happens.
+- **§5.B — The Per-Page Review**: page-by-page TTS read-aloud + voice/manual revision. Auto-opens after the kid approves the whole story in the Generate Chat; remains optional/on-demand for Shelly's flows and for parent post-hoc review.
 
 ### 3.5 Inventory of generation entry points and their V2 disposition
 
@@ -109,8 +134,9 @@ The current app has three distinct generation systems and six-plus contextual en
 
 | Current entry (file:line ref) | What it does today | V2 disposition |
 |---|---|---|
-| "Tell a Story 🎮/✨" button on Bookshelf (BookshelfPage.tsx:347, 966) → /books/story-guide → StoryGuidePage 5-question wizard → useBookGenerator | Kid-facing wizard, full text + DALL-E illustration | Route + label kept. Page rewritten to single-prompt entry (§3.1). Wizard code deleted in Phase 2. |
-| "+ New Book" dialog "Generate" tab (BookshelfPage.tsx dialog) → useBookGenerator | Adult form: textarea + words + style picker + page count slider | Generate tab REMOVED in Phase 2. The single-prompt entry is the only AI path from the bookshelf. Dialog retains "Blank Book" tab for manual creation. |
+| "Tell a Story 🎮/✨" button on Bookshelf (BookshelfPage.tsx:347, 966) → /books/story-guide → StoryGuidePage 5-question wizard → useBookGenerator | Kid-facing wizard, full text + DALL-E illustration | Bookshelf CTA REMOVED in Phase 2. /books/story-guide route kept for the buried-wizard fallback; the wizard remains accessible only from inside the "+ New Book" dialog (see §6.2). |
+| "+ New Book" dialog "Generate" tab (BookshelfPage.tsx dialog) → useBookGenerator | Adult form: textarea + words + style picker + page count slider | Generate tab is the new primary entry. Form fields replaced with chat surface. Style chips become inline icon strip below composer. Dialog defaults to this tab (currently defaults to "Blank Book"). Dialog button relocates to top of Bookshelf grid. |
+| "+ New Book" dialog "Use Story Guide (guided questions)" secondary button (BookshelfPage.tsx, top of Generate tab) | Routes to /books/story-guide wizard | RETAINED as buried fallback for kids who prefer the guided questions. Restyled as secondary/text button. Same wizard, same route. |
 | "Create Targeted Story" button (EvaluationBookBanner.tsx:73, in Suggested for X card) → /books/create-story with prefillWords + source='evaluation' | Routes to CreateSightWordBook with weak words pre-filled; user still completes the multi-field form | CHANGES in Phase 2. Becomes truly one-tap: button generates immediately using pre-fetched weak words + child defaults, bypassing CreateSightWordBook entirely. Goes straight to book editor. Review chat available after. |
 | "Create Sight Word Story" button on Bookshelf (BookshelfPage.tsx:402) → /books/create-story (no prefill) | Routes to CreateSightWordBook with empty state | KEPT in Phase 2. Remains the named entry to Shelly's manual builder for deliberate tutoring sessions. |
 | "Create Sight Word Story" on Sight Word Dashboard (SightWordDashboard.tsx:119) → /books/create-story | Same as above | KEPT. |
@@ -121,10 +147,9 @@ The current app has three distinct generation systems and six-plus contextual en
 
 ### 3.6 The three V2 generation paths
 
-**Path A — Kid single-prompt entry** (replaces Story Guide wizard).
-Lives at /books/story-guide. The "Tell a Story" CTA on the Bookshelf still routes here. One hero input, one mic button, "Make my book!" — defaults come from active child profile (London → storybook, 6 pages; Lincoln → minecraft, 10 pages). Empty prompt is allowed (uses age-appropriate fallback). Full text + DALL-E illustration via useBookGenerator. Detailed in §3.1.
+**Path A — Chat-based Generate** (inside the "+ New Book" dialog). Primary kid path. The dialog opens to the Generate tab as default; the surface is a chat thread, not a form. Kid types or speaks an idea ("a Minecraft adventure with a cat and a dragon"). AI generates a full draft (text + scene descriptions for each page via useBookGenerator). AI reads the whole draft back aloud via useTTS. Kid responds — voice OR text — with revisions, additions, or approval. AI revises using the full chat history as context (important for Lincoln, whose STT mishears him; reading back lets errors surface, manual text edit remains available as a fallback). No hard revision cap — the loop continues until the kid says "I like the whole story." At that point, Path A hands off to §5.B (per-page review). Style icons below the composer let the kid change illustration style mid-conversation. Page count is derived from active child profile (London 6, Lincoln 10) and not exposed in the default flow.
 
-**Path B — One-tap targeted story** (NEW). Any contextual surface suggesting "make a story about these specific words" — Suggested for X card, Word Wall struggling-word chips, Quest summary post-quest links, EvaluationHistory links — triggers this path. No form. Pre-fetched weak words (already known to the caller, since these surfaces know which words are struggling) plus child theme defaults plus immediate generation via useBookGenerator. Lands in the book editor. Review chat available. The user never sees a form — they see "generating..." and then their book.
+**Path B — One-tap targeted story** (NEW). Any contextual surface suggesting "make a story about these specific words" — Suggested for X card, Word Wall struggling-word chips, Quest summary post-quest links, EvaluationHistory links — triggers this path. No form. Pre-fetched weak words (already known to the caller, since these surfaces know which words are struggling) plus child theme defaults. Lands in the same Generate Chat surface with the weak words preloaded as context (the AI sees them and weaves them naturally); kid continues from there as if they'd started Path A.
 
 **Path C — Shelly's manual builder** (retained, unchanged structurally).
 Lives at /books/create-story → CreateSightWordBook. Chips for Dolch Pre-Primer, Dolch Primer, London's Starter Words, "Words needing work", sample story. Theme field, page count slider, text-only preview-and-edit step, then publish. For deliberate tutoring sessions where Shelly wants exact control. The text-only preview within this page already functions as a review surface; the post-publish review chat is still available as a TTS read-back layer if Shelly wants it.
@@ -276,11 +301,117 @@ Add `temperature: 0.7` (Sonnet default is 1.0). Slight reduction nudges toward l
 
 ---
 
-## 5. Review chat (Phase 2)
+## 5. The two review surfaces (Phase 2)
 
-The review chat is a separate page (`/books/:id/review`) opened from the book editor's "Read it to me 🎧" button. It is opt-in. The kid (or Shelly) can leave at any time and the book stays as it was last saved — there's no concept of "exit without saving" because every revision is committed to Firestore immediately, same pattern as the editor.
+Review happens in two distinct surfaces with different jobs:
 
-### 5.1 The page
+- **§5.A — Generate Chat:** a conversational whole-story drafting and revision loop. Operates on the whole story at once. Lives inside the "+ New Book" dialog. This is where most kid revision happens, before any per-page work.
+- **§5.B — Per-Page Review:** page-by-page TTS read-aloud with voice or manual revision. Auto-opens after the kid approves the whole story in the Generate Chat. Remains available on-demand from the book editor toolbar for Shelly-authored books and parent post-hoc review.
+
+### 5.A The Generate Chat (Path A primary surface)
+
+The Generate Chat lives inside the "+ New Book" dialog's Generate tab. It is a multi-turn chat that produces a complete first draft and then iteratively refines it via natural conversation, all in one surface. Once the kid says "I like the whole story", the dialog closes, the book commits to the editor, and the Per-Page Review (§5.B) opens automatically for kid-generated books.
+
+#### 5.A.1 The chat thread
+
+Each turn alternates kid/AI:
+
+- **Kid (turn 1):** types or speaks an idea ("a Minecraft adventure with a cat and a dragon").
+- **AI:** generates a full draft via useBookGenerator and posts each page text into the chat thread as a sequence of AI messages. Then posts a closing message: "I read it to you?" with a TTS auto-play control.
+- **Kid:** responds via voice or text. Possible intents:
+  - "I like it!" → commits the book and transitions to §5.B
+  - "Change [X]" → AI revises the affected pages, posts the diff or the updated pages into the thread
+  - "Add a part where [Y]" → AI weaves it in, may extend pages
+  - "Make it scarier / funnier / about [Z] instead" → AI rewrites affected pages
+- **AI:** revises using FULL CHAT HISTORY plus the current story state as context. Repeats the read-back. Loops.
+
+No hard revision cap — the loop continues until the kid approves. Empty/silent state after several minutes saves a draft (resumable behavior detailed in §5.A.4).
+
+#### 5.A.2 Visual layout
+
+```
+┌────────────────────────────────────────────────┐
+│  ✕                Craft a New Book              │
+│  ┌──────────────┐ ┌────────────────────────┐   │
+│  │  Blank Book  │ │  Generate a Book  ✓    │   │
+│  └──────────────┘ └────────────────────────┘   │
+│                                                │
+│  Use Story Guide (guided questions)  ← buried  │
+│                                                │
+│  ┌──────────────────────────────────────────┐  │
+│  │ You: a minecraft adventure with a cat    │  │
+│  │      and a dragon                        │  │
+│  │                                          │  │
+│  │ AI:  Here's your story! (reading...)     │  │
+│  │      Page 1: Marco the cat found a...    │  │
+│  │      Page 2: He climbed a tall block...  │  │
+│  │      ▶ Tap to hear it                    │  │
+│  │                                          │  │
+│  │ You: make the dragon a girl named        │  │
+│  │      Sparkle                             │  │
+│  │                                          │  │
+│  │ AI:  Fixed! Here's page 3 now...         │  │
+│  │      ▶ Tap to hear it                    │  │
+│  └──────────────────────────────────────────┘  │
+│                                                │
+│  [ Type or tap mic 🎤 ]            [ Send ]    │
+│                                                │
+│  Style: 🟦Minecraft 🌸Garden 📖Storybook       │
+│         🎮Platformer 💥Comic   📷Realistic     │
+│                                                │
+│  [    ✓  I like the whole story!    ]          │
+└────────────────────────────────────────────────┘
+```
+
+#### 5.A.3 The whole-story revision task
+
+A new chat task: `reviseStory` (distinct from the per-page `revisePage` task in §5.B.3). Sonnet 4.6. Request payload:
+
+```ts
+{
+  chatHistory: Array<{ role: "kid" | "ai"; content: string }>
+  currentStory: {
+    title: string
+    pages: Array<{ pageNumber, text, sceneDescription, wordsOnPage }>
+  }
+  childCalibration: {
+    childAge, childName, illustrationStyle, pageCount
+  }
+  newFeedback: string  // the kid's latest message, transcribed
+}
+```
+
+System prompt instructions:
+
+- Use the full chat history to understand the kid's evolving vision.
+- Apply the latest feedback to whichever pages it touches; leave unrelated pages alone.
+- Keep character names and tone consistent across pages.
+- If the feedback meaningfully changes the visual scene for any page, mark that page's `regenerateImage: true`.
+- Return the full updated story (all pages) so the diff against the current state is unambiguous. Also return a brief `humanResponse` ("Okay, I made the dragon into Sparkle — listen!") that gets posted as the AI's next chat turn before the read-back.
+- If the kid's message is conversational, not a revision request ("haha that's cool", "what's a dragon?"), respond conversationally in `humanResponse` and leave `currentStory` unchanged (`storyUpdated: false`).
+
+Output JSON:
+
+```json
+{
+  "humanResponse": "Okay, I fixed it!",
+  "storyUpdated": true,
+  "updatedStory": { "title": "...", "pages": [] },
+  "pagesNeedingImageRegen": [3, 5]
+}
+```
+
+#### 5.A.4 Resumability
+
+Draft books are saved progressively (same pattern as useBookGenerator today). If the kid closes the dialog mid-conversation, the book sits in Firestore with `reviewState.generateChatState: "in-progress"` and the chat history persisted. Re-opening the book offers "Continue making your story" instead of opening the editor. Closing without ever generating (no AI turn yet) discards the draft.
+
+Voice transcription read-back applies to the kid's messages too: when the kid speaks, the transcript appears alongside a "Did I hear you right?" affordance before the message is sent to the AI. This addresses Lincoln's STT mishearing issue raised in §9 Q2.
+
+### 5.B The Per-Page Review
+
+The per-page review opens automatically after the kid approves the whole story in the Generate Chat (Path A), and is available on-demand from the book editor's "Read it to me 🎧" button for any book. The kid (or Shelly) can leave at any time and the book stays as it was last saved — there's no concept of "exit without saving" because every revision is committed to Firestore immediately, same pattern as the editor.
+
+#### 5.B.1 The page
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -309,7 +440,7 @@ The review chat is a separate page (`/books/:id/review`) opened from the book ed
 └──────────────────────────────────────────────────┘
 ```
 
-### 5.2 The state machine per page
+#### 5.B.2 The state machine per page
 
 ```
                   ┌─────────────────────┐
@@ -351,7 +482,9 @@ The review chat is a separate page (`/books/:id/review`) opened from the book ed
        └─────────────┘
 ```
 
-### 5.3 The revision task
+#### 5.B.3 The revision task
+
+This is the surgical-revision task used during per-page review. The whole-story revision task used during the Generate Chat is documented in §5.A.3.
 
 A new chat task: `revisePage`. Sonnet 4.6. The request payload:
 
@@ -421,7 +554,7 @@ Notes on this:
 - **Image regen for a flagged page uses the existing `generateImage` flow.** No changes to image generation per the locked decision.
 - **Word coverage is updated** so `SightWordChip` rendering stays accurate.
 
-### 5.4 Voice input for feedback
+#### 5.B.4 Voice input for feedback
 
 Uses `useSpeechRecognition` exactly like the entry screen. Two-step:
 
@@ -432,9 +565,9 @@ Uses `useSpeechRecognition` exactly like the entry screen. Two-step:
 
 The read-back confirmation is critical for London — speech recognition mishears, and a 6-year-old won't catch it on his own. The text appears alongside a TTS playback of the transcript so he can hear it spoken back.
 
-### 5.5 Resumability
+#### 5.B.5 Resumability
 
-Two scenarios to handle:
+Per-page review can be resumed mid-flow regardless of whether the book originated from Path A (kid-generated, auto-opened review) or Path B/C (Shelly triggered on-demand). Two scenarios to handle:
 
 - **Kid abandons mid-review** (closes the app, taps Bookshelf, etc.) — the book is already in Firestore; any revisions made so far are persisted. Re-opening "Read it to me" resumes at the first un-reviewed page. A small `reviewState` field on the book doc tracks which pages have been heard + approved.
 - **Kid taps "Skip the rest"** — the remaining pages stay as they were. `reviewState` records completion. The "Read it to me" button no longer appears on the book toolbar.
@@ -449,7 +582,7 @@ The book's `reviewState` shape:
 }
 ```
 
-### 5.6 What the review chat is NOT
+#### 5.B.6 What the review chat is NOT
 
 It is not a generative chat. The kid can't say "add another character" or "make it longer" — that would let a 6-year-old turn a 6-page book into a 14-page book with one sentence, which is friction in the wrong direction. The review chat operates strictly within the existing page count. Adding pages, removing pages, or major structural change happens in the editor (where Shelly can do it deliberately), not the review chat.
 
@@ -465,30 +598,37 @@ Phase 2 is broader than retiring the wizard. Per the inventory in §3.5, the wor
 
 Phase 1 ships prompt improvements only. The Story Guide wizard keeps working exactly as it does today. The `/books/story-guide` route still goes to the 5-question wizard. The wizard benefits from the prompt improvements automatically because it routes through the same `generateBook` → `generateStory` task.
 
-### 6.2 Phase 2 — Story Guide still functional but de-emphasized
+### 6.2 Phase 2 — Story Guide wizard buried, not removed
 
-When the review chat ships, the Bookshelf CTA stays labeled "Tell a Story" and still routes to `/books/story-guide`. But the wizard page is rewritten to be the new single-prompt entry described in §3.1. The 5-question flow is removed in this same change.
+Original plan was to delete the wizard entirely in Phase 2. New direction: keep it as a buried fallback. Some kids may prefer the guided questions; even though Lincoln doesn't, removing the path entirely closes the option.
 
-Why merge wizard removal into Phase 2 instead of a clean Phase 3: the wizard exists *because* there was no review step. Its purpose was to get enough information up front for a good single-shot generation. Once we have a review step, that purpose evaporates. Removing both pieces in the same release is cleaner than carrying the wizard through one more cycle.
+In Phase 2:
 
-This means Phase 3 in the original prompt collapses into Phase 2. The new phasing is:
+- The Bookshelf "Tell a Story 🎮/✨" CTA is removed.
+- The `/books/story-guide` route is retained.
+- The wizard is accessible only via a secondary/text button at the top of the "+ New Book" dialog's Generate tab ("Use Story Guide (guided questions)").
+- No code in `useStoryGuide`, `StoryGuideQuestion`, or `StoryGuidePage` is removed. They keep working as today, just from a less prominent entry.
+
+The phasing is:
 
 - **Phase 1:** Prompt improvements (server-side only)
-- **Phase 2:** Review chat + replace Story Guide wizard with single-prompt entry
+- **Phase 2:** Generate Chat + Per-Page Review + "+ New Book" dialog rewire (wizard kept as buried fallback)
 - **Phase 3 (sketched):** Polish — TTS voice picker, save-as-template for story prompts, sharing/printing review-approved books.
 
 ### 6.3 What gets deleted in Phase 2
 
-- `src/features/books/useStoryGuide.ts` — the hook with `LINCOLN_QUESTIONS` and `LONDON_QUESTIONS`. Replaced by a much smaller hook for the single-prompt page.
-- `src/features/books/StoryGuideQuestion.tsx` — the per-question UI component.
-- The 5-question section of `StoryGuidePage.tsx` — wizard step states (`questions`, `questions-done`, `ai-shaping`).
-- The AI shaping chat call (Story Guide line 87-93). The `chat` task remains used elsewhere; only this specific call is removed.
-- Test file `src/features/books/__tests__/storyGuide.test.ts` — replaced with tests for the new entry hook.
+Less than originally planned. Specifically:
+
+- The "Tell a Story 🎮/✨" button on `BookshelfPage.tsx` (lines 347 and 966 — both kid-themed renderings).
+- The current "Generate a Book" form-based tab body in BookshelfPage dialog (replaced with the new Generate Chat surface — see §5.A).
+- The "AI shaping" optional step inside `StoryGuidePage` (lines 87-93) — this nudge-for-more-detail step is redundant once the Generate Chat exists. The wizard's 5 questions remain; only the post-questions shaping step is removed.
 
 What stays:
-- The route name `/books/story-guide` (just renders different content).
-- The CTA name "Tell a Story 🎮/✨" on the Bookshelf.
-- The sight word loading (`getWeakWords` from `useSightWordProgress`) — moves into the new entry hook.
+
+- `useStoryGuide`, `StoryGuideQuestion`, `StoryGuidePage` — the wizard itself. Accessed only from the buried button in the dialog.
+- The `/books/story-guide` route.
+- The CTA name "Tell a Story" is repurposed as the secondary button label inside the dialog ("Use Story Guide (guided questions)").
+- All sight-word loading logic (`useSightWordProgress.getWeakWords`) — moves into the Generate Chat's preflight context.
 
 ### 6.4 What about the AI-shaping step?
 
@@ -516,17 +656,23 @@ A book titled "Link's Brave Mine..." (the Zelda-derived character that prompted 
 | `loadSightWordSummary` (`chat.ts`) | Wired into `buildStoryPrompt` | Already loads mastery tiers; just needs to be referenced in the prompt. |
 | `inferBookTheme` | Unchanged | Theme inference from story idea text still runs. |
 | `useStoryGenerator` | Retained for Path C — Shelly's manual builder | Not touched. The text-only generator that powers CreateSightWordBook's preview-and-edit step continues to serve Path C unchanged. |
+| `useStoryGuide` (`src/features/books/useStoryGuide.ts`) | RETAINED — wizard is buried fallback in "+ New Book" dialog. No code changes. | See §6.2. |
+| `StoryGuideQuestion` (`src/features/books/StoryGuideQuestion.tsx`) | RETAINED, no changes. | Reached via the buried secondary button only. |
+| Existing "+ New Book" dialog (BookshelfPage.tsx) | Generate tab body REWRITTEN as chat surface. Blank Book tab unchanged. Dialog default tab changes from Blank to Generate. Dialog button relocates to top of Bookshelf grid. | See §3.1 and §5.A. |
+| Bookshelf grid layout (BookshelfPage.tsx render section) | "+ New Book" tile relocates from end of grid to first position. | Layout shift — see §3.1 note about Shelly gut-check. |
 
 What's new in code:
 
-- `functions/src/ai/tasks/revisePage.ts` — new task handler.
-- `revisePage` added to `TaskType` const + `modelForTask` → Sonnet.
-- `revisePage` added to `contextSlices.ts` → `["childProfile", "sightWords", "wordMastery"]` (same as `generateStory`).
-- `src/features/books/BookReviewChat.tsx` — new component, full-screen page.
-- `src/features/books/useBookReview.ts` — new hook driving the state machine.
-- `src/features/books/SinglePromptEntry.tsx` — replaces wizard.
-- Route `/books/:id/review` added.
-- `Book` type gets a `reviewState` optional field.
+- `functions/src/ai/tasks/revisePage.ts` — new task handler (per-page surgical revision).
+- `functions/src/ai/tasks/reviseStory.ts` — new whole-story revision task driven by chat history (distinct from revisePage).
+- `revisePage` and `reviseStory` added to `TaskType` const + `modelForTask` → Sonnet.
+- `revisePage` / `reviseStory` added to `contextSlices.ts` → `["childProfile", "sightWords", "wordMastery"]` (same as `generateStory`).
+- `src/features/books/BookGenerateChat.tsx` — the new chat surface inside "+ New Book" dialog (renders the chat thread, composer, style icon strip, and "I like it" commit affordance).
+- `src/features/books/useBookGenerateChat.ts` — new hook orchestrating the Generate Chat (turn management, persistence, calls to `generateStory` and `reviseStory`).
+- `src/features/books/BookReviewChat.tsx` — new component for the Per-Page Review (§5.B).
+- `src/features/books/useBookReview.ts` — new hook driving the per-page state machine.
+- Per-Page Review opens automatically after kid approves story in Generate Chat; or on-demand from book editor toolbar. May still live at `/books/:id/review` or render as a dialog overlay — implementation detail.
+- `Book` type gets a `reviewState` optional field (including a new `generateChatState: "in-progress" | "complete"` for Path A resumability).
 
 ---
 
@@ -550,31 +696,42 @@ Acceptance:
 
 Risk: low. Server-only change, no schema migration, parser unchanged.
 
-### Phase 2 — Review chat + single-prompt entry (~3-5 days)
+### Phase 2 — Generate Chat + Per-Page Review + dialog rewire (~3-5 days)
 
 Scope:
-- New `revisePage` task with system prompt per §5.3.
-- New `BookReviewChat.tsx` page driven by `useBookReview` hook (state machine per §5.2).
-- Single-prompt entry page replacing the wizard (per §3.1) — same route.
-- Book editor toolbar gets the "Read it to me 🎧" button (only visible for AI-generated books with no `reviewState.completedAt`).
-- `Book` type extended with `reviewState`.
-- Tests: state machine transitions, abandon/resume, image-regen-on-scene-change, voice transcript read-back confirmation, "Skip the rest" path.
-- Delete: `useStoryGuide`, `StoryGuideQuestion`, wizard sections of `StoryGuidePage`, `storyGuide.test.ts`.
+- New `reviseStory` task with system prompt per §5.A.3.
+- New `revisePage` task with system prompt per §5.B.3.
+- New `BookGenerateChat.tsx` surface driven by `useBookGenerateChat` hook (Generate Chat — §5.A).
+- New `BookReviewChat.tsx` surface driven by `useBookReview` hook (Per-Page Review state machine per §5.B.2).
+- Rewire "+ New Book" dialog: default tab flipped to Generate; Generate tab body replaced with the chat surface; "Use Story Guide (guided questions)" secondary button preserved at top.
+- Relocate "+ New Book" tile to first position in Bookshelf grid.
+- Remove "Tell a Story 🎮/✨" Bookshelf CTA (lines 347 and 966 of `BookshelfPage.tsx`).
+- Book editor toolbar gets the "Read it to me 🎧" button (visible on parent profile regardless of `reviewState.completedAt`; visible on kid profile for AI-generated books not yet reviewed).
+- Auto-open Per-Page Review after kid commits in Generate Chat (Path A and Path B); do NOT auto-open for Path C (Shelly's manual builder).
+- `Book` type extended with `reviewState` (including `generateChatState`).
+- Remove the AI-shaping step inside `StoryGuidePage` (lines 87-93). Keep the wizard's 5 questions and the rest of the page intact.
+- Tests: Generate Chat turn loop + persistence + resumability, per-page state machine transitions, abandon/resume, image-regen-on-scene-change, voice transcript read-back confirmation, "Skip the rest" path.
 
 Acceptance:
-- London can finish a book without ever opening the review chat (the chat is genuinely optional).
-- The "Read it to me" button reads each page aloud, accepts "Sounds good" / "Change this" / "Skip" by voice OR tap.
-- Voice feedback is read back before being acted on.
-- A revision call on page 4 doesn't break pages 1-3 or 5-6 — character names stay stable.
-- Image regen fires only when scene description meaningfully changes (verifiable in logs).
-- Closing the app mid-review and returning later resumes correctly.
-- "Create Targeted Story" generates in one tap with no intermediate form.
-- WordWall struggling-word chips generate in one tap with no intermediate form.
-- QuestSummary post-quest "make a story about this" link generates in one tap with no intermediate form.
+- "+ New Book" button appears as the first item in the Bookshelf grid (currently last).
+- "+ New Book" dialog opens to the "Generate a Book" tab by default.
+- "Generate a Book" tab body is a chat surface; no form fields.
+- The composer accepts both text and voice input. Voice transcript is shown with a "Did I hear you right?" confirmation before send.
+- Illustration style icons appear inline below the composer; tapping one updates the style for the current and any future generations in this chat.
+- "Tell a Story 🎮/✨" Bookshelf CTA is removed.
+- "Use Story Guide (guided questions)" button is present at the top of the Generate tab as a buried fallback; clicking it navigates to the existing wizard at `/books/story-guide`.
+- The Generate Chat persists draft state in Firestore; closing and re-opening the book offers "Continue making your story".
+- After the kid says "I like the whole story" (button or voice), the dialog closes, the book commits to the editor, AND the Per-Page Review opens automatically.
+- The Per-Page Review reads each page aloud via `useTTS`, accepts voice or text feedback, revises via the `revisePage` task, and commits page state back to Firestore on every approval.
+- Books authored by Shelly (Path C, CreateSightWordBook) do NOT auto-open the Per-Page Review; the "Read it to me" button is available on the editor toolbar for on-demand review.
+- Shelly can trigger the Per-Page Review on any book at any time, including one the kid has already approved (parent post-hoc).
+- "Create Targeted Story" button (EvaluationBookBanner) generates immediately with no intermediate form; the Generate Chat opens with weak words pre-loaded as context.
+- WordWall struggling-word chips behave identically to "Create Targeted Story".
+- QuestSummary post-quest "make a story about this" link behaves identically.
 - "Create Sight Word Story" button still opens CreateSightWordBook (no regression for Shelly's deliberate tutoring use case).
-- The "+ New Book" dialog no longer has a Generate tab; the dialog retains "Blank Book" for manual creation.
+- No code in `useStoryGuide`, `StoryGuideQuestion`, `StoryGuidePage`, `CreateSightWordBook`, or `useStoryGenerator` is modified except as required to update entry points or add `reviewState` surfacing.
 
-Risk: medium. New task, new state machine, new page. Mitigations: the progressive-save pattern from `useBookGenerator` handles the persistence cleanly, and `useTTS`/`useSpeechRecognition` are battle-tested from Workshop.
+Risk: medium. New tasks, new state machine, new chat surface. Mitigations: the progressive-save pattern from `useBookGenerator` handles the persistence cleanly, and `useTTS`/`useSpeechRecognition` are battle-tested from Workshop.
 
 ### Phase 3 — Polish (sketched only, not committed)
 
@@ -590,14 +747,27 @@ These ship as small standalone PRs after Phase 2 stabilizes.
 
 ## 9. Open questions and decisions still to make
 
-These don't block Phase 1 but will need answers before Phase 2 lands:
+### Answered (May 2026, with Nathan)
 
-1. **Should "Read it to me" auto-open after generation, or wait for an explicit tap?** Current proposal: explicit tap only. Auto-open contradicts "review is opt-in, not a gate." But Shelly might want it auto-open for her own workflow — needs a quick test.
-2. **What happens if the AI's revision is also bad?** Current proposal: the kid loops back to AWAITING_FEEDBACK on the same page and can say "Change this" again. We cap at ~3 revision attempts per page; after 3, suggest opening the book editor manually. Need to validate the cap with Shelly.
-3. **Can Shelly trigger the review chat on a book the kid already approved?** Useful when she catches an error post-hoc. Current proposal: yes, parent profile sees the button even after `reviewState.completedAt` is set; kid profile doesn't. Confirms with parent-vs-kid render guard already in book editor.
-4. **Voice selection for TTS** — Samantha is currently default. For Lincoln's gaming context, a deeper / different voice might fit better. Defer to Phase 3 unless feedback says otherwise.
-5. **The "Make my book!" button while no input is given** — generates with the fallback prompt. Does this need a separate "Surprise me!" button to signal that's a valid path, or is the empty-and-tap behavior discoverable enough? Lean: keep one button, document the empty-tap behavior in the parent help.
-6. **Path B (one-tap targeted story) — should it auto-open the review chat after generation since these books were created without user input on text?** Lean toward yes for Path B specifically (the listener had zero creative input upstream, so the review step adds value rather than friction), even if Path A keeps review opt-in.
+1. **Auto-open review chat?** YES for Path A (kid-generated via Generate Chat) — the Per-Page Review opens automatically once the kid approves the story. NO for Path C (Shelly's manual builder) — the "Read it to me" button surfaces on the editor toolbar for on-demand use. Path B inherits Path A behavior.
+
+2. **Revision attempt cap?** NO hard cap. The iterative loop is the design. Voice transcript read-back + manual text edit are both available as fallbacks for Lincoln's STT mishearing.
+
+3. **Shelly post-hoc review?** YES. The "Read it to me" button surfaces in the parent profile view regardless of the book's `reviewState.completedAt`, including on books the kid has already approved.
+
+4. **Voice selection?** Samantha (default) for now. Voice picker moves to Phase 3.
+
+5. **Revision based on full chat history?** YES. The `reviseStory` task receives the full chat history and uses it to revise. This is what enables natural multi-turn refinement ("make him nicer"... "also smarter"... "wait, can you bring the cat back?").
+
+6. **Path B auto-open?** YES (inherits Path A).
+
+### Still open
+
+7. **"+ New Book" button relocation.** Bookshelf grids commonly grow downward with the add affordance at the end. Pinning to top is a deliberate departure. Worth a quick gut-check with Shelly during testing: would she prefer the "+ New Book" tile pinned as the first grid item (current proposal) or as a separate top-bar button outside the grid?
+
+8. **Style icon design.** The current dialog has text chips ("Minecraft", "Garden Battle", etc.). The new direction calls for icons. Are these (a) text labels with prefix emoji (cheap), (b) small image thumbnails showing a sample illustration of each style (better, requires assets), or (c) a separate icon button row with text-on-hover (compact)? Phase 2 implementation detail; defer to whoever builds the component.
+
+9. **"I like the whole story" button or voice trigger?** Always both, but the button label might want personalization (kid vs Shelly). Defer to Phase 2 implementation.
 
 ---
 
