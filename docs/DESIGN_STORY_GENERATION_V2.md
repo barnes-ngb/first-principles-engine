@@ -50,7 +50,9 @@ The Charter principles in play: voice-first for London (the review chat does thi
                         └──────────────────┘    └──────────────────┘
 ```
 
-The book exists after step 2. London can stop there. Step 3 is for catching errors, not gating completion.
+V2 is not one flow but **three**, all landing in the same destination — a real book in the editor with an optional review chat. The diagram above is the canonical Path A (kid single-prompt entry); Paths B and C share the same downstream surface but enter generation from different starting contexts. See §3.6 for the prose definitions of each path and §3.5 for the full inventory of which UI entry points map to which path.
+
+The book exists after step 2 in every path. London (or Shelly) can stop there. Step 3 is for catching errors, not gating completion.
 
 ### 3.1 Single-prompt entry — the new "Tell a Story" screen
 
@@ -100,6 +102,32 @@ One new element on the editor toolbar (for kid mode only, when the book was AI-g
 ### 3.4 Review chat — opt-in, page-by-page, voice-driven
 
 Detailed in §5.
+
+### 3.5 Inventory of generation entry points and their V2 disposition
+
+The current app has three distinct generation systems and six-plus contextual entry points scattered across the bookshelf, the sight word dashboard, the word wall, evaluation surfaces, and the quest summary. The original framing of "the wizard" as the single AI entry was incomplete. This table is the source of truth — when in doubt about where any "create a story" surface should land in V2, consult it before writing code.
+
+| Current entry (file:line ref) | What it does today | V2 disposition |
+|---|---|---|
+| "Tell a Story 🎮/✨" button on Bookshelf (BookshelfPage.tsx:347, 966) → /books/story-guide → StoryGuidePage 5-question wizard → useBookGenerator | Kid-facing wizard, full text + DALL-E illustration | Route + label kept. Page rewritten to single-prompt entry (§3.1). Wizard code deleted in Phase 2. |
+| "+ New Book" dialog "Generate" tab (BookshelfPage.tsx dialog) → useBookGenerator | Adult form: textarea + words + style picker + page count slider | Generate tab REMOVED in Phase 2. The single-prompt entry is the only AI path from the bookshelf. Dialog retains "Blank Book" tab for manual creation. |
+| "Create Targeted Story" button (EvaluationBookBanner.tsx:73, in Suggested for X card) → /books/create-story with prefillWords + source='evaluation' | Routes to CreateSightWordBook with weak words pre-filled; user still completes the multi-field form | CHANGES in Phase 2. Becomes truly one-tap: button generates immediately using pre-fetched weak words + child defaults, bypassing CreateSightWordBook entirely. Goes straight to book editor. Review chat available after. |
+| "Create Sight Word Story" button on Bookshelf (BookshelfPage.tsx:402) → /books/create-story (no prefill) | Routes to CreateSightWordBook with empty state | KEPT in Phase 2. Remains the named entry to Shelly's manual builder for deliberate tutoring sessions. |
+| "Create Sight Word Story" on Sight Word Dashboard (SightWordDashboard.tsx:119) → /books/create-story | Same as above | KEPT. |
+| Sight Word Dashboard struggling-word chips (SightWordDashboard.tsx:65) → /books/create-story?words=... | Routes with URL params | CHANGES in Phase 2. Becomes one-tap targeted story (same behavior as "Create Targeted Story"). |
+| EvaluationHistoryTab.tsx:207 — link from struggling-word patterns | Routes to CreateSightWordBook with prefillWords | CHANGES in Phase 2. One-tap targeted story. |
+| QuestSummary.tsx:421 — link after a quest with struggling words | Routes to CreateSightWordBook with prefillWords | CHANGES in Phase 2. One-tap targeted story. |
+| WordWall.tsx:71, 93 — two links from word progress | Routes to CreateSightWordBook with prefillWords | CHANGES in Phase 2. One-tap targeted story. |
+
+### 3.6 The three V2 generation paths
+
+**Path A — Kid single-prompt entry** (replaces Story Guide wizard).
+Lives at /books/story-guide. The "Tell a Story" CTA on the Bookshelf still routes here. One hero input, one mic button, "Make my book!" — defaults come from active child profile (London → storybook, 6 pages; Lincoln → minecraft, 10 pages). Empty prompt is allowed (uses age-appropriate fallback). Full text + DALL-E illustration via useBookGenerator. Detailed in §3.1.
+
+**Path B — One-tap targeted story** (NEW). Any contextual surface suggesting "make a story about these specific words" — Suggested for X card, Word Wall struggling-word chips, Quest summary post-quest links, EvaluationHistory links — triggers this path. No form. Pre-fetched weak words (already known to the caller, since these surfaces know which words are struggling) plus child theme defaults plus immediate generation via useBookGenerator. Lands in the book editor. Review chat available. The user never sees a form — they see "generating..." and then their book.
+
+**Path C — Shelly's manual builder** (retained, unchanged structurally).
+Lives at /books/create-story → CreateSightWordBook. Chips for Dolch Pre-Primer, Dolch Primer, London's Starter Words, "Words needing work", sample story. Theme field, page count slider, text-only preview-and-edit step, then publish. For deliberate tutoring sessions where Shelly wants exact control. The text-only preview within this page already functions as a review surface; the post-publish review chat is still available as a TTS read-back layer if Shelly wants it.
 
 ---
 
@@ -429,7 +457,9 @@ It is also not mandatory. The book is complete after generation. The review chat
 
 ---
 
-## 6. What happens to Story Guide
+## 6. What happens to existing generation surfaces
+
+Phase 2 is broader than retiring the wizard. Per the inventory in §3.5, the work spans all three generation paths and the six-plus entry points that feed them. This section captures the disposition for each, with one important non-change: CreateSightWordBook (Path C) is retained without structural change — only its post-publish flow gains the review chat affordance. The six-plus entry points to /books/create-story split in V2 by intent: contextual suggestion entries (those that already have weak words / prefillWords in context) become Path B and bypass the form; the explicit "Create Sight Word Story" button entries remain wired to Path C so Shelly's deliberate tutoring workflow doesn't regress.
 
 ### 6.1 Phase 1 — no change to Story Guide
 
@@ -464,6 +494,10 @@ What stays:
 
 It goes away entirely. Its job was to nudge the kid for one more detail before generation. With review-after-generation, that nudge is replaced by *seeing the actual book* and saying "make this part different." That's a strictly better signal — concrete, not hypothetical.
 
+### 6.5 Existing books with copyright issues
+
+A book titled "Link's Brave Mine..." (the Zelda-derived character that prompted the Phase 1 prompt fix) exists in production inventory predating the substitution rule. Per product decision: no cleanup. Phase 1 prevents recurrence at generation time; existing legacy books are out of scope for this design. If Shelly wants to rename the legacy book manually in the book editor, the editor already supports that.
+
 ---
 
 ## 7. What can be reused from existing code
@@ -481,6 +515,7 @@ It goes away entirely. Its job was to nudge the kid for one more detail before g
 | `useSightWordProgress.getWeakWords()` | Single-prompt entry | Word injection moves out of Story Guide into the entry hook. |
 | `loadSightWordSummary` (`chat.ts`) | Wired into `buildStoryPrompt` | Already loads mastery tiers; just needs to be referenced in the prompt. |
 | `inferBookTheme` | Unchanged | Theme inference from story idea text still runs. |
+| `useStoryGenerator` | Retained for Path C — Shelly's manual builder | Not touched. The text-only generator that powers CreateSightWordBook's preview-and-edit step continues to serve Path C unchanged. |
 
 What's new in code:
 
@@ -533,6 +568,11 @@ Acceptance:
 - A revision call on page 4 doesn't break pages 1-3 or 5-6 — character names stay stable.
 - Image regen fires only when scene description meaningfully changes (verifiable in logs).
 - Closing the app mid-review and returning later resumes correctly.
+- "Create Targeted Story" generates in one tap with no intermediate form.
+- WordWall struggling-word chips generate in one tap with no intermediate form.
+- QuestSummary post-quest "make a story about this" link generates in one tap with no intermediate form.
+- "Create Sight Word Story" button still opens CreateSightWordBook (no regression for Shelly's deliberate tutoring use case).
+- The "+ New Book" dialog no longer has a Generate tab; the dialog retains "Blank Book" for manual creation.
 
 Risk: medium. New task, new state machine, new page. Mitigations: the progressive-save pattern from `useBookGenerator` handles the persistence cleanly, and `useTTS`/`useSpeechRecognition` are battle-tested from Workshop.
 
@@ -557,6 +597,7 @@ These don't block Phase 1 but will need answers before Phase 2 lands:
 3. **Can Shelly trigger the review chat on a book the kid already approved?** Useful when she catches an error post-hoc. Current proposal: yes, parent profile sees the button even after `reviewState.completedAt` is set; kid profile doesn't. Confirms with parent-vs-kid render guard already in book editor.
 4. **Voice selection for TTS** — Samantha is currently default. For Lincoln's gaming context, a deeper / different voice might fit better. Defer to Phase 3 unless feedback says otherwise.
 5. **The "Make my book!" button while no input is given** — generates with the fallback prompt. Does this need a separate "Surprise me!" button to signal that's a valid path, or is the empty-and-tap behavior discoverable enough? Lean: keep one button, document the empty-tap behavior in the parent help.
+6. **Path B (one-tap targeted story) — should it auto-open the review chat after generation since these books were created without user input on text?** Lean toward yes for Path B specifically (the listener had zero creative input upstream, so the review step adds value rather than friction), even if Path A keeps review opt-in.
 
 ---
 
