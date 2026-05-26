@@ -210,6 +210,36 @@ export const STICKER_TAG_LABELS: Record<StickerTag, string> = {
   other: 'Other',
 }
 
+// ── Review state (Story Generation V2 — Phase 2) ─────────────
+
+/**
+ * Review state for AI-generated books. Tracks the Generate Chat (PR-A)
+ * lifecycle and — once PR-B lands — the Per-Page Review.
+ *
+ * All fields are optional and additive; books without `reviewState` are
+ * legacy or non-AI books and stay backwards compatible.
+ */
+export interface ReviewState {
+  // Generate Chat phase (PR-A)
+  generateChatState?: 'in-progress' | 'completed'
+  chatHistory?: ChatTurn[]
+  /** Last-set illustration style during the Generate Chat */
+  illustrationStyle?: string
+
+  // Per-Page Review phase (PR-B will populate these)
+  reviewedPages?: number[]
+  revisedPages?: number[]
+  /** ISO timestamp when fully reviewed or explicitly skipped */
+  completedAt?: string
+}
+
+/** One turn in the Generate Chat. ts is ms-since-epoch for deterministic ordering. */
+export interface ChatTurn {
+  role: 'kid' | 'ai'
+  content: string
+  ts: number
+}
+
 export interface Book {
   id?: string
   childId: string
@@ -250,6 +280,8 @@ export interface Book {
     difficulty?: 'simple' | 'moderate'
     pageCount: number
   }
+  /** Review state (Generate Chat + Per-Page Review). Phase 2 V2. */
+  reviewState?: ReviewState
 }
 
 export interface BookPage {

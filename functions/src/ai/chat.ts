@@ -26,6 +26,7 @@ export const TaskType = {
   Chat: "chat",
   Quest: "quest",
   GenerateStory: "generateStory",
+  ReviseStory: "reviseStory",
   Workshop: "workshop",
   AnalyzeWorkbook: "analyzeWorkbook",
   Disposition: "disposition",
@@ -63,6 +64,7 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.Evaluate:
     case TaskType.Quest:
     case TaskType.GenerateStory:
+    case TaskType.ReviseStory:
     case TaskType.Workshop:
     case TaskType.AnalyzeWorkbook:
     case TaskType.Disposition:
@@ -1858,6 +1860,44 @@ export function buildPageBeats(pageCount: number): string {
   return lines.join("\n");
 }
 
+/**
+ * Sentence target by age — calibrated to read-aloud cadence, not to the
+ * child's decoding ceiling (the AI handles that from WORD MASTERY context).
+ * Shared between buildStoryPrompt and buildReviseStoryPrompt so both stay in
+ * sync.
+ */
+export function sentenceTargetForAge(age: number): string {
+  return age <= 7
+    ? "1-2 short sentences (5-9 words each)"
+    : "2-4 sentences (8-14 words each)";
+}
+
+/**
+ * Content stakes guidance by age — separate from vocabulary calibration.
+ * Vocabulary follows WORD MASTERY / SKILL SNAPSHOT; stakes follow age.
+ */
+export function contentStakesForAge(age: number): string {
+  return age <= 7
+    ? "Warm, gentle, and encouraging. Think picture book — feelings, friendship, small problems with reassuring resolutions."
+    : "Content stakes are age-appropriate — real problems, real heroes, no toddler scenarios. Heroes solve things, take risks, and grow. Action vocabulary (build, craft, explore, defeat) is welcome.";
+}
+
+/** Shared WRITING QUALITY guardrails — used by both generate and revise prompts. */
+export const WRITING_QUALITY_BLOCK = `WRITING QUALITY:
+- Read each page aloud in your head before writing it. If a sentence sounds awkward or stumbly when spoken, rewrite it.
+- Use natural dialogue. Characters talk like real people, not like textbook examples. Contractions are fine. "I can't fly!" not "I cannot fly!"
+- Consistent character names. If the dragon is named Ember on page 1, she's Ember on every page. No nickname drift.
+- Each page should advance the story. A page where nothing changes is filler — cut it.
+- Avoid run-on sentences. Two short sentences are almost always better than one long one for this reader.
+- No typos. No misspellings. No subject-verb disagreements.
+- The ending should answer the beginning. If the dragon couldn't fly in page 1, the resolution involves flight (literal or metaphorical) somehow.`;
+
+/** Shared COPYRIGHT block — used by both generate and revise prompts. */
+export const COPYRIGHT_BLOCK = `COPYRIGHT — IMPORTANT:
+- Never use copyrighted character names (Mario, Luigi, Peach, Bowser, Link, Zelda, Pikachu, Elsa, Spider-Man, Batman, Sonic, etc.) or franchise/brand names (Nintendo, Disney, Marvel, Minecraft, Pokemon, Fortnite, etc.).
+- If the child's idea references a copyrighted character, create an original character inspired by the same archetype. For example: "Princess Peach" → "Princess Coral" (a kind, brave princess in a pink dress), "Mario" → "Marco" (a fearless explorer in red overalls with a big mustache).
+- The story should capture the spirit of what the child imagined with original characters that belong to THEM.`;
+
 export function buildStoryPrompt(input: StoryGenInput): string {
   const {
     storyIdea,
@@ -1885,19 +1925,8 @@ export function buildStoryPrompt(input: StoryGenInput): string {
   // attached by buildContextForTask). This string is a soft hint only.
   const level = readingLevel || (age <= 7 ? "pre-K to kindergarten" : "1st grade");
 
-  // Sentence target by age — calibrated to read-aloud cadence, not to the
-  // child's decoding ceiling (the AI handles that from the context above).
-  const sentenceTarget =
-    age <= 7
-      ? "1-2 short sentences (5-9 words each)"
-      : "2-4 sentences (8-14 words each)";
-
-  // Content stakes guidance — separate from vocabulary calibration.
-  // Vocabulary follows WORD MASTERY / SKILL SNAPSHOT; stakes follow age.
-  const contentStakes =
-    age <= 7
-      ? "Warm, gentle, and encouraging. Think picture book — feelings, friendship, small problems with reassuring resolutions."
-      : "Content stakes are age-appropriate — real problems, real heroes, no toddler scenarios. Heroes solve things, take risks, and grow. Action vocabulary (build, craft, explore, defeat) is welcome.";
+  const sentenceTarget = sentenceTargetForAge(age);
+  const contentStakes = contentStakesForAge(age);
 
   const sightWordSection = hasWords
     ? `
@@ -1952,19 +1981,9 @@ ${pageBeatsBlock}
 
 These beats are a structural floor, not a cage. Deviate when the story demands it — but every page should advance the arc.
 
-WRITING QUALITY:
-- Read each page aloud in your head before writing it. If a sentence sounds awkward or stumbly when spoken, rewrite it.
-- Use natural dialogue. Characters talk like real people, not like textbook examples. Contractions are fine. "I can't fly!" not "I cannot fly!"
-- Consistent character names. If the dragon is named Ember on page 1, she's Ember on every page. No nickname drift.
-- Each page should advance the story. A page where nothing changes is filler — cut it.
-- Avoid run-on sentences. Two short sentences are almost always better than one long one for this reader.
-- No typos. No misspellings. No subject-verb disagreements.
-- The ending should answer the beginning. If the dragon couldn't fly in page 1, the resolution involves flight (literal or metaphorical) somehow.
+${WRITING_QUALITY_BLOCK}
 
-COPYRIGHT — IMPORTANT:
-- Never use copyrighted character names (Mario, Luigi, Peach, Bowser, Link, Zelda, Pikachu, Elsa, Spider-Man, Batman, Sonic, etc.) or franchise/brand names (Nintendo, Disney, Marvel, Minecraft, Pokemon, Fortnite, etc.).
-- If the child's idea references a copyrighted character, create an original character inspired by the same archetype. For example: "Princess Peach" → "Princess Coral" (a kind, brave princess in a pink dress), "Mario" → "Marco" (a fearless explorer in red overalls with a big mustache).
-- The story should capture the spirit of what the child imagined with original characters that belong to THEM.
+${COPYRIGHT_BLOCK}
 
 OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
 {
@@ -1977,6 +1996,116 @@ OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
     }
   ]${hasWords ? ',\n  "allWordsUsed": ["the", "sun", "cat"],\n  "missedWords": [],' : ","}
   "qualityNotes": "Brief debug note on craft choices — sight words actually used, character name(s), beat handling. Not shown to the reader."
+}`;
+}
+
+// ── Revise-story prompt (Phase 2 PR-A) ───────────────────────────
+
+export interface ReviseStoryChatTurn {
+  role: "kid" | "ai";
+  content: string;
+}
+
+export interface ReviseStoryStoryPage {
+  pageNumber: number;
+  text: string;
+  sceneDescription: string;
+  wordsOnPage?: string[];
+}
+
+export interface ReviseStoryInput {
+  chatHistory: ReviseStoryChatTurn[];
+  currentStory: {
+    title: string;
+    pages: ReviseStoryStoryPage[];
+  };
+  childCalibration: {
+    childAge: number;
+    childName: string;
+    illustrationStyle: string;
+    pageCount: number;
+  };
+  newFeedback: string;
+}
+
+/**
+ * Build the system prompt for the reviseStory task. The AI sees the full
+ * chat history, the current story state, and the latest feedback. It must
+ * apply only the changes the feedback implies and leave unrelated pages
+ * alone, then return the full updated story so the diff is unambiguous.
+ */
+export function buildReviseStoryPrompt(input: ReviseStoryInput): string {
+  const { chatHistory, currentStory, childCalibration, newFeedback } = input;
+  const { childAge, childName, illustrationStyle, pageCount } = childCalibration;
+
+  const sentenceTarget = sentenceTargetForAge(childAge);
+  const contentStakes = contentStakesForAge(childAge);
+
+  const chatBlock = chatHistory.length === 0
+    ? "(no prior turns)"
+    : chatHistory
+      .map((t) => `${t.role === "kid" ? childName : "AI"}: ${t.content}`)
+      .join("\n");
+
+  const pagesBlock = currentStory.pages
+    .map((p) => {
+      const words = p.wordsOnPage?.length
+        ? `\n  WORDS ON PAGE: ${p.wordsOnPage.join(", ")}`
+        : "";
+      return `PAGE ${p.pageNumber}:
+  TEXT: ${p.text}
+  SCENE: ${p.sceneDescription}${words}`;
+    })
+    .join("\n\n");
+
+  return `You are revising a children's story for ${childName} (age ${childAge}) based on a chat conversation.
+
+ILLUSTRATION STYLE: ${illustrationStyle}
+PAGE COUNT: ${pageCount} (do not add or remove pages)
+
+CALIBRATION:
+- Each page should have ${sentenceTarget}.
+- ${contentStakes}
+
+CHAT HISTORY:
+${chatBlock}
+
+CURRENT STORY:
+TITLE: ${currentStory.title}
+
+${pagesBlock}
+
+LATEST MESSAGE FROM ${childName}: ${newFeedback}
+
+${WRITING_QUALITY_BLOCK}
+
+${COPYRIGHT_BLOCK}
+
+REVISION INSTRUCTIONS:
+- Use the full CHAT HISTORY to understand ${childName}'s evolving vision. Earlier feedback still counts.
+- Apply the LATEST MESSAGE to the pages it touches; leave unrelated pages exactly as they are.
+- Keep character names and tone consistent across all pages.
+- If the feedback meaningfully changes a page's visual scene (a new character, a different location, the dragon becoming a knight, etc.), include that page number in pagesNeedingImageRegen. Pure text fixes (typo, phrasing) do NOT need image regen.
+- If the latest message is conversational, not a revision request — for example "haha cool", "what's a dragon?", "I like it!" — respond conversationally in humanResponse, set storyUpdated to false, omit updatedStory, and return an empty pagesNeedingImageRegen array.
+- Keep the same page count (${pageCount}). Do NOT add or remove pages.
+
+OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
+{
+  "humanResponse": "A short, friendly reply to ${childName} that will appear as the AI's next chat turn before any read-back. One or two sentences.",
+  "storyUpdated": true,
+  "updatedStory": {
+    "title": "Story Title",
+    "pages": [
+      {
+        "pageNumber": 1,
+        "text": "...",
+        "sceneDescription": "...",
+        "wordsOnPage": ["..."]
+      }
+    ]
+  },
+  "pagesNeedingImageRegen": [3, 5],
+  "qualityNotes": "Brief debug note on what was changed and why. Not shown to the reader."
 }`;
 }
 
