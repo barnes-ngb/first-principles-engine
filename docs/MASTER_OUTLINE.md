@@ -1,6 +1,6 @@
 # Barnes Family Homeschool — Master Project Outline v15
 
-**Version:** v15 — April 12, 2026  
+**Version:** v15 — May 26, 2026  
 **Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, Stonebridge narrative foundation, armor progression gating, capture pipeline unification, working levels, chapter book pool.
 
 ## Project Summary
@@ -93,6 +93,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - **Loose gate** — next-tier pieces visible but locked with clear reason text (aspirational, not hidden).
 - **Dual requirement** — both XP threshold AND prior tier fully forged needed to unlock next tier.
 - **`forgedPieces[]`** field on AvatarProfile (distinct from `equippedPieces`).
+- **Planned:** `faithStats: { strength, wisdom, mercy, courage }` will be added to AvatarProfile during step 2 of the Design Pass v1 implementation queue.
 - **Migration backfill** — infers forged pieces from current equipped state + ledger history.
 - **`armorGate.ts`** with `isTierComplete()`, `canForgePiece()`, `getHighestCompletedTier()`.
 - **Milestone rewards** — diamond bonuses on tier completion: Wood 20, Stone 30, Iron 50, Gold 75, Diamond 120, Netherite 200.
@@ -138,6 +139,20 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - Edge-outline render performance on lower-end mobile tablets.
 - Chat-link Phase 1 — needs Shelly's tablet verification per `docs/CHAT_LINK_PHASE1_VERIFY_2026-05.md` (8 questions, ~15 min). After fixing three silent dead reads in `shellyChat` (disposition profile, weekly review narrative, conundrum title), Shelly's chat sees disposition / week-over-week trajectory / conundrum / recent teach-backs for the first time. Pass bar: AI grounds answers in specific recent evidence and uses trajectory language; no confabulation on London's empty data.
 
+## Design Pass v1 — Implementation Queue
+
+Ordered smallest → largest per `/docs/design-pass-v1/README.md` §Suggested implementation order. Each step is safely shippable in isolation.
+
+1. [ ] Not started — **No-judge copy pass.** Find/replace banned vocabulary ("missed", "behind", "couldn't", "failed") across `features/today/`, `features/records/`, `features/avatar/`; replace with the noticed/flow/stuck/joy/tried/took-a-break/came-back vocabulary. Small, high-impact emotional change.
+2. [ ] Not started — **Faith Stats bars on `/avatar`.** Pure visual addition under the existing XP bar: Strength / Wisdom / Mercy / Courage. Derivation formulas pending Shelly review (see `/docs/design-pass-v1/README.md` §State management). Adds `faithStats` to `AvatarProfile`.
+3. [ ] Not started — **Behavior Log richer layout** ("What I noticed" timeline + mood-chip surface, no-judge tags noticed/flow/stuck/joy). **Placement TBD — /today/log vs /records/log, decide before kicking off this step.**
+4. [ ] Not started — **Records table view + State Checklist sidebar + PDF export rail.** Contained to `features/records/`. Adds significant value for Shelly's state reporting.
+5. [ ] Not started — **Plan My Week split view at tablet+.** Reflow `PlannerChatPage.tsx` to a 2-pane grid above the `md` breakpoint (plan left, chat right).
+6. [ ] Not started — **Hero Hub bigger scene + Stonebridge banner + emote bar.** Visual upgrade to `MyAvatarPage.tsx`.
+7. [ ] Not started — **Knowledge Mine depth meter + ore-block tasks.** Replaces existing quest list rendering in `KnowledgeMinePage.tsx`.
+8. [ ] Not started — **Shelly AI "build a test" action.** Wire the chat to create a `Quest` record from a natural-language directive (e.g. "Build a long-A check").
+9. [ ] Not started — **Quest Complete celebration screen.** Modal/route reached from `/quest`. Mom-note required (or graceful "Mom will see this tonight." fallback — never AI praise).
+
 ## What's Not Built Yet — Priority Queue
 1. **Banner Rally missions (Hero Hub Phase 2)** — adaptive reading missions in Stonebridge.
 2. **Restoration Map (Phase 2)** — village repair nodes and progress map.
@@ -151,10 +166,14 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 10. **Minecraft skin export** — 64x64 skin output from avatar config.
 11. **Seasonal themes** — date-aware winter/fall/Christmas/Easter theming.
 
+### Avatar System — Remaining
+- Faith Stats bars (Strength/Wisdom/Mercy/Courage) under XP bar — derivation formulas pending Shelly review per `/docs/design-pass-v1/README.md` §State management (HIGH).
+
 ---
 
 ## Sprint History (Since v14)
 
+| Design v1 | May 26 | 10 mobile + 6 tablet design mocks landed at /docs/design-pass-v1/. No-judge vocabulary guardrail, Faith Stats kid-layer, Behavior Log evolution, State Checklist, Quest Complete with mandatory mom-note. Docs updated; implementation queued. |
 | Story Gen V2 Phase 1 | May 25, 2026 | Story generation prompt quality pass. Rewrote `buildStoryPrompt` (`functions/src/ai/chat.ts`) — removed binary `isYounger` switch and "CVC words are great" instruction (was infantilizing Lincoln's output). Per-child calibration now driven by WORD MASTERY and SKILL SNAPSHOT context slices for vocabulary; content stakes calibrated separately by age. Sight-word integration changed from "MUST use every word" to "weave 3-5 naturally; leave words out if they don't fit". Added explicit per-page beat templates (6-arc for ≤6 pages, 10-arc for 7-10, proportional beyond) via new exported `buildPageBeats` helper. Added WRITING QUALITY craft guardrails (read-aloud sanity check, natural dialogue with contractions, consistent character names, no run-ons, ending answers beginning) and an optional `qualityNotes` output field for usage-log debugging. Replaced "Link" in the JSON example with original character name. Wired `skillSnapshot` into `generateStory`'s context slice. Token budget 4096 → 6144, temperature 1.0 (default) → 0.7. `callClaude` in `chatTypes.ts` now accepts optional `temperature` opt. Output JSON contract unchanged; `useBookGenerator` parser untouched. 24 new tests in `chat.test.ts` and `contextSlices.test.ts`. Design doc: §4 of `DESIGN_STORY_GENERATION_V2.md`. |
 | Monthly Review v1.6 | May 26, 2026 | Real-use fixes after Nathan showed Lincoln his April book. Three discrete bug fixes — no new features. (1) Hours-by-subject table on the Stats page rendered minutes with an `h` suffix (Language Arts at 154 minutes displayed as "154.0h"; AI prose narrated correctly as "154 minutes"). `hoursBySubject` is in minutes natively (from per-item `actualMinutes` and the `hours` collection's `minutes` field); the renderer was treating the value as hours. New `formatSubjectMinutes` helper (`src/features/monthly-review/formatSubjectMinutes.ts`) — under 60 shows minutes (e.g. "5m"), 60+ converts to hours with whole/decimal split ("3h" vs "2.6h"). `StatsLayout` in `MonthlyReviewPage.tsx` now uses it on the hours-by-subject table. `totalHours` tile stays as-is because it's already stored in hours (`composeMonthlyReview` divides total minutes by 60 with 1-decimal rounding). Helper extracted into its own file to keep `MonthlyReviewPage.tsx` component-only (Fast Refresh constraint). (2) Dad Lab aggregation in `loadDadLabReportsInMonth` (`functions/src/ai/tasks/monthlyReviewData.ts`) missed April's "The Bridge Test" because the loader hard-filtered `status == "complete"` while families don't always advance a session past 'active' even after the kid finished the work. Removed the status filter; the existing `childReports[childId]` check is the real participation signal. `(status ASC, date ASC)` composite index in `firestore.indexes.json` is no longer required by this loader but kept for other callers; range query on `date` alone uses Firestore's default single-field index. (3) Voice-note schema scaffold — added `voiceNotes?: { kid?: VoiceNote[]; parent?: VoiceNote[] }` to `MonthlyReviewPage` + a new `VoiceNote` type in `src/core/types/monthlyReview.ts`. No UI writes to this field yet; reserving the schema slot because Lincoln engaged strongly with the "More from this month" gallery by talking about his work — the strongest positive signal so far and the natural next surface for tap-to-record. Future PR will reuse `useAudioRecorder` to actually capture audio. 7 new tests: `formatSubjectMinutes` (3 cases — minutes, whole hours, decimal hours) + Stats renderer integration (1 — Language Arts displays "2.6h", Reading displays "5m") + Dad Lab loader (3 — status-not-complete still counts, wrong-child excluded, out-of-window excluded). 2206 tests pass. No prompt changes; no curation changes; no new sections. |
 | Monthly Review v1.5 | May 26, 2026 | Pre-Lincoln polish — cover hero scans excluded, gallery threshold lowered, parent draft-ready card on Today. Three small targeted changes before showing the artifact to Lincoln (the kid it was designed for) and Shelly for the first time. (1) Cover hero is now artifact-only: the classified-scan branch removed from `COVER_HERO_ALLOWED` in `monthlyReviewCuration.ts`, so scans — even classified ones — are evidence and never qualify as cover. Falls back to the existing gradient + theme word render when no artifact qualifies. (2) `MAX_PHOTOS_PER_SECTION.whatYouLoved.kid` lowered from 8 to 6 so overflow actually reaches the moreFromMonth gallery (previously the section rarely triggered because main sections absorbed everything). New `MIN_OVERFLOW_TO_SHOW_GALLERY = 2` gate in `composeMonthlyReview` — gallery only added when at least 2 overflow photos exist (a 1-photo gallery felt lonely). (3) New `DraftReadyCard` (`src/features/monthly-review/DraftReadyCard.tsx`) on the parent Today page — subscribes to monthly reviews, surfaces the most recent `status='draft'` review with the month + child name + "Open" button. Auto-dismisses when published (the subscription filter handles it). Rendered between Week Focus and Chapter Question Pool in `TodayPage.tsx`, wrapped in `SectionErrorBoundary`. Adds 4 unit tests (cover hero scan exclusion x2, moreFromMonth threshold x2) + 3 component tests (DraftReadyCard render, no-render when published, picks most recent draft). No prompt changes. |
@@ -267,6 +286,9 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 14. **Cleaned drawings reimagine as transparent stickers by default** — When the AI reimagines a cleaned (background-removed) drawing, the result keeps the transparent background so it stays usable as a positionable sticker. The dialog still exposes a "Reimagine as scene" path for the cases where the kid wants a full illustrated background.
 15. **One Capture surface, three behaviors** — Today has a single Capture card that adapts to what Shelly fills in: media + duration = both artifact and hours; media only = artifact; duration only = hours. Preset chips reduce friction for common activities (Lego build, baking, nature, music, drawing, reading, zoo/museum, sports) without locking her into them — she can de-select a chip, override the activity name, or change the category. A Lego build is one action now: tap chip, snap photo, save. (Replaces the prior three-card design — Quick Capture + Log Creative Time + Log Extra Activity — that fragmented the same moment.)
 16. **Evidence beats narrative.** The Weekly Review AI narrative is helpful but optional. The raw counts of books and teach-back moments are the unfalsifiable record of what actually happened that week. The "Week in Evidence" section on the rendered review surfaces these directly so Shelly always sees the data, not just the story — even when the AI doesn't mention them in the wins list.
+17. **Faith Stats are kid-facing; Dispositions are parent-facing.** Faith Stats (Strength/Wisdom/Mercy/Courage) live on `/avatar` and Quest Complete. Dispositions (Curiosity/Persistence/Articulation/Self-Awareness/Ownership) remain canonical on Progress → Learning Profile. Where data can be shared, share it — but never collapse one into the other.
+18. **No-judge vocabulary is enforced in user-facing strings.** Banned: "missed", "behind", "failed", "couldn't". Required: "noticed", "flow", "stuck", "tried", "took a break", "came back". Every "stuck" must be paired with what came next.
+19. **Quest Complete mom-note is hand-written by Shelly.** Never AI-generated. Fallback when absent: "Mom will see this tonight." — never a generic praise blurb.
 
 ---
 
