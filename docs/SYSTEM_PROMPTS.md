@@ -146,7 +146,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `generate` | charter, childProfile |
 | `evaluate` | charter, childProfile, sightWords, wordMastery |
 | `quest` | childProfile, sightWords, recentEval, wordMastery |
-| `generateStory` | childProfile, sightWords, wordMastery |
+| `generateStory` | childProfile, sightWords, wordMastery, skillSnapshot |
 | `workshop` | charter, childProfile, workshopGames |
 | `analyzePatterns` | childProfile |
 | `scan` | childProfile, recentEval |
@@ -211,7 +211,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 ### `generateStory` (tasks/generateStory.ts)
 
 **System prompt assembly:**
-1. Context slices for "generateStory": charter, childProfile, sightWords, wordMastery, skillSnapshot
+1. Context slices for "generateStory": childProfile, sightWords, wordMastery, skillSnapshot
 2. `buildStoryPrompt(input)` — sight word story generator (V2)
 
 **Input:** storyIdea, words[], pageCount, childName, childAge, childInterests, readingLevel
