@@ -41,6 +41,25 @@ export interface PageModePhotos {
   parent: PhotoRef[]
 }
 
+/**
+ * A child- or parent-recorded audio note attached to a specific page. No
+ * write UI exists yet — the schema slot is reserved for a future PR that
+ * adds tap-to-record on top of the gallery (Lincoln's strongest engagement
+ * signal so far was talking about the photos on "More from this month",
+ * which is the natural surface for voice capture).
+ */
+export interface VoiceNote {
+  id: string
+  /** Firebase Storage path. */
+  audioUrl: string
+  durationMs: number
+  recordedBy: 'lincoln' | 'london' | 'shelly' | 'nathan'
+  /** ISO timestamp. */
+  recordedAt: string
+  /** Populated by a future transcription pass. */
+  transcription?: string
+}
+
 export interface MonthlyReviewPage {
   id: string
   sectionType: SectionType
@@ -58,6 +77,16 @@ export interface MonthlyReviewPage {
 
   /** Parent can hide a section (defaults false). */
   hidden?: boolean
+
+  /**
+   * Reserved for future kid- and parent-recorded voice notes per page. No UI
+   * writes to this field today; declared now so the schema is stable when
+   * the tap-to-record feature lands.
+   */
+  voiceNotes?: {
+    kid?: VoiceNote[]
+    parent?: VoiceNote[]
+  }
 }
 
 export interface MonthStats {
