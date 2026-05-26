@@ -206,9 +206,11 @@ export function hasPositiveKidModeSignal(
 // ── Selection / placement ───────────────────────────────────────
 
 /**
- * Predicates that qualify a photo for cover-hero placement. The cover should
- * never be an unclassified incidental photo — it must be a recognizable piece
- * of creative work or curriculum.
+ * Predicates that qualify a photo for cover-hero placement. The cover is for
+ * celebration — a scan of a triangle exercise documents what was done, but a
+ * photo of a finished book or a sketch celebrates who the kid became. Scans
+ * (even classified ones) are evidence and belong on the workedThrough page,
+ * not on the cover. The hero pool is therefore artifacts only.
  */
 const COVER_HERO_ALLOWED = [
   // Broad artifact allowlist — covers books, sketches, Dad Lab, and any other
@@ -225,15 +227,13 @@ const COVER_HERO_ALLOWED = [
     p.source === "artifact" && c.sketchArtifactIds.has(p.sourceDocId),
   (p: ScoredPhoto, c: PhotoCurationContext) =>
     p.source === "artifact" && c.dadLabArtifactIds.has(p.sourceDocId),
-  (p: ScoredPhoto, c: PhotoCurationContext) =>
-    p.source === "scan" &&
-    !p.isWorkbookScan &&
-    !!c.classifiedScanIds?.has(p.sourceDocId),
 ];
 
 /**
- * Pick a cover-hero photo for the given mode. The cover allowlist is strict:
- * book artifact, sketch artifact, Dad Lab artifact, or classified scan. If
+ * Pick a cover-hero photo for the given mode. The cover allowlist is strict
+ * and artifact-only: any non-workbook artifact (books, sketches, Dad Lab,
+ * family activities, etc.) qualifies. Scans — even classified ones — are
+ * never cover heroes because the cover is for celebration, not evidence. If
  * no photo qualifies, returns `undefined` and the Cover layout renders the
  * theme word on a gradient background instead.
  *
@@ -371,7 +371,9 @@ export interface SectionPlacement {
  * view with a tighter cap.
  */
 export const MAX_PHOTOS_PER_SECTION = {
-  whatYouLoved: { kid: 8, parent: 6 },
+  // Kid cap lowered from 8 to 6 so overflow actually reaches the
+  // moreFromMonth gallery — the photo-dominant section kids love.
+  whatYouLoved: { kid: 6, parent: 6 },
   workedThrough: { kid: 4, parent: 4 },
   moreFromMonth: { kid: 20, parent: 0 },
   cover: 1,

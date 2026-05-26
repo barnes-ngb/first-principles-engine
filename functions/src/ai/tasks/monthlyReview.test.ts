@@ -88,19 +88,19 @@ describe("composeMonthlyReview", () => {
     expect(sectionTypes).not.toContain("moreFromMonth");
   });
 
-  it("adds a moreFromMonth page with fixed kid content when overflow exists", () => {
-    const overflowPhoto = {
-      id: "artifact:over-1",
-      storagePath: "art/over-1.jpg",
+  it("adds a moreFromMonth page with fixed kid content when overflow >= 2", () => {
+    const overflowPhotos = [1, 2].map((n) => ({
+      id: `artifact:over-${n}`,
+      storagePath: `art/over-${n}.jpg`,
       source: "artifact" as const,
-      sourceDocId: "over-1",
+      sourceDocId: `over-${n}`,
       capturedAt: "2026-05-15T10:00:00Z",
-    };
+    }));
     const placement: SectionPlacement = {
       cover: { kid: [], parent: [] },
       whatYouLoved: { kid: [], parent: [] },
       workedThrough: { kid: [], parent: [] },
-      moreFromMonth: { kid: [overflowPhoto], parent: [] },
+      moreFromMonth: { kid: overflowPhotos, parent: [] },
       more: [],
     };
     const review = composeMonthlyReview(baseInput({ placement }));
@@ -115,8 +115,35 @@ describe("composeMonthlyReview", () => {
     if (Array.isArray(photoRefs)) {
       throw new Error("expected per-mode photoRefs");
     }
-    expect(photoRefs.kid.map((p) => p.id)).toEqual(["artifact:over-1"]);
+    expect(photoRefs.kid.map((p) => p.id)).toEqual([
+      "artifact:over-1",
+      "artifact:over-2",
+    ]);
     expect(photoRefs.parent).toEqual([]);
+  });
+
+  it("omits the moreFromMonth page when overflow is only 1 photo", () => {
+    const placement: SectionPlacement = {
+      cover: { kid: [], parent: [] },
+      whatYouLoved: { kid: [], parent: [] },
+      workedThrough: { kid: [], parent: [] },
+      moreFromMonth: {
+        kid: [
+          {
+            id: "artifact:lone",
+            storagePath: "art/lone.jpg",
+            source: "artifact",
+            sourceDocId: "lone",
+            capturedAt: "2026-05-15T10:00:00Z",
+          },
+        ],
+        parent: [],
+      },
+      more: [],
+    };
+    const review = composeMonthlyReview(baseInput({ placement }));
+    const sectionTypes = review.pages.map((p) => p.sectionType);
+    expect(sectionTypes).not.toContain("moreFromMonth");
   });
 
   it("omits optional photo fields (score/subjectTag) when undefined on curated photos", () => {
