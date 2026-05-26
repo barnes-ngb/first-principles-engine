@@ -78,6 +78,7 @@ import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivit
 import { useRolloverUnchecked } from './useRolloverUnchecked'
 import { useUnifiedCapture } from './useUnifiedCapture'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
+import DraftReadyCard from '../monthly-review/DraftReadyCard'
 import WeekFocusCard from './WeekFocusCard'
 import WeekRibbon from './WeekRibbon'
 import WorkshopGameCards from './WorkshopGameCards'
@@ -965,6 +966,13 @@ export default function TodayPage() {
             selectedChildId={selectedChildId}
             onSnackMessage={handleSnackMessage}
           />
+        </SectionErrorBoundary>
+      )}
+
+      {/* --- Draft Ready: surface unpublished monthly books --- */}
+      {familyId && (
+        <SectionErrorBoundary section="monthly draft ready">
+          <DraftReadyCard familyId={familyId} />
         </SectionErrorBoundary>
       )}
 

@@ -215,7 +215,7 @@ describe("assignPhotosToSections", () => {
     expect(placement.more).toEqual([]);
   });
 
-  it("kid mode whatYouLoved caps at 8 (raised from 6)", () => {
+  it("kid mode whatYouLoved caps at 6 (lowered so overflow reaches gallery)", () => {
     const ctx = emptyContext();
     ctx.dayLogEngagement["2026-04-10"] = {};
     const photos: PhotoRef[] = [];
@@ -229,7 +229,7 @@ describe("assignPhotosToSections", () => {
       hasBookCompletions: false,
       hasDadLab: false,
     });
-    expect(placement.whatYouLoved.kid.length).toBe(8);
+    expect(placement.whatYouLoved.kid.length).toBe(6);
     expect(placement.whatYouLoved.parent.length).toBe(6);
   });
 
@@ -451,7 +451,7 @@ describe("pickHeroForMode — strict allowlist", () => {
     expect(pickHeroForMode("kid", scored, new Set(), ctx)?.id).toBe("book");
   });
 
-  it("picks classified scan but skips unclassified scan", () => {
+  it("never picks a scan as cover hero, even when classified", () => {
     const ctx = emptyContext();
     ctx.classifiedScanIds = new Set(["scan-class"]);
     const scored = scorePhotos(
@@ -461,9 +461,9 @@ describe("pickHeroForMode — strict allowlist", () => {
       ],
       ctx,
     );
-    // The unclassified scan stays an isWorkbookScan and never qualifies; the
-    // classified scan does.
-    expect(pickHeroForMode("kid", scored, new Set(), ctx)?.id).toBe("class");
+    // Scans — even classified ones — are evidence, not celebration. The
+    // hero pool is artifact-only.
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)).toBeUndefined();
   });
 
   it("adds chosen hero to alreadyPlaced for dedup", () => {
@@ -559,7 +559,7 @@ describe("artifact-default kid-mode placement (v1.4)", () => {
   it("overflow goes to moreFromMonth when whatYouLoved + workedThrough are full", () => {
     const ctx = emptyContext();
     // 20 plain artifacts — no engagement, no creative tags. Kid sections:
-    // whatYouLoved cap 8 + workedThrough cap 4 = 12; remaining 8 should
+    // whatYouLoved cap 6 + workedThrough cap 4 = 10; remaining 10 should
     // land in moreFromMonth.kid.
     const photos: PhotoRef[] = [];
     for (let i = 0; i < 20; i++) {
@@ -579,7 +579,7 @@ describe("artifact-default kid-mode placement (v1.4)", () => {
       hasBookCompletions: false,
       hasDadLab: false,
     });
-    expect(placement.whatYouLoved.kid.length).toBe(8);
+    expect(placement.whatYouLoved.kid.length).toBe(6);
     expect(placement.moreFromMonth.kid.length).toBeGreaterThanOrEqual(4);
   });
 
@@ -634,6 +634,37 @@ describe("artifact-default kid-mode placement (v1.4)", () => {
       hasDadLab: false,
     });
     expect(placement.moreFromMonth.kid.length).toBe(20);
+  });
+});
+
+describe("cover hero — no scans, even classified", () => {
+  it("does not pick classified scan as cover hero when an artifact exists", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-class"]);
+    ctx.allArtifactIds = new Set(["art-doc"]);
+    const scored = scorePhotos(
+      [
+        photo({ id: "classified-scan", source: "scan", sourceDocId: "scan-class" }),
+        photo({ id: "real-artifact", source: "artifact", sourceDocId: "art-doc" }),
+      ],
+      ctx,
+    );
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)?.id).toBe(
+      "real-artifact",
+    );
+  });
+
+  it("returns undefined when only scans (classified or not) exist", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-class"]);
+    const scored = scorePhotos(
+      [
+        photo({ id: "classified", source: "scan", sourceDocId: "scan-class" }),
+        photo({ id: "unclass", source: "scan", sourceDocId: "scan-rand" }),
+      ],
+      ctx,
+    );
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)).toBeUndefined();
   });
 });
 

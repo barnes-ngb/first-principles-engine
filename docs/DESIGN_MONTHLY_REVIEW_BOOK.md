@@ -697,6 +697,49 @@ moreFromMonth is purely a photo gallery. Parent mode behavior is
 unchanged. No editor work (deferred to PR E-2: "More Photos" tray +
 per-photo remove).
 
+### v1.5 — May 26, 2026 — Pre-Lincoln polish
+
+Three small targeted changes before showing Lincoln's April book to him
+(the kid it was designed for) and Shelly (who needs a heads-up that a
+draft is ready) for the first time.
+
+**Cover hero is now artifact-only.** Scans — even classified ones — no
+longer qualify as cover heroes. The cover is reserved for celebration
+(a photo of a finished book, a sketch, a Dad Lab moment, a family
+activity); scans document evidence and belong on `workedThrough`. The
+classified-scan branch was removed from `COVER_HERO_ALLOWED` in
+`monthlyReviewCuration.ts`. When no artifact qualifies, `pickHeroForMode`
+still returns `undefined`, `composeMonthlyReview` writes
+`heroPhotoRef: null`, and `CoverLayout` renders the existing gradient +
+theme word fallback unchanged.
+
+**moreFromMonth gallery threshold lowered.** Two related changes so the
+gallery actually triggers for a typical month:
+
+- `MAX_PHOTOS_PER_SECTION.whatYouLoved.kid` lowered from 8 to 6. The
+  upstream cap was absorbing nearly all kid-eligible photos, leaving
+  nothing for overflow.
+- New `MIN_OVERFLOW_TO_SHOW_GALLERY = 2` in `composeMonthlyReview`. The
+  gallery page is only added when overflow is ≥ 2 photos — a 1-photo
+  grid reads as lonely.
+
+**DraftReadyCard on parent Today.** New
+`src/features/monthly-review/DraftReadyCard.tsx` subscribes to monthly
+reviews via `useMonthlyReviews`, finds the most recent `status='draft'`
+review across any active child, and renders a soft card on the parent
+Today page: "{Month Year} book ready for {child name}" + "A draft is
+waiting for you to skim and publish." + an "Open" button that navigates
+to `/progress/monthly-books/{reviewId}`. Auto-dismisses on publish — the
+subscription filter handles it; no explicit dismiss state. If multiple
+children have drafts, only the most recent is shown (Shelly can find the
+rest from the reader → Monthly Books tab). Rendered in `TodayPage.tsx`
+between Week Focus and Chapter Question Pool, wrapped in
+`SectionErrorBoundary`.
+
+**What did NOT change.** Prompt untouched. Schema untouched. No push
+notifications or external delivery — the card is purely an in-app
+heads-up.
+
 ---
 
-*Last updated: May 25, 2026*
+*Last updated: May 26, 2026*
