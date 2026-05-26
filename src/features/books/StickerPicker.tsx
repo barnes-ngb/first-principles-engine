@@ -14,7 +14,7 @@ import Alert from '@mui/material/Alert'
 import AddIcon from '@mui/icons-material/Add'
 import FileUploadIcon from '@mui/icons-material/FileUpload'
 import { addDoc, getDocs, orderBy, query, doc, setDoc } from 'firebase/firestore'
-import { ref, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
@@ -223,18 +223,10 @@ export default function StickerPicker({
   }, [generationPreview, createPrompt, familyId, childProfile])
 
   const handleTryAgain = useCallback(() => {
-    if (generationPreview) {
-      // Delete the generated image from Storage
-      try {
-        void deleteObject(ref(storage, generationPreview.storagePath))
-      } catch {
-        // Ignore deletion errors
-      }
-    }
     setGenerationPreview(null)
     setGenerationError(false)
     // Keep the prompt pre-filled so they can tweak it
-  }, [generationPreview])
+  }, [])
 
   const [uploading, setUploading] = useState(false)
 

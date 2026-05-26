@@ -75,17 +75,21 @@
   }
 }
 
-/* Chat page: fill available height with no extra padding */
+/* Chat page: fill available height with no extra padding.
+ * Use 100dvh (dynamic viewport height) so mobile/tablet browser UI
+ * (URL bar etc.) is excluded — 100vh includes that chrome and pushes
+ * the input bar below the visible fold.  Subtract the actual mobile
+ * header height (MUI IconButton 48px + py:1.5 24px + 1px border ≈ 73px). */
 .app-shell__content:has(> [data-page="chat"]) {
   padding: 0;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 56px); /* subtract mobile header height */
+  height: calc(100dvh - 73px);
 }
 
 @media (min-width: 900px) {
   .app-shell__content:has(> [data-page="chat"]) {
-    height: 100vh;
+    height: 100dvh;
   }
 }
 
