@@ -913,7 +913,8 @@ export default function TodayChecklist({
                     <Typography variant="body2">Quick check: how did it go?</Typography>
                     <TextField
                       size="small"
-                      placeholder="e.g., 5/6 correct, missed regrouping on #4"
+                      // no-judge v1: was "e.g., 5/6 correct, missed regrouping on #4"
+                      placeholder="e.g., 5/6 correct, noticed regrouping was tricky on #4"
                       value={gradeNote.text}
                       onChange={(e) => setGradeNote({ index, text: e.target.value })}
                       multiline

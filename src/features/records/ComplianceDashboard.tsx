@@ -127,14 +127,17 @@ export default function ComplianceDashboard({
   const alerts = useMemo(() => {
     const items: string[] = []
     if (totalStatus === Status.Red)
-      items.push(`Total hours (${totalHours.toFixed(0)}h) are significantly behind the ${TOTAL_HOURS_TARGET}h target`)
+      // no-judge v1: was "Total hours (${totalHours.toFixed(0)}h) are significantly behind the ${TOTAL_HOURS_TARGET}h target"
+      items.push(`Total hours (${totalHours.toFixed(0)}h) are tracking under the ${TOTAL_HOURS_TARGET}h target`)
     if (coreStatus === Status.Red)
-      items.push(`Core hours (${coreHours.toFixed(0)}h) are significantly behind the ${CORE_HOURS_TARGET}h target`)
+      // no-judge v1: was "Core hours (${coreHours.toFixed(0)}h) are significantly behind the ${CORE_HOURS_TARGET}h target"
+      items.push(`Core hours (${coreHours.toFixed(0)}h) are tracking under the ${CORE_HOURS_TARGET}h target`)
     for (const subject of MO_REQUIRED_SUBJECTS) {
       const minutes = subjectByBucket.get(subject) ?? 0
       const status = getSubjectStatus(minutes, yearProgress)
       if (status === Status.Red) {
-        items.push(`${SUBJECT_LABELS[subject]} (${(minutes / 60).toFixed(0)}h) is falling behind`)
+        // no-judge v1: was "${SUBJECT_LABELS[subject]} (${(minutes / 60).toFixed(0)}h) is falling behind"
+        items.push(`${SUBJECT_LABELS[subject]} (${(minutes / 60).toFixed(0)}h) is tracking under target`)
       }
     }
     return items
