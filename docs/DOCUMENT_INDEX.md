@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-05-24.
+> Where everything lives. Updated 2026-05-26.
 
 ---
 
@@ -8,7 +8,8 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated Apr 12: Hero Hub, two-currency economy, Stonebridge narrative, armor progression gating, capture pipeline, working levels, chapter pool |
+| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated May 26, 2026: Design Pass v1 implementation queue added, Faith Stats kid-layer + no-judge vocab guardrail recorded as Key Design Decisions. |
+| `design-pass-v1/` | **CURRENT** | 10 mobile + 6 tablet design mocks + handoff README for v1 refine pass (May 26, 2026) |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
@@ -82,6 +83,7 @@
 | `PROFILE_LIMITS_AUDIT.md` | Working on rate limits, AI usage caps, cost controls |
 | `08_RUNBOOK.md` | Working on deployment, backups, operations |
 | `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
+| `design-pass-v1/README.md` | Use when working on any v1 implementation queue item |
 
 ---
 

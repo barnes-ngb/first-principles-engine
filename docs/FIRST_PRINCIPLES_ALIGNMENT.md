@@ -233,3 +233,65 @@ It is NEVER used for **pace pressure**:
 
 The AI context pipeline sends covered skills and upcoming topics.
 It does NOT send pace status, deadline math, or completion percentages.
+
+---
+
+## Faith Stats (kid-facing layer)
+
+Faith Stats are the gamified Lincoln-side view of growth — four named stat bars that surface on `/avatar` (under the existing XP bar) and on the Quest Complete screen. They speak the Minecraft-and-armor language Lincoln already lives in, so growth shows up where he already looks.
+
+The four stats:
+
+| Stat | What it tracks |
+|---|---|
+| **Strength** | Stuck → came-back ratio. How often he picked himself up after hitting a wall. |
+| **Wisdom** | Mastery average across subjects. The "what he knows" stat. |
+| **Mercy** | Times he chose the gentler retry path or helped London. The "how he treats others" stat. |
+| **Courage** | Suit-up streak × tier multiplier. The "showing up every day" stat. |
+
+**Proposed derivation formulas** (verbatim from `/docs/design-pass-v1/README.md` §State management — pending Shelly review):
+
+- Strength = % of "stuck" entries with a "came back" follow-up.
+- Wisdom = mastery average across subjects.
+- Mercy = times Lincoln chose the gentler retry path or helped London.
+- Courage = streak of suit-up days × tier multiplier.
+
+**Faith Stats do not replace Dispositions.** Dispositions (Curiosity / Persistence / Articulation / Self-Awareness / Ownership) remain the canonical parent-facing report card on Progress → Learning Profile — the AI-synthesized narrative Shelly reads. Faith Stats are the kid-facing translation of the same growth philosophy: same instinct, two audiences, two vocabularies. Where data can be shared between them (e.g. persistence signal feeding Strength), share it — but never collapse one into the other.
+
+---
+
+## No-judge vocabulary
+
+The Behavior Log and every other user-facing surface speak in a deliberate vocabulary that frames hard moments as data, not failure. This is the **enforced word list** for any string the user reads:
+
+**Banned:**
+- "missed"
+- "behind"
+- "failed"
+- "couldn't"
+
+**Required (when these moments happen):**
+- "noticed"
+- "flow"
+- "stuck"
+- "tried"
+- "took a break"
+- "came back"
+
+**The "stuck" rule:** Every "stuck" must be paired with what came next. "Stuck" on its own is a verdict; "stuck, then took a break, then came back and finished 4 of 6" is a story. The amber "stuck" tag in the Behavior Log is a context flag, never a closing punctuation.
+
+This vocabulary will be swept through `features/today/`, `features/records/`, and `features/avatar/` as step 1 of the Design Pass v1 Implementation Queue (see MASTER_OUTLINE.md). The copy pass is small in code surface area and large in emotional surface area — it's the cheapest, highest-leverage move in the design pass.
+
+---
+
+## Quest Complete mom-note guardrail
+
+Quest Complete (the celebration screen Lincoln sees on quest completion) always renders a **Note from Mom** card. The note is **hand-written by Shelly** in her parallel "Shelly noticed" insight surface — it is never AI-generated.
+
+When Shelly hasn't written one yet, the card shows a soft fallback line:
+
+> "Mom will see this tonight."
+
+This is the only acceptable substitute. **AI-generated praise blurbs are explicitly prohibited** in this slot. A generic AI "Great job!" would corrode the meaning of every real mom-note — Lincoln has to be able to trust that if the card says something specific, his mom actually said it. The fallback is a promise of a real note later, not a placeholder pretending to be one.
+
+This is the same instinct as Design Decision #3 in MASTER_OUTLINE.md ("Charter alignment: all AI-generated content must be reviewable against family values") taken one step further: in this single surface, AI content is not just reviewable — it's banned outright. The note is the relationship; the AI never gets to forge that signature.
