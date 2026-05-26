@@ -4,9 +4,9 @@ import { addDoc, doc, getDoc, setDoc } from 'firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { TaskType } from '../../core/ai/useAI'
 import { booksCollection } from '../../core/firebase/firestore'
-import type { Book, BookPage, BookTheme, ChatTurn } from '../../core/types'
+import type { Book, BookPage, BookTheme, ChatTurn, PageImage } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
-import { generatePageId } from './bookTypes'
+import { generateImageId, generatePageId } from './bookTypes'
 import { inferBookTheme } from './useBookGenerator'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -46,6 +46,16 @@ export interface UseBookGenerateChatOptions {
 
 export type ClarificationPhase = 'clarifying' | 'ready'
 
+export interface IllustrationProgress {
+  phase: 'idle' | 'illustrating' | 'done'
+  /** 1-based; 0 when idle. */
+  currentPage: number
+  /** 0 when idle. */
+  totalPages: number
+  /** Most recently generated image, for live preview. */
+  lastImageUrl?: string
+}
+
 export interface UseBookGenerateChat {
   chatHistory: ChatTurn[]
   currentStory: GeneratedStory | null
@@ -58,6 +68,8 @@ export interface UseBookGenerateChat {
   pendingIdea: string
   pendingRefinement: string | null
   canStartStory: boolean
+
+  illustrationProgress: IllustrationProgress
 
   sendKidMessage: (text: string) => Promise<void>
   setIllustrationStyle: (style: string) => void
@@ -166,7 +178,7 @@ export function useBookGenerateChat(
     resumeBookId,
   } = opts
 
-  const { chat } = useAI()
+  const { chat, generateImage } = useAI()
 
   const [chatHistory, setChatHistory] = useState<ChatTurn[]>([])
   const [currentStory, setCurrentStory] = useState<GeneratedStory | null>(null)
@@ -181,6 +193,13 @@ export function useBookGenerateChat(
     useState<ClarificationPhase>('clarifying')
   const [pendingIdea, setPendingIdea] = useState<string>('')
   const [pendingRefinement, setPendingRefinement] = useState<string | null>(null)
+
+  const [illustrationProgress, setIllustrationProgress] =
+    useState<IllustrationProgress>({
+      phase: 'idle',
+      currentPage: 0,
+      totalPages: 0,
+    })
 
   // Track whether we've initialized from a resume so we don't keep refetching.
   const initializedRef = useRef(false)
@@ -708,7 +727,108 @@ export function useBookGenerateChat(
       pendingIdea,
       null,
     )
-    return finalId ?? bookId
+    const resolvedId = finalId ?? bookId
+    if (!resolvedId) return null
+
+    // Per-page image generation — mirrors useBookGenerator's loop so books
+    // from both flows look identical in Firestore.
+    const bookRef = doc(booksCollection(familyId), resolvedId)
+    const illustrationStyleKey = `book-illustration-${illustrationStyle}` as
+      | 'book-illustration-minecraft'
+      | 'book-illustration-storybook'
+      | 'book-illustration-comic'
+      | 'book-illustration-realistic'
+      | 'book-illustration-garden-warfare'
+      | 'book-illustration-platformer'
+
+    const themeId = inferBookTheme(pendingIdea, [], illustrationStyle)
+    const totalPages = currentStory.pages.length
+    let lastImageUrl: string | undefined
+
+    setIllustrationProgress({
+      phase: 'illustrating',
+      currentPage: 0,
+      totalPages,
+    })
+
+    for (let i = 0; i < currentStory.pages.length; i++) {
+      const page = currentStory.pages[i]
+      setIllustrationProgress({
+        phase: 'illustrating',
+        currentPage: i + 1,
+        totalPages,
+        lastImageUrl,
+      })
+
+      if (!page.sceneDescription) continue
+
+      try {
+        const imgResult = await generateImage({
+          familyId,
+          prompt: page.sceneDescription,
+          style: illustrationStyleKey,
+          size: '1024x1024',
+          ...(themeId ? { themeId } : {}),
+        })
+
+        if (imgResult) {
+          lastImageUrl = imgResult.url
+          const pageImage: PageImage = {
+            id: generateImageId(),
+            url: imgResult.url,
+            storagePath: imgResult.storagePath,
+            type: 'ai-generated',
+            prompt: page.sceneDescription,
+          }
+
+          try {
+            const snap = await getDoc(bookRef)
+            if (snap.exists()) {
+              const current = snap.data() as Book
+              const updatedPages = current.pages.map((p, idx) =>
+                idx === i
+                  ? {
+                      ...p,
+                      images: [pageImage],
+                      layout: 'image-top' as const,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : p,
+              )
+              await setDoc(bookRef, {
+                ...current,
+                pages: updatedPages,
+                ...(i === 0
+                  ? { coverImageUrl: imgResult.url }
+                  : current.coverImageUrl
+                    ? { coverImageUrl: current.coverImageUrl }
+                    : {}),
+                updatedAt: new Date().toISOString(),
+              })
+              setIllustrationProgress({
+                phase: 'illustrating',
+                currentPage: i + 1,
+                totalPages,
+                lastImageUrl,
+              })
+            }
+          } catch (saveErr) {
+            console.warn(`Failed to save illustration for page ${i + 1}:`, saveErr)
+          }
+        }
+      } catch (err) {
+        console.warn(`Illustration failed for page ${i + 1}:`, err)
+      }
+    }
+
+    setIllustrationProgress({
+      phase: 'done',
+      currentPage: 0,
+      totalPages: 0,
+      lastImageUrl,
+    })
+
+    return resolvedId
   }, [
     currentStory,
     chatHistory,
@@ -716,6 +836,8 @@ export function useBookGenerateChat(
     persistStory,
     bookId,
     pendingIdea,
+    familyId,
+    generateImage,
   ])
 
   const abandonDraft = useCallback(async (): Promise<void> => {
@@ -746,6 +868,7 @@ export function useBookGenerateChat(
     pendingIdea,
     pendingRefinement,
     canStartStory,
+    illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,
     commitAndClose,
