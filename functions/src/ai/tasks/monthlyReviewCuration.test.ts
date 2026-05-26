@@ -210,6 +210,8 @@ describe("assignPhotosToSections", () => {
     expect(placement.whatYouLoved.parent).toEqual([]);
     expect(placement.workedThrough.kid).toEqual([]);
     expect(placement.workedThrough.parent).toEqual([]);
+    expect(placement.moreFromMonth.kid).toEqual([]);
+    expect(placement.moreFromMonth.parent).toEqual([]);
     expect(placement.more).toEqual([]);
   });
 
@@ -514,30 +516,148 @@ describe("cross-section deduplication (within mode)", () => {
   });
 });
 
-describe("positive kid-mode filter — assignment integration", () => {
-  it("excludes incidental photos with no positive signal from kid sections", () => {
+describe("artifact-default kid-mode placement (v1.4)", () => {
+  it("places non-workbook artifacts in kid mode without requiring engagement", () => {
     const ctx = emptyContext();
-    ctx.bookArtifactIds.add("real-book");
-    // "steering-wheel" is an unclassified incidental photo — no engagement,
-    // no creative tag, no resolved-blocker tag.
+    // A "family-activity" photo with no engagement tagging, no creative-type
+    // tag — under the v1.4 artifact-default policy it should still qualify
+    // for kid-mode placement because it's a real artifact (not a workbook).
     const scored = scorePhotos(
-      [
-        photo({ id: "steering-wheel", sourceDocId: "incidental-doc" }),
-        photo({ id: "real-book", sourceDocId: "real-book" }),
-      ],
+      [photo({ id: "family-activity", sourceDocId: "art-doc" })],
       ctx,
     );
     const placement = assignPhotosToSections(scored, {
       ...ctx,
-      hasBookCompletions: true,
+      hasBookCompletions: false,
       hasDadLab: false,
     });
-    const allKidIds = [
-      ...placement.cover.kid,
-      ...placement.whatYouLoved.kid,
-      ...placement.workedThrough.kid,
-    ].map((p) => p.id);
-    expect(allKidIds).not.toContain("steering-wheel");
-    expect(allKidIds).toContain("real-book");
+    expect(placement.whatYouLoved.kid.map((p) => p.id)).toContain(
+      "family-activity",
+    );
+  });
+
+  it("excludes workbook scans from kid mode (unchanged behavior)", () => {
+    const ctx = emptyContext();
+    const scored = scorePhotos(
+      [photo({ id: "wb1", source: "scan", sourceDocId: "scan-x" })],
+      ctx,
+    );
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    // Workbook scan is excluded from every kid-mode section.
+    expect(placement.cover.kid).toEqual([]);
+    expect(placement.whatYouLoved.kid).toEqual([]);
+    expect(placement.workedThrough.kid).toEqual([]);
+    expect(placement.moreFromMonth.kid).toEqual([]);
+    // Parent mode still uses the scan as worked-through evidence.
+    expect(placement.workedThrough.parent.map((p) => p.id)).toContain("wb1");
+  });
+
+  it("overflow goes to moreFromMonth when whatYouLoved + workedThrough are full", () => {
+    const ctx = emptyContext();
+    // 20 plain artifacts — no engagement, no creative tags. Kid sections:
+    // whatYouLoved cap 8 + workedThrough cap 4 = 12; remaining 8 should
+    // land in moreFromMonth.kid.
+    const photos: PhotoRef[] = [];
+    for (let i = 0; i < 20; i++) {
+      photos.push(
+        photo({
+          id: `art-${i}`,
+          sourceDocId: `doc-${i}`,
+          // Spread captures across days so spread penalties don't punish
+          // the trailing photos out of the cap.
+          capturedAt: `2026-04-${String((i % 28) + 1).padStart(2, "0")}T12:00:00Z`,
+        }),
+      );
+    }
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.whatYouLoved.kid.length).toBe(8);
+    expect(placement.moreFromMonth.kid.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("moreFromMonth is empty when no overflow exists", () => {
+    const ctx = emptyContext();
+    const photos: PhotoRef[] = [
+      photo({ id: "a1", sourceDocId: "doc-1" }),
+      photo({ id: "a2", sourceDocId: "doc-2" }),
+    ];
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.moreFromMonth.kid).toEqual([]);
+  });
+
+  it("moreFromMonth.parent is always empty even with many photos", () => {
+    const ctx = emptyContext();
+    const photos: PhotoRef[] = [];
+    for (let i = 0; i < 20; i++) {
+      photos.push(photo({ id: `a${i}`, sourceDocId: `doc-${i}` }));
+    }
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.moreFromMonth.parent).toEqual([]);
+  });
+
+  it("moreFromMonth respects the 20-photo cap", () => {
+    const ctx = emptyContext();
+    // 40 plain artifacts spread across the month. Kid sections place 12
+    // (8 + 4), so 28 remain — moreFromMonth should cap at 20.
+    const photos: PhotoRef[] = [];
+    for (let i = 0; i < 40; i++) {
+      photos.push(
+        photo({
+          id: `a${i}`,
+          sourceDocId: `doc-${i}`,
+          capturedAt: `2026-04-${String((i % 28) + 1).padStart(2, "0")}T12:00:00Z`,
+        }),
+      );
+    }
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.moreFromMonth.kid.length).toBe(20);
+  });
+});
+
+describe("cover hero allowlist — broadened pool", () => {
+  it("picks any non-workbook artifact via allArtifactIds", () => {
+    const ctx = emptyContext();
+    ctx.allArtifactIds = new Set(["family-doc"]);
+    const scored = scorePhotos(
+      [photo({ id: "family", sourceDocId: "family-doc" })],
+      ctx,
+    );
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)?.id).toBe("family");
+  });
+
+  it("still excludes workbook scans from cover hero", () => {
+    const ctx = emptyContext();
+    ctx.workbookArtifactIds = new Set(["wb-doc"]);
+    // Even if a workbook artifact were placed in allArtifactIds, the
+    // isWorkbookScan guard inside the allowlist must reject it.
+    ctx.allArtifactIds = new Set(["wb-doc"]);
+    const scored = scorePhotos(
+      [photo({ id: "wb", sourceDocId: "wb-doc" })],
+      ctx,
+    );
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)).toBeUndefined();
   });
 });

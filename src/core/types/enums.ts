@@ -434,5 +434,6 @@ export const SectionType = {
   LookingAhead: 'lookingAhead',
   ShellyNote: 'shellyNote',
   BackCover: 'backCover',
+  MoreFromMonth: 'moreFromMonth',
 } as const
 export type SectionType = (typeof SectionType)[keyof typeof SectionType]
