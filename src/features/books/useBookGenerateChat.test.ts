@@ -360,6 +360,48 @@ describe('useBookGenerateChat clarification state machine', () => {
     expect(coverWrite).toBeTruthy()
   })
 
+  it('commitAndClose passes the RAW illustrationStyle key to generateImage (illustrator handles prefix)', async () => {
+    const firestore = await import('firebase/firestore')
+    const addDoc = firestore.addDoc as ReturnType<typeof vi.fn>
+    const setDoc = firestore.setDoc as ReturnType<typeof vi.fn>
+    const getDoc = firestore.getDoc as ReturnType<typeof vi.fn>
+    addDoc.mockResolvedValue({ id: 'book-new' })
+    setDoc.mockResolvedValue(undefined)
+    getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ pages: [{ images: [], layout: 'text-only' }] }),
+    })
+
+    const fakeStory = {
+      title: 'One Page',
+      pages: [{ pageNumber: 1, text: 'p', sceneDescription: 'a field' }],
+    }
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    generateImageMock.mockResolvedValue({ url: 'u', storagePath: 's' })
+
+    const { result } = renderHook(() =>
+      useBookGenerateChat({ ...baseOpts, defaultIllustrationStyle: 'minecraft' }),
+    )
+
+    await act(async () => {
+      await result.current.sendKidMessage('a puppy')
+    })
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    await act(async () => {
+      await result.current.commitAndClose()
+    })
+
+    // Contract: hook stores raw style ('minecraft'); illustrator constructs
+    // the 'book-illustration-minecraft' prefix before calling generateImage.
+    expect(result.current.illustrationStyle).toBe('minecraft')
+    expect(generateImageMock).toHaveBeenCalled()
+    expect(generateImageMock.mock.calls[0][0]).toMatchObject({
+      style: 'book-illustration-minecraft',
+    })
+  })
+
   it('commitAndClose continues when one page fails to illustrate', async () => {
     const firestore = await import('firebase/firestore')
     const addDoc = firestore.addDoc as ReturnType<typeof vi.fn>

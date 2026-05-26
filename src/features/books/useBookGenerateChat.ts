@@ -4,10 +4,12 @@ import { addDoc, doc, getDoc, setDoc } from 'firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { TaskType } from '../../core/ai/useAI'
 import { booksCollection } from '../../core/firebase/firestore'
-import type { Book, BookPage, BookTheme, ChatTurn, PageImage } from '../../core/types'
+import type { Book, BookPage, BookTheme, ChatTurn } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
-import { generateImageId, generatePageId } from './bookTypes'
+import { generatePageId } from './bookTypes'
 import { inferBookTheme } from './useBookGenerator'
+import { useBookIllustrator } from './useBookIllustrator'
+import type { IllustrationProgress as IllustratorProgress } from './useBookIllustrator'
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -46,15 +48,7 @@ export interface UseBookGenerateChatOptions {
 
 export type ClarificationPhase = 'clarifying' | 'ready'
 
-export interface IllustrationProgress {
-  phase: 'idle' | 'illustrating' | 'done'
-  /** 1-based; 0 when idle. */
-  currentPage: number
-  /** 0 when idle. */
-  totalPages: number
-  /** Most recently generated image, for live preview. */
-  lastImageUrl?: string
-}
+export type IllustrationProgress = IllustratorProgress
 
 export interface UseBookGenerateChat {
   chatHistory: ChatTurn[]
@@ -178,7 +172,8 @@ export function useBookGenerateChat(
     resumeBookId,
   } = opts
 
-  const { chat, generateImage } = useAI()
+  const { chat } = useAI()
+  const { illustrate } = useBookIllustrator()
 
   const [chatHistory, setChatHistory] = useState<ChatTurn[]>([])
   const [currentStory, setCurrentStory] = useState<GeneratedStory | null>(null)
@@ -199,6 +194,7 @@ export function useBookGenerateChat(
       phase: 'idle',
       currentPage: 0,
       totalPages: 0,
+      failedPages: [],
     })
 
   // Track whether we've initialized from a resume so we don't keep refetching.
@@ -730,102 +726,18 @@ export function useBookGenerateChat(
     const resolvedId = finalId ?? bookId
     if (!resolvedId) return null
 
-    // Per-page image generation — mirrors useBookGenerator's loop so books
-    // from both flows look identical in Firestore.
-    const bookRef = doc(booksCollection(familyId), resolvedId)
-    const illustrationStyleKey = `book-illustration-${illustrationStyle}` as
-      | 'book-illustration-minecraft'
-      | 'book-illustration-storybook'
-      | 'book-illustration-comic'
-      | 'book-illustration-realistic'
-      | 'book-illustration-garden-warfare'
-      | 'book-illustration-platformer'
-
     const themeId = inferBookTheme(pendingIdea, [], illustrationStyle)
-    const totalPages = currentStory.pages.length
-    let lastImageUrl: string | undefined
 
-    setIllustrationProgress({
-      phase: 'illustrating',
-      currentPage: 0,
-      totalPages,
-    })
-
-    for (let i = 0; i < currentStory.pages.length; i++) {
-      const page = currentStory.pages[i]
-      setIllustrationProgress({
-        phase: 'illustrating',
-        currentPage: i + 1,
-        totalPages,
-        lastImageUrl,
-      })
-
-      if (!page.sceneDescription) continue
-
-      try {
-        const imgResult = await generateImage({
-          familyId,
-          prompt: page.sceneDescription,
-          style: illustrationStyleKey,
-          size: '1024x1024',
-          ...(themeId ? { themeId } : {}),
-        })
-
-        if (imgResult) {
-          lastImageUrl = imgResult.url
-          const pageImage: PageImage = {
-            id: generateImageId(),
-            url: imgResult.url,
-            storagePath: imgResult.storagePath,
-            type: 'ai-generated',
-            prompt: page.sceneDescription,
-          }
-
-          try {
-            const snap = await getDoc(bookRef)
-            if (snap.exists()) {
-              const current = snap.data() as Book
-              const updatedPages = current.pages.map((p, idx) =>
-                idx === i
-                  ? {
-                      ...p,
-                      images: [pageImage],
-                      layout: 'image-top' as const,
-                      updatedAt: new Date().toISOString(),
-                    }
-                  : p,
-              )
-              await setDoc(bookRef, {
-                ...current,
-                pages: updatedPages,
-                ...(i === 0
-                  ? { coverImageUrl: imgResult.url }
-                  : current.coverImageUrl
-                    ? { coverImageUrl: current.coverImageUrl }
-                    : {}),
-                updatedAt: new Date().toISOString(),
-              })
-              setIllustrationProgress({
-                phase: 'illustrating',
-                currentPage: i + 1,
-                totalPages,
-                lastImageUrl,
-              })
-            }
-          } catch (saveErr) {
-            console.warn(`Failed to save illustration for page ${i + 1}:`, saveErr)
-          }
-        }
-      } catch (err) {
-        console.warn(`Illustration failed for page ${i + 1}:`, err)
-      }
-    }
-
-    setIllustrationProgress({
-      phase: 'done',
-      currentPage: 0,
-      totalPages: 0,
-      lastImageUrl,
+    await illustrate({
+      bookId: resolvedId,
+      pages: currentStory.pages.map((p) => ({
+        pageNumber: p.pageNumber,
+        sceneDescription: p.sceneDescription ?? '',
+      })),
+      style: illustrationStyle,
+      bookTheme: themeId,
+      familyId,
+      onProgress: setIllustrationProgress,
     })
 
     return resolvedId
@@ -837,7 +749,7 @@ export function useBookGenerateChat(
     bookId,
     pendingIdea,
     familyId,
-    generateImage,
+    illustrate,
   ])
 
   const abandonDraft = useCallback(async (): Promise<void> => {
