@@ -22,6 +22,7 @@ import { useSpeechRecognition } from '../../core/hooks/useSpeechRecognition'
 import { useTTS } from '../../core/hooks/useTTS'
 import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
+import type { ChatTurn } from '../../core/types'
 import { useBookGenerateChat } from './useBookGenerateChat'
 
 interface Props {
@@ -97,10 +98,16 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     illustrationStyle,
     isLoading,
     error,
+    clarificationPhase,
+    pendingRefinement,
+    canStartStory,
     sendKidMessage,
     setIllustrationStyle,
     commitAndClose,
     abandonDraft,
+    confirmStartStory,
+    confirmAddRefinement,
+    confirmChangeRefinement,
   } = chat
 
   // ── Composer state ────────────────────────────────────────────
@@ -110,11 +117,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   const stt = useSpeechRecognition()
   const tts = useTTS()
 
-  // Mirror STT's terminal transcript into the composer + confirmation
-  // banner. STT is an external subscription whose lifecycle we don't own,
-  // so syncing its terminal output here is a valid one-shot effect.
-  // ("Did I hear you right?" confirmation — critical for Lincoln per
-  // design doc §5.A.4 / §5.B.4.)
+  // Mirror STT's terminal transcript into the composer + confirmation banner.
   const lastConsumedTranscriptRef = useRef<string>('')
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -138,40 +141,52 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     }
   }, [stt])
 
+  const composerDisabled =
+    isLoading ||
+    (clarificationPhase === 'clarifying' && pendingRefinement !== null)
+
   const handleSend = useCallback(async () => {
     const text = composerText.trim()
-    if (!text || isLoading) return
+    if (!text || composerDisabled) return
     setComposerText('')
     setPendingTranscript(null)
     await sendKidMessage(text)
-  }, [composerText, isLoading, sendKidMessage])
+  }, [composerText, composerDisabled, sendKidMessage])
 
-  // ── TTS: read first AI story-draft message once it lands ──────
+  // ── TTS: auto-play templated turns + first story draft ────────
 
-  const lastReadIndexRef = useRef<number>(-1)
+  const lastReadKeyRef = useRef<string>('')
   useEffect(() => {
     if (chatHistory.length === 0) return
-    // Find the most recent AI message index.
+    let lastAi: ChatTurn | undefined
     let lastAiIndex = -1
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       if (chatHistory[i].role === 'ai') {
+        lastAi = chatHistory[i]
         lastAiIndex = i
         break
       }
     }
-    if (lastAiIndex < 0) return
-    // Only auto-play the first AI draft (index where we transitioned from no
-    // story to having one). Subsequent AI messages need an explicit tap.
-    if (lastAiIndex !== lastReadIndexRef.current && currentStory) {
-      lastReadIndexRef.current = lastAiIndex
-      const isFirstAiMessage =
-        chatHistory.filter((t) => t.role === 'ai').length === 1
-      if (isFirstAiMessage) {
+    if (!lastAi) return
+    const key = `${lastAi.ts}:${lastAiIndex}`
+    if (key === lastReadKeyRef.current) return
+
+    if (lastAi.kind === 'echo' || lastAi.kind === 'add-or-change') {
+      lastReadKeyRef.current = key
+      tts.cancel()
+      tts.speak(lastAi.content)
+      return
+    }
+
+    if (lastAi.kind === 'story-draft' && currentStory) {
+      lastReadKeyRef.current = key
+      const isFirstStoryDraft =
+        chatHistory.filter((t) => t.role === 'ai' && t.kind === 'story-draft')
+          .length === 1
+      if (isFirstStoryDraft) {
         const queue = [
-          chatHistory[lastAiIndex].content,
-          ...currentStory.pages.map(
-            (p) => `Page ${p.pageNumber}: ${p.text}`,
-          ),
+          lastAi.content,
+          ...currentStory.pages.map((p) => `Page ${p.pageNumber}: ${p.text}`),
         ]
         tts.speakQueue(queue)
       }
@@ -209,8 +224,27 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     onAbandon()
   }, [abandonDraft, onAbandon, tts])
 
-  const canAbandon = chatHistory.length === 0
+  // Abandon allowed any time before an AI story-draft turn exists.
+  const canAbandon = currentStory === null
   const canCommit = currentStory !== null && !isLoading
+
+  const lastAiKind = useMemo(() => {
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+      if (chatHistory[i].role === 'ai') return chatHistory[i].kind
+    }
+    return undefined
+  }, [chatHistory])
+
+  const showYesStartButton =
+    clarificationPhase === 'clarifying' &&
+    pendingRefinement === null &&
+    canStartStory &&
+    lastAiKind === 'echo'
+
+  const showAddOrChangeButtons =
+    clarificationPhase === 'clarifying' &&
+    pendingRefinement !== null &&
+    lastAiKind === 'add-or-change'
 
   // ── Render ────────────────────────────────────────────────────
 
@@ -246,29 +280,75 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           </Typography>
         )}
         <Stack spacing={1.5}>
-          {chatHistory.map((turn, idx) => (
-            <Box
-              key={`${turn.ts}-${idx}`}
-              sx={{
-                display: 'flex',
-                justifyContent: turn.role === 'kid' ? 'flex-end' : 'flex-start',
-              }}
-            >
+          {chatHistory.map((turn, idx) => {
+            const isLastAi =
+              turn.role === 'ai' && idx === chatHistory.length - 1
+            const showYesHere =
+              isLastAi && turn.kind === 'echo' && showYesStartButton
+            const showAddChangeHere =
+              isLastAi && turn.kind === 'add-or-change' && showAddOrChangeButtons
+            return (
               <Box
+                key={`${turn.ts}-${idx}`}
                 sx={{
-                  maxWidth: '85%',
-                  px: 1.5,
-                  py: 1,
-                  borderRadius: 2,
-                  bgcolor: turn.role === 'kid' ? 'primary.50' : 'grey.100',
-                  border: '1px solid',
-                  borderColor: turn.role === 'kid' ? 'primary.200' : 'divider',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: turn.role === 'kid' ? 'flex-end' : 'flex-start',
                 }}
               >
-                <Typography variant="body2">{turn.content}</Typography>
+                <Box
+                  sx={{
+                    maxWidth: '85%',
+                    px: 1.5,
+                    py: 1,
+                    borderRadius: 2,
+                    bgcolor: turn.role === 'kid' ? 'primary.50' : 'grey.100',
+                    border: '1px solid',
+                    borderColor: turn.role === 'kid' ? 'primary.200' : 'divider',
+                  }}
+                >
+                  <Typography variant="body2">{turn.content}</Typography>
+                </Box>
+                {showYesHere && (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    size="large"
+                    fullWidth
+                    onClick={() => void confirmStartStory()}
+                    sx={{
+                      mt: 1,
+                      minHeight: 56,
+                      textTransform: 'none',
+                      fontWeight: 700,
+                    }}
+                  >
+                    ✓ Yes, start my story!
+                  </Button>
+                )}
+                {showAddChangeHere && (
+                  <Stack direction="row" spacing={1} sx={{ mt: 1, width: '100%' }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={() => void confirmAddRefinement()}
+                      sx={{ flex: 1, textTransform: 'none', fontWeight: 700 }}
+                    >
+                      + Add it
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      onClick={() => void confirmChangeRefinement()}
+                      sx={{ flex: 1, textTransform: 'none', fontWeight: 700 }}
+                    >
+                      ↺ Change it
+                    </Button>
+                  </Stack>
+                )}
               </Box>
-            </Box>
-          ))}
+            )
+          })}
           {currentStory && (
             <Box sx={{ borderTop: 1, borderColor: 'divider', pt: 1.5 }}>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
@@ -356,13 +436,18 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           minRows={1}
           maxRows={4}
           fullWidth
-          disabled={isLoading}
+          disabled={composerDisabled}
+          helperText={
+            composerDisabled && !isLoading
+              ? 'Tap Add or Change above to continue.'
+              : undefined
+          }
         />
         {stt.isSupported && (
           <IconButton
             color={stt.isListening ? 'error' : 'default'}
             onClick={handleMicToggle}
-            disabled={isLoading}
+            disabled={composerDisabled}
             aria-label={stt.isListening ? 'Stop recording' : 'Start recording'}
             sx={{ mb: 0.5 }}
           >
@@ -372,7 +457,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
         <IconButton
           color="primary"
           onClick={() => void handleSend()}
-          disabled={!composerText.trim() || isLoading}
+          disabled={!composerText.trim() || composerDisabled}
           aria-label="Send message"
           sx={{ mb: 0.5 }}
         >

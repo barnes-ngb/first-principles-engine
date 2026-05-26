@@ -11,9 +11,14 @@ const sendKidMessageMock = vi.fn<(text: string) => Promise<void>>()
 const setIllustrationStyleMock = vi.fn<(style: string) => void>()
 const commitAndCloseMock = vi.fn<() => Promise<string | null>>()
 const abandonDraftMock = vi.fn<() => Promise<void>>()
+const confirmStartStoryMock = vi.fn<() => Promise<void>>()
+const confirmAddRefinementMock = vi.fn<() => Promise<void>>()
+const confirmChangeRefinementMock = vi.fn<() => Promise<void>>()
+
+type ChatKind = 'echo' | 'add-or-change' | 'story-draft' | 'revision'
 
 interface HookState {
-  chatHistory: Array<{ role: 'kid' | 'ai'; content: string; ts: number }>
+  chatHistory: Array<{ role: 'kid' | 'ai'; content: string; ts: number; kind?: ChatKind }>
   currentStory: null | {
     title: string
     pages: Array<{ pageNumber: number; text: string; sceneDescription: string }>
@@ -22,6 +27,10 @@ interface HookState {
   isLoading: boolean
   error: string | null
   bookId: string | null
+  clarificationPhase: 'clarifying' | 'ready'
+  pendingIdea: string
+  pendingRefinement: string | null
+  canStartStory: boolean
 }
 
 let hookState: HookState = {
@@ -31,6 +40,10 @@ let hookState: HookState = {
   isLoading: false,
   error: null,
   bookId: null,
+  clarificationPhase: 'clarifying',
+  pendingIdea: '',
+  pendingRefinement: null,
+  canStartStory: false,
 }
 
 vi.mock('../useBookGenerateChat', () => ({
@@ -40,6 +53,9 @@ vi.mock('../useBookGenerateChat', () => ({
     setIllustrationStyle: setIllustrationStyleMock,
     commitAndClose: commitAndCloseMock,
     abandonDraft: abandonDraftMock,
+    confirmStartStory: confirmStartStoryMock,
+    confirmAddRefinement: confirmAddRefinementMock,
+    confirmChangeRefinement: confirmChangeRefinementMock,
   }),
 }))
 
@@ -78,11 +94,14 @@ vi.mock('../../../core/hooks/useSpeechRecognition', () => ({
   }),
 }))
 
+const ttsSpeakMock = vi.fn()
+const ttsSpeakQueueMock = vi.fn()
+const ttsCancelMock = vi.fn()
 vi.mock('../../../core/hooks/useTTS', () => ({
   useTTS: () => ({
-    speak: vi.fn(),
-    speakQueue: vi.fn(),
-    cancel: vi.fn(),
+    speak: ttsSpeakMock,
+    speakQueue: ttsSpeakQueueMock,
+    cancel: ttsCancelMock,
     isSpeaking: false,
     isSupported: true,
   }),
@@ -97,6 +116,12 @@ beforeEach(() => {
   setIllustrationStyleMock.mockReset()
   commitAndCloseMock.mockReset().mockResolvedValue('book-1')
   abandonDraftMock.mockReset().mockResolvedValue(undefined)
+  confirmStartStoryMock.mockReset().mockResolvedValue(undefined)
+  confirmAddRefinementMock.mockReset().mockResolvedValue(undefined)
+  confirmChangeRefinementMock.mockReset().mockResolvedValue(undefined)
+  ttsSpeakMock.mockReset()
+  ttsSpeakQueueMock.mockReset()
+  ttsCancelMock.mockReset()
   recoStartMock.mockReset()
   recoStopMock.mockReset()
   recoResetMock.mockReset()
@@ -114,6 +139,10 @@ beforeEach(() => {
     isLoading: false,
     error: null,
     bookId: null,
+    clarificationPhase: 'clarifying',
+    pendingIdea: '',
+    pendingRefinement: null,
+    canStartStory: false,
   }
 })
 
@@ -186,7 +215,7 @@ describe('BookGenerateChat', () => {
     expect(setIllustrationStyleMock).toHaveBeenCalledWith('minecraft')
   })
 
-  it('shows the abandon/cancel link only when chatHistory is empty', () => {
+  it('shows the abandon/cancel link before any AI story-draft exists', () => {
     // Empty history → cancel visible
     render(
       <Wrap>
@@ -196,10 +225,32 @@ describe('BookGenerateChat', () => {
     expect(screen.getByRole('button', { name: /cancel — start over/i })).toBeTruthy()
   })
 
-  it('hides the cancel link once the chat has turns', () => {
+  it('keeps the cancel link visible during clarification turns (no story yet)', () => {
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a puppy', ts: 1 },
+        { role: 'ai', content: 'Here is what I heard…', ts: 2, kind: 'echo' },
+      ],
+      pendingIdea: 'a puppy',
+      canStartStory: true,
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(screen.getByRole('button', { name: /cancel — start over/i })).toBeTruthy()
+  })
+
+  it('hides the cancel link once a story draft exists', () => {
     hookState = {
       ...hookState,
       chatHistory: [{ role: 'kid', content: 'hi', ts: 1 }],
+      currentStory: {
+        title: 'A Story',
+        pages: [{ pageNumber: 1, text: 'p', sceneDescription: '' }],
+      },
     }
     render(
       <Wrap>
@@ -260,6 +311,131 @@ describe('BookGenerateChat', () => {
     // Transcript flows into the editable composer.
     const input = screen.getByLabelText(/edit, then tap send/i) as HTMLInputElement
     expect(input.value).toBe('a dragon adventure')
+  })
+
+  it('does not show "Yes, start my story!" until first message is sent', () => {
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(
+      screen.queryByRole('button', { name: /yes, start my story/i }),
+    ).toBeNull()
+  })
+
+  it('renders an echo turn with a "Yes, start my story!" button after first kid message', () => {
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a puppy who finds a rainbow', ts: 1 },
+        {
+          role: 'ai',
+          content:
+            'Here\'s what I heard: "a puppy who finds a rainbow". Want me to start the story?',
+          ts: 2,
+          kind: 'echo',
+        },
+      ],
+      pendingIdea: 'a puppy who finds a rainbow',
+      canStartStory: true,
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(screen.getByText(/here's what i heard/i)).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /yes, start my story/i }),
+    ).toBeTruthy()
+  })
+
+  it('calls confirmStartStory when "Yes, start my story!" is tapped', async () => {
+    const user = userEvent.setup()
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a puppy', ts: 1 },
+        { role: 'ai', content: 'Here\'s what I heard…', ts: 2, kind: 'echo' },
+      ],
+      pendingIdea: 'a puppy',
+      canStartStory: true,
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    await user.click(
+      screen.getByRole('button', { name: /yes, start my story/i }),
+    )
+    expect(confirmStartStoryMock).toHaveBeenCalled()
+  })
+
+  it('renders Add / Change buttons under an add-or-change turn and disables the composer', async () => {
+    const user = userEvent.setup()
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a puppy', ts: 1 },
+        { role: 'ai', content: 'Here\'s what I heard…', ts: 2, kind: 'echo' },
+        { role: 'kid', content: 'and a dragon', ts: 3 },
+        {
+          role: 'ai',
+          content: 'Should I ADD that to your story, or CHANGE the idea to that?',
+          ts: 4,
+          kind: 'add-or-change',
+        },
+      ],
+      pendingIdea: 'a puppy',
+      pendingRefinement: 'and a dragon',
+      canStartStory: false,
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    const addBtn = screen.getByRole('button', { name: /\+ add it/i })
+    const changeBtn = screen.getByRole('button', { name: /change it/i })
+    expect(addBtn).toBeTruthy()
+    expect(changeBtn).toBeTruthy()
+
+    const input = screen.getByLabelText(/type or tap mic/i) as HTMLInputElement
+    expect(input.disabled).toBe(true)
+    expect(screen.getByText(/tap add or change above to continue/i)).toBeTruthy()
+
+    await user.click(addBtn)
+    expect(confirmAddRefinementMock).toHaveBeenCalled()
+
+    await user.click(changeBtn)
+    expect(confirmChangeRefinementMock).toHaveBeenCalled()
+  })
+
+  it('auto-plays the echo turn via TTS when it first appears', () => {
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a puppy', ts: 1 },
+        {
+          role: 'ai',
+          content: 'Here\'s what I heard: "a puppy". Want me to start the story?',
+          ts: 2,
+          kind: 'echo',
+        },
+      ],
+      pendingIdea: 'a puppy',
+      canStartStory: true,
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(ttsSpeakMock).toHaveBeenCalledWith(
+      expect.stringMatching(/here's what i heard/i),
+    )
   })
 
   it('renders story pages with per-page read-aloud buttons once a draft exists', () => {

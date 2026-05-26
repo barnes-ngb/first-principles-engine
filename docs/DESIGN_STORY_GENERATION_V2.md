@@ -314,18 +314,22 @@ The Generate Chat lives inside the "+ New Book" dialog's Generate tab. It is a m
 
 #### 5.A.1 The chat thread
 
-Each turn alternates kid/AI:
+The first AI turn is a **templated confirmation read-back**, not a generated draft. Lincoln's STT often mishears him, so the system echoes the input back via TTS first and waits for explicit "Yes, start my story!" before spending tokens on generation.
 
-- **Kid (turn 1):** types or speaks an idea ("a Minecraft adventure with a cat and a dragon").
-- **AI:** generates a full draft via useBookGenerator and posts each page text into the chat thread as a sequence of AI messages. Then posts a closing message: "I read it to you?" with a TTS auto-play control.
-- **Kid:** responds via voice or text. Possible intents:
-  - "I like it!" → commits the book and transitions to §5.B
-  - "Change [X]" → AI revises the affected pages, posts the diff or the updated pages into the thread
-  - "Add a part where [Y]" → AI weaves it in, may extend pages
-  - "Make it scarier / funnier / about [Z] instead" → AI rewrites affected pages
-- **AI:** revises using FULL CHAT HISTORY plus the current story state as context. Repeats the read-back. Loops.
+Turn sequence:
 
-No hard revision cap — the loop continues until the kid approves. Empty/silent state after several minutes saves a draft (resumable behavior detailed in §5.A.4).
+1. **Kid (turn 1):** types or speaks an idea ("a Minecraft adventure with a cat and a dragon").
+2. **AI (templated echo, no API call):** posts `Here's what I heard: "<idea>". Want me to start the story?`. Auto-plays via TTS. A prominent "✓ Yes, start my story!" button renders below the bubble.
+3. **Kid choice:**
+   - Taps **"Yes, start my story!"** → `generateStory` fires, full draft populates as a `story-draft` turn, TTS auto-plays the first draft.
+   - Sends **another message** → AI replies with a templated `Should I ADD that to your story, or CHANGE the idea to that?` ("add-or-change" kind). Composer disables; kid must tap **+ Add it** or **↺ Change it**.
+     - **+ Add it** → idea is joined with the refinement ("a puppy and a dragon") and a new echo turn renders; Yes button returns.
+     - **↺ Change it** → the refinement replaces the prior idea; a new echo turn renders; Yes button returns.
+     - If the kid sends yet another message while the Add/Change prompt is open, the new message overwrites the pending refinement and the AI re-asks Add/Change.
+4. **After "Yes, start my story!":** loading indicator → story-draft turn appears with the full per-page list and read-aloud buttons. From here, subsequent kid messages flow through §5.A.3 `reviseStory` (unchanged).
+5. **Revision loop (§5.A.3):** kid responds with revisions, additions, or approval. AI revises using FULL CHAT HISTORY plus the current story state. Repeats until "I like the whole story!".
+
+No hard revision cap. The confirmation step is purely templated — no AI task is added. Empty/silent state after several minutes saves a draft (resumable behavior detailed in §5.A.4).
 
 #### 5.A.2 Visual layout
 
@@ -404,6 +408,8 @@ Output JSON:
 #### 5.A.4 Resumability
 
 Draft books are saved progressively (same pattern as useBookGenerator today). If the kid closes the dialog mid-conversation, the book sits in Firestore with `reviewState.generateChatState: "in-progress"` and the chat history persisted. Re-opening the book offers "Continue making your story" instead of opening the editor. Closing without ever generating (no AI turn yet) discards the draft.
+
+Resumability also covers **mid-clarification state**: `clarificationPhase`, `pendingIdea`, and `pendingRefinement` are persisted alongside the chat history, so a kid can bail out after an echo or add-or-change turn and pick up from the same templated bubble (with the same Yes/Add/Change affordances) on return.
 
 Voice transcription read-back applies to the kid's messages too: when the kid speaks, the transcript appears alongside a "Did I hear you right?" affordance before the message is sent to the AI. This addresses Lincoln's STT mishearing issue raised in §9 Q2.
 

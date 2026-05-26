@@ -226,6 +226,13 @@ export interface ReviewState {
   /** Last-set illustration style during the Generate Chat */
   illustrationStyle?: string
 
+  // Confirm-first flow (PR-A patch — clarification phase)
+  clarificationPhase?: 'clarifying' | 'ready'
+  /** The idea currently displayed in the latest echo turn. */
+  pendingIdea?: string
+  /** When set, kid sent a follow-up during clarification awaiting Add/Change. */
+  pendingRefinement?: string | null
+
   // Per-Page Review phase (PR-B will populate these)
   reviewedPages?: number[]
   revisedPages?: number[]
@@ -233,11 +240,16 @@ export interface ReviewState {
   completedAt?: string
 }
 
+/** Kind of an AI message in the Generate Chat — drives how it renders. */
+export type ChatMessageKind = 'echo' | 'add-or-change' | 'story-draft' | 'revision'
+
 /** One turn in the Generate Chat. ts is ms-since-epoch for deterministic ordering. */
 export interface ChatTurn {
   role: 'kid' | 'ai'
   content: string
   ts: number
+  /** Only AI turns set this. Kid turns omit it. */
+  kind?: ChatMessageKind
 }
 
 export interface Book {
