@@ -44,6 +44,8 @@ export interface UseBookGenerateChatOptions {
   resumeBookId?: string
 }
 
+export type ClarificationPhase = 'clarifying' | 'ready'
+
 export interface UseBookGenerateChat {
   chatHistory: ChatTurn[]
   currentStory: GeneratedStory | null
@@ -52,10 +54,19 @@ export interface UseBookGenerateChat {
   error: string | null
   bookId: string | null
 
+  clarificationPhase: ClarificationPhase
+  pendingIdea: string
+  pendingRefinement: string | null
+  canStartStory: boolean
+
   sendKidMessage: (text: string) => Promise<void>
   setIllustrationStyle: (style: string) => void
   commitAndClose: () => Promise<string | null>
   abandonDraft: () => Promise<void>
+
+  confirmStartStory: () => Promise<void>
+  confirmAddRefinement: () => Promise<void>
+  confirmChangeRefinement: () => Promise<void>
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -98,6 +109,47 @@ function storyToPages(story: GeneratedStory): BookPage[] {
   }))
 }
 
+const CHAINING_WORDS = new Set([
+  'and',
+  'or',
+  'with',
+  'plus',
+  'also',
+  'but',
+  'then',
+])
+
+/**
+ * Dumb heuristic to combine the kid's prior idea with a refinement they
+ * tapped "+ Add it" for. Trims trailing punctuation off the first part,
+ * inserts "and" unless the refinement already starts with a chaining word.
+ */
+export function joinIdeas(a: string, b: string): string {
+  const left = a.replace(/[.!?,\s]+$/u, '').trim()
+  const right = b.replace(/^\s+/u, '')
+  if (!left) return right
+  if (!right) return left
+  const firstWord = right.split(/\s+/, 1)[0]?.toLowerCase() ?? ''
+  const stripped = firstWord.replace(/[^a-z]/gu, '')
+  const naturallyChains = CHAINING_WORDS.has(stripped)
+  const joined = naturallyChains ? `${left} ${right}` : `${left} and ${right}`
+  return joined.replace(/\s{2,}/gu, ' ')
+}
+
+function echoMessage(idea: string): string {
+  return `Here's what I heard: "${idea}". Want me to start the story?`
+}
+
+function echoUpdatedMessage(idea: string): string {
+  return `Here's what I heard now: "${idea}". Want me to start the story?`
+}
+
+const ADD_OR_CHANGE_FIRST =
+  'Should I ADD that to your story, or CHANGE the idea to that?'
+
+const ADD_OR_CHANGE_OVERWRITE =
+  "Got it — that's what you want to add now. Should I ADD this to your story, or CHANGE the idea to this?"
+
 // ── Hook ─────────────────────────────────────────────────────────
 
 export function useBookGenerateChat(
@@ -125,6 +177,11 @@ export function useBookGenerateChat(
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [clarificationPhase, setClarificationPhase] =
+    useState<ClarificationPhase>('clarifying')
+  const [pendingIdea, setPendingIdea] = useState<string>('')
+  const [pendingRefinement, setPendingRefinement] = useState<string | null>(null)
+
   // Track whether we've initialized from a resume so we don't keep refetching.
   const initializedRef = useRef(false)
 
@@ -141,6 +198,11 @@ export function useBookGenerateChat(
         const state = data.reviewState
         if (state?.chatHistory) setChatHistory(state.chatHistory)
         if (state?.illustrationStyle) setIllustrationStyle(state.illustrationStyle)
+        if (state?.clarificationPhase) setClarificationPhase(state.clarificationPhase)
+        if (typeof state?.pendingIdea === 'string') setPendingIdea(state.pendingIdea)
+        if (state?.pendingRefinement !== undefined) {
+          setPendingRefinement(state.pendingRefinement ?? null)
+        }
         // Reconstruct currentStory from persisted pages.
         if (Array.isArray(data.pages) && data.pages.length > 0) {
           setCurrentStory({
@@ -152,6 +214,8 @@ export function useBookGenerateChat(
               wordsOnPage: p.sightWordsOnPage,
             })),
           })
+          // If we have a story but no explicit phase, we're in "ready" land.
+          if (!state?.clarificationPhase) setClarificationPhase('ready')
         }
       } catch (err) {
         console.warn('Failed to resume book draft:', err)
@@ -164,12 +228,15 @@ export function useBookGenerateChat(
 
   // ── Persistence ──────────────────────────────────────────────
 
-  const persist = useCallback(
+  const persistStory = useCallback(
     async (
       story: GeneratedStory,
       nextHistory: ChatTurn[],
       style: string,
       generateChatState: 'in-progress' | 'completed',
+      phase: ClarificationPhase,
+      idea: string,
+      refinement: string | null,
     ): Promise<string | null> => {
       const now = new Date().toISOString()
       const pages = storyToPages(story)
@@ -180,8 +247,6 @@ export function useBookGenerateChat(
           const snap = await getDoc(ref)
           if (snap.exists()) {
             const current = snap.data() as Book
-            // Preserve existing images on pages that already have them; only
-            // overwrite pages whose text changed.
             const mergedPages: BookPage[] = pages.map((p, i) => {
               const prior = current.pages?.[i]
               if (!prior) return p
@@ -203,6 +268,9 @@ export function useBookGenerateChat(
                 generateChatState,
                 chatHistory: nextHistory,
                 illustrationStyle: style,
+                clarificationPhase: phase,
+                pendingIdea: idea,
+                pendingRefinement: refinement,
               },
             })
             return bookId
@@ -212,7 +280,6 @@ export function useBookGenerateChat(
         }
       }
 
-      // First save — create the book doc.
       const newBook: Omit<Book, 'id'> = {
         childId: attribution?.createdFor ?? childId,
         title: story.title,
@@ -228,7 +295,7 @@ export function useBookGenerateChat(
         createdBy: attribution?.createdBy ?? childId,
         createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
-          storyIdea: '',
+          storyIdea: idea,
           words: [],
           style,
           pageCount,
@@ -237,6 +304,9 @@ export function useBookGenerateChat(
           generateChatState,
           chatHistory: nextHistory,
           illustrationStyle: style,
+          clarificationPhase: phase,
+          pendingIdea: idea,
+          pendingRefinement: refinement,
         },
       }
       try {
@@ -251,6 +321,83 @@ export function useBookGenerateChat(
     [familyId, childId, bookId, attribution, pageCount],
   )
 
+  /**
+   * Persist clarification-phase state to Firestore before any story exists.
+   * Once a story exists we go through persistStory instead.
+   */
+  const persistClarification = useCallback(
+    async (
+      nextHistory: ChatTurn[],
+      style: string,
+      phase: ClarificationPhase,
+      idea: string,
+      refinement: string | null,
+    ): Promise<void> => {
+      const now = new Date().toISOString()
+      if (bookId) {
+        const ref = doc(booksCollection(familyId), bookId)
+        try {
+          const snap = await getDoc(ref)
+          if (snap.exists()) {
+            const current = snap.data() as Book
+            await setDoc(ref, {
+              ...current,
+              updatedAt: now,
+              reviewState: {
+                ...(current.reviewState ?? {}),
+                generateChatState: 'in-progress',
+                chatHistory: nextHistory,
+                illustrationStyle: style,
+                clarificationPhase: phase,
+                pendingIdea: idea,
+                pendingRefinement: refinement,
+              },
+            })
+          }
+        } catch (err) {
+          console.warn('Failed to update draft clarification state:', err)
+        }
+        return
+      }
+
+      const newBook: Omit<Book, 'id'> = {
+        childId: attribution?.createdFor ?? childId,
+        title: '',
+        pages: [],
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now,
+        subjectBuckets: ['LanguageArts' as SubjectBucket],
+        bookType: 'generated',
+        source: 'ai-generated',
+        theme: inferBookTheme('', [], style) as BookTheme,
+        createdBy: attribution?.createdBy ?? childId,
+        createdFor: attribution?.createdFor ?? childId,
+        generationConfig: {
+          storyIdea: idea,
+          words: [],
+          style,
+          pageCount,
+        },
+        reviewState: {
+          generateChatState: 'in-progress',
+          chatHistory: nextHistory,
+          illustrationStyle: style,
+          clarificationPhase: phase,
+          pendingIdea: idea,
+          pendingRefinement: refinement,
+        },
+      }
+      try {
+        const ref = await addDoc(booksCollection(familyId), newBook as Book)
+        setBookId(ref.id)
+      } catch (err) {
+        console.error('Failed to create draft clarification book:', err)
+      }
+    },
+    [familyId, childId, bookId, attribution, pageCount],
+  )
+
   // ── Send a kid message ───────────────────────────────────────
 
   const sendKidMessage = useCallback(
@@ -260,51 +407,14 @@ export function useBookGenerateChat(
 
       const ts = Date.now()
       const kidTurn: ChatTurn = { role: 'kid', content: trimmed, ts }
-      const historyWithKid: ChatTurn[] = [...chatHistory, kidTurn]
-      setChatHistory(historyWithKid)
-      setIsLoading(true)
-      setError(null)
 
-      try {
-        // First AI turn → generateStory; subsequent → reviseStory.
-        const isFirstTurn = currentStory === null
-
-        if (isFirstTurn) {
-          const result = await chat({
-            familyId,
-            childId,
-            taskType: 'generateStory' as TaskType,
-            messages: [
-              {
-                role: 'user',
-                content: JSON.stringify({
-                  storyIdea: trimmed,
-                  words: [],
-                  pageCount,
-                  theme: inferBookTheme(trimmed, [], illustrationStyle),
-                }),
-              },
-            ],
-          })
-          if (!result?.message) {
-            setError('I had trouble writing that. Try again?')
-            return
-          }
-          const story = parseGeneratedStory(result.message)
-          if (!story) {
-            setError('I had trouble writing that. Try again?')
-            return
-          }
-          const aiTurn: ChatTurn = {
-            role: 'ai',
-            content: `Here's your story! "${story.title}"`,
-            ts: Date.now(),
-          }
-          const nextHistory: ChatTurn[] = [...historyWithKid, aiTurn]
-          setCurrentStory(story)
-          setChatHistory(nextHistory)
-          await persist(story, nextHistory, illustrationStyle, 'in-progress')
-        } else {
+      // ── Post-story revision branch ──
+      if (clarificationPhase === 'ready') {
+        const historyWithKid: ChatTurn[] = [...chatHistory, kidTurn]
+        setChatHistory(historyWithKid)
+        setIsLoading(true)
+        setError(null)
+        try {
           const result = await chat({
             familyId,
             childId,
@@ -342,53 +452,288 @@ export function useBookGenerateChat(
             role: 'ai',
             content: parsed.humanResponse,
             ts: Date.now(),
+            kind: 'revision',
           }
           const nextHistory: ChatTurn[] = [...historyWithKid, aiTurn]
-          const nextStory = parsed.storyUpdated && parsed.updatedStory
-            ? parsed.updatedStory
-            : currentStory
+          const nextStory =
+            parsed.storyUpdated && parsed.updatedStory
+              ? parsed.updatedStory
+              : currentStory
           setChatHistory(nextHistory)
           if (parsed.storyUpdated && parsed.updatedStory) {
             setCurrentStory(parsed.updatedStory)
           }
           if (nextStory) {
-            await persist(nextStory, nextHistory, illustrationStyle, 'in-progress')
+            await persistStory(
+              nextStory,
+              nextHistory,
+              illustrationStyle,
+              'in-progress',
+              'ready',
+              pendingIdea,
+              null,
+            )
           }
+        } finally {
+          setIsLoading(false)
         }
-      } finally {
-        setIsLoading(false)
+        return
       }
+
+      // ── Clarification branch — no AI call ──
+      setError(null)
+
+      if (chatHistory.length === 0) {
+        // First message ever → echo turn.
+        const aiTurn: ChatTurn = {
+          role: 'ai',
+          content: echoMessage(trimmed),
+          ts: Date.now(),
+          kind: 'echo',
+        }
+        const nextHistory: ChatTurn[] = [...chatHistory, kidTurn, aiTurn]
+        setChatHistory(nextHistory)
+        setPendingIdea(trimmed)
+        setPendingRefinement(null)
+        await persistClarification(
+          nextHistory,
+          illustrationStyle,
+          'clarifying',
+          trimmed,
+          null,
+        )
+        return
+      }
+
+      if (pendingRefinement === null) {
+        // Kid sent a follow-up during clarification → Add/Change prompt.
+        const aiTurn: ChatTurn = {
+          role: 'ai',
+          content: ADD_OR_CHANGE_FIRST,
+          ts: Date.now(),
+          kind: 'add-or-change',
+        }
+        const nextHistory: ChatTurn[] = [...chatHistory, kidTurn, aiTurn]
+        setChatHistory(nextHistory)
+        setPendingRefinement(trimmed)
+        await persistClarification(
+          nextHistory,
+          illustrationStyle,
+          'clarifying',
+          pendingIdea,
+          trimmed,
+        )
+        return
+      }
+
+      // Kid sent yet another message while Add-or-Change was pending —
+      // overwrite the pending refinement and ask again.
+      const aiTurn: ChatTurn = {
+        role: 'ai',
+        content: ADD_OR_CHANGE_OVERWRITE,
+        ts: Date.now(),
+        kind: 'add-or-change',
+      }
+      const nextHistory: ChatTurn[] = [...chatHistory, kidTurn, aiTurn]
+      setChatHistory(nextHistory)
+      setPendingRefinement(trimmed)
+      await persistClarification(
+        nextHistory,
+        illustrationStyle,
+        'clarifying',
+        pendingIdea,
+        trimmed,
+      )
     },
     [
       chat,
       chatHistory,
       currentStory,
+      clarificationPhase,
       familyId,
       childId,
       childName,
       childAge,
       illustrationStyle,
       pageCount,
-      persist,
+      pendingIdea,
+      pendingRefinement,
+      persistClarification,
+      persistStory,
     ],
   )
+
+  // ── Confirm start story (kid taps "Yes, start my story!") ────
+
+  const confirmStartStory = useCallback(async () => {
+    if (clarificationPhase !== 'clarifying') return
+    if (pendingRefinement !== null) return
+    if (!pendingIdea) return
+
+    setIsLoading(true)
+    setError(null)
+    const priorPhase = clarificationPhase
+    setClarificationPhase('ready')
+    try {
+      const result = await chat({
+        familyId,
+        childId,
+        taskType: 'generateStory' as TaskType,
+        messages: [
+          {
+            role: 'user',
+            content: JSON.stringify({
+              storyIdea: pendingIdea,
+              words: [],
+              pageCount,
+              theme: inferBookTheme(pendingIdea, [], illustrationStyle),
+            }),
+          },
+        ],
+      })
+      if (!result?.message) {
+        setError('I had trouble writing that. Try again?')
+        setClarificationPhase(priorPhase)
+        return
+      }
+      const story = parseGeneratedStory(result.message)
+      if (!story) {
+        setError('I had trouble writing that. Try again?')
+        setClarificationPhase(priorPhase)
+        return
+      }
+      const aiTurn: ChatTurn = {
+        role: 'ai',
+        content: `Here's your story! "${story.title}"`,
+        ts: Date.now(),
+        kind: 'story-draft',
+      }
+      const nextHistory: ChatTurn[] = [...chatHistory, aiTurn]
+      setCurrentStory(story)
+      setChatHistory(nextHistory)
+      await persistStory(
+        story,
+        nextHistory,
+        illustrationStyle,
+        'in-progress',
+        'ready',
+        pendingIdea,
+        null,
+      )
+    } finally {
+      setIsLoading(false)
+    }
+  }, [
+    chat,
+    chatHistory,
+    clarificationPhase,
+    familyId,
+    childId,
+    illustrationStyle,
+    pageCount,
+    pendingIdea,
+    pendingRefinement,
+    persistStory,
+  ])
+
+  // ── Confirm add refinement ───────────────────────────────────
+
+  const confirmAddRefinement = useCallback(async () => {
+    if (pendingRefinement === null) return
+    const joined = joinIdeas(pendingIdea, pendingRefinement)
+    const aiTurn: ChatTurn = {
+      role: 'ai',
+      content: echoUpdatedMessage(joined),
+      ts: Date.now(),
+      kind: 'echo',
+    }
+    const nextHistory: ChatTurn[] = [...chatHistory, aiTurn]
+    setPendingIdea(joined)
+    setPendingRefinement(null)
+    setChatHistory(nextHistory)
+    await persistClarification(
+      nextHistory,
+      illustrationStyle,
+      'clarifying',
+      joined,
+      null,
+    )
+  }, [
+    chatHistory,
+    illustrationStyle,
+    pendingIdea,
+    pendingRefinement,
+    persistClarification,
+  ])
+
+  // ── Confirm change refinement ────────────────────────────────
+
+  const confirmChangeRefinement = useCallback(async () => {
+    if (pendingRefinement === null) return
+    const next = pendingRefinement
+    const aiTurn: ChatTurn = {
+      role: 'ai',
+      content: echoUpdatedMessage(next),
+      ts: Date.now(),
+      kind: 'echo',
+    }
+    const nextHistory: ChatTurn[] = [...chatHistory, aiTurn]
+    setPendingIdea(next)
+    setPendingRefinement(null)
+    setChatHistory(nextHistory)
+    await persistClarification(
+      nextHistory,
+      illustrationStyle,
+      'clarifying',
+      next,
+      null,
+    )
+  }, [
+    chatHistory,
+    illustrationStyle,
+    pendingRefinement,
+    persistClarification,
+  ])
 
   // ── Commit + abandon ─────────────────────────────────────────
 
   const commitAndClose = useCallback(async (): Promise<string | null> => {
     if (!currentStory) return null
-    const finalId = await persist(currentStory, chatHistory, illustrationStyle, 'completed')
+    const finalId = await persistStory(
+      currentStory,
+      chatHistory,
+      illustrationStyle,
+      'completed',
+      'ready',
+      pendingIdea,
+      null,
+    )
     return finalId ?? bookId
-  }, [currentStory, chatHistory, illustrationStyle, persist, bookId])
+  }, [
+    currentStory,
+    chatHistory,
+    illustrationStyle,
+    persistStory,
+    bookId,
+    pendingIdea,
+  ])
 
   const abandonDraft = useCallback(async (): Promise<void> => {
-    // Only valid before any AI turn has produced a story. After that, the draft
-    // persists for resumption — see design doc §5.A.4.
+    // Allowed any time before an AI story-draft turn exists — the kid can
+    // bail out of clarification freely. Once a story-draft exists, the draft
+    // persists for resumption (no-op here).
     if (currentStory !== null) return
-    // Clear local state. We never persisted a book yet, so nothing to delete.
     setChatHistory([])
+    setPendingIdea('')
+    setPendingRefinement(null)
+    setClarificationPhase('clarifying')
     setError(null)
   }, [currentStory])
+
+  const canStartStory =
+    clarificationPhase === 'clarifying' &&
+    pendingRefinement === null &&
+    pendingIdea.trim().length > 0
 
   return {
     chatHistory,
@@ -397,9 +742,16 @@ export function useBookGenerateChat(
     isLoading,
     error,
     bookId,
+    clarificationPhase,
+    pendingIdea,
+    pendingRefinement,
+    canStartStory,
     sendKidMessage,
     setIllustrationStyle,
     commitAndClose,
     abandonDraft,
+    confirmStartStory,
+    confirmAddRefinement,
+    confirmChangeRefinement,
   }
 }
