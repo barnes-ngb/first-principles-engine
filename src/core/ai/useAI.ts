@@ -11,6 +11,7 @@ export const TaskType = {
   Chat: 'chat',
   Quest: 'quest',
   GenerateStory: 'generateStory',
+  ReviseStory: 'reviseStory',
   Workshop: 'workshop',
   AnalyzeWorkbook: 'analyzeWorkbook',
   Disposition: 'disposition',

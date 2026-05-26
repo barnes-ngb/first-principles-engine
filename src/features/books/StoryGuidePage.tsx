@@ -12,8 +12,6 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import { useAI } from '../../core/ai/useAI'
-import type { TaskType } from '../../core/ai/useAI'
 import { useBookGenerator, inferBookTheme } from './useBookGenerator'
 import { useSightWordProgress } from './useSightWordProgress'
 import StoryGuideQuestion from './StoryGuideQuestion'
@@ -35,7 +33,7 @@ function ageFromBirthdate(birthdate: string | undefined, fallback: number): numb
   }
 }
 
-type WizardStep = 'questions' | 'questions-done' | 'ai-shaping' | 'brief-preview' | 'generating'
+type WizardStep = 'questions' | 'questions-done' | 'brief-preview' | 'generating'
 
 export default function StoryGuidePage() {
   const navigate = useNavigate()
@@ -49,65 +47,20 @@ export default function StoryGuidePage() {
   const pageCount = isLincoln ? 10 : 6
   const genStyle = isLincoln ? 'minecraft' : 'storybook'
 
-  const { chat } = useAI()
   const { generateBook, progress, generating, resetProgress } = useBookGenerator()
   const { getWeakWords, loading: sightWordsLoading } = useSightWordProgress(familyId, childId)
 
   const guide = useStoryGuide(isLincoln)
   const [wizardStep, setWizardStep] = useState<WizardStep>('questions')
-  const [aiShapingLoading, setAiShapingLoading] = useState(false)
-  const [aiShapingError, setAiShapingError] = useState<string | null>(null)
-  const [shapingTyped, setShapingTyped] = useState('')
   const [generationError, setGenerationError] = useState<string | null>(null)
 
   const accentColor = isLincoln ? '#4caf50' : '#f06292'
   const accentHover = isLincoln ? '#388e3c' : '#e91e8c'
 
-  // Derive transition from 'questions' → 'questions-done' without an effect
+  // Derive transition: once questions are done, jump straight to brief-preview
+  // (AI shaping step removed per Story Gen V2 §6.3).
   const effectiveWizardStep: WizardStep =
-    guide.isDone && wizardStep === 'questions' ? 'questions-done' : wizardStep
-
-  // ── AI shaping step ──────────────────────────────────────────
-
-  const handleRequestAiShaping = useCallback(async () => {
-    if (!familyId || !childId) return
-    setAiShapingLoading(true)
-    setAiShapingError(null)
-
-    const answersText = [
-      `Hero: ${guide.answers[0] || '(skipped)'}`,
-      `Setting: ${guide.answers[1] || '(skipped)'}`,
-      `Problem: ${guide.answers[2] || '(skipped)'}`,
-      `Solution: ${guide.answers[3] || '(skipped)'}`,
-      `Ending: ${guide.answers[4] || '(skipped)'}`,
-    ].join('\n')
-
-    const prompt = `You are a kind story helper for a ${childAge}-year-old child. They answered these questions about their story:\n${answersText}\n\nIn 2-3 sentences, suggest one fun detail they could add to make the story more exciting. Ask it as a simple question they can answer yes or no, or with one word. Ask only ONE follow-up question. Keep it very simple.`
-
-    const result = await chat({
-      familyId,
-      childId,
-      taskType: 'chat' as TaskType,
-      messages: [{ role: 'user', content: prompt }],
-    })
-
-    setAiShapingLoading(false)
-
-    if (result?.message) {
-      guide.setAiShapingQuestion(result.message)
-      guide.speakText(result.message)
-      setWizardStep('ai-shaping')
-    } else {
-      setAiShapingError('Could not get a suggestion — you can skip this step.')
-    }
-  }, [familyId, childId, childAge, chat, guide])
-
-  const handleAiShapingSubmit = useCallback(() => {
-    if (shapingTyped.trim()) {
-      guide.setAiShapingAnswer(shapingTyped.trim())
-    }
-    setWizardStep('brief-preview')
-  }, [shapingTyped, guide])
+    guide.isDone && wizardStep === 'questions' ? 'brief-preview' : wizardStep
 
   // ── Story generation ─────────────────────────────────────────
 
@@ -227,146 +180,6 @@ export default function StoryGuidePage() {
             canGoBack={guide.currentIndex > 0}
             isLincoln={isLincoln}
           />
-        </Stack>
-      </Page>
-    )
-  }
-
-  // ── Render: questions done — offer AI shaping ────────────────
-
-  if (effectiveWizardStep === 'questions-done') {
-    return (
-      <Page>
-        <Stack spacing={3} sx={{ maxWidth: 480, mx: 'auto', py: 2 }}>
-          <Typography
-            variant="h5"
-            sx={{
-              fontWeight: 700,
-              textAlign: 'center',
-              ...(isLincoln
-                ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.9rem' }
-                : {}),
-            }}
-          >
-            {isLincoln ? 'Story ready! 🎮' : 'Your story is ready! 🌟'}
-          </Typography>
-
-          {aiShapingError && (
-            <Alert severity="warning" onClose={() => setAiShapingError(null)}>
-              {aiShapingError}
-            </Alert>
-          )}
-
-          <Typography variant="body1" textAlign="center" color="text.secondary">
-            {isLincoln
-              ? 'Want to make it even more epic? Let AI suggest one more cool detail!'
-              : 'Want to make it even more magical? I can suggest one more special detail!'}
-          </Typography>
-
-          <Stack spacing={2}>
-            <Button
-              variant="outlined"
-              size="large"
-              onClick={handleRequestAiShaping}
-              disabled={aiShapingLoading || sightWordsLoading}
-              sx={{ minHeight: 52, textTransform: 'none' }}
-            >
-              {aiShapingLoading && <CircularProgress size={18} sx={{ mr: 1 }} />}
-              {isLincoln ? 'Make it even more epic! →' : 'Make it even more magical! →'}
-            </Button>
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<AutoStoriesIcon />}
-              onClick={() => setWizardStep('brief-preview')}
-              sx={{
-                minHeight: 52,
-                textTransform: 'none',
-                bgcolor: accentColor,
-                '&:hover': { bgcolor: accentHover },
-              }}
-            >
-              Skip → Review My Story
-            </Button>
-          </Stack>
-        </Stack>
-      </Page>
-    )
-  }
-
-  // ── Render: AI shaping question ──────────────────────────────
-
-  if (effectiveWizardStep === 'ai-shaping') {
-    return (
-      <Page>
-        <Stack spacing={3} sx={{ maxWidth: 480, mx: 'auto', py: 2 }}>
-          <Typography
-            variant="h6"
-            sx={{
-              fontWeight: 700,
-              textAlign: 'center',
-              ...(isLincoln
-                ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.75rem', lineHeight: 2 }
-                : {}),
-            }}
-          >
-            {isLincoln ? 'One more idea...' : 'One more magical idea...'}
-          </Typography>
-
-          {guide.aiShapingQuestion && (
-            <Box
-              sx={{
-                p: 3,
-                borderRadius: 3,
-                bgcolor: isLincoln ? 'grey.900' : '#fff8f0',
-                border: '2px solid',
-                borderColor: accentColor,
-                textAlign: 'center',
-              }}
-            >
-              <Typography variant="body1" sx={{ fontWeight: 600, fontSize: '1.1rem' }}>
-                {guide.aiShapingQuestion}
-              </Typography>
-            </Box>
-          )}
-
-          <textarea
-            value={shapingTyped}
-            onChange={(e) => setShapingTyped(e.target.value)}
-            placeholder="Type your answer..."
-            rows={3}
-            style={{
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid #ccc',
-              padding: 12,
-              fontSize: '1rem',
-              resize: 'vertical',
-              boxSizing: 'border-box',
-            }}
-          />
-
-          <Stack direction="row" spacing={2} justifyContent="center">
-            <Button
-              variant="contained"
-              onClick={handleAiShapingSubmit}
-              disabled={!shapingTyped.trim()}
-              sx={{
-                bgcolor: accentColor,
-                '&:hover': { bgcolor: accentHover },
-                textTransform: 'none',
-              }}
-            >
-              Add this detail!
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => setWizardStep('brief-preview')}
-              sx={{ textTransform: 'none' }}
-            >
-              Skip
-            </Button>
-          </Stack>
         </Stack>
       </Page>
     )
