@@ -37,7 +37,9 @@ import type { Firestore } from "firebase-admin/firestore";
  *       — loadQuestCountForMonth (childId + status equalities + evaluatedAt range)
  *
  *   dadLabReports:
- *     (status ASC, date ASC) — loadDadLabReportsInMonth — already present
+ *     `date` single-field (auto) — loadDadLabReportsInMonth (range only).
+ *     The legacy (status ASC, date ASC) composite still exists for other
+ *     callers but is no longer required by this loader.
  *   hours:
  *     (childId ASC, date ASC) — loadHoursForMonth — already present
  *   days:
@@ -438,9 +440,12 @@ export async function loadDadLabReportsInMonth(
   start: string,
   end: string,
 ): Promise<DadLabEntry[]> {
+  // No `status` filter: the lifecycle is planned → active → complete, but
+  // families don't always mark a session 'complete' even after the kid did
+  // the work. The child's contribution (`childReports[childId]`) is the real
+  // participation signal — that filter runs below.
   const snap = await db
     .collection(`families/${familyId}/dadLabReports`)
-    .where("status", "==", "complete")
     .where("date", ">=", start)
     .where("date", "<=", end)
     .get();
