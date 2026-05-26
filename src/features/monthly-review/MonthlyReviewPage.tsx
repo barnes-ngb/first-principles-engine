@@ -45,6 +45,8 @@ export function MonthlyReviewPage({
       return <CoverLayout page={page} review={review} mode={mode} />
     case SectionType.ByTheNumbers:
       return <StatsLayout page={page} review={review} mode={mode} />
+    case SectionType.MoreFromMonth:
+      return <MoreFromMonthLayout page={page} review={review} mode={mode} />
     default:
       return <StandardLayout page={page} review={review} mode={mode} />
   }
@@ -302,6 +304,64 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
           </Box>
         </Box>
       )}
+    </Stack>
+  )
+}
+
+// ── More from this month ────────────────────────────────────────
+
+function MoreFromMonthLayout({ page, mode }: MonthlyReviewPageProps) {
+  const content = getContent(page, mode)
+  const photos = getModePhotos(page, mode)
+
+  // Match the StandardLayout photo-row swipe fix: keep horizontal gestures
+  // inside the gallery from triggering page flips in MonthlyReviewReader.
+  const stopTouchPropagation = (e: React.TouchEvent) => {
+    e.stopPropagation()
+  }
+
+  if (photos.length === 0) return null
+
+  return (
+    <Stack spacing={2} sx={{ px: 1, py: 2 }}>
+      {content.headline && (
+        <Typography
+          variant="h4"
+          sx={{
+            fontFamily: '"Georgia", serif',
+            fontWeight: 600,
+            lineHeight: 1.2,
+          }}
+        >
+          {content.headline}
+        </Typography>
+      )}
+      {content.body && (
+        <Typography
+          sx={{ fontSize: 14, color: 'text.secondary' }}
+        >
+          {content.body}
+        </Typography>
+      )}
+      <Box
+        onTouchStart={stopTouchPropagation}
+        onTouchMove={stopTouchPropagation}
+        onTouchEnd={stopTouchPropagation}
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+          gap: 1.5,
+          mt: 1,
+        }}
+      >
+        {photos.map((photo) => (
+          <MonthlyPhoto
+            key={photo.id}
+            photo={photo}
+            caption={content.captions?.[photo.id]}
+          />
+        ))}
+      </Box>
     </Stack>
   )
 }

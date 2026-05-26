@@ -166,6 +166,13 @@ export interface MonthAggregate {
    * placement and cover-hero selection.
    */
   classifiedScanIds: Set<string>;
+  /**
+   * Source-doc IDs of every artifact that is NOT a workbook scan. Drives the
+   * artifact-default placement policy (v1.4): any photo in this set qualifies
+   * for kid-mode placement without requiring engagement signal. Strict subset
+   * of the `artifacts` collection for this child/month.
+   */
+  allArtifactIds: Set<string>;
   conundrums: ConundrumEntry[];
   teachBacks: TeachBackEntry[];
   hours: HoursSummary;
@@ -471,11 +478,13 @@ export async function loadPhotosForMonth(
   photos: PhotoRef[];
   workbookArtifactIds: Set<string>;
   classifiedScanIds: Set<string>;
+  allArtifactIds: Set<string>;
 }> {
   const endIso = end + "T23:59:59";
   const photos: PhotoRef[] = [];
   const workbookArtifactIds = new Set<string>();
   const classifiedScanIds = new Set<string>();
+  const allArtifactIds = new Set<string>();
 
   // Scans
   try {
@@ -523,7 +532,13 @@ export async function loadPhotosForMonth(
       // Only image-bearing artifacts (Photo, Worksheet); skip Audio/Note
       if (type !== "Photo" && type !== "Worksheet" && type !== "Video") continue;
       const tags = (d.tags ?? {}) as { subjectBucket?: string };
-      if (type === "Worksheet") workbookArtifactIds.add(doc.id);
+      if (type === "Worksheet") {
+        workbookArtifactIds.add(doc.id);
+      } else {
+        // Any artifact that's not a workbook capture qualifies as a creative
+        // artifact for artifact-default kid-mode placement.
+        allArtifactIds.add(doc.id);
+      }
       const ref: PhotoRef = {
         id: `artifact:${doc.id}`,
         storagePath,
@@ -538,7 +553,7 @@ export async function loadPhotosForMonth(
     console.warn("[monthlyReview] loadPhotosForMonth artifacts failed:", err);
   }
 
-  return { photos, workbookArtifactIds, classifiedScanIds };
+  return { photos, workbookArtifactIds, classifiedScanIds, allArtifactIds };
 }
 
 function extractScanSubject(d: Record<string, unknown>): string | undefined {
@@ -777,6 +792,7 @@ export async function aggregateMonthData(
     photos: photosResult.photos,
     workbookArtifactIds: photosResult.workbookArtifactIds,
     classifiedScanIds: photosResult.classifiedScanIds,
+    allArtifactIds: photosResult.allArtifactIds,
     conundrums,
     teachBacks,
     hours,

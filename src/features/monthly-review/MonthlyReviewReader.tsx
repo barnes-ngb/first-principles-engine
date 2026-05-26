@@ -39,6 +39,7 @@ const MVP_SECTION_TYPES: ReadonlyArray<string> = [
   SectionType.WhatYouLoved,
   SectionType.WorkedThrough,
   SectionType.ByTheNumbers,
+  SectionType.MoreFromMonth,
 ]
 
 type ReaderMode = 'kid' | 'parent'
@@ -77,11 +78,21 @@ export function MonthlyReviewReader({
   const pages: MonthlyReviewPageType[] = useMemo(() => {
     if (!review) return []
     return [...review.pages]
-      .filter(
-        (p) => !p.hidden && MVP_SECTION_TYPES.includes(p.sectionType),
-      )
+      .filter((p) => {
+        if (p.hidden) return false
+        if (!MVP_SECTION_TYPES.includes(p.sectionType)) return false
+        // moreFromMonth is the kid-only overflow gallery — never show it
+        // in parent mode even if the data exists.
+        if (
+          p.sectionType === SectionType.MoreFromMonth &&
+          mode === 'parent'
+        ) {
+          return false
+        }
+        return true
+      })
       .sort((a, b) => a.order - b.order)
-  }, [review])
+  }, [review, mode])
 
   const totalPages = pages.length
   const currentPage = pages[pageIndex]

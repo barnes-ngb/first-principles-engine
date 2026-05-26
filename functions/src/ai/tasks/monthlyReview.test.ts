@@ -17,6 +17,7 @@ function emptyAggregate(): MonthAggregate {
     photos: [],
     workbookArtifactIds: new Set(),
     classifiedScanIds: new Set(),
+    allArtifactIds: new Set(),
     conundrums: [],
     teachBacks: [],
     hours: { totalMinutes: 0, minutesBySubject: {} },
@@ -30,6 +31,7 @@ function emptyPlacement(): SectionPlacement {
     cover: { kid: [], parent: [] },
     whatYouLoved: { kid: [], parent: [] },
     workedThrough: { kid: [], parent: [] },
+    moreFromMonth: { kid: [], parent: [] },
     more: [],
   };
 }
@@ -78,6 +80,43 @@ describe("composeMonthlyReview", () => {
     };
     const review = composeMonthlyReview(baseInput({ hero }));
     expect(review.heroPhotoRef).toEqual(hero);
+  });
+
+  it("omits the moreFromMonth page when no overflow exists", () => {
+    const review = composeMonthlyReview(baseInput());
+    const sectionTypes = review.pages.map((p) => p.sectionType);
+    expect(sectionTypes).not.toContain("moreFromMonth");
+  });
+
+  it("adds a moreFromMonth page with fixed kid content when overflow exists", () => {
+    const overflowPhoto = {
+      id: "artifact:over-1",
+      storagePath: "art/over-1.jpg",
+      source: "artifact" as const,
+      sourceDocId: "over-1",
+      capturedAt: "2026-05-15T10:00:00Z",
+    };
+    const placement: SectionPlacement = {
+      cover: { kid: [], parent: [] },
+      whatYouLoved: { kid: [], parent: [] },
+      workedThrough: { kid: [], parent: [] },
+      moreFromMonth: { kid: [overflowPhoto], parent: [] },
+      more: [],
+    };
+    const review = composeMonthlyReview(baseInput({ placement }));
+    const page = review.pages.find((p) => p.sectionType === "moreFromMonth");
+    expect(page).toBeDefined();
+    expect(page!.kidMode.headline).toBe("More from this month");
+    expect(page!.kidMode.body).toBe("Look at everything you made.");
+    // Parent mode is empty content — the renderer filters this page out
+    // entirely in parent mode.
+    expect(page!.parentMode).toEqual({});
+    const photoRefs = page!.photoRefs;
+    if (Array.isArray(photoRefs)) {
+      throw new Error("expected per-mode photoRefs");
+    }
+    expect(photoRefs.kid.map((p) => p.id)).toEqual(["artifact:over-1"]);
+    expect(photoRefs.parent).toEqual([]);
   });
 
   it("omits optional photo fields (score/subjectTag) when undefined on curated photos", () => {

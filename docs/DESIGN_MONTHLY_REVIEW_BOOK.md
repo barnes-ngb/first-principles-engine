@@ -634,6 +634,69 @@ or regenerating."* — so Shelly can fix it before publishing. Kid mode
 shows nothing — the section reads as a clean text page rather than
 flagging a "missing" photo.
 
+### v1.4 — May 25, 2026 — Artifact-default curation + "More from this month" gallery
+
+Real-world testing after the v1.3 PR shipped surfaced the next failure mode:
+Lincoln's April 2026 kid book had 0–1 photos per section even though the
+month included multiple completed books, Dad Lab activities, and family
+artifacts. Root cause: the v1.3 `hasPositiveKidModeSignal` filter required
+engagement signal (😊/😐 emojis on Today items), creative-artifact tags,
+or classified scans for kid-mode inclusion. In real use, engagement tagging
+is not happening reliably — Shelly captures end-of-day or end-of-week, not
+in-the-moment — so the positive-filter chain starves and the kid book
+renders nearly photo-less.
+
+**Policy shift: artifact-default placement.** Every photo from the
+`artifacts` collection that is not a workbook scan now qualifies for
+kid-mode placement, regardless of whether engagement was tagged. A photo
+of a finished book, a sketch, a Dad Lab experiment, a family activity, or
+Lincoln teaching London all belong in the kid book by default. The
+`hasPositiveKidModeSignal` helper is **kept** but downgraded from a
+gating filter to a ranking heuristic — engaged photos still sort higher
+through existing score-based ordering. `assignPhotosToSections` now uses
+the broader kid-mode pool (`!isWorkbookScan`) for cover / whatYouLoved /
+workedThrough placement.
+
+**Workbook scans still excluded from kid mode.** The v1.2 rule is
+unchanged — `isWorkbookScan` photos never appear in kid sections, and
+parent mode still surfaces them on `workedThrough` as evidence.
+
+**New `moreFromMonth` overflow section.** Anything kid-eligible that
+doesn't land in cover / whatYouLoved / workedThrough flows into a new
+gallery section at the end of the kid book (after `byTheNumbers`, before
+`backCover`). Cap is 20 photos. Layout is a CSS grid (≥140px columns)
+with soft per-photo captions; no AI text — headline is the fixed
+*"More from this month"* and the body line is *"Look at everything you
+made."* The section is only added to the `pages` array when overflow
+exists; when the kid book has ≤12 artifacts the section is omitted
+entirely. In parent mode the renderer filters this page out so it never
+appears in the parent reader.
+
+**Cover hero allowlist widened (but still strict).** The v1.3 strict
+cover allowlist (book / sketch / Dad Lab artifact OR classified scan)
+now includes any non-workbook artifact via `allArtifactIds`. Workbook
+scans are still excluded — `isWorkbookScan` remains the gate. The
+allowlist *rule* didn't change; the *artifact pool* did.
+
+**Data flow.** `loadPhotosForMonth` now populates `allArtifactIds`
+(`Set<docId>`) covering every artifact whose type is not `Worksheet`.
+`buildCurationContext` forwards it to the curation pass. `MAX_PHOTOS_PER_SECTION`
+gains a `moreFromMonth: { kid: 20, parent: 0 }` entry. `SectionType`
+gains a `MoreFromMonth: 'moreFromMonth'` const. Section order array in
+the composer adds `moreFromMonth` after `byTheNumbers`.
+
+**Renderer.** `MonthlyReviewPage` dispatches a new `MoreFromMonthLayout`
+(grid of `MonthlyPhoto` cards, soft captions, swipe `stopPropagation`
+matching the StandardLayout photo-row fix). `MonthlyReviewReader.tsx`
+adds `MoreFromMonth` to `MVP_SECTION_TYPES` and filters it out when
+`mode === 'parent'`.
+
+**What did NOT change.** The system prompt is untouched (voice is
+working in both modes). The 5 AI-driven sections still get AI text —
+moreFromMonth is purely a photo gallery. Parent mode behavior is
+unchanged. No editor work (deferred to PR E-2: "More Photos" tray +
+per-photo remove).
+
 ---
 
 *Last updated: May 25, 2026*
