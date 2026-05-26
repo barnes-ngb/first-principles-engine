@@ -101,6 +101,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     clarificationPhase,
     pendingRefinement,
     canStartStory,
+    illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,
     commitAndClose,
@@ -109,6 +110,8 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     confirmAddRefinement,
     confirmChangeRefinement,
   } = chat
+
+  const isIllustrating = illustrationProgress.phase === 'illustrating'
 
   // ── Composer state ────────────────────────────────────────────
 
@@ -143,6 +146,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
 
   const composerDisabled =
     isLoading ||
+    isIllustrating ||
     (clarificationPhase === 'clarifying' && pendingRefinement !== null)
 
   const handleSend = useCallback(async () => {
@@ -226,7 +230,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
 
   // Abandon allowed any time before an AI story-draft turn exists.
   const canAbandon = currentStory === null
-  const canCommit = currentStory !== null && !isLoading
+  const canCommit = currentStory !== null && !isLoading && !isIllustrating
 
   const lastAiKind = useMemo(() => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
@@ -407,6 +411,42 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
       </Box>
 
       {error && <Alert severity="warning">{error}</Alert>}
+
+      {isIllustrating && (
+        <Box
+          aria-live="polite"
+          role="status"
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            p: 1.25,
+            borderRadius: 2,
+            border: '1px solid',
+            borderColor: 'primary.200',
+            bgcolor: 'primary.50',
+          }}
+        >
+          <CircularProgress size={20} />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Illustrating page {illustrationProgress.currentPage} of{' '}
+              {illustrationProgress.totalPages}…
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Hang tight — this can take up to a minute.
+            </Typography>
+          </Box>
+          {illustrationProgress.lastImageUrl && (
+            <Box
+              component="img"
+              src={illustrationProgress.lastImageUrl}
+              alt="Latest illustration preview"
+              sx={{ width: 48, height: 48, borderRadius: 1, boxShadow: 1 }}
+            />
+          )}
+        </Box>
+      )}
 
       {/* Voice transcript confirmation banner (critical for Lincoln) */}
       {pendingTranscript && (
