@@ -2,6 +2,13 @@ import { useCallback, useRef, useState } from 'react'
 
 // ── Types ─────────────────────────────────────────────────────────
 
+export interface UseAudioRecorderOpts {
+  /** Override the default 10s max duration. Clamped to HARD_MAX_DURATION_MS. */
+  maxDurationMs?: number
+  /** Override preferred mime types (first supported wins). */
+  mimeTypePreference?: string[]
+}
+
 export interface UseAudioRecorder {
   /** Whether the browser supports MediaRecorder + getUserMedia */
   isSupported: boolean
@@ -17,6 +24,8 @@ export interface UseAudioRecorder {
   startRecording: () => Promise<void>
   /** Stop recording and return the audio Blob */
   stopRecording: () => Promise<Blob | null>
+  /** Discard the active recording without returning a blob. */
+  cancelRecording: () => void
   /** Play an audio URL (local blob URL or remote URL) */
   playRecording: (url: string) => void
   /** Stop any current playback */
@@ -27,21 +36,37 @@ export interface UseAudioRecorder {
   error: string | null
 }
 
-/** Maximum recording duration in milliseconds */
-const MAX_DURATION_MS = 10_000
+/** Default max recording duration. Existing call sites rely on this 10s cap. */
+const DEFAULT_MAX_DURATION_MS = 10_000
+
+/** Absolute ceiling enforced regardless of caller-provided override. */
+export const HARD_MAX_DURATION_MS = 120_000
+
+const DEFAULT_MIME_PREFERENCE = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+]
 
 /** Preferred MIME type for MediaRecorder */
-function getPreferredMimeType(): string {
+function getPreferredMimeType(preference?: string[]): string {
   if (typeof MediaRecorder === 'undefined') return 'audio/webm'
-  if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus'
-  if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm'
-  if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4'
+  const candidates = preference ?? DEFAULT_MIME_PREFERENCE
+  for (const candidate of candidates) {
+    if (MediaRecorder.isTypeSupported(candidate)) return candidate
+  }
   return 'audio/webm'
 }
 
 // ── Hook ──────────────────────────────────────────────────────────
 
-export function useAudioRecorder(): UseAudioRecorder {
+export function useAudioRecorder(opts?: UseAudioRecorderOpts): UseAudioRecorder {
+  const requestedMax = opts?.maxDurationMs ?? DEFAULT_MAX_DURATION_MS
+  const maxDurationMs = Math.min(
+    Math.max(requestedMax, 0),
+    HARD_MAX_DURATION_MS,
+  )
+  const mimePreference = opts?.mimeTypePreference
   const [isRecording, setIsRecording] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null)
@@ -92,7 +117,7 @@ export function useAudioRecorder(): UseAudioRecorder {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
-      const mimeType = getPreferredMimeType()
+      const mimeType = getPreferredMimeType(mimePreference)
       const recorder = new MediaRecorder(stream, { mimeType })
       recorderRef.current = recorder
       chunksRef.current = []
@@ -132,12 +157,12 @@ export function useAudioRecorder(): UseAudioRecorder {
       recorder.start()
       setIsRecording(true)
 
-      // Auto-stop after MAX_DURATION_MS
+      // Auto-stop after maxDurationMs
       autoStopRef.current = setTimeout(() => {
         if (recorderRef.current?.state === 'recording') {
           recorderRef.current.stop()
         }
-      }, MAX_DURATION_MS)
+      }, maxDurationMs)
     } catch (err) {
       const message =
         err instanceof DOMException && err.name === 'NotAllowedError'
@@ -146,7 +171,7 @@ export function useAudioRecorder(): UseAudioRecorder {
       setError(message)
       cleanup()
     }
-  }, [isSupported, recordingUrl, cleanup])
+  }, [isSupported, recordingUrl, cleanup, maxDurationMs, mimePreference])
 
   const stopRecording = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
@@ -158,6 +183,26 @@ export function useAudioRecorder(): UseAudioRecorder {
       recorderRef.current.stop()
     })
   }, [])
+
+  const cancelRecording = useCallback(() => {
+    if (recorderRef.current && recorderRef.current.state === 'recording') {
+      // Pre-empt onstop so we don't resolve a blob.
+      recorderRef.current.onstop = null
+      try {
+        recorderRef.current.stop()
+      } catch {
+        // ignore
+      }
+    }
+    chunksRef.current = []
+    cleanup()
+    setIsRecording(false)
+    setDurationMs(0)
+    if (blobResolveRef.current) {
+      blobResolveRef.current(null)
+      blobResolveRef.current = null
+    }
+  }, [cleanup])
 
   const playRecording = useCallback((url: string) => {
     // Stop any current playback first
@@ -211,6 +256,7 @@ export function useAudioRecorder(): UseAudioRecorder {
     durationMs,
     startRecording,
     stopRecording,
+    cancelRecording,
     playRecording,
     stopPlayback,
     clearRecording,

@@ -76,6 +76,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `generateMinecraftSkin` | imageTasks/minecraftSkin.ts | onCall |
 | `generateMinecraftFace` | imageTasks/minecraftFace.ts | onCall |
 | `enhanceSketch` | imageTasks/enhanceSketch.ts | onCall |
+| `transcribeAudio` | tasks/transcribeAudio.ts | onCall — OpenAI Whisper transcription for the voice input module (no system prompt; verbatim audio→text). |
 | `healthCheck` | health.ts | onCall |
 
 ---
@@ -109,6 +110,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `extractFeatures` | `claude-sonnet-4-6` |
 | Image generation | `gpt-image-1.5` |
 | `enhanceSketch` | `gpt-image-1.5` (image editing) |
+| `transcribeAudio` | OpenAI `whisper-1` ($0.006 / minute of audio; logs to `aiUsage` + `transcriptionEvents`) |
 | Image prompts (Claude describes scene) | `claude-sonnet-4-6` |
 
 ---

@@ -21,4 +21,9 @@ export interface Child {
   dayBlocks?: DayBlockType[]
   /** Ordered list of routine items this child logs (priority order). */
   routineItems?: RoutineItemKey[]
+  /**
+   * Whisper-backed voice input (vs Web Speech). Opt-in per child;
+   * see docs/DESIGN_VOICE_INPUT_MODULE.md §5. Lincoln defaults to true.
+   */
+  voiceInputEnhanced?: boolean
 }
