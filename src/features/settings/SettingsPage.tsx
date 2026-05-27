@@ -34,6 +34,7 @@ import AIUsagePanel from './AIUsagePanel'
 import AvatarAdminTab from './AvatarAdminTab'
 import DevAdminTab from './DevAdminTab'
 import StickerLibraryTab from './StickerLibraryTab'
+import VoiceInputSection from './VoiceInputSection'
 
 /**
  * Nathan's Firebase Auth UID. The "Dev" admin tab in Settings is only
@@ -174,6 +175,10 @@ export default function SettingsPage() {
             </Stack>
 
             <Divider />
+
+            {isParent && <VoiceInputSection />}
+
+            {isParent && <Divider />}
 
             <AccountSection />
 
