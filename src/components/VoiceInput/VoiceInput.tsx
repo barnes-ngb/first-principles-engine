@@ -313,6 +313,7 @@ function WhisperPath({
       disabled={disabled || !recorder.isSupported}
       size={buttonSize}
       placeholder={placeholder}
+      mode={mode}
       onClick={
         mode === 'toggle'
           ? phase === 'recording'
@@ -323,6 +324,7 @@ function WhisperPath({
       onPointerDown={holdToTalkPress}
       onPointerUp={holdToTalkRelease}
       onCancel={phase === 'recording' ? handleCancelRecording : undefined}
+      onStop={phase === 'recording' ? () => void handleStop() : undefined}
     />
   )
 }
@@ -423,6 +425,7 @@ function WebSpeechPath({
       disabled={disabled || !stt.isSupported}
       size={buttonSize}
       placeholder={placeholder}
+      mode="toggle"
       onClick={
         stt.isListening
           ? handleStop
@@ -439,6 +442,7 @@ function WebSpeechPath({
             }
           : undefined
       }
+      onStop={stt.isListening ? handleStop : undefined}
     />
   )
 }
@@ -450,10 +454,12 @@ interface RecordingButtonProps {
   disabled: boolean
   size: number
   placeholder?: string
+  mode: 'toggle' | 'hold-to-talk'
   onClick?: () => void
   onPointerDown?: () => void
   onPointerUp?: () => void
   onCancel?: () => void
+  onStop?: () => void
 }
 
 function RecordingButton({
@@ -461,13 +467,22 @@ function RecordingButton({
   disabled,
   size,
   placeholder,
+  mode,
   onClick,
   onPointerDown,
   onPointerUp,
   onCancel,
+  onStop,
 }: RecordingButtonProps) {
+  const showDone = isRecording && mode === 'toggle' && Boolean(onStop)
   return (
-    <Stack direction="row" spacing={1} alignItems="center">
+    <Stack
+      direction="row"
+      spacing={1}
+      alignItems="center"
+      flexWrap="wrap"
+      rowGap={1}
+    >
       <IconButton
         color={isRecording ? 'error' : 'primary'}
         onClick={onClick}
@@ -492,20 +507,30 @@ function RecordingButton({
         </Typography>
       )}
       {isRecording && (
-        <>
-          <Typography variant="body2" color="error.main">
-            Recording…
-          </Typography>
-          {onCancel && (
-            <Button
-              size="small"
-              onClick={onCancel}
-              sx={{ textTransform: 'none' }}
-            >
-              Cancel
-            </Button>
-          )}
-        </>
+        <Typography variant="body2" color="error.main">
+          Recording…
+        </Typography>
+      )}
+      {showDone && (
+        <Button
+          variant="contained"
+          color="success"
+          size="medium"
+          onClick={onStop}
+          aria-label="Done recording — submit for transcription"
+          sx={{ textTransform: 'none', fontWeight: 600 }}
+        >
+          ✓ Done
+        </Button>
+      )}
+      {isRecording && onCancel && (
+        <Button
+          size="small"
+          onClick={onCancel}
+          sx={{ textTransform: 'none' }}
+        >
+          Cancel
+        </Button>
       )}
     </Stack>
   )
