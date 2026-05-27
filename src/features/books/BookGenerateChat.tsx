@@ -9,17 +9,14 @@ import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
-import MicIcon from '@mui/icons-material/Mic'
-import StopIcon from '@mui/icons-material/Stop'
 import SendIcon from '@mui/icons-material/Send'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
-import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import { useSpeechRecognition } from '../../core/hooks/useSpeechRecognition'
 import { useTTS } from '../../core/hooks/useTTS'
+import VoiceInput from '../../components/VoiceInput'
 import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { ChatTurn } from '../../core/types'
@@ -116,33 +113,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   // ── Composer state ────────────────────────────────────────────
 
   const [composerText, setComposerText] = useState('')
-  const [pendingTranscript, setPendingTranscript] = useState<string | null>(null)
-  const stt = useSpeechRecognition()
   const tts = useTTS()
-
-  // Mirror STT's terminal transcript into the composer + confirmation banner.
-  const lastConsumedTranscriptRef = useRef<string>('')
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    if (stt.isListening) return
-    const t = stt.transcript
-    if (!t || t === lastConsumedTranscriptRef.current) return
-    lastConsumedTranscriptRef.current = t
-    setPendingTranscript(t)
-    setComposerText(t)
-    stt.reset()
-  }, [stt.isListening, stt.transcript, stt])
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const handleMicToggle = useCallback(() => {
-    if (stt.isListening) {
-      stt.stop()
-    } else {
-      setPendingTranscript(null)
-      stt.reset()
-      stt.start()
-    }
-  }, [stt])
 
   const composerDisabled =
     isLoading ||
@@ -153,9 +124,25 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     const text = composerText.trim()
     if (!text || composerDisabled) return
     setComposerText('')
-    setPendingTranscript(null)
     await sendKidMessage(text)
   }, [composerText, composerDisabled, sendKidMessage])
+
+  const handleVoiceTranscript = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed || composerDisabled) return
+      await sendKidMessage(trimmed)
+    },
+    [composerDisabled, sendKidMessage],
+  )
+
+  const voiceProfile = useMemo(
+    () => ({
+      id: childId,
+      voiceInputEnhanced: activeChild?.voiceInputEnhanced === true,
+    }),
+    [childId, activeChild?.voiceInputEnhanced],
+  )
 
   // ── TTS: auto-play templated turns + first story draft ────────
 
@@ -448,21 +435,11 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
         </Box>
       )}
 
-      {/* Voice transcript confirmation banner (critical for Lincoln) */}
-      {pendingTranscript && (
-        <Alert
-          severity="info"
-          icon={<CheckCircleIcon fontSize="small" />}
-          sx={{ alignItems: 'center' }}
-        >
-          Did I hear you right? You can edit before sending.
-        </Alert>
-      )}
-
-      {/* Composer */}
+      {/* Composer — typed input + VoiceInput module (replaces the prior
+          ad-hoc mic + "Did I hear you right?" banner). */}
       <Stack direction="row" spacing={1} alignItems="flex-end">
         <TextField
-          label={pendingTranscript ? 'Edit, then tap Send' : 'Type or tap mic'}
+          label="Type your message"
           placeholder={placeholder}
           value={composerText}
           onChange={(e) => setComposerText(e.target.value)}
@@ -483,17 +460,6 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
               : undefined
           }
         />
-        {stt.isSupported && (
-          <IconButton
-            color={stt.isListening ? 'error' : 'default'}
-            onClick={handleMicToggle}
-            disabled={composerDisabled}
-            aria-label={stt.isListening ? 'Stop recording' : 'Start recording'}
-            sx={{ mb: 0.5 }}
-          >
-            {stt.isListening ? <StopIcon /> : <MicIcon />}
-          </IconButton>
-        )}
         <IconButton
           color="primary"
           onClick={() => void handleSend()}
@@ -504,6 +470,18 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           <SendIcon />
         </IconButton>
       </Stack>
+      {childId && (
+        <VoiceInput
+          profile={voiceProfile}
+          sourceSurface="generate-chat"
+          mode="toggle"
+          maxDurationSec={60}
+          placeholder="Or tap the mic to speak"
+          showConfirmation={true}
+          disabled={composerDisabled}
+          onTranscript={(text) => void handleVoiceTranscript(text)}
+        />
+      )}
 
       {/* Illustration style strip */}
       <Box>

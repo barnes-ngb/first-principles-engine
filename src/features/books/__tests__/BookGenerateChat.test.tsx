@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -169,7 +169,7 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    expect(screen.getByLabelText(/type or tap mic/i)).toBeTruthy()
+    expect(screen.getByLabelText(/type your message/i)).toBeTruthy()
     expect(screen.getByLabelText(/illustration style: minecraft/i)).toBeTruthy()
     expect(screen.getByLabelText(/illustration style: storybook/i)).toBeTruthy()
   })
@@ -181,7 +181,7 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    const input = screen.getByLabelText(/type or tap mic/i) as HTMLInputElement
+    const input = screen.getByLabelText(/type your message/i) as HTMLInputElement
     await user.type(input, 'a dragon who learns to fly')
     await user.click(screen.getByLabelText(/send message/i))
     expect(sendKidMessageMock).toHaveBeenCalledWith('a dragon who learns to fly')
@@ -284,7 +284,7 @@ describe('BookGenerateChat', () => {
       </Wrap>,
     )
     // Composer disabled
-    const input = screen.getByLabelText(/type or tap mic/i) as HTMLInputElement
+    const input = screen.getByLabelText(/type your message/i) as HTMLInputElement
     expect(input.disabled).toBe(true)
   })
 
@@ -298,35 +298,15 @@ describe('BookGenerateChat', () => {
     expect(screen.getByText(/i had trouble with that/i)).toBeTruthy()
   })
 
-  it('surfaces a "Did I hear you right?" confirmation banner after a voice transcript lands', async () => {
-    const user = userEvent.setup()
-    const { rerender } = render(
+  it('mounts the VoiceInput module so kids can speak instead of typing', () => {
+    render(
       <Wrap>
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    // Start listening
-    await user.click(screen.getByLabelText(/start recording/i))
-    expect(recoStartMock).toHaveBeenCalled()
-
-    // Simulate STT finalizing — transcript arrives with isListening=false.
-    recoState = {
-      ...recoState,
-      transcript: 'a dragon adventure',
-      isListening: false,
-    }
-    rerender(
-      <Wrap>
-        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
-      </Wrap>,
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText(/did i hear you right/i)).toBeTruthy()
-    })
-    // Transcript flows into the editable composer.
-    const input = screen.getByLabelText(/edit, then tap send/i) as HTMLInputElement
-    expect(input.value).toBe('a dragon adventure')
+    // VoiceInput exposes a start-recording mic button. Its internal
+    // confirmation banner is exercised by VoiceInput's own tests.
+    expect(screen.getByLabelText(/start recording/i)).toBeTruthy()
   })
 
   it('does not show "Yes, start my story!" until first message is sent', () => {
@@ -418,7 +398,7 @@ describe('BookGenerateChat', () => {
     expect(addBtn).toBeTruthy()
     expect(changeBtn).toBeTruthy()
 
-    const input = screen.getByLabelText(/type or tap mic/i) as HTMLInputElement
+    const input = screen.getByLabelText(/type your message/i) as HTMLInputElement
     expect(input.disabled).toBe(true)
     expect(screen.getByText(/tap add or change above to continue/i)).toBeTruthy()
 
@@ -485,7 +465,7 @@ describe('BookGenerateChat', () => {
     expect(preview.src).toContain('preview.png')
 
     // Composer disabled.
-    const input = screen.getByLabelText(/type or tap mic/i) as HTMLInputElement
+    const input = screen.getByLabelText(/type your message/i) as HTMLInputElement
     expect(input.disabled).toBe(true)
 
     // Commit button disabled while illustrating.
