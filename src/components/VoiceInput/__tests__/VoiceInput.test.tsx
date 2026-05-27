@@ -303,6 +303,58 @@ describe('VoiceInput — Whisper path', () => {
     })
   })
 
+  it('renders a Done button during recording in toggle mode', async () => {
+    const onTranscript = vi.fn()
+    render(
+      <VoiceInput
+        profile={lincolnProfile}
+        sourceSurface="generate-chat"
+        onTranscript={onTranscript}
+      />,
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /start recording/i }))
+    })
+
+    const doneButton = screen.getByRole('button', { name: /done recording/i })
+    expect(doneButton).toBeTruthy()
+    expect(doneButton.textContent).toMatch(/done/i)
+
+    await act(async () => {
+      fireEvent.click(doneButton)
+    })
+
+    expect(mockStopRecording).toHaveBeenCalled()
+    // Same stop+transcribe flow lands in confirmation.
+    expect(screen.getByText(/Did I hear you right/i)).toBeTruthy()
+  })
+
+  it('does not render a Done button in hold-to-talk mode', async () => {
+    render(
+      <VoiceInput
+        profile={lincolnProfile}
+        sourceSurface="generate-chat"
+        onTranscript={() => {}}
+        mode="hold-to-talk"
+      />,
+    )
+
+    const mic = screen.getByRole('button', { name: /start recording/i })
+    await act(async () => {
+      fireEvent.pointerDown(mic)
+    })
+
+    // Now in recording state — no Done button should be present.
+    expect(screen.queryByRole('button', { name: /done recording/i })).toBeNull()
+
+    // Pointer-up still ends recording (existing hold-to-talk behavior).
+    await act(async () => {
+      fireEvent.pointerUp(mic)
+    })
+    expect(mockStopRecording).toHaveBeenCalled()
+  })
+
   it('clamps maxDurationSec > 120 (no runtime error; effect is in useAudioRecording)', () => {
     // The clamp itself is exercised by useAudioRecording's own tests.
     // Here we just verify the component renders with an extreme value.
