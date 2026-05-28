@@ -4,6 +4,8 @@ import {
   getMonthBounds,
   getPreviousMonth,
   loadDadLabReportsInMonth,
+  loadPhotosForMonth,
+  type DadLabEntry,
 } from "./monthlyReviewData.js";
 
 // ── Minimal Firestore mock for chained `.where().where().get()` queries ──
@@ -20,6 +22,15 @@ interface WhereClause {
 }
 
 function makeFakeDb(docsByCollection: Record<string, FakeDoc[]>): Firestore {
+  function findDoc(path: string): FakeDoc | undefined {
+    // path is like `families/fam/artifacts/abc` → collection `families/fam/artifacts`, id `abc`
+    const slash = path.lastIndexOf("/");
+    if (slash === -1) return undefined;
+    const collectionPath = path.slice(0, slash);
+    const id = path.slice(slash + 1);
+    return (docsByCollection[collectionPath] ?? []).find((d) => d.id === id);
+  }
+
   function makeQuery(path: string, clauses: WhereClause[]): unknown {
     return {
       where: (field: string, op: string, value: unknown) =>
@@ -55,8 +66,34 @@ function makeFakeDb(docsByCollection: Record<string, FakeDoc[]>): Firestore {
       },
     };
   }
+
+  function makeDocRef(path: string): unknown {
+    return {
+      path,
+      get: async () => {
+        const found = findDoc(path);
+        return {
+          id: path.slice(path.lastIndexOf("/") + 1),
+          exists: !!found,
+          data: () => found?.data,
+        };
+      },
+    };
+  }
+
   return {
     collection: (path: string) => makeQuery(path, []),
+    doc: (path: string) => makeDocRef(path),
+    getAll: async (...refs: Array<{ path: string }>) => {
+      return refs.map((r) => {
+        const found = findDoc(r.path);
+        return {
+          id: r.path.slice(r.path.lastIndexOf("/") + 1),
+          exists: !!found,
+          data: () => found?.data,
+        };
+      });
+    },
   } as unknown as Firestore;
 }
 
@@ -241,5 +278,202 @@ describe("loadDadLabReportsInMonth", () => {
       "Lincoln",
     );
     expect(result).toHaveLength(0);
+  });
+
+  it("extracts the artifact id list from childReports[name].artifacts", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-bridge",
+          data: {
+            date: "2026-04-04",
+            status: "active",
+            title: "The Bridge Test",
+            childReports: {
+              lincoln: {
+                prediction: "yes",
+                artifacts: ["art-1", "art-2", "art-3"],
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].artifactIds).toEqual(["art-1", "art-2", "art-3"]);
+  });
+});
+
+describe("loadPhotosForMonth — Dad Lab photo extraction", () => {
+  const LINCOLN_DOC_ID = "child_abc123";
+
+  function bridgeReport(artifactIds: string[]): DadLabEntry {
+    return {
+      id: "lab-bridge",
+      title: "The Bridge Test",
+      question: "Can it hold the weight?",
+      completedAt: "2026-04-04T12:00:00.000Z",
+      hasPrediction: true,
+      hasExplanation: false,
+      artifactIds,
+    };
+  }
+
+  it("fetches Dad Lab artifact photos that the childId-filtered query misses", async () => {
+    // Repro: KidLabView writes artifact `childId` as the lowercase name
+    // ("lincoln") instead of the Firestore child doc id. The artifacts query
+    // (childId == child doc id) returns nothing, but the `childReports[name].artifacts`
+    // list on the dadLabReport still points to the right artifact docs.
+    const db = makeFakeDb({
+      "families/fam/scans": [],
+      "families/fam/artifacts": [
+        {
+          id: "art-bridge-1",
+          data: {
+            childId: "lincoln", // ← stored under lowercase name, not child doc id
+            type: "Photo",
+            storagePath: "artifacts/art-bridge-1.jpg",
+            createdAt: "2026-04-04T12:30:00.000Z",
+          },
+        },
+        {
+          id: "art-bridge-2",
+          data: {
+            childId: "lincoln",
+            type: "Photo",
+            storagePath: "artifacts/art-bridge-2.jpg",
+            createdAt: "2026-04-04T12:35:00.000Z",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      [bridgeReport(["art-bridge-1", "art-bridge-2"])],
+    );
+
+    expect(result.photos).toHaveLength(2);
+    const dadLabPhotos = result.photos.filter(
+      (p) => p.sourceMetadata?.type === "dadLab",
+    );
+    expect(dadLabPhotos).toHaveLength(2);
+    expect(dadLabPhotos[0].sourceMetadata?.reportId).toBe("lab-bridge");
+    expect(dadLabPhotos[0].sourceMetadata?.reportTitle).toBe("The Bridge Test");
+  });
+
+  it("adds Dad Lab artifacts to allArtifactIds (so they enter kid mode)", async () => {
+    const db = makeFakeDb({
+      "families/fam/scans": [],
+      "families/fam/artifacts": [
+        {
+          id: "art-1",
+          data: {
+            childId: "lincoln",
+            type: "Photo",
+            storagePath: "artifacts/art-1.jpg",
+            createdAt: "2026-04-04T12:30:00.000Z",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      [bridgeReport(["art-1"])],
+    );
+
+    expect(result.allArtifactIds.has("art-1")).toBe(true);
+    expect(result.workbookArtifactIds.has("art-1")).toBe(false);
+  });
+
+  it("does not duplicate photos already picked up by the childId-filtered artifacts query", async () => {
+    // When LabReportForm writes the photo, `childId` is the Firestore doc id,
+    // so the artifacts query already returns it. We must not add it a second
+    // time when walking dadLabReports.
+    const db = makeFakeDb({
+      "families/fam/scans": [],
+      "families/fam/artifacts": [
+        {
+          id: "art-1",
+          data: {
+            childId: LINCOLN_DOC_ID, // ← matches the artifacts query
+            type: "Photo",
+            storagePath: "artifacts/art-1.jpg",
+            createdAt: "2026-04-04T12:30:00.000Z",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      [bridgeReport(["art-1"])],
+    );
+
+    expect(result.photos).toHaveLength(1);
+  });
+
+  it("skips non-image artifacts referenced by the lab (e.g. audio recordings)", async () => {
+    const db = makeFakeDb({
+      "families/fam/scans": [],
+      "families/fam/artifacts": [
+        {
+          id: "art-audio",
+          data: {
+            childId: "lincoln",
+            type: "Audio",
+            storagePath: "artifacts/art-audio.webm",
+            createdAt: "2026-04-04T12:30:00.000Z",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      [bridgeReport(["art-audio"])],
+    );
+
+    expect(result.photos).toHaveLength(0);
+  });
+
+  it("is a no-op when no Dad Lab reports are provided", async () => {
+    const db = makeFakeDb({ "families/fam/scans": [], "families/fam/artifacts": [] });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+    );
+
+    expect(result.photos).toHaveLength(0);
   });
 });
