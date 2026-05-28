@@ -6,6 +6,15 @@ import type { MonthlyReviewStatus, SectionType } from './enums'
 // One book per child per month, with both kid and parent voices. See
 // docs/DESIGN_MONTHLY_REVIEW_BOOK.md for the full design.
 
+export interface PhotoSourceMetadata {
+  /** Origin tag for downstream curation (e.g. "dadLab"). */
+  type?: string
+  /** Source Dad Lab report doc id when type === "dadLab". */
+  reportId?: string
+  /** Source Dad Lab report title when type === "dadLab". */
+  reportTitle?: string
+}
+
 export interface PhotoRef {
   id: string
   storagePath: string
@@ -17,6 +26,12 @@ export interface PhotoRef {
   score?: number
   /** Optional subject tag for diversity scoring. */
   subjectTag?: string
+  /**
+   * Tags photos whose origin is not directly inferable from the source
+   * collection — e.g. Dad Lab photos stored in `artifacts` but referenced
+   * via `dadLabReports[*].childReports[name].artifacts`.
+   */
+  sourceMetadata?: PhotoSourceMetadata
 }
 
 export interface PageContent {
