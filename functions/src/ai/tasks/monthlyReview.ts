@@ -51,7 +51,10 @@ interface MonthlyReviewPage {
 
 interface MonthStats {
   daysWithActivity: number;
+  /** Kept for backward compatibility with already-generated reviews. */
   totalHours: number;
+  /** Canonical: integer minutes. Display layer converts to "Xh Ym". */
+  totalMinutes: number;
   hoursBySubject: Record<string, number>;
   booksCompleted: number;
   booksRead: number;
@@ -116,7 +119,13 @@ export async function runMonthlyReview(
   const model = modelForTask("monthlyReview" as never);
 
   // 1. Aggregate the month's data
-  const data = await aggregateMonthData(db, familyId, childId, month);
+  const data = await aggregateMonthData(
+    db,
+    familyId,
+    childId,
+    month,
+    childData.name,
+  );
 
   // 2. Build curation context + score photos
   const curationCtx = buildCurationContext(data);
@@ -830,6 +839,7 @@ export function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload 
   const stats: MonthStats = {
     daysWithActivity: data.dayLogs.length,
     totalHours: Math.round((data.hours.totalMinutes / 60) * 10) / 10,
+    totalMinutes: data.hours.totalMinutes,
     hoursBySubject: data.hours.minutesBySubject,
     booksCompleted: data.completedBooks.length,
     booksRead: data.completedBooks.length,

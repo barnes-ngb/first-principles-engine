@@ -18,6 +18,7 @@ import { app } from '../../core/firebase/firebase'
 import { useMonthlyReview } from '../../core/hooks/useMonthlyReviews'
 import { MonthlyReviewStatus, SectionType } from '../../core/types/enums'
 import type { MonthlyReviewPage as MonthlyReviewPageType } from '../../core/types'
+import { DiagnosticPanel } from './DiagnosticPanel'
 import { MonthlyReviewPage } from './MonthlyReviewPage'
 import { PublishConfirmDialog } from './PublishConfirmDialog'
 
@@ -339,6 +340,11 @@ export function MonthlyReviewReader({
           </Stack>
         )}
       </Stack>
+
+      {/* Diagnostic panel — flag-gated by ?diag=1, parent-mode only.
+          Renders nothing unless both gates pass. Kept in place after the
+          Dad Lab/hours fixes so future debugging doesn't require a rebuild. */}
+      {mode === 'parent' && !isKidLocked && <DiagnosticPanel review={review} />}
 
       {/* Page area */}
       <Box
