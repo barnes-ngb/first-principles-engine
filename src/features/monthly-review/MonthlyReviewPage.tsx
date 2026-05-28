@@ -147,7 +147,7 @@ const STAT_EMOJI: Record<string, string> = {
 }
 
 const STAT_LABELS: Record<string, string> = {
-  totalHours: 'Hours',
+  totalHours: 'Time',
   booksCompleted: 'Books made',
   booksRead: 'Books read',
   quests: 'Quests',
@@ -223,8 +223,14 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
         {visibleKeys.map((key) => {
           const raw = stats[key]
           if (typeof raw !== 'number') return null
+          // Prefer the canonical integer-minute total when present so the
+          // tile reads "Xh Ym" / "Xm" — matching the per-subject breakdown
+          // below. Legacy reviews stored only `totalHours` (decimal), so
+          // fall back to `totalHours * 60` for those.
           const value =
-            key === 'totalHours' ? raw.toFixed(1) : raw.toString()
+            key === 'totalHours'
+              ? formatSubjectMinutes(stats.totalMinutes ?? raw * 60)
+              : raw.toString()
           return (
             <Box
               key={key}
