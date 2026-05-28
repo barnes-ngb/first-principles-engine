@@ -55,6 +55,15 @@ import type { Firestore } from "firebase-admin/firestore";
 
 // ── Types (mirror src/core/types/monthlyReview.ts but kept local to functions) ──
 
+export interface PhotoSourceMetadata {
+  /** Origin tag for downstream curation (e.g. "dadLab"). */
+  type?: string;
+  /** Source Dad Lab report doc id when type === "dadLab". */
+  reportId?: string;
+  /** Source Dad Lab report title when type === "dadLab". */
+  reportTitle?: string;
+}
+
 export interface PhotoRef {
   id: string;
   storagePath: string;
@@ -63,6 +72,12 @@ export interface PhotoRef {
   capturedAt: string;
   score?: number;
   subjectTag?: string;
+  /**
+   * Tags photos whose origin is not directly inferable from the source
+   * collection — e.g. Dad Lab photos stored in `artifacts` but referenced
+   * via `dadLabReports[*].childReports[name].artifacts`.
+   */
+  sourceMetadata?: PhotoSourceMetadata;
 }
 
 export interface DayLogEntry {
@@ -119,6 +134,15 @@ export interface DadLabEntry {
   completedAt: string;
   hasPrediction: boolean;
   hasExplanation: boolean;
+  /**
+   * Artifact doc IDs the queried child attached to this session (photos +
+   * audio recordings). Populated from `childReports[name].artifacts`. Used by
+   * `loadPhotosForMonth` to surface Dad Lab photos that the artifacts query
+   * may miss (the KidLabView writer keys artifacts by lowercase child name
+   * rather than the Firestore child doc id, so the standard `childId == X`
+   * filter misses them).
+   */
+  artifactIds: string[];
 }
 
 export interface ConundrumEntry {
@@ -463,7 +487,7 @@ export async function loadDadLabReportsInMonth(
     const d = doc.data() as Record<string, unknown>;
     const childReports = (d.childReports ?? {}) as Record<
       string,
-      { prediction?: string; explanation?: string }
+      { prediction?: string; explanation?: string; artifacts?: string[] }
     >;
     const childContrib =
       (nameKey ? childReports[nameKey] : undefined) ?? childReports[childId];
@@ -476,6 +500,9 @@ export async function loadDadLabReportsInMonth(
       completedAt: (d.updatedAt as string) ?? (d.date as string) ?? "",
       hasPrediction: !!childContrib.prediction,
       hasExplanation: !!childContrib.explanation,
+      artifactIds: Array.isArray(childContrib.artifacts)
+        ? childContrib.artifacts.filter((a): a is string => typeof a === "string")
+        : [],
     });
   }
 
@@ -488,6 +515,7 @@ export async function loadPhotosForMonth(
   childId: string,
   start: string,
   end: string,
+  dadLabReports: DadLabEntry[] = [],
 ): Promise<{
   photos: PhotoRef[];
   workbookArtifactIds: Set<string>;
@@ -530,6 +558,7 @@ export async function loadPhotosForMonth(
   }
 
   // Artifacts
+  const seenArtifactIds = new Set<string>();
   try {
     const artifactsSnap = await db
       .collection(`families/${familyId}/artifacts`)
@@ -562,9 +591,72 @@ export async function loadPhotosForMonth(
       };
       if (tags.subjectBucket) ref.subjectTag = tags.subjectBucket;
       photos.push(ref);
+      seenArtifactIds.add(doc.id);
     }
   } catch (err) {
     console.warn("[monthlyReview] loadPhotosForMonth artifacts failed:", err);
+  }
+
+  // Dad Lab photos
+  //
+  // Dad Lab photo writes go to the `artifacts` collection, but the writer in
+  // `KidLabView` sets `childId` to `childName.toLowerCase()` instead of the
+  // Firestore child doc id (LabReportForm uses the doc id). So the
+  // childId-filtered artifact query above misses any photo a kid uploaded
+  // themselves. The `childReports[name].artifacts` array on each Dad Lab
+  // report is the authoritative list — we fetch those artifact docs directly
+  // by id and add the ones we haven't already seen.
+  try {
+    const dadLabArtifactRefs: Array<{ reportId: string; reportTitle: string; reportDate: string; artifactId: string }> = [];
+    for (const report of dadLabReports) {
+      for (const artifactId of report.artifactIds) {
+        if (seenArtifactIds.has(artifactId)) continue;
+        dadLabArtifactRefs.push({
+          reportId: report.id,
+          reportTitle: report.title,
+          reportDate: report.completedAt,
+          artifactId,
+        });
+      }
+    }
+
+    if (dadLabArtifactRefs.length > 0) {
+      const docRefs = dadLabArtifactRefs.map(({ artifactId }) =>
+        db.doc(`families/${familyId}/artifacts/${artifactId}`),
+      );
+      const snaps = await db.getAll(...docRefs);
+      for (let i = 0; i < snaps.length; i++) {
+        const snap = snaps[i];
+        const meta = dadLabArtifactRefs[i];
+        if (!snap.exists) continue;
+        const d = snap.data() as Record<string, unknown> | undefined;
+        if (!d) continue;
+        const storagePath = (d.storagePath as string) ?? (d.uri as string) ?? "";
+        if (!storagePath) continue;
+        const type = (d.type as string) ?? "";
+        // Image-bearing artifacts only — skip audio recordings attached to the lab.
+        if (type !== "Photo" && type !== "Video") continue;
+        const tags = (d.tags ?? {}) as { subjectBucket?: string };
+        allArtifactIds.add(meta.artifactId);
+        seenArtifactIds.add(meta.artifactId);
+        const ref: PhotoRef = {
+          id: `artifact:${meta.artifactId}`,
+          storagePath,
+          source: "artifact",
+          sourceDocId: meta.artifactId,
+          capturedAt: (d.createdAt as string) ?? meta.reportDate ?? "",
+          sourceMetadata: {
+            type: "dadLab",
+            reportId: meta.reportId,
+            reportTitle: meta.reportTitle,
+          },
+        };
+        if (tags.subjectBucket) ref.subjectTag = tags.subjectBucket;
+        photos.push(ref);
+      }
+    }
+  } catch (err) {
+    console.warn("[monthlyReview] loadPhotosForMonth dadLab failed:", err);
   }
 
   return { photos, workbookArtifactIds, classifiedScanIds, allArtifactIds };
@@ -768,13 +860,14 @@ export async function aggregateMonthData(
 ): Promise<MonthAggregate> {
   const { start, end } = getMonthBounds(month);
 
+  // dadLabReports must resolve before loadPhotosForMonth so the photo loader
+  // can extract Dad Lab artifact IDs from `childReports[name].artifacts`.
   const [
     dayLogs,
     weeklyReviews,
     blockers,
     completedBooks,
     dadLabReports,
-    photosResult,
     conundrums,
     hours,
     diamonds,
@@ -785,12 +878,20 @@ export async function aggregateMonthData(
     loadBlockers(db, familyId, childId, start, end),
     loadCompletedBooksInMonth(db, familyId, childId, start, end),
     loadDadLabReportsInMonth(db, familyId, childId, start, end, childName),
-    loadPhotosForMonth(db, familyId, childId, start, end),
     loadConundrumsForMonth(db, familyId, start, end),
     loadHoursForMonth(db, familyId, childId, start, end),
     loadDiamondsForMonth(db, familyId, childId, start, end),
     loadQuestCountForMonth(db, familyId, childId, start, end),
   ]);
+
+  const photosResult = await loadPhotosForMonth(
+    db,
+    familyId,
+    childId,
+    start,
+    end,
+    dadLabReports,
+  );
 
   const teachBacks = extractTeachBacksFromDayLogs(dayLogs);
 

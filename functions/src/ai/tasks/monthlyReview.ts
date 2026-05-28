@@ -249,9 +249,16 @@ function buildCurationContext(data: MonthAggregate): PhotoCurationContext {
     bookArtifactIds.add(b.id);
   }
 
+  // `dadLabArtifactIds` is keyed by ARTIFACT doc id (matched against
+  // `photo.sourceDocId` in `scorePhotos`). Photos tagged by the loader with
+  // `sourceMetadata.type === "dadLab"` are the source of truth; the previous
+  // implementation mistakenly added Dad Lab REPORT ids here, which never
+  // matched and silently dropped the Dad Lab score boost.
   const dadLabArtifactIds = new Set<string>();
-  for (const lab of data.dadLabReports) {
-    if (lab.hasExplanation) dadLabArtifactIds.add(lab.id);
+  for (const p of data.photos) {
+    if (p.sourceMetadata?.type === "dadLab") {
+      dadLabArtifactIds.add(p.sourceDocId);
+    }
   }
 
   // MVP: no scan-quality flags wired from scans; resolved blocker evidence
@@ -515,10 +522,13 @@ function buildMonthlyReviewUserPrompt(input: PromptInputs): string {
 
   const dadLabLines = data.dadLabReports
     .slice(0, 6)
-    .map(
-      (l) =>
-        `- ${l.title}${l.hasPrediction ? " [predicted]" : ""}${l.hasExplanation ? " [explained]" : ""}`,
-    )
+    .map((l) => {
+      const date = l.completedAt ? ` (${l.completedAt.slice(0, 10)})` : "";
+      const tags =
+        `${l.hasPrediction ? " [predicted]" : ""}${l.hasExplanation ? " [explained]" : ""}` +
+        (l.artifactIds.length ? ` [${l.artifactIds.length} artifact${l.artifactIds.length === 1 ? "" : "s"}]` : "");
+      return `- ${l.title}${date}${tags}`;
+    })
     .join("\n");
 
   const teachBackStr = data.teachBacks.length
@@ -833,6 +843,7 @@ export function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload 
     };
     if (Number.isFinite(p.score)) ref.score = p.score;
     if (p.subjectTag) ref.subjectTag = p.subjectTag;
+    if (p.sourceMetadata) ref.sourceMetadata = p.sourceMetadata;
     return ref;
   });
 
