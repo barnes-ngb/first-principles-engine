@@ -439,16 +439,24 @@ export async function loadDadLabReportsInMonth(
   childId: string,
   start: string,
   end: string,
+  childName?: string,
 ): Promise<DadLabEntry[]> {
   // No `status` filter: the lifecycle is planned → active → complete, but
   // families don't always mark a session 'complete' even after the kid did
-  // the work. The child's contribution (`childReports[childId]`) is the real
+  // the work. The child's contribution in `childReports` is the real
   // participation signal — that filter runs below.
+  //
+  // Key shape: the writer (LabReportForm + KidLabView) keys `childReports`
+  // by `childName.toLowerCase()` ("lincoln" / "london"), not by Firestore
+  // child doc id. Check the lowercase-name key first, then fall back to
+  // the child doc id for any historical reports written under that shape.
   const snap = await db
     .collection(`families/${familyId}/dadLabReports`)
     .where("date", ">=", start)
     .where("date", "<=", end)
     .get();
+
+  const nameKey = childName?.toLowerCase();
 
   const reports: DadLabEntry[] = [];
   for (const doc of snap.docs) {
@@ -457,7 +465,8 @@ export async function loadDadLabReportsInMonth(
       string,
       { prediction?: string; explanation?: string }
     >;
-    const childContrib = childReports[childId];
+    const childContrib =
+      (nameKey ? childReports[nameKey] : undefined) ?? childReports[childId];
     if (!childContrib) continue;
 
     reports.push({
@@ -755,6 +764,7 @@ export async function aggregateMonthData(
   familyId: string,
   childId: string,
   month: string,
+  childName?: string,
 ): Promise<MonthAggregate> {
   const { start, end } = getMonthBounds(month);
 
@@ -774,7 +784,7 @@ export async function aggregateMonthData(
     loadWeeklyReviewsForMonth(db, familyId, childId, start, end),
     loadBlockers(db, familyId, childId, start, end),
     loadCompletedBooksInMonth(db, familyId, childId, start, end),
-    loadDadLabReportsInMonth(db, familyId, childId, start, end),
+    loadDadLabReportsInMonth(db, familyId, childId, start, end, childName),
     loadPhotosForMonth(db, familyId, childId, start, end),
     loadConundrumsForMonth(db, familyId, start, end),
     loadHoursForMonth(db, familyId, childId, start, end),

@@ -91,7 +91,14 @@ export interface MonthlyReviewPage {
 
 export interface MonthStats {
   daysWithActivity: number
+  /**
+   * Hours rounded to one decimal. Kept on the type for backward compatibility
+   * with reviews generated before `totalMinutes` was added — readers should
+   * prefer `totalMinutes ?? Math.round(totalHours * 60)`.
+   */
   totalHours: number
+  /** Canonical integer-minute total. Display layer converts via `formatSubjectMinutes`. */
+  totalMinutes?: number
   hoursBySubject: Record<string, number>
   booksCompleted: number
   booksRead: number

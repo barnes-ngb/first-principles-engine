@@ -112,7 +112,12 @@ describe("getPreviousMonth", () => {
 describe("loadDadLabReportsInMonth", () => {
   const path = "families/fam/dadLabReports";
 
-  it("includes an in-month session even when status is not 'complete'", async () => {
+  // Production data: Lincoln's Firestore child doc id is an auto-generated
+  // string, but the LabReportForm / KidLabView writer keys `childReports` by
+  // `childName.toLowerCase()`. The loader must match by name first.
+  const LINCOLN_DOC_ID = "child_abc123";
+
+  it("matches by lowercase child name (writer key shape)", async () => {
     // The Bridge Test reproducer: real-use feedback found that families
     // don't always advance a session to 'complete' even after the kid did
     // the work. The loader must count it as long as the child contributed.
@@ -133,12 +138,48 @@ describe("loadDadLabReportsInMonth", () => {
       ],
     });
 
-    const result = await loadDadLabReportsInMonth(db, "fam", "lincoln", "2026-04-01", "2026-04-30");
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
 
     expect(result).toHaveLength(1);
     expect(result[0].title).toBe("The Bridge Test");
     expect(result[0].hasPrediction).toBe(true);
     expect(result[0].hasExplanation).toBe(true);
+  });
+
+  it("falls back to child doc id when childReports is keyed that way", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-legacy",
+          data: {
+            date: "2026-04-05",
+            status: "complete",
+            title: "Legacy lab",
+            childReports: {
+              [LINCOLN_DOC_ID]: { prediction: "x" },
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].hasPrediction).toBe(true);
   });
 
   it("excludes sessions where the queried child did not contribute", async () => {
@@ -156,7 +197,14 @@ describe("loadDadLabReportsInMonth", () => {
       ],
     });
 
-    const result = await loadDadLabReportsInMonth(db, "fam", "lincoln", "2026-04-01", "2026-04-30");
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
     expect(result).toHaveLength(0);
   });
 
@@ -184,7 +232,14 @@ describe("loadDadLabReportsInMonth", () => {
       ],
     });
 
-    const result = await loadDadLabReportsInMonth(db, "fam", "lincoln", "2026-04-01", "2026-04-30");
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
     expect(result).toHaveLength(0);
   });
 });

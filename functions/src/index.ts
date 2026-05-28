@@ -10,6 +10,7 @@ export {
   generateMonthlyReviewNow,
   publishMonthlyReview,
   unpublishMonthlyReview,
+  auditMonthlyReviewSources,
 } from "./ai/monthlyReview.js";
 export { generateActivity } from "./ai/generate.js";
 export { generateImage, generateAvatarPiece, generateStarterAvatar, transformAvatarPhoto, generateArmorPiece, generateBaseCharacter, generateArmorSheet, generateArmorReference, extractFeatures, generateMinecraftSkin, generateMinecraftFace, enhanceSketch } from "./ai/imageGen.js";

@@ -9,7 +9,19 @@ import {
   runMonthlyReview,
   type MonthlyReviewPayload,
 } from "./tasks/monthlyReview.js";
-import { getPreviousMonth } from "./tasks/monthlyReviewData.js";
+import {
+  getMonthBounds,
+  getPreviousMonth,
+  loadCompletedBooksInMonth,
+  loadConundrumsForMonth,
+  loadDadLabReportsInMonth,
+  loadDayLogsForMonth,
+  loadDiamondsForMonth,
+  loadHoursForMonth,
+  loadPhotosForMonth,
+  loadQuestCountForMonth,
+  loadWeeklyReviewsForMonth,
+} from "./tasks/monthlyReviewData.js";
 
 // ── Per-child generator ────────────────────────────────────────
 
@@ -276,6 +288,158 @@ export const publishMonthlyReview = onCall(
     return { reviewId, publishedAt: now };
   },
 );
+
+// ── Diagnostic: raw source audit (read-only, no AI call) ──────
+//
+// Returns the raw aggregation counts plus a shape-only sample of dadLabReport
+// documents so we can confirm the writer schema from inside the app (no
+// Firebase Console access required). Used by the DiagnosticPanel rendered on
+// MonthlyReviewReader when `?diag=1` is set. Read-only — no Firestore writes.
+
+interface AuditArgs {
+  familyId?: string;
+  childId?: string;
+  month?: string;
+}
+
+export const auditMonthlyReviewSources = onCall(
+  {
+    memory: "512MiB",
+    timeoutSeconds: 60,
+  },
+  async (request) => {
+    const { uid } = requireEmailAuth(request);
+    const { familyId, childId, month } = (request.data ?? {}) as AuditArgs;
+
+    if (!familyId || !childId || !month) {
+      throw new HttpsError(
+        "invalid-argument",
+        "familyId, childId, and month are required.",
+      );
+    }
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      throw new HttpsError(
+        "invalid-argument",
+        "month must be in YYYY-MM format.",
+      );
+    }
+    if (uid !== familyId) {
+      throw new HttpsError(
+        "permission-denied",
+        "You do not have access to this family.",
+      );
+    }
+
+    const db = getFirestore();
+    const childSnap = await db
+      .doc(`families/${familyId}/children/${childId}`)
+      .get();
+    const childName = childSnap.exists
+      ? ((childSnap.data() as { name?: string }).name ?? null)
+      : null;
+
+    const { start, end } = getMonthBounds(month);
+
+    const [
+      weeklyReviews,
+      dayLogs,
+      books,
+      dadLabReports,
+      photosResult,
+      conundrums,
+      hours,
+      diamonds,
+      questCount,
+    ] = await Promise.all([
+      loadWeeklyReviewsForMonth(db, familyId, childId, start, end),
+      loadDayLogsForMonth(db, familyId, childId, start, end),
+      loadCompletedBooksInMonth(db, familyId, childId, start, end),
+      loadDadLabReportsInMonth(
+        db,
+        familyId,
+        childId,
+        start,
+        end,
+        childName ?? undefined,
+      ),
+      loadPhotosForMonth(db, familyId, childId, start, end),
+      loadConundrumsForMonth(db, familyId, start, end),
+      loadHoursForMonth(db, familyId, childId, start, end),
+      loadDiamondsForMonth(db, familyId, childId, start, end),
+      loadQuestCountForMonth(db, familyId, childId, start, end),
+    ]);
+
+    // Unfiltered read of dadLabReports for this family — limited to a
+    // reasonable cap so the callable doesn't time out on large histories.
+    const allDadLabSnap = await db
+      .collection(`families/${familyId}/dadLabReports`)
+      .limit(100)
+      .get();
+
+    const allReports = allDadLabSnap.docs.map((d) => ({
+      id: d.id,
+      data: d.data() as Record<string, unknown>,
+    }));
+
+    const sampleReportShapes = allReports.slice(0, 3).map((r) => ({
+      id: r.id,
+      schema: Object.fromEntries(
+        Object.entries(r.data).map(([k, v]) => [k, describeValue(v)]),
+      ),
+      dateFields: {
+        date: (r.data.date as string | undefined) ?? null,
+        createdAt: (r.data.createdAt as string | undefined) ?? null,
+        completedAt: (r.data.completedAt as string | undefined) ?? null,
+        updatedAt: (r.data.updatedAt as string | undefined) ?? null,
+      },
+      childAttribution: {
+        childId: (r.data.childId as string | undefined) ?? null,
+        childReportsKeys:
+          r.data.childReports && typeof r.data.childReports === "object"
+            ? Object.keys(r.data.childReports as Record<string, unknown>)
+            : null,
+      },
+      status: (r.data.status as string | undefined) ?? null,
+    }));
+
+    return {
+      query: {
+        familyId,
+        childId,
+        childName,
+        month,
+        start,
+        end,
+      },
+      counts: {
+        weeklyReviews: weeklyReviews.length,
+        dayLogs: dayLogs.length,
+        books: books.length,
+        dadLabReports: dadLabReports.length,
+        photos: photosResult.photos.length,
+        conundrums: conundrums.length,
+      },
+      hours,
+      diamonds,
+      questCount,
+      dadLabDiagnostic: {
+        reportsReturnedByLoader: dadLabReports.length,
+        allReportsInDb: allReports.length,
+        sampleReportShapes,
+      },
+    };
+  },
+);
+
+function describeValue(v: unknown): string {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return `array(${v.length})`;
+  if (typeof v === "object") {
+    const keys = Object.keys(v as Record<string, unknown>);
+    return `object(${keys.join(",")})`;
+  }
+  return typeof v;
+}
 
 export const unpublishMonthlyReview = onCall(
   {

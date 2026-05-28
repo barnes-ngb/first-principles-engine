@@ -1,11 +1,11 @@
 # Story Generation V2 — Design
 
-**Status:** Design proposal, not yet built
-**Author:** Design chat (Claude + Nathan), May 2026
-**Decisions locked:** chat-based entry inside "+ New Book" dialog (Path A primary), two review surfaces (Generate Chat + Per-Page Review), Per-Page Review auto-opens for kid-generated books (Paths A/B) and is on-demand for Shelly-authored books (Path C), Story Guide wizard buried as fallback (not deleted), prompt quality fixes ship Phase 1 standalone
-**Phases in this doc:** Phase 1 (prompt quality) and Phase 2 (Generate Chat + Per-Page Review + dialog rewire) in detail. Phase 3 (polish) sketched.
-**Builds on:** Book Builder (`src/features/books/`), AI Chat infrastructure (`functions/src/ai/chat.ts`, `tasks/generateStory.ts`), `useTTS`, `useSpeechRecognition`, `useBookGenerator` progressive-save pattern
-**Out of scope:** Image generation (working, untouched), book editor (working, untouched), manual page-by-page creation (preserved), sticker generation, scene generation in editor
+**Status:** Phase 1 shipped. Phase 2 partially shipped (Generate Chat + reviseStory live). Phase 2-P (illustration-phase persistence + resume) added May 2026 — see §11. Per-Page Review not yet built.
+**Author:** Design chat (Claude + Nathan), May 2026; persistence section added later that same month.
+**Decisions locked:** chat-based entry inside "+ New Book" dialog (Path A primary), two review surfaces (Generate Chat + Per-Page Review), Per-Page Review auto-opens for kid-generated books (Paths A/B) and is on-demand for Shelly-authored books (Path C), Story Guide wizard buried as fallback (not deleted), prompt quality fixes ship Phase 1 standalone, illustration loop stays client-driven with resume-on-next-open (no Cloud Function migration).
+**Phases in this doc:** Phase 1 (prompt quality, shipped), Phase 2 (Generate Chat + Per-Page Review + dialog rewire — Generate Chat shipped, Per-Page Review pending), Phase 2-P (illustration-phase persistence + resume — new, blocks Per-Page Review). Phase 3 (polish) sketched.
+**Builds on:** Book Builder (`src/features/books/`), AI Chat infrastructure (`functions/src/ai/chat.ts`, `tasks/generateStory.ts`, `tasks/reviseStory.ts`), `useTTS`, `useSpeechRecognition`, `useBookGenerator` progressive-save pattern, `useBookGenerateChat` chat draft persistence
+**Out of scope:** Image generation quality/style (working, untouched), book editor (working, untouched), manual page-by-page creation (preserved), sticker generation, scene generation in editor, server-side illustration loop (explicitly rejected to keep latency + cost down)
 
 ---
 
@@ -415,7 +415,9 @@ Voice transcription read-back applies to the kid's messages too: when the kid sp
 
 ### 5.B The Per-Page Review
 
-The per-page review opens automatically after the kid approves the whole story in the Generate Chat (Path A), and is available on-demand from the book editor's "Read it to me 🎧" button for any book. The kid (or Shelly) can leave at any time and the book stays as it was last saved — there's no concept of "exit without saving" because every revision is committed to Firestore immediately, same pattern as the editor.
+The per-page review opens automatically after the kid approves the whole story in the Generate Chat (Path A) **AND all pages have illustrations** (see §11 — the book's `generationStatus` is `'complete'`). If the kid approves while illustrations are still rendering, the dialog closes to the Bookshelf instead and the Per-Page Review auto-opens the next time the kid taps that book once illustrations finish. Available on-demand from the book editor's "Read it to me 🎧" button for any book regardless of `generationStatus` (the parent path; if some images are missing the review still works on the text, with placeholders where images haven't landed).
+
+The kid (or Shelly) can leave at any time and the book stays as it was last saved — there's no concept of "exit without saving" because every revision is committed to Firestore immediately, same pattern as the editor. Revision edits only ever touch text fields; images are never regenerated from the review (the only path that can regenerate an image is the explicit "the scene description changed" branch in §5.B.3, which is rare and gated).
 
 #### 5.B.1 The page
 
@@ -684,6 +686,12 @@ What's new in code:
 
 ## 8. Phased build
 
+**Status snapshot (May 2026):**
+- Phase 1 (prompt quality): **shipped** — `buildStoryPrompt` carries `sentenceTargetForAge`, `contentStakesForAge`, `WRITING_QUALITY_BLOCK`, `COPYRIGHT_BLOCK`, story-beat scaffolding, and the soft "weave 3-5 sight words naturally" rule. `maxTokens: 6144`, `temperature: 0.7` are live.
+- Phase 2 — Generate Chat half: **shipped** — `BookGenerateChat.tsx`, `useBookGenerateChat.ts`, `tasks/reviseStory.ts`, Bookshelf in-progress card for chat drafts, dialog rewire.
+- Phase 2 — Per-Page Review half: **not started**. Blocked on Phase 2-P (illustrations must be complete before review opens).
+- Phase 2-P (illustration persistence + resume): **new, blocks Per-Page Review**. See §11. This is the next thing to build.
+
 ### Phase 1 — Prompt quality (server-only, ~1 day of work)
 
 Scope:
@@ -792,3 +800,244 @@ Cross-references this doc lives alongside:
 - `docs/DESIGN_MONTHLY_REVIEW_BOOK.md` — sibling design doc for the parent-facing monthly book. Same Book Builder substrate, different generation path.
 - `docs/barnes-story-game-workshop-design.md` — sibling for the Workshop flow which also uses `useTTS` and `useSpeechRecognition`. Reuse patterns confirmed there.
 - `CLAUDE.md` — repo coding conventions; the new task and components follow these (no enums, `import type`, Firestore id-after-spread, etc.).
+
+---
+
+## 11. Illustration-phase persistence & resume (Phase 2-P)
+
+### 11.1 The problem this fixes
+
+A Generate Chat draft completes the *chat* (`reviewState.generateChatState: "completed"`) the moment the kid taps "I like the whole story". At that point `useBookGenerateChat.commitAndClose` synchronously runs the `useBookIllustrator.illustrate` loop, which generates DALL-E images one page at a time and writes each finished image back to the book doc.
+
+This loop is a problem the moment the kid leaves the dialog:
+
+- **Back-tap, app-switch, or accidental nav kills the loop.** The `for` loop in `useBookIllustrator.ts:65` lives in component state. When the dialog unmounts the loop's closures keep running for the in-flight image (no AbortController), but the next iteration won't start because the loop is already inside the awaited `generateImage(...)`. Outcome is unpredictable: sometimes the in-flight image lands, sometimes it doesn't, and **no later page is ever attempted**.
+- **The book is left half-illustrated with no marker.** Because `commitAndClose` calls `persistStory(... 'completed' ...)` *before* it starts illustrating, the book lands on the Bookshelf with `reviewState.generateChatState === 'completed'`. The "in-progress" warning card check at `BookshelfPage.tsx:522` only fires for `'in-progress'`, so the Bookshelf renders the book as a finished draft. Lincoln has no way to know it's missing 4 of his 10 illustrations until he opens it.
+- **DALL-E credits are wasted on regeneration.** If Shelly later tries to rerun generation from scratch (today's only fix path), every already-saved illustration gets regenerated and replaced.
+
+The Per-Page Review (§5.B) makes this worse: auto-opening a review surface over a book with missing illustrations creates a confusing experience where some pages have art and others are blank. The persistence work has to land before the Per-Page Review.
+
+### 11.2 Design — what changes
+
+#### 11.2.1 New book-level field: `generationStatus`
+
+Add a top-level field to `Book` (`src/core/types/books.ts`) — distinct from `reviewState.generateChatState` because the chat is "done" long before illustrations are:
+
+```ts
+export type GenerationStatus =
+  | 'text-only'       // story text saved, no illustration loop started yet
+  | 'illustrating'    // illustration loop is running on some client right now
+  | 'awaiting'        // loop was running, then stopped (nav, crash, close)
+  | 'complete'        // every page that has a sceneDescription has an image
+  | 'failed'          // unrecoverable error during text generation (rare)
+
+export interface Book {
+  // ...existing fields...
+  generationStatus?: GenerationStatus  // optional for backwards-compat
+  /** ms-since-epoch heartbeat; lets us tell 'illustrating' from a stuck client */
+  generationHeartbeatAt?: number
+  /** Page numbers that errored during illustration. Resume retries these. */
+  failedPages?: number[]
+}
+```
+
+Backwards-compat: books without `generationStatus` are treated as `'complete'` (every existing legacy book either has all images or was a manual creation). The migration is implicit — no backfill needed.
+
+Why not reuse `reviewState.generateChatState`? Because the chat is conceptually different from illustration. The chat being `'completed'` means "kid approved the text"; that's a real lifecycle event we want to preserve even when illustrations are still rendering. Conflating the two would break the "kid approved → review available" gate in §5.B.
+
+#### 11.2.2 Lifecycle transitions
+
+```
+                           ┌─────────────────┐
+   chat commits text       │   text-only     │
+   ───────────────────────►│ (story saved,   │
+                           │  no images yet) │
+                           └────────┬────────┘
+                                    │  client starts illustrate loop
+                                    ▼
+                           ┌─────────────────┐
+                  ┌───────►│  illustrating   │
+                  │        │ (heartbeat ticks│
+                  │        │  every 5 sec)   │
+                  │        └────────┬────────┘
+                  │                 │
+            resume                  │ ┌───────► complete (all pages have images
+                  │                 │ │          OR no remaining sceneDesc pages)
+                  │                 │ │
+                  │       client unmounts /
+                  │       heartbeat stale 30s+
+                  │                 │
+                  │                 ▼
+                  │        ┌─────────────────┐
+                  └────────┤    awaiting     │
+                           │ (Bookshelf shows│
+                           │  "X of Y done") │
+                           └─────────────────┘
+```
+
+- `text-only` and `illustrating` are *transient*. The Bookshelf treats them the same as `awaiting` for the resume card.
+- The heartbeat lets a second client (Shelly's phone) detect that another device is already illustrating and avoid a double-loop. The check is best-effort, not a hard lock — Firestore transactions are heavier than the cost of a redundant DALL-E call and we're not optimizing for that race.
+
+#### 11.2.3 Per-image atomic writes
+
+Today `useBookIllustrator.ts:97` reads the whole book doc, mutates one page's images in JS, then `setDoc` writes the whole doc back. That's a read-modify-write across DALL-E calls; if two clients ever run the loop concurrently they'd clobber each other's images.
+
+Switch to a targeted `updateDoc` keyed on page index:
+
+```ts
+import { updateDoc } from 'firebase/firestore'
+
+await updateDoc(bookRef, {
+  [`pages.${i}.images`]: [pageImage],
+  [`pages.${i}.layout`]: 'image-top',
+  [`pages.${i}.updatedAt`]: now,
+  updatedAt: now,
+  generationHeartbeatAt: Date.now(),
+  ...(i === 0 ? { coverImageUrl: imgResult.url } : {}),
+})
+```
+
+`pages` is an array, not a map, so dot-notation `pages.0.images` works on Firestore arrays-as-positional-fields. This avoids the read-modify-write race and keeps each image write small.
+
+If Storage upload succeeded but the Firestore write failed, the image is orphaned in Storage but the next resume will simply regenerate it (cheap re-attempt; the orphaned blob is a small cost we accept rather than building a cleanup job).
+
+#### 11.2.4 Resume entry point
+
+The `illustrate` loop becomes resumable. The hook signature stays the same; the body changes:
+
+```ts
+async function illustrate(opts) {
+  await markIllustrating(bookId)  // sets generationStatus='illustrating', starts heartbeat
+  try {
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i]
+      // SKIP pages that already have an AI-generated image (resume guard)
+      const existing = await readPageImages(bookId, i)
+      if (existing?.some((img) => img.type === 'ai-generated')) continue
+      if (!page.sceneDescription) continue
+      // ...generate + updateDoc as before...
+    }
+    await markComplete(bookId)  // sets generationStatus='complete'
+  } finally {
+    stopHeartbeat()
+  }
+}
+```
+
+The skip check turns a fresh run and a resume into the same code path. No separate "resume" function.
+
+Heartbeat: a `setInterval` that calls `updateDoc(bookRef, { generationHeartbeatAt: Date.now() })` every 5 seconds. On unmount or after `markComplete`, clear the interval. A reader treats any book whose `generationStatus === 'illustrating'` AND `Date.now() - generationHeartbeatAt > 30000` as stale → effectively `'awaiting'`.
+
+#### 11.2.5 AbortController for graceful unmount
+
+Even with resume, we want a clean cancellation path so an in-flight DALL-E call doesn't keep running (and billing) after the user navigates away:
+
+```ts
+const abortRef = useRef<AbortController | null>(null)
+
+useEffect(() => {
+  return () => {
+    abortRef.current?.abort()
+  }
+}, [])
+
+// inside illustrate:
+abortRef.current = new AbortController()
+const imgResult = await generateImage({ ..., signal: abortRef.current.signal })
+```
+
+The `generateImage` CF caller (`useAI`'s `generateImage`) gets a new optional `signal` param. When aborted, the current page is left without an image and the loop exits. The book lands in `'awaiting'` because the heartbeat stops ticking; next resume picks up from page i.
+
+#### 11.2.6 Bookshelf — "X of Y pages illustrated" card
+
+`BookshelfPage.tsx:522`'s in-progress detection currently fires only for `reviewState?.generateChatState === 'in-progress'`. Expand it to a derived state:
+
+```ts
+const isChatDraft = book.reviewState?.generateChatState === 'in-progress'
+const isAwaitingIllustration =
+  book.generationStatus === 'awaiting' ||
+  book.generationStatus === 'text-only' ||
+  (book.generationStatus === 'illustrating' &&
+   Date.now() - (book.generationHeartbeatAt ?? 0) > 30000)
+const totalPages = book.pages?.length ?? 0
+const illustratedPages = (book.pages ?? []).filter(
+  (p) => p.images?.some((img) => img.type === 'ai-generated'),
+).length
+const showProgress = isAwaitingIllustration && totalPages > 0
+const progressLabel = showProgress ? `${illustratedPages} of ${totalPages} pages illustrated` : null
+```
+
+Card visual treatment:
+
+- Warning-dashed border (same as today's chat draft card)
+- Cover thumbnail = first available illustrated page if any, else theme placeholder
+- A small chip on the cover: `4 of 6 pages` with a spinner icon if currently illustrating, a "▶ resume" icon if awaiting
+- Tap behavior:
+  - `isChatDraft` → resume into Generate Chat dialog (existing behavior)
+  - `isAwaitingIllustration && !isChatDraft` → resume the illustrate loop in a new lightweight `BookIllustrationProgress` modal (re-uses `GenerationProgress.tsx`'s UI shell). When the loop finishes, route to the Per-Page Review if the chat was already completed.
+
+Sort order: in-progress books (either kind) appear *before* completed and draft books. The existing `sortedBooks` logic (BookshelfPage.tsx:241) puts drafts before complete; insert a pre-step that puts `isAwaitingIllustration || isChatDraft` ahead of all others. Inside the in-progress group, most-recently-updated first.
+
+#### 11.2.7 Where the loop runs
+
+The illustrate loop is owned by **two** surfaces today (`useBookGenerator` legacy path and `useBookGenerateChat.commitAndClose`). After Phase 2-P:
+
+1. **`useBookGenerator`** still runs the loop at the end of its `generateBook` call (legacy Path B / Path C). The change is that it sets `generationStatus` and skips already-illustrated pages.
+2. **`useBookGenerateChat.commitAndClose`** stops running the loop synchronously. Instead it:
+   - Persists `reviewState.generateChatState: 'completed'` and `generationStatus: 'text-only'`
+   - Returns the book id immediately so the dialog can close fast (kid sees their book)
+   - The Bookshelf card detects `'text-only'` and shows a "resume" affordance
+   - **Or** (cleaner UX): the dialog navigates to a dedicated `BookIllustrationProgress` page that runs the loop. If the kid leaves that page, the loop dies cleanly via AbortController, status stays `'awaiting'`, and the Bookshelf picks it up.
+3. **New shared hook `useBookIllustrationRunner`** factors the loop out of both. Both surfaces call it. The hook is the only place that touches `generationStatus`.
+
+We pick option (2) for the chat path. Showing the kid a progress screen where they can watch images appear one by one is exciting (they see the dragon land on page 3 before page 4 is even drawn) and gives Lincoln a "wait, that's mine!" moment rather than a blank Bookshelf cover.
+
+#### 11.2.8 What stays out of scope (no CF migration)
+
+We considered moving the illustrate loop to a Cloud Function so generation continues with the app closed. We rejected it for Phase 2-P because:
+
+- **Latency.** A CF call per page adds ~1-2s of cold-start + dispatch overhead vs. direct client → OpenAI. For Lincoln's 10-page book that's 10-20 extra seconds.
+- **No webhook from OpenAI.** The CF would have to poll or stream; either way we still need a client to know when an image lands. A Firestore listener on the book doc handles that already, but the persistence story doesn't need a CF to work.
+- **Cost.** CF invocations + longer CF wall-time = more $$ per book.
+- **Reliability is already enough.** With per-page Firestore writes + AbortController + resume-on-next-open, the only data loss case is "DALL-E call in flight when client dies" — and that case loses at most one image, which the next resume regenerates.
+
+A scheduled CF sweep (find books in `'awaiting'` for > 24h, try once to resume) is a Phase 3 candidate if we see real-world books getting stuck. Not required for Phase 2-P.
+
+### 11.3 Implementation tasks
+
+In order:
+
+1. **Add `generationStatus`, `generationHeartbeatAt`, `failedPages` to `Book` type** (`src/core/types/books.ts`). Update tests that construct Books.
+2. **Build `useBookIllustrationRunner`** in `src/features/books/useBookIllustrationRunner.ts`. Owns: heartbeat, AbortController, per-image `updateDoc`, skip-already-illustrated, status transitions, retry of `failedPages`. Internally uses `useAI.generateImage` (which gains an optional `signal` param).
+3. **Add `signal` param to `generateImage`** in `useAI` and the underlying CF caller wiring. CF itself doesn't need to know — the client aborts the fetch.
+4. **Refactor `useBookIllustrator`** to be a thin wrapper around `useBookIllustrationRunner` for backwards-compat. Or delete and migrate callers; only `useBookGenerator` and `useBookGenerateChat` call it.
+5. **Update `useBookGenerator.generateBook`** to set `generationStatus: 'text-only'` after text save and `'complete'` (or `'awaiting'` on error) after the loop.
+6. **Update `useBookGenerateChat.commitAndClose`** to set `generationStatus: 'text-only'`, return bookId, and let the caller route to a progress page rather than illustrating in-place.
+7. **New page `BookIllustrationProgress.tsx`** at route `/books/:id/illustrating`. Loads book, runs `useBookIllustrationRunner`, shows GenerationProgress UI, navigates to `/books/:id` (or auto-opens Per-Page Review once §5.B lands) on completion. Back button is allowed; AbortController fires; book is safe in `'awaiting'`.
+8. **Update Bookshelf** (`BookshelfPage.tsx`):
+   - Sort `isAwaitingIllustration || isChatDraft` to the top
+   - Render progress chip + spinner/resume icon
+   - Wire tap behavior for the three cases
+9. **Wire the dialog → progress page handoff** in BookGenerateChat's `onCommit` callback (BookEditorPage navigates today; instead navigate to `/books/:id/illustrating`).
+10. **Stale-illustrating detector**: a small util `isStaleIllustrating(book)` used by Bookshelf and BookIllustrationProgress. If stale, the progress page can safely restart the loop (its skip logic protects against re-illustrating).
+11. **Tests.** `useBookIllustrationRunner.test.ts`: skip-already-illustrated, status transitions on success/abort/error, heartbeat tick. `BookshelfPage.test.tsx`: progress chip rendering, sort order. Mock `generateImage` and Firestore — no real API calls.
+
+Estimated size: ~600 LOC across ~8 files. Two days of work + tests.
+
+### 11.4 Acceptance
+
+- Kid taps "I like the whole story" → dialog closes within 500ms → progress page opens showing "Illustrating page 1 of 6..."
+- Kid taps Back during illustration → progress page unmounts → AbortController fires → in-flight DALL-E request aborts → no further pages start → book lands on Bookshelf as the first card with "3 of 6 pages illustrated" and a resume icon.
+- Kid taps the resume card → progress page opens, picks up at page 4 — pages 1-3 are NOT regenerated.
+- Two devices: Shelly opens the same in-progress book on her phone while Lincoln's iPad is mid-loop → Shelly's Bookshelf shows "currently illustrating" (heartbeat fresh) → tapping it opens a read-only "X of Y done" view, not a second illustrate loop.
+- A book stuck in `'illustrating'` with a heartbeat older than 30s is shown as resumable on every device.
+- Existing books without `generationStatus` render as complete (no false-positive resume cards).
+- DALL-E credits are spent at most once per page across all resumes for a given book.
+- Per-Page Review (§5.B) does NOT auto-open until `generationStatus === 'complete'`. If illustration is still running when the kid approves, the review opens automatically the next time the kid taps the book once status flips.
+
+### 11.5 Risks
+
+- **Array dot-path writes.** Firestore allows `pages.0.images` writes on array fields, but if the array length changes mid-loop (it shouldn't — pages count is fixed once text saves) the index could land on the wrong page. Mitigation: read `pages.length` once at loop start and never re-read; never resize the array during illustration.
+- **AbortController support in the underlying SDK.** The `fetch` calls we route through `useAI.generateImage` need to honor `signal`. Verify via the existing CF caller; if not supported, the fallback is "let the in-flight call finish, just don't start the next one" — slightly worse but acceptable.
+- **Bookshelf cluttered with stale in-progress cards.** If a book gets stuck in `'awaiting'` forever (DALL-E outage, etc.), it pins to the top permanently. Mitigation: 3-dot menu's "Delete" already works; add a "Mark as text-only book" option that flips status to `'complete'` without re-illustrating. Defer to Phase 3 unless we see it in the wild.
+- **Heartbeat write amplification.** A 5-second interval on a single doc is 12 writes/min. Negligible at family scale (2 kids × 1 book in flight at a time), not a concern.
