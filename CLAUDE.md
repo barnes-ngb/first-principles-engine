@@ -198,6 +198,7 @@ All under `families/{familyId}/`:
 | `plannerConversations` | Planner chat conversations |
 | `lessonCards` | Lesson card definitions |
 | `weeklyReviews` | AI-generated weekly adaptive reviews |
+| `monthlyReviews` | AI-generated monthly review books per child (doc ID: `{childId}_{YYYY-MM}`) |
 | `workbookConfigs` | Workbook pace/config per child (legacy — see activityConfigs) |
 | `activityConfigs` | Structured activity definitions per child (replaces routine text + workbook configs) |
 | `xpLedger` | XP event log for armor progression |
@@ -261,7 +262,7 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview)
 
-### Cloud Functions (23 exported)
+### Cloud Functions (24 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions, monthlyReview)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
@@ -270,6 +271,7 @@ All under `families/{familyId}/`:
 - `generateMonthlyReviewNow` — Manual monthly review trigger
 - `publishMonthlyReview` — Mark a monthly review book published (visible to kids)
 - `unpublishMonthlyReview` — Revert publish
+- `auditMonthlyReviewSources` — Diagnostic: inspect photo sources available for a monthly review
 - `generateActivity` — Lesson card generation
 - `transcribeAudio` — OpenAI Whisper voice transcription for the voice input module (writes `aiUsage` + `transcriptionEvents`)
 - `healthCheck` — Diagnostic endpoint
@@ -285,7 +287,7 @@ All under `families/{familyId}/`:
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
 - `functions/src/ai/health.ts` — Health check endpoint
 - `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview
-- `functions/src/ai/tasks/index.ts` — Chat task registry (CHAT_TASKS dispatch table, 15 task types)
+- `functions/src/ai/tasks/index.ts` — Chat task registry (CHAT_TASKS dispatch table, 17 task types)
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/monthlyReview.ts` — Monthly review callables (generate / publish / unpublish)
