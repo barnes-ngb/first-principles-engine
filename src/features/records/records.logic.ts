@@ -32,6 +32,9 @@ export type HoursSummaryRow = {
 export type HoursSummary = {
   totalMinutes: number
   coreMinutes: number
+  /** Home minutes across ALL subjects (core + non-core). */
+  homeMinutes: number
+  /** Home minutes for CORE subjects only — the MO "≥600 at home" metric. */
   coreHomeMinutes: number
   adjustmentMinutes: number
   bySubject: HoursSummaryRow[]
@@ -136,10 +139,12 @@ export const computeHoursSummary = (
 
   let totalMinutes = 0
   let coreMinutes = 0
+  let homeMinutes = 0
   let coreHomeMinutes = 0
 
   for (const row of bySubject) {
     totalMinutes += row.totalMinutes
+    homeMinutes += row.homeMinutes
     if (coreBuckets.has(row.subjectBucket as SubjectBucket)) {
       coreMinutes += row.totalMinutes
       coreHomeMinutes += row.homeMinutes
@@ -149,6 +154,7 @@ export const computeHoursSummary = (
   return {
     totalMinutes,
     coreMinutes,
+    homeMinutes,
     coreHomeMinutes,
     adjustmentMinutes,
     bySubject,
@@ -173,7 +179,7 @@ export const generateHoursSummaryCsv = (summary: HoursSummary): string => {
   const totals = csvRow([
     'TOTAL',
     (summary.totalMinutes / 60).toFixed(2),
-    (summary.coreHomeMinutes / 60).toFixed(2),
+    (summary.homeMinutes / 60).toFixed(2),
   ])
   const coreRow = csvRow([
     'CORE TOTAL',
@@ -604,8 +610,14 @@ export function generateComplianceReportHtml(
       <tr style="font-weight:bold">
         <td>TOTAL</td>
         <td class="num">${totalHours}</td>
-        <td class="num">${coreHomeHours}</td>
+        <td class="num">${(summary.homeMinutes / 60).toFixed(1)}</td>
         <td></td>
+      </tr>
+      <tr>
+        <td>Core at home (MO &ge;600)</td>
+        <td class="num">${coreHours}</td>
+        <td class="num">${coreHomeHours}</td>
+        <td>Core</td>
       </tr>
     </tbody>
   </table>

@@ -264,6 +264,9 @@ describe('computeHoursSummary', () => {
     expect(summary.totalMinutes).toBe(75)
     expect(summary.coreMinutes).toBe(30)
     expect(summary.coreHomeMinutes).toBe(30)
+    // homeMinutes = ALL home minutes (Reading 30 + PracticalArts 45),
+    // distinct from coreHomeMinutes which excludes the non-core PracticalArts.
+    expect(summary.homeMinutes).toBe(75)
     const practicalRow = summary.bySubject.find(
       (r) => r.subjectBucket === 'PracticalArts',
     )

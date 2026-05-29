@@ -135,6 +135,70 @@ Files over 1,500 lines — all stable, no growth this run:
 - **3 lint warnings** (`react-hooks/exhaustive-deps` for `sessionTimer` in `EvaluateChatPage.tsx:282`, `useQuestSession.ts:679`, `useQuestSession.ts:1760`) — intentional timer-ref pattern, not auto-fixable.
 - **`chat.ts` CF (2,466L)** — `buildQuestPrompt` is 400+ lines; extracting to separate prompt builder files would improve maintainability. Noted in CLAUDE.md tech debt.
 
+## Hours aggregation divergence (Records page) — 2026-05-29
+
+Audit triggered by Lincoln's Records page showing a ~7.3h core discrepancy between
+the **Monthly Trend** card (606h core) and every other view — Records summary, MO
+Compliance, Hours-by-Subject (all 598.73h core). Non-core matched everywhere; the
+entire gap was in core.
+
+### Additive-hours invariant (the rule all views must obey)
+Hours = **day logs + hours entries + hours adjustments**, summed additively. Each
+minute is classified by `subjectBucket` into **core** (Reading, LanguageArts, Math,
+Science, SocialStudies) or **non-core** (everything else). An unmapped/null
+`subjectBucket` is treated as **non-core** in *every* path (`?? 'Other'` /
+`?? ''`). The canonical implementation is `computeHoursSummary()` in
+`src/features/records/records.logic.ts`; the summary card, MO Compliance dashboard,
+and Hours-by-Subject table all read from it.
+
+### Root cause (core-classification gap)
+The reported hypothesis — that Monthly Trend defaults *unmapped* subjects to core —
+is **incorrect**: both paths default unmapped→non-core, which is exactly why non-core
+agrees across views. The real cause is that **Monthly Trend re-derives totals
+independently and reads day logs differently** than the canonical path:
+
+- `computeHoursSummary()` (`records.logic.ts:85-115`): per day log, if **any** block
+  has `actualMinutes > 0` it counts **block actual minutes** and ignores the
+  checklist; otherwise it falls back to **completed checklist items**.
+- `MonthlyTrend.tsx` (`:48-63`): counts **only completed checklist items**, never
+  reads block `actualMinutes`, and **skips any day log with no checklist**.
+
+On days that have both tracked blocks and a checklist, the two disagree. Because the
+canonical path only counts blocks that were actually tracked, **partially-tracked
+days** (the documented "Hours partial-day edge" tech debt) make the checklist-based
+trend read higher than the canonical block-based total — surfacing as the ~7.3h core
+gap. Non-core stays aligned because non-core minutes come almost entirely from hours
+entries + adjustments, which both paths read identically.
+
+### Which view is correct
+`computeHoursSummary()` is the source of truth: it backs 3 of the 4 cards plus the
+CSV export and printable MO compliance report. **Monthly Trend is the outlier and
+over-counts core.** Treat 598.73h core as authoritative → Lincoln is ~1.3h *under*
+the MO 600-core line; log a little core before June 30 to be safe.
+
+### Proposed fix (NOT yet applied — touches computation logic)
+Route `MonthlyTrend` through the same aggregation as `computeHoursSummary()` (extract
+a per-month variant, or compute monthly buckets from the same block-vs-checklist
+preference logic) so all four views read identical sources and bucket identically.
+This is the only change that closes the gap, and it touches the additive-hours
+invariant, so it is flagged for review rather than auto-applied. A code comment now
+marks the divergence at `MonthlyTrend.tsx`.
+
+### Applied fix (targeted, display-only — does not touch the invariant)
+The Hours-by-Subject **Total** row printed core-only home minutes (525.95h) under a
+Home column whose per-subject rows summed all-subject home (577.12h). Added a derived
+`homeMinutes` (all-subject home) to `HoursSummary`; the Total row now shows all-home
+and a separate **"Core at home (MO ≥600)"** row shows the core-only figure. Same fix
+applied to the CSV export and the printable HTML report. No existing computed value
+changed.
+
+### Data-integrity follow-ups (not code bugs — runtime Firestore data)
+- **Possible duplicate backfill:** near-identical 5-subject estimate batches dated
+  `2025-07-15` and `2025-08-15`. De-dupe `hoursAdjustments` on
+  `(date, subject, minutes, reason)`. Requires live data access (see Prompt 2 export).
+- **"Other" = 202h** (Zoo, Treehouse, etc.) is all non-core, so it doesn't affect the
+  core question, but it inflates the reviewer-facing total.
+
 ## Charter Alignment
 
 All task types checked: `chat` (`chatHandler.ts`) and `generate` (`generate.ts`) are not in `tasks/` directory but are handled elsewhere — no charter gap. All task handler files with a `.ts` in `functions/src/ai/tasks/` that are in the registry use either `buildContextForTask` or include charter context via context slices.
