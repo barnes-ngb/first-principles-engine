@@ -1,10 +1,8 @@
 # First Principles Engine — System Prompts Reference (v4)
 
-> **STALE** — does not reflect `chapterQuestions` task handler added Apr 10, 2026. Needs update.
-
 > Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
-> Last updated: 2026-04-01
+> Last updated: 2026-05-29 (health audit auto-fix: added chapterQuestions, reviseStory, monthlyReview task entries; section 4 prose may lag current implementations)
 
 ---
 
@@ -99,6 +97,9 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `weeklyFocus` | `claude-sonnet-4-6` | Unified weekly focus + conundrum |
 | `scan` | `claude-sonnet-4-6` | Curriculum photo analysis (vision) |
 | `shellyChat` | `claude-sonnet-4-6` | Parent AI assistant (family context) |
+| `chapterQuestions` | `claude-sonnet-4-6` | Chapter book discussion question generation |
+| `reviseStory` | `claude-sonnet-4-6` | Generate Chat AI story revision (full-story context) |
+| `monthlyReview` | `claude-sonnet-4-6` | Monthly review book generation (narrative + photo curation) |
 | `generate` | `claude-haiku-4-5-20251001` | Activity/lesson generation |
 | `chat` | `claude-haiku-4-5-20251001` | General chat |
 
@@ -150,10 +151,13 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `evaluate` | charter, childProfile, sightWords, wordMastery |
 | `quest` | childProfile, sightWords, recentEval, wordMastery |
 | `generateStory` | childProfile, sightWords, wordMastery, skillSnapshot |
+| `reviseStory` | childProfile, sightWords, wordMastery, skillSnapshot |
 | `revisePage` | childProfile, sightWords, wordMastery, skillSnapshot |
 | `workshop` | charter, childProfile, workshopGames |
 | `analyzePatterns` | childProfile |
 | `scan` | childProfile, recentEval |
+| `chapterQuestions` | _(self-loading)_ chapter book content + child profile |
+| `monthlyReview` | _(self-loading)_ CHARTER_PREAMBLE + aggregated month data (day logs, photos, milestones) |
 | `disposition` | _(self-loading)_ charter preamble + 4 weeks day logs + 3 recent evals + 5 recent lab reports |
 | `conundrum` | _(self-loading)_ charter preamble + week focus + recent subjects + child profiles |
 | `weeklyFocus` | _(self-loading)_ charter preamble + previous 4 weeks' themes + recent subjects + user input |
