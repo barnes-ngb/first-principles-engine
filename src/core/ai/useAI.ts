@@ -12,6 +12,7 @@ export const TaskType = {
   Quest: 'quest',
   GenerateStory: 'generateStory',
   ReviseStory: 'reviseStory',
+  RevisePage: 'revisePage',
   Workshop: 'workshop',
   AnalyzeWorkbook: 'analyzeWorkbook',
   Disposition: 'disposition',
