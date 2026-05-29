@@ -760,7 +760,16 @@ function HoursComplianceTab() {
                   <strong>{formatHours(summary.totalMinutes)}</strong>
                 </TableCell>
                 <TableCell align="right">
-                  <strong>{formatHours(summary.coreHomeMinutes)}</strong>
+                  <strong>{formatHours(summary.homeMinutes)}</strong>
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Core at home (MO ≥600)</TableCell>
+                <TableCell align="right">
+                  {formatHours(summary.coreMinutes)}
+                </TableCell>
+                <TableCell align="right">
+                  {formatHours(summary.coreHomeMinutes)}
                 </TableCell>
               </TableRow>
             </TableBody>
