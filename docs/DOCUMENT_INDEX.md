@@ -24,6 +24,7 @@
 | `STONEBRIDGE_BIBLE.md` | **CURRENT** | Canonical narrative world bible — 8 places, 10+ characters, values, tone, continuity rules |
 | `GAME_WORLD_ECONOMY.md` | **CURRENT** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
 | `HEALTH_REPORT.md` | **CURRENT** | Weekly code health metrics — line counts, test coverage, bundle size, tech debt tracking |
+| `PROJECT_CONTEXT.md` | **CURRENT** (auto-generated 2026-05-29) | Synthesized project context file for Claude.ai — family context, current sprint, nav structure, AI task registry, key design decisions. Regenerated on demand from repo docs + Drive docs. |
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls, per-function model + cost-per-call mapping |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4, updated 2026-05-29) | Task dispatch, model selection, context slices — 17 task types in `tasks/index.ts` registry (plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview); `analyzeEvaluationPatterns` exported separately |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
