@@ -91,6 +91,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `evaluate` | `claude-sonnet-4-6` | Reading/math diagnostic evaluation |
 | `quest` | `claude-sonnet-4-6` | Interactive Knowledge Mine quests |
 | `generateStory` | `claude-sonnet-4-6` | Sight word story generation |
+| `revisePage` | `claude-sonnet-4-6` | Per-Page Review single-page revision (V2 PR-B) |
 | `workshop` | `claude-sonnet-4-6` | Story Game Workshop |
 | `analyzeWorkbook` | `claude-sonnet-4-6` | Workbook page analysis |
 | `disposition` | `claude-sonnet-4-6` | Learning disposition narrative |
@@ -149,6 +150,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `evaluate` | charter, childProfile, sightWords, wordMastery |
 | `quest` | childProfile, sightWords, recentEval, wordMastery |
 | `generateStory` | childProfile, sightWords, wordMastery, skillSnapshot |
+| `revisePage` | childProfile, sightWords, wordMastery, skillSnapshot |
 | `workshop` | charter, childProfile, workshopGames |
 | `analyzePatterns` | childProfile |
 | `scan` | childProfile, recentEval |
@@ -228,6 +230,45 @@ src/core/ai/useAI.ts              functions/src/ai/
 **Output:** JSON with `title`, `pages[]` (`pageNumber`, `text`, `sceneDescription`, `wordsOnPage`), `allWordsUsed`, `missedWords`, plus new optional `qualityNotes` field (debug-only — logged to aiUsage, not rendered in the book).
 
 **Model:** `claude-sonnet-4-6` · **maxTokens:** 6144 · **temperature:** 0.7
+
+### `revisePage` (tasks/revisePage.ts)
+
+The surgical single-page revision task used during the **Per-Page Review**
+(§5.B of `DESIGN_STORY_GENERATION_V2.md`). Distinct from the whole-story
+`reviseStory` task that drives the Generate Chat — `revisePage` touches one
+page at a time, in response to TTS-read-aloud listener feedback.
+
+> Note: the model is **`claude-sonnet-4-6`**, not `whisper-1`. (Whisper is the
+> separate `transcribeAudio` function that turns the listener's spoken
+> feedback into the `feedback` string; the page rewrite itself is Sonnet.)
+
+**System prompt assembly:**
+1. Context slices for "revisePage": childProfile, sightWords, wordMastery, skillSnapshot
+2. `buildRevisePagePrompt(input)` — single-page reviser with full-story context
+
+**Input:** `pageNumber`, `currentText`, `currentSceneDescription`, `feedback`
+(transcribed listener feedback), `fullStoryContext` (`title`, `allPages[]`,
+`characterNames[]`), `childCalibration` (`childAge`, `childName`,
+`sentenceTarget`, `vocabularyLevel`).
+
+**Key behaviors:**
+- **Full-story context for consistency:** every page's text is embedded so the
+  revision keeps character names, tone, and pacing intact; only the target page
+  is rewritten.
+- **Beat preservation:** the revised page keeps its role in the arc (a climax
+  stays a climax).
+- **Surgical edits:** typo/phrasing feedback fixes the issue without rewriting
+  the whole page; "I don't like this page" gets a fresh page that still fits.
+- **Reuses the shared `WRITING_QUALITY_BLOCK` and `COPYRIGHT_BLOCK`** and the
+  per-child `sentenceTargetForAge` / `contentStakesForAge` calibration helpers.
+- **Model decides `regenerateImage`:** "yes" when the visual scene meaningfully
+  changes, "no" for pure text fixes. The client only calls image generation on
+  "yes" (background regen — the kid keeps reading the revised text).
+
+**Output:** JSON with `newText`, `newSceneDescription`, `wordsOnPage[]`,
+`regenerateImage` (`"yes" | "no"`), and optional `qualityNotes` (debug-only).
+
+**Model:** `claude-sonnet-4-6` · **maxTokens:** 2048 · **temperature:** 0.7
 
 ### `workshop` (tasks/workshop.ts)
 

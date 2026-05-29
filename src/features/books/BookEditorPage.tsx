@@ -26,6 +26,7 @@ import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import DrawIcon from '@mui/icons-material/Draw'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import PrintIcon from '@mui/icons-material/Print'
+import HeadphonesIcon from '@mui/icons-material/Headphones'
 
 import Divider from '@mui/material/Divider'
 import FormControl from '@mui/material/FormControl'
@@ -1151,6 +1152,20 @@ export default function BookEditorPage() {
           variant="outlined"
           size="small"
         />
+        {/* "Read it to me 🎧" — opens the Per-Page Review (Story Gen V2 PR-B).
+            Parent: always available for AI-generated books (post-hoc review,
+            design §9 Q3). Kid: only when the review isn't finished yet.
+            Hidden entirely for manual (non-AI) books. */}
+        {(book.source === 'ai-generated' || book.bookType === 'generated') &&
+          (isParentProfile || !book.reviewState?.completedAt) && (
+            <Chip
+              label="Read it to me 🎧"
+              icon={<HeadphonesIcon />}
+              onClick={() => navigate(`/books/${bookId}/review`)}
+              variant="outlined"
+              size="small"
+            />
+          )}
         <Chip
           label={printing ? 'Building...' : 'Print'}
           icon={printing ? <CircularProgress size={14} /> : <PrintIcon />}

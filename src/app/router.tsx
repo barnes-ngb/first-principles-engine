@@ -17,6 +17,7 @@ import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
 import BookshelfPage from '../features/books/BookshelfPage'
 import BookEditorPage from '../features/books/BookEditorPage'
 import BookReaderPage from '../features/books/BookReaderPage'
+import BookReviewChat from '../features/books/BookReviewChat'
 import CreateSightWordBook from '../features/books/CreateSightWordBook'
 import SightWordDashboard from '../features/books/SightWordDashboard'
 import StoryGuidePage from '../features/books/StoryGuidePage'
@@ -61,6 +62,7 @@ const routes = [
       { path: '/books/sight-words', element: <SightWordDashboard /> },
       { path: '/books/:bookId', element: <BookEditorPage /> },
       { path: '/books/:bookId/read', element: <BookReaderPage /> },
+      { path: '/books/:bookId/review', element: <BookReviewChat /> },
       { path: '/quest', element: <KnowledgeMinePage />, errorElement: <QuestErrorBoundary /> },
       { path: '/avatar', element: <MyAvatarPage /> },
       { path: '/hero', element: <Navigate to="/avatar" replace /> },

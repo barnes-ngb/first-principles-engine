@@ -55,6 +55,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   quest: ["childProfile", "sightWords", "recentHistoryByDomain", "wordMastery", "skillSnapshot", "workbookPaces", "recentScans"],
   generateStory: ["childProfile", "sightWords", "wordMastery", "skillSnapshot"],
   reviseStory: ["childProfile", "sightWords", "wordMastery", "skillSnapshot"],
+  revisePage: ["childProfile", "sightWords", "wordMastery", "skillSnapshot"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
   analyzeWorkbook: ["charter", "childProfile"],
