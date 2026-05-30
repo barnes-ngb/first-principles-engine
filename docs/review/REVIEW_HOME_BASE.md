@@ -5,7 +5,7 @@
 > audit, holds the live issue ledger, and spins out fix runs.
 > **Where fixing happens:** Claude Code web, driven by the prompts in `prompts/`, reviewed before merge.
 > **Repo:** github.com/barnes-ngb/first-principles-engine · **Live:** first-principles-engine.web.app
-> **Created:** 2026-05-29 · **Last audit:** 2026-05-29 (seed)
+> **Created:** 2026-05-29 · **Last audit:** 2026-05-29 (monthly — `ARCHITECTURE_AUDIT_2026-05.md`)
 
 ---
 
@@ -86,18 +86,22 @@ Band = priority band from §2. The audit prompt updates this table; the fix prom
 
 | ID | Band | Status | Title | Evidence / location |
 |---|---|---|---|---|
-| **FUNC-01** | 2 | OPEN | No authoritative source for "where is Lincoln" — 6 overlapping truth surfaces | `first-principles-system-review.md`; Skill Snapshot / Ladders / Milestones / Learning Map / Curriculum / Disposition |
-| **DATA-01** | 4† | OPEN | `MonthlyTrend` over-counts core hours; canonical view puts Lincoln **~1.3h under MO 600-core**. Fix written, **not applied** (touches additive-hours invariant) | `HEALTH_REPORT.md`; `MonthlyTrend.tsx:48-63` vs `records.logic.ts:85-115` |
-| **ARCH-01** | 1 | OPEN | `chat.ts` Cloud Function is 2,466L; `buildQuestPrompt` alone 400+L | `functions/src/ai/chat.ts` |
-| **ARCH-05** | 1 | OPEN | Main bundle 3.84MB / 1.13MB gzip, **zero code splitting** (Three.js, jsPDF, curriculum map) | needs route-level `React.lazy` — architectural decision |
-| **ARCH-04** | 1 | OPEN | `useQuestSession.ts` 1,870L handles 4 quest types in one hook | `src/features/quest/useQuestSession.ts` |
+| **DATA-01** | 4† | OPEN | `MonthlyTrend` over-counts core hours; canonical view puts Lincoln **~1.3h under MO 600-core** (June 30 deadline). Fix documented, **not applied** | `MonthlyTrend.tsx:48-63` vs `records.logic.ts:85-115`; fix proposal in `ARCHITECTURE_AUDIT_2026-05.md` |
+| **ARCH-01** | 1 | OPEN | `chat.ts` CF 2,466L; `buildQuestPrompt` 400+L — extract prompt builders | `functions/src/ai/chat.ts` |
 | **ARCH-02** | 1 | OPEN | `PlannerChatPage.tsx` 2,620L; ~1,700L interconnected state | `src/features/planner-chat/PlannerChatPage.tsx` |
-| **ARCH-03** | 1 | OPEN | `BookEditorPage.tsx` 2,278L, grew with themes + drawing flows | `src/features/books/BookEditorPage.tsx` |
-| **ARCH-06** | 1 | OPEN | WorkbookConfig → ActivityConfig migration incomplete (27 legacy refs; backfill covers runtime) | quest starting-level check, certificate scan |
-| **TEST-01** | 1 | OPEN | `shelly-chat`, `progress`, `dad-lab` have **0** test files | `HEALTH_REPORT.md` coverage table |
-| **ARCH-07** | 1 | OPEN | Ladder system partial-deprecation; 3 files carry TODO removal markers | per `CLAUDE.md` tech debt |
-| **DATA-02** | 4 | NEEDS-DATA | Possible duplicate hours backfill: near-identical 5-subject batches dated 2025-07-15 & 2025-08-15 | de-dupe `hoursAdjustments` on (date,subject,minutes,reason) |
-| **DOC-01** | 1 | OPEN | Claude.ai project still points at MASTER_OUTLINE **v14** (Mar 31); repo is **v15**. Repoint at `PROJECT_CONTEXT.md` | this project's loaded files |
+| **ARCH-03** | 1 | OPEN | `BookEditorPage.tsx` 2,278L — section-bounded, low urgency | `src/features/books/BookEditorPage.tsx` |
+| **ARCH-04** | 1 | OPEN | `useQuestSession.ts` 1,870L handles 4 quest types in one hook | `src/features/quest/useQuestSession.ts` |
+| **ARCH-05** | 1 | OPEN | Main bundle 3.84MB / 1.13MB gzip, **zero code splitting**. AvatarThumbnail blocks Three.js split (in AppShell). Proposed 4-step plan in `ARCHITECTURE_AUDIT_2026-05.md §1.2` | `router.tsx`, `AppShell.tsx:15`, `AvatarThumbnail.tsx` |
+| **ARCH-06** | 1 | OPEN | WorkbookConfig → ActivityConfig migration incomplete. **34 legacy refs** (grew from 27). Planner still has 5 active `workbookConfigs` reads. | `PlannerChatPage.tsx:295,898,978,1397,1399`; `firestore.ts:247` |
+| **ARCH-07** | 1 | **IN PROGRESS** | Ladder UI surfaces removed; `/ladders` → `/progress` redirect; `ladders/` dir + dead `LadderQuickLog` deleted; data layer (`ladderRef` tag, `ladderProgress` collection, `Ladder*` types) retained. PR open, awaiting review. | [PR #1263](https://github.com/barnes-ngb/first-principles-engine/pull/1263) — touched `router.tsx`, `TodayPage.tsx`, `TeachHelperDialog.tsx`, deleted `src/features/ladders/*` + `LadderQuickLog.tsx` |
+| **ARCH-08** | 1 | OPEN (new) | `AvatarThumbnail.tsx` imports Three.js; used in AppShell — prerequisite for any bundle split | `AppShell.tsx:15`, `ContextBar.tsx:14`, `ChildSelector.tsx:10`, `ProfileMenu.tsx:15` |
+| **ARCH-09** | 1 | OPEN (new) | `ShellyChatPage.tsx` 1,653L — 23+ useState, image generation, thread management | `src/features/shelly-chat/ShellyChatPage.tsx` — defer until usage stabilizes |
+| **TEST-01** | 1 | OPEN | `shelly-chat`, `progress`, `dad-lab` have **0** test files. Propose `shellyChat.logic.test.ts` + `DispositionProfile.test.tsx` next. | confirmed in `ARCHITECTURE_AUDIT_2026-05.md §1.3` |
+| **FUNC-01** | 2 | OPEN | No authoritative source for "where is Lincoln" — 6 overlapping truth surfaces, no reconciliation | skillSnapshot (closest to auth) vs. childSkillMaps vs. activityConfigs vs. ladderProgress vs. dispositionCache |
+| **FUNC-02** | 2 | OPEN (new) | Learning Map → Skill Snapshot write-through missing. Scan advances curriculum node but does NOT update conceptual blocks. Dead end in the curriculum→eval loop. | `updateSkillMapFromFindings.ts`; no write-through to `skillSnapshots` |
+| **ETHOS-01** | 3 | OPEN (new) | Charter preamble absent from 5/17 task types: `generateStory`, `reviseStory`, `revisePage`, `quest`, `scan`. Story trio is highest concern. | `contextSlices.ts:56-58,55,66`; `generateStory.ts`, `revisePage.ts`, `reviseStory.ts` |
+| **DATA-02** | 4 | NEEDS-DATA | Possible duplicate hours backfill: near-identical 5-subject batches dated 2025-07-15 & 2025-08-15 | de-dupe `hoursAdjustments` on (date,subject,minutes,reason) — requires live Firestore export |
+| **DOC-01** | 1 | OPEN | Claude.ai project still points at MASTER_OUTLINE **v14** (Mar 31); repo is **v15**. Repoint at `PROJECT_CONTEXT.md` | this project's loaded context |
 | **LINT-01** | 1 | WONTFIX? | 3 `react-hooks/exhaustive-deps` warnings (intentional timer-ref pattern) | `EvaluateChatPage.tsx:282`, `useQuestSession.ts:679,1760` |
 
 † DATA-01 is in band 4 by topic but **promoted to top of queue** as compliance- and time-sensitive (June 30).

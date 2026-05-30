@@ -94,12 +94,11 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/evaluate/` — Reading evaluation chat, findings extraction
 - `src/features/evaluation/` — Skill snapshot page, quick check panel
 - `src/features/kids/` — Kids page, ladder logic
-- `src/features/ladders/` — Skill progression ladders
 - `src/features/login/` — Profile selection
 - `src/features/not-found/` — 404 page
 - `src/features/planner/` — TeachHelperDialog (shared)
 - `src/features/planner-chat/` — Plan My Week (AI chat planner, decomposed: PlannerChatPage + PlannerSetupWizard, WeekFocusPanel, PlanDayCards, PlannerChatMessages)
-- `src/features/progress/` — Progress tabs (learning profile, ladders, engine, snapshot, milestones, word wall, armor, curriculum)
+- `src/features/progress/` — Progress tabs (learning profile, engine, snapshot, milestones, word wall, armor, curriculum)
 - `src/features/progress/CurriculumTab.tsx` — Curriculum management tab (activity configs)
 - `src/features/progress/learning-map/` — Learning Map UI components (visual curriculum knowledge map)
 - `src/features/progress/DispositionProfile.tsx` — AI disposition narrative from day log data, with per-disposition parent overrides (inline edit, revert to AI)
@@ -318,7 +317,7 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 - **useQuestSession.ts (1,763L)** — Grew from 954L. Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
 - **MyAvatarPage.tsx (1,749L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
 - **VoxelCharacter.tsx (1,433L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
-- **Ladder system** — Partially deprecated. Disposition system replacing it. 3 files have TODO comments marking ladder references for removal.
+- **Ladder system** — UI surfaces removed (ARCH-07): the `/ladders` route now redirects to `/progress`, and the `src/features/ladders/` directory + the dead `LadderQuickLog` were deleted now that the disposition system is live. The data layer is intentionally retained: the `ladderRef` artifact tag (still scored by `scoreArtifactsForPortfolio` and shown in `ArtifactCard`), the `ladderProgress` collection (historical data), and the `Ladder*` types in `common.ts`.
 - **evaluate.ts (weekly review)** — Registered in `TASK_CONTEXT` as `weeklyReview` and now calls `buildContextForTask` to fetch shared slices (charter, childProfile, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports). Still not routed through the `chat` dispatch — it's a dedicated scheduled CF + `generateWeeklyReviewNow` callable, not a chat task handler — so it composes its own systemPrompt from `[sharedSlices, WEEKLY_REVIEW_ADDENDUM]`. `assembleWeekContext` provides the week-scoped dayLogs/hours/plans/books/teach-backs/missedDays that shared slices don't cover. Books slice = created / completed / reading sessions (cumulative minutes on touched books); teach-backs slice = count / subject breakdown / audio-vs-text / up to 3 brief examples with audio URLs. Both are persisted on the `weeklyReviews/{weekKey}_{childId}` doc as `evidence` so the rendered "Week in Evidence" section reads without re-querying.
 - **WorkbookConfig → ActivityConfig migration** — Both systems exist. ActivityConfig is the new primary (66 refs vs 27). workbookConfigs still read by quest starting level check and certificate scan. Plan: complete migration, remove workbookConfig references.
 - **Bundle size** — Main chunk is 3.4MB (1MB gzipped). Should code-split Three.js, jsPDF, and heavy features.

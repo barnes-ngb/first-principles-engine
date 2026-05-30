@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CloseIcon from '@mui/icons-material/Close'
 import PrintIcon from '@mui/icons-material/Print'
@@ -19,7 +19,7 @@ import { addDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useGenerateActivity } from '../../core/ai/useAI'
 import { lessonCardsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
-import type { ChecklistItem, LadderCardDefinition, LessonCard, SkillSnapshot } from '../../core/types'
+import type { ChecklistItem, LessonCard, SkillSnapshot } from '../../core/types'
 import { fixUnicodeEscapes } from '../../core/utils/format'
 import { openPrintWindow } from '../planner-chat/generateMaterials'
 
@@ -30,7 +30,6 @@ interface TeachHelperDialogProps {
   childId: string
   childName: string
   item: ChecklistItem | null
-  ladders: LadderCardDefinition[]
   weekTheme?: string
 }
 
@@ -47,7 +46,6 @@ export default function TeachHelperDialog({
   childId,
   childName,
   item,
-  ladders,
   weekTheme,
 }: TeachHelperDialogProps) {
   const [snapshot, setSnapshot] = useState<SkillSnapshot | null>(null)
@@ -128,13 +126,6 @@ export default function TeachHelperDialog({
 
     return () => { cancelled = true }
   }, [lessonCardKey, familyId, childId, item])
-
-  const ladderInfo = useMemo(() => {
-    if (!item?.ladderRef) return null
-    const ladder = ladders.find((l) => l.ladderKey === item.ladderRef!.ladderId)
-    const rung = ladder?.rungs.find((r) => r.rungId === item.ladderRef!.rungId)
-    return { ladder, rung }
-  }, [item, ladders])
 
   const handleGenerateForItem = useCallback(async () => {
     if (!item || !childId) return
@@ -296,26 +287,6 @@ ${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'G
             )}
           </Box>
 
-          {/* Ladder context */}
-          {ladderInfo?.ladder && (
-            <>
-              <Divider />
-              <Box>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Ladder
-                </Typography>
-                <Typography>
-                  {ladderInfo.ladder.title} — {ladderInfo.rung?.name ?? 'Unknown rung'}
-                </Typography>
-                {ladderInfo.rung && (
-                  <Typography variant="body2" color="text.secondary">
-                    Evidence: {fixUnicodeEscapes(ladderInfo.rung.evidenceText)}
-                  </Typography>
-                )}
-              </Box>
-            </>
-          )}
-
           <Divider />
 
           {/* Lesson content: saved card or generic template */}
@@ -388,7 +359,6 @@ ${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'G
                   </Typography>
                   <Typography variant="body2">
                     <strong>4. Check (1 min):</strong> Ask {childName} to explain what they did.
-                    {ladderInfo?.rung && ` Look for: ${fixUnicodeEscapes(ladderInfo.rung.evidenceText)}`}
                   </Typography>
                 </Stack>
               </Box>
