@@ -32,6 +32,7 @@ export const ContextSlice = {
   WorkshopGames: "workshopGames",
   Mastery: "mastery",
   SkillSnapshot: "skillSnapshot",
+  ChildSkillMap: "childSkillMap",
   RecentScans: "recentScans",
   ActivityConfigs: "activityConfigs",
   RecentHistoryByDomain: "recentHistoryByDomain",
@@ -67,7 +68,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   shellyChat: [
     "charter", "childProfile", "engagement", "gradeResults",
     "recentEval", "sightWords", "weekFocus", "wordMastery", "workbookPaces",
-    "skillSnapshot", "recentHistoryByDomain", "recentScans",
+    "skillSnapshot", "childSkillMap", "recentHistoryByDomain", "recentScans",
     "dayToday", "dadLabReports",
   ],
   weeklyReview: [
@@ -389,6 +390,9 @@ export async function buildContextForTask(
   if (slices.includes("skillSnapshot")) {
     fetches.push({ slice: "skillSnapshot", promise: loadSkillSnapshotContext(db, familyId, childId) });
   }
+  if (slices.includes("childSkillMap")) {
+    fetches.push({ slice: "childSkillMap", promise: loadChildSkillMapContext(db, familyId, childId) });
+  }
   if (slices.includes("recentScans")) {
     fetches.push({ slice: "recentScans", promise: loadRecentScansContext(db, familyId, childId) });
   }
@@ -600,6 +604,12 @@ export async function buildContextForTask(
   if (sliceData.has("skillSnapshot")) {
     const snapshotText = sliceData.get("skillSnapshot") as string;
     if (snapshotText) sections.push(snapshotText);
+  }
+
+  // Curriculum map coverage (per-node not-started/in-progress/mastered states)
+  if (sliceData.has("childSkillMap")) {
+    const childSkillMapText = sliceData.get("childSkillMap") as string;
+    if (childSkillMapText) sections.push(childSkillMapText);
   }
 
   // Recent scans (where the child left off in each workbook)
@@ -917,6 +927,134 @@ async function loadSkillSnapshotContext(
   }
 
   return lines.length > 1 ? lines.join("\n") : "";
+}
+
+// ── Curriculum map (childSkillMaps) coverage loader ──────────────
+
+/**
+ * Raw `childSkillMaps/{childId}` doc shape as stored in Firestore.
+ * The client curriculum-node catalog (`src/core/curriculum/`) is not importable
+ * from `functions/`, so the loader works off the stored nodeId + status only.
+ */
+interface ChildSkillMapDoc {
+  childId?: string;
+  skills?: Record<string, {
+    nodeId?: string;
+    status?: string;
+    source?: string;
+    updatedAt?: string;
+    notes?: string;
+  }>;
+  updatedAt?: string;
+}
+
+/**
+ * Humanize a curriculum nodeId's leaf segment for a readable label —
+ * e.g. "reading.phonics.letterSounds" → "letter sounds". No catalog lookup
+ * (the node labels live client-side), so this is a best-effort derivation
+ * from the stored id.
+ */
+function curriculumNodeLabel(nodeId: string): string {
+  const leaf = nodeId.split(".").pop() || nodeId;
+  return leaf
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[-_]/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Pure-format the per-child curriculum knowledge map (childSkillMaps) into a
+ * compact COVERAGE block. Exported for unit testing without Firestore.
+ *
+ * This slice is *coverage* — how many nodes are covered, the current frontier,
+ * and what advanced recently — NOT per-skill grades. The SKILL SNAPSHOT slice
+ * already carries working levels, so this deliberately emits node counts and
+ * names only (no levels) to avoid duplicating snapshot detail and to keep AI
+ * context size in check.
+ *
+ * Returns "" when the doc is missing or has no nodes (omit-on-empty — match the
+ * other shellyChat formatters' "don't explain absence" convention).
+ */
+export function formatChildSkillMap(mapDoc: ChildSkillMapDoc | undefined): string {
+  const skills = mapDoc?.skills;
+  if (!skills) return "";
+
+  const entries = Object.entries(skills).map(([nodeId, e]) => ({
+    nodeId: e?.nodeId || nodeId,
+    status: e?.status || "not-started",
+    updatedAt: e?.updatedAt || "",
+  }));
+  if (entries.length === 0) return "";
+
+  const mastered = entries.filter((e) => e.status === "mastered");
+  const inProgress = entries.filter((e) => e.status === "in-progress");
+  const notStarted = entries.filter((e) => e.status === "not-started");
+
+  const lines: string[] = ["CURRICULUM MAP / COVERAGE:"];
+  lines.push(
+    `${entries.length} curriculum nodes tracked: ${mastered.length} mastered, ${inProgress.length} in progress, ${notStarted.length} not yet started.`,
+  );
+
+  // Per-domain breakdown (domain = first nodeId segment, e.g. reading/math).
+  const byDomain = new Map<string, { total: number; mastered: number }>();
+  for (const e of entries) {
+    const domain = e.nodeId.split(".")[0] || "other";
+    const agg = byDomain.get(domain) ?? { total: 0, mastered: 0 };
+    agg.total++;
+    if (e.status === "mastered") agg.mastered++;
+    byDomain.set(domain, agg);
+  }
+  const domainStrs = [...byDomain.entries()]
+    .sort((a, b) => b[1].total - a[1].total)
+    .map(([d, agg]) => `${d} ${agg.total} (${agg.mastered} mastered)`);
+  if (domainStrs.length > 0) {
+    lines.push(`By domain: ${domainStrs.join(", ")}.`);
+  }
+
+  // Frontier — what the child is currently working on (cap to keep it short).
+  if (inProgress.length > 0) {
+    const names = inProgress.slice(0, 6).map((e) => curriculumNodeLabel(e.nodeId));
+    lines.push(`Currently working on: ${names.join(", ")}.`);
+  }
+
+  // Recently advanced nodes (mastered/in-progress, most-recent first).
+  const recent = entries
+    .filter((e) => e.status !== "not-started" && e.updatedAt)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 3);
+  if (recent.length > 0) {
+    const recentStrs = recent.map((e) => {
+      const date = e.updatedAt
+        ? new Date(e.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        : "";
+      const statusLabel = e.status === "mastered" ? "mastered" : "in progress";
+      return `${curriculumNodeLabel(e.nodeId)} (${statusLabel}${date ? ` ${date}` : ""})`;
+    });
+    lines.push(`Recently advanced: ${recentStrs.join(", ")}.`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Load the per-child curriculum knowledge map (childSkillMaps/{childId}) and
+ * format it as a compact coverage block. Read-only — the portal never writes
+ * childSkillMaps (owned by updateSkillMapFromFindings / useSkillMap).
+ */
+async function loadChildSkillMapContext(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  if (!childId) return "";
+  const snap = await db
+    .collection(`families/${familyId}/childSkillMaps`)
+    .doc(childId)
+    .get();
+
+  if (!snap.exists) return "";
+  return formatChildSkillMap(snap.data() as ChildSkillMapDoc);
 }
 
 /** Load recently created workshop games that can be included as plan activities. */

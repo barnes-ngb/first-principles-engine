@@ -117,10 +117,10 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 
 **17 chat task types** (`tasks/index.ts`): plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview.
 
-**Context slices** (`TASK_CONTEXT` in `contextSlices.ts`) — per-task assembly of: `charter`, `childProfile`, `workbookPaces` (curriculum coverage, NO pace pressure), `weekFocus`, `hoursProgress`, `engagement`, `gradeResults`, `bookStatus`, `sightWords`, `recentEval`, `recentHistoryByDomain`, `wordMastery`, `generatedContent`, `workshopGames`, `mastery`, `skillSnapshot`, `recentScans`, `activityConfigs`, `dayToday`, `dadLabReports`. Examples:
+**Context slices** (`TASK_CONTEXT` in `contextSlices.ts`) — per-task assembly of: `charter`, `childProfile`, `workbookPaces` (curriculum coverage, NO pace pressure), `weekFocus`, `hoursProgress`, `engagement`, `gradeResults`, `bookStatus`, `sightWords`, `recentEval`, `recentHistoryByDomain`, `wordMastery`, `generatedContent`, `workshopGames`, `mastery`, `skillSnapshot`, `childSkillMap` (curriculum-map node coverage; `shellyChat`-only, read-only), `recentScans`, `activityConfigs`, `dayToday`, `dadLabReports`. Examples:
 - `plan` → 18 slices (the richest).
 - `chat` → `["charter","childProfile"]` only (Haiku, kid-facing — pinned by isolation test; must NOT gain eval/disposition context).
-- `shellyChat` → 14 shared slices + 8 supplemental queries in `tasks/shellyChat.ts` (disposition profile, weekly review strip, conundrum, teach-backs). Sonnet, planning-partner mode.
+- `shellyChat` → 15 shared slices (incl. `childSkillMap` curriculum-coverage, FUNC-03) + 8 supplemental queries in `tasks/shellyChat.ts` (disposition profile, weekly review strip, conundrum, teach-backs). Sonnet, planning-partner mode.
 - `weeklyReview` → charter, childProfile, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports (+ week-scoped `assembleWeekContext`); not routed through `chat` dispatch (dedicated scheduled CF).
 
 **Findings pipeline:** `EvaluationFinding { skill, status: mastered|emerging|not-yet|not-tested, evidence, notes?, testedAt }` (`evaluation.ts`). Created by Knowledge Mine quests (`<quest>` tag), guided evaluations (`<finding>` tag), and curriculum scans (findings-shaped). Written to `evaluationSessions` (replace) and `skillSnapshots.prioritySkills` (merge); feeds `childSkillMaps` via `updateSkillMapFromFindings()`.
