@@ -156,9 +156,11 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 19. Quest Complete mom-note is hand-written by Shelly, never AI-generated (fallback: "Mom will see this tonight.").
 
 ## Architecture
-**Top files (computed):** PlannerChatPage.tsx (2,620) · functions/src/ai/chat.ts (2,466) · BookEditorPage.tsx (2,278) · useQuestSession.ts (1,870) · MyAvatarPage.tsx (1,804) · ShellyChatPage.tsx (1,653) · WorkshopPage.tsx (1,623) · VoxelCharacter.tsx (1,562) · chatPlanner.logic.ts (1,363) · contextSlices.ts (1,325).
+**Top files (computed):** PlannerChatPage.tsx (2,620) · functions/src/ai/chat.ts (2,466) · BookEditorPage.tsx (2,278) · useQuestSession.ts (1,870) · MyAvatarPage.tsx (1,804) · ShellyChatPage.tsx (1,632) · WorkshopPage.tsx (1,623) · VoxelCharacter.tsx (1,562) · chatPlanner.logic.ts (1,363) · contextSlices.ts (1,325).
 
-**Decomposition status:** Today, Kid Today, Planner render layers, and Avatar subpanels partially decomposed. Risk concentration is state-heavy files (PlannerChatPage, useQuestSession, MyAvatarPage).
+**shelly-chat (`src/features/shelly-chat/`):** ShellyChatPage (page shell + handlers), ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime, `useShellyChatState` (extracted thread/message/image state hook — ARCH-09), `parseFollowups` (pure `[FOLLOWUP]` parser). First tests landed (TEST-01): `parseFollowups.test.ts`, `formatRelativeTime.test.ts`, `useShellyChatState.test.ts` (0 → 3 files). Reserved seam: `useShellyChatActions` (portal write layer, Build Step 3).
+
+**Decomposition status:** Today, Kid Today, Planner render layers, and Avatar subpanels partially decomposed. ShellyChatPage state extracted to `useShellyChatState` (ARCH-09 IN PROGRESS). Risk concentration is state-heavy files (PlannerChatPage, useQuestSession, MyAvatarPage).
 
 **Known tech debt:** Ladder system partially deprecated (Dispositions replacing it; data kept). WorkbookConfig → ActivityConfig migration incomplete (both exist; ActivityConfig is primary). chat.ts CF large (prompt builders inline). Bundle ~3.7MB (code-split Three.js/jsPDF candidates). AvatarThumbnail spawns N WebGLRenderer instances. Hardcoded admin UID in SettingsPage.tsx. Hours partial-day edge (only tracked blocks count).
 

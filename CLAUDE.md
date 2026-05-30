@@ -104,7 +104,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
 - `src/features/settings/` — AI usage, account, avatar admin, sticker library, Dev tab (admin-only: chapter book seeding, Sunday cleanup, working levels backfill)
-- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime)
+- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime, `useShellyChatState` — extracted thread/message/image state hook, `parseFollowups` — pure `[FOLLOWUP]` marker parser). Reserved seam: `useShellyChatActions` (portal write layer, Build Step 3 — insertion point documented in `ShellyChatPage` `sendToAI`)
 - `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, UnifiedCaptureCard, TeachBackSection, ChapterQuestionPool) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterPool, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP, scan advance, rollover, budget enforcement
 - `src/features/weekly-review/` — Weekly review page
 - `src/features/workshop/` — Story Game Workshop (board/adventure/card games), `steps/` sub-module (wizard step components)
@@ -312,7 +312,7 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 - **BookEditorPage.tsx (2,278L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
 - **useQuestSession.ts (1,870L)** — Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
 - **MyAvatarPage.tsx (1,804L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
-- **ShellyChatPage.tsx (1,653L)** — 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
+- **ShellyChatPage.tsx (1,632L)** — ARCH-09 IN PROGRESS: the 23+ `useState`/`useRef` declarations now live in `useShellyChatState` (typed, unit-tested); the pure `[FOLLOWUP]` parser moved to `parseFollowups`. Handlers (send/response, image gen/refine/upload, thread CRUD) still in the page by design — the actions/write layer (`useShellyChatActions`) is reserved with a documented insertion point in `sendToAI`, to be built in Build Step 3. Net LOC barely moved because destructured-setter deps were added to keep `exhaustive-deps` clean.
 - **WorkshopPage.tsx (1,623L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
 - **VoxelCharacter.tsx (1,562L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
 - **Ladder system** — UI surfaces removed (ARCH-07): the `/ladders` route now redirects to `/progress`, and the `src/features/ladders/` directory + the dead `LadderQuickLog` were deleted now that the disposition system is live. The data layer is intentionally retained: the `ladderRef` artifact tag (still scored by `scoreArtifactsForPortfolio` and shown in `ArtifactCard`), the `ladderProgress` collection (historical data), and the `Ladder*` types in `common.ts`.
