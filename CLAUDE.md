@@ -211,7 +211,7 @@ All under `families/{familyId}/`:
 | `shellyChatThreads` | Shelly AI chat thread roots |
 | `chapterResponses` | Read-aloud chapter discussion responses per child |
 | `bookThemes` | Book theme presets and custom themes |
-| `childSkillMaps` | Per-child curriculum knowledge maps |
+| `childSkillMaps` | Per-child curriculum knowledge maps (read into `shellyChat` AI context as the `childSkillMap` coverage slice — `loadChildSkillMapContext` / `formatChildSkillMap`; read-only, owned by `updateSkillMapFromFindings`) |
 | `bookProgress` | Per-child read-aloud book progress and question pools |
 
 **Global collections** (not under `families/`):

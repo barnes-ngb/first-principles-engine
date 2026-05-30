@@ -369,9 +369,10 @@ describe("buildShellyChatRoleSection", () => {
   it("includes the PLANNING-PARTNER MODE addendum when a child is selected", () => {
     const out = buildShellyChatRoleSection("Lincoln");
     expect(out).toContain("PLANNING-PARTNER MODE:");
-    // Names the four upstream section headers so the model can ground claims.
+    // Names the upstream section headers so the model can ground claims.
     expect(out).toContain("EVALUATION HISTORY BY DOMAIN");
     expect(out).toContain("DISPOSITION PROFILE");
+    expect(out).toContain("CURRICULUM MAP / COVERAGE");
     expect(out).toContain("RECENT WEEKLY REVIEWS");
     expect(out).toContain("RECENT TEACH-BACKS");
     // Names the child throughout (no stray placeholder).
