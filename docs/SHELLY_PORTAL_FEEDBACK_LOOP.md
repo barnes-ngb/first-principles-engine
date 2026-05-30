@@ -198,17 +198,19 @@ must **not** interrupt Shelly with "want to file a request?". Capture is a
 fire-and-forget Firestore write that never alters the chat reply.
 
 **Where it hooks in:** the same chat-response path the portal recon identifies —
-the Shelly chat send/response handler in
-`src/features/shelly-chat/chatHandlers.ts` (`sendChatMessage` /
-`handleSendMessage`), which is what `ShellyChatPage.tsx` calls and where the CF
-response (`functions/src/ai/tasks/shellyChat.ts`) is processed. (There is no
-`applyChatAction` symbol in the codebase today; the handler above is the canonical
-insertion point.)
+the `handleSend` callback in `src/features/shelly-chat/ShellyChatPage.tsx`
+(`:457`). That callback writes the user message, calls the `shellyChat` Cloud
+Function via `useAI()`'s `chat({ taskType: 'shellyChat', ... })`
+(`functions/src/ai/tasks/shellyChat.ts`), then persists the assistant reply with
+`addDoc(shellyChatMessagesCollection(...))` (around `:547`). The point **right
+after the assistant reply comes back** is the canonical insertion point. (There is
+no `applyChatAction` / `chatHandlers.ts` symbol in the codebase today — the send
+handler lives inline in `ShellyChatPage.tsx`.)
 
-After the assistant reply is received and rendered, if the model flagged a friction
-signal in its response, write a `featureRequests/{id}` doc with `status: 'new'` and
-move on — no UI, no prompt, no blocking. The scheduled routine in §1–§3 does the
-rest, out of band.
+At that point, if the model flagged a friction signal in its response, fire a
+fire-and-forget `featureRequests/{id}` write with `status: 'new'` and move on — no
+UI, no prompt, no blocking, no change to the rendered reply. The scheduled routine
+in §1–§3 does the rest, out of band.
 
 ---
 
