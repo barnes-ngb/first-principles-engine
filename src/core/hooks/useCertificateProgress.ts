@@ -5,6 +5,7 @@ import { activityConfigsCollection, normalizeCurriculumKey } from '../firebase/f
 import type { ActivityConfig, CertificateScanResult, CurriculumMeta } from '../types'
 import { SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
+import { writeSnapshotUpdate } from '../../features/evaluate/skillSnapshotWrites'
 
 export interface CertificateProgressOptions {
   /**
@@ -161,6 +162,16 @@ export function useCertificateProgress(): UseCertificateProgressResult {
         const newMasteredSkills = result.suggestedSnapshotUpdate?.masteredSkills ?? result.skillsCovered
         const milestoneDate = result.date || new Date().toISOString().slice(0, 10)
 
+        // A certificate that reads as a completion ("100%", "complete", "gold")
+        // resolves the matching Skill Snapshot blocks; otherwise it advances
+        // them to RESOLVING. See FUNC-02 write-through below.
+        const milestoneText = (result.milestone ?? '').toLowerCase()
+        const isComplete =
+          milestoneText.includes('100%') ||
+          milestoneText.includes('complete') ||
+          milestoneText.includes('finished') ||
+          milestoneText.includes('gold')
+
         if (!matchingDoc && options.targetConfigId) {
           throw new Error('Target curriculum card not found. It may have been deleted.')
         }
@@ -170,13 +181,6 @@ export function useCertificateProgress(): UseCertificateProgressResult {
           const existing = matchingDoc.data()
           const existingMastered = existing.curriculumMeta?.masteredSkills ?? []
           const mergedSkills = [...new Set([...existingMastered, ...newMasteredSkills])]
-
-          const milestoneText = (result.milestone ?? '').toLowerCase()
-          const isComplete =
-            milestoneText.includes('100%') ||
-            milestoneText.includes('complete') ||
-            milestoneText.includes('finished') ||
-            milestoneText.includes('gold')
 
           const curriculumUpdate: CurriculumMeta = {
             ...existing.curriculumMeta,
@@ -202,13 +206,6 @@ export function useCertificateProgress(): UseCertificateProgressResult {
           // Create new activity config from certificate data
           const docRef = doc(colRef)
           const subjectBucket = inferSubjectBucket(result.curriculum, result.curriculumName)
-
-          const milestoneText = (result.milestone ?? '').toLowerCase()
-          const isComplete =
-            milestoneText.includes('100%') ||
-            milestoneText.includes('complete') ||
-            milestoneText.includes('finished') ||
-            milestoneText.includes('gold')
 
           const newConfig: ActivityConfig = {
             id: docRef.id,
@@ -238,6 +235,24 @@ export function useCertificateProgress(): UseCertificateProgressResult {
           }
 
           await setDoc(docRef, newConfig, { merge: true })
+        }
+
+        // FUNC-02 write-through: fold the certificate's mastered skills into the
+        // Skill Snapshot so the curriculum store and the "what to teach next"
+        // authority can't silently disagree. Best-effort — never block the
+        // primary curriculum-config update on a snapshot write failure.
+        if (newMasteredSkills.length > 0) {
+          try {
+            await writeSnapshotUpdate(familyId, childId, {
+              masteredSkills: newMasteredSkills,
+              fullyMastered: isComplete,
+              source: 'scan',
+              evidence: `Certificate: ${result.milestone || result.curriculumName}`,
+              at: new Date().toISOString(),
+            })
+          } catch (err) {
+            console.warn('[useCertificateProgress] Snapshot write-through failed (non-blocking):', err)
+          }
         }
 
         setApplied(true)
