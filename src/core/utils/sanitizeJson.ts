@@ -3,8 +3,10 @@
  * issues such as trailing commas, unescaped control characters inside strings,
  * or markdown code fences.
  *
- * NOTE: A deliberate client-side port lives at `src/core/utils/sanitizeJson.ts`
- * (separate build root — `functions/` cannot be imported from `src/`).
+ * NOTE: This is a deliberate client-side port of
+ * `functions/src/ai/sanitizeJson.ts`. The two copies live in separate build
+ * roots (the `functions/` package cannot be imported from `src/`), so the
+ * duplication is intentional for now.
  * TODO: consolidate the two sanitizeJson copies behind a shared package
  * (future ARCH item) once cross-root sharing is set up.
  */
@@ -13,17 +15,17 @@
  * Strip markdown code fences that LLMs commonly wrap around JSON output.
  */
 function stripCodeFences(text: string): string {
-  let cleaned = text.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/i);
+  let cleaned = text.trim()
+  const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/i)
   if (fenceMatch) {
-    cleaned = fenceMatch[1].trim();
+    cleaned = fenceMatch[1].trim()
   }
   // Also try stripping simple start/end fences
   cleaned = cleaned
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
-    .trim();
-  return cleaned;
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+  return cleaned
 }
 
 /**
@@ -34,7 +36,7 @@ function stripCodeFences(text: string): string {
  */
 function removeTrailingCommas(text: string): string {
   // Replace trailing commas before ] or } (allowing whitespace between)
-  return text.replace(/,\s*([}\]])/g, "$1");
+  return text.replace(/,\s*([}\]])/g, '$1')
 }
 
 /**
@@ -43,52 +45,52 @@ function removeTrailingCommas(text: string): string {
  */
 function escapeControlCharsInStrings(text: string): string {
   // Walk through the string tracking whether we're inside a JSON string value
-  let result = "";
-  let inString = false;
-  let escaped = false;
+  let result = ''
+  let inString = false
+  let escaped = false
 
   for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+    const ch = text[i]
 
     if (escaped) {
-      result += ch;
-      escaped = false;
-      continue;
+      result += ch
+      escaped = false
+      continue
     }
 
-    if (ch === "\\") {
-      result += ch;
+    if (ch === '\\') {
+      result += ch
       if (inString) {
-        escaped = true;
+        escaped = true
       }
-      continue;
+      continue
     }
 
     if (ch === '"') {
-      inString = !inString;
-      result += ch;
-      continue;
+      inString = !inString
+      result += ch
+      continue
     }
 
     if (inString) {
-      if (ch === "\n") {
-        result += "\\n";
-        continue;
+      if (ch === '\n') {
+        result += '\\n'
+        continue
       }
-      if (ch === "\r") {
-        result += "\\r";
-        continue;
+      if (ch === '\r') {
+        result += '\\r'
+        continue
       }
-      if (ch === "\t") {
-        result += "\\t";
-        continue;
+      if (ch === '\t') {
+        result += '\\t'
+        continue
       }
     }
 
-    result += ch;
+    result += ch
   }
 
-  return result;
+  return result
 }
 
 /**
@@ -99,10 +101,13 @@ function escapeControlCharsInStrings(text: string): string {
  * 2. Remove trailing commas in arrays/objects
  * 3. Escape unescaped control characters inside string values
  * 4. Parse with JSON.parse
+ *
+ * Throws if the cleaned text is still not valid JSON (same contract as the
+ * server copy).
  */
 export function sanitizeAndParseJson<T = unknown>(raw: string): T {
-  let text = stripCodeFences(raw);
-  text = removeTrailingCommas(text);
-  text = escapeControlCharsInStrings(text);
-  return JSON.parse(text) as T;
+  let text = stripCodeFences(raw)
+  text = removeTrailingCommas(text)
+  text = escapeControlCharsInStrings(text)
+  return JSON.parse(text) as T
 }

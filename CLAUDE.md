@@ -79,7 +79,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
 - `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useAudioRecording, useSpeechRecognition, useTranscription, useTTS, useActivityConfigs, useScanToActivityConfig, useCertificateProgress, useMonthlyReviews)
 - `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
-- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, domain mapping, blocker lifecycle, workbook matching, session timer, image compression
+- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, domain mapping, blocker lifecycle, workbook matching, session timer, image compression, `sanitizeJson` (client port of the functions LLM-JSON parser — deliberate duplication, `// TODO: consolidate`)
 - `src/core/ai/` — AI service interface (useAI hook), feature flags, prompt templates (`prompts/plannerPrompts.ts`)
 - `src/core/profile/` — Profile context provider and hook (family + children)
 - `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
@@ -104,7 +104,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
 - `src/features/settings/` — AI usage, account, avatar admin, sticker library, Dev tab (admin-only: chapter book seeding, Sunday cleanup, working levels backfill)
-- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime, `useShellyChatState` — extracted thread/message/image state hook, `parseFollowups` — pure `[FOLLOWUP]` marker parser). Reserved seam: `useShellyChatActions` (portal write layer, Build Step 3 — insertion point documented in `ShellyChatPage` `sendToAI`)
+- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime, `useShellyChatState` — extracted thread/message/image state hook, `parseFollowups` — pure `[FOLLOWUP]` marker parser, `parseChatActions` — pure `<action>` block extractor (3a: detect/parse/allowlist-validate `ChatAction`s + return clean text; unwired, no writes)). Reserved seam: `useShellyChatActions` (portal write layer, Build Step 3b — insertion point documented in `ShellyChatPage` `sendToAI`)
 - `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, UnifiedCaptureCard, TeachBackSection, ChapterQuestionPool) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterPool, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP, scan advance, rollover, budget enforcement
 - `src/features/weekly-review/` — Weekly review page
 - `src/features/workshop/` — Story Game Workshop (board/adventure/card games), `steps/` sub-module (wizard step components)
