@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
@@ -58,6 +58,9 @@ import type { ShellyChatMessage, ChatThread, ChatContext } from '../../core/type
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 import { formatRelativeTime } from './formatRelativeTime'
+import { parseFollowUps } from './parseFollowups'
+import { useShellyChatState } from './useShellyChatState'
+import type { RefinementQuestion } from './useShellyChatState'
 
 const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: string; suggestions: ReadonlyArray<{ label: string; message: string }> }> = {
   lincoln: {
@@ -89,56 +92,44 @@ const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: 
   },
 }
 
-// ── Image refinement types ─────────────────────────────────────
-
-interface RefinementQuestion {
-  question: string
-  options: string[]
-}
-
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
   const { activeChildId, children } = useActiveChild()
   const { chat, generateImage, lastErrorRef } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
-  const [chatContext, setChatContext] = useState<ChatContext>('general')
-  const [threads, setThreads] = useState<ChatThread[]>([])
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(
-    searchParams.get('thread'),
-  )
-  const [messages, setMessages] = useState<ShellyChatMessage[]>([])
-  const [input, setInput] = useState('')
-  const [sending, setSending] = useState(false)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [generatingImage, setGeneratingImage] = useState(false)
 
-  // ── Image upload state (Prompt 8) ──────────────────────────────
-  const [uploadPreview, setUploadPreview] = useState<string | null>(null)
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
-  const [pendingAttachment, setPendingAttachment] = useState<{ url: string; previewUrl: string } | null>(null)
-  const [pendingReferenceImage, setPendingReferenceImage] = useState<{ url: string; previewUrl: string } | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // ── Image refinement state (Prompt 9) ──────────────────────────
-  const [imageFlowOpen, setImageFlowOpen] = useState(false)
-  const [imageFlowStep, setImageFlowStep] = useState<'idea' | 'questions' | 'generating'>('idea')
-  const [imageIdea, setImageIdea] = useState('')
-  const [imageQuestions, setImageQuestions] = useState<RefinementQuestion[]>([])
-  const [imageAnswers, setImageAnswers] = useState<Record<number, string>>({})
-  const [loadingQuestions, setLoadingQuestions] = useState(false)
-
-  // ── Follow-up suggestions state ─────────────────────────────────
-  const [followUps, setFollowUps] = useState<string[]>([])
-
-  // ── Data-driven reflection suggestions ────────────────────────
-  const [reflectionSuggestions, setReflectionSuggestions] = useState<Array<{ label: string; message: string }>>([])
-
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const autoSendTriggered = useRef(false)
-  const imageIdeaTimeoutFired = useRef(false)
+  // ── All chat state + refs live in useShellyChatState (ARCH-09) ──
+  // Behavior-preserving extraction: the page consumes the hook and keeps the
+  // same names so the handlers below read unchanged. See useShellyChatState.ts.
+  const {
+    chatContext, setChatContext,
+    threads, setThreads,
+    activeThreadId, setActiveThreadId,
+    messages, setMessages,
+    input, setInput,
+    followUps, setFollowUps,
+    reflectionSuggestions, setReflectionSuggestions,
+    sending, setSending,
+    drawerOpen, setDrawerOpen,
+    generatingImage, setGeneratingImage,
+    uploadPreview, setUploadPreview,
+    uploadFile, setUploadFile,
+    uploading, setUploading,
+    uploadDialogOpen, setUploadDialogOpen,
+    pendingAttachment, setPendingAttachment,
+    pendingReferenceImage, setPendingReferenceImage,
+    imageFlowOpen, setImageFlowOpen,
+    imageFlowStep, setImageFlowStep,
+    imageIdea, setImageIdea,
+    imageQuestions, setImageQuestions,
+    imageAnswers, setImageAnswers,
+    loadingQuestions, setLoadingQuestions,
+    fileInputRef,
+    messagesEndRef,
+    autoSendTriggered,
+    imageIdeaTimeoutFired,
+  } = useShellyChatState(searchParams.get('thread'))
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
 
@@ -260,7 +251,7 @@ export default function ShellyChatPage() {
     }
 
     void loadReflectionData()
-  }, [familyId, chatContext, children])
+  }, [familyId, chatContext, children, setReflectionSuggestions])
 
   // ── Migrate old threads without chatContext ────────────────────
   useEffect(() => {
@@ -297,7 +288,7 @@ export default function ShellyChatPage() {
     setFollowUps([])
     setSearchParams({})
     autoSendTriggered.current = false
-  }, [setSearchParams])
+  }, [setSearchParams, setChatContext, setActiveThreadId, setMessages, setFollowUps, autoSendTriggered])
 
   // ── Map chatContext to childId for AI calls ───────────────────
   const getChildIdForContext = useCallback((): string => {
@@ -327,7 +318,7 @@ export default function ShellyChatPage() {
       (err) => console.error('Thread list listener error:', err),
     )
     return unsub
-  }, [familyId, chatContext])
+  }, [familyId, chatContext, setThreads])
 
   // ── Real-time messages ─────────────────────────────────────────
   useEffect(() => {
@@ -352,12 +343,12 @@ export default function ShellyChatPage() {
       (err) => console.error('Messages listener error:', err),
     )
     return unsub
-  }, [familyId, activeThreadId])
+  }, [familyId, activeThreadId, setMessages, autoSendTriggered])
 
   // ── Auto-scroll on new messages ────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, messagesEndRef])
 
   // ── Auto-send for pre-seeded threads ───────────────────────────
   useEffect(() => {
@@ -374,26 +365,7 @@ export default function ShellyChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, activeThreadId])
 
-  // ── Follow-up parser ────────────────────────────────────────────
-  const parseFollowUps = (text: string): { cleanText: string; followUps: string[] } => {
-    const lines = text.split('\n')
-    const followUpItems: string[] = []
-    const contentLines: string[] = []
-
-    for (const line of lines) {
-      const match = line.match(/^\[FOLLOWUP\]\s*(.+)/)
-      if (match) {
-        followUpItems.push(match[1].trim())
-      } else {
-        contentLines.push(line)
-      }
-    }
-
-    return {
-      cleanText: contentLines.join('\n').trimEnd(),
-      followUps: followUpItems.slice(0, 3),
-    }
-  }
+  // parseFollowUps now lives in ./parseFollowups (pure, unit-tested — TEST-01).
 
   // ── Send to AI (shared logic) ──────────────────────────────────
   const sendToAI = useCallback(
@@ -416,6 +388,13 @@ export default function ShellyChatPage() {
         if (response?.message) {
           const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
           setFollowUps(suggestions)
+          // ── ARCH-09 / Build Step 3 insertion point ──────────────────
+          // The write/actions layer (`useShellyChatActions.applyChatAction`)
+          // plugs in here: parse `<action>` blocks out of `response.message`
+          // (mirroring parseFollowUps), stage them for human-confirm, and strip
+          // them from `cleanText` before persisting. Not built yet — it needs the
+          // `applyChatAction` writer (Build Step 3) and stays out of scope here so
+          // the CF request/response shape is unchanged. See SHELLY_PORTAL_CONTEXT §5.
           await addDoc(shellyChatMessagesCollection(familyId, activeThreadId), {
             role: 'assistant',
             content: cleanText,
@@ -450,7 +429,7 @@ export default function ShellyChatPage() {
         setSending(false)
       }
     },
-    [activeThreadId, chat, familyId, getChildIdForContext],
+    [activeThreadId, chat, familyId, getChildIdForContext, setFollowUps, setSending],
   )
 
   // ── Send handler ───────────────────────────────────────────────
@@ -579,7 +558,7 @@ export default function ShellyChatPage() {
     } finally {
       setSending(false)
     }
-  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachment, chatContext])
+  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachment, chatContext, setActiveThreadId, setFollowUps, setInput, setPendingAttachment, setSending])
 
   // ── Image generation (refactored for Prompt 9) ─────────────────
   const handleGenerateImageDirect = useCallback(async (prompt: string) => {
@@ -671,7 +650,7 @@ export default function ShellyChatPage() {
     } finally {
       setGeneratingImage(false)
     }
-  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef])
+  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef, setActiveThreadId, setGeneratingImage])
 
   // ── Image refinement flow (Prompt 9) ───────────────────────────
 
@@ -681,7 +660,7 @@ export default function ShellyChatPage() {
     setImageIdea('')
     setImageQuestions([])
     setImageAnswers({})
-  }, [])
+  }, [setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers])
 
   const handleImageFlowClose = useCallback(() => {
     setImageFlowOpen(false)
@@ -693,7 +672,7 @@ export default function ShellyChatPage() {
       URL.revokeObjectURL(pendingReferenceImage.previewUrl)
       setPendingReferenceImage(null)
     }
-  }, [pendingReferenceImage])
+  }, [pendingReferenceImage, setImageFlowOpen, setImageIdea, setImageQuestions, setImageAnswers, setLoadingQuestions, setPendingReferenceImage])
 
   const handleImageIdeaSubmit = useCallback(async () => {
     const idea = imageIdea.trim()
@@ -764,7 +743,7 @@ export default function ShellyChatPage() {
       handleImageFlowClose()
       handleGenerateImageDirect(idea)
     }
-  }, [imageIdea, chat, familyId, getChildIdForContext, handleImageFlowClose, handleGenerateImageDirect])
+  }, [imageIdea, chat, familyId, getChildIdForContext, handleImageFlowClose, handleGenerateImageDirect, imageIdeaTimeoutFired, setImageFlowStep, setImageQuestions, setLoadingQuestions])
 
   const handleImageRefinementGenerate = useCallback(async () => {
     setImageFlowStep('generating')
@@ -835,7 +814,7 @@ export default function ShellyChatPage() {
       setLoadingQuestions(false)
       await handleGenerateImageDirect(imageIdea)
     }
-  }, [imageAnswers, imageQuestions, imageIdea, chat, familyId, getChildIdForContext, handleGenerateImageDirect, pendingReferenceImage])
+  }, [imageAnswers, imageQuestions, imageIdea, chat, familyId, getChildIdForContext, handleGenerateImageDirect, pendingReferenceImage, setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers, setLoadingQuestions, setPendingReferenceImage])
 
   const handleJustGenerate = useCallback(async () => {
     const idea = imageIdea.trim()
@@ -876,7 +855,7 @@ export default function ShellyChatPage() {
     setLoadingQuestions(false)
 
     await handleGenerateImageDirect(finalPrompt)
-  }, [imageIdea, handleGenerateImageDirect, pendingReferenceImage, chat, familyId, getChildIdForContext])
+  }, [imageIdea, handleGenerateImageDirect, pendingReferenceImage, chat, familyId, getChildIdForContext, setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers, setLoadingQuestions, setPendingReferenceImage])
 
   // ── Image upload handlers (Prompt 8) ───────────────────────────
 
@@ -889,14 +868,14 @@ export default function ShellyChatPage() {
     setUploadFile(file)
     setUploadPreview(URL.createObjectURL(file))
     setUploadDialogOpen(true)
-  }, [])
+  }, [setUploadFile, setUploadPreview, setUploadDialogOpen])
 
   const handleUploadCancel = useCallback(() => {
     if (uploadPreview) URL.revokeObjectURL(uploadPreview)
     setUploadDialogOpen(false)
     setUploadFile(null)
     setUploadPreview(null)
-  }, [uploadPreview])
+  }, [uploadPreview, setUploadDialogOpen, setUploadFile, setUploadPreview])
 
   const handleUploadContext = useCallback(async () => {
     if (!uploadFile || !uploadPreview) return
@@ -940,7 +919,7 @@ export default function ShellyChatPage() {
       setUploadPreview(null)
       setUploading(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setPendingAttachment, setUploadDialogOpen, setUploadFile, setUploadPreview, setUploading])
 
   const handleUploadAnalyze = useCallback(async () => {
     if (!uploadFile) return
@@ -1060,7 +1039,7 @@ export default function ShellyChatPage() {
       setUploading(false)
       setSending(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFile, setUploadPreview, setUploading])
 
   const handleUploadGenerate = useCallback(async () => {
     if (!uploadFile || !uploadPreview) return
@@ -1109,7 +1088,7 @@ export default function ShellyChatPage() {
       setUploadPreview(null)
       setUploading(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers, setPendingReferenceImage, setUploadDialogOpen, setUploadFile, setUploadPreview, setUploading])
 
   // ── New thread ─────────────────────────────────────────────────
   const handleNewThread = useCallback(() => {
@@ -1119,7 +1098,7 @@ export default function ShellyChatPage() {
     setDrawerOpen(false)
     setFollowUps([])
     autoSendTriggered.current = false
-  }, [setSearchParams])
+  }, [setSearchParams, setActiveThreadId, setMessages, setDrawerOpen, setFollowUps, autoSendTriggered])
 
   // ── Select thread ──────────────────────────────────────────────
   const handleSelectThread = useCallback(
@@ -1130,7 +1109,7 @@ export default function ShellyChatPage() {
       setFollowUps([])
       autoSendTriggered.current = false
     },
-    [setSearchParams],
+    [setSearchParams, setActiveThreadId, setDrawerOpen, setFollowUps, autoSendTriggered],
   )
 
   // ── Archive thread ─────────────────────────────────────────────
