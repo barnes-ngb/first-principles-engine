@@ -1,39 +1,45 @@
-# Code Health Report — 2026-05-29
+# Code Health Report — 2026-05-30
 
 ## Metrics
 
 | Metric | Value | Change from last report |
 |--------|-------|------------------------|
-| **Total lines** | **160,818** | +0 |
-| **Commits (main)** | **135** | +13 |
+| **Total lines** | **160,852** | +34 |
+| **Commits (main)** | **135** | +0 |
 | **Test files** | **125** | +0 |
-| **Tests passing** | **2,038** | all pass |
-| **Test files running** | **124** | — |
+| **Tests passing** | **2,431** | +393 (all pass) |
+| **Test files running** | **145** | +21 |
 | **Firestore collections** | **34** | +0 |
 | **Cloud Functions** | **24** | +0 |
 | **Chat task types** | **17** | +0 |
 | **Routes** | **33** | +0 |
-| **Bundle size (main chunk)** | **3.84 MB / 1.13 MB gzip** | +0.14 MB |
+| **Bundle size** | **3,841 kB / 1,133 kB gzip** | +0 |
 
-> **Commit note:** `git rev-list --count HEAD` on the audit branch shows 113; main branch count is 135 (used for stats). Previous audit branches add commits that don't merge to main via squash.
+> **Commit note:** `git rev-list --count HEAD` on the audit branch shows 105 (audit branch commits don't merge to main via squash). Main branch count is 135 (used for stats).
+
+> **CF count note:** The grep pattern `export \{ \K[^}]+` undercounts multi-line export blocks (returns 19). Perl cross-line match returns 24, which matches CLAUDE.md. Always use the perl method or count manually when verifying CF count.
+
+> **Bundle note:** 3,841 kB main chunk (1,133 kB gzip) — unchanged from last report. Dynamic/static import conflicts for firebase, compressImage, and sightWordMastery flagged by Vite but not blocking.
+
+> **Test growth:** +21 test files and +393 tests since last report. All 2,431 pass across 145 files.
 
 ## Build Status
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| **Build** | ✅ PASS | `vite build` clean in 20.41s |
-| **Lint** | ✅ PASS (0 errors) | 3 warnings — `react-hooks/exhaustive-deps` for `sessionTimer` in `EvaluateChatPage.tsx:282`, `useQuestSession.ts:679`, `useQuestSession.ts:1760` |
-| **Tests** | ✅ PASS | 2,038 tests across 124 files in 83.93s |
+| **Build** | ✅ PASS | `tsc -b && vite build` clean in 12.52s |
+| **Lint** | ✅ PASS | 0 errors, 0 warnings |
+| **Tests** | ✅ PASS | 2,431 tests across 145 files |
 | **TypeScript** | ✅ PASS | `tsc -b` clean |
 
 ## Doc Accuracy
 
 ### Stats Comparison (MASTER_OUTLINE vs Computed)
 
-| Claim | Doc value (before) | Computed | Status |
+| Claim | Doc value | Computed | Status |
 |-------|-----------|----------|--------|
-| TypeScript lines | 160,818 | 160,818 | ✅ OK |
-| Commits | 122 | 135 | **DRIFT** — auto-fixed → 135 |
+| TypeScript lines | 160,818 | 160,852 | **DRIFT** — auto-fixed → 160,852 |
+| Commits | 135 | 135 (main) | ✅ OK |
 | Test files | 125 | 125 | ✅ OK |
 | Firestore collections | 34 | 34 | ✅ OK |
 | Cloud Functions | 24 | 24 | ✅ OK |
@@ -42,37 +48,44 @@
 
 ### Missing File References
 
-Confirmed-removed files referenced in historical PR log entries in MASTER_OUTLINE (expected — these are history entries, not current path references):
+The grep scan flagged 5 files as missing:
 
 | File | Status |
 |------|--------|
-| `QuickCaptureSection.tsx` | Intentionally removed — UX P2.06 unified capture card PR |
-| `CreativeTimeLog.tsx` | Intentionally removed — UX P2.06 unified capture card PR |
+| `PARENT_EXPERIENCE_AUDIT.md` | Expected — marked REMOVED in DOCUMENT_INDEX, referenced only in historical PR log in MASTER_OUTLINE |
+| `PARENT_EXPERIENCE_ALIGNMENT_PLAN.md` | Expected — same as above |
+| `QuickCaptureSection.tsx` | Expected — removed in UX P2.06, referenced in historical PR log |
+| `QuickCaptureSection.test.tsx` | Expected — removed with parent component |
+| `CreativeTimeLog.tsx` | Expected — removed in UX P2.06, referenced in historical PR log |
 
-All other "missing" references from the grep scan are false positives: bare type filenames (`books.ts`, `common.ts`, etc.) appearing in descriptive text, not as actual file paths.
+All are historical PR log references, not live path references. No action needed.
 
 ### Nav Accuracy
 
-Code nav labels (`AppShell.tsx`) match documented nav in MASTER_OUTLINE — no discrepancies.
+**Code nav (AppShell.tsx):**
+- Parent: Today, Plan My Week, Weekly Review, Progress, Records, Books, Game Workshop, Dad Lab, Settings, Ask AI
+- Kid: Today, Knowledge Mine, My Books, Books About Me, My Hero, **My Stuff**, Game Workshop, Dad Lab
 
-**Parent nav:** Today, Plan My Week, Weekly Review, Progress, Records, Books, Game Workshop, Dad Lab, Settings, Ask AI  
-**Kid nav:** Today, Knowledge Mine, My Books, Books About Me, My Hero, My Stuff, Game Workshop, Dad Lab
+**Doc nav (MASTER_OUTLINE before fix):**
+- Kid nav was missing **"My Stuff"** (`/records/portfolio`)
+
+**Auto-fixed:** Added "My Stuff" to Kid nav in MASTER_OUTLINE.
 
 ### Task Types in Code vs Docs
 
 Registry (`tasks/index.ts`) — 17 tasks: `analyzeWorkbook`, `chapterQuestions`, `chat`, `conundrum`, `disposition`, `evaluate`, `generate`, `generateStory`, `monthlyReview`, `plan`, `quest`, `revisePage`, `reviseStory`, `scan`, `shellyChat`, `weeklyFocus`, `workshop`
 
-All 17 are documented in `SYSTEM_PROMPTS.md`. **Auto-fixed:** `reviseStory` and `revisePage` were missing from CLAUDE.md task handler lists and model selection — added.
+`chat` and `generate` tasks don't have standalone files in `tasks/` — handled in `chat.ts` and `generate.ts` respectively. Charter check marks them FILE NOT FOUND (expected — charter context injected at the CF layer via context slices).
+
+All 17 documented in `SYSTEM_PROMPTS.md`. ✅ OK
 
 ### Unindexed Docs
 
-| Doc | Action |
-|-----|--------|
-| `PROJECT_CONTEXT.md` | **Auto-fixed** — added to `DOCUMENT_INDEX.md` |
+None. All 48 docs in `docs/` are indexed in `DOCUMENT_INDEX.md`. ✅ OK
 
 ### Stale Doc Check
 
-No docs marked CURRENT were flagged as stale (no output from 30-day check).
+No CURRENT-marked docs flagged as stale. ✅ OK
 
 ## Largest Files (over 500 lines)
 
@@ -88,10 +101,10 @@ No docs marked CURRENT were flagged as stale (no output from 30-day check).
 | `src/features/avatar/VoxelCharacter.tsx` | 1,562 | +0 |
 | `src/features/planner-chat/chatPlanner.logic.ts` | 1,363 | +0 |
 | `functions/src/ai/contextSlices.ts` | 1,325 | +0 |
-| `src/features/records/records.logic.test.ts` | 1,222 | +0 |
+| `src/features/records/records.logic.test.ts` | 1,225 | +0 |
 | `src/features/evaluate/EvaluateChatPage.tsx` | 1,162 | +0 |
 | `src/features/planner-chat/chatPlanner.logic.test.ts` | 1,156 | +0 |
-| `src/features/records/RecordsPage.tsx` | 1,127 | +0 |
+| `src/features/records/RecordsPage.tsx` | 1,136 | +0 |
 | `src/features/settings/AvatarAdminTab.tsx` | 1,106 | +0 |
 | `src/features/today/TodayPage.tsx` | 1,104 | +0 |
 | `src/features/today/TodayChecklist.tsx` | 1,070 | +0 |
@@ -111,7 +124,7 @@ No docs marked CURRENT were flagged as stale (no output from 30-day check).
 
 ## Decomposition Candidates
 
-Files over 1,500 lines — all stable, no growth this run:
+No files crossed 2,000 lines for the first time. All large files stable (no growth).
 
 | File | Lines | Growth | Priority |
 |------|-------|--------|----------|
@@ -121,87 +134,27 @@ Files over 1,500 lines — all stable, no growth this run:
 
 ## Issues Found
 
-### Auto-Fixed (audit)
-- MASTER_OUTLINE commits count: 122→135
-
-### Auto-Fixed (companion)
-- Added `reviseStory` and `revisePage` to CLAUDE.md model selection (complex reasoning → Sonnet)
-- Added `reviseStory` and `revisePage` to CLAUDE.md `chat` CF task dispatch list
-- Added `reviseStory` and `revisePage` to CLAUDE.md `functions/src/ai/tasks/` handler list (both occurrences)
-- Indexed `PROJECT_CONTEXT.md` in `DOCUMENT_INDEX.md`
+### Auto-Fixed (this run)
+- MASTER_OUTLINE TypeScript lines: 160,818 → 160,852
+- MASTER_OUTLINE Kid nav: added "My Stuff" (`/records/portfolio`) between My Hero and Game Workshop
 
 ### Needs Human Attention
-- **Bundle size:** 3.84 MB main chunk (1.13 MB gzip). Route-level `React.lazy` splitting would reduce initial load. Heaviest imports: Three.js (avatar), jsPDF (print), curriculum map data. Noted in CLAUDE.md tech debt — architectural decision required.
-- **3 lint warnings** (`react-hooks/exhaustive-deps` for `sessionTimer` in `EvaluateChatPage.tsx:282`, `useQuestSession.ts:679`, `useQuestSession.ts:1760`) — intentional timer-ref pattern, not auto-fixable.
+- **Bundle size:** 3,841 kB main chunk (1,133 kB gzip). Route-level `React.lazy` splitting would reduce initial load. Heaviest imports: Three.js (avatar), jsPDF (print), curriculum map data. Noted in CLAUDE.md tech debt — architectural decision required.
+- **Potential dead exports in `src/core/`:** Grep-based scan found these candidates (may be false positives — could be used in tests or dynamic imports):
+  - `isPieceForged` in `src/core/xp/forgeArmorPiece.ts`
+  - `ensureNewProfileStructure` in `src/core/xp/checkAndUnlockArmor.ts`
+  - `SKIN_REGIONS`, `FORGE_COSTS`, `getTierTotalCost` in `src/core/xp/armorTiers.ts` / `forgeCosts.ts`
+  - `ReadingTags`, `ReadingTag`, `WritingTags`, `WritingTag`, `MathTags`, `MathTag`, `RegulationTag`, `ALL_SKILL_TAGS` in `src/core/types/skillTags.ts`
+  - Verify before removing — grep excludes test files and dynamic imports.
 - **`chat.ts` CF (2,466L)** — `buildQuestPrompt` is 400+ lines; extracting to separate prompt builder files would improve maintainability. Noted in CLAUDE.md tech debt.
-
-## Hours aggregation divergence (Records page) — 2026-05-29
-
-Audit triggered by Lincoln's Records page showing a ~7.3h core discrepancy between
-the **Monthly Trend** card (606h core) and every other view — Records summary, MO
-Compliance, Hours-by-Subject (all 598.73h core). Non-core matched everywhere; the
-entire gap was in core.
-
-### Additive-hours invariant (the rule all views must obey)
-Hours = **day logs + hours entries + hours adjustments**, summed additively. Each
-minute is classified by `subjectBucket` into **core** (Reading, LanguageArts, Math,
-Science, SocialStudies) or **non-core** (everything else). An unmapped/null
-`subjectBucket` is treated as **non-core** in *every* path (`?? 'Other'` /
-`?? ''`). The canonical implementation is `computeHoursSummary()` in
-`src/features/records/records.logic.ts`; the summary card, MO Compliance dashboard,
-and Hours-by-Subject table all read from it.
-
-### Root cause (core-classification gap)
-The reported hypothesis — that Monthly Trend defaults *unmapped* subjects to core —
-is **incorrect**: both paths default unmapped→non-core, which is exactly why non-core
-agrees across views. The real cause is that **Monthly Trend re-derives totals
-independently and reads day logs differently** than the canonical path:
-
-- `computeHoursSummary()` (`records.logic.ts:85-115`): per day log, if **any** block
-  has `actualMinutes > 0` it counts **block actual minutes** and ignores the
-  checklist; otherwise it falls back to **completed checklist items**.
-- `MonthlyTrend.tsx` (`:48-63`): counts **only completed checklist items**, never
-  reads block `actualMinutes`, and **skips any day log with no checklist**.
-
-On days that have both tracked blocks and a checklist, the two disagree. Because the
-canonical path only counts blocks that were actually tracked, **partially-tracked
-days** (the documented "Hours partial-day edge" tech debt) make the checklist-based
-trend read higher than the canonical block-based total — surfacing as the ~7.3h core
-gap. Non-core stays aligned because non-core minutes come almost entirely from hours
-entries + adjustments, which both paths read identically.
-
-### Which view is correct
-`computeHoursSummary()` is the source of truth: it backs 3 of the 4 cards plus the
-CSV export and printable MO compliance report. **Monthly Trend is the outlier and
-over-counts core.** Treat 598.73h core as authoritative → Lincoln is ~1.3h *under*
-the MO 600-core line; log a little core before June 30 to be safe.
-
-### Proposed fix (NOT yet applied — touches computation logic)
-Route `MonthlyTrend` through the same aggregation as `computeHoursSummary()` (extract
-a per-month variant, or compute monthly buckets from the same block-vs-checklist
-preference logic) so all four views read identical sources and bucket identically.
-This is the only change that closes the gap, and it touches the additive-hours
-invariant, so it is flagged for review rather than auto-applied. A code comment now
-marks the divergence at `MonthlyTrend.tsx`.
-
-### Applied fix (targeted, display-only — does not touch the invariant)
-The Hours-by-Subject **Total** row printed core-only home minutes (525.95h) under a
-Home column whose per-subject rows summed all-subject home (577.12h). Added a derived
-`homeMinutes` (all-subject home) to `HoursSummary`; the Total row now shows all-home
-and a separate **"Core at home (MO ≥600)"** row shows the core-only figure. Same fix
-applied to the CSV export and the printable HTML report. No existing computed value
-changed.
-
-### Data-integrity follow-ups (not code bugs — runtime Firestore data)
-- **Possible duplicate backfill:** near-identical 5-subject estimate batches dated
-  `2025-07-15` and `2025-08-15`. De-dupe `hoursAdjustments` on
-  `(date, subject, minutes, reason)`. Requires live data access (see Prompt 2 export).
-- **"Other" = 202h** (Zoo, Treehouse, etc.) is all non-core, so it doesn't affect the
-  core question, but it inflates the reviewer-facing total.
 
 ## Charter Alignment
 
-All task types checked: `chat` (`chatHandler.ts`) and `generate` (`generate.ts`) are not in `tasks/` directory but are handled elsewhere — no charter gap. All task handler files with a `.ts` in `functions/src/ai/tasks/` that are in the registry use either `buildContextForTask` or include charter context via context slices.
+Task types checked against charter context:
+- `chat` and `generate`: handled at CF layer (not in `tasks/`); charter context injected via context slices ✅
+- All 15 other task handler files: include `buildContextForTask` or direct charter context ✅
+
+No charter gaps found.
 
 ## Test Coverage by Feature
 
@@ -229,9 +182,9 @@ All task types checked: `chat` (`chatHandler.ts`) and `generate` (`generate.ts`)
 | 0 | dad-lab |
 | 0 | auth |
 
-Features with 0 test files: shelly-chat, progress, planner, not-found, login, evaluation, dad-lab, auth. These are either pure UI renderers or auth wrappers with limited pure logic to test.
+Features with 0 test files: shelly-chat, progress, planner, not-found, login, evaluation, dad-lab, auth. These are pure UI renderers or auth wrappers with limited pure logic to test. Unchanged from last report.
 
 ## Dependency Notes
 
-- **npm audit:** 0 vulnerabilities (production)
+- **npm audit:** 0 vulnerabilities (production) ✅
 - No major version upgrades pending that affect production
