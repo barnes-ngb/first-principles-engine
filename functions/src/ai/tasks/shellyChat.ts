@@ -219,6 +219,35 @@ SHELLY-SPECIFIC GUIDELINES:
 - For printable activities, format them clearly for screenshot or print.`;
 }
 
+/**
+ * Build the `<action>` grammar addendum for the shellyChat system prompt
+ * (Build Step 3b — the portal's confirmed sight-word write path).
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), since sight-word
+ * actions bind to a specific child. The model is told the active child's id so
+ * it can address the action correctly; the app still performs the write only on
+ * Shelly's confirm tap. Returns "" on the general (no-child) branch.
+ */
+export function buildSightWordActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+SIGHT-WORD ACTIONS: When Shelly clearly asks to ADD or REMOVE a sight word for ${who} (e.g. "add 'because' to ${who}'s sight words", "take 'the' off his list"), propose it with a structured action block. Otherwise, respond in normal prose — do NOT emit an action block when she is only discussing or asking about words.
+
+Grammar — one trailing line per action, after your prose, using ${who}'s id exactly as given here ("${childId}") and a lowercase word:
+<action>{"kind":"addSightWord","childId":"${childId}","word":"because"}</action>
+<action>{"kind":"removeSightWord","childId":"${childId}","word":"the"}</action>
+
+Rules:
+- One JSON object per <action> block; lowercase the word; always use childId "${childId}".
+- NEVER say the change is done. Say you've proposed it and Shelly can confirm with a tap — the app performs the write only when she confirms.
+- Be conservative: if you're unsure whether she wants a write versus just talking about words, do NOT emit an action — ask or stay in prose.`;
+}
+
 export const handleShellyChat = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
@@ -447,12 +476,14 @@ Example: If she says "Lincoln seems bored with reading" and the data shows posit
 
   // ── Step C: Build system prompt with charter alignment ──────────
   const roleSection = buildShellyChatRoleSection(childId && childName ? childName : undefined);
+  const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
 
   const systemPrompt = `${sharedContext}
 
 ${supplementalContext}
 
 ${roleSection}
+${sightWordActionAddendum}
 
 After your response, suggest 2-3 brief follow-up questions Shelly might want to ask. Format them on new lines at the very end of your response, each prefixed with "[FOLLOWUP] ". Keep each under 50 characters. These should be specific to what you just discussed, not generic.
 

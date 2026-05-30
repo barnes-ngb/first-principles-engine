@@ -25,6 +25,13 @@ export interface ShellyChatMessage {
   imagePrompt?: string
   uploadedImageUrl?: string
   imageAction?: 'analyze' | 'generate' | 'attach'
+  /**
+   * Portal write audit (Build Step 3b): the `<action>` proposals Shelly
+   * confirmed on this assistant message, recorded inline so the applied write
+   * is auditable in the thread itself (no separate collection). Appended on
+   * apply by `useShellyChatActions.applyChatAction`.
+   */
+  appliedActions?: { action: ChatAction; appliedAt: string }[]
 }
 
 /**

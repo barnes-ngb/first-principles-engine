@@ -1,0 +1,173 @@
+// ── Shelly portal: confirmed-write layer (ARCH-09 / Build Step 3b) ──────
+//
+// This is the portal's FIRST write path. The AI *proposes* sight-word changes
+// via `<action>` blocks (parsed by `parseChatActions`); Shelly sees inline
+// confirm cards; only her tap calls `applyChatAction`, which performs exactly
+// one typed, validated write. Nothing auto-writes.
+//
+// Guardrails (see docs/SHELLY_PORTAL_CONTEXT.md §3, §5):
+//   - No write before a confirm tap — `stagePendingActions` only stages.
+//   - Allowlist only — the `ChatAction` union (3a) is the structural boundary;
+//     this hook handles exactly the two sight-word kinds.
+//   - Route through the shared writers (`addSightWord` / `removeSightWord`) —
+//     no ad-hoc setDoc from the page.
+//   - Bind to the active child — `action.childId` must resolve to a family
+//     child AND match the active chat context, or the action is rejected.
+
+import { useCallback, useState } from 'react'
+import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
+
+import { shellyChatMessagesCollection } from '../../core/firebase/firestore'
+import type { ChatAction, Child } from '../../core/types'
+import { addSightWord, removeSightWord } from '../books/useSightWordProgress'
+
+export type ActionStatus = 'pending' | 'applied' | 'dismissed'
+
+export interface PendingAction {
+  /** Stable key for list rendering + per-card status. */
+  id: string
+  action: ChatAction
+  status: ActionStatus
+}
+
+export interface ShellyChatActionsDeps {
+  familyId: string
+  children: Child[]
+  /** The active chat context's childId. Actions must match this. */
+  activeChildId: string
+  /** Thread the pending actions came from, so applies can annotate the message. */
+  activeThreadId: string | null
+}
+
+/**
+ * Owns the propose → human-confirm → write loop for `<action>` blocks. The page
+ * stages actions parsed from the latest assistant message via
+ * {@link stagePendingActions}; the confirm-card UI calls {@link applyChatAction}
+ * or {@link dismissAction} on a tap.
+ */
+export function useShellyChatActions(deps: ShellyChatActionsDeps) {
+  const { familyId, children, activeChildId, activeThreadId } = deps
+
+  const [pending, setPending] = useState<PendingAction[]>([])
+  // The assistant message the current `pending` set was parsed from — applied
+  // actions are recorded back onto it for inline audit.
+  const [pendingMessageId, setPendingMessageId] = useState<string | null>(null)
+
+  /**
+   * Stage the actions parsed from an assistant message, awaiting a confirm tap.
+   * This NEVER writes — it only moves the proposals into confirm-card state.
+   */
+  const stagePendingActions = useCallback(
+    (messageId: string, actions: ChatAction[]) => {
+      setPendingMessageId(messageId)
+      setPending(
+        actions.map((action, i) => ({
+          id: `${messageId}_${i}`,
+          action,
+          status: 'pending' as const,
+        })),
+      )
+    },
+    [],
+  )
+
+  const clearPending = useCallback(() => {
+    setPending([])
+    setPendingMessageId(null)
+  }, [])
+
+  /**
+   * Validate the active-child binding. Returns a rejection reason or null.
+   * A confused model must not edit the wrong child: the action's `childId` must
+   * resolve to a real family child AND match the active chat context.
+   */
+  const rejectReason = useCallback(
+    (action: ChatAction): string | null => {
+      if (!children.some((c) => c.id === action.childId)) {
+        return 'unknown child'
+      }
+      if (activeChildId && action.childId !== activeChildId) {
+        return 'child mismatch with active context'
+      }
+      return null
+    },
+    [children, activeChildId],
+  )
+
+  /**
+   * Apply a single proposed action on a confirm tap. Validates the active-child
+   * binding, routes through the shared sight-word writer, records the applied
+   * write inline on the source message, and marks the card applied. Idempotent
+   * and safe to re-tap (the underlying writers guarantee this).
+   *
+   * @returns true if the write was performed, false if rejected.
+   */
+  const applyChatAction = useCallback(
+    async (action: ChatAction): Promise<boolean> => {
+      const reason = rejectReason(action)
+      if (reason) {
+        console.warn('[shellyChat] rejected action —', reason, action)
+        return false
+      }
+
+      if (action.kind === 'addSightWord') {
+        await addSightWord(familyId, action.childId, action.word)
+      } else {
+        await removeSightWord(familyId, action.childId, action.word)
+      }
+
+      setPending((prev) =>
+        prev.map((p) =>
+          p.action === action ? { ...p, status: 'applied' } : p,
+        ),
+      )
+
+      // Audit inline on the source assistant message (no new collection).
+      if (pendingMessageId && activeThreadId) {
+        try {
+          await updateDoc(
+            doc(shellyChatMessagesCollection(familyId, activeThreadId), pendingMessageId),
+            {
+              appliedActions: arrayUnion({
+                action,
+                appliedAt: new Date().toISOString(),
+              }),
+            },
+          )
+        } catch (err) {
+          console.warn('[shellyChat] failed to record applied action on message:', err)
+        }
+      }
+
+      console.info('[shellyChat] applied action', action)
+      return true
+    },
+    [familyId, activeThreadId, pendingMessageId, rejectReason],
+  )
+
+  /** Dismiss a proposed action without writing. */
+  const dismissAction = useCallback((action: ChatAction) => {
+    setPending((prev) =>
+      prev.map((p) =>
+        p.action === action ? { ...p, status: 'dismissed' } : p,
+      ),
+    )
+  }, [])
+
+  /** Confirm every still-pending action (Tier-B turns are often multi-word). */
+  const confirmAll = useCallback(async () => {
+    const stillPending = pending.filter((p) => p.status === 'pending')
+    for (const p of stillPending) {
+      await applyChatAction(p.action)
+    }
+  }, [pending, applyChatAction])
+
+  return {
+    pending,
+    stagePendingActions,
+    clearPending,
+    applyChatAction,
+    dismissAction,
+    confirmAll,
+  }
+}
