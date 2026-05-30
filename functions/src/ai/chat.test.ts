@@ -5,11 +5,12 @@ import {
   buildPageBeats,
   buildQuestPrompt,
   buildRecentCurriculumSection,
+  buildRevisePagePrompt,
   buildReviseStoryPrompt,
   buildStoryPrompt,
   getWeekMonday,
 } from "./chat.js";
-import type { ReviseStoryInput } from "./chat.js";
+import type { ReviseStoryInput, RevisePageInput } from "./chat.js";
 import { MATH_CONCEPT_BANDS } from "./levelDefinitions.js";
 
 // ── getWeekMonday ──────────────────────────────────────────────
@@ -667,5 +668,119 @@ describe("buildReviseStoryPrompt", () => {
     expect(p).toContain("second turn");
     expect(p).toContain("third turn");
     expect(p).toContain("fourth turn");
+  });
+});
+
+// ── Story Generation V2 Phase 2 PR-B: buildRevisePagePrompt ────
+
+describe("buildRevisePagePrompt", () => {
+  const baseLondon: RevisePageInput = {
+    pageNumber: 2,
+    currentText: "She flapped her tiny wings, but stayed on the ground.",
+    currentSceneDescription: "The dragon flapping her wings hard in a meadow.",
+    feedback: "Make the dragon a girl named Sparkle.",
+    fullStoryContext: {
+      title: "Ember the Dragon",
+      allPages: [
+        { pageNumber: 1, text: "Ember the dragon could not fly." },
+        {
+          pageNumber: 2,
+          text: "She flapped her tiny wings, but stayed on the ground.",
+        },
+        { pageNumber: 3, text: "Then a wise owl gave her an idea." },
+      ],
+      characterNames: ["Ember"],
+    },
+    childCalibration: {
+      childAge: 6,
+      childName: "London",
+      sentenceTarget: "1-2 short sentences (5-9 words each)",
+      vocabularyLevel: "kindergarten",
+    },
+  };
+
+  const baseLincoln: RevisePageInput = {
+    ...baseLondon,
+    childCalibration: {
+      childAge: 10,
+      childName: "Lincoln",
+      sentenceTarget: "2-4 sentences (8-14 words each)",
+      vocabularyLevel: "1st-2nd grade decoding",
+    },
+  };
+
+  it("includes the child name and age in the calibration section", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain("London");
+    expect(p).toContain("age 6");
+  });
+
+  it("states LISTENER FEEDBACK with the feedback verbatim", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain('LISTENER FEEDBACK: "Make the dragon a girl named Sparkle."');
+  });
+
+  it("embeds the full story context (all pages with text)", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain("Ember the dragon could not fly.");
+    expect(p).toContain("She flapped her tiny wings, but stayed on the ground.");
+    expect(p).toContain("Then a wise owl gave her an idea.");
+  });
+
+  it("makes the page number to revise explicit", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain("REVISE THIS PAGE");
+    expect(p).toMatch(/Apply the feedback to PAGE 2 ONLY/);
+  });
+
+  it("reuses the WRITING QUALITY guardrails block", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain("WRITING QUALITY:");
+    expect(p).toContain("Consistent character names");
+  });
+
+  it("reuses the COPYRIGHT block (Mario → Marco example present)", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain("COPYRIGHT — IMPORTANT:");
+    expect(p).toContain("Mario");
+    expect(p).toContain("Marco");
+  });
+
+  it("declares the output schema (newText, newSceneDescription, wordsOnPage, regenerateImage, qualityNotes)", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain('"newText"');
+    expect(p).toContain('"newSceneDescription"');
+    expect(p).toContain('"wordsOnPage"');
+    expect(p).toContain('"regenerateImage"');
+    expect(p).toContain('"qualityNotes"');
+  });
+
+  it("instructs the model to decide regenerateImage", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toMatch(/DECIDE regenerateImage/);
+    expect(p).toContain('"yes"');
+    expect(p).toContain('"no"');
+  });
+
+  it("calibrates London (age 6) with a short-sentence target", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain("1-2 short sentences (5-9 words each)");
+  });
+
+  it("calibrates Lincoln (age 10) with longer sentences + content-stakes language", () => {
+    const p = buildRevisePagePrompt(baseLincoln);
+    expect(p).toContain("2-4 sentences (8-14 words each)");
+    expect(p).toContain("real problems, real heroes");
+  });
+
+  it("never calibrates Lincoln with CVC-style infantilizing language", () => {
+    const p = buildRevisePagePrompt(baseLincoln);
+    expect(p).not.toContain("CVC");
+  });
+
+  it("includes character names when provided", () => {
+    const p = buildRevisePagePrompt(baseLondon);
+    expect(p).toContain("CHARACTER NAMES");
+    expect(p).toContain("Ember");
   });
 });

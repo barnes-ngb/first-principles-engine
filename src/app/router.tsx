@@ -17,11 +17,11 @@ import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
 import BookshelfPage from '../features/books/BookshelfPage'
 import BookEditorPage from '../features/books/BookEditorPage'
 import BookReaderPage from '../features/books/BookReaderPage'
+import BookReviewChat from '../features/books/BookReviewChat'
 import CreateSightWordBook from '../features/books/CreateSightWordBook'
 import SightWordDashboard from '../features/books/SightWordDashboard'
 import StoryGuidePage from '../features/books/StoryGuidePage'
 import MyAvatarPage from '../features/avatar/MyAvatarPage'
-import LaddersPage from '../features/ladders/LaddersPage'
 import WorkshopPage from '../features/workshop/WorkshopPage'
 import ShellyChatPage from '../features/shelly-chat/ShellyChatPage'
 import MonthlyReviewReaderPage from '../features/monthly-review/MonthlyReviewReaderPage'
@@ -61,12 +61,13 @@ const routes = [
       { path: '/books/sight-words', element: <SightWordDashboard /> },
       { path: '/books/:bookId', element: <BookEditorPage /> },
       { path: '/books/:bookId/read', element: <BookReaderPage /> },
+      { path: '/books/:bookId/review', element: <BookReviewChat /> },
       { path: '/quest', element: <KnowledgeMinePage />, errorElement: <QuestErrorBoundary /> },
       { path: '/avatar', element: <MyAvatarPage /> },
       { path: '/hero', element: <Navigate to="/avatar" replace /> },
       { path: '/armor', element: <Navigate to="/avatar" replace /> },
       { path: '/workshop', element: <WorkshopPage /> },
-      { path: '/ladders', element: <LaddersPage /> },
+      { path: '/ladders', element: <Navigate to="/progress" replace /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
       { path: '/records', element: <RecordsPage /> },
       { path: '/records/evaluations', element: <EvaluationsPage /> },

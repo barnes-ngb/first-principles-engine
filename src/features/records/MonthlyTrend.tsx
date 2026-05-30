@@ -30,6 +30,16 @@ interface MonthlyTrendProps {
 }
 
 export default function MonthlyTrend({ dayLogs, hoursEntries, adjustments, startDate, endDate }: MonthlyTrendProps) {
+  // KNOWN DIVERGENCE (see docs/HEALTH_REPORT.md "Hours aggregation divergence"):
+  // This trend re-derives totals independently from the canonical
+  // computeHoursSummary() used by the summary / MO-compliance / Hours-by-Subject
+  // cards. It reads ONLY completed checklist items from day logs — it never reads
+  // block actualMinutes and skips logs with no checklist. computeHoursSummary
+  // instead PREFERS block actualMinutes when present and only falls back to the
+  // checklist. On partially-tracked days these disagree, which is why the trend's
+  // cumulative core can read higher than the canonical core total. The fix is to
+  // route this through the same aggregation; until then, treat the canonical
+  // cards (not this trend) as the source of truth for compliance.
   const months = useMemo(() => {
     // Build month buckets from startDate to endDate
     const [startY, startM] = startDate.split('-').map(Number)

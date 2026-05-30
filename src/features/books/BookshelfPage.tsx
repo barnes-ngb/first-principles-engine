@@ -520,6 +520,12 @@ export default function BookshelfPage() {
               ? 'By Mom'
               : `By ${allChildren.find((c) => c.id === by)?.name ?? 'Kid'}`
             const isInProgressDraft = book.reviewState?.generateChatState === 'in-progress'
+            // Per-Page Review started but not finished (or skipped) yet.
+            const isReviewInProgress =
+              !isInProgressDraft &&
+              !book.reviewState?.completedAt &&
+              (book.reviewState?.reviewedPages?.length ?? 0) > 0
+            const isResumable = isInProgressDraft || isReviewInProgress
 
             return (
               <Box
@@ -529,6 +535,10 @@ export default function BookshelfPage() {
                     handleResumeDraft(book.id)
                     return
                   }
+                  if (isReviewInProgress && book.id) {
+                    navigate(`/books/${book.id}/review`)
+                    return
+                  }
                   navigate(
                     book.status === 'complete' ? `/books/${book.id}/read` : `/books/${book.id}`,
                   )
@@ -536,8 +546,8 @@ export default function BookshelfPage() {
                 sx={{
                   p: 2,
                   borderRadius: 2,
-                  border: isInProgressDraft ? '2px dashed' : '1px solid',
-                  borderColor: isInProgressDraft
+                  border: isResumable ? '2px dashed' : '1px solid',
+                  borderColor: isResumable
                     ? 'warning.main'
                     : book.isTogetherBook
                       ? 'info.300'
@@ -712,6 +722,19 @@ export default function BookshelfPage() {
                   ) : isInProgressDraft ? (
                     <Chip
                       label="Continue making this story →"
+                      size="small"
+                      sx={{
+                        ml: 'auto',
+                        height: 22,
+                        fontSize: '0.65rem',
+                        bgcolor: 'warning.100',
+                        color: 'warning.900',
+                        fontWeight: 700,
+                      }}
+                    />
+                  ) : isReviewInProgress ? (
+                    <Chip
+                      label="Continue reading →"
                       size="small"
                       sx={{
                         ml: 'auto',
@@ -919,7 +942,10 @@ export default function BookshelfPage() {
                 resumeBookId={resumeBookId}
                 onCommit={(bookId) => {
                   handleCloseNewDialog()
-                  navigate(`/books/${bookId}`)
+                  // Kid-generated books auto-open the Per-Page Review
+                  // (design §9 Q1); Shelly lands in the editor and uses the
+                  // on-demand "Read it to me 🎧" button instead.
+                  navigate(isParent ? `/books/${bookId}` : `/books/${bookId}/review`)
                 }}
                 onAbandon={handleCloseNewDialog}
               />

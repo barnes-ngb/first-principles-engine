@@ -27,6 +27,7 @@ export const TaskType = {
   Quest: "quest",
   GenerateStory: "generateStory",
   ReviseStory: "reviseStory",
+  RevisePage: "revisePage",
   Workshop: "workshop",
   AnalyzeWorkbook: "analyzeWorkbook",
   Disposition: "disposition",
@@ -65,6 +66,7 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.Quest:
     case TaskType.GenerateStory:
     case TaskType.ReviseStory:
+    case TaskType.RevisePage:
     case TaskType.Workshop:
     case TaskType.AnalyzeWorkbook:
     case TaskType.Disposition:
@@ -2106,6 +2108,127 @@ OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
   },
   "pagesNeedingImageRegen": [3, 5],
   "qualityNotes": "Brief debug note on what was changed and why. Not shown to the reader."
+}`;
+}
+
+// ── Revise-page prompt (Phase 2 PR-B) ────────────────────────────
+
+/** One page of the surrounding story, supplied for consistency context. */
+export interface RevisePageContextPage {
+  pageNumber: number;
+  text: string;
+}
+
+export interface RevisePageInput {
+  pageNumber: number;
+  currentText: string;
+  currentSceneDescription: string;
+  /** The listener's transcribed feedback ("make the dragon a girl named Sparkle"). */
+  feedback: string;
+  fullStoryContext: {
+    title: string;
+    allPages: RevisePageContextPage[];
+    /** Optional; extracted client-side from current text or passed empty. */
+    characterNames: string[];
+  };
+  childCalibration: {
+    childAge: number;
+    childName: string;
+    /** Caller-supplied sentence target hint (the prompt also derives from age). */
+    sentenceTarget: string;
+    vocabularyLevel: string;
+  };
+}
+
+export interface RevisePageOutput {
+  newText: string;
+  newSceneDescription: string;
+  wordsOnPage: string[];
+  regenerateImage: "yes" | "no";
+  qualityNotes?: string;
+}
+
+/**
+ * Build the system prompt for the revisePage task (per-page surgical revision
+ * during the Per-Page Review). The AI sees the full story for consistency but
+ * is instructed to touch ONLY the target page, and decides on its own whether
+ * the visual scene changed enough to warrant a fresh illustration.
+ */
+export function buildRevisePagePrompt(input: RevisePageInput): string {
+  const {
+    pageNumber,
+    currentText,
+    currentSceneDescription,
+    feedback,
+    fullStoryContext,
+    childCalibration,
+  } = input;
+  const { childAge, childName, sentenceTarget: callerSentenceTarget, vocabularyLevel } =
+    childCalibration;
+
+  const sentenceTarget = sentenceTargetForAge(childAge);
+  const contentStakes = contentStakesForAge(childAge);
+
+  const allPagesBlock = fullStoryContext.allPages
+    .map((p) => {
+      const marker = p.pageNumber === pageNumber ? "  ← REVISE THIS PAGE" : "";
+      return `PAGE ${p.pageNumber}: ${p.text}${marker}`;
+    })
+    .join("\n");
+
+  const characterNamesBlock = fullStoryContext.characterNames.length
+    ? `CHARACTER NAMES (keep consistent): ${fullStoryContext.characterNames.join(", ")}`
+    : "";
+
+  const vocabHint = vocabularyLevel
+    ? `\n- Vocabulary level: ${vocabularyLevel}`
+    : "";
+  const callerTargetHint =
+    callerSentenceTarget && callerSentenceTarget !== sentenceTarget
+      ? `\n- Caller sentence hint: ${callerSentenceTarget}`
+      : "";
+
+  return `You are revising one page of a children's book based on listener feedback. You are revising for ${childName} (age ${childAge}).
+
+The full story is provided so your revision stays consistent with characters, tone, and pacing on the other pages.
+
+CALIBRATION:
+- Each page should have ${sentenceTarget}.
+- ${contentStakes}${vocabHint}${callerTargetHint}
+
+FULL STORY: "${fullStoryContext.title}"
+${allPagesBlock}
+${characterNamesBlock ? `\n${characterNamesBlock}\n` : "\n"}
+PAGE ${pageNumber} (the page to revise):
+  CURRENT TEXT: ${currentText}
+  CURRENT SCENE: ${currentSceneDescription}
+
+LISTENER FEEDBACK: "${feedback}"
+
+${WRITING_QUALITY_BLOCK}
+
+${COPYRIGHT_BLOCK}
+
+YOUR TASK:
+- Apply the feedback to PAGE ${pageNumber} ONLY.
+- Keep every other page untouched.
+- Keep character names consistent with the rest of the story.
+- Keep this page's role in the story (its beat) — if it was the climax, the revised page should still feel like the climax.
+- If the feedback is about a typo, grammar, or phrasing, fix it and do NOT rewrite the whole page.
+- If the feedback is "I don't like this page" or similar, write a fresh version that fits the surrounding pages.
+- If the feedback is unclear, make your best interpretation and note it in qualityNotes.
+
+DECIDE regenerateImage:
+- "yes" if the feedback meaningfully changes the visual scene (a new character, a different location, the dragon becomes a knight, etc.).
+- "no" if it is only a text fix (typo, phrasing, or a dialogue rewrite that does not change what's in the picture).
+
+OUTPUT: Respond ONLY with valid JSON, no markdown fences, no preamble:
+{
+  "newText": "the revised text for this page",
+  "newSceneDescription": "the (possibly unchanged) scene description for this page",
+  "wordsOnPage": ["list", "of", "sight", "words", "that", "appear", "on", "this", "page"],
+  "regenerateImage": "yes" | "no",
+  "qualityNotes": "Brief debug note on what changed and any interpretation made. Not shown to the reader."
 }`;
 }
 

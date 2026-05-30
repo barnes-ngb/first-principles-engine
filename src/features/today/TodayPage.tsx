@@ -47,9 +47,8 @@ import {
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, BookProgress, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, LadderCardDefinition, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
+import type { Artifact, BookProgress, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
-import { getLaddersForChild } from '../ladders/laddersCatalog'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
   EnergyLevel,
@@ -164,12 +163,6 @@ export default function TodayPage() {
 
   const selectableChildren = children
   const selectedChild = activeChild
-
-  // TODO: Remove ladder references after disposition system is fully live
-  const cardLadders: LadderCardDefinition[] = useMemo(
-    () => (selectedChild ? getLaddersForChild(selectedChild.name) ?? [] : []),
-    [selectedChild],
-  )
 
   // Resolve the active template and routine items for the selected child.
   // Priority: child.routineItems (Firestore) → template.routineItems → undefined (all).
@@ -1069,7 +1062,6 @@ export default function TodayPage() {
           childId={selectedChildId}
           childName={selectedChild?.name ?? ''}
           item={teachHelperItem}
-          ladders={cardLadders}
           weekTheme={weekFocus?.theme}
         />
       )}

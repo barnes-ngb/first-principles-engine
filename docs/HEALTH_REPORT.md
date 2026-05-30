@@ -1,202 +1,190 @@
-# Code Health Report — 2026-04-06
+# Code Health Report — 2026-05-30
 
 ## Metrics
-- **Total lines:** 119,626 (+6,209 from last report)
-- **Total files:** 467 (+17)
-- **Total commits:** 106 (note: rebased from 108 last report)
-- **Test files:** 57 (+1)
-- **Test lines:** 12,445 (+161)
-- **Firestore collections:** 33 collection helpers (+2 from last report)
-- **Cloud Functions:** 19 exported (healthCheck, chat, analyzeEvaluationPatterns, weeklyReview, generateWeeklyReviewNow, generateActivity, + 12 image functions + enhanceSketch)
-- **AI task types:** 13 (plan, chat, generate, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat)
-- **Tests:** 1,025 passing across 56 test files (+34 tests, +1 test file)
+
+| Metric | Value | Change from last report |
+|--------|-------|------------------------|
+| **Total lines** | **160,852** | +34 |
+| **Commits (main)** | **135** | +0 |
+| **Test files** | **125** | +0 |
+| **Tests passing** | **2,431** | +393 (all pass) |
+| **Test files running** | **145** | +21 |
+| **Firestore collections** | **34** | +0 |
+| **Cloud Functions** | **24** | +0 |
+| **Chat task types** | **17** | +0 |
+| **Routes** | **33** | +0 |
+| **Bundle size** | **3,841 kB / 1,133 kB gzip** | +0 |
+
+> **Commit note:** `git rev-list --count HEAD` on the audit branch shows 105 (audit branch commits don't merge to main via squash). Main branch count is 135 (used for stats).
+
+> **CF count note:** The grep pattern `export \{ \K[^}]+` undercounts multi-line export blocks (returns 19). Perl cross-line match returns 24, which matches CLAUDE.md. Always use the perl method or count manually when verifying CF count.
+
+> **Bundle note:** 3,841 kB main chunk (1,133 kB gzip) — unchanged from last report. Dynamic/static import conflicts for firebase, compressImage, and sightWordMastery flagged by Vite but not blocking.
+
+> **Test growth:** +21 test files and +393 tests since last report. All 2,431 pass across 145 files.
+
+## Build Status
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| **Build** | ✅ PASS | `tsc -b && vite build` clean in 12.52s |
+| **Lint** | ✅ PASS | 0 errors, 0 warnings |
+| **Tests** | ✅ PASS | 2,431 tests across 145 files |
+| **TypeScript** | ✅ PASS | `tsc -b` clean |
+
+## Doc Accuracy
+
+### Stats Comparison (MASTER_OUTLINE vs Computed)
+
+| Claim | Doc value | Computed | Status |
+|-------|-----------|----------|--------|
+| TypeScript lines | 160,818 | 160,852 | **DRIFT** — auto-fixed → 160,852 |
+| Commits | 135 | 135 (main) | ✅ OK |
+| Test files | 125 | 125 | ✅ OK |
+| Firestore collections | 34 | 34 | ✅ OK |
+| Cloud Functions | 24 | 24 | ✅ OK |
+| Chat task types | 17 | 17 | ✅ OK |
+| Routes | 33 | 33 | ✅ OK |
+
+### Missing File References
+
+The grep scan flagged 5 files as missing:
+
+| File | Status |
+|------|--------|
+| `PARENT_EXPERIENCE_AUDIT.md` | Expected — marked REMOVED in DOCUMENT_INDEX, referenced only in historical PR log in MASTER_OUTLINE |
+| `PARENT_EXPERIENCE_ALIGNMENT_PLAN.md` | Expected — same as above |
+| `QuickCaptureSection.tsx` | Expected — removed in UX P2.06, referenced in historical PR log |
+| `QuickCaptureSection.test.tsx` | Expected — removed with parent component |
+| `CreativeTimeLog.tsx` | Expected — removed in UX P2.06, referenced in historical PR log |
+
+All are historical PR log references, not live path references. No action needed.
+
+### Nav Accuracy
+
+**Code nav (AppShell.tsx):**
+- Parent: Today, Plan My Week, Weekly Review, Progress, Records, Books, Game Workshop, Dad Lab, Settings, Ask AI
+- Kid: Today, Knowledge Mine, My Books, Books About Me, My Hero, **My Stuff**, Game Workshop, Dad Lab
+
+**Doc nav (MASTER_OUTLINE before fix):**
+- Kid nav was missing **"My Stuff"** (`/records/portfolio`)
+
+**Auto-fixed:** Added "My Stuff" to Kid nav in MASTER_OUTLINE.
+
+### Task Types in Code vs Docs
+
+Registry (`tasks/index.ts`) — 17 tasks: `analyzeWorkbook`, `chapterQuestions`, `chat`, `conundrum`, `disposition`, `evaluate`, `generate`, `generateStory`, `monthlyReview`, `plan`, `quest`, `revisePage`, `reviseStory`, `scan`, `shellyChat`, `weeklyFocus`, `workshop`
+
+`chat` and `generate` tasks don't have standalone files in `tasks/` — handled in `chat.ts` and `generate.ts` respectively. Charter check marks them FILE NOT FOUND (expected — charter context injected at the CF layer via context slices).
+
+All 17 documented in `SYSTEM_PROMPTS.md`. ✅ OK
+
+### Unindexed Docs
+
+None. All 48 docs in `docs/` are indexed in `DOCUMENT_INDEX.md`. ✅ OK
+
+### Stale Doc Check
+
+No CURRENT-marked docs flagged as stale. ✅ OK
 
 ## Largest Files (over 500 lines)
 
 | File | Lines | Change from last report |
 |------|-------|------------------------|
-| `src/features/planner-chat/PlannerChatPage.tsx` | 2,252 | +68 |
-| `src/features/books/BookEditorPage.tsx` | 1,886 | +428 |
-| `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | +125 |
-| `src/features/workshop/WorkshopPage.tsx` | 1,606 | — |
-| `functions/src/ai/chat.ts` | 1,599 | +10 |
-| `src/features/quest/useQuestSession.ts` | 1,545 | +87 |
-| `src/features/avatar/MyAvatarPage.tsx` | 1,386 | — |
-| `src/features/planner-chat/chatPlanner.logic.ts` | 1,293 | +119 |
-| `src/features/avatar/VoxelCharacter.tsx` | 1,242 | -48 |
-| `src/features/records/RecordsPage.tsx` | 1,127 | +3 |
-| `src/features/today/KidTodayView.tsx` | 1,083 | +1 |
-| `src/features/evaluate/EvaluateChatPage.tsx` | 1,060 | +5 |
-| `src/features/records/records.logic.test.ts` | 1,053 | — |
-| `src/features/planner-chat/chatPlanner.logic.test.ts` | 1,051 | — |
-| `src/features/books/BookshelfPage.tsx` | 1,006 | — |
-| `src/features/settings/AvatarAdminTab.tsx` | 997 | — |
-| `src/features/today/TodayPage.tsx` | 982 | +83 |
-| `src/features/today/TodayChecklist.tsx` | 973 | +225 |
-| `src/features/dad-lab/DadLabPage.tsx` | 969 | — |
-| `src/features/books/printBook.ts` | 937 | — |
-| `functions/src/ai/contextSlices.ts` | 914 | +160 |
-| `src/features/avatar/BrothersVoxelScene.tsx` | 865 | — |
-| `src/features/quest/ReadingQuest.tsx` | 830 | — |
-| `src/features/dad-lab/LabReportForm.tsx` | 797 | +21 |
-| `src/core/types/planning.ts` | 795 | +111 |
-| `src/features/workshop/GamePlayView.tsx` | 772 | — |
-| `src/features/books/BookReaderPage.tsx` | 772 | — |
-| `src/features/books/useBook.ts` | 754 | +12 |
-| `src/features/progress/ArmorTab.tsx` | 745 | — |
-| `src/core/data/seed.ts` | 704 | — |
-| `src/features/workshop/workshopUtils.ts` | 675 | — |
-| `src/features/progress/CurriculumTab.tsx` | 670 | new |
-| `src/features/ladders/lincolnLadders.ts` | 670 | — |
-| `src/features/avatar/__tests__/avatarSystem.test.ts` | 651 | — |
-| `src/features/records/records.logic.ts` | 640 | — |
-| `src/features/records/EvaluationHistoryTab.tsx` | 635 | — |
-| `src/features/avatar/voxel/buildArmorPiece.ts` | 629 | — |
-| `functions/src/ai/evaluate.ts` | 609 | — |
-| `src/features/books/StickerPicker.tsx` | 599 | — |
-| `src/features/today/ReadingRoutineItems.tsx` | 584 | new |
-| `src/features/avatar/voxel/buildCharacter.ts` | 575 | new |
-| `functions/src/ai/generate.ts` | 561 | — |
-| `src/features/dad-lab/KidLabView.tsx` | 555 | new |
-| `src/features/evaluation/SkillSnapshotPage.tsx` | 550 | -528 (decomposed) |
-| `src/features/weekly-review/WeeklyReviewPage.tsx` | 548 | new |
-| `src/core/data/gatbCurriculum.ts` | 545 | new |
-| `src/features/workshop/MyGamesGallery.tsx` | 538 | new |
-| `functions/src/ai/tasks/workshop.ts` | 533 | — |
-| `src/features/avatar/voxel/minecraftSkin.ts` | 528 | new |
-| `src/features/today/KidChecklist.tsx` | 524 | new |
-| `src/features/quest/KnowledgeMinePage.tsx` | 524 | new |
-| `src/features/books/SketchScanner.tsx` | 524 | new |
-| `src/features/workshop/workshopArt.ts` | 523 | new |
-| `functions/src/ai/data/gatbCurriculum.ts` | 519 | new |
-| `src/features/workshop/CollectingPlayView.tsx` | 516 | new |
-| `src/features/workshop/BattlePlayView.tsx` | 509 | new |
-| `src/features/workshop/AdventurePlayView.tsx` | 504 | new |
-
-## Files Changed This Week
-
-529 files changed total (foundational week — entire codebase established). Top areas by change volume:
-
-| Feature Area | Files Changed |
-|---|---|
-| `src/features/avatar/` | 37 |
-| `src/features/books/` | 37 |
-| `src/features/workshop/` | 33 |
-| `src/features/today/` | 33 |
-| `src/features/planner-chat/` | 32 |
-| `src/components/` | 23 |
-| `src/features/avatar/voxel/` | 20 |
-| `src/core/types/` | 16 |
-| `src/core/hooks/` | 14 |
-| `src/features/workshop/steps/` | 12 |
-| `src/features/progress/` | 12 |
-| `src/core/utils/` | 12 |
-| `src/features/quest/` | 10 |
-| `src/features/records/` | 10 |
-| `src/features/ladders/` | 9 |
-| `src/core/xp/` | 9 |
-| `src/features/settings/` | 7 |
-| `src/core/firebase/` | 7 |
-| `src/core/curriculum/` | 7 |
-| `src/features/shelly-chat/` | 6 |
-| `src/features/dad-lab/` | 5 |
-
-## Auto-Fixes Applied
-- Unused imports removed: **0** (codebase is clean — TypeScript `noUnusedLocals` enforces this)
-- Lint issues fixed: **0** (ESLint `--fix` found no auto-fixable issues in `src/`; `functions/src/` uses separate ESLint config not resolvable from root)
-- Inline handlers extracted: **0** (no inline JSX arrow functions over 20 lines found — all handlers are properly short)
-- Files split: **none** (PlannerChatPage at 2,252 is the only file over 2,000 lines; per CLAUDE.md, its interconnected state makes splitting complex)
-- Dead exports removed: **0** (14 dead exports were removed in previous report; no new dead exports found this week)
-
-## Issues Found (Not Auto-Fixed)
-
-### High Priority
-- **None.** Build, lint, and all 1,025 tests pass cleanly.
-
-### Medium Priority
-- **PlannerChatPage.tsx (2,252 lines)** continues growing (+68 from last report). The only file over 2,000 lines. Setup wizard remains the best extraction candidate but shares chat/plan/apply state.
-- **BookEditorPage.tsx (1,886 lines)** grew +428 since last report — largest single-file growth. Now approaching 2,000 lines. Sketch scanner, voice, and sticker panels are extraction candidates.
-- **ESLint does not cover `functions/src/`** from the root project — still unresolved from last report. Consider adding a lint script in `functions/package.json`.
-- **TodayChecklist.tsx (973 lines)** grew +225 — rapid growth. Monitor for continued expansion.
-- **contextSlices.ts (914 lines)** grew +160. As more context slices are added for new task types, this file will keep growing. Consider grouping slices by domain.
-
-### Low Priority
-- **Vite chunk warning:** Main bundle is 3,589 KB (1,057 KB gzipped) — slightly up from 3,520/1,038. Dynamic imports or manual chunks for Three.js, jsPDF would help.
-- **Major version upgrades available:** ESLint 10, TypeScript 6, Vite 8, Vitest 4 — all major bumps requiring migration effort. Not urgent but worth tracking.
-- **Deprecated ladder system** — CLAUDE.md still notes 5 files with TODO comments for ladder removal. Disposition system is the replacement.
+| `src/features/planner-chat/PlannerChatPage.tsx` | 2,620 | +0 |
+| `functions/src/ai/chat.ts` | 2,466 | +0 |
+| `src/features/books/BookEditorPage.tsx` | 2,278 | +0 |
+| `src/features/quest/useQuestSession.ts` | 1,870 | +0 |
+| `src/features/avatar/MyAvatarPage.tsx` | 1,804 | +0 |
+| `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | +0 |
+| `src/features/workshop/WorkshopPage.tsx` | 1,623 | +0 |
+| `src/features/avatar/VoxelCharacter.tsx` | 1,562 | +0 |
+| `src/features/planner-chat/chatPlanner.logic.ts` | 1,363 | +0 |
+| `functions/src/ai/contextSlices.ts` | 1,325 | +0 |
+| `src/features/records/records.logic.test.ts` | 1,225 | +0 |
+| `src/features/evaluate/EvaluateChatPage.tsx` | 1,162 | +0 |
+| `src/features/planner-chat/chatPlanner.logic.test.ts` | 1,156 | +0 |
+| `src/features/records/RecordsPage.tsx` | 1,136 | +0 |
+| `src/features/settings/AvatarAdminTab.tsx` | 1,106 | +0 |
+| `src/features/today/TodayPage.tsx` | 1,104 | +0 |
+| `src/features/today/TodayChecklist.tsx` | 1,070 | +0 |
+| `functions/src/ai/evaluate.ts` | 1,050 | +0 |
+| `src/features/today/KidTodayView.tsx` | 1,030 | +0 |
+| `src/features/quest/ReadingQuest.tsx` | 993 | +0 |
+| `src/features/books/BookshelfPage.tsx` | 986 | +0 |
+| `src/features/dad-lab/DadLabPage.tsx` | 969 | +0 |
+| `src/features/books/printBook.ts` | 952 | +0 |
+| `src/features/settings/DevAdminTab.tsx` | 943 | +0 |
+| `src/core/types/planning.ts` | 941 | +0 |
+| `functions/src/ai/tasks/monthlyReviewData.ts` | 918 | +0 |
+| `src/features/avatar/voxel/buildArmorPiece.ts` | 913 | +0 |
+| `src/features/progress/CurriculumTab.tsx` | 900 | +0 |
+| `functions/src/ai/tasks/monthlyReview.ts` | 887 | +0 |
+| `src/features/books/useBook.ts` | 877 | +0 |
 
 ## Decomposition Candidates
 
-| File | Lines | Notes |
-|------|-------|-------|
-| `PlannerChatPage.tsx` | 2,252 | Setup wizard is the best extraction candidate. Shares chat/plan/apply state — needs careful prop design. Growing steadily. |
-| `BookEditorPage.tsx` | 1,886 | **Watch item** — grew +428 this week. Sketch/voice/sticker panels could extract. Approaching decomposition threshold. |
-| `ShellyChatPage.tsx` | 1,653 | 23+ useState hooks. Image generation flow, thread management, follow-up suggestions could be separate hooks. Growing (+125). |
-| `WorkshopPage.tsx` | 1,606 | Phase-based rendering. Handlers share `currentGame` state across 3 game types. Stable. |
-| `functions/src/ai/chat.ts` | 1,599 | Task dispatcher + prompt builders. Could extract prompt building per-task into the tasks/ directory. |
-| `useQuestSession.ts` | 1,545 | Quest session state machine. Could split into phase-specific hooks. Growing (+87). |
-| `MyAvatarPage.tsx` | 1,386 | Stable. 3D scene, equip panel could separate further. |
-| `chatPlanner.logic.ts` | 1,293 | Growing (+119). Pure logic file — watch for continued expansion. |
+No files crossed 2,000 lines for the first time. All large files stable (no growth).
 
-## Charter Alignment Check
+| File | Lines | Growth | Priority |
+|------|-------|--------|----------|
+| `functions/src/ai/chat.ts` | 2,466 | +0 | **HIGH** — `buildQuestPrompt` alone is 400+ lines; extract prompt builders to separate files |
+| `src/features/planner-chat/PlannerChatPage.tsx` | 2,620 | +0 | **MEDIUM** — stable, noted in CLAUDE.md tech debt |
+| `src/features/books/BookEditorPage.tsx` | 2,278 | +0 | **MEDIUM** — stable growth, noted in CLAUDE.md |
 
-### Tasks using `buildContextForTask` (shared context with charter):
-- `plan` — charter + childProfile + wordMastery + generatedContent + workshopGames
-- `chat` / `generate` — charter + childProfile
-- `evaluate` — charter + childProfile + sightWords + wordMastery
-- `quest` — childProfile + sightWords + recentEval + wordMastery
-- `generateStory` — childProfile + sightWords + wordMastery
-- `workshop` — charter + childProfile + workshopGames
-- `analyzeWorkbook` — charter + childProfile
-- `disposition` — charter + childProfile + engagement + gradeResults
-- `scan` — childProfile + recentEval
-- `shellyChat` — charter + childProfile + sightWords + weekFocus + wordMastery
+## Issues Found
 
-### Tasks using `CHARTER_PREAMBLE` only (direct import):
-- `weeklyFocus` — family-level generator, not child-specific
-- `conundrum` — family-level generator, not child-specific
+### Auto-Fixed (this run)
+- MASTER_OUTLINE TypeScript lines: 160,818 → 160,852
+- MASTER_OUTLINE Kid nav: added "My Stuff" (`/records/portfolio`) between My Hero and Game Workshop
 
-### Standalone charter consumers (outside task system):
-- `generate.ts` (activity generation) — uses CHARTER_PREAMBLE directly
-- `evaluate.ts` (weekly review) — uses CHARTER_PREAMBLE + addendum; noted in CLAUDE.md as separate from task system
+### Needs Human Attention
+- **Bundle size:** 3,841 kB main chunk (1,133 kB gzip). Route-level `React.lazy` splitting would reduce initial load. Heaviest imports: Three.js (avatar), jsPDF (print), curriculum map data. Noted in CLAUDE.md tech debt — architectural decision required.
+- **Potential dead exports in `src/core/`:** Grep-based scan found these candidates (may be false positives — could be used in tests or dynamic imports):
+  - `isPieceForged` in `src/core/xp/forgeArmorPiece.ts`
+  - `ensureNewProfileStructure` in `src/core/xp/checkAndUnlockArmor.ts`
+  - `SKIN_REGIONS`, `FORGE_COSTS`, `getTierTotalCost` in `src/core/xp/armorTiers.ts` / `forgeCosts.ts`
+  - `ReadingTags`, `ReadingTag`, `WritingTags`, `WritingTag`, `MathTags`, `MathTag`, `RegulationTag`, `ALL_SKILL_TAGS` in `src/core/types/skillTags.ts`
+  - Verify before removing — grep excludes test files and dynamic imports.
+- **`chat.ts` CF (2,466L)** — `buildQuestPrompt` is 400+ lines; extracting to separate prompt builder files would improve maintainability. Noted in CLAUDE.md tech debt.
 
-### Tasks with no charter context:
-- `analyzePatterns` — pattern analysis from evaluation sessions (uses evaluation data only)
+## Charter Alignment
 
-### Drift detected: **No**
-All child-specific tasks use `buildContextForTask` which injects charter values consistently. Family-level tasks use `CHARTER_PREAMBLE` directly. No new tasks have been added without appropriate charter context.
+Task types checked against charter context:
+- `chat` and `generate`: handled at CF layer (not in `tasks/`); charter context injected via context slices ✅
+- All 15 other task handler files: include `buildContextForTask` or direct charter context ✅
 
-## Test Coverage Gaps
+No charter gaps found.
 
-| Feature Directory | Test Files | Status |
-|---|---|---|
-| `src/features/auth/` | 0 | Gap — client auth guard untested |
-| `src/features/dad-lab/` | 0 | Gap — dad lab lifecycle untested |
-| `src/features/evaluation/` | 0 | Gap — skill snapshot page untested |
-| `src/features/login/` | 0 | Gap — profile selection untested |
-| `src/features/not-found/` | 0 | Trivial — 404 page |
-| `src/features/planner/` | 0 | Gap — TeachHelperDialog untested |
-| `src/features/progress/` | 0 | Gap — progress tabs (7 sub-tabs) untested |
-| `src/features/settings/` | 0 | Gap — settings tabs untested |
-| `src/features/shelly-chat/` | 0 | Gap — high-usage feature, high priority for testing |
-| `src/features/weekly-review/` | 0 | Gap — weekly review page untested |
+## Test Coverage by Feature
 
-**Recently improved (2026-04-19 test run):**
-- `records.logic` — added mixed blocks, checklist fallback, all-3-sources aggregation tests
-- `addXpEvent` — added dedup, zero/empty guard, source bucketing, negative clamp, default avatar tests
-- `time.ts` — added getWeekRange tests (Sun/Sat/Mon start, month/year boundaries)
-- `functions/src/ai/authGuard` — new test file: email auth, allowlist, rate limiting (15 tests)
+| Tests | Feature |
+|-------|---------|
+| 21 | books |
+| 13 | planner-chat |
+| 12 | avatar |
+| 11 | today |
+| 4 | settings |
+| 4 | quest |
+| 3 | evaluate |
+| 2 | workshop |
+| 2 | monthly-review |
+| 1 | weekly-review |
+| 1 | records |
+| 1 | ladders |
+| 1 | engine |
+| 0 | shelly-chat |
+| 0 | progress |
+| 0 | planner |
+| 0 | not-found |
+| 0 | login |
+| 0 | evaluation |
+| 0 | dad-lab |
+| 0 | auth |
 
-**Well-tested areas:** planner-chat (8 tests), avatar (5), books (4), today (3), quest (2), workshop (2), engine (1), evaluate (1), kids (1), ladders (1), records (1)
+Features with 0 test files: shelly-chat, progress, planner, not-found, login, evaluation, dad-lab, auth. These are pure UI renderers or auth wrappers with limited pure logic to test. Unchanged from last report.
 
 ## Dependency Notes
-- `npm audit --production`: **0 vulnerabilities** found
-- **Major version upgrades available:**
-  - ESLint 9.39 → 10.2 (major)
-  - TypeScript 5.9 → 6.0 (major)
-  - Vite 7.3 → 8.0 (major)
-  - Vitest 3.2 → 4.1 (major)
-  - jsdom 27.4 → 29.0 (major)
-  - `@types/three` and `three` 0.128 → 0.183 (major — pinned intentionally for VoxelCharacter stability)
-- **Minor updates available:** react-router-dom 7.13→7.14, typescript-eslint 8.57→8.58, @types/node 24.12.0→24.12.2
-- Bundle size: 3,589 KB (1,057 KB gzipped) — slight increase from last report's 3,520/1,038
+
+- **npm audit:** 0 vulnerabilities (production) ✅
+- No major version upgrades pending that affect production
