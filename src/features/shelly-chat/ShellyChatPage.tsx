@@ -32,9 +32,11 @@ import { useAI } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ChatContext } from '../../core/types'
+import ActionConfirmCard from './ActionConfirmCard'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 import { formatRelativeTime } from './formatRelativeTime'
+import { useShellyChatActions } from './useShellyChatActions'
 import { useShellyChatState } from './useShellyChatState'
 import { useShellyChatFlows } from './useShellyChatFlows'
 
@@ -106,6 +108,26 @@ export default function ShellyChatPage() {
     messagesEndRef,
   } = state
 
+  // ── Portal write layer (Build Step 3b) — propose → confirm → write.
+  //    The chat context's childId is the active-child binding actions validate
+  //    against; map the selected tab to its childId so a confused model can't
+  //    edit the wrong child.
+  const contextChildId = chatContext === 'general'
+    ? ''
+    : children.find((c) => c.name.toLowerCase() === chatContext)?.id ?? ''
+  const {
+    pending: pendingActions,
+    stagePendingActions,
+    applyChatAction,
+    dismissAction,
+    confirmAll,
+  } = useShellyChatActions({
+    familyId,
+    children,
+    activeChildId: contextChildId,
+    activeThreadId,
+  })
+
   const {
     handleContextChange,
     handleSend,
@@ -132,6 +154,7 @@ export default function ShellyChatPage() {
     generateImage,
     lastErrorRef,
     setSearchParams,
+    stagePendingActions,
   })
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
@@ -446,6 +469,17 @@ export default function ShellyChatPage() {
             </Box>
           )}
         </Paper>
+      )}
+
+      {/* Proposed-action confirm cards (Build Step 3b) — propose → confirm → write */}
+      {!sending && (
+        <ActionConfirmCard
+          pending={pendingActions}
+          familyChildren={children}
+          onConfirm={applyChatAction}
+          onDismiss={dismissAction}
+          onConfirmAll={confirmAll}
+        />
       )}
 
       {/* Follow-up suggestions */}

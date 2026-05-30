@@ -25,6 +25,8 @@ import {
 } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import type { Child, ChatContext, ChatThread, ShellyChatMessage } from '../../core/types'
+import type { ChatAction } from '../../core/types'
+import { parseChatActions } from './parseChatActions'
 import { parseFollowUps } from './parseFollowups'
 import { computeReflectionSuggestions } from './reflectionSuggestions'
 import type { ReflectionDay } from './reflectionSuggestions'
@@ -46,6 +48,13 @@ export interface ShellyChatFlowsDeps {
   generateImage: AI['generateImage']
   lastErrorRef: AI['lastErrorRef']
   setSearchParams: SetURLSearchParams
+  /**
+   * Stage `<action>` proposals parsed from an assistant message for
+   * human-confirm (Build Step 3b). Owned by `useShellyChatActions`; the page
+   * passes it through so the response handlers can hand off parsed actions
+   * without this hook taking on any write capability.
+   */
+  stagePendingActions: (messageId: string, actions: ChatAction[]) => void
 }
 
 /**
@@ -59,7 +68,7 @@ export interface ShellyChatFlowsDeps {
  * keeping its external prop/route contract identical.
  */
 export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlowsDeps) {
-  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, setSearchParams } = deps
+  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, setSearchParams, stagePendingActions } = deps
 
   const {
     chatContext, setChatContext,
@@ -280,20 +289,19 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           messages: aiMessages,
         })
         if (response?.message) {
-          const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+          // ── ARCH-09 / Build Step 3b: action extraction ──────────────
+          // Strip [FOLLOWUP] markers, then `<action>` blocks, so neither shows
+          // in the rendered/persisted message. Parsed actions are staged for
+          // human-confirm via `useShellyChatActions` — no write happens here.
+          const { cleanText: afterFollowups, followUps: suggestions } = parseFollowUps(response.message)
           setFollowUps(suggestions)
-          // ── ARCH-09 / Build Step 3 insertion point ──────────────────
-          // The write/actions layer (`useShellyChatActions.applyChatAction`)
-          // plugs in here: parse `<action>` blocks out of `response.message`
-          // (mirroring parseFollowUps), stage them for human-confirm, and strip
-          // them from `cleanText` before persisting. Not built yet — it needs the
-          // `applyChatAction` writer (Build Step 3) and stays out of scope here so
-          // the CF request/response shape is unchanged. See SHELLY_PORTAL_CONTEXT §5.
-          await addDoc(shellyChatMessagesCollection(familyId, activeThreadId), {
+          const { actions, cleanText } = parseChatActions(afterFollowups)
+          const msgRef = await addDoc(shellyChatMessagesCollection(familyId, activeThreadId), {
             role: 'assistant',
             content: cleanText,
             timestamp: new Date().toISOString(),
           })
+          if (actions.length) stagePendingActions(msgRef.id, actions)
           await updateDoc(
             doc(shellyChatThreadsCollection(familyId), activeThreadId),
             {
@@ -323,7 +331,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         setSending(false)
       }
     },
-    [activeThreadId, chat, familyId, getChildIdForContext, setFollowUps, setSending],
+    [activeThreadId, chat, familyId, getChildIdForContext, setFollowUps, setSending, stagePendingActions],
   )
 
   // ── Send handler ───────────────────────────────────────────────
@@ -415,13 +423,15 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       }
 
       if (response?.message) {
-        const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+        const { cleanText: afterFollowups, followUps: suggestions } = parseFollowUps(response.message)
         setFollowUps(suggestions)
-        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+        const { actions, cleanText } = parseChatActions(afterFollowups)
+        const msgRef = await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
           content: cleanText,
           timestamp: new Date().toISOString(),
         })
+        if (actions.length) stagePendingActions(msgRef.id, actions)
         await updateDoc(
           doc(shellyChatThreadsCollection(familyId), threadId),
           {
@@ -452,7 +462,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     } finally {
       setSending(false)
     }
-  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachment, chatContext, setActiveThreadId, setFollowUps, setInput, setPendingAttachment, setSending])
+  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachment, chatContext, setActiveThreadId, setFollowUps, setInput, setPendingAttachment, setSending, stagePendingActions])
 
   // ── Image generation (refactored for Prompt 9) ─────────────────
   const handleGenerateImageDirect = useCallback(async (prompt: string) => {
@@ -893,13 +903,15 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       console.log('[Chat] Image analysis response:', response ? 'got response' : 'null/undefined', response?.message?.slice(0, 50))
 
       if (response?.message) {
-        const { cleanText, followUps: suggestions } = parseFollowUps(response.message)
+        const { cleanText: afterFollowups, followUps: suggestions } = parseFollowUps(response.message)
         setFollowUps(suggestions)
-        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+        const { actions, cleanText } = parseChatActions(afterFollowups)
+        const msgRef = await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
           content: cleanText,
           timestamp: new Date().toISOString(),
         })
+        if (actions.length) stagePendingActions(msgRef.id, actions)
         await updateDoc(
           doc(shellyChatThreadsCollection(familyId), threadId),
           {
@@ -933,7 +945,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       setUploading(false)
       setSending(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFile, setUploadPreview, setUploading])
+  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFile, setUploadPreview, setUploading, stagePendingActions])
 
   const handleUploadGenerate = useCallback(async () => {
     if (!uploadFile || !uploadPreview) return
