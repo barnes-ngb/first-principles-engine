@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-05-26.
+> Where everything lives. Updated 2026-05-30.
 
 ---
 
@@ -58,6 +58,11 @@
 | `HERO_HUB_DEPLOY_AUDIT_2026-04-07.md` | **RESOLVED** | Deploy audit validating merged animation guardrails/tuning reached production |
 | `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | **CURRENT** | Server-side guaranteed backfill: legacy workbookConfigs → activityConfigs before quest/AI dispatch |
 | `first-principles-system-review.md` | **CURRENT** | Full-loop system review: evaluation → planning → execution, curriculum pacing, disposition tracking |
+| `DESIGN_MONTHLY_REVIEW_BOOK.md` | **CURRENT** | Monthly review book design — per-child monthly narrative, photo curation, section types, reader layouts. Phase 1 shipped. |
+| `review/REVIEW_HOME_BASE.md` | **NEW** (2026-05-29) | Monthly deep audit coordination hub — 4-tier review priority, prompt-driven audit methodology |
+| `review/ARCHITECTURE_AUDIT_2026-05.md` | **NEW** (2026-05-29) | May 2026 architecture audit — baseline green, Band 1 largest file analysis (ARCH-01–09), decomposition candidates |
+| `review/prompts/` | **NEW** (2026-05-29) | Reusable audit prompts: `PROMPT_ARCH_AUDIT.md` (monthly), `PROMPT_BACKUP_CHECK.md`, `PROMPT_FIX.md` (issue runner) |
+| `design-pass-v1/copy-pass-audit.md` | **CURRENT** | Design pass copy audit — terminology, tone, label consistency across UI surfaces |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `archive/01–07_*.md` | ARCHIVED | Phase 1–5 specs, original testing plan, Saturday lab runbook — all superseded by current docs |
 | `08_RUNBOOK.md` | **CURRENT** (Reference) | Operational runbook: deploy, backups, key rotation, troubleshooting |
@@ -94,6 +99,8 @@
 | `08_RUNBOOK.md` | Working on deployment, backups, operations |
 | `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
 | `design-pass-v1/README.md` | Use when working on any v1 implementation queue item |
+| `DESIGN_MONTHLY_REVIEW_BOOK.md` | Working on monthly review books, photo curation, kid reader |
+| `review/REVIEW_HOME_BASE.md` | Running monthly audits, reviewing architecture health |
 
 ---
 
@@ -117,7 +124,7 @@ These are family/values documents maintained outside the repo. They inform AI pr
 | File | Purpose |
 |---|---|
 | `CLAUDE.md` | AI assistant instructions: build commands, constraints, conventions, project context |
-| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `zod.ts` |
+| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `zod.ts` |
 | `src/core/types/enums.ts` | All enum-like `as const` objects and companion types |
 | `functions/src/ai/chat.ts` | Cloud Function: system prompt assembly, enriched context, quest prompt |
 | `src/features/quest/questTypes.ts` | Knowledge Mine types (QuestState, SessionQuestion, InteractiveSessionData) |
