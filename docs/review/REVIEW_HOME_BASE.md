@@ -106,7 +106,38 @@ Band = priority band from §2. The audit prompt updates this table; the fix prom
 
 † DATA-01 is in band 4 by topic but **promoted to top of queue** as compliance- and time-sensitive (June 30).
 
-## 7. Conventions for this system
+## 7. Triggers (phone-first cheat-sheet)
+
+Everything below is either fully automatic or a single short message pasted into Claude Code web.
+No local commands, ever.
+
+### Fully automatic (set once)
+- **Monthly audit** — scheduled Claude Code task, same as the /3-day health audit. Task prompt:
+  > Read `docs/review/prompts/PROMPT_ARCH_AUDIT.md` and execute it fully.
+
+  Suggested schedule: 1st of the month, after the health audit. It auto-applies safe doc fixes and
+  opens a PR for everything else. You just review + merge from the phone.
+
+### One-line triggers (paste into Claude Code web on the repo)
+- **Run a fix** (you pick the issue ID from §6):
+  > Read `docs/review/prompts/PROMPT_FIX.md` and run it for ISSUE_ID: DATA-01
+
+- **Run the audit now** (off-schedule, e.g. before a design session):
+  > Read `docs/review/prompts/PROMPT_ARCH_AUDIT.md` and execute it fully.
+
+- **Just triage / ask** (in the Claude.ai home-base chat, not Claude Code):
+  > Read REVIEW_HOME_BASE.md and the latest audit report. What should I fix next and why?
+
+### What is and isn't automated (by design)
+- **Auto, no touch:** the audit, stat/doc corrections, PR creation.
+- **One tap from you:** merging any PR.
+- **Deliberately manual:** fixes that change real code or data — compliance hours, XP ledger, charter
+  preamble. These propose-and-stop so a human decides. That's a safety feature for a system holding a
+  child's school records, not a gap to close.
+
+
+
+## 8. Conventions for this system
 
 - **Design here, build there.** This home base produces decisions and prompts. Claude Code makes the code changes, always on a branch, always reviewed before merge.
 - **Inspect → validate → propose for anything touching an invariant.** Hours math, XP ledger, and the additive-hours rule are never auto-fixed. They land as a proposal in the ledger for a human call.
