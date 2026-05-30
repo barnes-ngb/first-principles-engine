@@ -96,15 +96,18 @@ Band = priority band from §2. The audit prompt updates this table; the fix prom
 | **ARCH-07** | 1 | **IN PROGRESS** | Ladder UI surfaces removed; `/ladders` → `/progress` redirect; `ladders/` dir + dead `LadderQuickLog` deleted; data layer (`ladderRef` tag, `ladderProgress` collection, `Ladder*` types) retained. PR open, awaiting review. | [PR #1263](https://github.com/barnes-ngb/first-principles-engine/pull/1263) — touched `router.tsx`, `TodayPage.tsx`, `TeachHelperDialog.tsx`, deleted `src/features/ladders/*` + `LadderQuickLog.tsx` |
 | **ARCH-08** | 1 | OPEN (new) | `AvatarThumbnail.tsx` imports Three.js; used in AppShell — prerequisite for any bundle split | `AppShell.tsx:15`, `ContextBar.tsx:14`, `ChildSelector.tsx:10`, `ProfileMenu.tsx:15` |
 | **ARCH-09** | 1 | OPEN (new) | `ShellyChatPage.tsx` 1,653L — 23+ useState, image generation, thread management | `src/features/shelly-chat/ShellyChatPage.tsx` — defer until usage stabilizes |
+| **ARCH-10** | 1 | OPEN | Security rules are one blanket `if isFamily(familyId)` write grant across all family data — kids' tablet sessions can write `hours`/`xpLedger`/`evaluations`; no field validation. A kid-UI bug could corrupt compliance data. | `firestore.rules:29-31` |
+| **ARCH-11** | 1 | OPEN | No client crash/error reporting (no Sentry/Crashlytics). Failures on Shelly's phone (plan gen, hours save) are silent. Backend has default Cloud Logging only. | repo-wide; `SectionErrorBoundary` isolates UI but emits no telemetry |
 | **TEST-01** | 1 | OPEN | `shelly-chat`, `progress`, `dad-lab` have **0** test files. Propose `shellyChat.logic.test.ts` + `DispositionProfile.test.tsx` next. | confirmed in `ARCHITECTURE_AUDIT_2026-05.md §1.3` |
 | **FUNC-01** | 2 | OPEN | No authoritative source for "where is Lincoln" — 6 overlapping truth surfaces, no reconciliation | skillSnapshot (closest to auth) vs. childSkillMaps vs. activityConfigs vs. ladderProgress vs. dispositionCache |
 | **FUNC-02** | 2 | OPEN (new) | Learning Map → Skill Snapshot write-through missing. Scan advances curriculum node but does NOT update conceptual blocks. Dead end in the curriculum→eval loop. | `updateSkillMapFromFindings.ts`; no write-through to `skillSnapshots` |
 | **ETHOS-01** | 3 | OPEN (new) | Charter preamble absent from 5/17 task types: `generateStory`, `reviseStory`, `revisePage`, `quest`, `scan`. Story trio is highest concern. | `contextSlices.ts:56-58,55,66`; `generateStory.ts`, `revisePage.ts`, `reviseStory.ts` |
 | **DATA-02** | 4 | NEEDS-DATA | Possible duplicate hours backfill: near-identical 5-subject batches dated 2025-07-15 & 2025-08-15 | de-dupe `hoursAdjustments` on (date,subject,minutes,reason) — requires live Firestore export |
+| **DATA-03** | 4† | OPEN | No automated Firestore backup found in repo (no scheduled export / backup CF / `firebase.json` config). App is Lincoln's legal MO record — no recovery path if data is lost/corrupted. Confirm PITR + scheduled backups in the GCP console; if absent, add one. **Promoted top-of-queue (highest-stakes).** | repo-wide; runbook mentions backups but no code implements them. Investigate via `prompts/PROMPT_BACKUP_CHECK.md` |
 | **DOC-01** | 1 | OPEN | Claude.ai project still points at MASTER_OUTLINE **v14** (Mar 31); repo is **v15**. Repoint at `PROJECT_CONTEXT.md` | this project's loaded context |
 | **LINT-01** | 1 | WONTFIX? | 3 `react-hooks/exhaustive-deps` warnings (intentional timer-ref pattern) | `EvaluateChatPage.tsx:282`, `useQuestSession.ts:679,1760` |
 
-† DATA-01 is in band 4 by topic but **promoted to top of queue** as compliance- and time-sensitive (June 30).
+† DATA-01 and DATA-03 are in band 4 by topic but **promoted to top of queue**: DATA-01 as compliance- and time-sensitive (June 30); DATA-03 because data loss is unrecoverable — the app is Lincoln's only legal MO record.
 
 ## 7. Triggers (phone-first cheat-sheet)
 
