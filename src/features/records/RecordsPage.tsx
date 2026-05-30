@@ -674,11 +674,30 @@ function HoursComplianceTab() {
                 Hours entries: {hoursEntries.length} | Day logs: {dayLogs.length}{' '}
                 | Adjustments: {adjustments.length}
               </Typography>
-              {hoursEntries.some((e) => e.source === 'creative-timer') && (
-                <Typography color="text.secondary" variant="body2">
-                  Includes {hoursEntries.filter((e) => e.source === 'creative-timer').length} auto-tracked creative session{hoursEntries.filter((e) => e.source === 'creative-timer').length === 1 ? '' : 's'} ({(hoursEntries.filter((e) => e.source === 'creative-timer').reduce((sum, e) => sum + e.minutes, 0) / 60).toFixed(1)}h)
-                </Typography>
-              )}
+              {(() => {
+                const autoSources = [
+                  { source: 'creative-timer', label: 'creative' },
+                  { source: 'evaluation-session', label: 'evaluation' },
+                  { source: 'quest-session', label: 'quest' },
+                ] as const
+                const autoEntries = hoursEntries.filter((e) =>
+                  autoSources.some((s) => s.source === e.source),
+                )
+                if (autoEntries.length === 0) return null
+                const totalMinutes = autoEntries.reduce((sum, e) => sum + e.minutes, 0)
+                const breakdown = autoSources
+                  .map((s) => {
+                    const count = autoEntries.filter((e) => e.source === s.source).length
+                    return count > 0 ? `${count} ${s.label}` : null
+                  })
+                  .filter(Boolean)
+                  .join(', ')
+                return (
+                  <Typography color="text.secondary" variant="body2">
+                    Includes {autoEntries.length} auto-tracked session{autoEntries.length === 1 ? '' : 's'} ({(totalMinutes / 60).toFixed(1)}h): {breakdown}
+                  </Typography>
+                )
+              })()}
               {showGenerate && (
                 <Button
                   variant="contained"
