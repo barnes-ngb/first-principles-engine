@@ -263,6 +263,10 @@ export function compressEngagement(summaries: EngagementEntry[]): string {
 interface ChildContext {
   name: string;
   grade?: string;
+  /** Human-owned soft-profile fields on `children` (Shelly portal Phase 0). */
+  motivators?: string;
+  interests?: string;
+  strengths?: string;
   prioritySkills?: Array<{ tag: string; label: string; level: string }>;
   supports?: Array<{ label: string; description: string }>;
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
@@ -273,6 +277,15 @@ export function formatChildProfile(child: ChildContext): string {
   lines.push(`Name: ${child.name}`);
   if (child.grade) {
     lines.push(`Grade: ${child.grade}`);
+  }
+  if (child.motivators?.trim()) {
+    lines.push(`Motivators: ${child.motivators.trim()}`);
+  }
+  if (child.interests?.trim()) {
+    lines.push(`Interests: ${child.interests.trim()}`);
+  }
+  if (child.strengths?.trim()) {
+    lines.push(`Strengths: ${child.strengths.trim()}`);
   }
   if (child.prioritySkills?.length) {
     lines.push("Priority skills:");
@@ -301,7 +314,13 @@ export interface SliceContext {
   db: Firestore;
   familyId: string;
   childId: string;
-  childData: { name: string; grade?: string };
+  childData: {
+    name: string;
+    grade?: string;
+    motivators?: string;
+    interests?: string;
+    strengths?: string;
+  };
   snapshotData: SnapshotData | undefined;
   /** Optional domain hint for domain-scoped slices (e.g. quest mode). */
   domain?: string;
@@ -331,6 +350,9 @@ export async function buildContextForTask(
     sections.push(formatChildProfile({
       name: childData.name,
       grade: childData.grade,
+      motivators: childData.motivators,
+      interests: childData.interests,
+      strengths: childData.strengths,
       prioritySkills: snapshotData?.prioritySkills,
       supports: snapshotData?.supports,
       stopRules: snapshotData?.stopRules,

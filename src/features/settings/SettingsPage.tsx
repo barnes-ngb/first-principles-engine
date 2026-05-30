@@ -33,6 +33,7 @@ import AccountSection from './AccountSection'
 import AIUsagePanel from './AIUsagePanel'
 import AvatarAdminTab from './AvatarAdminTab'
 import DevAdminTab from './DevAdminTab'
+import SoftProfileSection from './SoftProfileSection'
 import StickerLibraryTab from './StickerLibraryTab'
 import VoiceInputSection from './VoiceInputSection'
 
@@ -175,6 +176,10 @@ export default function SettingsPage() {
             </Stack>
 
             <Divider />
+
+            {isParent && <SoftProfileSection />}
+
+            {isParent && <Divider />}
 
             {isParent && <VoiceInputSection />}
 
