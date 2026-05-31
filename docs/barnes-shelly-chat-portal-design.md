@@ -67,7 +67,7 @@ The portal mirrors this exactly:
 
 ## 3. Three tiers
 
-### Tier A — Knowing (now, **no writes**)
+### Tier A — Knowing (now, **no writes**) — ✅ DONE (FUNC-03, PR #1275)
 
 Add the one missing read slice so the portal can *talk about* where a child is across every truth
 surface.
