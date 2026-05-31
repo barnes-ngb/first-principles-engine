@@ -92,15 +92,15 @@ No CURRENT-marked docs flagged as stale. ✅ OK
 | File | Lines | Change from last report |
 |------|-------|------------------------|
 | `src/features/planner-chat/PlannerChatPage.tsx` | 2,620 | +0 |
-| `functions/src/ai/chat.ts` | 2,466 | +0 |
+| `functions/src/ai/chat.ts` | 2,478 | +12 |
 | `src/features/books/BookEditorPage.tsx` | 2,278 | +0 |
 | `src/features/quest/useQuestSession.ts` | 1,870 | +0 |
 | `src/features/avatar/MyAvatarPage.tsx` | 1,804 | +0 |
-| `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | +0 |
+| `src/features/shelly-chat/useShellyChatFlows.ts` | 1,123 | (new — extracted from ShellyChatPage) |
 | `src/features/workshop/WorkshopPage.tsx` | 1,623 | +0 |
 | `src/features/avatar/VoxelCharacter.tsx` | 1,562 | +0 |
 | `src/features/planner-chat/chatPlanner.logic.ts` | 1,363 | +0 |
-| `functions/src/ai/contextSlices.ts` | 1,325 | +0 |
+| `functions/src/ai/contextSlices.ts` | 1,485 | +160 |
 | `src/features/records/records.logic.test.ts` | 1,225 | +0 |
 | `src/features/evaluate/EvaluateChatPage.tsx` | 1,162 | +0 |
 | `src/features/planner-chat/chatPlanner.logic.test.ts` | 1,156 | +0 |
@@ -124,13 +124,15 @@ No CURRENT-marked docs flagged as stale. ✅ OK
 
 ## Decomposition Candidates
 
-No files crossed 2,000 lines for the first time. All large files stable (no growth).
+No files crossed 2,000 lines for the first time. Note: `ShellyChatPage.tsx` was decomposed (1,632→645L) — removed from this table.
 
 | File | Lines | Growth | Priority |
 |------|-------|--------|----------|
-| `functions/src/ai/chat.ts` | 2,466 | +0 | **HIGH** — `buildQuestPrompt` alone is 400+ lines; extract prompt builders to separate files |
+| `functions/src/ai/chat.ts` | 2,478 | +12 | **HIGH** — `buildQuestPrompt` alone is 400+ lines; extract prompt builders to separate files |
 | `src/features/planner-chat/PlannerChatPage.tsx` | 2,620 | +0 | **MEDIUM** — stable, noted in CLAUDE.md tech debt |
 | `src/features/books/BookEditorPage.tsx` | 2,278 | +0 | **MEDIUM** — stable growth, noted in CLAUDE.md |
+| `src/features/shelly-chat/useShellyChatFlows.ts` | 1,123 | new | **WATCH** — created by ShellyChatPage decomposition; 19 handler functions; not urgent |
+| `functions/src/ai/contextSlices.ts` | 1,485 | +160 | **WATCH** — crossed +150L drift threshold; slice loaders may group into domain files |
 
 ## Issues Found
 
@@ -173,7 +175,7 @@ No charter gaps found.
 | 1 | records |
 | 1 | ladders |
 | 1 | engine |
-| 0 | shelly-chat |
+| 9 | shelly-chat |
 | 0 | progress |
 | 0 | planner |
 | 0 | not-found |
@@ -182,7 +184,7 @@ No charter gaps found.
 | 0 | dad-lab |
 | 0 | auth |
 
-Features with 0 test files: shelly-chat, progress, planner, not-found, login, evaluation, dad-lab, auth. These are pure UI renderers or auth wrappers with limited pure logic to test. Unchanged from last report.
+Features with 0 test files: progress, planner, not-found, login, evaluation, dad-lab, auth. These are pure UI renderers or auth wrappers with limited pure logic to test. Note: shelly-chat now has **9 test files** (57+ tests) — updated from 0 (ARCH-09/TEST-01 decomposition). `DispositionProfile.tsx` in `progress` has testable override logic; candidate for next coverage addition.
 
 ## Dependency Notes
 
