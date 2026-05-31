@@ -317,3 +317,42 @@ These ledger items are part of the portal build, not parallel tracks:
 > **Out of scope (follow-on runs):** Tier C snapshot writes (needs FUNC-02's `skillSnapshotWrites.ts`),
 > the `firestore.rules` tightening (ARCH-10), and the `featureRequests` silent-capture + scheduled
 > GitHub-issue routine (see `docs/SHELLY_PORTAL_FEEDBACK_LOOP.md`).
+
+---
+
+## 10. Decision — Tier C shipped as **Option 2** (additive), Option 3 deferred
+
+**Settled 2026-05-31 (Build 6b).** Tier C — authoritative writes to a child's Skill Snapshot by chat —
+shipped as **Option 2: additive only.** This is the durable record of the final **A + B + Option-2**
+portal scope.
+
+**What Option 2 is (shipped):** Shelly can, by chat, **propose additive edits** to a child's
+`skillSnapshots` record — *add* a priority skill, *add* a support, *add* a stop rule, or *mark* a skill
+progressing/mastered — each shown as a higher-stakes confirm card and applied **only on her tap**.
+
+- **Additive only, by construction.** The four `ChatAction` kinds (`addPrioritySkill`, `addSupport`,
+  `addStopRule`, `markSkillProgress`) carry only "add"/"mark" payloads. Removals, downgrades, and
+  level-lowering are **unrepresentable** in the union and rejected by `parseChatActions`, so they can
+  never reach the writer.
+- **Through the central writer.** Every snapshot edit routes through 6a's `skillSnapshotWrites.ts`
+  (`writeSnapshotUpdate` additive fields; `markSkillProgress` via the mastered-skill path). The writer
+  dedups and **auto-stamps** each entry as a parent directive (`parent directive via chat — <at>`); the
+  model/UI never fabricates evidence. Re-applying a duplicate add is a no-op.
+- **Confirm-gated + active-child bound.** No write before a confirm tap (reuses the 3b/Step-4
+  propose→confirm→write loop, allowlist, and active-child guard); applied writes audited inline on the
+  message (`appliedActions`). The card is framed visibly weightier than a sight-word card ("Updates
+  {child}'s skill snapshot" label) since it edits the authoritative "what to teach next" record.
+- **Model grammar is conservative.** `buildSnapshotActionAddendum` (child-tab only) teaches only the
+  additive grammar and instructs the model to **refuse** removals/downgrades — offering to note them for
+  later (which can become a friction-capture entry) rather than emitting an action.
+
+**What Option 3 would add (deferred):** authoritative **removals / downgrades / level-setting** on the
+snapshot. That is genuinely destructive (it lowers or strips the learning record), so it needs:
+1. a **separate human-override writer class** distinct from the additive-only central writer (6a never
+   removes or downgrades), and
+2. the **ARCH-10** Firestore-rules backstop (shape validation on `skillSnapshots` writes).
+
+**Why ARCH-10 is optional for Option 2 (but required for Option 3):** Option 2 is safe without rules
+hardening because every write is **additive + confirm-gated + shape-checked by the central writer** —
+the worst case is an extra deduped entry, never a lost or lowered one. Option 3's destructive surface is
+what makes the rules backstop a prerequisite, not a nicety.
