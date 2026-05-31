@@ -26,6 +26,7 @@ import type {
   DayLog,
   Evaluation,
   EvaluationSession,
+  FeatureRequest,
   HoursAdjustment,
   HoursEntry,
   LadderProgress,
@@ -344,6 +345,18 @@ export const xpLedgerCollection = (
   familyId: string,
 ): CollectionReference<XpLedger> =>
   collection(db, `families/${familyId}/xpLedger`) as CollectionReference<XpLedger>
+
+// ── Feature Requests (Shelly portal friction log) ───────────────
+
+/**
+ * Silent friction log: `families/{familyId}/featureRequests/{id}`.
+ * Feedback metadata (not a child's record) — written fire-and-forget by the
+ * Shelly chat when she voices an unmet want. Read by Step 5b's scheduled CF.
+ */
+export const featureRequestsCollection = (
+  familyId: string,
+): CollectionReference<FeatureRequest> =>
+  collection(db, `families/${familyId}/featureRequests`) as CollectionReference<FeatureRequest>
 
 // ── Books (Book Builder) ──────────────────────────────────────
 

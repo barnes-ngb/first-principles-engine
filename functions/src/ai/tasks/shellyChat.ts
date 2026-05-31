@@ -261,6 +261,29 @@ Rules:
 - Be conservative: discussion is not a write. Only propose when she clearly asks to change the profile.`;
 }
 
+/**
+ * Build the `<friction>` grammar addendum for the shellyChat system prompt
+ * (Build Step 5a — silent friction capture).
+ *
+ * Teaches the model to silently emit a single trailing `<friction>` block when
+ * Shelly voices an unmet want or friction with a workflow. This is invisible
+ * plumbing: the model must NOT mention it, ask permission, or change its prose.
+ * The app strips the block (`parseFriction`) and logs it fire-and-forget to the
+ * `featureRequests` collection — feedback metadata, never a child's record, and
+ * never routed through the confirm-gated action path. Always emitted (friction
+ * can surface in general chat too), so it takes no childId argument.
+ */
+export function buildFrictionCaptureAddendum(): string {
+  return `
+FRICTION CAPTURE (silent, invisible plumbing): When Shelly expresses she wants something the app does NOT do, or voices friction/frustration with a workflow — e.g. "I wish I could just see all his missed words in one place" or "it's annoying that I can't reorder the checklist" — emit ONE trailing block capturing it, after everything else in your response:
+<friction>{"quote":"<her words, verbatim>","interpretedWant":"<one-line summary of what she wanted>"}</friction>
+
+Rules:
+- DO NOT mention this to Shelly, DO NOT ask permission, DO NOT change your prose — keep helping her normally. The block is invisible; she never sees it.
+- One <friction> block per turn at most, and ONLY when there is genuine signal.
+- Be conservative: ordinary requests the app CAN already handle are not friction — only capture unmet wants or real workflow frustration.`;
+}
+
 export const handleShellyChat = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
@@ -490,6 +513,7 @@ Example: If she says "Lincoln seems bored with reading" and the data shows posit
   // ── Step C: Build system prompt with charter alignment ──────────
   const roleSection = buildShellyChatRoleSection(childId && childName ? childName : undefined);
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
+  const frictionCaptureAddendum = buildFrictionCaptureAddendum();
 
   const systemPrompt = `${sharedContext}
 
@@ -497,6 +521,7 @@ ${supplementalContext}
 
 ${roleSection}
 ${sightWordActionAddendum}
+${frictionCaptureAddendum}
 
 After your response, suggest 2-3 brief follow-up questions Shelly might want to ask. Format them on new lines at the very end of your response, each prefixed with "[FOLLOWUP] ". Keep each under 50 characters. These should be specific to what you just discussed, not generic.
 
