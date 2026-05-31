@@ -2,6 +2,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
+import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
@@ -32,6 +33,62 @@ function describeSightWord(
 ): string {
   const verb = action.kind === 'addSightWord' ? 'Add' : 'Remove'
   return `${verb} sight word "${action.word.toLowerCase()}" for ${childName}`
+}
+
+/** The Tier-C Option-2 additive snapshot kinds (6b). */
+type SnapshotAction = Extract<
+  ChatAction,
+  { kind: 'addPrioritySkill' | 'addSupport' | 'addStopRule' | 'markSkillProgress' }
+>
+
+const isSnapshotAction = (action: ChatAction): action is SnapshotAction =>
+  action.kind === 'addPrioritySkill' ||
+  action.kind === 'addSupport' ||
+  action.kind === 'addStopRule' ||
+  action.kind === 'markSkillProgress'
+
+/** Plain-language preview for a proposed additive snapshot edit (6b). */
+function describeSnapshot(action: SnapshotAction, childName: string): string {
+  switch (action.kind) {
+    case 'addPrioritySkill':
+      return `Add to ${childName}'s priority skills: "${action.skill}"`
+    case 'addSupport':
+      return `Add to ${childName}'s supports: "${action.support}"`
+    case 'addStopRule':
+      return `Add to ${childName}'s stop rules: "${action.rule}"`
+    case 'markSkillProgress':
+      return action.mastered
+        ? `Mark "${action.skill}" as mastered for ${childName}`
+        : `Mark "${action.skill}" as progressing for ${childName}`
+  }
+}
+
+/**
+ * Preview for an additive Skill-Snapshot edit. These write the authoritative
+ * "what to teach next" record, so the card is framed as visibly weightier than
+ * a sight-word card: a "Updates {child}'s skill snapshot" label sits above the
+ * action line so Shelly registers what she's confirming before she taps.
+ */
+function SnapshotEditPreview({
+  action,
+  childName,
+}: {
+  action: SnapshotAction
+  childName: string
+}) {
+  return (
+    <Stack spacing={0.25}>
+      <Typography
+        variant="caption"
+        sx={{ display: 'block', fontWeight: 700, color: 'warning.main', letterSpacing: 0.2 }}
+      >
+        Updates {childName}'s skill snapshot
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {describeSnapshot(action, childName)}
+      </Typography>
+    </Stack>
+  )
 }
 
 /**
@@ -65,12 +122,15 @@ function ProfileEditPreview({
 }
 
 /**
- * Inline confirm cards for proposed `<action>` writes (Build Step 3b + 4). Each
- * pending action gets a human-readable preview with Confirm / Dismiss — sight
- * words as a one-liner, `editProfileField` as a before → after diff since those
- * are replace-writes on freeform text. A batch "Confirm all" appears when 2+
- * are still pending. Nothing here writes — taps call back into
- * `useShellyChatActions`. Mobile-first: large tap targets.
+ * Inline confirm cards for proposed `<action>` writes (Build Step 3b + 4 + 6b).
+ * Each pending action gets a human-readable preview with Confirm / Dismiss —
+ * sight words as a one-liner, `editProfileField` as a before → after diff since
+ * those are replace-writes on freeform text, and the Tier-C Option-2 additive
+ * snapshot edits (priority skill / support / stop rule / mark progress) framed
+ * as visibly weightier cards (accent border + "Updates {child}'s skill
+ * snapshot" label) since they write the authoritative learning record. A batch
+ * "Confirm all" appears when 2+ are still pending. Nothing here writes — taps
+ * call back into `useShellyChatActions`. Mobile-first: large tap targets.
  */
 export default function ActionConfirmCard({
   pending,
@@ -94,11 +154,14 @@ export default function ActionConfirmCard({
         {pending.map((item) => {
           const { action } = item
           const isProfileEdit = action.kind === 'editProfileField'
+          const isSnapshotEdit = isSnapshotAction(action)
           const icon =
             action.kind === 'addSightWord' ? (
               <AddCircleOutlineIcon fontSize="small" color="action" />
             ) : action.kind === 'removeSightWord' ? (
               <RemoveCircleOutlineIcon fontSize="small" color="action" />
+            ) : isSnapshotEdit ? (
+              <SchoolOutlinedIcon fontSize="small" color="warning" />
             ) : (
               <EditOutlinedIcon fontSize="small" color="action" />
             )
@@ -110,14 +173,22 @@ export default function ActionConfirmCard({
                 p: 1.25,
                 borderRadius: 2,
                 display: 'flex',
-                alignItems: isProfileEdit ? 'flex-start' : 'center',
+                alignItems: isProfileEdit || isSnapshotEdit ? 'flex-start' : 'center',
                 gap: 1,
                 opacity: item.status === 'dismissed' ? 0.5 : 1,
+                // Higher-stakes framing for snapshot edits: a left accent + a
+                // slightly stronger border so they read weightier than a
+                // sight-word card.
+                ...(isSnapshotEdit
+                  ? { borderColor: 'warning.main', borderLeftWidth: 3 }
+                  : {}),
               }}
             >
               {icon}
               <Box sx={{ flex: 1 }}>
-                {isProfileEdit ? (
+                {isSnapshotEdit ? (
+                  <SnapshotEditPreview action={action} childName={childName(action.childId)} />
+                ) : isProfileEdit ? (
                   <ProfileEditPreview
                     action={action}
                     childName={childName(action.childId)}

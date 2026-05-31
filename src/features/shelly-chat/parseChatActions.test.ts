@@ -137,6 +137,93 @@ describe('parseChatActions', () => {
     expect(actions).toEqual([])
   })
 
+  // ── Tier C Option 2 — additive snapshot edits (6b) ──────────────
+
+  it('extracts an addPrioritySkill block', () => {
+    const raw =
+      "Let's add that.\n<action>{\"kind\": \"addPrioritySkill\", \"childId\": \"lincoln\", \"skill\": \"inference from passages\"}</action>"
+    const { actions, cleanText } = parseChatActions(raw)
+    expect(actions).toEqual([
+      { kind: 'addPrioritySkill', childId: 'lincoln', skill: 'inference from passages' },
+    ])
+    expect(cleanText).toBe("Let's add that.")
+  })
+
+  it('extracts an addSupport block', () => {
+    const raw =
+      '<action>{"kind": "addSupport", "childId": "lincoln", "support": "movement break every 10 min"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([
+      { kind: 'addSupport', childId: 'lincoln', support: 'movement break every 10 min' },
+    ])
+  })
+
+  it('extracts an addStopRule block', () => {
+    const raw =
+      '<action>{"kind": "addStopRule", "childId": "lincoln", "rule": "stop if frustration spikes"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([
+      { kind: 'addStopRule', childId: 'lincoln', rule: 'stop if frustration spikes' },
+    ])
+  })
+
+  it('extracts a markSkillProgress block with mastered:true', () => {
+    const raw =
+      '<action>{"kind": "markSkillProgress", "childId": "lincoln", "skill": "CVCe long vowels", "mastered": true}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([
+      { kind: 'markSkillProgress', childId: 'lincoln', skill: 'CVCe long vowels', mastered: true },
+    ])
+  })
+
+  it('extracts a markSkillProgress block without mastered (progressing)', () => {
+    const raw =
+      '<action>{"kind": "markSkillProgress", "childId": "lincoln", "skill": "two-digit addition"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([
+      { kind: 'markSkillProgress', childId: 'lincoln', skill: 'two-digit addition' },
+    ])
+  })
+
+  it('trims whitespace on additive snapshot fields', () => {
+    const raw =
+      '<action>{"kind": "addPrioritySkill", "childId": "lincoln", "skill": "  blends  "}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([
+      { kind: 'addPrioritySkill', childId: 'lincoln', skill: 'blends' },
+    ])
+  })
+
+  it('rejects an additive snapshot block with an empty payload field', () => {
+    const raw =
+      '<action>{"kind": "addPrioritySkill", "childId": "lincoln", "skill": "   "}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
+  })
+
+  it('rejects a removal-shaped snapshot payload (Option 3, unrepresentable)', () => {
+    const raw =
+      '<action>{"kind": "removePrioritySkill", "childId": "lincoln", "skill": "inference"}</action>'
+    const { actions, cleanText } = parseChatActions(raw)
+    expect(actions).toEqual([])
+    // tag still stripped even though the action is rejected
+    expect(cleanText).toBe('')
+  })
+
+  it('rejects a downgrade/level-lowering-shaped snapshot payload', () => {
+    const raw =
+      '<action>{"kind": "setSkillLevel", "childId": "lincoln", "skill": "CVCe", "level": "emerging"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
+  })
+
+  it('rejects a markSkillProgress with a missing skill', () => {
+    const raw =
+      '<action>{"kind": "markSkillProgress", "childId": "lincoln", "mastered": true}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
+  })
+
   it('rejects an action with a missing word', () => {
     const raw = '<action>{"kind": "addSightWord", "childId": "lincoln"}</action>'
     const { actions } = parseChatActions(raw)

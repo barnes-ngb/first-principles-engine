@@ -8,11 +8,19 @@
 // Guardrails (see docs/SHELLY_PORTAL_CONTEXT.md §3, §5):
 //   - No write before a confirm tap — `stagePendingActions` only stages.
 //   - Allowlist only — the `ChatAction` union is the structural boundary; this
-//     hook handles the two sight-word kinds (3b) plus Tier-B `editProfileField`
-//     (Step 4: motivators/interests/strengths only).
+//     hook handles the two sight-word kinds (3b), Tier-B `editProfileField`
+//     (Step 4: motivators/interests/strengths only), and the Tier-C Option 2
+//     additive snapshot kinds (6b): `addPrioritySkill` / `addSupport` /
+//     `addStopRule` / `markSkillProgress`.
 //   - Route through the shared writers (`addSightWord` / `removeSightWord` for
-//     sight words; `updateChildSoftProfile` for soft fields) — no ad-hoc
-//     setDoc from the page, and no fork with the Settings editor.
+//     sight words; `updateChildSoftProfile` for soft fields; the central
+//     `writeSnapshotUpdate` for snapshot edits) — no ad-hoc setDoc from the
+//     page, and no fork with the Settings editor.
+//   - Additive only — the snapshot kinds can only ADD a priority skill /
+//     support / stop rule, or mark a skill progressing/mastered. Removals and
+//     downgrades (Option 3) are unrepresentable in `ChatAction` and never reach
+//     here; every snapshot write is auto-stamped as a parent directive by the
+//     central writer (the UI never fabricates evidence).
 //   - Bind to the active child — `action.childId` must resolve to a family
 //     child AND match the active chat context, or the action is rejected.
 
@@ -22,6 +30,8 @@ import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
 import { shellyChatMessagesCollection } from '../../core/firebase/firestore'
 import { updateChildSoftProfile } from '../../core/family/updateChildSoftProfile'
 import type { ChatAction, Child } from '../../core/types'
+import { todayKey } from '../../core/utils/dateKey'
+import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import { addSightWord, removeSightWord } from '../books/useSightWordProgress'
 
 export type ActionStatus = 'pending' | 'applied' | 'dismissed'
@@ -40,6 +50,61 @@ export interface ShellyChatActionsDeps {
   activeChildId: string
   /** Thread the pending actions came from, so applies can annotate the message. */
   activeThreadId: string | null
+}
+
+/** The Tier-C Option-2 additive snapshot kinds (6b). */
+type SnapshotAction = Extract<
+  ChatAction,
+  { kind: 'addPrioritySkill' | 'addSupport' | 'addStopRule' | 'markSkillProgress' }
+>
+
+/**
+ * Route a Tier-C Option-2 additive snapshot action through the central
+ * {@link writeSnapshotUpdate} writer (6a). **Additive only** — each kind maps
+ * onto an additive writer field; there is no removal/downgrade path here.
+ *
+ * The add* kinds append a priority skill / support / stop rule; the central
+ * writer dedups them and auto-stamps each as a parent directive (`directive`
+ * left unset → generic "parent directive via chat — <at>" stamp). We pin `at`
+ * to today's date so the stamp carries the date. `markSkillProgress` routes
+ * through the writer's mastered-skill path — `RESOLVING` by default, `RESOLVED`
+ * when `mastered` is true — carrying a matching parent-directive evidence note
+ * and `source: 'parent'`. Re-applying a duplicate add is a no-op via 6a's dedup.
+ */
+async function applySnapshotAction(familyId: string, action: SnapshotAction): Promise<void> {
+  const at = todayKey()
+  switch (action.kind) {
+    case 'addPrioritySkill':
+      await writeSnapshotUpdate(familyId, action.childId, {
+        masteredSkills: [],
+        addPrioritySkills: [action.skill],
+        at,
+      })
+      return
+    case 'addSupport':
+      await writeSnapshotUpdate(familyId, action.childId, {
+        masteredSkills: [],
+        addSupports: [action.support],
+        at,
+      })
+      return
+    case 'addStopRule':
+      await writeSnapshotUpdate(familyId, action.childId, {
+        masteredSkills: [],
+        addStopRules: [action.rule],
+        at,
+      })
+      return
+    case 'markSkillProgress':
+      await writeSnapshotUpdate(familyId, action.childId, {
+        masteredSkills: [action.skill],
+        fullyMastered: action.mastered === true,
+        source: 'parent',
+        evidence: `parent directive via chat — ${at}`,
+        at,
+      })
+      return
+  }
 }
 
 /**
@@ -117,13 +182,18 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         await addSightWord(familyId, action.childId, action.word)
       } else if (action.kind === 'removeSightWord') {
         await removeSightWord(familyId, action.childId, action.word)
-      } else {
+      } else if (action.kind === 'editProfileField') {
         // editProfileField — replace-write one freeform soft-profile field
         // through the shared, allowlist-validated writer (Tier B). Idempotent:
         // re-applying the same value is a harmless overwrite.
         await updateChildSoftProfile(familyId, action.childId, {
           [action.field]: action.value,
         })
+      } else {
+        // Tier C Option 2 (6b) — additive snapshot edits routed through the
+        // central writer. Additive-only fields; the writer auto-stamps each new
+        // entry as a parent directive and dedups, so a duplicate add is a no-op.
+        await applySnapshotAction(familyId, action)
       }
 
       setPending((prev) =>

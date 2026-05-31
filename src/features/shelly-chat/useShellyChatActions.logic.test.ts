@@ -22,6 +22,14 @@ vi.mock('../../core/family/updateChildSoftProfile', () => ({
   updateChildSoftProfile: (...args: unknown[]) => updateChildSoftProfile(...args),
 }))
 
+// The central additive snapshot writer (6a). Mocked so the 6b snapshot-action
+// routing is testable without Firestore; its additive/dedup/evidence-stamp
+// guarantees are covered in skillSnapshotWrites.test.ts.
+const writeSnapshotUpdate = vi.fn()
+vi.mock('../evaluate/skillSnapshotWrites', () => ({
+  writeSnapshotUpdate: (...args: unknown[]) => writeSnapshotUpdate(...args),
+}))
+
 const updateDoc = vi.fn()
 const arrayUnion = vi.fn((...v: unknown[]) => ({ __arrayUnion: v[0] }))
 const doc = vi.fn((...args: unknown[]) => ({ __doc: args.length }))
@@ -58,6 +66,7 @@ beforeEach(() => {
   addSightWord.mockResolvedValue(undefined)
   removeSightWord.mockResolvedValue(undefined)
   updateChildSoftProfile.mockResolvedValue(undefined)
+  writeSnapshotUpdate.mockResolvedValue({ changed: true })
   updateDoc.mockResolvedValue(undefined)
 })
 
@@ -253,6 +262,197 @@ describe('useShellyChatActions', () => {
 
     expect(ok).toBe(false)
     expect(updateChildSoftProfile).not.toHaveBeenCalled()
+  })
+
+  // ── Tier C Option 2 — additive snapshot edits (6b) ──────────────
+
+  it('does not write a snapshot action when only staged', () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'addPrioritySkill',
+      childId: 'lincoln1',
+      skill: 'inference from passages',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+
+    expect(result.current.pending[0].status).toBe('pending')
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+  })
+
+  it('routes a confirmed addPrioritySkill through the central writer', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'addPrioritySkill',
+      childId: 'lincoln1',
+      skill: 'inference from passages',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(action)
+    })
+
+    expect(ok).toBe(true)
+    expect(writeSnapshotUpdate).toHaveBeenCalledWith(
+      'fam1',
+      'lincoln1',
+      expect.objectContaining({ addPrioritySkills: ['inference from passages'], at: expect.any(String) }),
+    )
+    expect(result.current.pending[0].status).toBe('applied')
+    // audit recorded inline on the source message
+    expect(updateDoc).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes a confirmed addSupport through the central writer', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'addSupport',
+      childId: 'lincoln1',
+      support: 'movement break every 10 min',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(writeSnapshotUpdate).toHaveBeenCalledWith(
+      'fam1',
+      'lincoln1',
+      expect.objectContaining({ addSupports: ['movement break every 10 min'] }),
+    )
+  })
+
+  it('routes a confirmed addStopRule through the central writer', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'addStopRule',
+      childId: 'lincoln1',
+      rule: 'stop if frustration spikes',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(writeSnapshotUpdate).toHaveBeenCalledWith(
+      'fam1',
+      'lincoln1',
+      expect.objectContaining({ addStopRules: ['stop if frustration spikes'] }),
+    )
+  })
+
+  it('routes a confirmed markSkillProgress (mastered) through the mastered-skill path with an evidence stamp', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'CVCe long vowels',
+      mastered: true,
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(writeSnapshotUpdate).toHaveBeenCalledWith(
+      'fam1',
+      'lincoln1',
+      expect.objectContaining({
+        masteredSkills: ['CVCe long vowels'],
+        fullyMastered: true,
+        source: 'parent',
+        evidence: expect.stringContaining('parent directive via chat'),
+      }),
+    )
+  })
+
+  it('marks a skill as progressing (not mastered) when mastered is omitted', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'two-digit addition',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(writeSnapshotUpdate).toHaveBeenCalledWith(
+      'fam1',
+      'lincoln1',
+      expect.objectContaining({ masteredSkills: ['two-digit addition'], fullyMastered: false }),
+    )
+  })
+
+  it('rejects a snapshot action for a child other than the active context', async () => {
+    const { result } = setup('lincoln1')
+    const action: ChatAction = {
+      kind: 'addPrioritySkill',
+      childId: 'london1', // real child, but Lincoln is active
+      skill: 'letter sounds',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(action)
+    })
+
+    expect(ok).toBe(false)
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('rejects a snapshot action whose childId is not a family child', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'addPrioritySkill',
+      childId: 'ghost',
+      skill: 'blends',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(action)
+    })
+
+    expect(ok).toBe(false)
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+  })
+
+  it('treats a duplicate add as a no-op (6a dedup) without throwing', async () => {
+    // Simulate 6a's dedup: the writer reports no change on the duplicate add.
+    writeSnapshotUpdate.mockResolvedValueOnce({ changed: true })
+    writeSnapshotUpdate.mockResolvedValueOnce({ changed: false })
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'addPrioritySkill',
+      childId: 'lincoln1',
+      skill: 'inference',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    let first: boolean | undefined
+    let second: boolean | undefined
+    await act(async () => {
+      first = await result.current.applyChatAction(action)
+      second = await result.current.applyChatAction(action)
+    })
+
+    // Both taps succeed at the hook boundary; the central writer absorbs the
+    // duplicate (changed:false) without error, and the card stays applied.
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    expect(writeSnapshotUpdate).toHaveBeenCalledTimes(2)
+    expect(result.current.pending[0].status).toBe('applied')
   })
 
   it('confirmAll applies every still-pending action', async () => {
