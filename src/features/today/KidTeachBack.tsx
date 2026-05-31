@@ -20,6 +20,8 @@ import { DIAMOND_EVENTS } from '../../core/types'
 
 interface KidTeachBackProps {
   child: Child
+  /** The younger sibling this child teaches (charter "older teaches younger"). */
+  recipientName: string
   familyId: string
   today: string
   dayLog: DayLog
@@ -28,6 +30,7 @@ interface KidTeachBackProps {
 
 export default function KidTeachBack({
   child,
+  recipientName,
   familyId,
   today,
   dayLog,
@@ -92,7 +95,7 @@ export default function KidTeachBack({
           location: 'home',
         },
         ...(mediaUrl ? { mediaUrl } : {}),
-        notes: `Lincoln taught London about ${teachSubject}`,
+        notes: `${child.name} taught ${recipientName} about ${teachSubject}`,
         createdAt: new Date().toISOString(),
       })
 
@@ -123,13 +126,13 @@ export default function KidTeachBack({
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSaving(false)
-  }, [teachSubject, child.id, familyId, audioBlob, today, dayLog, persistDayLogImmediate])
+  }, [teachSubject, child.id, child.name, recipientName, familyId, audioBlob, today, dayLog, persistDayLogImmediate])
 
   return (
-    <SectionCard title="⛏️ I Taught London Something!">
+    <SectionCard title="⛏️ I Taught Someone Something!">
       <Stack spacing={2} alignItems="center" sx={{ py: 1 }}>
         <Typography variant="body1" sx={{ textAlign: 'center' }}>
-          Did you explain something to London today? Tap to mine a knowledge diamond!
+          Did you explain something to {recipientName} today? Tap to mine a knowledge diamond!
         </Typography>
         {saveError && (
           <Alert
@@ -149,7 +152,7 @@ export default function KidTeachBack({
             onClick={() => setShowTeachBack(true)}
             sx={{ fontSize: '1.1rem', py: 1.5, px: 4 }}
           >
-            💎 I Taught London!
+            💎 I Taught {recipientName}!
           </Button>
         ) : (
           <Stack spacing={2} sx={{ width: '100%' }}>

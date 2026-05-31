@@ -12,6 +12,7 @@ import SettingsPage from '../features/settings/SettingsPage'
 import TodayPage from '../features/today/TodayPage'
 import DadLabPage from '../features/dad-lab/DadLabPage'
 import KnowledgeMinePage from '../features/quest/KnowledgeMinePage'
+import RequireKnowledgeMineAccess from '../features/quest/RequireKnowledgeMineAccess'
 import QuestErrorBoundary from '../features/quest/QuestErrorBoundary'
 import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
 import BookshelfPage from '../features/books/BookshelfPage'
@@ -62,7 +63,15 @@ const routes = [
       { path: '/books/:bookId', element: <BookEditorPage /> },
       { path: '/books/:bookId/read', element: <BookReaderPage /> },
       { path: '/books/:bookId/review', element: <BookReviewChat /> },
-      { path: '/quest', element: <KnowledgeMinePage />, errorElement: <QuestErrorBoundary /> },
+      {
+        path: '/quest',
+        element: (
+          <RequireKnowledgeMineAccess>
+            <KnowledgeMinePage />
+          </RequireKnowledgeMineAccess>
+        ),
+        errorElement: <QuestErrorBoundary />,
+      },
       { path: '/avatar', element: <MyAvatarPage /> },
       { path: '/hero', element: <Navigate to="/avatar" replace /> },
       { path: '/armor', element: <Navigate to="/avatar" replace /> },
