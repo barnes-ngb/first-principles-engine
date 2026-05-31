@@ -99,6 +99,7 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 | `shellyChatThreads` (+ `/messages`) | Shelly AI chat threads + messages |
 | `chapterResponses` | Read-aloud chapter discussion responses |
 | `childSkillMaps` | Per-child curriculum knowledge maps |
+| `featureRequests` | Silent Shelly-chat friction log (feedback metadata, not a child record; deduped; consumed by Step 5b CF → GitHub issue) |
 
 **Subcollections:** `children/{childId}/transcriptionEvents` (Whisper events), `children/{childId}/wordProgress` (Knowledge Mine word progress).
 **Global:** `chapterBooks` (shared chapter book library).

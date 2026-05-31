@@ -27,6 +27,8 @@ import { storage } from '../../core/firebase/storage'
 import type { Child, ChatContext, ChatThread, ShellyChatMessage } from '../../core/types'
 import type { ChatAction } from '../../core/types'
 import { parseChatActions } from './parseChatActions'
+import { parseFriction } from './parseFriction'
+import { logFeatureRequest } from './logFeatureRequest'
 import { parseFollowUps } from './parseFollowups'
 import { computeReflectionSuggestions } from './reflectionSuggestions'
 import type { ReflectionDay } from './reflectionSuggestions'
@@ -295,13 +297,26 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           // human-confirm via `useShellyChatActions` — no write happens here.
           const { cleanText: afterFollowups, followUps: suggestions } = parseFollowUps(response.message)
           setFollowUps(suggestions)
-          const { actions, cleanText } = parseChatActions(afterFollowups)
+          const { actions, cleanText: afterActions } = parseChatActions(afterFollowups)
+          // Silent friction capture (Build Step 5a): feedback metadata, NOT a
+          // child's record, so it NEVER routes through applyChatAction. Strip the
+          // <friction> block too, then fire-and-forget below. cleanText is the
+          // text with both <action> and <friction> blocks removed.
+          const { friction, cleanText } = parseFriction(afterActions)
           const msgRef = await addDoc(shellyChatMessagesCollection(familyId, activeThreadId), {
             role: 'assistant',
             content: cleanText,
             timestamp: new Date().toISOString(),
           })
           if (actions.length) stagePendingActions(msgRef.id, actions)
+          if (friction) {
+            void logFeatureRequest(familyId, {
+              quote: friction.quote,
+              interpretedWant: friction.interpretedWant,
+              childId: getChildIdForContext() || undefined,
+              context: 'shelly-chat',
+            })
+          }
           await updateDoc(
             doc(shellyChatThreadsCollection(familyId), activeThreadId),
             {
@@ -425,13 +440,25 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       if (response?.message) {
         const { cleanText: afterFollowups, followUps: suggestions } = parseFollowUps(response.message)
         setFollowUps(suggestions)
-        const { actions, cleanText } = parseChatActions(afterFollowups)
+        const { actions, cleanText: afterActions } = parseChatActions(afterFollowups)
+        // Silent friction capture (Build Step 5a): feedback metadata, NOT a
+        // child's record, so it NEVER routes through applyChatAction. cleanText
+        // has both <action> and <friction> blocks stripped.
+        const { friction, cleanText } = parseFriction(afterActions)
         const msgRef = await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
           content: cleanText,
           timestamp: new Date().toISOString(),
         })
         if (actions.length) stagePendingActions(msgRef.id, actions)
+        if (friction) {
+          void logFeatureRequest(familyId, {
+            quote: friction.quote,
+            interpretedWant: friction.interpretedWant,
+            childId: getChildIdForContext() || undefined,
+            context: 'shelly-chat',
+          })
+        }
         await updateDoc(
           doc(shellyChatThreadsCollection(familyId), threadId),
           {
@@ -905,13 +932,25 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       if (response?.message) {
         const { cleanText: afterFollowups, followUps: suggestions } = parseFollowUps(response.message)
         setFollowUps(suggestions)
-        const { actions, cleanText } = parseChatActions(afterFollowups)
+        const { actions, cleanText: afterActions } = parseChatActions(afterFollowups)
+        // Silent friction capture (Build Step 5a): feedback metadata, NOT a
+        // child's record, so it NEVER routes through applyChatAction. cleanText
+        // has both <action> and <friction> blocks stripped.
+        const { friction, cleanText } = parseFriction(afterActions)
         const msgRef = await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
           content: cleanText,
           timestamp: new Date().toISOString(),
         })
         if (actions.length) stagePendingActions(msgRef.id, actions)
+        if (friction) {
+          void logFeatureRequest(familyId, {
+            quote: friction.quote,
+            interpretedWant: friction.interpretedWant,
+            childId: getChildIdForContext() || undefined,
+            context: 'shelly-chat',
+          })
+        }
         await updateDoc(
           doc(shellyChatThreadsCollection(familyId), threadId),
           {

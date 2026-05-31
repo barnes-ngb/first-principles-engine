@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFrictionCaptureAddendum,
   buildShellyChatRoleSection,
   buildSightWordActionAddendum,
   formatConundrumTitle,
@@ -425,6 +426,33 @@ describe("buildSightWordActionAddendum", () => {
     const out = buildSightWordActionAddendum("london456", undefined);
     expect(out).toContain('"childId":"london456"');
     expect(out).toContain("this child");
+  });
+});
+
+// ── 7c. Silent friction-capture grammar addendum (Build Step 5a) ──
+
+describe("buildFrictionCaptureAddendum", () => {
+  it("teaches the <friction> grammar with the interpretedWant field", () => {
+    const out = buildFrictionCaptureAddendum();
+    expect(out).toContain("FRICTION CAPTURE");
+    expect(out).toContain("<friction>");
+    expect(out).toContain("</friction>");
+    expect(out).toContain("interpretedWant");
+    expect(out).toContain('"quote"');
+  });
+
+  it("instructs the model to keep it silent and conservative", () => {
+    const out = buildFrictionCaptureAddendum().toLowerCase();
+    // Invisible plumbing: never surfaced to Shelly.
+    expect(out).toContain("do not");
+    expect(out).toContain("silent");
+    // One block per turn, only on genuine signal.
+    expect(out).toContain("one");
+  });
+
+  it("takes no arguments and is stable (no leaked template placeholder)", () => {
+    expect(buildFrictionCaptureAddendum()).toBe(buildFrictionCaptureAddendum());
+    expect(buildFrictionCaptureAddendum()).not.toContain("${");
   });
 });
 
