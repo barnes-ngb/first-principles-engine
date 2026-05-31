@@ -44,10 +44,23 @@ export interface ShellyChatMessage {
  * Tier-C authority surfaces (`skillSnapshots`, `childSkillMaps`,
  * `dispositionCache`). See docs/SHELLY_PORTAL_CONTEXT.md §3 and §5.
  *
- * This build (3a) defines only the two sight-word kinds. Tier-B
- * `editProfileField` is intentionally omitted until the `children` soft-field
- * schema exists (Step 4); no Tier-C kind is ever added here.
+ * This build defines the two sight-word kinds (3a/3b) plus the Tier-B
+ * `editProfileField` kind (Step 4). No Tier-C kind is ever added here.
+ *
+ * `editProfileField` can only ever touch the three freeform soft-profile
+ * fields on the `children` doc — `motivators | interests | strengths`. The
+ * `field` literal type IS the allowlist: `supports` (which lives on
+ * `skillSnapshots` → Tier C), `prioritySkills`, `grade`, and any
+ * `skillSnapshots`/`childSkillMaps` path are unrepresentable here and are
+ * rejected by `parseChatActions`. It is a replace-write of freeform text, so
+ * `value` is the full intended new text, not a fragment.
  */
 export type ChatAction =
   | { kind: 'addSightWord'; childId: string; word: string }
   | { kind: 'removeSightWord'; childId: string; word: string }
+  | {
+      kind: 'editProfileField'
+      childId: string
+      field: 'motivators' | 'interests' | 'strengths'
+      value: string
+    }

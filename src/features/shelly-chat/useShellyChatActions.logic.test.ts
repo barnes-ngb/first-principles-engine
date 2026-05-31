@@ -14,6 +14,14 @@ vi.mock('../books/useSightWordProgress', () => ({
   removeSightWord: (...args: unknown[]) => removeSightWord(...args),
 }))
 
+// The shared soft-profile writer — the same one Settings uses. Mocked so the
+// chat-action routing is testable without Firestore. Its own validation
+// (disallowed-key defense in depth) is covered in updateChildSoftProfile.test.ts.
+const updateChildSoftProfile = vi.fn()
+vi.mock('../../core/family/updateChildSoftProfile', () => ({
+  updateChildSoftProfile: (...args: unknown[]) => updateChildSoftProfile(...args),
+}))
+
 const updateDoc = vi.fn()
 const arrayUnion = vi.fn((...v: unknown[]) => ({ __arrayUnion: v[0] }))
 const doc = vi.fn((...args: unknown[]) => ({ __doc: args.length }))
@@ -49,6 +57,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   addSightWord.mockResolvedValue(undefined)
   removeSightWord.mockResolvedValue(undefined)
+  updateChildSoftProfile.mockResolvedValue(undefined)
   updateDoc.mockResolvedValue(undefined)
 })
 
@@ -163,6 +172,87 @@ describe('useShellyChatActions', () => {
 
     expect(result.current.pending[0].status).toBe('dismissed')
     expect(addSightWord).not.toHaveBeenCalled()
+  })
+
+  // ── editProfileField (Tier B, Step 4) ──────────────────────────
+
+  it('does not write an editProfileField when only staged', () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'editProfileField',
+      childId: 'lincoln1',
+      field: 'motivators',
+      value: 'Minecraft, Lego',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+
+    expect(result.current.pending[0].status).toBe('pending')
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+  })
+
+  it('routes a confirmed editProfileField through the shared profile writer', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'editProfileField',
+      childId: 'lincoln1',
+      field: 'motivators',
+      value: 'Minecraft, Lego, Art',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(action)
+    })
+
+    expect(ok).toBe(true)
+    expect(updateChildSoftProfile).toHaveBeenCalledWith('fam1', 'lincoln1', {
+      motivators: 'Minecraft, Lego, Art',
+    })
+    expect(addSightWord).not.toHaveBeenCalled()
+    expect(result.current.pending[0].status).toBe('applied')
+    // audit recorded inline on the source message
+    expect(updateDoc).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an editProfileField for a child other than the active context', async () => {
+    const { result } = setup('lincoln1')
+    const action: ChatAction = {
+      kind: 'editProfileField',
+      childId: 'london1', // real child, but Lincoln is active
+      field: 'interests',
+      value: 'dinosaurs',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(action)
+    })
+
+    expect(ok).toBe(false)
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('rejects an editProfileField whose childId is not a family child', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'editProfileField',
+      childId: 'ghost',
+      field: 'strengths',
+      value: 'persistence',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(action)
+    })
+
+    expect(ok).toBe(false)
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
   })
 
   it('confirmAll applies every still-pending action', async () => {

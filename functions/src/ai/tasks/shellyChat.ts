@@ -221,11 +221,11 @@ SHELLY-SPECIFIC GUIDELINES:
 
 /**
  * Build the `<action>` grammar addendum for the shellyChat system prompt
- * (Build Step 3b — the portal's confirmed sight-word write path).
+ * (Build Step 3b — sight words; Step 4 — `editProfileField` soft fields).
  *
- * Only emitted on a child-scoped tab (a real `childId`), since sight-word
- * actions bind to a specific child. The model is told the active child's id so
- * it can address the action correctly; the app still performs the write only on
+ * Only emitted on a child-scoped tab (a real `childId`), since these actions
+ * bind to a specific child. The model is told the active child's id so it can
+ * address the action correctly; the app still performs the write only on
  * Shelly's confirm tap. Returns "" on the general (no-child) branch.
  */
 export function buildSightWordActionAddendum(
@@ -245,7 +245,20 @@ Grammar — one trailing line per action, after your prose, using ${who}'s id ex
 Rules:
 - One JSON object per <action> block; lowercase the word; always use childId "${childId}".
 - NEVER say the change is done. Say you've proposed it and Shelly can confirm with a tap — the app performs the write only when she confirms.
-- Be conservative: if you're unsure whether she wants a write versus just talking about words, do NOT emit an action — ask or stay in prose.`;
+- Be conservative: if you're unsure whether she wants a write versus just talking about words, do NOT emit an action — ask or stay in prose.
+
+PROFILE ACTIONS: When Shelly clearly wants to update ${who}'s profile — only the freeform fields motivators, interests, or strengths (e.g. "add Lego to ${who}'s motivators", "he's really into dinosaurs now") — propose an editProfileField action. These are the ONLY editable profile fields: never propose this for grade, supports, priority skills, or anything else.
+
+These are REPLACE writes, not appends: the app overwrites the whole field with your "value". You already have the current value in the CHILD PROFILE section above — compose the FULL intended new text (existing value plus the addition), not just the fragment, so the value is a clean replacement.
+
+Grammar — one trailing line, after your prose, using ${who}'s id exactly ("${childId}"):
+<action>{"kind":"editProfileField","childId":"${childId}","field":"motivators","value":"Minecraft, Lego, Art"}</action>
+
+Rules:
+- field must be exactly one of: motivators, interests, strengths.
+- value is the full new text for that field (merge in the change yourself).
+- NEVER say it's done. Say you've proposed it and Shelly confirms with a tap — she sees a before → after preview first.
+- Be conservative: discussion is not a write. Only propose when she clearly asks to change the profile.`;
 }
 
 export const handleShellyChat = async (

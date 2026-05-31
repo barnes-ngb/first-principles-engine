@@ -4,11 +4,10 @@ import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { doc, updateDoc } from 'firebase/firestore'
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
-import { childrenCollection } from '../../core/firebase/firestore'
+import { updateChildSoftProfile } from '../../core/family/updateChildSoftProfile'
 
 /** The three human-owned soft-profile fields stored on the `children` doc. */
 const FIELDS = [
@@ -78,8 +77,7 @@ export default function SoftProfileSection() {
       setSavingId(childId)
       const draft = drafts[childId] ?? emptyDraft()
       try {
-        const ref = doc(childrenCollection(familyId), childId)
-        await updateDoc(ref, {
+        await updateChildSoftProfile(familyId, childId, {
           motivators: draft.motivators.trim(),
           interests: draft.interests.trim(),
           strengths: draft.strengths.trim(),
