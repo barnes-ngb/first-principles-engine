@@ -37,7 +37,15 @@ describe('HeroLauncherTiles', () => {
     expect(screen.getByText('My Books')).toBeInTheDocument()
   })
 
-  it('hides the Knowledge Mine tile for London (hideMine=true)', () => {
+  it('shows all three tiles for London (parity with Lincoln)', () => {
+    renderTiles({ isLincoln: false, hideMine: false })
+
+    expect(screen.getByTestId('hero-launcher-mine')).toBeInTheDocument()
+    expect(screen.getByTestId('hero-launcher-workshop')).toBeInTheDocument()
+    expect(screen.getByTestId('hero-launcher-books')).toBeInTheDocument()
+  })
+
+  it('can still hide Knowledge Mine via hideMine prop', () => {
     renderTiles({ isLincoln: false, hideMine: true })
 
     expect(screen.queryByTestId('hero-launcher-mine')).toBeNull()

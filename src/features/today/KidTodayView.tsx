@@ -405,14 +405,14 @@ export default function KidTodayView({
     [captureItemIndex, handleUnifiedCapture],
   )
 
-  // --- Teach-back helpers (Lincoln audio capture) ---
+  // --- Teach-back helpers ---
   const totalCompleted = useMemo(() => checklist.filter((i) => i.completed).length, [checklist])
   const hasEngagementFeedback = useMemo(
     () => checklist.some((i) => i.completed && i.engagement),
     [checklist],
   )
   const showTeachBackSection =
-    isLincoln && !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
+    !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
 
   // ── Armor Gate early return (after all hooks) ──
   if (avatarProfile && showArmorGateBlocker && armorStatus) {
@@ -556,8 +556,8 @@ export default function KidTodayView({
         </Box>
       </Stack>
 
-      {/* XP bar + Diamond count (Lincoln only) */}
-      {isLincoln && !xpLedger.loading && (
+      {/* XP bar + Diamond count */}
+      {!xpLedger.loading && (
         <>
           <XpDiamondBar familyId={familyId} childId={child.id} compact />
           <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
@@ -662,8 +662,8 @@ export default function KidTodayView({
         </Typography>
       )}
 
-      {/* ── I DID MORE MINING! (Lincoln only) ── */}
-      {isLincoln && (
+      {/* ── I DID MORE MINING! ── */}
+      {(
         <KidExtraLogger
           dayLog={dayLog}
           persistDayLogImmediate={persistDayLogImmediate}

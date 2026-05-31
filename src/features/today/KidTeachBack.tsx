@@ -92,7 +92,7 @@ export default function KidTeachBack({
           location: 'home',
         },
         ...(mediaUrl ? { mediaUrl } : {}),
-        notes: `Lincoln taught London about ${teachSubject}`,
+        notes: `${child.name} taught about ${teachSubject}`,
         createdAt: new Date().toISOString(),
       })
 
@@ -123,10 +123,10 @@ export default function KidTeachBack({
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSaving(false)
-  }, [teachSubject, child.id, familyId, audioBlob, today, dayLog, persistDayLogImmediate])
+  }, [teachSubject, child.id, child.name, familyId, audioBlob, today, dayLog, persistDayLogImmediate])
 
   return (
-    <SectionCard title="⛏️ I Taught London Something!">
+    <SectionCard title="⛏️ I Taught Someone Something!">
       <Stack spacing={2} alignItems="center" sx={{ py: 1 }}>
         <Typography variant="body1" sx={{ textAlign: 'center' }}>
           Did you explain something to London today? Tap to mine a knowledge diamond!
