@@ -143,5 +143,8 @@ to `activityConfigs` are a Tier B convenience. Everything else is read-only to t
 
 ## Ledger update
 
-`REVIEW_HOME_BASE.md` §6 FUNC-01 → **RESOLVED-WITH-DECISION** (this doc). FUNC-02 stays
-**OPEN** as the implementing fix run, now green-lit with the build prompt above.
+`REVIEW_HOME_BASE.md` §6 FUNC-01 → **RESOLVED-WITH-DECISION** (this doc). FUNC-02 →
+**FIXED** (commit `b60c3d6`): the scan → Skill Snapshot write-through seam (implied change
+#1) shipped via the new central writer `src/features/evaluate/skillSnapshotWrites.ts`,
+wired into both scan paths. Implied change #2 (migrating the three inline snapshot writers
+onto the central module) was intentionally deferred and is tracked as **ARCH-12**.

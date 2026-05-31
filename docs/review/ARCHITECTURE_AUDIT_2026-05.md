@@ -293,7 +293,7 @@ Checked all surfaces added since the seed audit (Story Gen V2 Phase 2, Monthly R
 | **ARCH-09** | 1 | OPEN (new) | `ShellyChatPage.tsx` 1,653L — 23+ useState, image generation, thread management | `src/features/shelly-chat/ShellyChatPage.tsx` — defer until usage patterns stabilize |
 | **TEST-01** | 1 | OPEN | `shelly-chat`, `progress`, `dad-lab` have 0 test files | Confirmed — propose `shellyChat.logic.test.ts` and `DispositionProfile.test.tsx` next |
 | **FUNC-01** | 2 | OPEN | No authoritative source for "where is Lincoln" — 6 overlapping truth surfaces | skillSnapshot (closest to auth), childSkillMaps, activityConfigs, ladderProgress (deprecated), dispositionCache — no reconciliation |
-| **FUNC-02** | 2 | OPEN (new) | Learning Map → Skill Snapshot write-through missing | Scan advance moves `childSkillMaps` node but does NOT update `skillSnapshots` conceptual blocks. Dead end in the curriculum→evaluation loop. |
+| **FUNC-02** | 2 | **FIXED** | Scan → Skill Snapshot write-through landed (`b60c3d6`) | New `skillSnapshotWrites.ts` central writer wired into both scan paths (certificate + worksheet); additive/idempotent reducer + 17 tests. Inline-writer migration deferred to ARCH-12. |
 | **ETHOS-01** | 3 | OPEN (new) | Charter preamble absent from 5/17 task types | `generateStory`, `reviseStory`, `revisePage`, `quest`, `scan` — story trio is highest concern |
 | **DATA-01** | 4† | OPEN | `MonthlyTrend` over-counts core; Lincoln ~1.3h under MO 600-core (June 30 deadline) | `MonthlyTrend.tsx:48–63` vs `records.logic.ts:85–115`; fix documented, not applied |
 | **DATA-02** | 4 | NEEDS-DATA | Possible duplicate backfill — 2025-07-15 & 2025-08-15 | Requires live Firestore export |
