@@ -45,6 +45,22 @@ If a fix-making routine exists, it is scoped to one ledger issue at a time behin
 human to run a local command — their actions are limited to: pasting a run, uploading a file, and
 reviewing / merging a PR.
 
+### Ledger integrity & base discipline
+
+- **Branch from fresh `origin/main`, and verify the ledger head against the remote before editing.**
+  A local checkout or git-proxy snapshot can serve a stale `REVIEW_HOME_BASE.md`; trust the remote,
+  not the local ref. Run `git fetch origin main` and diff the ledger against `origin/main` before
+  touching it.
+- **Ledger edits are additive.** Add new rows; update only the status of rows you own. **Never**
+  rewrite, reorder, or delete existing rows, and **never** reopen a `RESOLVED`/`FIXED` item.
+- **A ledger diff that shows deletions, reordering, or reopened items means your branch is on the
+  wrong base — stop, rebase onto current `origin/main`, and redo.** A correct ledger PR reads
+  `+N rows / −0`, one file changed.
+- **Single-writer-ish ownership.** The home-base chat owns the review ledger. The build chat edits
+  only its portal rows (`FEAT-01`, portal `FUNC-*`, `ARCH-10`). Routines may flip a row **they are
+  claiming** to `IN PROGRESS` but must not rewrite other rows. When two PRs touch the ledger, merge
+  promptly and in order; if one shows more than additive changes, it's stale — rebase it.
+
 ## TypeScript Constraints
 
 ### `erasableSyntaxOnly` is enabled
