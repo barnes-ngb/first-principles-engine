@@ -3,6 +3,7 @@ import {
   buildFrictionCaptureAddendum,
   buildShellyChatRoleSection,
   buildSightWordActionAddendum,
+  buildSnapshotActionAddendum,
   formatConundrumTitle,
   formatDispositionProfile,
   formatRecentTeachBacks,
@@ -424,6 +425,45 @@ describe("buildSightWordActionAddendum", () => {
 
   it("falls back to a generic noun when childName is absent but a childId exists", () => {
     const out = buildSightWordActionAddendum("london456", undefined);
+    expect(out).toContain('"childId":"london456"');
+    expect(out).toContain("this child");
+  });
+});
+
+// ── 7b-ii. Additive snapshot <action> grammar addendum (Build Step 6b) ──
+
+describe("buildSnapshotActionAddendum", () => {
+  it("returns empty string when childId is missing (general tab)", () => {
+    expect(buildSnapshotActionAddendum(undefined, "Lincoln")).toBe("");
+    expect(buildSnapshotActionAddendum("", "")).toBe("");
+  });
+
+  it("emits all four additive snapshot kinds bound to the active childId", () => {
+    const out = buildSnapshotActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("SKILL-SNAPSHOT ACTIONS");
+    expect(out).toContain('"childId":"lincoln123"');
+    expect(out).toContain('"kind":"addPrioritySkill"');
+    expect(out).toContain('"kind":"addSupport"');
+    expect(out).toContain('"kind":"addStopRule"');
+    expect(out).toContain('"kind":"markSkillProgress"');
+    // No stray template placeholder leaked.
+    expect(out).not.toContain("${");
+  });
+
+  it("teaches additive-only — never a removal or downgrade", () => {
+    const out = buildSnapshotActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("ADDITIVE ONLY");
+    expect(out.toLowerCase()).toContain("cannot remove");
+  });
+
+  it("frames it as propose→confirm, never claiming the write is done", () => {
+    const out = buildSnapshotActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("confirm");
+    expect(out).toContain("NEVER claim it's done");
+  });
+
+  it("falls back to a generic noun when childName is absent but a childId exists", () => {
+    const out = buildSnapshotActionAddendum("london456", undefined);
     expect(out).toContain('"childId":"london456"');
     expect(out).toContain("this child");
   });

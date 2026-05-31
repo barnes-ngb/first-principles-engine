@@ -32,11 +32,16 @@ const SOFT_PROFILE_FIELDS = ['motivators', 'interests', 'strengths'] as const
  * - sight words: string `childId` + non-empty string `word`.
  * - `editProfileField`: string `childId` + `field` in
  *   `motivators | interests | strengths` + string `value`.
+ * - Tier C Option 2 additive snapshot edits: `addPrioritySkill` (+`skill`),
+ *   `addSupport` (+`support`), `addStopRule` (+`rule`), `markSkillProgress`
+ *   (+`skill`, optional boolean `mastered`).
  *
- * Everything else — including a well-formed JSON object carrying an unknown or
- * Tier-C `kind`, or an `editProfileField` targeting a disallowed field like
- * `supports`/`grade`/`prioritySkills` — returns null. This is the structural
- * guarantee that the portal can never touch Tier-C paths (see
+ * Everything else — including a well-formed JSON object carrying an unknown
+ * `kind`, an `editProfileField` targeting a disallowed field like
+ * `supports`/`grade`/`prioritySkills`, or any **removal/downgrade**-shaped
+ * snapshot payload — returns null. The additive kinds are the ONLY
+ * snapshot-touching kinds, and they are additive only; removals and
+ * level-lowering (Option 3) are unrepresentable here by construction (see
  * docs/SHELLY_PORTAL_CONTEXT.md §3).
  */
 function toChatAction(payload: unknown): ChatAction | null {
@@ -65,6 +70,37 @@ function toChatAction(payload: unknown): ChatAction | null {
       field: obj.field as (typeof SOFT_PROFILE_FIELDS)[number],
       value: obj.value,
     }
+  }
+
+  // ── Tier C Option 2 — additive snapshot edits ──────────────────────
+  // Additive only: each carries a single non-empty string to ADD (or a skill
+  // to mark progressing/mastered). There is no removal/downgrade kind in the
+  // `ChatAction` union, so any removal/downgrade-shaped payload (e.g.
+  // `removePrioritySkill`, `setSkillLevel`, `downgradeSupport`) falls through
+  // to the final `return null` — the structural guarantee that the portal can
+  // never lower or strip a snapshot entry (that is the future Option 3).
+  if (obj.kind === 'addPrioritySkill') {
+    if (typeof obj.skill !== 'string' || obj.skill.trim().length === 0) return null
+    return { kind: 'addPrioritySkill', childId: obj.childId, skill: obj.skill.trim() }
+  }
+
+  if (obj.kind === 'addSupport') {
+    if (typeof obj.support !== 'string' || obj.support.trim().length === 0) return null
+    return { kind: 'addSupport', childId: obj.childId, support: obj.support.trim() }
+  }
+
+  if (obj.kind === 'addStopRule') {
+    if (typeof obj.rule !== 'string' || obj.rule.trim().length === 0) return null
+    return { kind: 'addStopRule', childId: obj.childId, rule: obj.rule.trim() }
+  }
+
+  if (obj.kind === 'markSkillProgress') {
+    if (typeof obj.skill !== 'string' || obj.skill.trim().length === 0) return null
+    // `mastered` is optional; accept only a real boolean, ignore anything else.
+    const mastered = typeof obj.mastered === 'boolean' ? obj.mastered : undefined
+    return mastered === undefined
+      ? { kind: 'markSkillProgress', childId: obj.childId, skill: obj.skill.trim() }
+      : { kind: 'markSkillProgress', childId: obj.childId, skill: obj.skill.trim(), mastered }
   }
 
   return null

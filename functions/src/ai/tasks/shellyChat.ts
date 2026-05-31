@@ -262,6 +262,44 @@ Rules:
 }
 
 /**
+ * Build the additive Skill-Snapshot `<action>` grammar addendum (Build Step 6b
+ * — Tier C Option 2).
+ *
+ * Teaches the model to propose ONLY additive snapshot edits — add a priority
+ * skill / support / stop rule, or mark a skill Shelly says the child has — each
+ * confirmed by her tap. Removals, downgrades, and level-lowering are impossible
+ * in the app (the future Option 3), so the model must NEVER emit one; if she
+ * asks to remove/lower something it says that's coming later and offers to note
+ * it (which can become a friction-capture entry) rather than emitting an action.
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like the other action
+ * grammars. Framed as higher-stakes since it edits the authoritative "what to
+ * teach next" record. Returns "" on the general (no-child) branch.
+ */
+export function buildSnapshotActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+SKILL-SNAPSHOT ACTIONS (higher-stakes — this edits ${who}'s authoritative "what to teach next" record): When Shelly clearly wants to ADD a focus to the snapshot — a priority skill, a support, or a stop rule — or to mark a skill she says ${who} has, propose ONE additive action. Examples: "let's add inference to his list", "he needs a movement break every 10 minutes", "stop the lesson if he melts down", "he's solid on CVCe now".
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
+<action>{"kind":"addPrioritySkill","childId":"${childId}","skill":"inference from passages"}</action>
+<action>{"kind":"addSupport","childId":"${childId}","support":"movement break every 10 min"}</action>
+<action>{"kind":"addStopRule","childId":"${childId}","rule":"stop the session if frustration spikes"}</action>
+<action>{"kind":"markSkillProgress","childId":"${childId}","skill":"CVCe long vowels","mastered":true}</action>
+
+Rules:
+- ADDITIVE ONLY. The app cannot remove, downgrade, or lower a level. If Shelly asks to REMOVE a skill, DELETE a support, or LOWER/DOWNGRADE a level, tell her that capability is coming later and offer to note it for later — do NOT emit any action.
+- For markSkillProgress: set "mastered":true only when she says the child has fully got it; omit "mastered" (or set it false) to mark a skill as progressing rather than mastered.
+- NEVER claim it's done. Say you've proposed it and she confirms with a tap; she sees a clearly-labeled "Updates the skill snapshot" card first.
+- One JSON object per <action> block. Be conservative: only propose when she clearly wants to change the snapshot. Discussion is not a write.`;
+}
+
+/**
  * Build the `<friction>` grammar addendum for the shellyChat system prompt
  * (Build Step 5a — silent friction capture).
  *
@@ -513,6 +551,7 @@ Example: If she says "Lincoln seems bored with reading" and the data shows posit
   // ── Step C: Build system prompt with charter alignment ──────────
   const roleSection = buildShellyChatRoleSection(childId && childName ? childName : undefined);
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
+  const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
 
   const systemPrompt = `${sharedContext}
@@ -521,6 +560,7 @@ ${supplementalContext}
 
 ${roleSection}
 ${sightWordActionAddendum}
+${snapshotActionAddendum}
 ${frictionCaptureAddendum}
 
 After your response, suggest 2-3 brief follow-up questions Shelly might want to ask. Format them on new lines at the very end of your response, each prefixed with "[FOLLOWUP] ". Keep each under 50 characters. These should be specific to what you just discussed, not generic.
