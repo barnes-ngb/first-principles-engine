@@ -1619,9 +1619,8 @@ export default function MyAvatarPage() {
           />
         )}
 
-        {/* Launcher tiles — kid jumps from the hub to other destinations.
-            London doesn't use Knowledge Mine yet (per outline). */}
-        <HeroLauncherTiles isLincoln={isLincoln} hideMine={!isLincoln} />
+        {/* Launcher tiles — kid jumps from the hub to other destinations. */}
+        <HeroLauncherTiles isLincoln={isLincoln} />
       </Page>
 
       {/* Unequip dialog removed — tap toggles directly */}

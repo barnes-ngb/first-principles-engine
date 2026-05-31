@@ -12,8 +12,6 @@ export interface HeroLauncherTile {
 
 interface HeroLauncherTilesProps {
   isLincoln: boolean
-  /** Set to true to hide the Knowledge Mine tile (default behavior for London). */
-  hideMine?: boolean
 }
 
 const ALL_TILES: HeroLauncherTile[] = [
@@ -22,9 +20,9 @@ const ALL_TILES: HeroLauncherTile[] = [
   { id: 'books', icon: '📖', label: 'My Books', to: '/books' },
 ]
 
-export default function HeroLauncherTiles({ isLincoln, hideMine = false }: HeroLauncherTilesProps) {
+export default function HeroLauncherTiles({ isLincoln }: HeroLauncherTilesProps) {
   const navigate = useNavigate()
-  const tiles = ALL_TILES.filter((t) => !(hideMine && t.id === 'mine'))
+  const tiles = ALL_TILES
 
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const borderColor = isLincoln ? 'rgba(126,252,32,0.22)' : 'rgba(232,160,191,0.28)'

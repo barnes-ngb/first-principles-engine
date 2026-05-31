@@ -13,12 +13,11 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-function renderTiles(props: { isLincoln?: boolean; hideMine?: boolean } = {}) {
+function renderTiles(props: { isLincoln?: boolean } = {}) {
   return render(
     <MemoryRouter>
       <HeroLauncherTiles
         isLincoln={props.isLincoln ?? true}
-        hideMine={props.hideMine ?? false}
       />
     </MemoryRouter>,
   )
@@ -26,7 +25,7 @@ function renderTiles(props: { isLincoln?: boolean; hideMine?: boolean } = {}) {
 
 describe('HeroLauncherTiles', () => {
   it('shows all three tiles for Lincoln (Mine, Workshop, Books)', () => {
-    renderTiles({ isLincoln: true, hideMine: false })
+    renderTiles({ isLincoln: true })
 
     expect(screen.getByTestId('hero-launcher-mine')).toBeInTheDocument()
     expect(screen.getByTestId('hero-launcher-workshop')).toBeInTheDocument()
@@ -37,10 +36,10 @@ describe('HeroLauncherTiles', () => {
     expect(screen.getByText('My Books')).toBeInTheDocument()
   })
 
-  it('hides the Knowledge Mine tile for London (hideMine=true)', () => {
-    renderTiles({ isLincoln: false, hideMine: true })
+  it('shows all three tiles for non-Lincoln children (parity)', () => {
+    renderTiles({ isLincoln: false })
 
-    expect(screen.queryByTestId('hero-launcher-mine')).toBeNull()
+    expect(screen.getByTestId('hero-launcher-mine')).toBeInTheDocument()
     expect(screen.getByTestId('hero-launcher-workshop')).toBeInTheDocument()
     expect(screen.getByTestId('hero-launcher-books')).toBeInTheDocument()
   })
@@ -48,6 +47,14 @@ describe('HeroLauncherTiles', () => {
   it('routes to /quest when Knowledge Mine tile is tapped', () => {
     navigateMock.mockClear()
     renderTiles({ isLincoln: true })
+
+    fireEvent.click(screen.getByTestId('hero-launcher-mine'))
+    expect(navigateMock).toHaveBeenCalledWith('/quest')
+  })
+
+  it('routes to /quest for non-Lincoln children too', () => {
+    navigateMock.mockClear()
+    renderTiles({ isLincoln: false })
 
     fireEvent.click(screen.getByTestId('hero-launcher-mine'))
     expect(navigateMock).toHaveBeenCalledWith('/quest')

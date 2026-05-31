@@ -405,14 +405,14 @@ export default function KidTodayView({
     [captureItemIndex, handleUnifiedCapture],
   )
 
-  // --- Teach-back helpers (Lincoln audio capture) ---
+  // --- Teach-back helpers ---
   const totalCompleted = useMemo(() => checklist.filter((i) => i.completed).length, [checklist])
   const hasEngagementFeedback = useMemo(
     () => checklist.some((i) => i.completed && i.engagement),
     [checklist],
   )
   const showTeachBackSection =
-    isLincoln && !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
+    !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
 
   // ── Armor Gate early return (after all hooks) ──
   if (avatarProfile && showArmorGateBlocker && armorStatus) {
