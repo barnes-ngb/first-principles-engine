@@ -25,6 +25,11 @@ reviews and merges (usually from a phone). Never push directly to `main` or `dep
 `xpLedger`, `skillSnapshots` (write only via the central `skillSnapshotWrites.ts`), the charter
 preamble, or `firestore.rules`. Changes touching these are proposed and stop for a human decision.
 Any user-facing write to a child's record goes propose → confirm → write; never auto-write.
+The central `skillSnapshotWrites.ts` writer is **additive-only**: beyond the scan mastered-skill
+write-through, it supports additive, evidence-stamped edit ops (Build 6a / Tier C Option 2) —
+`addPrioritySkills` / `addSupports` / `addStopRules`, each deduped and stamped as a parent
+directive. It **never removes or downgrades** (RESOLVED/DEFER blocks and existing levels are
+untouched); removals/downgrades are the future Option 3 and need a separate override path.
 
 **The review ledger is the backlog + memory.** `docs/review/REVIEW_HOME_BASE.md` §6 is the source of
 truth for open work (ID prefixes: `ARCH-` / `FUNC-` / `TEST-` / `DATA-` / `ETHOS-` / `DOC-` / `FEAT-`).
