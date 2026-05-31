@@ -33,6 +33,7 @@ import AccountSection from './AccountSection'
 import AIUsagePanel from './AIUsagePanel'
 import AvatarAdminTab from './AvatarAdminTab'
 import DevAdminTab from './DevAdminTab'
+import DiagnosticsTab from './DiagnosticsTab'
 import SoftProfileSection from './SoftProfileSection'
 import StickerLibraryTab from './StickerLibraryTab'
 import VoiceInputSection from './VoiceInputSection'
@@ -72,6 +73,9 @@ export default function SettingsPage() {
 
   const isParent = profile === UserProfile.Parents
   const isAdmin = familyId === ADMIN_UID
+  // Diagnostics sits after the (admin-only) Dev tab, so its positional tab value
+  // shifts by one when the Dev tab is present.
+  const diagnosticsTabIndex = isAdmin ? 4 : 3
 
   const handleSeedDemoData = async () => {
     try {
@@ -122,6 +126,7 @@ export default function SettingsPage() {
             <Tab label="Avatar & XP" />
             <Tab label="Sticker Library" />
             {isAdmin && <Tab label="Dev" />}
+            <Tab label="Diagnostics" />
           </Tabs>
         )}
 
@@ -210,6 +215,9 @@ export default function SettingsPage() {
 
         {/* ── Dev admin tab (admin UID only) ──────────────────── */}
         {isAdmin && activeTab === 3 && <DevAdminTab />}
+
+        {/* ── Diagnostics tab (ARCH-11, parent only, read-only) ─ */}
+        {isParent && activeTab === diagnosticsTabIndex && <DiagnosticsTab />}
       </SectionCard>
 
       <AIUsagePanel />

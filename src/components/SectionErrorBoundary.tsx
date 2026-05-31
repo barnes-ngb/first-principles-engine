@@ -3,6 +3,8 @@ import type { ErrorInfo, ReactNode } from 'react'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 
+import { ErrorSource, reportError } from '../core/observability'
+
 interface Props {
   children: ReactNode
   /** Label shown in error message, e.g. "checklist" or "quick capture" */
@@ -30,6 +32,16 @@ export default class SectionErrorBoundary extends Component<Props, State> {
       error,
       info.componentStack,
     )
+    // ARCH-11: report scrubbed telemetry so isolated section crashes aren't silent.
+    void reportError({
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      componentStack: info.componentStack ?? null,
+      section: this.props.section ?? null,
+      route: typeof window !== 'undefined' ? window.location.pathname : null,
+      source: ErrorSource.ReactSectionBoundary,
+    })
   }
 
   render() {
