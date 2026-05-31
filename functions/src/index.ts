@@ -15,3 +15,4 @@ export {
 export { generateActivity } from "./ai/generate.js";
 export { generateImage, generateAvatarPiece, generateStarterAvatar, transformAvatarPhoto, generateArmorPiece, generateBaseCharacter, generateArmorSheet, generateArmorReference, extractFeatures, generateMinecraftSkin, generateMinecraftFace, enhanceSketch } from "./ai/imageGen.js";
 export { transcribeAudio } from "./ai/tasks/transcribeAudio.js";
+export { fileFeatureRequests } from "./feedback/fileFeatureRequests.js";

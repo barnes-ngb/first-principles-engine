@@ -41,7 +41,7 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 - Commits: **118** on `claude/hopeful-knuth-uRZOG` (HEALTH_REPORT shows 122 on the audit branch off main)
 - Test files: **125** · Tests passing: **2,038** across 124 files (per HEALTH_REPORT 2026-05-29; full suite not re-run here)
 - Firestore collection/doc helpers in `firestore.ts`: **34**
-- Cloud Functions exported: **24**
+- Cloud Functions exported: **25**
 - Chat task types (`tasks/index.ts` registry): **17**
 - Routes (`router.tsx`): **33**
 - Bundle (main chunk): **3.7 MB / 1.13 MB gzip** (per HEALTH_REPORT; not re-built here)
@@ -99,7 +99,7 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 | `shellyChatThreads` (+ `/messages`) | Shelly AI chat threads + messages |
 | `chapterResponses` | Read-aloud chapter discussion responses |
 | `childSkillMaps` | Per-child curriculum knowledge maps |
-| `featureRequests` | Silent Shelly-chat friction log (feedback metadata, not a child record; deduped; consumed by Step 5b CF → GitHub issue) |
+| `featureRequests` | Silent Shelly-chat friction log (feedback metadata, not a child record; deduped; consumed by Step 5b's scheduled `fileFeatureRequests` CF, which files each as a GitHub issue and writes back `status: 'filed'` + `githubIssueUrl`) |
 
 **Subcollections:** `children/{childId}/transcriptionEvents` (Whisper events), `children/{childId}/wordProgress` (Knowledge Mine word progress).
 **Global:** `chapterBooks` (shared chapter book library).
@@ -117,7 +117,7 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 - Haiku (`claude-haiku-4-5-20251001`): generate, chat — routine generation (kid-facing utility; ≤1024 tokens).
 - Images: gpt-image-1.5 (OpenAI).
 
-**24 Cloud Functions:** `chat` (task dispatch), `analyzeEvaluationPatterns`, `weeklyReview`, `generateWeeklyReviewNow`, `generateMonthlyReview`, `generateMonthlyReviewNow`, `publishMonthlyReview`, `unpublishMonthlyReview`, `auditMonthlyReviewSources`, `generateActivity`, `transcribeAudio`, `healthCheck`, + 12 image functions (`generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`).
+**25 Cloud Functions:** `chat` (task dispatch), `analyzeEvaluationPatterns`, `weeklyReview`, `generateWeeklyReviewNow`, `generateMonthlyReview`, `generateMonthlyReviewNow`, `publishMonthlyReview`, `unpublishMonthlyReview`, `auditMonthlyReviewSources`, `generateActivity`, `transcribeAudio`, `fileFeatureRequests` (scheduled daily 08:00 CT — the only code path that talks to GitHub; files `featureRequests` as issues via GitHub REST), `healthCheck`, + 12 image functions (`generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`).
 
 **17 chat task types** (`tasks/index.ts`): plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview.
 

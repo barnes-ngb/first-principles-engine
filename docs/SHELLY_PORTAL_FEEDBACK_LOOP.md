@@ -1,13 +1,38 @@
 # Shelly Portal — Feedback Loop (Friction Log → Auto-GitHub-Issue)
 
-> **Status:** Recon only. This document records findings; it changes no code.
+> **Status:** SHIPPED end-to-end. Capture (Step 5a) and the auto-issue routine
+> (Step 5b) are both merged. Sections 1–4 below are the original recon that
+> grounded the build; the recommended mechanism (a) is what was built.
 > Supports §5 of the Shelly Portal design (the feedback-to-Nathan loop).
-> **Scope:** how a friction-log → auto-GitHub-issue routine should plug into the
-> existing scheduled-CF / secrets infrastructure so the build prompt reuses the
-> established pattern instead of inventing plumbing.
 
 There is no `docs/SHELLY_PORTAL_CONTEXT.md` yet, so this is a standalone doc. Fold
 the `## Feedback Loop` section into the portal context doc when it lands.
+
+---
+
+## 0. Activation — the ONE-TIME human step (Nathan, console)
+
+The auto-issue routine (`fileFeatureRequests`, scheduled daily 08:00 CT) is live
+in code and deploys harmlessly, but **it files nothing until Nathan provisions one
+secret.** This is a console action only Nathan can do — the build agent never runs
+it. Until it's done the function degrades safely: it logs a warning and writes
+nothing (no half-filed entries, no crash).
+
+**Do this once to activate the loop:**
+
+1. **Create a fine-grained GitHub PAT** scoped to **`barnes-ngb/first-principles-engine`
+   only**, with repository permission **Issues: Read and write** (nothing else).
+   GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token.
+2. **Store it as a Functions secret**, then redeploy functions:
+   ```
+   firebase functions:secrets:set GITHUB_PAT      # paste the token when prompted
+   firebase deploy --only functions
+   ```
+
+That's it. On the next 08:00 CT run the routine reads every family's `'new'`
+`featureRequests`, opens one labeled GitHub issue per distinct want, and marks each
+`filed`. Rotating or revoking the token simply returns the function to its safe,
+no-op state.
 
 ---
 
