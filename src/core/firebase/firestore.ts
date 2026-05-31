@@ -43,6 +43,7 @@ import type {
   XpLedger,
 } from '../types'
 import type { ChildSkillMap } from '../curriculum/skillStatus'
+import type { ErrorLog } from '../types/errorLog'
 import { app } from './firebase'
 
 export const db = getFirestore(app)
@@ -491,3 +492,11 @@ export const bookProgressCollection = (
 /** Book progress doc ID: {childId}_{bookId} */
 export const bookProgressDocId = (childId: string, bookId: string): string =>
   `${childId}_${bookId}`
+
+// ── Error Log (ARCH-11 client error reporting) ──────────────────
+
+/** Scrubbed client error records. Path: families/{familyId}/errorLog/{autoId} */
+export const errorLogsCollection = (
+  familyId: string,
+): CollectionReference<ErrorLog> =>
+  collection(db, `families/${familyId}/errorLog`) as CollectionReference<ErrorLog>
