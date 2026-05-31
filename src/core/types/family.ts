@@ -26,4 +26,19 @@ export interface Child {
    * see docs/DESIGN_VOICE_INPUT_MODULE.md §5. Lincoln defaults to true.
    */
   voiceInputEnhanced?: boolean
+  /**
+   * Human-owned "soft profile" — stable identity the Shelly portal's Tier B
+   * will eventually edit (propose → confirm → write). Per the FUNC-01 ruling
+   * these are stable identity owned by `children` (not `skillSnapshots`).
+   * Plain freeform text (matches the `grade` convention), optional so existing
+   * `children` docs keep working with no migration. Surfaced to AI prompts via
+   * the `childProfile` context slice. See docs/barnes-shelly-chat-portal-design.md §3.
+   * NOTE: `supports` is deliberately NOT here — it lives on `skillSnapshots` (Tier C).
+   */
+  /** What motivates this child (e.g. "Minecraft, Lego, Art"). */
+  motivators?: string
+  /** What this child is interested in / drawn to (e.g. "stories, dinosaurs"). */
+  interests?: string
+  /** This child's strengths (e.g. "persistence, visual memory"). */
+  strengths?: string
 }

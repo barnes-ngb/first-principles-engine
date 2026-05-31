@@ -40,7 +40,13 @@ export interface ChatTaskContext {
   db: Firestore;
   familyId: string;
   childId: string;
-  childData: { name: string; grade?: string };
+  childData: {
+    name: string;
+    grade?: string;
+    motivators?: string;
+    interests?: string;
+    strengths?: string;
+  };
   snapshotData: SnapshotData | undefined;
   messages: ChatTaskMessage[];
   domain: string | undefined;

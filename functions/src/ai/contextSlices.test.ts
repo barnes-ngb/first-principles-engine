@@ -237,6 +237,36 @@ describe("formatChildProfile", () => {
     expect(result).toContain("Visual checklist: Step-by-step");
     expect(result).toContain('Frustration: when "3 misses" → Switch');
   });
+
+  it("includes soft-profile fields (motivators / interests / strengths)", () => {
+    const result = formatChildProfile({
+      name: "Lincoln",
+      motivators: "Minecraft, Lego, art",
+      interests: "dinosaurs, building",
+      strengths: "persistence, visual memory",
+    });
+    expect(result).toContain("Motivators: Minecraft, Lego, art");
+    expect(result).toContain("Interests: dinosaurs, building");
+    expect(result).toContain("Strengths: persistence, visual memory");
+  });
+
+  it("omits soft-profile fields when absent or blank (no-migration guarantee)", () => {
+    // A child doc without the new fields still formats cleanly.
+    const result = formatChildProfile({ name: "London" });
+    expect(result).toContain("Name: London");
+    expect(result).not.toContain("Motivators:");
+    expect(result).not.toContain("Interests:");
+    expect(result).not.toContain("Strengths:");
+
+    // Blank/whitespace strings are treated as absent.
+    const blank = formatChildProfile({
+      name: "London",
+      motivators: "   ",
+      interests: "",
+    });
+    expect(blank).not.toContain("Motivators:");
+    expect(blank).not.toContain("Interests:");
+  });
 });
 
 // ── formatChildSkillMap ────────────────────────────────────────
