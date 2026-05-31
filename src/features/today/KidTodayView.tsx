@@ -58,6 +58,7 @@ import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useUnifiedCapture } from './useUnifiedCapture'
+import { findYoungerSibling } from './teachBackRecipient'
 import { calculateXp } from './xp'
 interface KidTodayViewProps {
   dayLog: DayLog
@@ -414,6 +415,14 @@ export default function KidTodayView({
   const showTeachBackSection =
     !dayLog.teachBackDone && (totalCompleted >= 3 || hasEngagementFeedback)
 
+  // Teach-back encodes the charter's "older teaches younger": only a child
+  // with a younger sibling to teach sees it (relationship-derived, not a
+  // name-gate). The youngest child (no one to teach) doesn't see the section.
+  const youngerSibling = useMemo(
+    () => findYoungerSibling(child, allChildren),
+    [child, allChildren],
+  )
+
   // ── Armor Gate early return (after all hooks) ──
   if (avatarProfile && showArmorGateBlocker && armorStatus) {
     return (
@@ -727,11 +736,12 @@ export default function KidTodayView({
         />
       )}
 
-      {/* ── TEACH-BACK (Lincoln only) ── */}
-      {showTeachBackSection && (
+      {/* ── TEACH-BACK (older teaches younger) ── */}
+      {showTeachBackSection && youngerSibling && (
         <SectionErrorBoundary section="teach-back">
           <KidTeachBack
             child={child}
+            recipientName={youngerSibling.name}
             familyId={familyId}
             today={today}
             dayLog={dayLog}
