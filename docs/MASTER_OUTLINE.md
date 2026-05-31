@@ -31,6 +31,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - Reusable `<VoiceInput>` component plus `useAudioRecording` + `useTranscription` hooks at `src/components/VoiceInput/` and `src/core/hooks/`.
 - New `transcribeAudio` Firebase callable wraps OpenAI Whisper-1; auth-gated, rate-limited (30/hour), 7 MB raw audio cap, logs cost to `aiUsage`.
 - Per-child `Child.voiceInputEnhanced` flag routes between Whisper (server) and Web Speech (browser); toggle lives at Settings → General → Voice Input. Lincoln defaults to `true` via `scripts/setLincolnVoiceInputEnhanced.ts`.
+- Per-child soft-profile fields `Child.motivators` / `Child.interests` / `Child.strengths` (optional freeform text, human-owned stable identity per FUNC-01; Shelly portal Phase 0). Edited at Settings → General → Child Profile (`SoftProfileSection`); surfaced to AI prompts via the `childProfile` context slice (`formatChildProfile`). All optional — existing `children` docs need no migration.
 - Every successful transcription writes a `families/{familyId}/children/{childId}/transcriptionEvents/{eventId}` doc with segments + per-segment `avg_logprob` — substrate for future trouble-word tracking (`DESIGN_VOICE_INPUT_MODULE.md` §12).
 - First integration: `BookGenerateChat` composer. Phase 2 (migrating FluencyPractice, PlaytestView, VoiceRecordingStep, AdventurePlaytestView, UnifiedCaptureCard) deferred to separate PRs.
 
@@ -311,7 +312,7 @@ Ordered smallest → largest per `/docs/design-pass-v1/README.md` §Suggested im
 | `src/features/books/BookEditorPage.tsx` | 2,263 | Grew with undo/redo + contextual action bar |
 | `src/features/quest/useQuestSession.ts` | 1,870 | Largest hook; future split candidate |
 | `src/features/avatar/MyAvatarPage.tsx` | 1,804 | Grew with Hero Hub Phase 1A — mission/Stonebridge promoted above armor row, launcher tiles added |
-| `src/features/shelly-chat/ShellyChatPage.tsx` | 1,653 | Stable, still large |
+| `src/features/shelly-chat/ShellyChatPage.tsx` | 611 | ARCH-09 FIXED — decomposed to a thin shell (`useShellyChatState` + `useShellyChatFlows` + actions/confirm layer); was 1,632 |
 
 ### Decomposition Status
 - Today page, Kid Today view, Planner render layers, and Avatar subpanels have all been partially decomposed.

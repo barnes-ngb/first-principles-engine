@@ -8,6 +8,59 @@
 - `npm run lint` — Run ESLint
 - `npx tsc -b` — Type-check only (no emit)
 
+## AI Development Operating Model
+
+How this project is built by AI sessions (Claude Code and design chats). These conventions are
+load-bearing — follow them even when a request doesn't restate them.
+
+**How work is assigned.** Substantive changes — structure, features, docs — are assigned by a human
+through self-contained run-prompts pasted into Claude Code. A run grounds itself against the code,
+makes the change, updates the review ledger, and opens a PR. Sessions don't freelance scope beyond
+the run they were given.
+
+**Branch + PR, never merge.** Every change lands on a branch with a PR. **Do not merge** — the human
+reviews and merges (usually from a phone). Never push directly to `main` or `deploy`.
+
+**Invariants are propose-and-confirm.** Never silently change: compliance / `hours` math, the
+`xpLedger`, `skillSnapshots` (write only via the central `skillSnapshotWrites.ts`), the charter
+preamble, or `firestore.rules`. Changes touching these are proposed and stop for a human decision.
+Any user-facing write to a child's record goes propose → confirm → write; never auto-write.
+
+**The review ledger is the backlog + memory.** `docs/review/REVIEW_HOME_BASE.md` §6 is the source of
+truth for open work (ID prefixes: `ARCH-` / `FUNC-` / `TEST-` / `DATA-` / `ETHOS-` / `DOC-` / `FEAT-`).
+Every run reads it, updates the relevant row, and never reuses an ID. Reusable run-prompts live in
+`docs/review/prompts/`; decision docs (e.g. `DECISION_FUNC-01_*`) record settled architecture choices.
+
+**Two chats, split ownership.** A home-base chat owns architecture/review plus non-portal ledger items
+and the monthly audit. A dedicated build chat owns the Shelly Chat portal feature, its design doc, and
+its ledger rows (`FEAT-01`, `FUNC-03`, `ARCH-10`). Each edits only its own ledger rows; merge ledger
+PRs promptly to avoid trivial table conflicts.
+
+**Routines detect; humans assign.** Scheduled routines (claude.ai/code/routines) run audits and
+mechanical doc upkeep — stat numbers, index entries, alignment — and surface findings into the ledger.
+They do **not** autonomously make substantive structural or feature changes; those are human-assigned.
+If a fix-making routine exists, it is scoped to one ledger issue at a time behind a reviewable PR.
+
+**Phone-first.** A run does all build / lint / test / git in its own environment. Never instruct the
+human to run a local command — their actions are limited to: pasting a run, uploading a file, and
+reviewing / merging a PR.
+
+### Ledger integrity & base discipline
+
+- **Branch from fresh `origin/main`, and verify the ledger head against the remote before editing.**
+  A local checkout or git-proxy snapshot can serve a stale `REVIEW_HOME_BASE.md`; trust the remote,
+  not the local ref. Run `git fetch origin main` and diff the ledger against `origin/main` before
+  touching it.
+- **Ledger edits are additive.** Add new rows; update only the status of rows you own. **Never**
+  rewrite, reorder, or delete existing rows, and **never** reopen a `RESOLVED`/`FIXED` item.
+- **A ledger diff that shows deletions, reordering, or reopened items means your branch is on the
+  wrong base — stop, rebase onto current `origin/main`, and redo.** A correct ledger PR reads
+  `+N rows / −0`, one file changed.
+- **Single-writer-ish ownership.** The home-base chat owns the review ledger. The build chat edits
+  only its portal rows (`FEAT-01`, portal `FUNC-*`, `ARCH-10`). Routines may flip a row **they are
+  claiming** to `IN PROGRESS` but must not rewrite other rows. When two PRs touch the ledger, merge
+  promptly and in order; if one shows more than additive changes, it's stale — rebase it.
+
 ## TypeScript Constraints
 
 ### `erasableSyntaxOnly` is enabled
@@ -78,8 +131,8 @@ const items = snapshot.docs.map((doc) => ({
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
 - `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useAudioRecording, useSpeechRecognition, useTranscription, useTTS, useActivityConfigs, useScanToActivityConfig, useCertificateProgress, useMonthlyReviews)
-- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
-- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, domain mapping, blocker lifecycle, workbook matching, session timer, image compression
+- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
+- `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, domain mapping, blocker lifecycle, workbook matching, session timer, image compression, `sanitizeJson` (client port of the functions LLM-JSON parser — deliberate duplication, `// TODO: consolidate`)
 - `src/core/ai/` — AI service interface (useAI hook), feature flags, prompt templates (`prompts/plannerPrompts.ts`)
 - `src/core/profile/` — Profile context provider and hook (family + children)
 - `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
@@ -104,7 +157,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/quest/` — Knowledge Mine (interactive reading quest)
 - `src/features/records/` — Hours, compliance, evaluations, portfolio
 - `src/features/settings/` — AI usage, account, avatar admin, sticker library, Dev tab (admin-only: chapter book seeding, Sunday cleanup, working levels backfill)
-- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime)
+- `src/features/shelly-chat/` — Shelly AI chat assistant (ShellyChatPage — thin shell, ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime, `useShellyChatState` — thread/message/image state hook, `useShellyChatFlows` — effects + send/image/upload/thread-CRUD handlers, `reflectionSuggestions` — pure data-driven conversation-starter heuristics, `parseFollowups` — pure `[FOLLOWUP]` marker parser, `parseChatActions` — pure `<action>` block extractor (detect/parse/allowlist-validate `ChatAction`s + return clean text), `useShellyChatActions` — **portal write layer (Build Steps 3b + 4)**: the confirmed-write path (Tier B complete). Owns confirm-card state (`pending`/`applied`/`dismissed`) + `applyChatAction`; routes sight-word writes through the shared `addSightWord`/`removeSightWord` writers in `useSightWordProgress`, and **`editProfileField` writes (Step 4 — `motivators`/`interests`/`strengths` only) through the shared `updateChildSoftProfile` writer** (`src/core/family/`, also used by Settings' `SoftProfileSection` — no fork); enforces the `ChatAction` allowlist + active-child binding; records applied writes inline on the assistant message (`appliedActions`). `ActionConfirmCard` — inline propose→confirm→write cards (Confirm / Dismiss / batch Confirm all); sight words render a one-liner, `editProfileField` a **before→after** diff (replace-write on freeform text). The `<action>` grammar is taught to the model in `functions/src/ai/tasks/shellyChat.ts` (`buildSightWordActionAddendum` — both sight-word + `editProfileField` grammar, child-tab only). Wired into `useShellyChatFlows`' response handlers (`sendToAI`/`handleSend`/`handleUploadAnalyze`). `supports` stays Tier C (lives on `skillSnapshots`); Tier-C snapshot writes + ARCH-10 rules hardening remain out of scope. `parseFriction` — pure `<friction>` block extractor (mirrors `parseChatActions`: detect/parse/validate `quote`+`interpretedWant`, strip the block, never throw). `logFeatureRequest` — **Build Step 5a silent friction capture**: a fire-and-forget, dedup'd write to the `featureRequests` collection (feedback metadata, **NOT** a child's record — deliberately separate from `applyChatAction`, never confirmed, never surfaced to Shelly). Wired into all three `useShellyChatFlows` response handlers (`sendToAI`/`handleSend`/`handleUploadAnalyze`) alongside `parseChatActions`; the `<friction>` grammar is taught to the model in `functions/src/ai/tasks/shellyChat.ts` (`buildFrictionCaptureAddendum` — always emitted, invisible plumbing). Dedup mirrors the `xpLedger` idempotency pattern via `dedupKey` = stable hash of the normalized `interpretedWant`. Step 5b (scheduled CF → GitHub issue) consumes the `new` entries.)
 - `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, UnifiedCaptureCard, TeachBackSection, ChapterQuestionPool) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterPool, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP, scan advance, rollover, budget enforcement
 - `src/features/weekly-review/` — Weekly review page
 - `src/features/workshop/` — Story Game Workshop (board/adventure/card games), `steps/` sub-module (wizard step components)
@@ -201,7 +254,7 @@ All under `families/{familyId}/`:
 | `xpLedger` | XP event log for armor progression |
 | `books` | Kid-authored books (My Books) |
 | `stickerLibrary` | Family sticker assets |
-| `sightWordProgress` | Per-child sight word mastery tracking |
+| `sightWordProgress` | Per-child sight word mastery tracking (writers in `useSightWordProgress`: `recordInteraction`/`confirmMastery` + shared `addSightWord`/`removeSightWord` — the latter two are the Shelly portal's confirmed-write path) |
 | `aiUsage` | AI token usage and cost tracking |
 | `avatarProfiles` | Per-child avatar customization |
 | `dailyArmorSessions` | Daily armor XP session tracking |
@@ -211,8 +264,9 @@ All under `families/{familyId}/`:
 | `shellyChatThreads` | Shelly AI chat thread roots |
 | `chapterResponses` | Read-aloud chapter discussion responses per child |
 | `bookThemes` | Book theme presets and custom themes |
-| `childSkillMaps` | Per-child curriculum knowledge maps |
+| `childSkillMaps` | Per-child curriculum knowledge maps (read into `shellyChat` AI context as the `childSkillMap` coverage slice — `loadChildSkillMapContext` / `formatChildSkillMap`; read-only, owned by `updateSkillMapFromFindings`) |
 | `bookProgress` | Per-child read-aloud book progress and question pools |
+| `featureRequests` | Silent friction / feature-request log from Shelly chat (feedback metadata, **not** a child's record — written fire-and-forget via `logFeatureRequest`, deduped by `dedupKey`, separate from the confirm-gated `applyChatAction` path; consumed by Step 5b's scheduled `fileFeatureRequests` CF → GitHub issue, which writes back `status: 'filed'` + `githubIssueUrl`) |
 
 **Global collections** (not under `families/`):
 
@@ -259,7 +313,7 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview)
 
-### Cloud Functions (24 exported)
+### Cloud Functions (25 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions, monthlyReview)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
@@ -271,6 +325,7 @@ All under `families/{familyId}/`:
 - `auditMonthlyReviewSources` — Diagnostic: inspect photo sources available for a monthly review
 - `generateActivity` — Lesson card generation
 - `transcribeAudio` — OpenAI Whisper voice transcription for the voice input module (writes `aiUsage` + `transcriptionEvents`)
+- `fileFeatureRequests` — Scheduled (daily 08:00 CT) Shelly-portal feedback-loop closer (Build Step 5b): reads `featureRequests` where `status == 'new'`, opens one GitHub issue per distinct want (deduped by `dedupKey`, belt-and-suspenders), writes back `status: 'filed'` + `githubIssueUrl`. **The only code path in the repo that talks to the GitHub API** — direct `fetch` against GitHub REST (no Octokit dependency), authed with the `GITHUB_PAT` fine-grained-token secret (`functions/src/feedback/fileFeatureRequests.ts`). Degrades safely: if the secret is unset it logs a warning and writes nothing; per-entry HTTP failures leave that entry `new` for the next run. **Requires the one-time human secret step** in `docs/SHELLY_PORTAL_FEEDBACK_LOOP.md` to file anything.
 - `healthCheck` — Diagnostic endpoint
 - 12 image functions: `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`
 
@@ -312,7 +367,7 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 - **BookEditorPage.tsx (2,278L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
 - **useQuestSession.ts (1,870L)** — Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
 - **MyAvatarPage.tsx (1,804L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
-- **ShellyChatPage.tsx (1,653L)** — 23+ useState hooks. Image generation, thread management, follow-up suggestions, image refinement flow. Decomposition candidate after usage patterns stabilize.
+- **ShellyChatPage.tsx (611L)** — ARCH-09 FIXED (decompose complete across PR #1274 + #1277, 1,632→611L, first tests added): state/refs in `useShellyChatState` (typed, unit-tested); effects + flow handlers (send/response, image gen/refine, image analysis/attach upload cluster, thread CRUD) in `useShellyChatFlows`; the branchy reflection-suggestion heuristics in the pure `reflectionSuggestions` module (unit-tested); the `[FOLLOWUP]` parser in `parseFollowups`. The page is now a thin shell composing the state + flows hooks (plus the actions hook + confirm cards). The actions/write layer (`useShellyChatActions`, Build Steps 3b + 4) is live: Tier B is complete — the portal's confirmed-write path covers sight words **and profile soft fields (`editProfileField` → `motivators`/`interests`/`strengths` via the shared `updateChildSoftProfile` writer)**, propose→confirm→write, wired into `useShellyChatFlows`' response handlers. No auto-writes — only a confirm tap commits.
 - **WorkshopPage.tsx (1,623L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
 - **VoxelCharacter.tsx (1,562L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
 - **Ladder system** — UI surfaces removed (ARCH-07): the `/ladders` route now redirects to `/progress`, and the `src/features/ladders/` directory + the dead `LadderQuickLog` were deleted now that the disposition system is live. The data layer is intentionally retained: the `ladderRef` artifact tag (still scored by `scoreArtifactsForPortfolio` and shown in `ArtifactCard`), the `ladderProgress` collection (historical data), and the `Ladder*` types in `common.ts`.

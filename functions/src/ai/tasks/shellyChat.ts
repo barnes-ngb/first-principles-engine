@@ -206,7 +206,7 @@ SHELLY-SPECIFIC GUIDELINES:
 - If she asks you to generate an image, tell her to tap the image button.
 - For printable activities, format them clearly for screenshot or print.
 
-PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she has not linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.`;
+PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE rather than guessing. Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she has not linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.`;
   }
   return `ROLE: You are Shelly's homeschool assistant. This is a general conversation — not focused on a specific child.
 
@@ -217,6 +217,71 @@ SHELLY-SPECIFIC GUIDELINES:
 - Keep responses concise unless she asks for detail.
 - If she asks you to generate an image, tell her to tap the image button.
 - For printable activities, format them clearly for screenshot or print.`;
+}
+
+/**
+ * Build the `<action>` grammar addendum for the shellyChat system prompt
+ * (Build Step 3b — sight words; Step 4 — `editProfileField` soft fields).
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), since these actions
+ * bind to a specific child. The model is told the active child's id so it can
+ * address the action correctly; the app still performs the write only on
+ * Shelly's confirm tap. Returns "" on the general (no-child) branch.
+ */
+export function buildSightWordActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+SIGHT-WORD ACTIONS: When Shelly clearly asks to ADD or REMOVE a sight word for ${who} (e.g. "add 'because' to ${who}'s sight words", "take 'the' off his list"), propose it with a structured action block. Otherwise, respond in normal prose — do NOT emit an action block when she is only discussing or asking about words.
+
+Grammar — one trailing line per action, after your prose, using ${who}'s id exactly as given here ("${childId}") and a lowercase word:
+<action>{"kind":"addSightWord","childId":"${childId}","word":"because"}</action>
+<action>{"kind":"removeSightWord","childId":"${childId}","word":"the"}</action>
+
+Rules:
+- One JSON object per <action> block; lowercase the word; always use childId "${childId}".
+- NEVER say the change is done. Say you've proposed it and Shelly can confirm with a tap — the app performs the write only when she confirms.
+- Be conservative: if you're unsure whether she wants a write versus just talking about words, do NOT emit an action — ask or stay in prose.
+
+PROFILE ACTIONS: When Shelly clearly wants to update ${who}'s profile — only the freeform fields motivators, interests, or strengths (e.g. "add Lego to ${who}'s motivators", "he's really into dinosaurs now") — propose an editProfileField action. These are the ONLY editable profile fields: never propose this for grade, supports, priority skills, or anything else.
+
+These are REPLACE writes, not appends: the app overwrites the whole field with your "value". You already have the current value in the CHILD PROFILE section above — compose the FULL intended new text (existing value plus the addition), not just the fragment, so the value is a clean replacement.
+
+Grammar — one trailing line, after your prose, using ${who}'s id exactly ("${childId}"):
+<action>{"kind":"editProfileField","childId":"${childId}","field":"motivators","value":"Minecraft, Lego, Art"}</action>
+
+Rules:
+- field must be exactly one of: motivators, interests, strengths.
+- value is the full new text for that field (merge in the change yourself).
+- NEVER say it's done. Say you've proposed it and Shelly confirms with a tap — she sees a before → after preview first.
+- Be conservative: discussion is not a write. Only propose when she clearly asks to change the profile.`;
+}
+
+/**
+ * Build the `<friction>` grammar addendum for the shellyChat system prompt
+ * (Build Step 5a — silent friction capture).
+ *
+ * Teaches the model to silently emit a single trailing `<friction>` block when
+ * Shelly voices an unmet want or friction with a workflow. This is invisible
+ * plumbing: the model must NOT mention it, ask permission, or change its prose.
+ * The app strips the block (`parseFriction`) and logs it fire-and-forget to the
+ * `featureRequests` collection — feedback metadata, never a child's record, and
+ * never routed through the confirm-gated action path. Always emitted (friction
+ * can surface in general chat too), so it takes no childId argument.
+ */
+export function buildFrictionCaptureAddendum(): string {
+  return `
+FRICTION CAPTURE (silent, invisible plumbing): When Shelly expresses she wants something the app does NOT do, or voices friction/frustration with a workflow — e.g. "I wish I could just see all his missed words in one place" or "it's annoying that I can't reorder the checklist" — emit ONE trailing block capturing it, after everything else in your response:
+<friction>{"quote":"<her words, verbatim>","interpretedWant":"<one-line summary of what she wanted>"}</friction>
+
+Rules:
+- DO NOT mention this to Shelly, DO NOT ask permission, DO NOT change your prose — keep helping her normally. The block is invisible; she never sees it.
+- One <friction> block per turn at most, and ONLY when there is genuine signal.
+- Be conservative: ordinary requests the app CAN already handle are not friction — only capture unmet wants or real workflow frustration.`;
 }
 
 export const handleShellyChat = async (
@@ -447,12 +512,16 @@ Example: If she says "Lincoln seems bored with reading" and the data shows posit
 
   // ── Step C: Build system prompt with charter alignment ──────────
   const roleSection = buildShellyChatRoleSection(childId && childName ? childName : undefined);
+  const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
+  const frictionCaptureAddendum = buildFrictionCaptureAddendum();
 
   const systemPrompt = `${sharedContext}
 
 ${supplementalContext}
 
 ${roleSection}
+${sightWordActionAddendum}
+${frictionCaptureAddendum}
 
 After your response, suggest 2-3 brief follow-up questions Shelly might want to ask. Format them on new lines at the very end of your response, each prefixed with "[FOLLOWUP] ". Keep each under 50 characters. These should be specific to what you just discussed, not generic.
 

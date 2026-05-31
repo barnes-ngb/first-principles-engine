@@ -17,6 +17,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
+import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import { useScan } from '../../core/hooks/useScan'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import type { CertificateScanResult, CurriculumDetected } from '../../core/types'
@@ -72,6 +73,26 @@ export default function CertificateScanSection() {
             await updateSkillMapFromFindings(familyId, activeChildId, findings)
           } catch (err) {
             console.warn('[CertificateScanSection] Failed to update skill map (non-blocking):', err)
+          }
+
+          // FUNC-02 write-through: skills the scan reports as already "ahead" of
+          // the snapshot are mastered — advance their matching conceptual blocks
+          // toward RESOLVING so the Learning Map and Skill Snapshot stay in sync.
+          const masteredSkills = skills
+            .filter((s) => s.alignsWithSnapshot === 'ahead')
+            .map((s) => s.skill)
+          if (masteredSkills.length > 0) {
+            try {
+              await writeSnapshotUpdate(familyId, activeChildId, {
+                masteredSkills,
+                fullyMastered: false,
+                source: 'scan',
+                evidence: `Workbook scan: ${record.results.subject}`,
+                at: new Date().toISOString(),
+              })
+            } catch (err) {
+              console.warn('[CertificateScanSection] Snapshot write-through failed (non-blocking):', err)
+            }
           }
         }
       }

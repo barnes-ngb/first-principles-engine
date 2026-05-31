@@ -2,6 +2,9 @@
 > Auto-generated 2026-05-29. Use as Claude.ai project context file.
 > Sources: repo docs (MASTER_OUTLINE v15, CLAUDE.md, FIRST_PRINCIPLES_ALIGNMENT, GAME_WORLD_ECONOMY, STONEBRIDGE_BIBLE, FINDINGS_PIPELINE, HEALTH_REPORT 2026-05-29), code (AppShell, contextSlices.ts, tasks/index.ts), and Drive docs (Charter v2, Dad Lab Charter, State Compliance Guide).
 
+## Operating model
+How AI sessions assign, branch, confirm invariants, and use the review ledger — see `CLAUDE.md` › **AI Development Operating Model**. (Carry this pointer forward on regeneration.)
+
 ## Family
 - **Shelly** — parent; runs the weekday routine (formation first, then fundamentals). Fibromyalgia: energy management is non-negotiable and the app adapts to her energy. Her direct attention is the primary schedulable resource. One-tap evidence capture; MVDs are real school.
 - **Nathan** — dad; runs Saturday Dad Lab and builds the system.
@@ -38,7 +41,7 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 - Commits: **118** on `claude/hopeful-knuth-uRZOG` (HEALTH_REPORT shows 122 on the audit branch off main)
 - Test files: **125** · Tests passing: **2,038** across 124 files (per HEALTH_REPORT 2026-05-29; full suite not re-run here)
 - Firestore collection/doc helpers in `firestore.ts`: **34**
-- Cloud Functions exported: **24**
+- Cloud Functions exported: **25**
 - Chat task types (`tasks/index.ts` registry): **17**
 - Routes (`router.tsx`): **33**
 - Bundle (main chunk): **3.7 MB / 1.13 MB gzip** (per HEALTH_REPORT; not re-built here)
@@ -96,6 +99,7 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 | `shellyChatThreads` (+ `/messages`) | Shelly AI chat threads + messages |
 | `chapterResponses` | Read-aloud chapter discussion responses |
 | `childSkillMaps` | Per-child curriculum knowledge maps |
+| `featureRequests` | Silent Shelly-chat friction log (feedback metadata, not a child record; deduped; consumed by Step 5b's scheduled `fileFeatureRequests` CF, which files each as a GitHub issue and writes back `status: 'filed'` + `githubIssueUrl`) |
 
 **Subcollections:** `children/{childId}/transcriptionEvents` (Whisper events), `children/{childId}/wordProgress` (Knowledge Mine word progress).
 **Global:** `chapterBooks` (shared chapter book library).
@@ -113,14 +117,14 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 - Haiku (`claude-haiku-4-5-20251001`): generate, chat — routine generation (kid-facing utility; ≤1024 tokens).
 - Images: gpt-image-1.5 (OpenAI).
 
-**24 Cloud Functions:** `chat` (task dispatch), `analyzeEvaluationPatterns`, `weeklyReview`, `generateWeeklyReviewNow`, `generateMonthlyReview`, `generateMonthlyReviewNow`, `publishMonthlyReview`, `unpublishMonthlyReview`, `auditMonthlyReviewSources`, `generateActivity`, `transcribeAudio`, `healthCheck`, + 12 image functions (`generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`).
+**25 Cloud Functions:** `chat` (task dispatch), `analyzeEvaluationPatterns`, `weeklyReview`, `generateWeeklyReviewNow`, `generateMonthlyReview`, `generateMonthlyReviewNow`, `publishMonthlyReview`, `unpublishMonthlyReview`, `auditMonthlyReviewSources`, `generateActivity`, `transcribeAudio`, `fileFeatureRequests` (scheduled daily 08:00 CT — the only code path that talks to GitHub; files `featureRequests` as issues via GitHub REST), `healthCheck`, + 12 image functions (`generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`).
 
 **17 chat task types** (`tasks/index.ts`): plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview.
 
-**Context slices** (`TASK_CONTEXT` in `contextSlices.ts`) — per-task assembly of: `charter`, `childProfile`, `workbookPaces` (curriculum coverage, NO pace pressure), `weekFocus`, `hoursProgress`, `engagement`, `gradeResults`, `bookStatus`, `sightWords`, `recentEval`, `recentHistoryByDomain`, `wordMastery`, `generatedContent`, `workshopGames`, `mastery`, `skillSnapshot`, `recentScans`, `activityConfigs`, `dayToday`, `dadLabReports`. Examples:
+**Context slices** (`TASK_CONTEXT` in `contextSlices.ts`) — per-task assembly of: `charter`, `childProfile`, `workbookPaces` (curriculum coverage, NO pace pressure), `weekFocus`, `hoursProgress`, `engagement`, `gradeResults`, `bookStatus`, `sightWords`, `recentEval`, `recentHistoryByDomain`, `wordMastery`, `generatedContent`, `workshopGames`, `mastery`, `skillSnapshot`, `childSkillMap` (curriculum-map node coverage; `shellyChat`-only, read-only), `recentScans`, `activityConfigs`, `dayToday`, `dadLabReports`. Examples:
 - `plan` → 18 slices (the richest).
 - `chat` → `["charter","childProfile"]` only (Haiku, kid-facing — pinned by isolation test; must NOT gain eval/disposition context).
-- `shellyChat` → 14 shared slices + 8 supplemental queries in `tasks/shellyChat.ts` (disposition profile, weekly review strip, conundrum, teach-backs). Sonnet, planning-partner mode.
+- `shellyChat` → 15 shared slices (incl. `childSkillMap` curriculum-coverage, FUNC-03) + 8 supplemental queries in `tasks/shellyChat.ts` (disposition profile, weekly review strip, conundrum, teach-backs). Sonnet, planning-partner mode.
 - `weeklyReview` → charter, childProfile, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports (+ week-scoped `assembleWeekContext`); not routed through `chat` dispatch (dedicated scheduled CF).
 
 **Findings pipeline:** `EvaluationFinding { skill, status: mastered|emerging|not-yet|not-tested, evidence, notes?, testedAt }` (`evaluation.ts`). Created by Knowledge Mine quests (`<quest>` tag), guided evaluations (`<finding>` tag), and curriculum scans (findings-shaped). Written to `evaluationSessions` (replace) and `skillSnapshots.prioritySkills` (merge); feeds `childSkillMaps` via `updateSkillMapFromFindings()`.
@@ -156,9 +160,11 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 19. Quest Complete mom-note is hand-written by Shelly, never AI-generated (fallback: "Mom will see this tonight.").
 
 ## Architecture
-**Top files (computed):** PlannerChatPage.tsx (2,620) · functions/src/ai/chat.ts (2,466) · BookEditorPage.tsx (2,278) · useQuestSession.ts (1,870) · MyAvatarPage.tsx (1,804) · ShellyChatPage.tsx (1,653) · WorkshopPage.tsx (1,623) · VoxelCharacter.tsx (1,562) · chatPlanner.logic.ts (1,363) · contextSlices.ts (1,325).
+**Top files (computed):** PlannerChatPage.tsx (2,620) · functions/src/ai/chat.ts (2,466) · BookEditorPage.tsx (2,278) · useQuestSession.ts (1,870) · MyAvatarPage.tsx (1,804) · ShellyChatPage.tsx (1,632) · WorkshopPage.tsx (1,623) · VoxelCharacter.tsx (1,562) · chatPlanner.logic.ts (1,363) · contextSlices.ts (1,325).
 
-**Decomposition status:** Today, Kid Today, Planner render layers, and Avatar subpanels partially decomposed. Risk concentration is state-heavy files (PlannerChatPage, useQuestSession, MyAvatarPage).
+**shelly-chat (`src/features/shelly-chat/`):** ShellyChatPage (thin shell), ChatThreadDrawer, ChatMessageBubble, openChatWithContext, formatRelativeTime, `useShellyChatState` (thread/message/image state — ARCH-09), `useShellyChatFlows` (effects + send/image/upload/thread-CRUD handlers), `reflectionSuggestions` (pure heuristics), `parseFollowups` (pure `[FOLLOWUP]` parser), `parseChatActions` (pure `<action>` extractor + `ChatAction` allowlist). **Portal write layer (Build Steps 3b + 4, live — Tier B complete):** `useShellyChatActions` (propose→confirm→write; allowlist + active-child guards; no write before a confirm tap; applied writes audited inline via `appliedActions`) + `ActionConfirmCard` (inline Confirm / Dismiss / Confirm-all cards; sight words one-liner, `editProfileField` before→after diff). Two write kinds: sight words via shared `addSightWord`/`removeSightWord` in `useSightWordProgress`, and **profile soft fields via the shared `updateChildSoftProfile` writer (`src/core/family/`) — `editProfileField` for `motivators`/`interests`/`strengths` only (the `field` literal IS the allowlist; `supports`/`grade`/Tier-C paths are unrepresentable + rejected by `parseChatActions`)**. The same `updateChildSoftProfile` backs Settings' `SoftProfileSection` (no fork). `<action>` grammar (both kinds) taught via `buildSightWordActionAddendum` in `functions/src/ai/tasks/shellyChat.ts`. `supports` stays Tier C (`skillSnapshots`); Tier-C snapshot writes + ARCH-10 rules hardening out of scope. Tests (TEST-01): `parseFollowups`, `formatRelativeTime`, `useShellyChatState`, `reflectionSuggestions`, `parseChatActions`, `ShellyChatPage` smoke, `useShellyChatActions.logic`, plus `updateChildSoftProfile`.
+
+**Decomposition status:** Today, Kid Today, Planner render layers, and Avatar subpanels partially decomposed. ShellyChatPage state extracted to `useShellyChatState` (ARCH-09 IN PROGRESS). Risk concentration is state-heavy files (PlannerChatPage, useQuestSession, MyAvatarPage).
 
 **Known tech debt:** Ladder system partially deprecated (Dispositions replacing it; data kept). WorkbookConfig → ActivityConfig migration incomplete (both exist; ActivityConfig is primary). chat.ts CF large (prompt builders inline). Bundle ~3.7MB (code-split Three.js/jsPDF candidates). AvatarThumbnail spawns N WebGLRenderer instances. Hardcoded admin UID in SettingsPage.tsx. Hours partial-day edge (only tracked blocks count).
 

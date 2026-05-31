@@ -5,6 +5,8 @@ import Button from '@mui/material/Button'
 import Link from '@mui/material/Link'
 import Typography from '@mui/material/Typography'
 
+import { ErrorSource, reportError } from '../core/observability'
+
 interface Props {
   children: ReactNode
 }
@@ -37,6 +39,16 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, info.componentStack)
+    // ARCH-11: report scrubbed crash telemetry. React render errors don't reach
+    // window.onerror, so this boundary is the only capture point for them.
+    void reportError({
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      componentStack: info.componentStack ?? null,
+      route: typeof window !== 'undefined' ? window.location.pathname : null,
+      source: ErrorSource.ReactErrorBoundary,
+    })
   }
 
   handleUnhandledRejection = (event: PromiseRejectionEvent) => {

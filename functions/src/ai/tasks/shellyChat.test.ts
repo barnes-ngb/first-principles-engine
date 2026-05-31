@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFrictionCaptureAddendum,
   buildShellyChatRoleSection,
+  buildSightWordActionAddendum,
   formatConundrumTitle,
   formatDispositionProfile,
   formatRecentTeachBacks,
@@ -369,9 +371,10 @@ describe("buildShellyChatRoleSection", () => {
   it("includes the PLANNING-PARTNER MODE addendum when a child is selected", () => {
     const out = buildShellyChatRoleSection("Lincoln");
     expect(out).toContain("PLANNING-PARTNER MODE:");
-    // Names the four upstream section headers so the model can ground claims.
+    // Names the upstream section headers so the model can ground claims.
     expect(out).toContain("EVALUATION HISTORY BY DOMAIN");
     expect(out).toContain("DISPOSITION PROFILE");
+    expect(out).toContain("CURRICULUM MAP / COVERAGE");
     expect(out).toContain("RECENT WEEKLY REVIEWS");
     expect(out).toContain("RECENT TEACH-BACKS");
     // Names the child throughout (no stray placeholder).
@@ -393,6 +396,63 @@ describe("buildShellyChatRoleSection", () => {
     const out = buildShellyChatRoleSection("");
     expect(out).not.toContain("PLANNING-PARTNER MODE");
     expect(out).toContain("This is a general conversation");
+  });
+});
+
+// ── 7b. Sight-word <action> grammar addendum (Build Step 3b) ──
+
+describe("buildSightWordActionAddendum", () => {
+  it("teaches the add/remove grammar and binds to the active childId on a child tab", () => {
+    const out = buildSightWordActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("SIGHT-WORD ACTIONS");
+    // Uses the literal childId so the model addresses the right child.
+    expect(out).toContain('"childId":"lincoln123"');
+    expect(out).toContain('"kind":"addSightWord"');
+    expect(out).toContain('"kind":"removeSightWord"');
+    expect(out).toContain("Lincoln");
+    // Conservative + propose-only guardrails are present.
+    expect(out).toContain("NEVER say the change is done");
+    expect(out).toContain("do NOT emit an action");
+    // No stray template placeholder leaked.
+    expect(out).not.toContain("${");
+  });
+
+  it("returns empty string on the general (no-child) branch", () => {
+    expect(buildSightWordActionAddendum(undefined, undefined)).toBe("");
+    expect(buildSightWordActionAddendum("", "")).toBe("");
+  });
+
+  it("falls back to a generic noun when childName is absent but a childId exists", () => {
+    const out = buildSightWordActionAddendum("london456", undefined);
+    expect(out).toContain('"childId":"london456"');
+    expect(out).toContain("this child");
+  });
+});
+
+// ── 7c. Silent friction-capture grammar addendum (Build Step 5a) ──
+
+describe("buildFrictionCaptureAddendum", () => {
+  it("teaches the <friction> grammar with the interpretedWant field", () => {
+    const out = buildFrictionCaptureAddendum();
+    expect(out).toContain("FRICTION CAPTURE");
+    expect(out).toContain("<friction>");
+    expect(out).toContain("</friction>");
+    expect(out).toContain("interpretedWant");
+    expect(out).toContain('"quote"');
+  });
+
+  it("instructs the model to keep it silent and conservative", () => {
+    const out = buildFrictionCaptureAddendum().toLowerCase();
+    // Invisible plumbing: never surfaced to Shelly.
+    expect(out).toContain("do not");
+    expect(out).toContain("silent");
+    // One block per turn, only on genuine signal.
+    expect(out).toContain("one");
+  });
+
+  it("takes no arguments and is stable (no leaked template placeholder)", () => {
+    expect(buildFrictionCaptureAddendum()).toBe(buildFrictionCaptureAddendum());
+    expect(buildFrictionCaptureAddendum()).not.toContain("${");
   });
 });
 

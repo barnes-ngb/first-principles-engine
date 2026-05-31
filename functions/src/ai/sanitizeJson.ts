@@ -2,6 +2,11 @@
  * Sanitize JSON strings returned by LLMs that may contain minor formatting
  * issues such as trailing commas, unescaped control characters inside strings,
  * or markdown code fences.
+ *
+ * NOTE: A deliberate client-side port lives at `src/core/utils/sanitizeJson.ts`
+ * (separate build root — `functions/` cannot be imported from `src/`).
+ * TODO: consolidate the two sanitizeJson copies behind a shared package
+ * (future ARCH item) once cross-root sharing is set up.
  */
 
 /**

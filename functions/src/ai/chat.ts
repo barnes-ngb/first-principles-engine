@@ -2342,7 +2342,13 @@ export const chat = onCall(
     const db = getFirestore();
 
     // ── Load child profile (skip if no childId — e.g. shellyChat general mode) ──
-    let childData: { name: string; grade?: string } = { name: "" };
+    let childData: {
+      name: string;
+      grade?: string;
+      motivators?: string;
+      interests?: string;
+      strengths?: string;
+    } = { name: "" };
     let snapshotData:
       | {
           prioritySkills?: ChildContext["prioritySkills"];
@@ -2373,7 +2379,13 @@ export const chat = onCall(
         throw new HttpsError("not-found", "Child not found.");
       }
 
-      childData = childSnap.data() as { name: string; grade?: string };
+      childData = childSnap.data() as {
+        name: string;
+        grade?: string;
+        motivators?: string;
+        interests?: string;
+        strengths?: string;
+      };
 
       // ── Load skill snapshot (optional — may not exist yet) ─────
       const snapshotSnap = await db

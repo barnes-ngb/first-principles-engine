@@ -13,6 +13,7 @@ import { buildTheme } from './theme'
 import { AppRouter } from './router'
 import LoginPage from '../features/auth/LoginPage'
 import ProfileSelectPage from '../features/login/ProfileSelectPage'
+import ErrorReporterSync from '../core/observability/ErrorReporterSync'
 
 function AuthGate() {
   const { user, loading } = useAuth()
@@ -43,11 +44,14 @@ function AuthGate() {
 function ProfileGate() {
   const { profile } = useProfile()
 
-  if (!profile) {
-    return <ProfileSelectPage />
-  }
-
-  return <AppRouter />
+  // ARCH-11: keep the error reporter's context (active child + names to scrub) in
+  // sync now that the user is authenticated. ErrorReporterSync renders nothing.
+  return (
+    <>
+      <ErrorReporterSync />
+      {!profile ? <ProfileSelectPage /> : <AppRouter />}
+    </>
+  )
 }
 
 function ThemedApp() {
