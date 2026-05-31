@@ -43,7 +43,7 @@ London uses it today.
 | **Kid Today — XP / diamonds bar** | Ready | — | `KidTodayView.tsx:560-565` (`XpDiamondBar` + `MinecraftXpBar`), `src/core/xp/` | Ungated for London (former FEAT-02 de-gating). Safe: progress display, no reading load. |
 | **Kid Today — extra-activity logger** | Ready | — | `KidTodayView.tsx:666` → `KidExtraLogger.tsx` | Renders unconditionally ("I did more!" capture). Safe: low-friction, photo/voice capture, no reading load. |
 | **Kid Today — greeting / celebration tone** | Ready | — | `KidTodayView.tsx:102-135` (`getGreeting`, `CELEBRATIONS` vs `MC_CELEBRATIONS`) | Already London-tuned: he gets the generic warm pool, Lincoln gets Minecraft phrasing. Safe by construction. |
-| **Knowledge Mine / `/quest`** | **Hold-until-tuned** | A 6-year-old reading-level path: kindergarten content framing, lower/age-shaped level caps, prompts that don't assume Lincoln's reader. | `src/features/quest/workingLevels.ts:49-71` (`computeStartLevel`), `questTypes.ts` (`QUEST_MODE_LEVEL_CAP`), `useQuestSession.ts:491`, prompt builders in `functions/src/ai/chat.ts` | Calibration **is** per-child (reads `skillSnapshot.workingLevels`), so London would get *his* level — but the caps and content framing are identical to Lincoln's and the quest is reading-heavy. **Confirmed first gate target** (see hand-off below). |
+| **Knowledge Mine / `/quest`** | **Hold-until-tuned** | A 6-year-old reading-level path: kindergarten content framing, lower/age-shaped level caps, prompts that don't assume Lincoln's reader. | `src/features/quest/workingLevels.ts:49-71` (`computeStartLevel`), `questTypes.ts` (`QUEST_MODE_LEVEL_CAP`), `useQuestSession.ts:491`, prompt builders in `functions/src/ai/chat.ts` | Calibration **is** per-child (reads `skillSnapshot.workingLevels`), so London would get *his* level — but the caps and content framing are identical to Lincoln's and the quest is reading-heavy. **Now held via a reading-snapshot capability gate** (`canAccessKnowledgeMine` in `src/features/quest/knowledgeMineAccess.ts`): no reading skill snapshot → tile hidden + `/quest` redirects to `/today`; **opens automatically once London is evaluated/tuned**. Gate keys on snapshot data, never on name/`isLincoln` (see ARCH-15). |
 | **Teach-back** | **N/A** | — | `KidTodayView.tsx:414` (`showTeachBackSection`), `KidTeachBack.tsx:84`, `src/features/today/teachBackRecipient.ts` | Pedagogically this is the **older child teaching the younger** (Lincoln teaches London) — London is the audience/learner, not the teacher. Since **PR #1300** the code renders teach-back **only for a child who has a younger sibling to teach** (`findYoungerSibling`, derived birthdate→grade), so London (youngest) is correctly excluded and no longer sees a stray "I Taught London!" button; the recipient is named dynamically. London-**as-teacher** is not a Lincoln-first priority. Not a gap to fill. |
 | **Avatar / Hero Hub** | Ready | — | `src/features/avatar/MyAvatarPage.tsx:304-328` (`LONDON_FEATURES`, `themeStyle: 'platformer'`, `ageGroup: 'younger'`), `src/core/types/xp.ts:149-224` (`londonPowerupPrompt` per piece) | **Fully built for London**: his own features, platformer theme, younger body proportions, and dedicated platformer-style armor-piece image prompts. Tier progression is shared logic. Safe — this is a genuinely complete London path. |
 | **My Books** | Ready | — | `src/features/books/BookshelfPage.tsx:82-84` (London → `'storybook'` cover default), book editor/reader | No age/name access gate; London gets a storybook (not Minecraft) cover default. **One of London's strongest surfaces** (drawing + book-making). The Kid-Today must-do gate that fronts it is universal, not a London block. |
@@ -76,15 +76,19 @@ London uses it today.
 Prioritized. Each is a **small, reviewable follow-up PR** (this run is docs-only — it set policy and the
 register, it did not change gating).
 
-1. **Knowledge Mine — gate London out until a 6-year-old reading path exists.** *(confirmed first)*
-   - **Tile gate:** `src/features/avatar/MyAvatarPage.tsx:1622` — `<HeroLauncherTiles isLincoln={isLincoln} />`
-     → pass `hideMine={<capability check>}`. The `hideMine` prop already exists
-     (`src/features/avatar/HeroLauncherTiles.tsx:16,27`), so this is a one-line, clean seam.
-   - **Route guard:** `src/app/router.tsx:65` — the `/quest` route (`KnowledgeMinePage`) should redirect
-     (e.g. to `/progress` or Hero Hub) when the active child isn't capability-eligible, so the gate holds
-     even via a direct link.
-   - **Capability signal, not name:** gate on a reading-level / working-level threshold (e.g.
-     `skillSnapshot.workingLevels.phonics`), not on `child.name` or `isLincoln`.
+1. **Knowledge Mine — gate London out until a 6-year-old reading path exists.** ✅ **Shipped** (capability
+   gate on reading-snapshot presence; opens automatically once London is evaluated).
+   - **Tile gate:** `src/features/avatar/MyAvatarPage.tsx:1622` — now
+     `<HeroLauncherTiles isLincoln={isLincoln} hideMine={hideKnowledgeMine} />`, driven by
+     `canAccessKnowledgeMine(skillSnapshot)` via the shared `useChildSkillSnapshot` hook. Held = tile
+     absent (no "you can't" messaging).
+   - **Route guard:** `src/app/router.tsx:65` — `/quest` is wrapped in `RequireKnowledgeMineAccess`,
+     which silently redirects an ineligible child to `/today` (kid home) so a direct link can't bypass
+     the tile gate.
+   - **Capability signal, not name:** `canAccessKnowledgeMine` (`src/features/quest/knowledgeMineAccess.ts`)
+     keys on snapshot calibration data (priority skills / completed program / working levels), **never**
+     on `child.name` or `isLincoln`. **Smoke-check after merge:** confirm Lincoln still sees the Mine
+     tile and can open `/quest`. Data-gap that forces this shape is tracked as `ARCH-15`.
 
 2. **Math eval (FEAT-06) — build, don't gate.** No harmful surface to close off; the work is *building*
    the guided math-eval flow + London calibration. Tracked in the ledger as `FEAT-06`. No gate PR needed.

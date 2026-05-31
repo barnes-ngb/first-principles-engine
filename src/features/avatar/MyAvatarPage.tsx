@@ -22,7 +22,9 @@ import {
 } from '../../core/firebase/firestore'
 import { uploadArtifactFile, generateFilename } from '../../core/firebase/upload'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { canAccessKnowledgeMine } from '../quest/knowledgeMineAccess'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { getDailyArmorSession, getMorningSuitUpMessage, getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { normalizeAvatarProfile } from './normalizeProfile'
@@ -195,6 +197,11 @@ export default function MyAvatarPage() {
   const { activeChild, children, setActiveChildId, isChildProfile } = useActiveChild()
   const childId = activeChild?.id ?? ''
   const isLincoln = activeChild?.name?.toLowerCase() === 'lincoln'
+
+  // Knowledge Mine launcher gate: capability, not name. The tile is shown only
+  // once a reading evaluation has produced calibration data for this child.
+  const { snapshot: skillSnapshot } = useChildSkillSnapshot(familyId, childId || undefined)
+  const hideKnowledgeMine = !canAccessKnowledgeMine(skillSnapshot)
 
   const [profile, setProfile] = useState<AvatarProfile | null>(null)
   const [session, setSession] = useState<DailyArmorSession | null>(null)
@@ -1619,7 +1626,7 @@ export default function MyAvatarPage() {
           />
         )}
 
-        <HeroLauncherTiles isLincoln={isLincoln} />
+        <HeroLauncherTiles isLincoln={isLincoln} hideMine={hideKnowledgeMine} />
       </Page>
 
       {/* Unequip dialog removed — tap toggles directly */}

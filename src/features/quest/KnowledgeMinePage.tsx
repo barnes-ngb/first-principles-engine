@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc, getDocs, query, updateDoc, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
+import { doc, getDocs, query, updateDoc, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -9,8 +9,9 @@ import Typography from '@mui/material/Typography'
 
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { evaluationSessionsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
 import type { EvaluationSession, SkillSnapshot } from '../../core/types'
 import { EvaluationDomain, SkillLevel } from '../../core/types/enums'
 import MinecraftAvatar from '../avatar/MinecraftAvatar'
@@ -112,28 +113,11 @@ export default function KnowledgeMinePage() {
   const quest = useQuestSession()
   const xpLedger = useXpLedger(familyId, activeChildId ?? '')
   const [activeDomain, setActiveDomain] = useState<QuestDomainConfig | null>(null)
-  const [snapshot, setSnapshot] = useState<SkillSnapshot | null>(null)
 
   const childName = activeChild?.name || 'Explorer'
 
-  // Load skill snapshot for recommendation badges
-  useEffect(() => {
-    if (!activeChildId || !familyId) return
-    let cancelled = false
-    async function load() {
-      try {
-        const ref = doc(skillSnapshotsCollection(familyId), activeChildId!)
-        const snap = await getDoc(ref)
-        if (!cancelled && snap.exists()) {
-          setSnapshot(snap.data() as SkillSnapshot)
-        }
-      } catch {
-        // Non-blocking
-      }
-    }
-    void load()
-    return () => { cancelled = true }
-  }, [activeChildId, familyId])
+  // Load skill snapshot for recommendation badges (shared eligibility fetch)
+  const { snapshot } = useChildSkillSnapshot(familyId, activeChildId || undefined)
 
   // Load in-progress quest sessions (within 24h) for resume card
   const [resumeSession, setResumeSession] = useState<(EvaluationSession & Partial<InteractiveSessionData>) | null>(null)

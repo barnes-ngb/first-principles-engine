@@ -3,6 +3,9 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import HeroLauncherTiles from '../HeroLauncherTiles'
+import { canAccessKnowledgeMine } from '../../quest/knowledgeMineAccess'
+import type { SkillSnapshot } from '../../../core/types'
+import { SkillLevel } from '../../../core/types/enums'
 
 const navigateMock = vi.fn()
 vi.mock('react-router-dom', async () => {
@@ -75,5 +78,32 @@ describe('HeroLauncherTiles', () => {
 
     fireEvent.click(screen.getByTestId('hero-launcher-books'))
     expect(navigateMock).toHaveBeenCalledWith('/books')
+  })
+})
+
+// Capability gate: the tile is driven by canAccessKnowledgeMine(snapshot),
+// exactly as MyAvatarPage wires it. No name / isLincoln in the decision.
+describe('HeroLauncherTiles — Knowledge Mine capability gate', () => {
+  const evaluated: SkillSnapshot = {
+    childId: 'c1',
+    prioritySkills: [
+      { tag: 'reading.cvcBlend', label: 'CVC blending', level: SkillLevel.Emerging },
+    ],
+    supports: [],
+    stopRules: [],
+    evidenceDefinitions: [],
+  }
+
+  it('shows the Mine tile for an evaluated child (reading snapshot present)', () => {
+    renderTiles({ isLincoln: true, hideMine: !canAccessKnowledgeMine(evaluated) })
+    expect(screen.getByTestId('hero-launcher-mine')).toBeInTheDocument()
+  })
+
+  it('hides the Mine tile for an unevaluated child (no snapshot) — gracefully absent', () => {
+    renderTiles({ isLincoln: false, hideMine: !canAccessKnowledgeMine(null) })
+    expect(screen.queryByTestId('hero-launcher-mine')).toBeNull()
+    // Other tiles remain — held state is absence, not a lockout.
+    expect(screen.getByTestId('hero-launcher-workshop')).toBeInTheDocument()
+    expect(screen.getByTestId('hero-launcher-books')).toBeInTheDocument()
   })
 })
