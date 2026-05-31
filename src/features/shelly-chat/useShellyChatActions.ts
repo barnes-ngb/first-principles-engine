@@ -7,10 +7,12 @@
 //
 // Guardrails (see docs/SHELLY_PORTAL_CONTEXT.md §3, §5):
 //   - No write before a confirm tap — `stagePendingActions` only stages.
-//   - Allowlist only — the `ChatAction` union (3a) is the structural boundary;
-//     this hook handles exactly the two sight-word kinds.
-//   - Route through the shared writers (`addSightWord` / `removeSightWord`) —
-//     no ad-hoc setDoc from the page.
+//   - Allowlist only — the `ChatAction` union is the structural boundary; this
+//     hook handles the two sight-word kinds (3b) plus Tier-B `editProfileField`
+//     (Step 4: motivators/interests/strengths only).
+//   - Route through the shared writers (`addSightWord` / `removeSightWord` for
+//     sight words; `updateChildSoftProfile` for soft fields) — no ad-hoc
+//     setDoc from the page, and no fork with the Settings editor.
 //   - Bind to the active child — `action.childId` must resolve to a family
 //     child AND match the active chat context, or the action is rejected.
 
@@ -18,6 +20,7 @@ import { useCallback, useState } from 'react'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
 
 import { shellyChatMessagesCollection } from '../../core/firebase/firestore'
+import { updateChildSoftProfile } from '../../core/family/updateChildSoftProfile'
 import type { ChatAction, Child } from '../../core/types'
 import { addSightWord, removeSightWord } from '../books/useSightWordProgress'
 
@@ -112,8 +115,15 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
 
       if (action.kind === 'addSightWord') {
         await addSightWord(familyId, action.childId, action.word)
-      } else {
+      } else if (action.kind === 'removeSightWord') {
         await removeSightWord(familyId, action.childId, action.word)
+      } else {
+        // editProfileField — replace-write one freeform soft-profile field
+        // through the shared, allowlist-validated writer (Tier B). Idempotent:
+        // re-applying the same value is a harmless overwrite.
+        await updateChildSoftProfile(familyId, action.childId, {
+          [action.field]: action.value,
+        })
       }
 
       setPending((prev) =>

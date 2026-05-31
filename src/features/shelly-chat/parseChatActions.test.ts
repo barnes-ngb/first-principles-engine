@@ -75,13 +75,59 @@ describe('parseChatActions', () => {
     ])
   })
 
-  it('rejects a well-formed block with a disallowed editProfileField kind', () => {
+  it('extracts an editProfileField block with an allowed field', () => {
+    const raw =
+      'Sounds good.\n<action>{"kind": "editProfileField", "childId": "lincoln", "field": "motivators", "value": "Minecraft, Lego, Art"}</action>'
+    const { actions, cleanText } = parseChatActions(raw)
+    expect(actions).toEqual([
+      {
+        kind: 'editProfileField',
+        childId: 'lincoln',
+        field: 'motivators',
+        value: 'Minecraft, Lego, Art',
+      },
+    ])
+    expect(cleanText).toBe('Sounds good.')
+  })
+
+  it('accepts each of the three allowed soft-profile fields', () => {
+    for (const field of ['motivators', 'interests', 'strengths'] as const) {
+      const raw = `<action>{"kind": "editProfileField", "childId": "london", "field": "${field}", "value": "x"}</action>`
+      const { actions } = parseChatActions(raw)
+      expect(actions).toEqual([
+        { kind: 'editProfileField', childId: 'london', field, value: 'x' },
+      ])
+    }
+  })
+
+  it('rejects an editProfileField targeting the disallowed grade field', () => {
     const raw =
       '<action>{"kind": "editProfileField", "childId": "lincoln", "field": "grade", "value": "4"}</action>'
     const { actions, cleanText } = parseChatActions(raw)
     expect(actions).toEqual([])
     // tag is still stripped even though the action is rejected
     expect(cleanText).toBe('')
+  })
+
+  it('rejects an editProfileField targeting Tier-C supports', () => {
+    const raw =
+      '<action>{"kind": "editProfileField", "childId": "lincoln", "field": "supports", "value": "extra time"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
+  })
+
+  it('rejects an editProfileField with a missing value', () => {
+    const raw =
+      '<action>{"kind": "editProfileField", "childId": "lincoln", "field": "interests"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
+  })
+
+  it('rejects an editProfileField with a missing childId', () => {
+    const raw =
+      '<action>{"kind": "editProfileField", "field": "interests", "value": "dinosaurs"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
   })
 
   it('rejects a well-formed block with a disallowed setPrioritySkill kind', () => {

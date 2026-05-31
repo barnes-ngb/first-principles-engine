@@ -22,24 +22,52 @@ export interface ParsedChatActions {
   cleanText: string
 }
 
+/** The three soft-profile fields `editProfileField` may target — the allowlist. */
+const SOFT_PROFILE_FIELDS = ['motivators', 'interests', 'strengths'] as const
+
 /**
  * Validate an arbitrary parsed payload against the `ChatAction` allowlist.
  *
- * Returns a typed `ChatAction` only for the two sight-word kinds with a string
- * `childId` and a non-empty string `word`. Everything else — including a
- * well-formed JSON object carrying an unknown or Tier-C `kind` — returns null.
- * This is the structural guarantee that the portal can never touch Tier-C
- * paths (see docs/SHELLY_PORTAL_CONTEXT.md §3).
+ * Returns a typed `ChatAction` only for the recognized kinds:
+ * - sight words: string `childId` + non-empty string `word`.
+ * - `editProfileField`: string `childId` + `field` in
+ *   `motivators | interests | strengths` + string `value`.
+ *
+ * Everything else — including a well-formed JSON object carrying an unknown or
+ * Tier-C `kind`, or an `editProfileField` targeting a disallowed field like
+ * `supports`/`grade`/`prioritySkills` — returns null. This is the structural
+ * guarantee that the portal can never touch Tier-C paths (see
+ * docs/SHELLY_PORTAL_CONTEXT.md §3).
  */
 function toChatAction(payload: unknown): ChatAction | null {
   if (typeof payload !== 'object' || payload === null) return null
   const obj = payload as Record<string, unknown>
 
-  if (obj.kind !== 'addSightWord' && obj.kind !== 'removeSightWord') return null
   if (typeof obj.childId !== 'string' || obj.childId.length === 0) return null
-  if (typeof obj.word !== 'string' || obj.word.trim().length === 0) return null
 
-  return { kind: obj.kind, childId: obj.childId, word: obj.word }
+  if (obj.kind === 'addSightWord' || obj.kind === 'removeSightWord') {
+    if (typeof obj.word !== 'string' || obj.word.trim().length === 0) return null
+    return { kind: obj.kind, childId: obj.childId, word: obj.word }
+  }
+
+  if (obj.kind === 'editProfileField') {
+    if (
+      typeof obj.field !== 'string' ||
+      !(SOFT_PROFILE_FIELDS as readonly string[]).includes(obj.field)
+    ) {
+      return null
+    }
+    // value may be empty (clearing a field) but must be a string.
+    if (typeof obj.value !== 'string') return null
+    return {
+      kind: 'editProfileField',
+      childId: obj.childId,
+      field: obj.field as (typeof SOFT_PROFILE_FIELDS)[number],
+      value: obj.value,
+    }
+  }
+
+  return null
 }
 
 /**
