@@ -52,6 +52,59 @@ function parseMinutesFromChecklist(label: string): number {
   return match ? parseInt(match[1]) : 0
 }
 
+/** A single minute contribution from one day log, after the canonical
+ *  block-vs-checklist rule has been applied. `location` is the block's location
+ *  (or `Home` for checklist items, which are assumed at-home). */
+export type DayLogContribution = {
+  subjectBucket: string
+  minutes: number
+  location?: string
+}
+
+/**
+ * Canonical per-day-log minute extraction — the SINGLE source of truth for how a
+ * day log converts into counted minutes. Used by both `computeHoursSummary`
+ * (totals / compliance) and `computeMonthlyTrend` (the trend chart) so the two
+ * can never diverge (DATA-01).
+ *
+ * Rule: if ANY block has tracked `actualMinutes`, use block-level actuals and
+ * ignore the checklist; otherwise fall back to completed checklist items
+ * (estimatedMinutes ?? plannedMinutes ?? minutes parsed from the label).
+ */
+export const dayLogMinuteContributions = (log: DayLog): DayLogContribution[] => {
+  const out: DayLogContribution[] = []
+  const hasActualBlockMinutes = log.blocks.some((b) => (b.actualMinutes ?? 0) > 0)
+
+  if (hasActualBlockMinutes) {
+    for (const block of log.blocks) {
+      const minutes = block.actualMinutes ?? 0
+      if (minutes <= 0) continue
+      out.push({
+        subjectBucket: block.subjectBucket ?? 'Other',
+        minutes,
+        location: block.location,
+      })
+    }
+  } else if (log.checklist) {
+    for (const item of log.checklist) {
+      if (!item.completed) continue
+      const minutes =
+        item.estimatedMinutes ??
+        item.plannedMinutes ??
+        parseMinutesFromChecklist(item.label)
+      if (minutes <= 0) continue
+      out.push({
+        subjectBucket: item.subjectBucket ?? 'Other',
+        minutes,
+        // Checklist completions are assumed at the regular place of instruction.
+        location: LearningLocation.Home,
+      })
+    }
+  }
+
+  return out
+}
+
 export const computeHoursSummary = (
   dayLogs: DayLog[],
   hoursEntries: HoursEntry[],
@@ -84,36 +137,16 @@ export const computeHoursSummary = (
     byDate[entry.date] = (byDate[entry.date] ?? 0) + minutes
   }
 
-  // ── SOURCE 2: Day logs (completed checklist items — primary for planner-generated days) ──
+  // ── SOURCE 2: Day logs (block actuals preferred, else completed checklist) ──
+  // Uses the shared `dayLogMinuteContributions` rule so this total can never
+  // diverge from the trend chart (DATA-01).
   for (const log of filteredLogs) {
-    // Check if any block has actual tracked minutes
-    const hasActualBlockMinutes = log.blocks.some(b => (b.actualMinutes ?? 0) > 0)
-
-    if (hasActualBlockMinutes) {
-      // Use block-level actual minutes (manually tracked sessions)
-      for (const block of log.blocks) {
-        const minutes = block.actualMinutes ?? 0
-        if (minutes <= 0) continue
-        const bucket = block.subjectBucket ?? 'Other'
-        const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
-        existing.total += minutes
-        if (block.location === LearningLocation.Home) existing.home += minutes
-        bySubjectMap.set(bucket, existing)
-        byDate[log.date] = (byDate[log.date] ?? 0) + minutes
-      }
-    } else if (log.checklist) {
-      // Use checklist completion (planner-generated days)
-      for (const item of log.checklist) {
-        if (!item.completed) continue
-        const minutes = item.estimatedMinutes ?? item.plannedMinutes ?? parseMinutesFromChecklist(item.label)
-        if (minutes <= 0) continue
-        const bucket = item.subjectBucket ?? 'Other'
-        const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
-        existing.total += minutes
-        existing.home += minutes // assume home
-        bySubjectMap.set(bucket, existing)
-        byDate[log.date] = (byDate[log.date] ?? 0) + minutes
-      }
+    for (const { subjectBucket, minutes, location } of dayLogMinuteContributions(log)) {
+      const existing = bySubjectMap.get(subjectBucket) ?? { total: 0, home: 0 }
+      existing.total += minutes
+      if (location === LearningLocation.Home) existing.home += minutes
+      bySubjectMap.set(subjectBucket, existing)
+      byDate[log.date] = (byDate[log.date] ?? 0) + minutes
     }
   }
 
@@ -160,6 +193,108 @@ export const computeHoursSummary = (
     bySubject,
     byDate,
   }
+}
+
+// ─── Monthly Trend ─────────────────────────────────────────────────────────
+
+export type MonthlyTrendDatum = {
+  /** "YYYY-MM" */
+  month: string
+  coreMinutes: number
+  nonCoreMinutes: number
+  totalMinutes: number
+  cumulativeTotal: number
+  cumulativeCore: number
+}
+
+/**
+ * Per-month hours aggregation for the Monthly Trend chart. Uses the SAME data
+ * sources and the SAME core-bucket set and per-day-log rule as
+ * `computeHoursSummary`, so the cumulative core/total at the end of the period
+ * reconciles exactly with the canonical compliance figure for any dataset whose
+ * dates fall within [startDate, endDate] (DATA-01).
+ *
+ * Buckets are created for every month in the inclusive range; months with no
+ * activity render as zero.
+ */
+export const computeMonthlyTrend = (
+  dayLogs: DayLog[],
+  hoursEntries: HoursEntry[],
+  adjustments: HoursAdjustment[],
+  startDate: string,
+  endDate: string,
+  childId?: string,
+): MonthlyTrendDatum[] => {
+  // Mirror computeHoursSummary's child-id safety-net filtering.
+  const filteredLogs = childId
+    ? dayLogs.filter((l) => l.childId === childId)
+    : dayLogs
+  const filteredEntries = childId
+    ? hoursEntries.filter((e) => e.childId === childId)
+    : hoursEntries
+  const filteredAdj = childId
+    ? adjustments.filter((a) => !a.childId || a.childId === childId)
+    : adjustments
+
+  // Build month buckets across the inclusive range.
+  const [startY, startM] = startDate.split('-').map(Number)
+  const [endY, endM] = endDate.split('-').map(Number)
+  const buckets = new Map<string, { core: number; nonCore: number }>()
+  let y = startY
+  let m = startM
+  while (y < endY || (y === endY && m <= endM)) {
+    buckets.set(`${y}-${String(m).padStart(2, '0')}`, { core: 0, nonCore: 0 })
+    m++
+    if (m > 12) {
+      m = 1
+      y++
+    }
+  }
+
+  const tally = (date: string, subjectBucket: string, minutes: number) => {
+    if (!date) return
+    const bucket = buckets.get(date.slice(0, 7))
+    if (!bucket) return
+    if (coreBuckets.has(subjectBucket as SubjectBucket)) bucket.core += minutes
+    else bucket.nonCore += minutes
+  }
+
+  // SOURCE 1: hours entries
+  for (const entry of filteredEntries) {
+    const minutes = entryMinutes(entry)
+    if (minutes <= 0) continue
+    tally(entry.date, entry.subjectBucket ?? 'Other', minutes)
+  }
+
+  // SOURCE 2: day logs (shared canonical rule)
+  for (const log of filteredLogs) {
+    for (const { subjectBucket, minutes } of dayLogMinuteContributions(log)) {
+      tally(log.date, subjectBucket, minutes)
+    }
+  }
+
+  // Adjustments (may be negative — no minutes guard, matching computeHoursSummary)
+  for (const adj of filteredAdj) {
+    tally(adj.date, adj.subjectBucket ?? 'Other', adj.minutes)
+  }
+
+  const result: MonthlyTrendDatum[] = []
+  let cumulativeTotal = 0
+  let cumulativeCore = 0
+  for (const [month, data] of buckets) {
+    const totalMinutes = data.core + data.nonCore
+    cumulativeTotal += totalMinutes
+    cumulativeCore += data.core
+    result.push({
+      month,
+      coreMinutes: data.core,
+      nonCoreMinutes: data.nonCore,
+      totalMinutes,
+      cumulativeTotal,
+      cumulativeCore,
+    })
+  }
+  return result
 }
 
 // ─── CSV Generation ──────────────────────────────────────────────────────────

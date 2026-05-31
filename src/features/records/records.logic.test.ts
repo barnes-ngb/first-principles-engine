@@ -16,6 +16,7 @@ import {
 import {
   buildComplianceZip,
   computeHoursSummary,
+  computeMonthlyTrend,
   deriveChildIdFromDocId,
   entryMinutes,
   generateComplianceReportHtml,
@@ -451,6 +452,129 @@ describe('computeHoursSummary', () => {
     expect(summary.totalMinutes).toBe(30)
     expect(summary.bySubject.length).toBe(1)
     expect(summary.bySubject[0].subjectBucket).toBe('Reading')
+  })
+})
+
+// ─── computeMonthlyTrend (DATA-01 compliance reconciliation guard) ───────────
+
+describe('computeMonthlyTrend', () => {
+  // A fixed, representative multi-month dataset that exercises every code path
+  // the compliance figure depends on: block-actuals days, a checklist-fallback
+  // day, an inflated checklist that must be IGNORED on a tracked day (the exact
+  // DATA-01 over-count source), a manual hours entry, a positive adjustment, a
+  // negative adjustment, and a non-core block.
+  const dayLogs: DayLog[] = [
+    // Jan: block actuals, with an INFLATED checklist that must be ignored.
+    {
+      childId: 'lincoln',
+      date: '2026-01-10',
+      blocks: [
+        { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 50, location: 'Home' },
+        { type: DayBlockType.Math, subjectBucket: SubjectBucket.Math, actualMinutes: 40, location: 'Home' },
+      ],
+      checklist: [
+        // Inflated estimates — the old MonthlyTrend counted these (120) instead
+        // of the 90 actual minutes. Canonical (and now the trend) ignore them.
+        { label: 'Reading (120m)', completed: true, subjectBucket: SubjectBucket.Reading, estimatedMinutes: 120 },
+        { label: 'Math (120m)', completed: true, subjectBucket: SubjectBucket.Math, estimatedMinutes: 120 },
+      ],
+    } as DayLog,
+    // Feb: partial-day edge — one tracked block, one untracked block (counts 0).
+    {
+      childId: 'lincoln',
+      date: '2026-02-05',
+      blocks: [
+        { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 30, location: 'Home' },
+        { type: DayBlockType.Math, subjectBucket: SubjectBucket.Math, location: 'Home' }, // no actualMinutes
+      ],
+    } as DayLog,
+    // Feb: checklist-fallback day (no block actuals at all).
+    {
+      childId: 'lincoln',
+      date: '2026-02-12',
+      blocks: [],
+      checklist: [
+        { label: 'Science (25m)', completed: true, subjectBucket: SubjectBucket.Science, estimatedMinutes: 25 },
+        { label: 'Art (40m)', completed: true, subjectBucket: SubjectBucket.Art, estimatedMinutes: 40 }, // non-core
+        { label: 'Reading (20m)', completed: false, subjectBucket: SubjectBucket.Reading, estimatedMinutes: 20 }, // not completed
+      ],
+    } as DayLog,
+  ]
+  const hoursEntries: HoursEntry[] = [
+    { childId: 'lincoln', date: '2026-01-20', minutes: 60, subjectBucket: SubjectBucket.Science, location: 'Home' },
+  ]
+  const adjustments: HoursAdjustment[] = [
+    { date: '2026-02-15', minutes: 15, reason: 'extra math', subjectBucket: SubjectBucket.Math },
+    { date: '2026-02-16', minutes: -10, reason: 'overcounted reading', subjectBucket: SubjectBucket.Reading },
+  ]
+
+  // Expected core minutes by month (core = Reading/LangArts/Math/Science/SocialStudies):
+  //   Jan: 50 Reading + 40 Math (block actuals; checklist ignored) + 60 Science entry = 150
+  //   Feb: 30 Reading (tracked block) + 25 Science (checklist) + 15 Math adj − 10 Reading adj = 60
+  // Expected non-core minutes:
+  //   Feb: 40 Art (checklist) = 40
+  it('buckets core/non-core minutes per month using the canonical rule', () => {
+    const trend = computeMonthlyTrend(dayLogs, hoursEntries, adjustments, '2026-01', '2026-02', 'lincoln')
+
+    expect(trend).toHaveLength(2)
+    const [jan, feb] = trend
+
+    expect(jan.month).toBe('2026-01')
+    expect(jan.coreMinutes).toBe(150)
+    expect(jan.nonCoreMinutes).toBe(0)
+    expect(jan.totalMinutes).toBe(150)
+
+    expect(feb.month).toBe('2026-02')
+    expect(feb.coreMinutes).toBe(60)
+    expect(feb.nonCoreMinutes).toBe(40)
+    expect(feb.totalMinutes).toBe(100)
+
+    // Cumulative core at end of period
+    expect(feb.cumulativeCore).toBe(210)
+    expect(feb.cumulativeTotal).toBe(250)
+  })
+
+  it('does NOT count inflated checklist estimates on a block-tracked day (the DATA-01 over-count)', () => {
+    const trend = computeMonthlyTrend(dayLogs, [], [], '2026-01', '2026-01', 'lincoln')
+    // 50 + 40 block actuals — NOT the 120 + 120 = 240 inflated checklist estimates.
+    expect(trend[0].coreMinutes).toBe(90)
+  })
+
+  it('RECONCILES exactly with computeHoursSummary core total (compliance guard)', () => {
+    const trend = computeMonthlyTrend(dayLogs, hoursEntries, adjustments, '2026-01', '2026-02', 'lincoln')
+    const summary = computeHoursSummary(dayLogs, hoursEntries, adjustments, 'lincoln')
+
+    const cumulativeCore = trend[trend.length - 1].cumulativeCore
+    const cumulativeTotal = trend[trend.length - 1].cumulativeTotal
+
+    // The whole point of DATA-01: the trend's cumulative figures must equal the
+    // canonical compliance figures for data within the period.
+    expect(cumulativeCore).toBe(summary.coreMinutes)
+    expect(cumulativeTotal).toBe(summary.totalMinutes)
+  })
+
+  it('creates zero buckets for months with no activity across the full range', () => {
+    const trend = computeMonthlyTrend(dayLogs, hoursEntries, adjustments, '2025-12', '2026-03', 'lincoln')
+    expect(trend.map((t) => t.month)).toEqual(['2025-12', '2026-01', '2026-02', '2026-03'])
+    expect(trend[0].totalMinutes).toBe(0) // Dec — no activity
+    expect(trend[3].totalMinutes).toBe(0) // Mar — no activity
+    // Cumulative still reconciles at the end since all data is in-range.
+    const summary = computeHoursSummary(dayLogs, hoursEntries, adjustments, 'lincoln')
+    expect(trend[trend.length - 1].cumulativeCore).toBe(summary.coreMinutes)
+  })
+
+  it('filters to the requested child (safety net)', () => {
+    const mixed: DayLog[] = [
+      ...dayLogs,
+      {
+        childId: 'london',
+        date: '2026-01-11',
+        blocks: [{ type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 999, location: 'Home' }],
+      } as DayLog,
+    ]
+    const trend = computeMonthlyTrend(mixed, hoursEntries, adjustments, '2026-01', '2026-02', 'lincoln')
+    // London's 999 must not leak into Lincoln's Jan core.
+    expect(trend[0].coreMinutes).toBe(150)
   })
 })
 

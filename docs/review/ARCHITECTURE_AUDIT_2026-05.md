@@ -250,13 +250,19 @@ Disposition-over-mastery framing confirmed in DispositionProfile.tsx and monthly
 
 ### 4.1 DATA-01 (compliance, time-sensitive — June 30 deadline)
 
-**Status: UNCHANGED.** The divergence between `MonthlyTrend` and `computeHoursSummary()` is documented in code (comment at `MonthlyTrend.tsx:33–42`), in `HEALTH_REPORT.md`, and in the ledger. The fix has not been applied.
+**Status: FIXED** (`fix/data-01-core-hours-overcount`). Classified as a **view-layer reconciliation** (SAFE): the canonical `computeHoursSummary()` total was correct; only `MonthlyTrend` computed a parallel, wrong number.
 
-**Authoritative figure:** `computeHoursSummary()` = **598.73h core** for Lincoln.  
-**Gap to MO 600-core line:** ~1.3h (approximately 80 minutes of core subjects needed before June 30, 2026).  
-**MonthlyTrend over-count:** reads completed checklist estimated minutes instead of block actual minutes.
+**Authoritative figure (unchanged):** `computeHoursSummary()` = **598.73h core** for Lincoln.  
+**Gap to MO 600-core line:** ~1.27h — still ~80 minutes of core subjects needed before June 30, 2026. *(The fix did NOT move this number — it never touched stored data or the canonical computation. It only stops `MonthlyTrend` from displaying a falsely-above-600 figure.)*  
+**Root cause:** `MonthlyTrend` read completed-checklist `estimatedMinutes` (and skipped logs with no checklist) instead of the canonical block-`actualMinutes`-preferred rule — on partially-tracked days this over-counted, pushing the chart's cumulative core above 600 while compliance was under.
 
-**Urgency is real:** June 30 is 32 days away. The fix proposal (route MonthlyTrend through per-month buckets from `computeHoursSummary`) is documented. This should be the **next PROMPT_FIX run**.
+**Fix applied:**
+- Extracted the canonical per-day-log rule into `dayLogMinuteContributions()` in `records.logic.ts`; `computeHoursSummary` now uses it (result-identical — all 46 existing tests pass unchanged).
+- Added `computeMonthlyTrend()` in `records.logic.ts` sharing the same sources, core-bucket set, and per-day rule. Its cumulative core/total reconcile **exactly** with `computeHoursSummary` for any data within `[startDate, endDate]`.
+- `MonthlyTrend.tsx` now calls `computeMonthlyTrend()` and deletes its parallel math.
+- Tests: +5 `computeMonthlyTrend` cases in `records.logic.test.ts` (incl. the reconciliation assertion `cumulativeCore === summary.coreMinutes`, the inflated-checklist-ignored case, adjustments, partial-day edge) + a new `MonthlyTrend.test.tsx` asserting the rendered core chip matches the canonical figure.
+
+**No stored hours value or canonical additive computation was altered.** Dashboard, compliance cards, and `MonthlyTrend` now agree.
 
 No new views added since last audit break the additive-hours invariant. `DraftReadyCard`, `WeekInEvidence`, `BookReviewChat` are all display-only.
 
@@ -295,7 +301,7 @@ Checked all surfaces added since the seed audit (Story Gen V2 Phase 2, Monthly R
 | **FUNC-01** | 2 | OPEN | No authoritative source for "where is Lincoln" — 6 overlapping truth surfaces | skillSnapshot (closest to auth), childSkillMaps, activityConfigs, ladderProgress (deprecated), dispositionCache — no reconciliation |
 | **FUNC-02** | 2 | **FIXED** | Scan → Skill Snapshot write-through landed (`b60c3d6`, [PR #1281](https://github.com/barnes-ngb/first-principles-engine/pull/1281)) | New `skillSnapshotWrites.ts` central writer wired into both scan paths (certificate + worksheet); additive/idempotent reducer + 17 tests. Inline-writer migration deferred to ARCH-12. |
 | **ETHOS-01** | 3 | OPEN (new) | Charter preamble absent from 5/17 task types | `generateStory`, `reviseStory`, `revisePage`, `quest`, `scan` — story trio is highest concern |
-| **DATA-01** | 4† | OPEN | `MonthlyTrend` over-counts core; Lincoln ~1.3h under MO 600-core (June 30 deadline) | `MonthlyTrend.tsx:48–63` vs `records.logic.ts:85–115`; fix documented, not applied |
+| **DATA-01** | 4† | **FIXED** | View-layer reconciliation: `MonthlyTrend` now reads canonical `computeMonthlyTrend()`; chart agrees with the 598.73h core compliance figure. No stored data / canonical-math change. | `records.logic.ts` (`dayLogMinuteContributions`, `computeMonthlyTrend`), `MonthlyTrend.tsx`; guards in `records.logic.test.ts` + `MonthlyTrend.test.tsx` |
 | **DATA-02** | 4 | NEEDS-DATA | Possible duplicate backfill — 2025-07-15 & 2025-08-15 | Requires live Firestore export |
 | **DOC-01** | 1 | OPEN | Claude.ai project still points at MASTER_OUTLINE v14 | This audit's loaded context is v15; repoint to `PROJECT_CONTEXT.md` |
 | **LINT-01** | 1 | WONTFIX? | 3 `react-hooks/exhaustive-deps` warnings — intentional timer-ref pattern | `EvaluateChatPage.tsx:282`, `useQuestSession.ts:679,1760` |
@@ -306,6 +312,6 @@ Checked all surfaces added since the seed audit (Story Gen V2 Phase 2, Monthly R
 
 ## Recommended PROMPT_FIX order
 
-1. **DATA-01** — Fix MonthlyTrend to route through `computeHoursSummary`-compatible per-month aggregation. June 30 deadline. Touches additive-hours invariant; requires careful review.
+1. ~~**DATA-01**~~ — **DONE** (`fix/data-01-core-hours-overcount`). MonthlyTrend now routes through the canonical `computeMonthlyTrend()` per-month aggregation; view-only reconciliation, no stored-data change. Compliance figure unchanged at 598.73h core (~1.27h under 600).
 2. **ARCH-07** — Remove ladder deprecation: `LaddersPage.tsx`, `LadderQuickLog.tsx`, and `TodayPage.tsx:168`. Disposition system is live. Route needs removing from `router.tsx`.
 3. **ETHOS-01** — Add `CHARTER_PREAMBLE` to `generateStory`, `reviseStory`, `revisePage` context. Mechanical change; story trio should carry family values.
