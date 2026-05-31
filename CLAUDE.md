@@ -45,6 +45,12 @@ If a fix-making routine exists, it is scoped to one ledger issue at a time behin
 human to run a local command — their actions are limited to: pasting a run, uploading a file, and
 reviewing / merging a PR.
 
+**Lincoln-first / London minimal.** Wire new work for Lincoln; gate London out of untuned surfaces on
+**capability, never on his name** (`isLincoln`/`ageGroup` are cosmetic/personality, not access). London's
+account/profile stays live but his experience is intentionally minimal — a surface opens for him only
+when it's tuned for a 6-year-old. Log London-specific work in `docs/LONDON_BACKLOG.md`; don't build it
+speculatively. Parity is **not** the goal.
+
 ### Ledger integrity & base discipline
 
 - **Branch from fresh `origin/main`, and verify the ledger head against the remote before editing.**
