@@ -2,6 +2,9 @@
 > Auto-generated 2026-05-29. Use as Claude.ai project context file.
 > Sources: repo docs (MASTER_OUTLINE v15, CLAUDE.md, FIRST_PRINCIPLES_ALIGNMENT, GAME_WORLD_ECONOMY, STONEBRIDGE_BIBLE, FINDINGS_PIPELINE, HEALTH_REPORT 2026-05-29), code (AppShell, contextSlices.ts, tasks/index.ts), and Drive docs (Charter v2, Dad Lab Charter, State Compliance Guide).
 
+## Operating model
+How AI sessions assign, branch, confirm invariants, and use the review ledger — see `CLAUDE.md` › **AI Development Operating Model**. (Carry this pointer forward on regeneration.)
+
 ## Family
 - **Shelly** — parent; runs the weekday routine (formation first, then fundamentals). Fibromyalgia: energy management is non-negotiable and the app adapts to her energy. Her direct attention is the primary schedulable resource. One-tap evidence capture; MVDs are real school.
 - **Nathan** — dad; runs Saturday Dad Lab and builds the system.

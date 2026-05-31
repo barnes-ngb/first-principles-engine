@@ -8,6 +8,43 @@
 - `npm run lint` — Run ESLint
 - `npx tsc -b` — Type-check only (no emit)
 
+## AI Development Operating Model
+
+How this project is built by AI sessions (Claude Code and design chats). These conventions are
+load-bearing — follow them even when a request doesn't restate them.
+
+**How work is assigned.** Substantive changes — structure, features, docs — are assigned by a human
+through self-contained run-prompts pasted into Claude Code. A run grounds itself against the code,
+makes the change, updates the review ledger, and opens a PR. Sessions don't freelance scope beyond
+the run they were given.
+
+**Branch + PR, never merge.** Every change lands on a branch with a PR. **Do not merge** — the human
+reviews and merges (usually from a phone). Never push directly to `main` or `deploy`.
+
+**Invariants are propose-and-confirm.** Never silently change: compliance / `hours` math, the
+`xpLedger`, `skillSnapshots` (write only via the central `skillSnapshotWrites.ts`), the charter
+preamble, or `firestore.rules`. Changes touching these are proposed and stop for a human decision.
+Any user-facing write to a child's record goes propose → confirm → write; never auto-write.
+
+**The review ledger is the backlog + memory.** `docs/review/REVIEW_HOME_BASE.md` §6 is the source of
+truth for open work (ID prefixes: `ARCH-` / `FUNC-` / `TEST-` / `DATA-` / `ETHOS-` / `DOC-` / `FEAT-`).
+Every run reads it, updates the relevant row, and never reuses an ID. Reusable run-prompts live in
+`docs/review/prompts/`; decision docs (e.g. `DECISION_FUNC-01_*`) record settled architecture choices.
+
+**Two chats, split ownership.** A home-base chat owns architecture/review plus non-portal ledger items
+and the monthly audit. A dedicated build chat owns the Shelly Chat portal feature, its design doc, and
+its ledger rows (`FEAT-01`, `FUNC-03`, `ARCH-10`). Each edits only its own ledger rows; merge ledger
+PRs promptly to avoid trivial table conflicts.
+
+**Routines detect; humans assign.** Scheduled routines (claude.ai/code/routines) run audits and
+mechanical doc upkeep — stat numbers, index entries, alignment — and surface findings into the ledger.
+They do **not** autonomously make substantive structural or feature changes; those are human-assigned.
+If a fix-making routine exists, it is scoped to one ledger issue at a time behind a reviewable PR.
+
+**Phone-first.** A run does all build / lint / test / git in its own environment. Never instruct the
+human to run a local command — their actions are limited to: pasting a run, uploading a file, and
+reviewing / merging a PR.
+
 ## TypeScript Constraints
 
 ### `erasableSyntaxOnly` is enabled
