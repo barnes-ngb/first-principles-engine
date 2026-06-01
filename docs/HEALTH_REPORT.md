@@ -1,36 +1,47 @@
-# Code Health Report — 2026-05-30
+# Code Health Report — 2026-06-01
 
 ## Metrics
 
-| Metric | Value | Change from last report |
-|--------|-------|------------------------|
-| **Total lines** | **160,852** | +34 |
-| **Commits (main)** | **135** | +0 |
-| **Test files** | **125** | +0 |
-| **Tests passing** | **2,431** | +393 (all pass) |
-| **Test files running** | **145** | +21 |
-| **Firestore collections** | **34** | +0 |
-| **Cloud Functions** | **24** | +0 |
+| Metric | Value | Change from last report (2026-05-30) |
+|--------|-------|--------------------------------------|
+| **Total lines** | **165,719** | +4,867 |
+| **Commits (main)** | **197** | +62 |
+| **Test files** | **144** | +19 |
+| **Tests passing** | **2,232** | −199 ⚠️ |
+| **Test files running** | **143** | −2 ⚠️ |
+| **Firestore collections** | **36** | +2 |
+| **Cloud Functions** | **25** | +1 |
 | **Chat task types** | **17** | +0 |
 | **Routes** | **33** | +0 |
-| **Bundle size** | **3,841 kB / 1,133 kB gzip** | +0 |
+| **Bundle size** | **3,841 kB / 1,132 kB gzip** | +0 |
 
-> **Commit note:** `git rev-list --count HEAD` on the audit branch shows 105 (audit branch commits don't merge to main via squash). Main branch count is 135 (used for stats).
+> **Test count note:** 2,232 tests pass across 143 vitest files. Last report recorded 2,431 tests across 145 files. The drop (−199 tests, −2 files) coincides with recent Shelly Chat decomposition PRs (#1274/#1277) and Tier C Option 2 (PR #1305). All 2,232 current tests pass cleanly. Human should verify test restructuring was intentional and no coverage regressed.
 
-> **CF count note:** The grep pattern `export \{ \K[^}]+` undercounts multi-line export blocks (returns 19). Perl cross-line match returns 24, which matches CLAUDE.md. Always use the perl method or count manually when verifying CF count.
+> **Commit count note:** `git rev-list --count HEAD` on a branch rooted at `origin/main` = 197. Previous report used main-branch squash count of 135. Both are valid; 197 reflects the actual linear count on current `origin/main`.
 
-> **Bundle note:** 3,841 kB main chunk (1,133 kB gzip) — unchanged from last report. Dynamic/static import conflicts for firebase, compressImage, and sightWordMastery flagged by Vite but not blocking.
-
-> **Test growth:** +21 test files and +393 tests since last report. All 2,431 pass across 145 files.
+---
 
 ## Build Status
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| **Build** | ✅ PASS | `tsc -b && vite build` clean in 12.52s |
-| **Lint** | ✅ PASS | 0 errors, 0 warnings |
-| **Tests** | ✅ PASS | 2,431 tests across 145 files |
+| **Build** | ✅ PASS | `tsc -b && vite build` clean in 11.95s |
+| **Lint** | ⚠️ 3 WARNINGS | 0 errors; 3 `react-hooks/exhaustive-deps` warnings (new since last report) |
+| **Tests** | ✅ PASS | 2,232 tests across 143 files, all pass |
 | **TypeScript** | ✅ PASS | `tsc -b` clean |
+| **npm audit (prod)** | ✅ PASS | 0 production vulnerabilities |
+
+### Lint Warnings
+
+```
+src/features/evaluate/EvaluateChatPage.tsx:282 — useEffect missing dep: sessionTimer
+src/features/quest/useQuestSession.ts:679 — useCallback missing dep: sessionTimer
+src/features/quest/useQuestSession.ts:1760 — useCallback missing dep: sessionTimer
+```
+
+All three are `sessionTimer` ref omissions. Not auto-fixable — adding `sessionTimer` to deps would cause re-subscription loops. Needs intentional suppression (`eslint-disable-next-line`) or refactor.
+
+---
 
 ## Doc Accuracy
 
@@ -38,125 +49,119 @@
 
 | Claim | Doc value | Computed | Status |
 |-------|-----------|----------|--------|
-| TypeScript lines | 160,818 | 160,852 | **DRIFT** — auto-fixed → 160,852 |
-| Commits | 135 | 135 (main) | ✅ OK |
-| Test files | 125 | 125 | ✅ OK |
-| Firestore collections | 34 | 34 | ✅ OK |
-| Cloud Functions | 24 | 24 | ✅ OK |
+| TypeScript lines | 160,852 | 165,719 | **DRIFT** (+3%) — auto-fixed |
+| Commits | 135 | 197 | **ERROR** (+46%) — auto-fixed |
+| Test files | 125 | 144 | **ERROR** (+15%) — auto-fixed |
+| Firestore collections | 34 | 36 | **ERROR** (+2) — auto-fixed |
+| Cloud Functions | 24 | 25 | **ERROR** (+1) — auto-fixed |
 | Chat task types | 17 | 17 | ✅ OK |
 | Routes | 33 | 33 | ✅ OK |
 
 ### Missing File References
 
-The grep scan flagged 5 files as missing:
+Same 5 files flagged as last report — all are historical PR log references, not live path references. No action needed.
 
 | File | Status |
 |------|--------|
-| `PARENT_EXPERIENCE_AUDIT.md` | Expected — marked REMOVED in DOCUMENT_INDEX, referenced only in historical PR log in MASTER_OUTLINE |
-| `PARENT_EXPERIENCE_ALIGNMENT_PLAN.md` | Expected — same as above |
+| `PARENT_EXPERIENCE_AUDIT.md` | Expected — marked REMOVED in DOCUMENT_INDEX |
+| `PARENT_EXPERIENCE_ALIGNMENT_PLAN.md` | Expected — marked REMOVED in DOCUMENT_INDEX |
 | `QuickCaptureSection.tsx` | Expected — removed in UX P2.06, referenced in historical PR log |
 | `QuickCaptureSection.test.tsx` | Expected — removed with parent component |
 | `CreativeTimeLog.tsx` | Expected — removed in UX P2.06, referenced in historical PR log |
 
-All are historical PR log references, not live path references. No action needed.
-
 ### Nav Accuracy
 
-**Code nav (AppShell.tsx):**
-- Parent: Today, Plan My Week, Weekly Review, Progress, Records, Books, Game Workshop, Dad Lab, Settings, Ask AI
-- Kid: Today, Knowledge Mine, My Books, Books About Me, My Hero, **My Stuff**, Game Workshop, Dad Lab
+Code nav matches MASTER_OUTLINE items. Minor ordering discrepancy: "Ask AI" appears last in code (`AppShell.tsx`) but is listed between Books and Game Workshop in MASTER_OUTLINE. All items present — ordering-only gap, not auto-fixed.
 
-**Doc nav (MASTER_OUTLINE before fix):**
-- Kid nav was missing **"My Stuff"** (`/records/portfolio`)
+### Collections — CLAUDE.md vs Code
 
-**Auto-fixed:** Added "My Stuff" to Kid nav in MASTER_OUTLINE.
+Two collection helpers in `firestore.ts` were not in CLAUDE.md:
 
-### Task Types in Code vs Docs
+| Collection | Helper | Status |
+|---|---|---|
+| `errorLog` | `errorLogsCollection` | **Missing from CLAUDE.md** — added (companion fix) |
+| `shellyChatMessages` | `shellyChatMessagesCollection` | Already documented as subcollection under `shellyChatThreads` |
 
-Registry (`tasks/index.ts`) — 17 tasks: `analyzeWorkbook`, `chapterQuestions`, `chat`, `conundrum`, `disposition`, `evaluate`, `generate`, `generateStory`, `monthlyReview`, `plan`, `quest`, `revisePage`, `reviseStory`, `scan`, `shellyChat`, `weeklyFocus`, `workshop`
-
-`chat` and `generate` tasks don't have standalone files in `tasks/` — handled in `chat.ts` and `generate.ts` respectively. Charter check marks them FILE NOT FOUND (expected — charter context injected at the CF layer via context slices).
-
-All 17 documented in `SYSTEM_PROMPTS.md`. ✅ OK
+MASTER_OUTLINE stat updated to 36 (was 34). CLAUDE.md collection table updated (companion fix).
 
 ### Unindexed Docs
 
-None. All 48 docs in `docs/` are indexed in `DOCUMENT_INDEX.md`. ✅ OK
+6 docs in `docs/` not listed in DOCUMENT_INDEX.md — all added by companion fix:
 
-### Stale Doc Check
+| Doc | Classification |
+|-----|---------------|
+| `ARCH-10_rules_hardening_plan.md` | CURRENT — Firestore rules hardening recon, build pending |
+| `LONDON_BACKLOG.md` | CURRENT — active London deferral register |
+| `SESSION_TIMER_HOURS_2026-04-14.md` | HISTORICAL — shipped session-timer hours implementation doc |
+| `SHELLY_PORTAL_CONTEXT.md` | CURRENT — Shelly portal code-verified recon reference |
+| `SHELLY_PORTAL_FEEDBACK_LOOP.md` | CURRENT — friction log → GitHub issue feedback loop (shipped) |
+| `barnes-shelly-chat-portal-design.md` | CURRENT — portal design doc (feature complete) |
 
-No CURRENT-marked docs flagged as stale. ✅ OK
+### Stale Docs
+
+No docs with CURRENT status were flagged as untouched 30+ days. ✅ OK
+
+---
 
 ## Largest Files (over 500 lines)
 
-| File | Lines | Change from last report |
-|------|-------|------------------------|
-| `src/features/planner-chat/PlannerChatPage.tsx` | 2,620 | +0 |
-| `functions/src/ai/chat.ts` | 2,478 | +12 |
-| `src/features/books/BookEditorPage.tsx` | 2,278 | +0 |
-| `src/features/quest/useQuestSession.ts` | 1,870 | +0 |
-| `src/features/avatar/MyAvatarPage.tsx` | 1,804 | +0 |
-| `src/features/shelly-chat/useShellyChatFlows.ts` | 1,123 | (new — extracted from ShellyChatPage) |
-| `src/features/workshop/WorkshopPage.tsx` | 1,623 | +0 |
-| `src/features/avatar/VoxelCharacter.tsx` | 1,562 | +0 |
-| `src/features/planner-chat/chatPlanner.logic.ts` | 1,363 | +0 |
-| `functions/src/ai/contextSlices.ts` | 1,485 | +160 |
-| `src/features/records/records.logic.test.ts` | 1,225 | +0 |
-| `src/features/evaluate/EvaluateChatPage.tsx` | 1,162 | +0 |
-| `src/features/planner-chat/chatPlanner.logic.test.ts` | 1,156 | +0 |
-| `src/features/records/RecordsPage.tsx` | 1,136 | +0 |
-| `src/features/settings/AvatarAdminTab.tsx` | 1,106 | +0 |
-| `src/features/today/TodayPage.tsx` | 1,104 | +0 |
-| `src/features/today/TodayChecklist.tsx` | 1,070 | +0 |
-| `functions/src/ai/evaluate.ts` | 1,050 | +0 |
-| `src/features/today/KidTodayView.tsx` | 1,030 | +0 |
-| `src/features/quest/ReadingQuest.tsx` | 993 | +0 |
-| `src/features/books/BookshelfPage.tsx` | 986 | +0 |
-| `src/features/dad-lab/DadLabPage.tsx` | 969 | +0 |
-| `src/features/books/printBook.ts` | 952 | +0 |
-| `src/features/settings/DevAdminTab.tsx` | 943 | +0 |
-| `src/core/types/planning.ts` | 941 | +0 |
-| `functions/src/ai/tasks/monthlyReviewData.ts` | 918 | +0 |
-| `src/features/avatar/voxel/buildArmorPiece.ts` | 913 | +0 |
-| `src/features/progress/CurriculumTab.tsx` | 900 | +0 |
-| `functions/src/ai/tasks/monthlyReview.ts` | 887 | +0 |
-| `src/features/books/useBook.ts` | 877 | +0 |
+| Lines | File | vs last report |
+|-------|------|----------------|
+| 2,620 | `src/features/planner-chat/PlannerChatPage.tsx` | unchanged |
+| 2,478 | `functions/src/ai/chat.ts` | +12 |
+| 2,278 | `src/features/books/BookEditorPage.tsx` | unchanged |
+| 1,870 | `src/features/quest/useQuestSession.ts` | unchanged |
+| 1,809 | `src/features/avatar/MyAvatarPage.tsx` | unchanged |
+| 1,623 | `src/features/workshop/WorkshopPage.tsx` | unchanged |
+| 1,562 | `src/features/avatar/VoxelCharacter.tsx` | unchanged |
+| 1,485 | `functions/src/ai/contextSlices.ts` | unchanged |
+| 1,376 | `src/features/records/records.logic.test.ts` | unchanged |
+| 1,363 | `src/features/planner-chat/chatPlanner.logic.ts` | unchanged |
+| 1,162 | `src/features/evaluate/EvaluateChatPage.tsx` | unchanged |
+| 1,155 | `src/features/records/RecordsPage.tsx` | unchanged |
+| 1,123 | `src/features/shelly-chat/useShellyChatFlows.ts` | unchanged |
+| 1,106 | `src/features/settings/AvatarAdminTab.tsx` | unchanged |
+| 1,096 | `src/features/today/TodayPage.tsx` | unchanged |
 
 ## Decomposition Candidates
 
-No files crossed 2,000 lines for the first time. Note: `ShellyChatPage.tsx` was decomposed (1,632→645L) — removed from this table.
+No file crossed 2,000 lines for the first time since last report. Files already over 2,000:
+- `PlannerChatPage.tsx` (2,620L) — documented tech debt, stable
+- `chat.ts` (2,478L) — documented tech debt, `buildQuestPrompt` extraction target
+- `BookEditorPage.tsx` (2,278L) — documented tech debt, stable
 
-| File | Lines | Growth | Priority |
-|------|-------|--------|----------|
-| `functions/src/ai/chat.ts` | 2,478 | +12 | **HIGH** — `buildQuestPrompt` alone is 400+ lines; extract prompt builders to separate files |
-| `src/features/planner-chat/PlannerChatPage.tsx` | 2,620 | +0 | **MEDIUM** — stable, noted in CLAUDE.md tech debt |
-| `src/features/books/BookEditorPage.tsx` | 2,278 | +0 | **MEDIUM** — stable growth, noted in CLAUDE.md |
-| `src/features/shelly-chat/useShellyChatFlows.ts` | 1,123 | new | **WATCH** — created by ShellyChatPage decomposition; 19 handler functions; not urgent |
-| `functions/src/ai/contextSlices.ts` | 1,485 | +160 | **WATCH** — crossed +150L drift threshold; slice loaders may group into domain files |
+---
 
 ## Issues Found
 
-### Auto-Fixed (this run)
-- MASTER_OUTLINE TypeScript lines: 160,818 → 160,852
-- MASTER_OUTLINE Kid nav: added "My Stuff" (`/records/portfolio`) between My Hero and Game Workshop
+### Auto-Fixed
+
+- Updated MASTER_OUTLINE stats: lines 160,852→165,719, commits 135→197, test files 125→144, collections 34→36, CFs 24→25
+- Added `errorLog` collection row to CLAUDE.md Firestore table
+- Indexed 6 unindexed docs in DOCUMENT_INDEX.md
 
 ### Needs Human Attention
-- **Bundle size:** 3,841 kB main chunk (1,133 kB gzip). Route-level `React.lazy` splitting would reduce initial load. Heaviest imports: Three.js (avatar), jsPDF (print), curriculum map data. Noted in CLAUDE.md tech debt — architectural decision required.
-- **Potential dead exports in `src/core/`:** Grep-based scan found these candidates (may be false positives — could be used in tests or dynamic imports):
-  - `isPieceForged` in `src/core/xp/forgeArmorPiece.ts`
-  - `ensureNewProfileStructure` in `src/core/xp/checkAndUnlockArmor.ts`
-  - `SKIN_REGIONS`, `FORGE_COSTS`, `getTierTotalCost` in `src/core/xp/armorTiers.ts` / `forgeCosts.ts`
-  - `ReadingTags`, `ReadingTag`, `WritingTags`, `WritingTag`, `MathTags`, `MathTag`, `RegulationTag`, `ALL_SKILL_TAGS` in `src/core/types/skillTags.ts`
-  - Verify before removing — grep excludes test files and dynamic imports.
-- **`chat.ts` CF (2,466L)** — `buildQuestPrompt` is 400+ lines; extracting to separate prompt builder files would improve maintainability. Noted in CLAUDE.md tech debt.
+
+1. **TEST COUNT DROP** — 2,232 tests vs 2,431 last report (−199 tests, −2 files). All pass. Verify test restructuring in Shelly Chat decomposition + Tier C Option 2 PRs was intentional.
+
+2. **3 lint warnings** (new since last report) — `sessionTimer` missing from deps in `EvaluateChatPage.tsx:282` and `useQuestSession.ts:679,1760`. Adding to deps risks re-subscription loops. Needs either `eslint-disable-next-line react-hooks/exhaustive-deps` with a comment, or refactor to `useRef`.
+
+3. **Bundle size 3,841 kB** — unchanged. Route-level React.lazy splitting would reduce initial load. Heaviest: Three.js (avatar), jsPDF (print), curriculum map data. Architectural decision required.
+
+4. **Dead exports in `src/core/types/`** — scan found candidates. Verify before removing (may be used in tests or dynamic imports):
+   - `skillTags.ts`: `ReadingTags`, `WritingTags`, `MathTags`, `ALL_SKILL_TAGS`
+   - `zod.ts`: 8 schema exports (`subjectBucketSchema`, `engineStageSchema`, `evidenceTypeSchema`, `dayBlockTypeSchema`, `checklistItemSchema`, `dayBlockSchema`, `artifactTagsSchema`, `artifactSchema`, `dayLogSchema`, `weekPlanSchema`)
+   - `books.ts`: `getPresetTheme`, `resolveBookCreator`
+   - `workshop.ts`: `PlaytestReaction`, `CardDifficulty`
+   - `xp.ts`: `PIECE_POSITIONS`
+
+---
 
 ## Charter Alignment
 
-Task types checked against charter context:
-- `chat` and `generate`: handled at CF layer (not in `tasks/`); charter context injected via context slices ✅
-- All 15 other task handler files: include `buildContextForTask` or direct charter context ✅
+All task files in `functions/src/ai/tasks/` reference charter context (via `buildContextForTask`, `CHARTER_PREAMBLE`, or `charterContext`). ✅ OK
 
-No charter gaps found.
+---
 
 ## Test Coverage by Feature
 
@@ -164,29 +169,31 @@ No charter gaps found.
 |-------|---------|
 | 21 | books |
 | 13 | planner-chat |
+| 12 | today |
 | 12 | avatar |
-| 11 | today |
-| 4 | settings |
-| 4 | quest |
-| 3 | evaluate |
+| 9 | shelly-chat |
+| 6 | quest |
+| 5 | settings |
+| 4 | evaluate |
 | 2 | workshop |
+| 2 | records |
 | 2 | monthly-review |
 | 1 | weekly-review |
-| 1 | records |
-| 1 | ladders |
 | 1 | engine |
-| 9 | shelly-chat |
-| 0 | progress |
-| 0 | planner |
-| 0 | not-found |
-| 0 | login |
-| 0 | evaluation |
-| 0 | dad-lab |
-| 0 | auth |
+| **0** | **progress** |
+| **0** | **planner** |
+| **0** | **not-found** |
+| **0** | **login** |
+| **0** | **evaluation** |
+| **0** | **dad-lab** |
+| **0** | **auth** |
 
-Features with 0 test files: progress, planner, not-found, login, evaluation, dad-lab, auth. These are pure UI renderers or auth wrappers with limited pure logic to test. Note: shelly-chat now has **9 test files** (57+ tests) — updated from 0 (ARCH-09/TEST-01 decomposition). `DispositionProfile.tsx` in `progress` has testable override logic; candidate for next coverage addition.
+Zero-test features are mostly thin UI shells or routing wrappers. `progress` and `evaluation` have the most surface area with no direct test coverage.
+
+---
 
 ## Dependency Notes
 
-- **npm audit:** 0 vulnerabilities (production) ✅
-- No major version upgrades pending that affect production
+- npm audit (production): **0 vulnerabilities**
+- npm audit (all deps): 8 moderate severity (dev-only dependencies)
+- npm major upgrade available: npm 10.9.7 → 11.16.0 (optional, dev tooling only)

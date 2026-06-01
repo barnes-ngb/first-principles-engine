@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-05-30.
+> Where everything lives. Updated 2026-06-01.
 
 ---
 
@@ -24,6 +24,12 @@
 | `STONEBRIDGE_BIBLE.md` | **CURRENT** | Canonical narrative world bible — 8 places, 10+ characters, values, tone, continuity rules |
 | `GAME_WORLD_ECONOMY.md` | **CURRENT** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
 | `HEALTH_REPORT.md` | **CURRENT** | Weekly code health metrics — line counts, test coverage, bundle size, tech debt tracking |
+| `ARCH-10_rules_hardening_plan.md` | **CURRENT** | Firestore rules hardening recon — feasibility, regression baseline, proposed rule structure. Build pending. |
+| `LONDON_BACKLOG.md` | **CURRENT** | Active London deferral register — per-surface breakdown of what works today vs. what's held until tuned for a 6-year-old |
+| `SESSION_TIMER_HOURS_2026-04-14.md` | **HISTORICAL** | Implementation doc for auto-tracked instructional hours via session timer (shipped Apr 14, 2026) |
+| `SHELLY_PORTAL_CONTEXT.md` | **CURRENT** | Code-verified recon reference for the Shelly Chat control portal build — corrects the design brief against actual code |
+| `SHELLY_PORTAL_FEEDBACK_LOOP.md` | **CURRENT** | Friction log → GitHub issue feedback loop (shipped end-to-end) — ops notes, secret setup, Step 5a+5b architecture |
+| `barnes-shelly-chat-portal-design.md` | **CURRENT** | Shelly Chat control portal design doc — feature-complete (Tier A reads, Tier B confirmed writes, Tier C Option 2 additive snapshot edits) |
 | `PROJECT_CONTEXT.md` | **CURRENT** (auto-generated 2026-05-29) | Synthesized project context file for Claude.ai — family context, current sprint, nav structure, AI task registry, key design decisions. Regenerated on demand from repo docs + Drive docs. |
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls, per-function model + cost-per-call mapping |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4, updated 2026-05-29) | Task dispatch, model selection, context slices — 17 task types in `tasks/index.ts` registry (plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview); `analyzeEvaluationPatterns` exported separately |
