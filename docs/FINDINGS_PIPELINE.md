@@ -175,7 +175,7 @@ Scans don't produce `EvaluationFinding` objects directly, but `CurriculumTab.tsx
 - [ ] Reading a practice story generating new findings (loop doesn't close)
 - [ ] Findings expiring or being re-tested on a schedule
 - [ ] Scan-derived findings appearing in `recentEval` AI context (scan-derived conceptualBlocks DO reach the prompt via `skillSnapshot` slice; raw scan findings still bypass `evaluationSessions`)
-- [ ] Math-domain working level derivation from eval findings (reading domain works; math has a TODO at `EvaluateChatPage.tsx:540`)
+- [x] ~~Math-domain working level derivation from eval findings~~ — **DONE** (implemented at `EvaluateChatPage.tsx:578-584` → `deriveWorkingLevelFromEvaluation(findings, 'math')`; the prior "TODO at line 540" was stale — line 540 is a loop brace). Reconciled 2026-06-01 (FEAT-06 RESOLVED).
 - [ ] Synthesis pass turning raw conceptualBlocks into a structured `blockerDiagnosis` (Phase 3 backlog)
 - [ ] Planner / scan recommendation / skip system reading active blockers to shape their outputs (Phase 4 backlog)
 - [ ] Parent UI to dismiss / edit / manually resolve a conceptual block
