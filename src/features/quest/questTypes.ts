@@ -51,12 +51,13 @@ export const VALIDATION_RETRIES = 2 // retry AI calls when question validation f
 
 // Per-quest-mode level ceilings.
 // Phonics: L9-10 test comprehension, not phonics — cap at 8.
-// Comprehension & Math: prompts only define L1-6 — cap at 6.
+// Comprehension: prompts only define L1-6 — cap at 6.
+// Math: L1-6 numbers & operations + L7-8 larger subtraction / times tables (FEAT-08) — cap at 8.
 // Fluency has no levels (N/A).
 export const QUEST_MODE_LEVEL_CAP: Record<string, number> = {
   phonics: 8,
   comprehension: 6,
-  math: 6,
+  math: 8,
 } as const
 export const DEFAULT_LEVEL_CAP = 10
 

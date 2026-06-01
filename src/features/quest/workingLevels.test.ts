@@ -114,11 +114,28 @@ describe('computeStartLevel', () => {
     expect(computeStartLevel(snapshot, 'comprehension')).toBe(6)
   })
 
-  it('caps math at 6', () => {
+  it('caps math at 8 (FEAT-08 math slice — raised from 6)', () => {
     const snapshot: Pick<SkillSnapshot, 'workingLevels'> = {
-      workingLevels: { math: makeWorkingLevel({ level: 8 }) },
+      workingLevels: { math: makeWorkingLevel({ level: 10 }) },
     }
-    expect(computeStartLevel(snapshot, 'math')).toBe(6)
+    expect(computeStartLevel(snapshot, 'math')).toBe(8)
+  })
+
+  it('starts at the new top math bands (L7/L8) without clamping down', () => {
+    expect(
+      computeStartLevel({ workingLevels: { math: makeWorkingLevel({ level: 7 }) } }, 'math'),
+    ).toBe(7)
+    expect(
+      computeStartLevel({ workingLevels: { math: makeWorkingLevel({ level: 8 }) } }, 'math'),
+    ).toBe(8)
+  })
+
+  it('behavior-preserving: a child mid-progression (L1-6) sees no shift', () => {
+    for (let level = 1; level <= 6; level++) {
+      expect(
+        computeStartLevel({ workingLevels: { math: makeWorkingLevel({ level }) } }, 'math'),
+      ).toBe(level)
+    }
   })
 
   it('different quest modes use different working levels', () => {
@@ -401,6 +418,59 @@ describe('deriveWorkingLevelFromEvaluation', () => {
     const result = deriveWorkingLevelFromEvaluation(findings, 'math')
     expect(result).not.toBeNull()
     expect(result!.level).toBe(5)
+  })
+
+  // ── FEAT-08 math slice: new top bands (L7 larger subtraction, L8 times tables) ──
+
+  it('math: maps multi-digit subtraction (regrouping) to level 7', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.multi-digit.subtraction', status: 'mastered' }),
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(7)
+  })
+
+  it('math: maps times-table fluency to level 8', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.multiplication.tables', status: 'mastered' }),
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(8)
+  })
+
+  it('math: caps at the raised ceiling QUEST_MODE_LEVEL_CAP.math = 8', () => {
+    const findings: EvaluationFinding[] = [
+      makeFinding({ skill: 'math.multiplication.tables', status: 'mastered' }), // L8
+      makeFinding({ skill: 'math.times-tables', status: 'mastered' }), // L8
+    ]
+    const result = deriveWorkingLevelFromEvaluation(findings, 'math')
+    expect(result).not.toBeNull()
+    expect(result!.level).toBe(8)
+  })
+
+  it('behavior-preserving: existing L3/L4/L5 subtraction & multiplication tags are unchanged', () => {
+    // The new L7/L8 tags must not steal levels from the original within-20 / two-digit /
+    // singular times-table mappings (substring-collision guard).
+    expect(
+      deriveWorkingLevelFromEvaluation(
+        [makeFinding({ skill: 'math.subtraction.within-20', status: 'mastered' })],
+        'math',
+      )!.level,
+    ).toBe(3)
+    expect(
+      deriveWorkingLevelFromEvaluation(
+        [makeFinding({ skill: 'math.two-digit.subtraction', status: 'mastered' })],
+        'math',
+      )!.level,
+    ).toBe(4)
+    expect(
+      deriveWorkingLevelFromEvaluation(
+        [makeFinding({ skill: 'math.multiplication.facts', status: 'mastered' })], // L5 intro
+        'math',
+      )!.level,
+    ).toBe(5)
   })
 })
 
