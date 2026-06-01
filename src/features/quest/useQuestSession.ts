@@ -87,15 +87,47 @@ function parseQuestBlock(text: string): QuestQuestion | null {
 
     const parsed = JSON.parse(jsonStr)
 
+    const rawTargeted = typeof parsed.targetedBlockerId === 'string'
+      ? parsed.targetedBlockerId.trim()
+      : ''
+
+    // ── Build-word (encoding) question ──────────────────────────
+    // FEAT-04: the AI emits "type": "build-word" with a target word + a tile
+    // set instead of options. There is no typed input — tiles are tapped.
+    if (parsed.type === 'build-word' || (Array.isArray(parsed.tiles) && parsed.tiles.length > 0)) {
+      const targetWord = String(parsed.targetWord ?? parsed.correctAnswer ?? '').trim()
+      const tiles = Array.isArray(parsed.tiles)
+        ? parsed.tiles.map((t: unknown) => String(t)).filter((t: string) => t.trim().length > 0)
+        : []
+      if (!targetWord || tiles.length === 0) {
+        console.warn('[parseQuestBlock] build-word missing targetWord/tiles:', Object.keys(parsed))
+        return null
+      }
+      return {
+        id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        type: 'build-word',
+        level: parsed.level ?? 2,
+        skill: parsed.skill ?? '',
+        prompt: parsed.prompt ?? 'Build the word you hear.',
+        targetWord,
+        correctAnswer: targetWord,
+        tiles,
+        audioCue: typeof parsed.audioCue === 'string' && parsed.audioCue.trim()
+          ? parsed.audioCue.trim()
+          : undefined,
+        encouragement: parsed.encouragement,
+        isBonusRound: parsed.bonusRound ?? undefined,
+        targetedBlockerId: rawTargeted ? rawTargeted : undefined,
+      }
+    }
+
+    // ── Multiple-choice question (default) ──────────────────────
     // Validate minimum required fields
     if (!parsed.prompt && !parsed.options) {
       console.warn('[parseQuestBlock] Parsed JSON but missing prompt/options:', Object.keys(parsed))
       return null
     }
 
-    const rawTargeted = typeof parsed.targetedBlockerId === 'string'
-      ? parsed.targetedBlockerId.trim()
-      : ''
     return {
       id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       type: 'multiple-choice',
@@ -1114,18 +1146,22 @@ export function useQuestSession() {
 
       const sessionQ: SessionQuestion = {
         id: currentQuestion.id,
-        type: 'multiple-choice',
+        type: currentQuestion.type,
         level: currentQuestion.level,
         skill: currentQuestion.skill,
         prompt: currentQuestion.prompt,
         stimulus: currentQuestion.stimulus,
-        options: currentQuestion.options,
+        // build-word records its tile set in `options` so analytics/persistence
+        // read one field regardless of question type.
+        options: currentQuestion.type === 'build-word'
+          ? currentQuestion.tiles
+          : currentQuestion.options,
         correctAnswer: currentQuestion.correctAnswer,
         childAnswer,
         correct,
         responseTimeMs,
         timestamp: new Date().toISOString(),
-        inputMethod: inputMethod || 'multiple-choice',
+        inputMethod: inputMethod || (currentQuestion.type === 'build-word' ? 'tile' : 'multiple-choice'),
         targetedBlockerId: currentQuestion.targetedBlockerId,
       }
 
@@ -1319,12 +1355,14 @@ export function useQuestSession() {
       const flagged = shouldFlagAsError(currentQuestion)
       const sessionQ: SessionQuestion = {
         id: currentQuestion.id,
-        type: 'multiple-choice',
+        type: currentQuestion.type,
         level: currentQuestion.level,
         skill: currentQuestion.skill,
         prompt: currentQuestion.prompt,
         stimulus: currentQuestion.stimulus,
-        options: currentQuestion.options,
+        options: currentQuestion.type === 'build-word'
+          ? currentQuestion.tiles
+          : currentQuestion.options,
         correctAnswer: currentQuestion.correctAnswer,
         childAnswer: '',
         correct: false,

@@ -17,6 +17,7 @@ import { EvaluationDomain, SkillLevel } from '../../core/types/enums'
 import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest'
+import BuildWordQuestionScreen from './BuildWordQuestion'
 import QuestSummary from './QuestSummary'
 import FluencyPractice from './FluencyPractice'
 import { extractTargetWord } from './questHelpers'
@@ -411,17 +412,29 @@ export default function KnowledgeMinePage() {
 
       {/* Question */}
       {quest.screen === QuestScreen.Question && quest.currentQuestion && quest.questState && (
-        <QuestQuestionScreen
-          question={quest.currentQuestion}
-          questState={quest.questState}
-          consecutiveWrong={quest.questState.consecutiveWrong}
-          onAnswer={quest.submitAnswer}
-          onAnswerWithMethod={quest.submitAnswer}
-          onSkip={quest.handleSkip}
-          domainLabel={activeDomain?.label || 'Reading Quest'}
-          domain={activeDomain?.domain || 'reading'}
-          questMode={quest.questMode}
-        />
+        quest.currentQuestion.type === 'build-word' ? (
+          <BuildWordQuestionScreen
+            question={quest.currentQuestion}
+            questState={quest.questState}
+            consecutiveWrong={quest.questState.consecutiveWrong}
+            onAnswer={quest.submitAnswer}
+            onAnswerWithMethod={quest.submitAnswer}
+            onSkip={quest.handleSkip}
+            domainLabel={activeDomain?.label || 'Reading Quest'}
+          />
+        ) : (
+          <QuestQuestionScreen
+            question={quest.currentQuestion}
+            questState={quest.questState}
+            consecutiveWrong={quest.questState.consecutiveWrong}
+            onAnswer={quest.submitAnswer}
+            onAnswerWithMethod={quest.submitAnswer}
+            onSkip={quest.handleSkip}
+            domainLabel={activeDomain?.label || 'Reading Quest'}
+            domain={activeDomain?.domain || 'reading'}
+            questMode={quest.questMode}
+          />
+        )
       )}
 
       {/* Feedback */}

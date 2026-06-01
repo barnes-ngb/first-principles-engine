@@ -1,4 +1,34 @@
-import type { QuestQuestion, SessionQuestion } from './questTypes'
+import type { MultipleChoiceQuestion, QuestQuestion, SessionQuestion } from './questTypes'
+
+// ── Build-word assembly ─────────────────────────────────────────
+
+/**
+ * Whether `target` can be spelled by concatenating a subset of `tiles`, each
+ * tile used at most once and in some order. Tiles may be multi-character
+ * graphemes (e.g. "sh", "ch"), so this segments the target greedily with
+ * backtracking. Used to validate that a build-word question is solvable
+ * (and therefore checkable) — the encoding analogue of "correctAnswer is in
+ * options" for multiple-choice.
+ */
+export function canAssemble(target: string, tiles: string[]): boolean {
+  const t = (target || '').trim().toLowerCase()
+  if (!t) return false
+  const pool = (tiles || []).map((x) => x.trim().toLowerCase()).filter(Boolean)
+
+  const solve = (remaining: string, available: string[]): boolean => {
+    if (remaining.length === 0) return true
+    for (let i = 0; i < available.length; i++) {
+      const tile = available[i]
+      if (tile.length > 0 && remaining.startsWith(tile)) {
+        const next = available.slice(0, i).concat(available.slice(i + 1))
+        if (solve(remaining.slice(tile.length), next)) return true
+      }
+    }
+    return false
+  }
+
+  return solve(t, pool)
+}
 
 // ── Answer checking ────────────────────────────────────────────
 
@@ -11,6 +41,12 @@ import type { QuestQuestion, SessionQuestion } from './questTypes'
 export function checkAnswer(selected: string, question: QuestQuestion): boolean {
   const correct = (question.correctAnswer || '').trim().toLowerCase()
   const answer = selected.trim().toLowerCase()
+
+  // Build-word: the assembled string must exactly spell the target word.
+  // No fuzzy matching — encoding is precise (that is the skill being tested).
+  if (question.type === 'build-word') {
+    return answer === (question.targetWord || correct).trim().toLowerCase()
+  }
 
   // Direct match (works for most question types)
   if (answer === correct) return true
@@ -90,6 +126,12 @@ export function sanitizeStimulus(question: QuestQuestion): string | null {
  * Used to flag skipped questions so they don't count against skill findings.
  */
 export function shouldFlagAsError(question: QuestQuestion): boolean {
+  // Build-word: the only structural error is a target that can't be spelled
+  // from the offered tiles (then there is no valid solution to tap).
+  if (question.type === 'build-word') {
+    return !canAssemble(question.targetWord, question.tiles)
+  }
+
   // Flag 1: Stimulus contains the correct answer (the "th_en" bug)
   if (question.stimulus && question.correctAnswer) {
     const stim = question.stimulus.toLowerCase()
@@ -142,6 +184,22 @@ export function shouldFlagAsError(question: QuestQuestion): boolean {
  * Returns null if the question is invalid and should be skipped.
  */
 export function validateQuestion(question: QuestQuestion): QuestQuestion | null {
+  // Build-word: valid when there is a target and a tile set that can actually
+  // spell it. This is the encoding analogue of "correctAnswer is in options".
+  if (question.type === 'build-word') {
+    if (!question.targetWord?.trim()) return null
+    if (!question.tiles || question.tiles.length === 0) return null
+    if (!canAssemble(question.targetWord, question.tiles)) {
+      console.warn(
+        'Build-word question not assemblable from tiles:',
+        question.targetWord,
+        question.tiles,
+      )
+      return null
+    }
+    return question
+  }
+
   // Check correct answer exists in options
   if (!question.options || question.options.length === 0) return null
   const hasCorrect = question.options.some(
@@ -185,7 +243,7 @@ export function validateQuestion(question: QuestQuestion): QuestQuestion | null 
  * Generate a simple client-side fallback question when AI validation
  * fails repeatedly. Guaranteed to pass validateQuestion().
  */
-export function generateFallbackQuestion(level: number, domain: string): QuestQuestion {
+export function generateFallbackQuestion(level: number, domain: string): MultipleChoiceQuestion {
   if (domain === 'math') {
     const a = Math.floor(Math.random() * 10) + 1
     const b = Math.floor(Math.random() * (level + 2)) + 1
