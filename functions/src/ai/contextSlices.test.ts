@@ -4,6 +4,7 @@ import {
   formatChildProfile,
   formatChildSkillMap,
   formatConceptualBlocks,
+  formatMasteredSkills,
   TASK_CONTEXT,
   CHARTER_PREAMBLE,
 } from "./contextSlices.js";
@@ -463,5 +464,89 @@ describe("formatConceptualBlocks", () => {
     expect(joined).toContain("ADDRESS NOW");
     expect(joined).toContain("RESOLVING");
     expect(joined).toContain("DEFERRED");
+  });
+});
+
+// ── formatMasteredSkills (FEAT-10) ─────────────────────────────
+
+describe("formatMasteredSkills", () => {
+  it("returns an empty array when nothing is mastered", () => {
+    expect(formatMasteredSkills([], [])).toEqual([]);
+    expect(
+      formatMasteredSkills(
+        [{ tag: "reading.phonics", label: "Phonics", level: "emerging" }],
+        [{ name: "Short i/e", status: "ADDRESS_NOW" }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("lists priority skills FEAT-09 advanced to 'secure' as checked off", () => {
+    const lines = formatMasteredSkills(
+      [
+        { tag: "reading.cvc", label: "CVC blending", level: "secure" },
+        { tag: "reading.fluency", label: "Fluency", level: "emerging" },
+      ],
+      [],
+    );
+    const joined = lines.join("\n");
+    expect(joined).toContain("MASTERED — DO NOT RE-SERVE AS NEW WORK:");
+    expect(joined).toContain("- CVC blending");
+    // Emerging (frontier) skills are NOT marked mastered.
+    expect(joined).not.toContain("Fluency");
+  });
+
+  it("matches 'secure' case-insensitively (writer stores lowercase; tolerate either)", () => {
+    const lines = formatMasteredSkills(
+      [{ tag: "math.placeValue", label: "Place value", level: "Secure" }],
+      [],
+    );
+    expect(lines.join("\n")).toContain("- Place value");
+  });
+
+  it("names RESOLVED conceptual blocks — the only place the planner sees them", () => {
+    // formatConceptualBlocks drops RESOLVED blocks entirely, so the planner
+    // would otherwise never learn the block was cleared.
+    const lines = formatMasteredSkills(
+      [],
+      [
+        { name: "Digraph /oo/", status: "RESOLVED" },
+        { name: "Short i/e", status: "ADDRESS_NOW" },
+      ],
+    );
+    const joined = lines.join("\n");
+    expect(joined).toContain("- Digraph /oo/");
+    // ADDRESS_NOW gaps are NOT mastered — they stay in the gap-routing path.
+    expect(joined).not.toContain("Short i/e");
+  });
+
+  it("honors legacy `recommendation` when `status` is absent", () => {
+    const lines = formatMasteredSkills(
+      [],
+      [{ name: "Legacy block", recommendation: "RESOLVED" }],
+    );
+    expect(lines.join("\n")).toContain("- Legacy block");
+  });
+
+  it("dedupes the same skill surfaced as both a priority and a block (case-insensitive)", () => {
+    const lines = formatMasteredSkills(
+      [{ tag: "reading.cvc", label: "CVC blending", level: "secure" }],
+      [{ name: "cvc blending", status: "RESOLVED" }],
+    );
+    const occurrences = lines.filter((l) => l.toLowerCase().includes("cvc blending"));
+    expect(occurrences).toHaveLength(1);
+  });
+
+  it("instructs skip-as-new-work while preserving frontier, gaps, and light review", () => {
+    const joined = formatMasteredSkills(
+      [{ tag: "reading.cvc", label: "CVC blending", level: "secure" }],
+      [],
+    ).join("\n");
+    // Skip mastered as new work…
+    expect(joined).toMatch(/Do NOT spend must-do minutes/i);
+    // …but don't forbid light review (no over-skipping)…
+    expect(joined).toMatch(/light review is fine/i);
+    // …and keep pointing minutes at the frontier + the gaps.
+    expect(joined).toMatch(/frontier/i);
+    expect(joined).toContain("ADDRESS NOW");
   });
 });

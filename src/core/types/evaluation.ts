@@ -126,6 +126,16 @@ export interface WorkingLevels {
   phonics?: WorkingLevel
   comprehension?: WorkingLevel
   math?: WorkingLevel
+  /**
+   * FEAT-11 Phase 1 — spelling/encoding progression ("spell-the-word"). This is
+   * the **spelling** signal only and is kept deliberately separate from any
+   * future composition level: spelling ("get the word right") and composition
+   * ("say what you mean") fail for different reasons and route by their own gap.
+   * When composition becomes a tracked signal it gets its **own** field
+   * (e.g. `composition?`), never folded into this one. Seeded by spell-the-word
+   * quest questions tagged `writing.spelling.*`.
+   */
+  writing?: WorkingLevel
   // Note: fluency has no levels, not tracked here
   // Note: speech not yet built
 }

@@ -9,7 +9,7 @@
 
 import type { WorkingLevel, WorkingLevels, SkillSnapshot, EvaluationFinding } from '../../core/types/evaluation'
 import type { QuestMode, SessionQuestion } from './questTypes'
-import { QUEST_MODE_LEVEL_CAP, DEFAULT_LEVEL_CAP } from './questTypes'
+import { QUEST_MODE_LEVEL_CAP, DEFAULT_LEVEL_CAP, WRITING_LEVEL_CAP } from './questTypes'
 
 // ── Manual override protection ────────────────────────────────
 
@@ -233,6 +233,50 @@ const MATH_SKILL_LEVEL_MAP: Record<string, number> = {
   'measurement': 6,
   'money': 6,
   'time': 6,
+  // L7 — larger-number subtraction (multi-digit, regrouping/borrowing). FEAT-08 math slice.
+  // Note: 'two-digit-subtraction' (L4) and 'subtraction.within-20' (L3) stay below; these
+  // keys are the larger/regrouping frontier and never overlap those substrings.
+  'subtraction.regrouping': 7,
+  'subtraction-regrouping': 7,
+  'multi-digit.subtraction': 7,
+  'multi-digit-subtraction': 7,
+  'larger-subtraction': 7,
+  'borrowing': 7,
+  // L8 — multiplication-table fluency (through 12×12). FEAT-08 math slice.
+  // Distinct from the L5 intro keys 'times-table' (singular) / 'multiplication.facts';
+  // the plural 'times-tables' and '.tables' fluency keys win via highest-match.
+  'multiplication.tables': 8,
+  'multiplication-tables': 8,
+  'times-tables': 8,
+  'multiplication.fluency': 8,
+}
+
+/**
+ * Writing / spelling skill → level mapping (FEAT-11 Phase 1). Mirrors the
+ * phonics tile progression that spell-the-word reuses (CVC → vowel teams),
+ * capped at {@link WRITING_LEVEL_CAP}. Keys match the `writing.spelling.*` tags
+ * and a few free-text variants. This is the **spelling** signal only —
+ * composition skills are intentionally absent and will map separately when that
+ * signal is built.
+ */
+const WRITING_SKILL_LEVEL_MAP: Record<string, number> = {
+  'cvc': 2,
+  'short-vowel': 2,
+  'phonetic': 2,
+  'sight-word': 2,
+  'sightword': 2,
+  'blend': 3,
+  'blends': 3,
+  'consonant-blend': 3,
+  'digraph': 4,
+  'digraphs': 4,
+  'cvce': 5,
+  'silent-e': 5,
+  'long-vowel': 5,
+  'vowel-team': 6,
+  'vowel-teams': 6,
+  'vowelteam': 6,
+  'conventional': 6,
 }
 
 /**
@@ -251,11 +295,12 @@ const MATH_SKILL_LEVEL_MAP: Record<string, number> = {
  */
 export function deriveWorkingLevelFromEvaluation(
   findings: EvaluationFinding[],
-  domain: 'phonics' | 'comprehension' | 'math',
+  domain: 'phonics' | 'comprehension' | 'math' | 'writing',
 ): WorkingLevel | null {
   const skillMap =
     domain === 'phonics' ? PHONICS_SKILL_LEVEL_MAP
     : domain === 'comprehension' ? COMPREHENSION_SKILL_LEVEL_MAP
+    : domain === 'writing' ? WRITING_SKILL_LEVEL_MAP
     : MATH_SKILL_LEVEL_MAP
 
   let highestMasteredLevel = 0
@@ -285,7 +330,9 @@ export function deriveWorkingLevelFromEvaluation(
 
   if (highestMasteredLevel === 0) return null
 
-  const cap = QUEST_MODE_LEVEL_CAP[domain] ?? DEFAULT_LEVEL_CAP
+  const cap = domain === 'writing'
+    ? WRITING_LEVEL_CAP
+    : (QUEST_MODE_LEVEL_CAP[domain] ?? DEFAULT_LEVEL_CAP)
   const level = Math.min(highestMasteredLevel, cap)
 
   return {
@@ -414,4 +461,98 @@ export function deriveReadingWorkingLevelFromScan(
     source: 'curriculum',
     evidence: `Scanned ${curriculumName} Lesson ${lessonNumber}`,
   }
+}
+
+// ── Write path 4: spell-the-word → writing (spelling) working level ─
+//
+// FEAT-11 Phase 1. Spell-the-word questions are mixed into a reading/phonics
+// quest (1–2 per session), so we cannot reuse `computeWorkingLevelFromSession`
+// (which needs ≥5 answered questions and would blur spelling into phonics).
+// Instead we derive the **writing/spelling** level only from the spell-word
+// subset — keeping spelling a separate, separable signal from both phonics and
+// future composition.
+
+/** A spell-word question is any tile-assembly question tagged `writing.spelling.*`. */
+function isSpellingQuestion(q: SessionQuestion): boolean {
+  return q.type === 'spell-word' || (q.skill ?? '').toLowerCase().startsWith('writing.spelling')
+}
+
+/**
+ * Derive the spelling working level from the spell-the-word questions in a
+ * session. The level is the highest level at which the child spelled a word
+ * correctly; if none were spelled correctly, a gentle downstep below the lowest
+ * attempted level. Returns null when there were no answered spelling questions.
+ *
+ * Intentionally separate from `computeWorkingLevelFromSession`: spelling earns
+ * its **own** working level (`workingLevels.writing`) so it routes by its own
+ * gap and is never folded into the phonics number.
+ */
+export function computeWritingLevelFromSpellingQuestions(
+  questions: SessionQuestion[],
+): WorkingLevel | null {
+  const answered = questions.filter(
+    (q) => isSpellingQuestion(q) && !q.skipped && !q.flaggedAsError,
+  )
+  if (answered.length === 0) return null
+
+  const correct = answered.filter((q) => q.correct)
+  const totalCorrect = correct.length
+
+  let newLevel: number
+  if (correct.length > 0) {
+    newLevel = Math.max(...correct.map((q) => q.level))
+  } else {
+    const lowestAttempted = Math.min(...answered.map((q) => q.level))
+    newLevel = lowestAttempted - 1
+  }
+
+  newLevel = Math.min(newLevel, WRITING_LEVEL_CAP)
+  newLevel = Math.max(newLevel, 1)
+
+  return {
+    level: newLevel,
+    updatedAt: new Date().toISOString(),
+    source: 'quest',
+    evidence: `Spelled ${totalCorrect}/${answered.length} from tiles → Level ${newLevel}`,
+  }
+}
+
+/**
+ * Build seeding findings for the spelling skills exercised this session.
+ *
+ * Returns at most one finding per `writing.spelling.*` skill, status
+ * `emerging` (when at least one word in that skill was spelled) or `not-yet`.
+ * **Never returns `mastered`** — spelling mastery is decided only later by the
+ * conservative `masteryRollup` and written through the central
+ * `skillSnapshotWrites` path. These findings exist purely to *seed* the priority
+ * skill on the snapshot (a "teach this next" marker) so the central mastery loop
+ * has a target to advance; they assert no mastery and downgrade nothing.
+ */
+export function deriveSpellingFindings(questions: SessionQuestion[]): EvaluationFinding[] {
+  const answered = questions.filter(
+    (q) => isSpellingQuestion(q) && !q.skipped && !q.flaggedAsError,
+  )
+  if (answered.length === 0) return []
+
+  const bySkill = new Map<string, { attempts: number; correct: number }>()
+  for (const q of answered) {
+    const skill = (q.skill ?? '').trim() || 'writing.spelling.phonetic'
+    const entry = bySkill.get(skill) ?? { attempts: 0, correct: 0 }
+    entry.attempts += 1
+    if (q.correct) entry.correct += 1
+    bySkill.set(skill, entry)
+  }
+
+  const at = new Date().toISOString()
+  const findings: EvaluationFinding[] = []
+  for (const [skill, { attempts, correct }] of bySkill) {
+    findings.push({
+      skill,
+      // Cap at 'emerging' — mastery is never asserted inline (central-writer only).
+      status: correct > 0 ? 'emerging' : 'not-yet',
+      evidence: `Spelled ${correct}/${attempts} from tiles (Spell-the-word)`,
+      testedAt: at,
+    })
+  }
+  return findings
 }

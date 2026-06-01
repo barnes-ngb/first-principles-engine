@@ -40,6 +40,7 @@ import {
   defaultSupports,
 } from './lincolnDefaults'
 import FoundationsSection from '../evaluate/FoundationsSection'
+import MasteryCheckoffPanel from '../evaluate/MasteryCheckoffPanel'
 import QuickCheckPanel from './QuickCheckPanel'
 import WorkingLevelsSection from './WorkingLevelsSection'
 import SkipAdvisorChip from '../planner-chat/SkipAdvisorChip'
@@ -348,6 +349,9 @@ export default function SkillSnapshotPage() {
             onSaved={(text) => setSnack({ text, severity: 'success' })}
             onError={(text) => setSnack({ text, severity: 'error' })}
           />
+
+          {/* FEAT-09: mastered-skill check-offs from daily mastery + quest evidence */}
+          <MasteryCheckoffPanel familyId={familyId} childId={activeChildId} snapshot={snapshot} />
 
           {/* Priority Skills */}
           <SectionCard title="Priority Skills (1\u20133 targets)">

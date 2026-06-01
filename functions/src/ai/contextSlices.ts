@@ -851,6 +851,59 @@ export function formatConceptualBlocks(
   return out;
 }
 
+/**
+ * FEAT-10: surface the mastered / checked-off state for the planner.
+ *
+ * Read-side only — this re-reads the exact state FEAT-09 (#1316)'s conservative
+ * mastery rollup writes (priority skills advanced to `secure`, conceptual blocks
+ * advanced to `RESOLVED`) and renders it as an explicit "do not re-serve as new
+ * work" list. It never re-decides mastery.
+ *
+ * RESOLVED blocks are otherwise dropped from AI context (see {@link
+ * formatConceptualBlocks}), so this is the only place a checked-off block is
+ * named back to the planner — closing the #1316 → planner loop.
+ */
+export function formatMasteredSkills(
+  prioritySkills: Array<{ tag?: string | number; label?: string; level?: string }>,
+  conceptualBlocks: Array<{ name?: string; status?: string; recommendation?: string }>,
+): string[] {
+  const labels: string[] = [];
+
+  // Priority skills FEAT-09 advanced to the terminal `secure` level.
+  for (const s of prioritySkills ?? []) {
+    if (String(s.level ?? "").toLowerCase() === "secure") {
+      const label = (s.label || String(s.tag ?? "")).trim();
+      if (label) labels.push(label);
+    }
+  }
+
+  // Conceptual blocks FEAT-09 advanced to RESOLVED (mastered milestone).
+  for (const b of conceptualBlocks ?? []) {
+    const status = b.status || b.recommendation || "ADDRESS_NOW";
+    if (status === "RESOLVED" && b.name?.trim()) labels.push(b.name.trim());
+  }
+
+  // Dedupe (case-insensitive), preserve first-seen order.
+  const seen = new Set<string>();
+  const unique = labels.filter((l) => {
+    const key = l.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (unique.length === 0) return [];
+
+  return [
+    "MASTERED — DO NOT RE-SERVE AS NEW WORK:",
+    ...unique.map((l) => `- ${l}`),
+    "These skills are checked off (mastered via repeated got-it / quest / scan).",
+    "Do NOT spend must-do minutes teaching them as new work, and don't make a checked-off",
+    "skill the point of a must-do item. Occasional LIGHT review is fine — just don't bunch it.",
+    "Spend the freed minutes on the frontier (Emerging/Developing skills) and the gaps (ADDRESS NOW).",
+  ];
+}
+
 /** Load skill snapshot (evaluation-derived priorities, supports, stop rules, conceptual blocks). */
 async function loadSkillSnapshotContext(
   db: Firestore,
@@ -891,6 +944,12 @@ async function loadSkillSnapshotContext(
       lines.push(`- ${s.label} (${s.tag}): ${s.level}${s.notes ? ` — ${s.notes}` : ""}`);
     }
   }
+
+  // FEAT-10: surface the mastered / checked-off state so the planner stops
+  // serving it as new work. Reads FEAT-09's secure/RESOLVED marking only — no
+  // re-decide. This names RESOLVED blocks the planner otherwise never sees.
+  const masteredLines = formatMasteredSkills(skills, data.conceptualBlocks || []);
+  for (const l of masteredLines) lines.push(l);
 
   // Stop rules
   const stops = data.stopRules || [];

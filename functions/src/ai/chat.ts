@@ -703,7 +703,7 @@ APPROACH:
 - No grades, no rankings. Findings are evidence-based, never shaming.
 - Keep each step to 2-3 minutes of actual testing with ${name}.
 
-MATH CONCEPT BANDS (L1-L6):
+MATH CONCEPT BANDS (L1-L8):
 ${MATH_CONCEPT_BANDS_TEXT}
 
 DIAGNOSTIC SEQUENCE — START AT THE LEVEL THE SKILL SNAPSHOT SUGGESTS, OR L1 IF NO DATA:
@@ -744,6 +744,19 @@ Level 6 — Fractions & complex problems
 - "What's half of 8?"
 - "If a pizza has 8 slices and ${name} eats 2, what fraction is left?"
 - 1 multi-step word problem with multiple operations.
+- If solid → Level 7. If gaps → frontier here.
+
+Level 7 — Larger-number subtraction (multi-digit, regrouping/borrowing)
+- 2 three-digit subtraction with regrouping: 432-178, 605-247.
+- 1 subtraction borrowing across a zero: 700-356.
+- 1 word problem: "Steve had 524 blocks and used 268. How many are left?"
+- If 3/4+ correct → Level 8. If gaps → frontier here. If <2 → drop to L4.
+
+Level 8 — Multiplication tables (times-table fluency through 12×12)
+- 5 times-table facts spanning the tables: 6x7, 8x9, 12x4, 7x7, 9x6.
+- 1 missing-factor fact: "? × 8 = 56".
+- 1 skip-count check: "Count by 7: 7, 14, 21, ___".
+- If 4/5+ correct → ceiling reached (fluent). If 2-3 → frontier here. If <2 → drop to L5.
 
 INSTRUCTIONS FOR EACH STEP:
 1. Tell the parent exactly what to ask ${name}.
@@ -774,6 +787,8 @@ SKILL TAGS for math findings — pick the most specific tag that matches the con
 - math.division.basic — Level 5
 - math.fractions.recognizing / math.fractions.comparing / math.fractions.operations — Level 6
 - math.measurement / math.time / math.money — Level 6
+- math.multi-digit.subtraction / math.subtraction.regrouping (3+ digit subtraction, borrowing across zeros) — Level 7
+- math.multiplication.tables / math.times-tables (fluent times tables through 12×12, missing-factor) — Level 8
 
 You may include multiple <finding> blocks in one response if you learned about multiple skills.
 
@@ -1654,7 +1669,7 @@ IMPORTANT:
 
   if (domain === "math") {
     const mathStartLevelBlock = startingLevel
-      ? `\nSTARTING LEVEL: This child has demonstrated mastery through Level ${Math.min(startingLevel, 6)} via curriculum completion or prior quest sessions. Start the quest at Level ${Math.min(startingLevel, 6)} unless the skill snapshot indicates otherwise. Do NOT start at Level 1 — that would be boring and disrespectful of their progress.\n`
+      ? `\nSTARTING LEVEL: This child has demonstrated mastery through Level ${Math.min(startingLevel, 8)} via curriculum completion or prior quest sessions. Start the quest at Level ${Math.min(startingLevel, 8)} unless the skill snapshot indicates otherwise. Do NOT start at Level 1 — that would be boring and disrespectful of their progress.\n`
       : "";
 
     return `ROLE: You are a Minecraft-themed Quest Master running an interactive math assessment for ${name}. See the child profile context above for age, neurodivergence, and current math level. ${name} is answering directly on a tablet — keep everything fun, encouraging, and in kid-friendly language.
@@ -1718,6 +1733,18 @@ Level 6 question types (rotate through these):
 - "Which fraction is bigger: 1/2 or 1/3?" (fraction comparison)
 - Measurement problems (inches, feet, pounds)
 
+Level 7 question types — larger-number subtraction (rotate through these):
+- "What is ___ - ___?" (three-digit subtraction with regrouping, e.g. "432 - 178")
+- "What is ___ - ___?" (borrowing across a zero, e.g. "700 - 356")
+- "Steve had 524 blocks and used 268. How many are left?" (multi-digit subtraction word problem)
+- "Which is the missing number: ___ - 147 = 256?" (missing-minuend / inverse check)
+
+Level 8 question types — multiplication tables (rotate through these):
+- "___ x ___ = ?" (times-table fact through 12×12, e.g. "8 x 9")
+- "What number makes this true: ? x 8 = 56" (missing-factor fact)
+- "Count by 7: 7, 14, 21, ___" (skip counting a times table)
+- "Steve mines 7 diamonds in each of 8 caves. How many total?" (times-table word problem)
+
 STIMULUS FIELD:
 - For problems that need a prominent display (like a big number or equation), set "stimulus" to the expression (e.g., "24 + 37")
 - For word problems, set "stimulus" to null — the prompt carries the full question
@@ -1753,7 +1780,7 @@ ITERATIVE PROGRESSION:
 ADAPTIVE BEHAVIOR:
 - On start_quest: begin at the STARTING LEVEL if specified above, otherwise the level suggested by recent evaluation data or skill snapshot, or Level 2 if no data
 - After correct answer at current level: stay at level, vary the skill within the level
-- After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up (math caps at Level 6)
+- After LEVEL_UP (3 correct in a row): nudge difficulty up within level first, then level up (math caps at Level 8)
 - After LEVEL_DOWN (2 wrong in a row): drop to easier skills at the lower level
 
 BONUS ROUND:

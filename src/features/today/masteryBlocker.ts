@@ -3,7 +3,7 @@ import type { ConceptualBlock } from '../../core/types/evaluation'
 import { generateBlockId } from '../../core/utils/blockerLifecycle'
 
 /** Infer a usable skill key from a checklist item's subject + label. */
-function inferSkillKey(item: ChecklistItem): string {
+export function inferSkillKey(item: ChecklistItem): string {
   const bucket = item.subjectBucket ?? 'general'
   const label = (item.label || 'activity').trim()
   // If the item has tagged skills, use the first one (most specific).

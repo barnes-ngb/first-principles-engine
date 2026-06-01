@@ -27,10 +27,22 @@ export type ReadingTag = (typeof ReadingTags)[keyof typeof ReadingTags]
 
 // ── Writing ──────────────────────────────────────────────────────
 
+// `writing` splits into two deliberately **separate** sub-domains so each
+// routes by its own gap (FEAT-11): `writing.spelling.*` (encoding — "get the
+// word right", the spell-the-word signal) and, in a later phase,
+// `writing.composition.*` ("say what you mean"). They are NOT collapsed into one
+// blurred `writing` number — a struggling speller with strong ideas (Lincoln)
+// would be mis-served by a single level. The legacy handwriting-mechanics tags
+// below are retained for back-compat but are **not** routed to via practice
+// (their pencil-first practice ideas were neutralized on the curriculum nodes —
+// see `curriculumMap.ts`).
 export const WritingTags = {
   GripPosture: 'writing.gripPosture',
   LetterFormation: 'writing.letterFormation',
   CopyWords: 'writing.copyWords',
+  // ── Spelling / encoding (FEAT-11 Phase 1, tap-only tile assembly) ──
+  SpellingPhonetic: 'writing.spelling.phonetic',
+  SpellingSightWord: 'writing.spelling.sightWord',
 } as const
 export type WritingTag = (typeof WritingTags)[keyof typeof WritingTags]
 
@@ -109,6 +121,19 @@ export const SKILL_TAG_CATALOG: SkillTagDefinition[] = [
     label: 'Copy Words',
     evidence: 'Copies 3-word phrases legibly with spacing',
     commonSupports: ['Model nearby', 'Lined paper', 'Short sets (3-5 words)'],
+  },
+  {
+    tag: WritingTags.SpellingPhonetic,
+    label: 'Spelling (sound it out)',
+    evidence: 'Builds a heard word from sound/letter tiles (tap-only)',
+    // Tap/voice supports only — never a pencil or typing prompt (FEAT-11).
+    commonSupports: ['Sound-block tiles', 'Hear-the-word replay', 'Stretch the sounds together'],
+  },
+  {
+    tag: WritingTags.SpellingSightWord,
+    label: 'Spelling sight words',
+    evidence: 'Spells a familiar sight word from tiles after hearing it (tap-only)',
+    commonSupports: ['Tiles from words he can already read', 'Hear-the-word replay', 'Build then check'],
   },
 
   // Math
