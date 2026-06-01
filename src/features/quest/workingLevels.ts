@@ -233,6 +233,22 @@ const MATH_SKILL_LEVEL_MAP: Record<string, number> = {
   'measurement': 6,
   'money': 6,
   'time': 6,
+  // L7 — larger-number subtraction (multi-digit, regrouping/borrowing). FEAT-08 math slice.
+  // Note: 'two-digit-subtraction' (L4) and 'subtraction.within-20' (L3) stay below; these
+  // keys are the larger/regrouping frontier and never overlap those substrings.
+  'subtraction.regrouping': 7,
+  'subtraction-regrouping': 7,
+  'multi-digit.subtraction': 7,
+  'multi-digit-subtraction': 7,
+  'larger-subtraction': 7,
+  'borrowing': 7,
+  // L8 — multiplication-table fluency (through 12×12). FEAT-08 math slice.
+  // Distinct from the L5 intro keys 'times-table' (singular) / 'multiplication.facts';
+  // the plural 'times-tables' and '.tables' fluency keys win via highest-match.
+  'multiplication.tables': 8,
+  'multiplication-tables': 8,
+  'times-tables': 8,
+  'multiplication.fluency': 8,
 }
 
 /**

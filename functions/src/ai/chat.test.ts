@@ -256,12 +256,29 @@ describe("buildQuestPrompt — math STARTING LEVEL (G54)", () => {
     expect(prompt).toContain("Level 4");
   });
 
-  it("caps the math STARTING LEVEL at 6 (QUEST_MODE_LEVEL_CAP.math)", () => {
-    const prompt = buildQuestPrompt("math", 9, "math", extras, "Lincoln");
+  it("caps the math STARTING LEVEL at 8 (QUEST_MODE_LEVEL_CAP.math — raised by FEAT-08)", () => {
+    const prompt = buildQuestPrompt("math", 11, "math", extras, "Lincoln");
     expect(prompt).toContain("STARTING LEVEL");
-    expect(prompt).toContain("Level 6");
-    // The raw 9 should not appear as a level instruction
-    expect(prompt).not.toMatch(/Start the quest at Level 9/);
+    expect(prompt).toMatch(/Start the quest at Level 8/);
+    // The raw 11 should not appear as a level instruction
+    expect(prompt).not.toMatch(/Start the quest at Level 11/);
+  });
+
+  it("starts the math quest at the new top bands (L7/L8) without clamping down", () => {
+    expect(buildQuestPrompt("math", 7, "math", extras, "Lincoln")).toMatch(
+      /Start the quest at Level 7/,
+    );
+    expect(buildQuestPrompt("math", 8, "math", extras, "Lincoln")).toMatch(
+      /Start the quest at Level 8/,
+    );
+  });
+
+  it("serves larger-subtraction (L7) and times-table (L8) question types in the math quest", () => {
+    const prompt = buildQuestPrompt("math", 8, "math", extras, "Lincoln");
+    expect(prompt).toContain("Level 7 question types");
+    expect(prompt).toContain("Level 8 question types");
+    expect(prompt).toMatch(/three-digit subtraction with regrouping/i);
+    expect(prompt).toMatch(/times-table fact through 12×12/i);
   });
 
   it("omits the STARTING LEVEL directive block when startingLevel is undefined for math", () => {
@@ -297,11 +314,35 @@ describe("buildEvaluationPrompt — math (G26)", () => {
     expect(prompt).not.toContain("Lincoln");
   });
 
-  it("includes the shared math concept bands (L1-L6) verbatim", () => {
+  it("includes the shared math concept bands (L1-L8) verbatim", () => {
     const prompt = buildEvaluationPrompt("math", "Lincoln");
     for (const band of MATH_CONCEPT_BANDS) {
       expect(prompt).toContain(band);
     }
+  });
+
+  it("extends the bands with L7 larger subtraction + L8 times tables (FEAT-08), in order", () => {
+    expect(MATH_CONCEPT_BANDS).toHaveLength(8);
+    expect(MATH_CONCEPT_BANDS[6]).toMatch(/Level 7:.*subtraction.*regrouping/i);
+    expect(MATH_CONCEPT_BANDS[7]).toMatch(/Level 8:.*Multiplication tables.*12×12/i);
+    // Scope discipline: no division/fractions sprawl in the new top bands.
+    expect(MATH_CONCEPT_BANDS[6]).not.toMatch(/fraction|division/i);
+    expect(MATH_CONCEPT_BANDS[7]).not.toMatch(/fraction|division/i);
+  });
+
+  it("behavior-preserving: the original L1-L6 bands are unchanged", () => {
+    expect(MATH_CONCEPT_BANDS[0]).toContain("Level 1: Number sense");
+    expect(MATH_CONCEPT_BANDS[1]).toContain("Level 2: Addition facts within 20");
+    expect(MATH_CONCEPT_BANDS[2]).toContain("Level 3: Subtraction facts within 20");
+    expect(MATH_CONCEPT_BANDS[3]).toContain("Level 4: Multi-step word problems");
+    expect(MATH_CONCEPT_BANDS[4]).toContain("Level 5: Multiplication facts");
+    expect(MATH_CONCEPT_BANDS[5]).toContain("Level 6: Fractions");
+  });
+
+  it("teaches a Level 7 and Level 8 step in the diagnostic sequence", () => {
+    const prompt = buildEvaluationPrompt("math", "Lincoln");
+    expect(prompt).toMatch(/Level 7 — Larger-number subtraction/);
+    expect(prompt).toMatch(/Level 8 — Multiplication tables/);
   });
 
   it("teaches the AI to emit <finding> and <complete> blocks", () => {

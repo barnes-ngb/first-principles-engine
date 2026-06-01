@@ -296,8 +296,8 @@ describe('QUEST_MODE_LEVEL_CAP', () => {
     expect(QUEST_MODE_LEVEL_CAP['comprehension']).toBe(6)
   })
 
-  it('caps math at 6', () => {
-    expect(QUEST_MODE_LEVEL_CAP['math']).toBe(6)
+  it('caps math at 8 (FEAT-08 — L7 larger subtraction + L8 times tables)', () => {
+    expect(QUEST_MODE_LEVEL_CAP['math']).toBe(8)
   })
 
   it('has a default cap of 10', () => {
