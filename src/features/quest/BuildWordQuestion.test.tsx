@@ -2,7 +2,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import BuildWordQuestionScreen from './BuildWordQuestion'
-import type { BuildWordQuestion, QuestState } from './questTypes'
+import type { BuildWordQuestion, QuestState, SpellWordQuestion } from './questTypes'
 
 // TTS uses the Web Speech API, which jsdom doesn't implement — stub it so the
 // component renders. We don't assert on speech here; the UI contract is taps.
@@ -120,5 +120,79 @@ describe('BuildWordQuestionScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Build the word' }))
     expect(onAnswerWithMethod).not.toHaveBeenCalled()
     expect(onAnswer).not.toHaveBeenCalled()
+  })
+})
+
+// ── FEAT-11: spell-the-word renders through the SAME tile screen ──
+// Spell-the-word reuses BuildWordQuestionScreen verbatim. The load-bearing
+// guarantees must hold for the spell-word shape too: tap-only (no text input),
+// and the target word is spoken, never shown.
+describe('BuildWordQuestionScreen — spell-the-word shape', () => {
+  function makeSpellQuestion(overrides: Partial<SpellWordQuestion> = {}): SpellWordQuestion {
+    return {
+      id: 'sw_1',
+      type: 'spell-word',
+      level: 2,
+      skill: 'writing.spelling.sightWord',
+      prompt: 'Listen, then spell the word with your sound-blocks!',
+      targetWord: 'said',
+      correctAnswer: 'said',
+      tiles: ['s', 'ai', 'd', 'a', 'i'],
+      audioCue: 'said',
+      source: 'sightWord',
+      ...overrides,
+    }
+  }
+
+  it('renders NO text-input element for the answer (tap-only, no typing test)', () => {
+    render(
+      <BuildWordQuestionScreen
+        question={makeSpellQuestion()}
+        questState={questState}
+        consecutiveWrong={0}
+        onAnswer={vi.fn()}
+        onAnswerWithMethod={vi.fn()}
+        onSkip={vi.fn()}
+        domainLabel="Spelling"
+      />,
+    )
+    expect(document.querySelector('input')).toBeNull()
+    expect(document.querySelector('textarea')).toBeNull()
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('never shows the target word as text (child spells from the spoken cue)', () => {
+    render(
+      <BuildWordQuestionScreen
+        question={makeSpellQuestion()}
+        questState={questState}
+        consecutiveWrong={0}
+        onAnswer={vi.fn()}
+        onAnswerWithMethod={vi.fn()}
+        onSkip={vi.fn()}
+        domainLabel="Spelling"
+      />,
+    )
+    expect(screen.queryByText('said')).toBeNull()
+  })
+
+  it('reports the assembled word with the tile input method on submit', () => {
+    const onAnswerWithMethod = vi.fn()
+    render(
+      <BuildWordQuestionScreen
+        question={makeSpellQuestion({ tiles: ['s', 'ai', 'd'] })}
+        questState={questState}
+        consecutiveWrong={0}
+        onAnswer={vi.fn()}
+        onAnswerWithMethod={onAnswerWithMethod}
+        onSkip={vi.fn()}
+        domainLabel="Spelling"
+      />,
+    )
+    fireEvent.click(screen.getByLabelText('Sound block s'))
+    fireEvent.click(screen.getByLabelText('Sound block ai'))
+    fireEvent.click(screen.getByLabelText('Sound block d'))
+    fireEvent.click(screen.getByRole('button', { name: 'Build the word' }))
+    expect(onAnswerWithMethod).toHaveBeenCalledWith('said', 'tile')
   })
 })

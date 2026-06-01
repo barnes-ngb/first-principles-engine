@@ -1,9 +1,12 @@
-# Writing & Spelling — Progression Design (PROPOSED)
+# Writing & Spelling — Progression Design (PHASE 1 DECIDED — IN PROGRESS)
 
-> **Status:** Proposed, pending owner review. **Docs-only** — no code has changed.
+> **Status:** **Phase 1 (spell-the-word) decided and building.** Phases 2–3 remain proposals.
 > **Ledger:** `FEAT-11` (REVIEW_HOME_BASE.md §6).
-> **This is a design pass, not a build.** The pedagogy below is the owner's call — every phase is
-> presented as a proposal with options, not a prescription. Adjust the progression before we build.
+> **Phase 1 decisions (locked in review, see §3):** Phase 1 (spell-the-word) leads; **spelling is its
+> own tracked signal, never blurred with composition**; surface = **extend the quest**; word source =
+> **blend sight-words + phonics frontier**; mastery = **reuse the conservative rollup threshold**; the
+> handwriting-first practice ideas were **neutralized** (no pencil routing). Phases 2–3 below stay
+> proposals — the pedagogy is still the owner's call; adjust before building.
 
 Writing/spelling is **Lincoln's hardest area** and he's advancing — so this is a careful design pass
 to ground what exists, name the gap honestly, define the skill ladder cleanly, and propose a phased
@@ -75,11 +78,12 @@ the **mastery loop doesn't run on it**:
 | **Mastery rollup** | ✅ Generic — would already work | `masteryRollup.ts:63-307` aggregates checklist mastery chips for *any* skill tag; a writing checklist item would feed it today. |
 | **Central writer** | ✅ Generic | `skillSnapshotWrites.ts` advances *any* matched priority skill/block; additive-only (per `CLAUDE.md`). |
 
-> ⚠️ **A subtle trap in the curriculum map:** the writing nodes' `practiceIdeas` are **handwriting-first**
-> ("Tracing practice", "Sand/salt tray writing", "Look-say-cover-write-check"). Those violate the
-> tap/voice constraint for Lincoln. The *node structure* is reusable; its *practice ideas* are not — a
-> writing progression for Lincoln needs tap/voice interactions mapped onto these nodes, not the
-> pencil-based ones already written there.
+> ⚠️ **A subtle trap in the curriculum map (NEUTRALIZED in Phase 1):** the writing nodes'
+> `practiceIdeas` *were* **handwriting-first** ("Tracing practice", "Sand/salt tray writing",
+> "Look-say-cover-write-check"), which violate the tap/voice constraint for Lincoln. **FEAT-11 Phase 1
+> replaced these with tap/voice (or neutral) equivalents** across the writing map so the planner can
+> never route him to a pencil; the *node structure* is retained. (Asserted by
+> `src/core/curriculum/writingNoPencil.test.ts`.)
 
 **Net:** to route a writing/spelling skill the way reading/math now route (#1316/#1317 mastery loop),
 the missing pieces are: (a) a `writing` working-level field, (b) spelling/composition skill tags, and
@@ -122,7 +126,18 @@ A **phased** progression, smallest-high-value first, each phase reusing existing
 into the mastery loop. **Where there's a real pedagogical choice, both options are laid out for you to
 pick** — that's the owner's call, not the build's.
 
-### Phase 1 — Spell-the-word (encoding, from words he's already met) **← recommended first build**
+### Phase 1 — Spell-the-word (encoding, from words he's already met) **← DECIDED — building (PR #1320)**
+
+> **Decided (FEAT-11 Phase 1).** Built as a new `spell-word` quest question type that **reuses the
+> build-the-word tile engine and `BuildWordQuestionScreen` verbatim** (tap-only tiles, target spoken
+> not shown, exact-match check — asserted: no text input). Targets are **client-generated** from the
+> **blended** source (sight-word bank + phonics frontier), rotated into the reading/phonics quest
+> (1–2 per session, never first, never two in a row). Spelling is tracked as its **own** signal:
+> `writing.spelling.*` skill tags + a new `WorkingLevels.writing` field derived **only** from the
+> spell-word subset — never folded into phonics, and structured so composition becomes a **separate**
+> signal later. Spelling **mastery** routes through the existing conservative `masteryRollup` →
+> central `skillSnapshotWrites` writer (additive, never-downgrade); the quest seeds an *emerging*
+> priority skill but never writes spelling mastery inline.
 
 **What:** Reuse the build-the-word tile engine, but seed targets from Lincoln's **sight-word bank**
 and recent phonics frontier instead of only AI-generated quest words. Child hears a word he's been
@@ -140,15 +155,15 @@ but never whether he can *spell* it. High value, low new surface area.
   in `workingLevels.ts`).
 - Mastered spelling words route through `masteryRollup` → snapshot the same way reading does.
 
-**Open options for you:**
-- **(1a) Surface:** new spelling tile inside the existing **quest** flow, *or* a standalone
-  "Spell-the-word" mini-surface in Today. *Recommendation: extend quest* (reuses adaptive engine +
-  findings) — but a Today mini-surface is more visible day-to-day. Your call.
-- **(1b) Word source:** sight-words only / phonics-frontier only / **both, blended**.
-  *Recommendation: both* — sight words for confidence, frontier for stretch.
-- **(1c) "Spelled" vs "mastered":** does one correct spelling count, or do we want N-across-M-days like
-  the conservative mastery rollup? *Recommendation: reuse the existing conservative threshold* so
-  spelling mastery means the same thing as every other skill.
+**Options — DECIDED:**
+- **(1a) Surface — ✅ extend the quest.** Spell-the-word is a `spell-word` question type rotated into
+  the reading/phonics quest (reuses the adaptive engine, findings, and tile UI). *(A standalone Today
+  mini-surface was not built.)*
+- **(1b) Word source — ✅ both, blended.** Sight-word bank (familiar/mastered words he can already
+  *read*) for confidence + the phonics-frontier list for stretch; sight words lead, frontier follows.
+- **(1c) "Spelled" vs "mastered" — ✅ reuse the conservative threshold.** Spelling mastery means the
+  same as every other skill (≥3 strong signals across ≥2 days, zero struggles) and routes through the
+  same `masteryRollup` → central writer. A single correct spelling never marks mastery.
 
 ### Phase 2 — Build-the-sentence (sentence-building bridge)
 

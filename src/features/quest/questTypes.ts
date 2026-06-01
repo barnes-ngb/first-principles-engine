@@ -98,8 +98,32 @@ export type AnswerInputMethod = (typeof AnswerInputMethod)[keyof typeof AnswerIn
 export const QuestQuestionType = {
   MultipleChoice: 'multiple-choice',
   BuildWord: 'build-word',
+  /**
+   * FEAT-11 Phase 1 — "spell-the-word": the encoding complement to build-word,
+   * but seeded from words the child has been *reading* (his sight-word bank +
+   * recent phonics frontier, blended) and tracked as a **spelling** signal
+   * (`writing.spelling.*`), not phonics. Reuses build-word's tile engine and UI
+   * verbatim (tap-only tiles, target spoken not shown, exact-match check); only
+   * the word source and the skill tag / working level it feeds differ. Closes
+   * the read/spell asymmetry — we tracked whether he can *read* a word but never
+   * whether he can *spell* it.
+   */
+  SpellWord: 'spell-word',
 } as const
 export type QuestQuestionType = (typeof QuestQuestionType)[keyof typeof QuestQuestionType]
+
+/** Question types that use the tap-only tile-assembly engine (no text input). */
+export const TILE_ASSEMBLY_TYPES = ['build-word', 'spell-word'] as const
+export function isTileAssemblyType(type: string): boolean {
+  return type === 'build-word' || type === 'spell-word'
+}
+
+/**
+ * Spell-the-word level ceiling (FEAT-11). Mirrors build-word's L6 cap — encoding
+ * multi-syllable words from tiles is too hard — and bounds the derived
+ * `workingLevels.writing` (spelling) level.
+ */
+export const WRITING_LEVEL_CAP = 6
 
 interface QuestQuestionBase {
   id: string
@@ -154,7 +178,31 @@ export interface BuildWordQuestion extends QuestQuestionBase {
   audioCue?: string
 }
 
-export type QuestQuestion = MultipleChoiceQuestion | BuildWordQuestion
+/**
+ * "Spell-the-word" encoding question (FEAT-11 Phase 1). Structurally identical
+ * to {@link BuildWordQuestion} — the child hears a word and taps grapheme tiles
+ * to spell it, with NO text input ever — but the target is sourced from the
+ * child's sight-word bank + phonics frontier (a word he's been *reading*), and
+ * its `skill` is a `writing.spelling.*` tag so it feeds the **spelling** working
+ * level, kept separate from phonics and from future composition. Rendered with
+ * the same `BuildWordQuestionScreen`.
+ */
+export interface SpellWordQuestion extends QuestQuestionBase {
+  type: 'spell-word'
+  /** The word to spell. Always equals `correctAnswer`. Not shown as text. */
+  targetWord: string
+  /** Grapheme tiles (scrambled) + level-appropriate distractors. */
+  tiles: string[]
+  /** Spoken cue text (defaults to targetWord when omitted). */
+  audioCue?: string
+  /** Where the target came from — for evidence/labelling. */
+  source?: 'sightWord' | 'frontier'
+}
+
+export type QuestQuestion =
+  | MultipleChoiceQuestion
+  | BuildWordQuestion
+  | SpellWordQuestion
 
 // ── Answered question ─────────────────────────────────────────
 

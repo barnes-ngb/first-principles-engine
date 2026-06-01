@@ -42,9 +42,9 @@ export function checkAnswer(selected: string, question: QuestQuestion): boolean 
   const correct = (question.correctAnswer || '').trim().toLowerCase()
   const answer = selected.trim().toLowerCase()
 
-  // Build-word: the assembled string must exactly spell the target word.
-  // No fuzzy matching — encoding is precise (that is the skill being tested).
-  if (question.type === 'build-word') {
+  // Build-word / spell-word: the assembled string must exactly spell the target
+  // word. No fuzzy matching — encoding is precise (that is the skill tested).
+  if (question.type === 'build-word' || question.type === 'spell-word') {
     return answer === (question.targetWord || correct).trim().toLowerCase()
   }
 
@@ -126,9 +126,9 @@ export function sanitizeStimulus(question: QuestQuestion): string | null {
  * Used to flag skipped questions so they don't count against skill findings.
  */
 export function shouldFlagAsError(question: QuestQuestion): boolean {
-  // Build-word: the only structural error is a target that can't be spelled
-  // from the offered tiles (then there is no valid solution to tap).
-  if (question.type === 'build-word') {
+  // Build-word / spell-word: the only structural error is a target that can't be
+  // spelled from the offered tiles (then there is no valid solution to tap).
+  if (question.type === 'build-word' || question.type === 'spell-word') {
     return !canAssemble(question.targetWord, question.tiles)
   }
 
@@ -184,14 +184,14 @@ export function shouldFlagAsError(question: QuestQuestion): boolean {
  * Returns null if the question is invalid and should be skipped.
  */
 export function validateQuestion(question: QuestQuestion): QuestQuestion | null {
-  // Build-word: valid when there is a target and a tile set that can actually
-  // spell it. This is the encoding analogue of "correctAnswer is in options".
-  if (question.type === 'build-word') {
+  // Build-word / spell-word: valid when there is a target and a tile set that
+  // can actually spell it. The encoding analogue of "correctAnswer is in options".
+  if (question.type === 'build-word' || question.type === 'spell-word') {
     if (!question.targetWord?.trim()) return null
     if (!question.tiles || question.tiles.length === 0) return null
     if (!canAssemble(question.targetWord, question.tiles)) {
       console.warn(
-        'Build-word question not assemblable from tiles:',
+        'Tile-assembly question not assemblable from tiles:',
         question.targetWord,
         question.tiles,
       )

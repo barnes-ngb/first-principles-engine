@@ -8,7 +8,7 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, sightWordProgressCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ConceptualBlock, EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import {
@@ -43,8 +43,11 @@ import {
   QuestScreen,
   VALIDATION_RETRIES,
 } from './questTypes'
-import { computeStartLevel, computeWorkingLevelFromSession, canOverwriteWorkingLevel } from './workingLevels'
+import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, canOverwriteWorkingLevel } from './workingLevels'
 import type { CurriculumLevelHint } from './workingLevels'
+import { WRITING_LEVEL_CAP } from './questTypes'
+import { generateSpellWordQuestion } from './spellTheWord'
+import type { SpellingSource } from './spellTheWord'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -395,6 +398,14 @@ export function useQuestSession() {
   const sessionSavedRef = useRef(false)
   const sessionTimer = useSessionTimer()
   const hoursLoggedRef = useRef(false)
+  // ── Spell-the-word (FEAT-11 Phase 1) ──────────────────────────────
+  // Blended word source (sight-word bank + phonics frontier) loaded at start,
+  // plus per-session injection bookkeeping so spell-word fires like build-word:
+  // 1–2 per session, never first, never two in a row.
+  const spellWordSourceRef = useRef<SpellingSource>({ sightWords: [] })
+  const spellWordCountRef = useRef(0)
+  const lastWasSpellWordRef = useRef(false)
+  const SPELL_WORD_PER_SESSION_MAX = 2
 
   // ── Load previous sessions + streak ───────────────────────────
 
@@ -553,6 +564,34 @@ export function useQuestSession() {
       bonusRoundUsedRef.current = false
       sessionIdRef.current = null
       hoursLoggedRef.current = false
+      // ── Spell-the-word: reset per-session bookkeeping + load the word bank ──
+      // Only the reading/phonics surface mixes in spell-word (encoding lives in
+      // reading); other domains leave the source empty so injection never fires.
+      spellWordCountRef.current = 0
+      lastWasSpellWordRef.current = false
+      spellWordSourceRef.current = { sightWords: [] }
+      if (domain === 'reading' && questMode === 'phonics') {
+        // Fire-and-forget: the bank is needed mid-session, not at the first
+        // question, so this never blocks the start. Frontier words are a built-in
+        // fallback, so an empty/failed bank still yields spell-word questions.
+        void (async () => {
+          try {
+            const snap = await getDocs(query(sightWordProgressCollection(familyId)))
+            const sightWords: string[] = []
+            for (const d of snap.docs) {
+              if (!d.id.startsWith(`${activeChildId}_`)) continue
+              const data = d.data() as { word?: string; masteryLevel?: string }
+              // Words he can already READ — the read/spell asymmetry we're closing.
+              if (data.masteryLevel === 'familiar' || data.masteryLevel === 'mastered') {
+                if (data.word) sightWords.push(String(data.word).toLowerCase())
+              }
+            }
+            spellWordSourceRef.current = { sightWords }
+          } catch (err) {
+            console.warn('[Quest] Failed to load sight-word bank for spell-the-word', err)
+          }
+        })()
+      }
       sessionTimer.startTimer()
 
       // Fluency mode has a different flow
@@ -744,6 +783,11 @@ export function useQuestSession() {
 
       if (!activeChildId) return
 
+      // FEAT-11: spelling seeding findings from the spell-the-word questions this
+      // session. Emerging/not-yet only — mastery is NEVER asserted inline here;
+      // the conservative masteryRollup decides it later through the central writer.
+      const spellingFindings = deriveSpellingFindings(questions)
+
       // Request AI-generated summary
       const domain = activeDomainRef.current
       let summaryText = `Interactive ${domain} quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`
@@ -816,7 +860,7 @@ export function useQuestSession() {
         domain,
         status: 'complete',
         messages: [],
-        findings,
+        findings: [...findings, ...spellingFindings],
         recommendations: sessionRecommendations,
         summary: summaryText,
         evaluatedAt: new Date().toISOString(),
@@ -911,8 +955,14 @@ export function useQuestSession() {
           ? snapshotSnap.data()
           : {}
 
+        // Findings = AI quest findings + spelling seeding findings (FEAT-11).
+        // Spelling findings are emerging-only, so they seed a `writing.spelling.*`
+        // priority skill (a "teach this next" marker) for the central mastery
+        // loop to advance later — they never mark spelling mastered inline.
+        const combinedFindings = [...findings, ...spellingFindings]
+
         // Build priority skills from findings (if any)
-        const newPrioritySkills: PrioritySkill[] = findings
+        const newPrioritySkills: PrioritySkill[] = combinedFindings
           .filter((f) => f.status === 'emerging' || f.status === 'not-yet')
           .map((f) => ({
             tag: f.skill,
@@ -923,7 +973,7 @@ export function useQuestSession() {
           }))
 
         // Update mastered skills
-        for (const f of findings) {
+        for (const f of combinedFindings) {
           if (f.status === 'mastered') {
             const idx = newPrioritySkills.findIndex((s) => s.tag === f.skill)
             if (idx < 0) {
@@ -958,9 +1008,18 @@ export function useQuestSession() {
           }
         }
 
+        // FEAT-11: derive the SPELLING working level from the spell-word subset
+        // only — a separate signal from phonics so spelling routes by its own gap
+        // and is never folded into the phonics number (and leaves room for a
+        // future, distinct composition level).
+        const writingLevel = computeWritingLevelFromSpellingQuestions(questions)
+        if (writingLevel && canOverwriteWorkingLevel(mergedWorkingLevels.writing)) {
+          mergedWorkingLevels = { ...mergedWorkingLevels, writing: writingLevel }
+        }
+
         const updated = {
           childId: activeChildId,
-          prioritySkills: findings.length > 0
+          prioritySkills: combinedFindings.length > 0
             ? [...existingSkills, ...newPrioritySkills]
             : existing.prioritySkills || [],
           supports: existing.supports || [],
@@ -1151,9 +1210,9 @@ export function useQuestSession() {
         skill: currentQuestion.skill,
         prompt: currentQuestion.prompt,
         stimulus: currentQuestion.stimulus,
-        // build-word records its tile set in `options` so analytics/persistence
-        // read one field regardless of question type.
-        options: currentQuestion.type === 'build-word'
+        // Tile-assembly questions (build-word / spell-word) record their tile set
+        // in `options` so analytics/persistence read one field regardless of type.
+        options: currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word'
           ? currentQuestion.tiles
           : currentQuestion.options,
         correctAnswer: currentQuestion.correctAnswer,
@@ -1161,7 +1220,7 @@ export function useQuestSession() {
         correct,
         responseTimeMs,
         timestamp: new Date().toISOString(),
-        inputMethod: inputMethod || (currentQuestion.type === 'build-word' ? 'tile' : 'multiple-choice'),
+        inputMethod: inputMethod || (currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word' ? 'tile' : 'multiple-choice'),
         targetedBlockerId: currentQuestion.targetedBlockerId,
       }
 
@@ -1213,6 +1272,37 @@ export function useQuestSession() {
 
       if (needsBonusRound) {
         bonusRoundUsedRef.current = true
+      }
+
+      // ── Spell-the-word injection (FEAT-11 Phase 1) ──────────────────
+      // On the reading/phonics surface, rotate in a client-generated
+      // spell-the-word question instead of the next AI question: 1–2 per session,
+      // never as a bonus round, never two in a row, and not before Q3 (so it's
+      // never the first thing he sees). Targets come from the blended sight-word
+      // bank + phonics frontier. Tap-only tiles, target spoken not shown.
+      const eligibleForSpellWord =
+        !needsBonusRound &&
+        activeDomainRef.current === 'reading' &&
+        activeQuestModeRef.current === 'phonics' &&
+        spellWordCountRef.current < SPELL_WORD_PER_SESSION_MAX &&
+        !lastWasSpellWordRef.current &&
+        newState.totalQuestions >= 2
+      const fireSpellWord =
+        eligibleForSpellWord &&
+        (spellWordCountRef.current === 0
+          ? newState.totalQuestions >= 3 // guarantee the first one appears
+          : Math.random() < 0.3) // a possible second, spaced out
+      if (fireSpellWord) {
+        const spellLevel = Math.min(newState.currentLevel, WRITING_LEVEL_CAP)
+        const spellQ = generateSpellWordQuestion(spellWordSourceRef.current, spellLevel)
+        if (spellQ) {
+          spellWordCountRef.current += 1
+          lastWasSpellWordRef.current = true
+          setCurrentQuestion(spellQ)
+          questionStartRef.current = Date.now()
+          setScreen(QuestScreen.Question)
+          return
+        }
       }
 
       // Send recent question types so AI can vary format
@@ -1319,6 +1409,7 @@ export function useQuestSession() {
 
         setCurrentQuestion(question)
         questionStartRef.current = Date.now()
+        lastWasSpellWordRef.current = false
         setScreen(QuestScreen.Question)
       } catch (err) {
         console.error('[submitAnswer] AI call threw — ending session gracefully', {
@@ -1360,7 +1451,7 @@ export function useQuestSession() {
         skill: currentQuestion.skill,
         prompt: currentQuestion.prompt,
         stimulus: currentQuestion.stimulus,
-        options: currentQuestion.type === 'build-word'
+        options: currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word'
           ? currentQuestion.tiles
           : currentQuestion.options,
         correctAnswer: currentQuestion.correctAnswer,
@@ -1489,6 +1580,7 @@ export function useQuestSession() {
 
         setCurrentQuestion(question)
         questionStartRef.current = Date.now()
+        lastWasSpellWordRef.current = false
         setScreen(QuestScreen.Question)
       } catch (err) {
         console.error('[handleSkip] AI call threw — ending session gracefully', {
