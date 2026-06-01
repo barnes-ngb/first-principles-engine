@@ -8,7 +8,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import VolumeOffIcon from '@mui/icons-material/VolumeOff'
 import BackspaceIcon from '@mui/icons-material/Backspace'
 import { useTTS } from '../../core/hooks/useTTS'
-import type { AnswerInputMethod, BuildWordQuestion, QuestState } from './questTypes'
+import type { AnswerInputMethod, BuildWordQuestion, QuestState, SpellWordQuestion } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
 
 // ── Minecraft color palette (matches ReadingQuest) ──────────────
@@ -26,7 +26,10 @@ const MC = {
 } as const
 
 interface BuildWordQuestionScreenProps {
-  question: BuildWordQuestion
+  // FEAT-11: spell-the-word reuses this exact tile UI. Both shapes carry
+  // `tiles` / `targetWord` / `audioCue`, so the screen renders either with no
+  // branching — tap-only, target spoken not shown, no text input for either.
+  question: BuildWordQuestion | SpellWordQuestion
   questState: QuestState
   consecutiveWrong: number
   onAnswer: (answer: string) => void

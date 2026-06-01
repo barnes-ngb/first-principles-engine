@@ -412,7 +412,7 @@ export default function KnowledgeMinePage() {
 
       {/* Question */}
       {quest.screen === QuestScreen.Question && quest.currentQuestion && quest.questState && (
-        quest.currentQuestion.type === 'build-word' ? (
+        quest.currentQuestion.type === 'build-word' || quest.currentQuestion.type === 'spell-word' ? (
           <BuildWordQuestionScreen
             question={quest.currentQuestion}
             questState={quest.questState}
@@ -420,7 +420,7 @@ export default function KnowledgeMinePage() {
             onAnswer={quest.submitAnswer}
             onAnswerWithMethod={quest.submitAnswer}
             onSkip={quest.handleSkip}
-            domainLabel={activeDomain?.label || 'Reading Quest'}
+            domainLabel={quest.currentQuestion.type === 'spell-word' ? 'Spelling' : (activeDomain?.label || 'Reading Quest')}
           />
         ) : (
           <QuestQuestionScreen
