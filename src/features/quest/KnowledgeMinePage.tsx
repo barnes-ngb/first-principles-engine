@@ -20,6 +20,7 @@ import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest
 import QuestSummary from './QuestSummary'
 import FluencyPractice from './FluencyPractice'
 import { extractTargetWord } from './questHelpers'
+import { hasMathCalibration, hasReadingCalibration } from './knowledgeMineAccess'
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
 import { useQuestSession } from './useQuestSession'
@@ -149,6 +150,13 @@ export default function KnowledgeMinePage() {
   }, [activeChildId, familyId, quest.screen]) // re-query when returning to intro
 
   const phonicsSecure = isPhonicsSecure(snapshot)
+
+  // Per-quest domain gating (ARCH-16): each quest family requires its own
+  // domain's calibration. The hub entry is generic (any Mine-domain data), but
+  // a child sees only the quests they're calibrated for — an uncalibrated quest
+  // is simply absent (no "not ready" message). Closes the math-only → reading leak.
+  const showReadingQuests = hasReadingCalibration(snapshot)
+  const showMathQuests = hasMathCalibration(snapshot)
 
   // Build reading modes with recommendation badges
   const readingModes = READING_MODES.map((m) => ({
@@ -283,33 +291,37 @@ export default function KnowledgeMinePage() {
             />
           )}
 
-          {/* ── READING section ─────────────────────────────── */}
-          <DomainSection label="READING" icon="📖">
-            {orderedReadingModes.map((qd) => (
-              <QuestCard
-                key={`${qd.domain}-${qd.questMode}`}
-                config={qd}
-                onSelect={() => {
-                  setActiveDomain(qd)
-                  void quest.startQuest(qd.domain, qd.questMode)
-                }}
-              />
-            ))}
-          </DomainSection>
+          {/* ── READING section (only if reading-calibrated) ─── */}
+          {showReadingQuests && (
+            <DomainSection label="READING" icon="📖">
+              {orderedReadingModes.map((qd) => (
+                <QuestCard
+                  key={`${qd.domain}-${qd.questMode}`}
+                  config={qd}
+                  onSelect={() => {
+                    setActiveDomain(qd)
+                    void quest.startQuest(qd.domain, qd.questMode)
+                  }}
+                />
+              ))}
+            </DomainSection>
+          )}
 
-          {/* ── MATH section ────────────────────────────────── */}
-          <DomainSection label="MATH" icon="➕">
-            {MATH_MODES.map((qd) => (
-              <QuestCard
-                key={`${qd.domain}-${qd.questMode}`}
-                config={qd}
-                onSelect={() => {
-                  setActiveDomain(qd)
-                  void quest.startQuest(qd.domain, qd.questMode)
-                }}
-              />
-            ))}
-          </DomainSection>
+          {/* ── MATH section (only if math-calibrated) ───────── */}
+          {showMathQuests && (
+            <DomainSection label="MATH" icon="➕">
+              {MATH_MODES.map((qd) => (
+                <QuestCard
+                  key={`${qd.domain}-${qd.questMode}`}
+                  config={qd}
+                  onSelect={() => {
+                    setActiveDomain(qd)
+                    void quest.startQuest(qd.domain, qd.questMode)
+                  }}
+                />
+              ))}
+            </DomainSection>
+          )}
 
           {/* ── SPEECH section ──────────────────────────────── */}
           <DomainSection label="SPEECH" icon="🗣️">
