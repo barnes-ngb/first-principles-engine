@@ -117,6 +117,30 @@ export const handlePlan = async (
     "INCLUDE skipGuidance ON EVERY WORKBOOK ITEM in the JSON output.",
   ].join("\n"));
 
+  // Append mastery-skipping / frontier-targeting instructions (FEAT-10).
+  // Closes the #1316 / FEAT-09 loop: the planner now READS the mastered state
+  // (the "MASTERED — DO NOT RE-SERVE AS NEW WORK" list in the Skill Snapshot)
+  // and stops serving it as new must-do work — focusing minutes on the frontier
+  // and the gaps. This ADDS skip-mastered without touching ADDRESS NOW routing.
+  sections.push([
+    "SKIP MASTERED — TARGET THE FRONTIER + THE GAPS (IMPORTANT):",
+    "The Skill Snapshot may include a \"MASTERED — DO NOT RE-SERVE AS NEW WORK\" list.",
+    "Those skills are checked off — the child has already shown them mastered.",
+    "",
+    "RULES:",
+    "1. SKIP mastered as new work. Do NOT fill must-do minutes with new instruction on a",
+    "   checked-off skill, and never build a must-do item whose point is teaching one.",
+    "2. KEEP TARGETING THE GAPS. Every conceptual block marked ADDRESS NOW still gets its",
+    "   targeted activities — skipping mastered work does NOT mean skipping gap work.",
+    "3. ADVANCE THE FRONTIER. Spend the freed minutes on Emerging/Developing skills (the edge",
+    "   of what he can do) and on first-exposure new material where the snapshot shows he's ready.",
+    "4. LIGHT REVIEW IS STILL ALLOWED. A mastered skill may surface occasionally as a quick",
+    "   warm-up or review — just don't make it new must-do work, and don't bunch review together.",
+    "",
+    "Framing: skip what's checked off; spend his minutes on the edge of what he can do and on",
+    "the gaps. Mastered = retire from NEW work, not erase from the child's day.",
+  ].join("\n"));
+
   // Append block-based daily schedule structure
   sections.push([
     "DAILY SCHEDULE STRUCTURE — Shelly's actual teaching flow:",
