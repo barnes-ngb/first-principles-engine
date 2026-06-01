@@ -7,9 +7,11 @@ import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
 import { canAccessKnowledgeMine } from './knowledgeMineAccess'
 
 /**
- * Route guard for /quest. Holds children without reading calibration data by
- * silently redirecting to the kid home, so a direct link can't bypass the
- * launcher-tile gate. Graceful — no error page, no "you can't" messaging.
+ * Route guard for /quest. Holds children without calibration data for ANY Mine
+ * domain by silently redirecting to the kid home, so a direct link can't bypass
+ * the launcher-tile gate. This mirrors the generic hub-entry gate; per-quest
+ * domain precision (Reading vs Math) lives inside KnowledgeMinePage (ARCH-16).
+ * Graceful — no error page, no "you can't" messaging.
  */
 export default function RequireKnowledgeMineAccess({
   children,
