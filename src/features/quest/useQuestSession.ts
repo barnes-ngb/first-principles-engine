@@ -43,11 +43,13 @@ import {
   QuestScreen,
   VALIDATION_RETRIES,
 } from './questTypes'
-import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, canOverwriteWorkingLevel } from './workingLevels'
+import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, computeSentenceLevelFromQuestions, deriveSentenceFindings, canOverwriteWorkingLevel } from './workingLevels'
 import type { CurriculumLevelHint } from './workingLevels'
-import { WRITING_LEVEL_CAP } from './questTypes'
+import { WRITING_LEVEL_CAP, SENTENCE_LEVEL_CAP } from './questTypes'
 import { generateSpellWordQuestion } from './spellTheWord'
 import type { SpellingSource } from './spellTheWord'
+import { generateBuildSentenceQuestion } from './buildTheSentence'
+import type { SentenceSource } from './buildTheSentence'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -406,6 +408,16 @@ export function useQuestSession() {
   const spellWordCountRef = useRef(0)
   const lastWasSpellWordRef = useRef(false)
   const SPELL_WORD_PER_SESSION_MAX = 2
+  // ── Build-the-sentence (FEAT-11 Phase 2) ──────────────────────────
+  // The bridge after encoding: tap word-tiles into order to form a sentence.
+  // Rotated into the reading/phonics quest like spell-word but gentler — at most
+  // one per session, never first, never two in a row (it's the heavier task).
+  // Source is the same sight-word bank (his words) blended with a function-word
+  // scaffold inside `buildTheSentence.ts`.
+  const sentenceSourceRef = useRef<SentenceSource>({ bankWords: [] })
+  const buildSentenceCountRef = useRef(0)
+  const lastWasBuildSentenceRef = useRef(false)
+  const BUILD_SENTENCE_PER_SESSION_MAX = 1
 
   // ── Load previous sessions + streak ───────────────────────────
 
@@ -570,10 +582,15 @@ export function useQuestSession() {
       spellWordCountRef.current = 0
       lastWasSpellWordRef.current = false
       spellWordSourceRef.current = { sightWords: [] }
+      // Build-the-sentence shares the reading/phonics surface + the same bank.
+      buildSentenceCountRef.current = 0
+      lastWasBuildSentenceRef.current = false
+      sentenceSourceRef.current = { bankWords: [] }
       if (domain === 'reading' && questMode === 'phonics') {
         // Fire-and-forget: the bank is needed mid-session, not at the first
-        // question, so this never blocks the start. Frontier words are a built-in
-        // fallback, so an empty/failed bank still yields spell-word questions.
+        // question, so this never blocks the start. Both spell-word and
+        // build-sentence have built-in fallbacks (phonics frontier / a curated
+        // function-word scaffold), so an empty/failed bank still yields questions.
         void (async () => {
           try {
             const snap = await getDocs(query(sightWordProgressCollection(familyId)))
@@ -587,8 +604,10 @@ export function useQuestSession() {
               }
             }
             spellWordSourceRef.current = { sightWords }
+            // Sentence-building blends the same words he's met into content slots.
+            sentenceSourceRef.current = { bankWords: sightWords }
           } catch (err) {
-            console.warn('[Quest] Failed to load sight-word bank for spell-the-word', err)
+            console.warn('[Quest] Failed to load sight-word bank for writing practice', err)
           }
         })()
       }
@@ -783,10 +802,14 @@ export function useQuestSession() {
 
       if (!activeChildId) return
 
-      // FEAT-11: spelling seeding findings from the spell-the-word questions this
-      // session. Emerging/not-yet only — mastery is NEVER asserted inline here;
-      // the conservative masteryRollup decides it later through the central writer.
+      // FEAT-11: writing seeding findings from the spell-the-word (spelling) and
+      // build-the-sentence (sentence) questions this session. Emerging/not-yet
+      // only — mastery is NEVER asserted inline here; the conservative
+      // masteryRollup decides it later through the central writer. Spelling and
+      // sentence carry distinct tags so they stay separable signals.
       const spellingFindings = deriveSpellingFindings(questions)
+      const sentenceFindings = deriveSentenceFindings(questions)
+      const writingFindings = [...spellingFindings, ...sentenceFindings]
 
       // Request AI-generated summary
       const domain = activeDomainRef.current
@@ -860,7 +883,7 @@ export function useQuestSession() {
         domain,
         status: 'complete',
         messages: [],
-        findings: [...findings, ...spellingFindings],
+        findings: [...findings, ...writingFindings],
         recommendations: sessionRecommendations,
         summary: summaryText,
         evaluatedAt: new Date().toISOString(),
@@ -955,11 +978,12 @@ export function useQuestSession() {
           ? snapshotSnap.data()
           : {}
 
-        // Findings = AI quest findings + spelling seeding findings (FEAT-11).
-        // Spelling findings are emerging-only, so they seed a `writing.spelling.*`
-        // priority skill (a "teach this next" marker) for the central mastery
-        // loop to advance later — they never mark spelling mastered inline.
-        const combinedFindings = [...findings, ...spellingFindings]
+        // Findings = AI quest findings + writing seeding findings (FEAT-11):
+        // spelling (`writing.spelling.*`) + sentence (`writing.composition.sentence`).
+        // Both are emerging-only, so they seed a priority skill (a "teach this
+        // next" marker) for the central mastery loop to advance later — they never
+        // mark spelling or sentence mastered inline.
+        const combinedFindings = [...findings, ...writingFindings]
 
         // Build priority skills from findings (if any)
         const newPrioritySkills: PrioritySkill[] = combinedFindings
@@ -1015,6 +1039,15 @@ export function useQuestSession() {
         const writingLevel = computeWritingLevelFromSpellingQuestions(questions)
         if (writingLevel && canOverwriteWorkingLevel(mergedWorkingLevels.writing)) {
           mergedWorkingLevels = { ...mergedWorkingLevels, writing: writingLevel }
+        }
+
+        // FEAT-11 Phase 2: derive the SENTENCE working level from the
+        // build-sentence subset only — a separate signal from both phonics and
+        // spelling, so sentence-building routes by its own gap and is never folded
+        // into the spelling number (and leaves room for a future composition level).
+        const sentenceLevel = computeSentenceLevelFromQuestions(questions)
+        if (sentenceLevel && canOverwriteWorkingLevel(mergedWorkingLevels.sentence)) {
+          mergedWorkingLevels = { ...mergedWorkingLevels, sentence: sentenceLevel }
         }
 
         const updated = {
@@ -1210,9 +1243,10 @@ export function useQuestSession() {
         skill: currentQuestion.skill,
         prompt: currentQuestion.prompt,
         stimulus: currentQuestion.stimulus,
-        // Tile-assembly questions (build-word / spell-word) record their tile set
-        // in `options` so analytics/persistence read one field regardless of type.
-        options: currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word'
+        // Tile-assembly questions (build-word / spell-word / build-sentence)
+        // record their tile set in `options` so analytics/persistence read one
+        // field regardless of type.
+        options: currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word' || currentQuestion.type === 'build-sentence'
           ? currentQuestion.tiles
           : currentQuestion.options,
         correctAnswer: currentQuestion.correctAnswer,
@@ -1220,7 +1254,7 @@ export function useQuestSession() {
         correct,
         responseTimeMs,
         timestamp: new Date().toISOString(),
-        inputMethod: inputMethod || (currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word' ? 'tile' : 'multiple-choice'),
+        inputMethod: inputMethod || (currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word' || currentQuestion.type === 'build-sentence' ? 'tile' : 'multiple-choice'),
         targetedBlockerId: currentQuestion.targetedBlockerId,
       }
 
@@ -1298,7 +1332,39 @@ export function useQuestSession() {
         if (spellQ) {
           spellWordCountRef.current += 1
           lastWasSpellWordRef.current = true
+          lastWasBuildSentenceRef.current = false
           setCurrentQuestion(spellQ)
+          questionStartRef.current = Date.now()
+          setScreen(QuestScreen.Question)
+          return
+        }
+      }
+
+      // ── Build-the-sentence injection (FEAT-11 Phase 2) ──────────────
+      // On the reading/phonics surface, rotate in a client-generated
+      // build-the-sentence question (the bridge after encoding): at most one per
+      // session, never as a bonus round, never right after another injected
+      // question, never first, and only once basic encoding is underway
+      // (Level ≥ 2, and not before Q4 so spelling has had a turn). Tap-only word
+      // tiles + a capital/period tile; the sentence is spoken, never shown.
+      const eligibleForSentence =
+        !needsBonusRound &&
+        activeDomainRef.current === 'reading' &&
+        activeQuestModeRef.current === 'phonics' &&
+        buildSentenceCountRef.current < BUILD_SENTENCE_PER_SESSION_MAX &&
+        !lastWasBuildSentenceRef.current &&
+        !lastWasSpellWordRef.current &&
+        newState.currentLevel >= 2 &&
+        newState.totalQuestions >= 4
+      const fireSentence = eligibleForSentence && Math.random() < 0.5
+      if (fireSentence) {
+        const sentenceLevel = Math.min(newState.currentLevel, SENTENCE_LEVEL_CAP)
+        const sentenceQ = generateBuildSentenceQuestion(sentenceSourceRef.current, sentenceLevel)
+        if (sentenceQ) {
+          buildSentenceCountRef.current += 1
+          lastWasBuildSentenceRef.current = true
+          lastWasSpellWordRef.current = false
+          setCurrentQuestion(sentenceQ)
           questionStartRef.current = Date.now()
           setScreen(QuestScreen.Question)
           return
@@ -1410,6 +1476,7 @@ export function useQuestSession() {
         setCurrentQuestion(question)
         questionStartRef.current = Date.now()
         lastWasSpellWordRef.current = false
+        lastWasBuildSentenceRef.current = false
         setScreen(QuestScreen.Question)
       } catch (err) {
         console.error('[submitAnswer] AI call threw — ending session gracefully', {
@@ -1451,7 +1518,7 @@ export function useQuestSession() {
         skill: currentQuestion.skill,
         prompt: currentQuestion.prompt,
         stimulus: currentQuestion.stimulus,
-        options: currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word'
+        options: currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word' || currentQuestion.type === 'build-sentence'
           ? currentQuestion.tiles
           : currentQuestion.options,
         correctAnswer: currentQuestion.correctAnswer,
@@ -1581,6 +1648,7 @@ export function useQuestSession() {
         setCurrentQuestion(question)
         questionStartRef.current = Date.now()
         lastWasSpellWordRef.current = false
+        lastWasBuildSentenceRef.current = false
         setScreen(QuestScreen.Question)
       } catch (err) {
         console.error('[handleSkip] AI call threw — ending session gracefully', {

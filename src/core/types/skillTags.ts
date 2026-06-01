@@ -27,15 +27,17 @@ export type ReadingTag = (typeof ReadingTags)[keyof typeof ReadingTags]
 
 // ── Writing ──────────────────────────────────────────────────────
 
-// `writing` splits into two deliberately **separate** sub-domains so each
-// routes by its own gap (FEAT-11): `writing.spelling.*` (encoding — "get the
-// word right", the spell-the-word signal) and, in a later phase,
+// `writing` splits into deliberately **separate** sub-domains so each routes by
+// its own gap (FEAT-11): `writing.spelling.*` (encoding — "get the word right",
+// the spell-the-word signal, Phase 1), `writing.composition.sentence` /
+// `writing.sentence.*` (sentence-building — "put words in order", the
+// build-the-sentence signal, Phase 2), and, in a later phase, the rest of
 // `writing.composition.*` ("say what you mean"). They are NOT collapsed into one
 // blurred `writing` number — a struggling speller with strong ideas (Lincoln)
-// would be mis-served by a single level. The legacy handwriting-mechanics tags
-// below are retained for back-compat but are **not** routed to via practice
-// (their pencil-first practice ideas were neutralized on the curriculum nodes —
-// see `curriculumMap.ts`).
+// would be mis-served by a single level: spelling ≠ sentence ≠ composition. The
+// legacy handwriting-mechanics tags below are retained for back-compat but are
+// **not** routed to via practice (their pencil-first practice ideas were
+// neutralized on the curriculum nodes — see `curriculumMap.ts`).
 export const WritingTags = {
   GripPosture: 'writing.gripPosture',
   LetterFormation: 'writing.letterFormation',
@@ -43,6 +45,13 @@ export const WritingTags = {
   // ── Spelling / encoding (FEAT-11 Phase 1, tap-only tile assembly) ──
   SpellingPhonetic: 'writing.spelling.phonetic',
   SpellingSightWord: 'writing.spelling.sightWord',
+  // ── Sentence-building (FEAT-11 Phase 2, tap word-tiles into order) ──
+  // `SentenceComposition` maps to the existing `writing.composition.sentence`
+  // curriculum node; `SentenceOrder` is the scrambled-to-order construction
+  // sub-skill (word order + bundled capital/period). Both are distinct from the
+  // `writing.spelling.*` namespace so the sentence signal never blurs into it.
+  SentenceComposition: 'writing.composition.sentence',
+  SentenceOrder: 'writing.sentence.order',
 } as const
 export type WritingTag = (typeof WritingTags)[keyof typeof WritingTags]
 
@@ -134,6 +143,19 @@ export const SKILL_TAG_CATALOG: SkillTagDefinition[] = [
     label: 'Spelling sight words',
     evidence: 'Spells a familiar sight word from tiles after hearing it (tap-only)',
     commonSupports: ['Tiles from words he can already read', 'Hear-the-word replay', 'Build then check'],
+  },
+  {
+    tag: WritingTags.SentenceComposition,
+    label: 'Building sentences',
+    evidence: 'Orders word tiles into a complete sentence with a capital and a period (tap-only)',
+    // Tap-only supports — never a pencil or typing prompt (FEAT-11).
+    commonSupports: ['Word tiles to tap into order', 'Hear-the-sentence replay', 'Capital tile + period tile'],
+  },
+  {
+    tag: WritingTags.SentenceOrder,
+    label: 'Word order in a sentence',
+    evidence: 'Puts scrambled word tiles into the right order to make a sentence',
+    commonSupports: ['Start with the capital tile', 'Say it aloud, then place each word', 'Finish with the period tile'],
   },
 
   // Math

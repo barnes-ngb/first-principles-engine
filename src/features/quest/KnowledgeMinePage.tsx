@@ -18,6 +18,7 @@ import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest'
 import BuildWordQuestionScreen from './BuildWordQuestion'
+import BuildSentenceQuestionScreen from './BuildSentenceQuestion'
 import QuestSummary from './QuestSummary'
 import FluencyPractice from './FluencyPractice'
 import { extractTargetWord } from './questHelpers'
@@ -412,7 +413,17 @@ export default function KnowledgeMinePage() {
 
       {/* Question */}
       {quest.screen === QuestScreen.Question && quest.currentQuestion && quest.questState && (
-        quest.currentQuestion.type === 'build-word' || quest.currentQuestion.type === 'spell-word' ? (
+        quest.currentQuestion.type === 'build-sentence' ? (
+          <BuildSentenceQuestionScreen
+            question={quest.currentQuestion}
+            questState={quest.questState}
+            consecutiveWrong={quest.questState.consecutiveWrong}
+            onAnswer={quest.submitAnswer}
+            onAnswerWithMethod={quest.submitAnswer}
+            onSkip={quest.handleSkip}
+            domainLabel="Sentence Builder"
+          />
+        ) : quest.currentQuestion.type === 'build-word' || quest.currentQuestion.type === 'spell-word' ? (
           <BuildWordQuestionScreen
             question={quest.currentQuestion}
             questState={quest.questState}

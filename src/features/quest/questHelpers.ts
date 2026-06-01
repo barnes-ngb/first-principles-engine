@@ -1,4 +1,5 @@
 import type { MultipleChoiceQuestion, QuestQuestion, SessionQuestion } from './questTypes'
+import { canAssembleSentence } from './buildTheSentence'
 
 // ── Build-word assembly ─────────────────────────────────────────
 
@@ -39,6 +40,15 @@ export function canAssemble(target: string, tiles: string[]): boolean {
  * Also handles voice/typed open-response answers with fuzzy matching.
  */
 export function checkAnswer(selected: string, question: QuestQuestion): boolean {
+  // Build-the-sentence: the assembled tile order must exactly match the target
+  // sentence — case- AND punctuation-sensitive, because the bundled capital
+  // (start) and period (end) ARE part of the skill being checked. Only internal
+  // whitespace is normalized. Handled before the lowercasing below.
+  if (question.type === 'build-sentence') {
+    const norm = (s: string) => (s || '').replace(/\s+/g, ' ').trim()
+    return norm(selected) === norm(question.targetSentence || question.correctAnswer)
+  }
+
   const correct = (question.correctAnswer || '').trim().toLowerCase()
   const answer = selected.trim().toLowerCase()
 
@@ -132,6 +142,12 @@ export function shouldFlagAsError(question: QuestQuestion): boolean {
     return !canAssemble(question.targetWord, question.tiles)
   }
 
+  // Build-sentence: the only structural error is a target that can't be built
+  // from the offered tiles (missing a word, capital, or period tile).
+  if (question.type === 'build-sentence') {
+    return !canAssembleSentence(question.targetSentence, question.tiles)
+  }
+
   // Flag 1: Stimulus contains the correct answer (the "th_en" bug)
   if (question.stimulus && question.correctAnswer) {
     const stim = question.stimulus.toLowerCase()
@@ -193,6 +209,22 @@ export function validateQuestion(question: QuestQuestion): QuestQuestion | null 
       console.warn(
         'Tile-assembly question not assemblable from tiles:',
         question.targetWord,
+        question.tiles,
+      )
+      return null
+    }
+    return question
+  }
+
+  // Build-sentence: valid when there is a target sentence and a tile set that can
+  // actually build it (every word + a capital tile + a period tile).
+  if (question.type === 'build-sentence') {
+    if (!question.targetSentence?.trim()) return null
+    if (!question.tiles || question.tiles.length === 0) return null
+    if (!canAssembleSentence(question.targetSentence, question.tiles)) {
+      console.warn(
+        'Build-sentence question not assemblable from tiles:',
+        question.targetSentence,
         question.tiles,
       )
       return null
@@ -297,6 +329,10 @@ export function generateFallbackQuestion(level: number, domain: string): Multipl
  * Extract the target word from a quest question for word progress tracking.
  */
 export function extractTargetWord(question: SessionQuestion & { stimulus?: string }): string | null {
+  // Build-sentence answers are whole sentences, not words — never feed them into
+  // per-word progress tracking.
+  if (question.type === 'build-sentence') return null
+
   const stimulus = question.stimulus || ''
 
   // For word-reading: the stimulus IS the word
