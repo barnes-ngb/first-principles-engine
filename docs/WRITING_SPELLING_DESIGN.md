@@ -1,6 +1,8 @@
-# Writing & Spelling — Progression Design (PHASE 1 DECIDED — IN PROGRESS)
+# Writing & Spelling — Progression Design (PHASES 1–2 DECIDED — IN PROGRESS)
 
-> **Status:** **Phase 1 (spell-the-word) decided and building.** Phases 2–3 remain proposals.
+> **Status:** **Phase 1 (spell-the-word) and Phase 2 (build-the-sentence) decided and building.**
+> Phase 3 (say-it-write-it) remains a proposal; the **free-bank** sentence composition and the
+> **dictate→reorder** voice on-ramp are explicitly **deferred** (see §3 Phase 2).
 > **Ledger:** `FEAT-11` (REVIEW_HOME_BASE.md §6).
 > **Phase 1 decisions (locked in review, see §3):** Phase 1 (spell-the-word) leads; **spelling is its
 > own tracked signal, never blurred with composition**; surface = **extend the quest**; word source =
@@ -111,7 +113,7 @@ Three distinct sub-skills, ascending. Naming them apart keeps the progression fr
 | Sub-skill | What it is | Tap/voice interaction | Where Lincoln likely sits |
 |---|---|---|---|
 | **Encoding / spelling** | Building a *word* from its sounds — sound→grapheme mapping | **Tile assembly** (the build-the-word seed): hear word → tap grapheme tiles. Extends to spelling sight words he can already *read*. | **Emerging→developing.** Build-the-word L1–L6 is his live surface; phonics "recently clicking." This is the nearest frontier. |
-| **Sentence-building** | Assembling a *sentence* from word/phrase tiles — word order, capital, end punctuation. The **bridge** from words to writing. | **Word-tile assembly**: tap word tiles into order; tap a capital/period tile. Optionally dictate, then fix order by tapping. | **Not yet started** — no surface exists. Likely his true next step once encoding is steadier. |
+| **Sentence-building** | Assembling a *sentence* from word/phrase tiles — word order, capital, end punctuation. The **bridge** from words to writing. | **Word-tile assembly**: tap word tiles into order; tap a capital/period tile. Optionally dictate, then fix order by tapping. | **Live (FEAT-11 Phase 2)** — `build-sentence` quest type (scrambled-to-order, bundled capital/period), tracked as its own `WorkingLevels.sentence` signal. Free-bank composition + the dictate→reorder on-ramp are deferred. |
 | **Composition** | Expressing an *idea* as text — the hard part, and the one most blocked by mechanics. | **Voice → transcription**, then **tap-to-revise** (tap a word to swap/delete/insert; never forced to type). | **Blocked, not absent** — he has the ideas (teach-back, story dictation prove it); the keyboard/pencil is the wall. This phase removes the wall. |
 
 The point of the ladder: **encoding** is "get the word right," **sentence-building** is "put words in
@@ -165,27 +167,52 @@ but never whether he can *spell* it. High value, low new surface area.
   same as every other skill (≥3 strong signals across ≥2 days, zero struggles) and routes through the
   same `masteryRollup` → central writer. A single correct spelling never marks mastery.
 
-### Phase 2 — Build-the-sentence (sentence-building bridge)
+### Phase 2 — Build-the-sentence (sentence-building bridge) **← DECIDED — building (PR: build-the-sentence)**
 
-**What:** Word/phrase **tiles** the child taps into order to make a sentence — subject + verb, capital
-at the start, period at the end. Tiles drawn from his word bank + a small function-word set.
+> **Decided (FEAT-11 Phase 2).** Built as a new `build-sentence` quest question type that **reuses the
+> tap-only tile-assembly paradigm** (a sibling `BuildSentenceQuestionScreen` to the word-tile screen —
+> tap tiles into order, tap to remove, no text input ever — asserted: no text-input element). Targets
+> are **client-generated** in pure, testable `buildTheSentence.ts` from his **word bank blended with a
+> small function-word set** (the grammar scaffold), using level-scaled templates so the target is
+> always grammatical and **deterministically checkable**. The correct words are presented **scrambled →
+> tapped into order** (scrambled-to-order). A **capital tile** and a **period tile** are **bundled into
+> the sentence** (tap them into place; capital at the start, period at the end) — checked
+> case/punctuation-sensitively against the target. Rotated into the reading/phonics quest (≤1 per
+> session, never first, never right after another injected question, Level ≥ 2). Sentence-building is
+> tracked as its **own** signal: `writing.composition.sentence` / `writing.sentence.*` tags + a new
+> `WorkingLevels.sentence` field derived **only** from the build-sentence subset — never folded into the
+> spelling signal (`WorkingLevels.writing`) or phonics, and structured so composition stays a separate
+> future signal. Sentence **mastery** routes through the existing conservative `masteryRollup` → central
+> `skillSnapshotWrites` writer (additive, never-downgrade); the quest seeds an *emerging* priority skill
+> but never writes sentence mastery inline.
+
+**What:** Word **tiles** the child taps into order to make a sentence — subject + verb, capital at the
+start, period at the end. Tiles drawn from his word bank + a small function-word set.
 
 **Why second:** it's the genuine bridge from "right word" to "real writing," and it stays fully inside
 the tile paradigm he already succeeds with — no new mechanics, just bigger units.
 
-**Tap/voice:** tap word-tiles into order; tap capital/period tiles. Optional: dictate a sentence, then
-the transcript breaks into tappable word-tiles he **reorders** — a soft on-ramp to Phase 3. ✅
+**Tap/voice:** tap word-tiles into order; tap capital/period tiles. ✅
 
-**Routing / mastery wiring:** map to `writing.composition.sentence` (curriculum node already exists);
-add a sentence skill tag; same working-level + rollup path.
+**Routing / mastery wiring:** maps to `writing.composition.sentence` (curriculum node already exists);
+new sentence skill tags + `WorkingLevels.sentence`; same rollup → central-writer path as spelling, but a
+separate signal.
 
-**Open options:**
-- **(2a) Construction model:** *order pre-given scrambled tiles* (easier, closed) vs *pick tiles from a
-  bank to compose freely* (harder, open). *Recommendation: start scrambled-to-order, graduate to
-  free-bank* as a within-phase difficulty ramp.
-- **(2b) Capital/punctuation:** assess as part of the sentence, or as its own micro-skill
-  (`writing.mechanics.capitalization` node exists). *Recommendation: bundle into the sentence at first;
-  split out only if it becomes a distinct blocker.*
+**Decisions — DECIDED:**
+- **(2a) Construction model — ✅ scrambled-to-order only.** The correct words are offered scrambled and
+  tapped into order — deterministic and checkable. **Free-bank** open composition (pick tiles to compose
+  freely, multiple valid sentences) is the within-phase graduation but is **deferred — not this run**
+  (it needs a validity approach, e.g. an acceptance grammar / AI check, before it can be scored).
+- **(2b) Capital/punctuation — ✅ bundled into the sentence.** A capital tile and a period tile are part
+  of the same build (not a separate micro-skill); split out only if it later becomes a distinct blocker.
+- **(2c) Voice on-ramp — ✅ deferred.** The dictate-a-sentence → reorder-the-transcript-tiles on-ramp is
+  **Phase 3**, not this run.
+
+> **Separable-signal note (load-bearing).** Phase 1 named the spelling signal `WorkingLevels.writing`.
+> Phase 2 does **not** rename it (no migration of live child records); instead it adds a **sibling**
+> `WorkingLevels.sentence` and documents `writing` explicitly as the *spelling* level. Spelling ≠
+> sentence ≠ composition: three signals, three fields, never one blurred `writing` number. Composition
+> (Phase 3) will get its own field again.
 
 ### Phase 3 — Say-it-write-it (composition, voice-first, tap-to-revise)
 
