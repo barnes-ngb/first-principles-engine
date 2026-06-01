@@ -126,7 +126,7 @@ A **phased** progression, smallest-high-value first, each phase reusing existing
 into the mastery loop. **Where there's a real pedagogical choice, both options are laid out for you to
 pick** — that's the owner's call, not the build's.
 
-### Phase 1 — Spell-the-word (encoding, from words he's already met) **← DECIDED — building (PR below)**
+### Phase 1 — Spell-the-word (encoding, from words he's already met) **← DECIDED — building (PR #1320)**
 
 > **Decided (FEAT-11 Phase 1).** Built as a new `spell-word` quest question type that **reuses the
 > build-the-word tile engine and `BuildWordQuestionScreen` verbatim** (tap-only tiles, target spoken
