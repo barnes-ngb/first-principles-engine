@@ -453,6 +453,10 @@ export default function QuestQuestionScreen({
 
   const [timerElapsed, setTimerElapsed] = useState(false)
   const [revealingAnswer, setRevealingAnswer] = useState(false)
+  // Select-then-confirm: the card the child has tapped once (highlighted + spoken)
+  // but not yet committed. null = nothing selected. Index-based so duplicate option
+  // strings can't collide. A second tap on this same card submits.
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [prevQuestionId, setPrevQuestionId] = useState(question.id)
 
   // Reset state when question changes (React-recommended pattern for derived state)
@@ -460,6 +464,7 @@ export default function QuestQuestionScreen({
     setPrevQuestionId(question.id)
     setTimerElapsed(false)
     setRevealingAnswer(false)
+    setSelectedIndex(null)
   }
 
   // Detect passage-based comprehension questions (passage separated by double newline)
@@ -541,10 +546,30 @@ export default function QuestQuestionScreen({
 
   const correctLower = question.correctAnswer.trim().toLowerCase()
 
+  // Always-visible progress: diamonds mined so far + how many questions remain.
+  // Minecraft-framed, no "score" language. The session cap (MAX_QUESTIONS) is
+  // enforced in shouldEndSession; this just makes the end visible to Lincoln.
+  const diamondsMined = questState.totalCorrect
+  const questionsRemaining = Math.max(0, MAX_QUESTIONS - questState.totalQuestions)
+
   return (
     <Box sx={{ bgcolor: MC.bg, borderRadius: 2, p: 3 }}>
+      {/* Sticky progress header — stays in view so the diamond tally and the
+          "how close to done" never scroll off on long comprehension passages. */}
+      <Box
+        sx={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 3,
+          bgcolor: MC.bg,
+          pt: 0.5,
+          pb: 1.5,
+          mb: 1,
+          borderBottom: `1px solid ${MC.darkStone}`,
+        }}
+      >
       {/* Header */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
         <Typography
           sx={{
             fontFamily: MC.font,
@@ -575,7 +600,7 @@ export default function QuestQuestionScreen({
           height: 8,
           borderRadius: 4,
           bgcolor: MC.darkStone,
-          mb: 2,
+          mb: 1,
           '& .MuiLinearProgress-bar': {
             bgcolor: MC.green,
             borderRadius: 4,
@@ -583,8 +608,8 @@ export default function QuestQuestionScreen({
         }}
       />
 
-      {/* Diamond counter + speaker controls */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+      {/* Diamond tally + speaker controls */}
+      <Stack direction="row" justifyContent="space-between" alignItems="center">
         {isVoiceFirst ? (
           <Stack direction="row" alignItems="center" spacing={0.5}>
             {/* Prominent replay button */}
@@ -649,15 +674,19 @@ export default function QuestQuestionScreen({
           </IconButton>
         )}
         <Typography
+          aria-label={`${diamondsMined} diamonds mined, ${questionsRemaining} to go`}
           sx={{
             fontFamily: MC.font,
             fontSize: '0.5rem',
             color: MC.diamond,
+            textAlign: 'right',
+            lineHeight: 1.6,
           }}
         >
-          💎
+          💎 {diamondsMined} mined · {questionsRemaining} to go
         </Typography>
       </Stack>
+      </Box>
 
       {/* Bonus round banner */}
       {question.isBonusRound && (
@@ -819,55 +848,76 @@ export default function QuestQuestionScreen({
         </Typography>
       )}
 
-      {/* Answer cards */}
+      {/* Answer cards — select-then-confirm so tapping to *hear* a word never
+          submits. First tap selects + plays the word; a second tap on the same
+          (selected) card commits. Tapping a different card moves the selection
+          and plays that word. Exploring options is always free. */}
       <Stack spacing={1.5}>
         {question.options.map((option, i) => {
           const isCorrectOption = option.trim().toLowerCase() === correctLower
           const revealCorrect = revealingAnswer && isCorrectOption
           const revealFade = revealingAnswer && !isCorrectOption
+          const isSelected = !revealingAnswer && selectedIndex === i
+
+          const handleCardTap = () => {
+            if (revealingAnswer) return
+            if (selectedIndex === i) {
+              // Second tap on the already-selected card → commit.
+              onAnswer(option)
+            } else {
+              // First tap (or moving from another card) → select + hear it.
+              setSelectedIndex(i)
+              speakWord(option)
+            }
+          }
 
           return (
             <Box
               key={i}
               role="button"
+              aria-pressed={isSelected}
               tabIndex={revealingAnswer ? -1 : 0}
-              onClick={() => {
-                if (!revealingAnswer) onAnswer(option)
-              }}
+              onClick={handleCardTap}
               onKeyDown={(e) => {
                 if (!revealingAnswer && (e.key === 'Enter' || e.key === ' ')) {
                   e.preventDefault()
-                  onAnswer(option)
+                  handleCardTap()
                 }
               }}
               sx={{
-                bgcolor: revealCorrect ? 'rgba(126, 252, 32, 0.15)' : MC.darkStone,
-                border: `2px solid ${revealCorrect ? MC.green : 'transparent'}`,
+                bgcolor: revealCorrect
+                  ? 'rgba(126, 252, 32, 0.15)'
+                  : isSelected
+                    ? 'rgba(91, 252, 238, 0.12)'
+                    : MC.darkStone,
+                border: `2px solid ${revealCorrect ? MC.green : isSelected ? MC.diamond : 'transparent'}`,
                 borderRadius: 2,
                 p: 2,
                 minHeight: 56,
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: revealingAnswer ? 'default' : 'pointer',
                 opacity: revealFade ? 0.3 : 1,
-                transition: 'border-color 0.15s, opacity 0.3s, background-color 0.3s',
+                transition: 'border-color 0.15s, opacity 0.3s, background-color 0.15s',
                 '&:hover': revealingAnswer ? {} : {
-                  borderColor: MC.gold,
+                  borderColor: isSelected ? MC.diamond : MC.gold,
                 },
                 '&:focus-visible': revealingAnswer ? {} : {
-                  borderColor: MC.gold,
+                  borderColor: isSelected ? MC.diamond : MC.gold,
                   outline: 'none',
                 },
               }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                {/* Voice-first: speaker icon to hear option without committing */}
-                {isVoiceFirst && !revealingAnswer && !muted && (
+                {/* Speaker = replay. Tapping it re-plays the word without changing
+                    the selection or submitting (stops propagation to the card). */}
+                {!revealingAnswer && !muted && (
                   <Box
                     component="span"
                     role="button"
-                    aria-label={`Hear option: ${option}`}
+                    aria-label={`Hear option again: ${option}`}
                     onClick={(e: React.MouseEvent) => {
                       e.stopPropagation()
                       speakWord(option)
@@ -891,24 +941,39 @@ export default function QuestQuestionScreen({
                     <VolumeUpIcon sx={{ fontSize: 20 }} />
                   </Box>
                 )}
-                <Box sx={{ textAlign: 'center' }}>
-                  {revealCorrect && (
-                    <Typography
-                      component="span"
-                      sx={{ fontFamily: MC.font, fontSize: '0.7rem', color: MC.green }}
-                    >
-                      {'✅ '}
-                    </Typography>
-                  )}
-                  <TappableText
-                    text={option}
-                    onTapWord={speakWord}
-                    fontFamily={MC.font}
-                    fontSize="0.7rem"
-                    color={revealCorrect ? MC.green : MC.white}
-                  />
-                </Box>
+                {/* Option text — contained within the card (wraps, never clips);
+                    the whole card is the tap target, so this is plain text. */}
+                <Typography
+                  component="span"
+                  sx={{
+                    fontFamily: MC.font,
+                    fontSize: '0.7rem',
+                    color: revealCorrect ? MC.green : isSelected ? MC.diamond : MC.white,
+                    textAlign: 'center',
+                    whiteSpace: 'normal',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                    minWidth: 0,
+                  }}
+                >
+                  {revealCorrect ? '✅ ' : ''}{option}
+                </Typography>
               </Box>
+              {/* Two-step affordance — only on the selected, not-yet-committed card. */}
+              {isSelected && (
+                <Typography
+                  sx={{
+                    fontFamily: MC.font,
+                    fontSize: '0.4rem',
+                    color: MC.diamond,
+                    textAlign: 'center',
+                    mt: 1,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  tap again to choose ✓
+                </Typography>
+              )}
             </Box>
           )
         })}
