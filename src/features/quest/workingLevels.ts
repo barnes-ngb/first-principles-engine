@@ -9,7 +9,7 @@
 
 import type { WorkingLevel, WorkingLevels, SkillSnapshot, EvaluationFinding } from '../../core/types/evaluation'
 import type { QuestMode, SessionQuestion } from './questTypes'
-import { QUEST_MODE_LEVEL_CAP, DEFAULT_LEVEL_CAP, WRITING_LEVEL_CAP } from './questTypes'
+import { QUEST_MODE_LEVEL_CAP, DEFAULT_LEVEL_CAP, WRITING_LEVEL_CAP, SENTENCE_LEVEL_CAP } from './questTypes'
 
 // ── Manual override protection ────────────────────────────────
 
@@ -280,6 +280,26 @@ const WRITING_SKILL_LEVEL_MAP: Record<string, number> = {
 }
 
 /**
+ * Sentence-building skill → level mapping (FEAT-11 Phase 2). The scrambled-to-
+ * order construction grows from a short subject–verb sentence (L1–2) to one with
+ * an adjective and a prepositional phrase (L5–6), capped at
+ * {@link SENTENCE_LEVEL_CAP}. Keys match the `writing.composition.sentence` /
+ * `writing.sentence.*` tags. This is the **sentence** signal only — kept distinct
+ * from the `WRITING_SKILL_LEVEL_MAP` (spelling) so the two never blur.
+ */
+const SENTENCE_SKILL_LEVEL_MAP: Record<string, number> = {
+  'composition.sentence': 2,
+  'sentence.order': 2,
+  'sentence': 2,
+  'sentence.subject-verb': 2,
+  'sentence.capitalization': 3,
+  'sentence.punctuation': 3,
+  'sentence.adjective': 4,
+  'sentence.expanded': 5,
+  'sentence.prepositional': 6,
+}
+
+/**
  * Derives a working level from evaluation findings for a given domain.
  * Returns null if no relevant findings or if ambiguous.
  *
@@ -295,12 +315,13 @@ const WRITING_SKILL_LEVEL_MAP: Record<string, number> = {
  */
 export function deriveWorkingLevelFromEvaluation(
   findings: EvaluationFinding[],
-  domain: 'phonics' | 'comprehension' | 'math' | 'writing',
+  domain: 'phonics' | 'comprehension' | 'math' | 'writing' | 'sentence',
 ): WorkingLevel | null {
   const skillMap =
     domain === 'phonics' ? PHONICS_SKILL_LEVEL_MAP
     : domain === 'comprehension' ? COMPREHENSION_SKILL_LEVEL_MAP
     : domain === 'writing' ? WRITING_SKILL_LEVEL_MAP
+    : domain === 'sentence' ? SENTENCE_SKILL_LEVEL_MAP
     : MATH_SKILL_LEVEL_MAP
 
   let highestMasteredLevel = 0
@@ -332,6 +353,8 @@ export function deriveWorkingLevelFromEvaluation(
 
   const cap = domain === 'writing'
     ? WRITING_LEVEL_CAP
+    : domain === 'sentence'
+    ? SENTENCE_LEVEL_CAP
     : (QUEST_MODE_LEVEL_CAP[domain] ?? DEFAULT_LEVEL_CAP)
   const level = Math.min(highestMasteredLevel, cap)
 
@@ -551,6 +574,107 @@ export function deriveSpellingFindings(questions: SessionQuestion[]): Evaluation
       // Cap at 'emerging' — mastery is never asserted inline (central-writer only).
       status: correct > 0 ? 'emerging' : 'not-yet',
       evidence: `Spelled ${correct}/${attempts} from tiles (Spell-the-word)`,
+      testedAt: at,
+    })
+  }
+  return findings
+}
+
+// ── Write path 5: build-the-sentence → sentence working level ───────
+//
+// FEAT-11 Phase 2. Build-the-sentence questions are mixed into a reading/phonics
+// quest (≤1 per session), so — exactly like spelling — we derive the **sentence**
+// level only from the build-sentence subset, never from the full session. This
+// keeps sentence-building a separate, separable signal from both phonics and the
+// spelling signal (`workingLevels.writing`); sentence results are NEVER folded
+// into the spelling number.
+
+/** A build-sentence question is any tagged `writing.composition.sentence` / `writing.sentence.*`. */
+function isSentenceQuestion(q: SessionQuestion): boolean {
+  const skill = (q.skill ?? '').toLowerCase()
+  return (
+    q.type === 'build-sentence' ||
+    skill.startsWith('writing.composition.sentence') ||
+    skill.startsWith('writing.sentence')
+  )
+}
+
+/**
+ * Derive the sentence working level from the build-the-sentence questions in a
+ * session: the highest level at which the child built a sentence correctly, or a
+ * gentle downstep below the lowest attempted level if none were correct. Returns
+ * null when there were no answered sentence questions.
+ *
+ * Intentionally separate from `computeWorkingLevelFromSession` and from
+ * `computeWritingLevelFromSpellingQuestions`: sentence-building earns its **own**
+ * working level (`workingLevels.sentence`) so it routes by its own gap and is
+ * never folded into the phonics or spelling number.
+ */
+export function computeSentenceLevelFromQuestions(
+  questions: SessionQuestion[],
+): WorkingLevel | null {
+  const answered = questions.filter(
+    (q) => isSentenceQuestion(q) && !q.skipped && !q.flaggedAsError,
+  )
+  if (answered.length === 0) return null
+
+  const correct = answered.filter((q) => q.correct)
+  const totalCorrect = correct.length
+
+  let newLevel: number
+  if (correct.length > 0) {
+    newLevel = Math.max(...correct.map((q) => q.level))
+  } else {
+    const lowestAttempted = Math.min(...answered.map((q) => q.level))
+    newLevel = lowestAttempted - 1
+  }
+
+  newLevel = Math.min(newLevel, SENTENCE_LEVEL_CAP)
+  newLevel = Math.max(newLevel, 1)
+
+  return {
+    level: newLevel,
+    updatedAt: new Date().toISOString(),
+    source: 'quest',
+    evidence: `Built ${totalCorrect}/${answered.length} sentences from tiles → Level ${newLevel}`,
+  }
+}
+
+/**
+ * Build seeding findings for the sentence skills exercised this session.
+ *
+ * Returns at most one finding per `writing.composition.sentence` / `writing.sentence.*`
+ * skill, status `emerging` (when at least one sentence in that skill was built) or
+ * `not-yet`. **Never returns `mastered`** — sentence mastery is decided only later
+ * by the conservative `masteryRollup` and written through the central
+ * `skillSnapshotWrites` path. These seed the priority skill (a "teach this next"
+ * marker) so the central mastery loop has a target to advance; they assert no
+ * mastery and downgrade nothing. Mirrors `deriveSpellingFindings` exactly, but
+ * for the separate sentence signal.
+ */
+export function deriveSentenceFindings(questions: SessionQuestion[]): EvaluationFinding[] {
+  const answered = questions.filter(
+    (q) => isSentenceQuestion(q) && !q.skipped && !q.flaggedAsError,
+  )
+  if (answered.length === 0) return []
+
+  const bySkill = new Map<string, { attempts: number; correct: number }>()
+  for (const q of answered) {
+    const skill = (q.skill ?? '').trim() || 'writing.composition.sentence'
+    const entry = bySkill.get(skill) ?? { attempts: 0, correct: 0 }
+    entry.attempts += 1
+    if (q.correct) entry.correct += 1
+    bySkill.set(skill, entry)
+  }
+
+  const at = new Date().toISOString()
+  const findings: EvaluationFinding[] = []
+  for (const [skill, { attempts, correct }] of bySkill) {
+    findings.push({
+      skill,
+      // Cap at 'emerging' — mastery is never asserted inline (central-writer only).
+      status: correct > 0 ? 'emerging' : 'not-yet',
+      evidence: `Built ${correct}/${attempts} sentences from tiles (Build-the-sentence)`,
       testedAt: at,
     })
   }

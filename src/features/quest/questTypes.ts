@@ -109,13 +109,38 @@ export const QuestQuestionType = {
    * whether he can *spell* it.
    */
   SpellWord: 'spell-word',
+  /**
+   * FEAT-11 Phase 2 — "build-the-sentence": the **bridge** from "right word" to
+   * "real writing". The child taps word tiles into order to form a sentence,
+   * with a **capital tile** and a **period tile** bundled in (capital at the
+   * start, period at the end). Scrambled-to-order only (the correct words,
+   * scrambled → tapped into order), client-generated from his word bank + a
+   * small function-word set. Tracked as a **sentence** signal
+   * (`writing.composition.sentence` → `workingLevels.sentence`), kept separate
+   * from the spelling signal (`writing.spelling.*` → `workingLevels.writing`)
+   * and from future composition. Tap-only tiles — NO text input, ever. Rendered
+   * with `BuildSentenceQuestionScreen` (sibling of the word-tile screen).
+   */
+  BuildSentence: 'build-sentence',
 } as const
 export type QuestQuestionType = (typeof QuestQuestionType)[keyof typeof QuestQuestionType]
 
-/** Question types that use the tap-only tile-assembly engine (no text input). */
+/**
+ * Question types whose answer is assembled by tapping tiles (NO text input).
+ * `build-word` / `spell-word` join grapheme tiles into a *word*; `build-sentence`
+ * orders word tiles into a *sentence*. They share the tap-only/no-typing contract
+ * and store their tile set in `SessionQuestion.options`, but assemble differently
+ * (the word screen joins with '', the sentence screen joins with spaces +
+ * capital/period) — so the word-join helpers below stay scoped to the first two.
+ */
 export const TILE_ASSEMBLY_TYPES = ['build-word', 'spell-word'] as const
 export function isTileAssemblyType(type: string): boolean {
   return type === 'build-word' || type === 'spell-word'
+}
+
+/** Any tap-to-assemble type (word or sentence) — records its tiles in `options`. */
+export function isTileQuestionType(type: string): boolean {
+  return type === 'build-word' || type === 'spell-word' || type === 'build-sentence'
 }
 
 /**
@@ -124,6 +149,13 @@ export function isTileAssemblyType(type: string): boolean {
  * `workingLevels.writing` (spelling) level.
  */
 export const WRITING_LEVEL_CAP = 6
+
+/**
+ * Build-the-sentence level ceiling (FEAT-11 Phase 2). Bounds the derived
+ * `workingLevels.sentence` level. Caps at the curriculum "complete sentence"
+ * building tier — multi-clause/paragraph construction is a later phase.
+ */
+export const SENTENCE_LEVEL_CAP = 6
 
 interface QuestQuestionBase {
   id: string
@@ -199,10 +231,37 @@ export interface SpellWordQuestion extends QuestQuestionBase {
   source?: 'sightWord' | 'frontier'
 }
 
+/**
+ * "Build-the-sentence" question (FEAT-11 Phase 2). The child hears a sentence
+ * and taps **word tiles** into order to build it, with a **capital tile** and a
+ * **period tile** bundled in — NO text input ever, tap-only. Scrambled-to-order:
+ * the correct words are offered scrambled; the assembled order (incl. capital at
+ * start, period at end) is checked against `targetSentence`. `correctAnswer`
+ * equals `targetSentence`. Its `skill` is `writing.composition.sentence`, feeding
+ * the **sentence** working level — kept separate from spelling and composition.
+ * Rendered with `BuildSentenceQuestionScreen`.
+ */
+export interface BuildSentenceQuestion extends QuestQuestionBase {
+  type: 'build-sentence'
+  /** The correct sentence (capital at start, period at end). Equals `correctAnswer`. Not shown as text. */
+  targetSentence: string
+  /**
+   * The tile set: each sentence word (lowercase) plus a capital tile
+   * (`SENTENCE_CAPITAL_TILE`) and a period tile (`SENTENCE_PERIOD_TILE`),
+   * scrambled. Tap into order to build the sentence.
+   */
+  tiles: string[]
+  /** Spoken cue text (defaults to targetSentence when omitted). */
+  audioCue?: string
+  /** Whether any content word came from the child's bank — for evidence/labelling. */
+  source?: 'wordBank' | 'generated'
+}
+
 export type QuestQuestion =
   | MultipleChoiceQuestion
   | BuildWordQuestion
   | SpellWordQuestion
+  | BuildSentenceQuestion
 
 // ── Answered question ─────────────────────────────────────────
 
