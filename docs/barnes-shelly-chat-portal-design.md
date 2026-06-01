@@ -1,5 +1,33 @@
 # Shelly Chat Control Portal — Design
 
+> ## Status: feature-complete (shipped & live on `main`)
+>
+> **Built & merged:** **Tier A** reads; **Tier B** confirmed writes (sight words + profile soft
+> fields — `editProfileField` → `motivators`/`interests`/`strengths`); the **feedback loop** (silent
+> friction capture → daily auto-filed GitHub issues); and **Tier C Option 2** — additive,
+> evidence-stamped, **confirm-gated** snapshot edits via the central `skillSnapshotWrites.ts` writer.
+> Every write is talk → preview → confirm → write; no auto-writes.
+>
+> **Deferred / optional (held by owner's decision):**
+> - **Option 3** — authoritative removals / downgrades / level-setting. Needs a separate
+>   human-override writer class **plus ARCH-10**; the current union can't represent a removal/downgrade
+>   and the model defers such requests.
+> - **ARCH-10** — Firestore-rules shape backstop. **Low urgency:** Option 2 is safe without it because
+>   every portal write is additive + confirm-gated + shape-checked by the central writer. The
+>   `ci.yml`-ownership question only matters if/when ARCH-10 is picked up.
+>
+> **Trigger to revisit Option 3:** if the friction log shows Shelly *repeatedly* asking to
+> **remove or lower** snapshot items (which the model currently defers), that's the signal Option 3 is
+> worth building.
+>
+> **Hand-off to home base (infra, not portal scope — surfaced during portal work; the home base owns
+> these `ARCH-*` rows, do not create them here):**
+> - Functions runtime **Node 20 is deprecated; decommission 2026-10-30** — needs a runtime bump before then.
+> - `firebase-functions` is **one version behind** (deploy-log warning) — worth upgrading alongside the runtime bump.
+>
+> ---
+>
+> **Original design header (for history):**
 > **Status:** Design landed 2026-05-30. Docs-only. No app code changed by this run.
 > **Ledger:** `FEAT-01` (Band 2) in `docs/review/REVIEW_HOME_BASE.md` §6.
 > **Builds on:** `docs/review/DECISION_FUNC-01_source_of_truth.md` (Model 2 — layered
