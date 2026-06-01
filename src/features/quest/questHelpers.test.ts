@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, sanitizeStimulus, shouldFlagAsError, validateQuestion } from './questHelpers'
-import type { QuestQuestion, SessionQuestion } from './questTypes'
+import { canAssemble, checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, sanitizeStimulus, shouldFlagAsError, validateQuestion } from './questHelpers'
+import type { BuildWordQuestion, MultipleChoiceQuestion, SessionQuestion } from './questTypes'
 
-function makeQuestion(overrides: Partial<QuestQuestion> = {}): QuestQuestion {
+function makeQuestion(overrides: Partial<MultipleChoiceQuestion> = {}): MultipleChoiceQuestion {
   return {
     id: 'q_test',
     type: 'multiple-choice',
@@ -276,7 +276,7 @@ describe('generateFallbackQuestion', () => {
 // ── validateQuestion ──────────────────────────────────────────
 
 describe('validateQuestion', () => {
-  function makeQ(overrides: Partial<QuestQuestion>) {
+  function makeQ(overrides: Partial<MultipleChoiceQuestion>) {
     return {
       id: 'q1',
       type: 'multiple-choice' as const,
@@ -325,5 +325,104 @@ describe('validateQuestion', () => {
   it('rejects question with empty options', () => {
     const q = makeQ({ options: [] })
     expect(validateQuestion(q)).toBeNull()
+  })
+})
+
+// ── FEAT-04: build-the-word (encoding) ─────────────────────────
+
+function makeBuildWord(overrides: Partial<BuildWordQuestion> = {}): BuildWordQuestion {
+  return {
+    id: 'bw_test',
+    type: 'build-word',
+    level: 3,
+    skill: 'phonics.digraphs.sh',
+    prompt: 'Build the word you hear!',
+    targetWord: 'ship',
+    correctAnswer: 'ship',
+    tiles: ['sh', 'i', 'p', 'ch', 'a'],
+    ...overrides,
+  }
+}
+
+describe('canAssemble', () => {
+  it('builds a CVC word from single-letter tiles', () => {
+    expect(canAssemble('stop', ['s', 't', 'o', 'p'])).toBe(true)
+  })
+
+  it('builds a word using multi-letter grapheme tiles', () => {
+    expect(canAssemble('ship', ['sh', 'i', 'p'])).toBe(true)
+    expect(canAssemble('rain', ['r', 'ai', 'n'])).toBe(true)
+  })
+
+  it('ignores distractor tiles', () => {
+    expect(canAssemble('ship', ['sh', 'i', 'p', 'ch', 'a'])).toBe(true)
+  })
+
+  it('returns false when the target cannot be spelled from tiles', () => {
+    expect(canAssemble('ship', ['sh', 'i', 'x'])).toBe(false)
+    expect(canAssemble('stop', ['s', 't', 'o'])).toBe(false) // missing p
+  })
+
+  it('respects single-use tiles (no reusing one tile twice)', () => {
+    expect(canAssemble('pop', ['p', 'o'])).toBe(false) // needs two p's
+    expect(canAssemble('pop', ['p', 'o', 'p'])).toBe(true)
+  })
+
+  it('is case-insensitive', () => {
+    expect(canAssemble('Ship', ['SH', 'I', 'P'])).toBe(true)
+  })
+})
+
+describe('checkAnswer — build-word', () => {
+  it('accepts the exact assembled word (case-insensitive)', () => {
+    const q = makeBuildWord()
+    expect(checkAnswer('ship', q)).toBe(true)
+    expect(checkAnswer('SHIP', q)).toBe(true)
+  })
+
+  it('rejects a mis-built word (no fuzzy/partial credit — encoding is precise)', () => {
+    const q = makeBuildWord()
+    expect(checkAnswer('shi', q)).toBe(false)
+    expect(checkAnswer('chip', q)).toBe(false)
+    expect(checkAnswer('', q)).toBe(false)
+  })
+})
+
+describe('validateQuestion — build-word', () => {
+  it('passes when tiles can spell the target', () => {
+    expect(validateQuestion(makeBuildWord())).not.toBeNull()
+  })
+
+  it('rejects when tiles cannot spell the target', () => {
+    expect(validateQuestion(makeBuildWord({ tiles: ['sh', 'i', 'x'] }))).toBeNull()
+  })
+
+  it('rejects when targetWord or tiles are missing', () => {
+    expect(validateQuestion(makeBuildWord({ targetWord: '' }))).toBeNull()
+    expect(validateQuestion(makeBuildWord({ tiles: [] }))).toBeNull()
+  })
+})
+
+describe('shouldFlagAsError — build-word', () => {
+  it('does not flag a solvable build-word question', () => {
+    expect(shouldFlagAsError(makeBuildWord())).toBe(false)
+  })
+
+  it('flags an unsolvable build-word question', () => {
+    expect(shouldFlagAsError(makeBuildWord({ tiles: ['sh', 'i', 'x'] }))).toBe(true)
+  })
+})
+
+describe('mixed pipeline — build-word rotates in alongside MC', () => {
+  it('validates both question types independently without interfering', () => {
+    const mc = makeQuestion()
+    const bw = makeBuildWord()
+    // Both pass their respective validation, and answer-checking stays type-correct.
+    expect(validateQuestion(mc)).not.toBeNull()
+    expect(validateQuestion(bw)).not.toBeNull()
+    expect(checkAnswer('dog', mc)).toBe(true)
+    expect(checkAnswer('ship', bw)).toBe(true)
+    // An MC answer string does not accidentally satisfy the build-word target.
+    expect(checkAnswer('dog', bw)).toBe(false)
   })
 })

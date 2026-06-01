@@ -168,6 +168,34 @@ describe("buildQuestPrompt — phase 2 extras", () => {
   });
 });
 
+// ── FEAT-04: build-the-word (encoding) generation guidance ──────
+
+describe("buildQuestPrompt — build-the-word (FEAT-04)", () => {
+  const extras = { activeBlockers: [], hasRecentScans: false };
+
+  it("instructs the phonics quest to emit calibrated, checkable build-word questions", () => {
+    const prompt = buildQuestPrompt("reading", 3, "phonics", extras, "Lincoln");
+    // The encoding question type is taught.
+    expect(prompt).toContain("BUILD-THE-WORD");
+    expect(prompt).toContain('"type": "build-word"');
+    expect(prompt).toContain('"targetWord"');
+    expect(prompt).toContain('"tiles"');
+    // Level calibration (CVC low, digraphs/blends higher).
+    expect(prompt).toContain("Levels 1-2: CVC words");
+    expect(prompt).toContain("Levels 3-4: digraphs/blends");
+    // Checkability guarantee: tiles must spell the target.
+    expect(prompt).toContain("EXACTLY spells the target word");
+    // No-typing / don't-leak-answer guardrails.
+    expect(prompt).toContain("must build it from the sound");
+  });
+
+  it("does not offer build-word to the comprehension quest (decoding-free surface)", () => {
+    const prompt = buildQuestPrompt("reading", 2, "comprehension", extras, "London");
+    expect(prompt).not.toContain("BUILD-THE-WORD");
+    expect(prompt).not.toContain('"type": "build-word"');
+  });
+});
+
 // ── G55: childName templating ──────────────────────────────────
 
 describe("buildQuestPrompt — childName templating (G55)", () => {

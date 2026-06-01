@@ -12,7 +12,7 @@ import { useSpeechRecognition } from '../../core/hooks/useSpeechRecognition'
 import { useTTS } from '../../core/hooks/useTTS'
 import { sanitizeStimulus } from './questHelpers'
 import TappableText from './TappableText'
-import type { AnswerInputMethod, QuestMode, QuestQuestion, QuestState } from './questTypes'
+import type { AnswerInputMethod, MultipleChoiceQuestion, QuestMode, QuestState } from './questTypes'
 import { MAX_QUESTIONS } from './questTypes'
 
 // ── Minecraft color palette ────────────────────────────────────
@@ -417,7 +417,9 @@ function blendForTTS(text: string): string {
 // ── QuestQuestionScreen ───────────────────────────────────────
 
 interface QuestQuestionScreenProps {
-  question: QuestQuestion
+  // Multiple-choice only. "build-word" questions render via BuildWordQuestionScreen
+  // (branched at the mount site) so this component's hook order stays stable.
+  question: MultipleChoiceQuestion
   questState: QuestState
   consecutiveWrong: number
   onAnswer: (answer: string) => void

@@ -1396,12 +1396,12 @@ READING SKILL PROGRESSION:
 - Level 10: Vocabulary in context — "Which word best completes: The explorer felt ___ when she discovered the hidden cave." (excited/boring/purple)
 
 CRITICAL QUESTION FORMAT RULES:
-- ALL questions must be TEXT-ONLY multiple choice
+- Questions are either TEXT-ONLY multiple choice OR "build-word" tile assembly (see BUILD-THE-WORD below). No other formats.
 - NEVER generate questions that require showing an image, picture, or illustration
 - NEVER use question types like "What does this picture show?" or "Look at the image"
 - NEVER reference images, pictures, illustrations, or visual content in questions
-- Every question must be answerable from TEXT information alone
-- The question text, stimulus word, and all answer options must be plain text strings
+- Every question must be answerable from TEXT (or, for build-word, the child hears the word read aloud and assembles it from text tiles)
+- The question text, stimulus word, answer options, and tiles must all be plain text strings
 
 KID-FRIENDLY LANGUAGE RULES — see child profile context above for age/neurodivergence:
 
@@ -1499,6 +1499,21 @@ For Levels 5-6: Add harder versions of all types.
 For Levels 7-8: Multi-syllable words, prefixes/suffixes, word building.
 For Levels 9-10: Comprehension passages, inference, vocabulary in context.
 
+BUILD-THE-WORD QUESTIONS (encoding — "type": "build-word"):
+This is the SPELLING/ENCODING complement to the multiple-choice decoding questions. Instead of options, you give a target word and a set of sound tiles; the child HEARS the word read aloud and taps the tiles in order to build it (no typing). Include 1-2 build-word questions per 10-question session (rotate them in like any other type — never two in a row, and never as the very first question of a brand-new session).
+- Calibrate the target word to the child's CURRENT LEVEL using the same progression above:
+  - Levels 1-2: CVC words; tiles are SINGLE letters (e.g. "stop" → tiles ["s","t","o","p"] + 1-2 distractor letters).
+  - Levels 3-4: digraphs/blends as MULTI-LETTER tiles (e.g. "ship" → tiles ["sh","i","p"] + distractors like "ch","th"; "stop" → ["st","o","p"]).
+  - Levels 5-6: CVCe / vowel teams as tiles (e.g. "rain" → ["r","ai","n"]; "cake" → ["c","a","k","e"]).
+  - Do NOT use build-word above Level 6 (encoding multi-syllable words from tiles is too hard for this surface).
+- TILE RULES (CRITICAL — the built word must be checkable):
+  - The tiles array MUST contain a set of tiles that, used in order, EXACTLY spells the target word. Mentally assemble the target from your tiles before responding — if it can't be built, fix the tiles.
+  - Add 1-3 plausible DISTRACTOR tiles (wrong letters/graphemes the child might reach for), but keep total tiles small (4-7) so it stays tappable on a tablet.
+  - Tiles are graphemes (sound chunks), not random single letters, once past Level 2. Split the target along its sounds.
+  - "targetWord" MUST equal the word the tiles spell. "audioCue" is OPTIONAL (defaults to targetWord) — set it only if you want different spoken text.
+  - Set "options", "stimulus", and "phonemeDisplay" to null for build-word — they are not used.
+  - NEVER show the target word as the stimulus — the child must build it from the sound they hear, not copy it.
+
 STIMULUS FIELD:
 - When the question asks "What word is this?" or presents a word to read, set "stimulus" to the target word (e.g., "stimulus": "stop")
 - The stimulus is displayed in a large, prominent box on screen — separate from the prompt and options
@@ -1519,8 +1534,8 @@ CRITICAL ANSWER MATCHING RULE:
 - ALWAYS: correctAnswer === options[correctIndex] must be true. No exceptions.
 
 QUESTION GENERATION RULES:
-1. Generate ONE multiple-choice question at a time
-2. Always provide exactly 3 options
+1. Generate ONE question at a time (multiple-choice, or occasionally build-word per BUILD-THE-WORD above)
+2. For multiple-choice, always provide exactly 3 options (build-word uses tiles instead — see above)
 3. Use plausible distractors: same word family, similar-looking words, or common confusions
 4. Vary the position of the correct answer across questions (don't always put it first or last)
 5. Focus on comprehension over pronunciation (check the child profile context above for speech notes — adjust expectations accordingly)
@@ -1577,6 +1592,26 @@ RESPONSE FORMAT — respond with ONLY this:
   "options": ["dig", "dog", "dug"],
   "correctAnswer": "dog",
   "encouragement": "The middle sound is /o/ like in 'hot'!",
+  "bonusRound": false,
+  "targetedBlockerId": null,
+  "finding": null
+}
+</quest>
+
+For a BUILD-THE-WORD (encoding) question, respond with ONLY this shape instead:
+<quest>
+{
+  "level": 3,
+  "type": "build-word",
+  "skill": "phonics.digraphs.sh",
+  "prompt": "Build the word you hear!",
+  "targetWord": "ship",
+  "tiles": ["sh", "i", "p", "ch", "a"],
+  "audioCue": "ship",
+  "stimulus": null,
+  "phonemeDisplay": null,
+  "options": null,
+  "encouragement": "Listen for the /sh/ sound at the start!",
   "bonusRound": false,
   "targetedBlockerId": null,
   "finding": null
