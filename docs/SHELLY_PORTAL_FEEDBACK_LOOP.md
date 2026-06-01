@@ -36,6 +36,19 @@ no-op state.
 
 ---
 
+## Operational notes
+
+- **`GITHUB_PAT` expires.** The secret is a **fine-grained token with an expiration date**.
+  When it lapses, `fileFeatureRequests` **safely no-ops** — it logs a warning and writes nothing;
+  it does **not** error, and it never affects the chat. **Rotate it before/after expiry** by
+  re-running `firebase functions:secrets:set GITHUB_PAT` (paste a fresh token) and redeploying
+  functions (`firebase deploy --only functions`). This is a one-time human/console action each
+  rotation, exactly as at first setup (§0).
+- **Cadence.** The routine runs **daily ~08:00 CT**, so issues for a given day's friction appear
+  **the next morning**, labeled `feature-request` / `source:shelly-chat`.
+
+---
+
 ## 1. The scheduled-CF pattern to copy
 
 The repo has **exactly two** scheduled Cloud Functions today (verified — no others;

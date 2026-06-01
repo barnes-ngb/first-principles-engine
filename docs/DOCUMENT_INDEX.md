@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-05-30.
+> Where everything lives. Updated 2026-06-01.
 
 ---
 
@@ -24,6 +24,12 @@
 | `STONEBRIDGE_BIBLE.md` | **CURRENT** | Canonical narrative world bible — 8 places, 10+ characters, values, tone, continuity rules |
 | `GAME_WORLD_ECONOMY.md` | **CURRENT** | Two-currency economy design (XP + Diamonds), choice-based armor forging, Stonebridge world |
 | `HEALTH_REPORT.md` | **CURRENT** | Weekly code health metrics — line counts, test coverage, bundle size, tech debt tracking |
+| `ARCH-10_rules_hardening_plan.md` | **CURRENT** | Firestore rules hardening recon — feasibility, regression baseline, proposed rule structure. Build pending. |
+| `LONDON_BACKLOG.md` | **CURRENT** | Active London deferral register — per-surface breakdown of what works today vs. what's held until tuned for a 6-year-old |
+| `SESSION_TIMER_HOURS_2026-04-14.md` | **HISTORICAL** | Implementation doc for auto-tracked instructional hours via session timer (shipped Apr 14, 2026) |
+| `SHELLY_PORTAL_CONTEXT.md` | **CURRENT** | Code-verified recon reference for the Shelly Chat control portal build — corrects the design brief against actual code |
+| `SHELLY_PORTAL_FEEDBACK_LOOP.md` | **CURRENT** | Friction log → GitHub issue feedback loop (shipped end-to-end) — ops notes, secret setup, Step 5a+5b architecture |
+| `barnes-shelly-chat-portal-design.md` | **CURRENT** | Shelly Chat control portal design doc — feature-complete (Tier A reads, Tier B confirmed writes, Tier C Option 2 additive snapshot edits) |
 | `PROJECT_CONTEXT.md` | **CURRENT** (auto-generated 2026-05-29) | Synthesized project context file for Claude.ai — family context, current sprint, nav structure, AI task registry, key design decisions. Regenerated on demand from repo docs + Drive docs. |
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls, per-function model + cost-per-call mapping |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4, updated 2026-05-29) | Task dispatch, model selection, context slices — 17 task types in `tasks/index.ts` registry (plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview); `analyzeEvaluationPatterns` exported separately |
@@ -58,10 +64,19 @@
 | `HERO_HUB_DEPLOY_AUDIT_2026-04-07.md` | **RESOLVED** | Deploy audit validating merged animation guardrails/tuning reached production |
 | `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | **CURRENT** | Server-side guaranteed backfill: legacy workbookConfigs → activityConfigs before quest/AI dispatch |
 | `first-principles-system-review.md` | **CURRENT** | Full-loop system review: evaluation → planning → execution, curriculum pacing, disposition tracking |
+| `LONDON_BACKLOG.md` | **CURRENT** | London-specific work tracking per Lincoln-first / London-minimal policy |
+| `SESSION_TIMER_HOURS_2026-04-14.md` | **HISTORICAL** | Session timer hours tracking investigation (Apr 14, 2026) |
+| `SHELLY_PORTAL_CONTEXT.md` | **CURRENT** | Context document for Shelly Chat portal feature |
+| `SHELLY_PORTAL_FEEDBACK_LOOP.md` | **CURRENT** | Feedback loop design for portal interactions; includes one-time human secret step for GitHub PAT |
+| `barnes-shelly-chat-portal-design.md` | **CURRENT** | Shelly Chat portal design doc — tiered write model, action grammar, confirm-gate UX |
+| `ARCH-10_rules_hardening_plan.md` | **CURRENT** (2026-06-01) | Firestore rules hardening plan for portal writes |
+| `investigations/backend-reliability-assessment.md` | **CURRENT** | Backend reliability investigation |
 | `DESIGN_MONTHLY_REVIEW_BOOK.md` | **CURRENT** | Monthly review book design — per-child monthly narrative, photo curation, section types, reader layouts. Phase 1 shipped. |
 | `review/REVIEW_HOME_BASE.md` | **NEW** (2026-05-29) | Monthly deep audit coordination hub — 4-tier review priority, prompt-driven audit methodology |
-| `review/ARCHITECTURE_AUDIT_2026-05.md` | **NEW** (2026-05-29) | May 2026 architecture audit — baseline green, Band 1 largest file analysis (ARCH-01–09), decomposition candidates |
-| `review/prompts/` | **NEW** (2026-05-29) | Reusable audit prompts: `PROMPT_ARCH_AUDIT.md` (monthly), `PROMPT_BACKUP_CHECK.md`, `PROMPT_FIX.md` (issue runner) |
+| `review/ARCHITECTURE_AUDIT_2026-05.md` | **HISTORICAL** (2026-05-29) | May 2026 architecture audit — baseline green, Band 1 largest file analysis (ARCH-01–09), decomposition candidates |
+| `review/ARCHITECTURE_AUDIT_2026-06.md` | **CURRENT** (2026-06-01) | June 2026 monthly architecture audit |
+| `review/DECISION_FUNC-01_source_of_truth.md` | **CURRENT** (2026-05-30) | "Where is Lincoln" source-of-truth decision — layered ownership with named write-through (Model 2 adopted) |
+| `review/prompts/` | **CURRENT** (2026-05-29) | Reusable audit prompts: `PROMPT_ARCH_AUDIT.md` (monthly), `PROMPT_AUTO_ARCH_FIX.md` (auto-fix runner), `PROMPT_BACKUP_CHECK.md`, `PROMPT_FIX.md` (issue runner) |
 | `design-pass-v1/copy-pass-audit.md` | **CURRENT** | Design pass copy audit — terminology, tone, label consistency across UI surfaces |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
 | `archive/01–07_*.md` | ARCHIVED | Phase 1–5 specs, original testing plan, Saturday lab runbook — all superseded by current docs |
@@ -100,7 +115,16 @@
 | `barnes-testing-guide-v2.md` | Working on tests (stale — needs Knowledge Mine, Workshop, Books, Armor coverage) |
 | `design-pass-v1/README.md` | Use when working on any v1 implementation queue item |
 | `DESIGN_MONTHLY_REVIEW_BOOK.md` | Working on monthly review books, photo curation, kid reader |
+| `DESIGN_VOICE_INPUT_MODULE.md` | Working on voice input, transcription, Whisper integration |
+| `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md` | Working on skip/rollover logic, scan-advance |
+| `EVALUATION_METHODOLOGY_2026-04.md` | Working on blocker-driven learning engine, evaluation phases |
+| `FINDINGS_PIPELINE.md` | Working on evaluation findings, conceptual blocks, merge semantics |
+| `SCRIPT_CONVENTIONS.md` | Writing npm scripts (cross-env, Windows compat) |
+| `LONDON_BACKLOG.md` | Working on London-specific features |
+| `barnes-shelly-chat-portal-design.md` | Working on Shelly Chat portal writes, action grammar |
+| `SHELLY_PORTAL_FEEDBACK_LOOP.md` | Working on feedback capture, feature request filing |
 | `review/REVIEW_HOME_BASE.md` | Running monthly audits, reviewing architecture health |
+| `review/DECISION_FUNC-01_source_of_truth.md` | Working on data ownership, write-through rules |
 
 ---
 
@@ -124,7 +148,7 @@ These are family/values documents maintained outside the repo. They inform AI pr
 | File | Purpose |
 |---|---|
 | `CLAUDE.md` | AI assistant instructions: build commands, constraints, conventions, project context |
-| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `zod.ts` |
+| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `zod.ts` |
 | `src/core/types/enums.ts` | All enum-like `as const` objects and companion types |
 | `functions/src/ai/chat.ts` | Cloud Function: system prompt assembly, enriched context, quest prompt |
 | `src/features/quest/questTypes.ts` | Knowledge Mine types (QuestState, SessionQuestion, InteractiveSessionData) |

@@ -51,7 +51,7 @@ London uses it today.
 | **Conundrum** | Ready | — | `src/features/today/KidConundrumResponse.tsx:378,382-385` (`londonPrompt`, `londonDrawingPrompt`), generated in `functions/src/ai/tasks/conundrum.ts:121,130` | **London-tuned**: he gets a simpler `londonPrompt` and a **drawing-first** `londonDrawingPrompt` (photo capture), generated "accessible to a 6-year-old." Safe by construction. |
 | **Chapter question pool** | Ready | (Optional) age-shaped question variants | `KidTodayView.tsx` → `KidChapterPool.tsx`, `bookProgress` | Works for London (shared read-aloud pool); no per-child variant, but read-aloud is age-independent and parent-mediated. Untuned but safe. |
 | **Reading evaluation** | Ready (infra) | A London learner profile (see below) | `src/features/evaluate/EvaluateChatPage.tsx:566-577` (phonics/comprehension working-level derivation) | The eval → snapshot → working-level flow is per-child and works for London today; what's missing is London's *starting* profile/defaults, tracked as its own row below. |
-| **Math evaluation (FEAT-06)** | **Hold-until-tuned** | Reading-style **guided** math eval flow + London calibration. | `EvaluateChatPage.tsx:578-584` (math working-level derivation exists) | Working-level **derivation** for math now exists, but there's no guided math-eval flow at reading parity and no London-specific calibration. Build, don't gate (it's incomplete, not harmful). |
+| **Math evaluation (FEAT-06)** | **Ready (infra)** | A London learner profile (see row below) — same dependency as Reading eval. | `EvaluateChatPage.tsx:578-584` (math working-level derivation), `:742-746` (live "Evaluate Math" tab), `functions/src/ai/chat.ts:692-824` (guided math diagnostic prompt) | **Reconciled 2026-06-01:** the guided math-eval flow **is** at reading parity and live for Lincoln — a working **Evaluate Math** tab, a server-side diagnostic prompt, and findings → `workingLevels.math` (plus a live Math Quest + scan-derived math levels). The prior "Hold-until-tuned / no guided flow" status was **stale** (FEAT-06 now RESOLVED). What's actually missing is the same thing the Reading-eval row needs: **London's starting profile/defaults** (`londonDefaults`), tracked in the row below. Build, don't gate — incomplete for London, not harmful. **ARCH-16 (2026-06-01):** the Math Quest tile is now gated on `hasMathCalibration` (math working level or `math.`-prefixed priority skill) independently of the Reading quests — so a math-only child (incl. a future math-evaluated London) sees only the Math Quest, never the Reading quests. See hand-off §1 for the open "hold London from the entire Mine" question. |
 | **Formal London learner profile** | **Not-built** | A London equivalent of Lincoln's defaults (priority skills, supports, stop rules, starting levels). | `src/features/evaluation/lincolnDefaults.ts` (no London equivalent) | `lincolnDefaults.ts` seeds Lincoln; there is **no `londonDefaults`**. Until built, a parent must set London's snapshot manually. Underpins both eval rows above. |
 | **Functions — per-child AI context** | Ready (shared) | — | `functions/src/ai/contextSlices.ts:83-84` (charter names both kids), TASK_CONTEXT slices | Context is assembled from London's own `skillSnapshot`/profile; the charter preamble already describes London (6, story-driven). No London-specific slice needed — slices are child-agnostic and fed his data. |
 | **Image-gen theming** | Ready (London-aware) | — | `src/features/planner-chat/generateMaterials.ts:40-44` (London → story theme), `xp.ts` `londonPowerupPrompt` | Worksheet and armor image generation already branch to story/platformer styling for London. Safe by construction. |
@@ -62,10 +62,10 @@ London uses it today.
 
 16 surfaces classified:
 
-- **Ready:** 12 — Kid Today checklist, XP/diamonds bar, extra-activity logger, greeting/celebration tone,
-  Avatar/Hero Hub, My Books, Story Workshop, Conundrum, Chapter pool, Reading-eval infra, Functions
-  per-child context, Image-gen theming. (Most are age-independent or already London-tuned.)
-- **Hold-until-tuned:** 2 — Knowledge Mine, Math eval.
+- **Ready:** 13 — Kid Today checklist, XP/diamonds bar, extra-activity logger, greeting/celebration tone,
+  Avatar/Hero Hub, My Books, Story Workshop, Conundrum, Chapter pool, Reading-eval infra, Math-eval infra,
+  Functions per-child context, Image-gen theming. (Most are age-independent or already London-tuned.)
+- **Hold-until-tuned:** 1 — Knowledge Mine. (Math eval reclassified Ready (infra) on 2026-06-01 — FEAT-06 RESOLVED.)
 - **N/A:** 1 — Teach-back (the youngest is the audience, not the teacher).
 - **Not-built:** 1 — Formal London learner profile.
 
@@ -89,9 +89,21 @@ register, it did not change gating).
      keys on snapshot calibration data (priority skills / completed program / working levels), **never**
      on `child.name` or `isLincoln`. **Smoke-check after merge:** confirm Lincoln still sees the Mine
      tile and can open `/quest`. Data-gap that forces this shape is tracked as `ARCH-15`.
+   - **Per-quest domain gating (ARCH-16, 2026-06-01):** the Mine is a multi-domain hub, so the *entry*
+     gate above stays generic but each quest tile is now gated on its **own** domain's calibration —
+     `hasReadingCalibration` for the Reading quests, `hasMathCalibration` for the Math Quest. London
+     (no calibration anywhere) is still held at entry, unchanged. **Design choice to note:** *if* London
+     is later math-evaluated but not reading-tuned, he would enter the Mine and see **only the Math
+     Quest** — never the Reading quests (reading calibration absent). That is intentional under
+     Lincoln-first / shame-free absence. **Open question for the owner:** if instead you want London held
+     from the *entire* Mine until his full experience (incl. math) is tuned for a 6-year-old, that is a
+     broader gate (hide the tile whenever `isLincoln` is false / age < N) — flagged here, **not built**,
+     pending your call. Build it only on an explicit assignment.
 
-2. **Math eval (FEAT-06) — build, don't gate.** No harmful surface to close off; the work is *building*
-   the guided math-eval flow + London calibration. Tracked in the ledger as `FEAT-06`. No gate PR needed.
+2. **Math eval (FEAT-06) — done (infra); no gate, no build needed for Lincoln.** Reconciled 2026-06-01:
+   the guided math-eval flow is already live at reading parity (FEAT-06 **RESOLVED**). No harmful surface
+   to gate. The only remainder is London's learner profile (`londonDefaults`) — the **Not-built** row
+   below, shared with Reading eval — not a FEAT-06 build.
 
 The **Not-built** (London learner profile) and **N/A** (teach-back) rows need no gate — the former is a
 build, the latter doesn't apply.

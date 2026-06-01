@@ -83,23 +83,38 @@ export const AnswerInputMethod = {
   MultipleChoice: 'multiple-choice',
   Voice: 'voice',
   Typed: 'typed',
+  /** "Build the word" — child assembled the word by tapping sound/letter tiles (no typing). */
+  Tile: 'tile',
 } as const
 export type AnswerInputMethod = (typeof AnswerInputMethod)[keyof typeof AnswerInputMethod]
 
-export interface QuestQuestion {
+// ── Question types (discriminated union) ──────────────────────
+// FEAT-04: the reading quest started multiple-choice only. "build-word" adds
+// ordered tile assembly (encoding) — the complement to decode/recognition. It
+// reuses the same lifecycle (adaptive engine, TTS, findings→snapshot writer);
+// only the render branch and answer-check differ.
+
+export const QuestQuestionType = {
+  MultipleChoice: 'multiple-choice',
+  BuildWord: 'build-word',
+} as const
+export type QuestQuestionType = (typeof QuestQuestionType)[keyof typeof QuestQuestionType]
+
+interface QuestQuestionBase {
   id: string
-  type: 'multiple-choice'
   level: number
   skill: string // e.g. "phonics.cvc.short-o"
   prompt: string // what Lincoln sees
   stimulus?: string // the word/content to display prominently (e.g. "stop")
-  phonemeDisplay?: string // e.g. "/d/ /o/ /g/" — shown above options (Levels 1-3 only)
-  options: string[] // always 3 for multiple choice
+  /**
+   * The answer the child must produce. For multiple-choice it matches one
+   * option; for build-word it is the target word the assembled tiles must
+   * spell. Kept on the base so type-agnostic code (checkAnswer, findings,
+   * persistence) reads one field regardless of question type.
+   */
   correctAnswer: string
   encouragement?: string // shown after wrong answer
   isBonusRound?: boolean // true for end-on-a-win bonus question
-  /** Whether this question should also show voice/type input alongside MC options */
-  allowOpenResponse?: boolean
   /**
    * Phase 2 — when the AI deliberately targets a known blocker from the
    * skill snapshot, it sets this to the block's stable id. Absent on
@@ -109,15 +124,47 @@ export interface QuestQuestion {
   targetedBlockerId?: string
 }
 
+/** Tap-one-option recognition/decoding question (the original quest type). */
+export interface MultipleChoiceQuestion extends QuestQuestionBase {
+  type: 'multiple-choice'
+  phonemeDisplay?: string // e.g. "/d/ /o/ /g/" — shown above options (Levels 1-3 only)
+  options: string[] // always 3 for multiple choice
+  /** Whether this question should also show voice/type input alongside MC options */
+  allowOpenResponse?: boolean
+}
+
+/**
+ * "Build the word" encoding question (FEAT-04). The target word is read aloud
+ * via TTS; the child taps sound/letter tiles into ordered slots to spell it.
+ * There is NEVER a typed text field — tap (and/or voice) only. `correctAnswer`
+ * equals `targetWord` and is the string the assembled tiles are checked against.
+ */
+export interface BuildWordQuestion extends QuestQuestionBase {
+  type: 'build-word'
+  /** The word to construct. Always equals `correctAnswer`. Not shown as text. */
+  targetWord: string
+  /**
+   * The tile set: the target word's graphemes (scrambled) plus a few
+   * level-appropriate distractor tiles. Single letters at low (CVC) levels;
+   * digraphs/blends as multi-character tiles at higher levels.
+   */
+  tiles: string[]
+  /** Spoken cue text (defaults to targetWord when omitted). */
+  audioCue?: string
+}
+
+export type QuestQuestion = MultipleChoiceQuestion | BuildWordQuestion
+
 // ── Answered question ─────────────────────────────────────────
 
 export interface SessionQuestion {
   id: string
-  type: 'multiple-choice'
+  type: QuestQuestionType
   level: number
   skill: string
   prompt: string
   stimulus?: string
+  /** MC options, or — for build-word — the tile set the child assembled from. */
   options: string[]
   correctAnswer: string
   childAnswer: string
