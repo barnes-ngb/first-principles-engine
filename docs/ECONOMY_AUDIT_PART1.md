@@ -95,7 +95,7 @@ All files containing economy-related references (`totalXp`, `diamondBalance`, `f
 | `childId` | `string` | required | Child document ID |
 | `themeStyle` | `'minecraft' \| 'platformer'` | `'minecraft'` | Lincoln=minecraft, London=platformer |
 | `pieces` | `ArmorPieceProgress[]` | `[]` | Per-piece unlock progress (legacy 2D system) |
-| `currentTier` | `ArmorTier \| PlatformerTier` | `'stone'` | Current material tier (note: default is 'stone' not 'wood') |
+| `currentTier` | `ArmorTier \| PlatformerTier` | `'wood'` | Current material tier (~~note: default is 'stone'~~ **RESOLVED 2026-06-02** — defaults to `'wood'` in both `normalizeAvatarProfile` and `createDefaultProfile`; no `'stone'` default remains) |
 | `characterFeatures` | `CharacterFeatures` | Lincoln defaults | AI-extracted photo features (skin, hair, eyes) |
 | `ageGroup` | `'older' \| 'younger'` | `'older'` | Body proportions template |
 | `photoUrl` | `string?` | undefined | Original uploaded photo URL |
@@ -299,7 +299,7 @@ These thresholds determine when a piece becomes *available* to forge (at any unl
 
 2. **`pendingTierUpgrade` is set but not declared** in the `AvatarProfile` interface (`addXpEvent.ts:135`). It's preserved by `normalizeAvatarProfile` via spread (`normalizeProfile.ts:84`), but it's a ghost field.
 
-3. **`currentTier` default is `'stone'`** in both `normalizeAvatarProfile` and `defaultAvatarProfile`, even though WOOD tier starts at 0 XP. A brand-new profile with 0 XP would show `currentTier: 'stone'` — a tier that requires 100 XP. (Unowned — see "Orphaned items"; no active economy run holds this.)
+3. ~~**`currentTier` default is `'stone'`** in both `normalizeAvatarProfile` and `defaultAvatarProfile`, even though WOOD tier starts at 0 XP. A brand-new profile with 0 XP would show `currentTier: 'stone'` — a tier that requires 100 XP.~~ **RESOLVED (2026-06-02, verified in code).** This observation is **stale**: `normalizeAvatarProfile` derives `currentTier` from forge progress (`getActiveForgeTierFromProgress`) and `createDefaultProfile` returns `currentTier: 'wood'` (`src/features/avatar/normalizeProfile.ts`). A brand-new 0-XP profile now correctly reads `'wood'`. No `'stone'` default remains anywhere in the avatar profile path.
 
 ---
 
