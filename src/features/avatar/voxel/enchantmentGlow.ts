@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+import { HERO_VIVIDNESS } from './heroVividness'
+
 // ── Glow colors per tier (Iron+ only) ────────────────────────────
 
 const GLOW_COLORS: Record<string, number> = {
@@ -27,7 +29,7 @@ export function addEnchantGlow(armorGroup: THREE.Group, tier: string): void {
   const glowMat = new THREE.MeshBasicMaterial({
     color,
     transparent: true,
-    opacity: 0.1,
+    opacity: HERO_VIVIDNESS.glow.baseOpacity,
     side: THREE.FrontSide,
     depthWrite: false,
   })
@@ -42,7 +44,7 @@ export function addEnchantGlow(armorGroup: THREE.Group, tier: string): void {
   for (const mesh of meshesToGlow) {
     const glowGeo = mesh.geometry.clone()
     const glowMesh = new THREE.Mesh(glowGeo, glowMat.clone())
-    glowMesh.scale.multiplyScalar(1.08)
+    glowMesh.scale.multiplyScalar(HERO_VIVIDNESS.glow.scale)
     glowMesh.userData.isGlow = true
     glowMesh.userData.phaseOffset = Math.random() * Math.PI * 2
     mesh.add(glowMesh)
@@ -75,7 +77,8 @@ export function animateEnchantGlow(scene: THREE.Scene, time: number): void {
     if (obj.userData.isGlow && obj instanceof THREE.Mesh) {
       const mat = obj.material as THREE.MeshBasicMaterial
       const phase = (obj.userData.phaseOffset as number) ?? 0
-      mat.opacity = 0.05 + 0.15 * Math.abs(Math.sin(time * 1.5 + phase))
+      const g = HERO_VIVIDNESS.glow
+      mat.opacity = g.baseOpacity * 0.6 + g.pulseAmplitude * Math.abs(Math.sin(time * 1.5 + phase))
     }
   })
 }
