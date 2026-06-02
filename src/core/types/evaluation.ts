@@ -122,6 +122,45 @@ export interface WorkingLevel {
   evidence?: string // short human-readable note
 }
 
+/**
+ * Outcome of a *sufficient* quest's effect on a domain's working level.
+ * Visibility-only — describes what the (unchanged) conservative level did, never
+ * drives it. `rose` = the working level climbed; `held` = it stayed where it was
+ * (the conservative level often holds a notch below the session high-water mark).
+ */
+export const QuestOutcome = {
+  Held: 'held',
+  Rose: 'rose',
+} as const
+export type QuestOutcome = (typeof QuestOutcome)[keyof typeof QuestOutcome]
+
+/**
+ * Per-domain "last mined" activity marker. Records that a *sufficient* quest ran
+ * in a domain so a counted session is visible even when the conservative level
+ * holds. **Deliberately separate from {@link WorkingLevel}** — `WorkingLevel.updatedAt`
+ * means "last level change" (the 48-hr manual-override gate relies on it), whereas
+ * `lastQuestAt` means "last sufficient quest" and moves on every counted run. This
+ * marker never touches the level value, never-downgrade, or manual logic.
+ */
+export interface QuestActivityMarker {
+  /** When the last *sufficient* quest ran in this domain (ISO). Distinct from `WorkingLevel.updatedAt`. */
+  lastQuestAt: string
+  /** Whether that quest raised the working level ('rose') or held it ('held'). */
+  outcome: QuestOutcome
+  /** Session high-water mark — the highest level the child reached that quest. */
+  levelReached: number
+}
+
+/**
+ * Per-domain quest activity markers (visibility layer over {@link WorkingLevels}).
+ * Scoped to the three Knowledge Mine quest modes shown on Working Levels.
+ */
+export interface QuestActivity {
+  phonics?: QuestActivityMarker
+  comprehension?: QuestActivityMarker
+  math?: QuestActivityMarker
+}
+
 export interface WorkingLevels {
   phonics?: WorkingLevel
   comprehension?: WorkingLevel
@@ -165,6 +204,13 @@ export interface SkillSnapshot {
   completedPrograms?: string[]
   /** Per-domain working levels for Knowledge Mine progression */
   workingLevels?: WorkingLevels
+  /**
+   * Per-domain "last mined" markers (visibility-only). Records the last
+   * *sufficient* quest per domain so a counted session is visible even when the
+   * conservative {@link WorkingLevels} entry holds. Separate from `workingLevels`
+   * on purpose — never repurposes `WorkingLevel.updatedAt`.
+   */
+  questActivity?: QuestActivity
   createdAt?: string
   updatedAt?: string
 }

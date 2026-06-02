@@ -7,7 +7,7 @@
  * - canOverwriteWorkingLevel: manual-override protection (48 hr guard)
  */
 
-import type { WorkingLevel, WorkingLevels, SkillSnapshot, EvaluationFinding } from '../../core/types/evaluation'
+import type { WorkingLevel, WorkingLevels, SkillSnapshot, EvaluationFinding, QuestActivityMarker } from '../../core/types/evaluation'
 import type { QuestMode, SessionQuestion } from './questTypes'
 import { QUEST_MODE_LEVEL_CAP, DEFAULT_LEVEL_CAP, WRITING_LEVEL_CAP, SENTENCE_LEVEL_CAP } from './questTypes'
 
@@ -136,6 +136,57 @@ export function computeWorkingLevelFromSession(
     updatedAt: new Date().toISOString(),
     source: 'quest',
     evidence: `Session ended at Level ${sessionEndLevel} with ${totalCorrect}/${answered.length} correct`,
+  }
+}
+
+// ── Quest activity marker (visibility-only, separate from the level) ──
+//
+// The conservative working level only moves when a quest *raises* it, so a
+// counted session that holds steady at the conservative level looks invisible.
+// These helpers derive a *separate* "last mined" marker so quest activity is
+// visible without touching the level value, never-downgrade, or manual logic.
+
+/**
+ * The session high-water mark: the highest level at which the child answered a
+ * question **correctly** this session (falling back to `fallbackLevel` — the
+ * level the session ended at — when nothing was answered correctly). This is
+ * deliberately more generous than the conservative working level: it shows how
+ * high he reached, even when the level holds a notch below.
+ */
+export function sessionHighWaterLevel(
+  questions: SessionQuestion[],
+  fallbackLevel: number,
+): number {
+  const correct = questions.filter((q) => q.correct && !q.skipped && !q.flaggedAsError)
+  const peak = correct.length > 0 ? Math.max(...correct.map((q) => q.level)) : fallbackLevel
+  return Math.max(peak, 1)
+}
+
+/**
+ * Derive the per-domain quest activity marker from a *sufficient* session.
+ *
+ * Visibility-only: it reports what the (unchanged) conservative level did —
+ * `rose` when the quest's new level is strictly higher than the prior stored
+ * level (or when there was no prior level at all — first signal counts as a
+ * climb), otherwise `held`. It never decides or mutates the level itself.
+ *
+ * - `priorLevel` — the stored working level before this quest (undefined if unset).
+ * - `newLevel`   — the level this quest derived (the value the level write would
+ *                  persist); undefined when no level was derived.
+ * - `sessionHighWater` — see {@link sessionHighWaterLevel}.
+ */
+export function computeQuestActivityMarker(args: {
+  priorLevel: number | undefined
+  newLevel: number | undefined
+  sessionHighWater: number
+  at?: string
+}): QuestActivityMarker {
+  const { priorLevel, newLevel, sessionHighWater } = args
+  const rose = priorLevel == null ? true : newLevel != null && newLevel > priorLevel
+  return {
+    lastQuestAt: args.at ?? new Date().toISOString(),
+    outcome: rose ? 'rose' : 'held',
+    levelReached: Math.max(sessionHighWater, 1),
   }
 }
 

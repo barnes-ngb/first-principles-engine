@@ -14,7 +14,7 @@ import { deleteField, doc, setDoc, updateDoc } from 'firebase/firestore'
 import SectionCard from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
-import type { WorkingLevel, WorkingLevels } from '../../core/types/evaluation'
+import type { QuestActivity, QuestActivityMarker, WorkingLevel, WorkingLevels } from '../../core/types/evaluation'
 import { QUEST_MODE_LEVEL_CAP } from '../quest/questTypes'
 
 type ModeKey = 'phonics' | 'comprehension' | 'math'
@@ -67,9 +67,29 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
+/**
+ * The "Last mined" line: makes a counted quest visible even when the
+ * conservative level holds. No-shame phrasing — "held at Level N", never "no
+ * progress". On a hold we surface the session high-water mark ("reached Level M")
+ * only when it's above the held level, so the run's reach is visible.
+ */
+function formatLastMined(activity: QuestActivityMarker, currentLevel: number | undefined): string {
+  const when = formatRelative(activity.lastQuestAt)
+  const level = currentLevel ?? activity.levelReached
+  if (activity.outcome === 'rose') {
+    return `Last mined: ${when} · climbed to Level ${level}`
+  }
+  if (activity.levelReached > level) {
+    return `Last mined: ${when} · held at Level ${level} · reached Level ${activity.levelReached}`
+  }
+  return `Last mined: ${when} · held at Level ${level}`
+}
+
 interface WorkingLevelsSectionProps {
   childId: string | null
   workingLevels: WorkingLevels | undefined
+  /** Per-domain "last mined" markers (visibility-only; separate from levels). */
+  questActivity?: QuestActivity | undefined
   onSaved?: (message: string) => void
   onError?: (message: string) => void
 }
@@ -77,6 +97,7 @@ interface WorkingLevelsSectionProps {
 export default function WorkingLevelsSection({
   childId,
   workingLevels,
+  questActivity,
   onSaved,
   onError,
 }: WorkingLevelsSectionProps) {
@@ -168,6 +189,7 @@ export default function WorkingLevelsSection({
       <Stack spacing={1.5}>
         {MODES.map((mode) => {
           const current = workingLevels?.[mode.key]
+          const activity = questActivity?.[mode.key]
           const isEditing = editingMode === mode.key
           return (
             <Box
@@ -214,6 +236,16 @@ export default function WorkingLevelsSection({
                   </Button>
                 )}
               </Stack>
+
+              {activity && !isEditing && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mt: 0.75, fontWeight: 500 }}
+                >
+                  {formatLastMined(activity, current?.level)}
+                </Typography>
+              )}
 
               {current?.evidence && !isEditing && (
                 <Typography

@@ -6,6 +6,8 @@ import type {
   ConceptualBlockSource,
   ConceptualBlockStatus,
   PrioritySkill,
+  QuestActivity,
+  QuestActivityMarker,
   SkillSnapshot,
   StopRule,
   SupportDefault,
@@ -73,6 +75,20 @@ export interface SnapshotApplyUpdate {
    * `parent directive via chat — <at>` stamp is recorded.
    */
   directive?: string
+
+  // ── Quest activity marker (visibility-only; additive, separate from levels) ──
+  /**
+   * Record a per-domain "last mined" marker (see {@link QuestActivityMarker}).
+   * Purely additive visibility: it writes only `questActivity[domain]` and never
+   * touches `workingLevels`, the level value, never-downgrade, or manual logic.
+   * Unlike the mastered-skill path this is **not** idempotent — each sufficient
+   * quest overwrites the domain's marker (last-write-wins) so `lastQuestAt`
+   * always reflects the most recent counted run.
+   */
+  recordQuestActivity?: {
+    domain: keyof QuestActivity
+    marker: QuestActivityMarker
+  }
 }
 
 export interface ApplyResult {
@@ -89,6 +105,7 @@ export interface ApplyResult {
     conceptualBlocks: boolean
     supports: boolean
     stopRules: boolean
+    questActivity: boolean
   }
 }
 
@@ -154,6 +171,7 @@ export function applyToSnapshot(
     evidenceDefinitions: existing?.evidenceDefinitions ?? [],
     conceptualBlocks: existing?.conceptualBlocks ?? [],
     workingLevels: existing?.workingLevels,
+    questActivity: existing?.questActivity,
     completedPrograms: existing?.completedPrograms,
     blocksUpdatedAt: existing?.blocksUpdatedAt,
     createdAt: existing?.createdAt,
@@ -261,15 +279,28 @@ export function applyToSnapshot(
     stopRulesChanged = true
   }
 
+  // ── Quest activity marker (visibility-only) ─────────────────────────
+  // Additive write to a separate `questActivity[domain]` slot. Never touches
+  // `workingLevels`, the level value, never-downgrade, or manual logic. Always
+  // a change when present (last-write-wins — it carries a fresh `lastQuestAt`).
+  let activityChanged = false
+  let nextQuestActivity: QuestActivity | undefined = base.questActivity
+  if (update.recordQuestActivity) {
+    const { domain, marker } = update.recordQuestActivity
+    nextQuestActivity = { ...(base.questActivity ?? {}), [domain]: marker }
+    activityChanged = true
+  }
+
   const prioritySkillsChanged = skillsChanged || addedSkills
   const changed =
-    blocksChanged || prioritySkillsChanged || supportsChanged || stopRulesChanged
+    blocksChanged || prioritySkillsChanged || supportsChanged || stopRulesChanged || activityChanged
   const snapshot: SkillSnapshot = {
     ...base,
     prioritySkills: nextSkills,
     supports: nextSupports,
     stopRules: nextStopRules,
     conceptualBlocks: nextBlocks,
+    questActivity: nextQuestActivity,
     ...(blocksChanged ? { blocksUpdatedAt: now } : {}),
     ...(changed ? { updatedAt: now } : {}),
   }
@@ -281,6 +312,7 @@ export function applyToSnapshot(
       conceptualBlocks: blocksChanged,
       supports: supportsChanged,
       stopRules: stopRulesChanged,
+      questActivity: activityChanged,
     },
   }
 }
@@ -313,6 +345,9 @@ export async function writeSnapshotUpdate(
   }
   if (changedFields.supports) payload.supports = snapshot.supports
   if (changedFields.stopRules) payload.stopRules = snapshot.stopRules
+  // Visibility-only activity marker — write the separate `questActivity` slot
+  // only when it changed. Never includes `workingLevels` (untouched on merge).
+  if (changedFields.questActivity) payload.questActivity = snapshot.questActivity
 
   await setDoc(
     ref,
