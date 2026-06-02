@@ -12,10 +12,19 @@ interface ArmorSuitUpPanelProps {
   morningReset: boolean
   unlockedVoxel: string[]
   appliedVoxel: string[]
-  allEarnedApplied: boolean
+  /** Daily ritual done: every forged slot is on today (a 5/6 kid still wins). */
+  dailyRitualDone: boolean
+  /** All six slots forged AND on today — the big "Full armor on!" celebration. */
+  isFullArmorOn: boolean
+  /** Best-of-slot forged pieces equipped today (0–6) — daily-ritual axis. */
+  slotsEquippedToday: number
+  /** Distinct slots forged at any tier (0–6) — daily-ritual axis. */
+  slotsForgedTotal: number
+  /** Pieces forged in the active forge tier (0–6) — forge-progress axis. */
+  forgedInActiveTier: number
+  /** Active forge tier (e.g. 'iron') — labels the forge-progress line. */
+  activeForgeTier: string
   allSixUnlocked: boolean
-  /** Total number of forged pieces the child owns (across all tiers) */
-  forgedCount: number
   nextUnlock: { piece: ArmorPieceMeta; xpNeeded: number } | null
   currentTierName: string
   nextUnlockProgress: number
@@ -31,14 +40,24 @@ interface ArmorSuitUpPanelProps {
   onStartDay: () => void
 }
 
+const SLOT_COUNT = ALL_ARMOR_VOXEL_PIECES.length
+
+function tierLabel(tier: string): string {
+  return tier.charAt(0).toUpperCase() + tier.slice(1)
+}
+
 export default function ArmorSuitUpPanel({
   profile,
   morningReset,
   unlockedVoxel,
   appliedVoxel,
-  allEarnedApplied,
+  dailyRitualDone,
+  isFullArmorOn,
+  slotsEquippedToday,
+  slotsForgedTotal,
+  forgedInActiveTier,
+  activeForgeTier,
   allSixUnlocked,
-  forgedCount,
   nextUnlock,
   currentTierName,
   nextUnlockProgress,
@@ -51,6 +70,12 @@ export default function ArmorSuitUpPanel({
   onStartDay,
 }: ArmorSuitUpPanelProps) {
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
+
+  // ── Forge-progress line (separate axis — never mixed with slot counts) ──
+  const forgeLine =
+    forgedInActiveTier < SLOT_COUNT
+      ? `${tierLabel(activeForgeTier)}: ${forgedInActiveTier}/${SLOT_COUNT} forged — forge more to upgrade your set.`
+      : null
 
   return (
     <>
@@ -156,19 +181,25 @@ export default function ArmorSuitUpPanel({
             {nextRecommendedAction.label}
           </Box>
 
+          {/* Daily ritual — slots on today (separate from forge progress) */}
           <Typography
             sx={{
               mt: 1,
               textAlign: 'center',
               fontFamily: titleFont,
               fontSize: isLincoln ? '10px' : '13px',
-              color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)',
-              fontWeight: 500,
+              color: isFullArmorOn
+                ? accentColor
+                : (isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)'),
+              fontWeight: isFullArmorOn ? 700 : 500,
             }}
           >
-            {appliedVoxel.length}/{forgedCount} equipped today{allEarnedApplied && forgedCount > 0 ? ' ✓' : ''}
+            {isFullArmorOn
+              ? 'Full armor on! 🛡️'
+              : `${slotsEquippedToday}/${SLOT_COUNT} pieces on today${dailyRitualDone ? ' — suited up ✓' : ''}`}
           </Typography>
-          {forgedCount < ALL_ARMOR_VOXEL_PIECES.length && (
+          {/* Forge progress — tier climb (independent of slot count) */}
+          {forgeLine && (
             <Typography
               sx={{
                 mt: 0.6,
@@ -178,14 +209,14 @@ export default function ArmorSuitUpPanel({
                 color: isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)',
               }}
             >
-              {forgedCount}/{ALL_ARMOR_VOXEL_PIECES.length} pieces forged. Forge more to unlock the next material.
+              {forgeLine}
             </Typography>
           )}
         </Box>
-      ) : allEarnedApplied && forgedCount > 0 ? (
+      ) : dailyRitualDone && slotsForgedTotal > 0 ? (
         <Box sx={{ textAlign: 'center', py: 2, mb: 0.5 }}>
           <Typography
-            key={`count-${appliedVoxel.length}`}
+            key={`count-${slotsEquippedToday}`}
             sx={{
               fontFamily: titleFont,
               fontSize: isLincoln ? '14px' : '18px',
@@ -200,10 +231,20 @@ export default function ArmorSuitUpPanel({
               },
             }}
           >
-            {forgedCount >= ALL_ARMOR_VOXEL_PIECES.length
-              ? 'Full armor equipped!'
-              : `${forgedCount}/${forgedCount} equipped ✓`}
+            {isFullArmorOn ? 'Full armor on! 🛡️' : `Suited up for today ✓ — ${slotsEquippedToday}/${SLOT_COUNT}`}
           </Typography>
+          {forgeLine && (
+            <Typography
+              sx={{
+                mt: 0.75,
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '10px' : '12px',
+                color: isLincoln ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)',
+              }}
+            >
+              {forgeLine}
+            </Typography>
+          )}
           {/* Streak display */}
           {(profile.armorStreak ?? 0) > 1 && (
             <Box
@@ -232,30 +273,38 @@ export default function ArmorSuitUpPanel({
             </Box>
           )}
         </Box>
-      ) : forgedCount > 0 && !allEarnedApplied ? (
+      ) : slotsForgedTotal > 0 && !dailyRitualDone ? (
         <Box sx={{ textAlign: 'center', py: 1, mb: 0.5 }}>
-          {/* Equipped count dots — one per forged piece */}
+          {/* Slot dots — all six slots; unforged slots render as ghost outlines */}
           <Box sx={{ display: 'flex', justifyContent: 'center', gap: '6px', mb: 1.5 }}>
-            {Array.from({ length: forgedCount }).map((_, i) => (
-              <Box
-                key={i}
-                sx={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: isLincoln ? '2px' : '50%',
-                  bgcolor: i < appliedVoxel.length
-                    ? accentColor
-                    : (isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)'),
-                  transition: 'all 0.3s ease',
-                  boxShadow: i < appliedVoxel.length
-                    ? `0 0 6px ${accentColor}44`
-                    : 'none',
-                }}
-              />
-            ))}
+            {Array.from({ length: SLOT_COUNT }).map((_, i) => {
+              const isOn = i < slotsEquippedToday
+              const isForged = i < slotsForgedTotal
+              return (
+                <Box
+                  key={i}
+                  sx={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: isLincoln ? '2px' : '50%',
+                    // On → accent fill; forged-not-on → faint fill; unforged → ghost outline
+                    bgcolor: isOn
+                      ? accentColor
+                      : isForged
+                        ? (isLincoln ? 'rgba(126,252,32,0.2)' : 'rgba(232,160,191,0.25)')
+                        : 'transparent',
+                    border: isForged
+                      ? 'none'
+                      : `1px dashed ${isLincoln ? 'rgba(126,252,32,0.3)' : 'rgba(232,160,191,0.4)'}`,
+                    transition: 'all 0.3s ease',
+                    boxShadow: isOn ? `0 0 6px ${accentColor}44` : 'none',
+                  }}
+                />
+              )
+            })}
           </Box>
           <Typography
-            key={`eq-${appliedVoxel.length}`}
+            key={`eq-${slotsEquippedToday}`}
             sx={{
               fontFamily: titleFont,
               fontSize: isLincoln ? '12px' : '16px',
@@ -269,8 +318,20 @@ export default function ArmorSuitUpPanel({
               },
             }}
           >
-            {appliedVoxel.length}/{forgedCount} equipped
+            {slotsEquippedToday}/{SLOT_COUNT} pieces on today
           </Typography>
+          {forgeLine && (
+            <Typography
+              sx={{
+                mt: 0.6,
+                fontFamily: titleFont,
+                fontSize: isLincoln ? '10px' : '12px',
+                color: isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
+              }}
+            >
+              {forgeLine}
+            </Typography>
+          )}
           {/* Suit Up! button */}
           <Box
             component="button"
