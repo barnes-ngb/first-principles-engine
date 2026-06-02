@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+import { HERO_VIVIDNESS, getHeroTierTint } from './heroVividness'
+
 // ── Tier definitions ─────────────────────────────────────────────
 
 export interface TierDefinition {
@@ -130,23 +132,29 @@ export function buildTierMaterial(
 ): THREE.MeshPhongMaterial {
   const tint = getTierTint(tier)
   const t = TIER_MATERIALS[tint] ?? TIER_MATERIALS.wood
+  const heroTint = getHeroTierTint(tint)
   const color = t[variant]
+  const specular = new THREE.Color(t.specular).lerp(
+    new THREE.Color(0xffffff),
+    HERO_VIVIDNESS.material.specularBoost,
+  )
   const mat = new THREE.MeshPhongMaterial({
     color,
     shininess: t.shininess,
-    specular: new THREE.Color(t.specular),
+    specular,
     emissive: new THREE.Color(t.emissive),
-    emissiveIntensity: t.emissiveIntensity,
+    emissiveIntensity: (t.emissiveIntensity + heroTint.emissive) * HERO_VIVIDNESS.material.emissiveBoost,
     flatShading: true,
   })
 
-  // Apply color jitter for stone-like variation
+  // Heroic saturation/lightness + stone-like jitter, all from HERO_VIVIDNESS.
+  const c = new THREE.Color(color)
+  c.offsetHSL(0, heroTint.saturate + HERO_VIVIDNESS.material.saturationBoost, heroTint.lighten)
   if (t.colorJitter > 0) {
-    const c = new THREE.Color(color)
     const jitter = (Math.random() - 0.5) * t.colorJitter
     c.offsetHSL(0, 0, jitter)
-    mat.color = c
   }
+  mat.color = c
 
   return mat
 }
@@ -195,23 +203,38 @@ export function applyTierToArmor(
         default: baseColor = materials.primary
       }
 
-      // Apply per-face color jitter for tier variation (stone-like effect)
+      // Heroic vividness: saturate/lighten per tier + glow + crisper specular.
+      // All values live in HERO_VIVIDNESS — zero them out to restore flat look.
+      const heroTint = getHeroTierTint(tint)
       const color = new THREE.Color(baseColor)
+      color.offsetHSL(
+        0,
+        heroTint.saturate + HERO_VIVIDNESS.material.saturationBoost,
+        heroTint.lighten,
+      )
+      // Apply per-face color jitter for tier variation (stone-like effect)
       if (materials.colorJitter > 0 && role === 'primary') {
         const jitter = (Math.random() - 0.5) * materials.colorJitter
         color.offsetHSL(0, 0, jitter)
       }
 
+      const specular = new THREE.Color(materials.specular).lerp(
+        new THREE.Color(0xffffff),
+        HERO_VIVIDNESS.material.specularBoost,
+      )
+      const emissiveIntensity =
+        (materials.emissiveIntensity + heroTint.emissive) * HERO_VIVIDNESS.material.emissiveBoost
+
       // Create per-face textured materials with Phong shading for armor shine
       const faceMats: THREE.MeshPhongMaterial[] = []
       for (let i = 0; i < 6; i++) {
-        const variation = 0.95 + Math.random() * 0.1
+        const variation = 1 - HERO_VIVIDNESS.material.faceVariation / 2 + Math.random() * HERO_VIVIDNESS.material.faceVariation
         faceMats.push(new THREE.MeshPhongMaterial({
           color: color.clone().multiplyScalar(variation),
-          specular: new THREE.Color(materials.specular),
+          specular: specular.clone(),
           shininess: materials.shininess,
           emissive: new THREE.Color(materials.emissive),
-          emissiveIntensity: materials.emissiveIntensity,
+          emissiveIntensity,
           flatShading: true,
         }))
       }

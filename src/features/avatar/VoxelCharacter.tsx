@@ -11,6 +11,7 @@ import { animateEquip, animateUnequip, animateJump, animateNod, animateSwordFlou
 import { createTouchControls, updateRotation, destroyTouchControls } from './voxel/touchControls'
 import type { TouchControlState } from './voxel/touchControls'
 import { applyTierToArmor, calculateTier, getTierTint, TIER_MATERIALS } from './voxel/tierMaterials'
+import { HERO_VIVIDNESS } from './voxel/heroVividness'
 import { addEnchantGlow, removeEnchantGlow, animateEnchantGlow, tierHasGlow } from './voxel/enchantmentGlow'
 import { buildBaseCape, animateCape, resolveCapeColor } from './voxel/buildCape'
 import { triggerTierUpCeremony } from './voxel/tierUpCeremony'
@@ -287,7 +288,7 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
   const edgeMat = new THREE.MeshBasicMaterial({
     color: edgeColor,
     transparent: true,
-    opacity: 0.5,
+    opacity: HERO_VIVIDNESS.atmosphere.platformEdgeOpacity,
   })
   // Front edge of bottom step
   const frontEdge = new THREE.Mesh(new THREE.BoxGeometry(3.0 * s, 0.02 * s, 0.02 * s), edgeMat)
@@ -309,6 +310,27 @@ function buildPlatform(ageGroup: 'older' | 'younger', tierBaseColor?: number): T
 function buildSkyGroup(): THREE.Group {
   const skyGroup = new THREE.Group()
   skyGroup.name = 'skyGroup'
+
+  // Gradient backdrop — a large plane behind everything, dark top → warmer
+  // horizon, for atmospheric depth (colors from HERO_VIVIDNESS.atmosphere).
+  const atmo = HERO_VIVIDNESS.atmosphere
+  const backdropGeo = new THREE.PlaneGeometry(44, 28)
+  const top = new THREE.Color(atmo.skyTop)
+  const bottom = new THREE.Color(atmo.skyBottom)
+  // PlaneGeometry verts: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right
+  const colors = new Float32Array([
+    top.r, top.g, top.b,
+    top.r, top.g, top.b,
+    bottom.r, bottom.g, bottom.b,
+    bottom.r, bottom.g, bottom.b,
+  ])
+  backdropGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  const backdrop = new THREE.Mesh(
+    backdropGeo,
+    new THREE.MeshBasicMaterial({ vertexColors: true, depthWrite: false }),
+  )
+  backdrop.position.set(0, 4, -11)
+  skyGroup.add(backdrop)
 
   // Distant terrain silhouette — dark blocks along the horizon
   const terrainColor = 0x0D0D1A
@@ -336,6 +358,19 @@ function buildSkyGroup(): THREE.Group {
   const moon = new THREE.Mesh(moonGeo, moonMat)
   moon.position.set(5, 6, -6)
   skyGroup.add(moon)
+
+  // Soft moon halo — larger dim disc behind the moon for atmospheric glow.
+  const moonGlow = new THREE.Mesh(
+    new THREE.CircleGeometry(1.6, 16),
+    new THREE.MeshBasicMaterial({
+      color: 0xFFF6CC,
+      transparent: true,
+      opacity: atmo.moonGlowOpacity,
+      depthWrite: false,
+    }),
+  )
+  moonGlow.position.set(5, 6, -6.5)
+  skyGroup.add(moonGlow)
 
   // Stars — varied sizes for depth, with seasonal color tinting
   const season = getCurrentSeason()
@@ -571,22 +606,25 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     // Will be re-framed after character + armor are built (below)
 
     // ── Night mode lighting ──────────────────────────────────────
-    const keyLight = new THREE.DirectionalLight(0xFFF5E6, 1.0)
+    // Intensities/colors come from HERO_VIVIDNESS.nightLighting (warm key +
+    // cool rim for the Minecraft-Legends heroic edge). Positions stay local.
+    const nightCfg = HERO_VIVIDNESS.nightLighting
+    const keyLight = new THREE.DirectionalLight(nightCfg.key.color, nightCfg.key.intensity)
     keyLight.position.set(5, 8, 6)
     scene.add(keyLight)
 
-    const fillLight = new THREE.DirectionalLight(0xC8D8E8, 0.3)
+    const fillLight = new THREE.DirectionalLight(nightCfg.fill.color, nightCfg.fill.intensity)
     fillLight.position.set(-5, 3, 3)
     scene.add(fillLight)
 
-    const rimLight = new THREE.DirectionalLight(0xFFFFFF, 0.5)
+    const rimLight = new THREE.DirectionalLight(nightCfg.rim.color, nightCfg.rim.intensity)
     rimLight.position.set(0, 3, -6)
     scene.add(rimLight)
 
-    const ambient = new THREE.AmbientLight(0xFFFFFF, 0.25)
+    const ambient = new THREE.AmbientLight(nightCfg.ambient.color, nightCfg.ambient.intensity)
     scene.add(ambient)
 
-    const bounceLight = new THREE.DirectionalLight(0xFFE8D6, 0.1)
+    const bounceLight = new THREE.DirectionalLight(nightCfg.bounce.color, nightCfg.bounce.intensity)
     bounceLight.position.set(0, -4, 2)
     scene.add(bounceLight)
 
@@ -597,18 +635,23 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
     applySeasonalLighting(nightLightsRef.current, season)
 
     // ── Room mode lighting (warmer, cozy) ────────────────────────
-    const roomKeyLight = new THREE.DirectionalLight(0xFFF4E0, 0.8)
+    const roomCfg = HERO_VIVIDNESS.roomLighting
+    const roomKeyLight = new THREE.DirectionalLight(roomCfg.key.color, roomCfg.key.intensity)
     roomKeyLight.position.set(3, 6, 4)
     scene.add(roomKeyLight)
 
-    const roomFill = new THREE.DirectionalLight(0xFFE8D0, 0.25)
+    const roomFill = new THREE.DirectionalLight(roomCfg.fill.color, roomCfg.fill.intensity)
     roomFill.position.set(-3, 4, 2)
     scene.add(roomFill)
 
-    const roomAmbient = new THREE.AmbientLight(0xFFFFFF, 0.35)
+    const roomRim = new THREE.DirectionalLight(roomCfg.rim.color, roomCfg.rim.intensity)
+    roomRim.position.set(0, 3, -6)
+    scene.add(roomRim)
+
+    const roomAmbient = new THREE.AmbientLight(roomCfg.ambient.color, roomCfg.ambient.intensity)
     scene.add(roomAmbient)
 
-    roomLightsRef.current = [roomKeyLight, roomFill, roomAmbient]
+    roomLightsRef.current = [roomKeyLight, roomFill, roomRim, roomAmbient]
 
     // Set initial lighting visibility
     for (const l of nightLightsRef.current) l.visible = bg !== 'room'
@@ -1139,15 +1182,16 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       const swordGroup = armorGroupsRef.current.get('sword')
       if (swordGroup?.visible) {
         const time2 = clock.getElapsedTime()
+        const sw = HERO_VIVIDNESS.sword
         swordGroup.traverse((child) => {
           if (child instanceof THREE.Mesh && child.userData.materialRole === 'sword_blade') {
             const mat = child.material
             if (mat instanceof THREE.MeshLambertMaterial) {
-              mat.emissiveIntensity = 0.2 + Math.sin(time2 * 2.5) * 0.15
+              mat.emissiveIntensity = sw.baseEmissive + Math.sin(time2 * 2.5) * sw.pulseAmplitude
             }
           }
           if (child instanceof THREE.PointLight) {
-            child.intensity = 0.5 + Math.sin(time2 * 2.5) * 0.3
+            child.intensity = sw.lightBase + Math.sin(time2 * 2.5) * sw.lightAmplitude
           }
         })
       }
