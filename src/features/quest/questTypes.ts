@@ -35,9 +35,17 @@ export type QuestScreen = (typeof QuestScreen)[keyof typeof QuestScreen]
 
 // ── Constants ─────────────────────────────────────────────────
 
-export const MAX_QUESTIONS = 10
+// A mining run is deliberately SHORT and repeatable: the session cap equals the
+// minimum that #1326 set as the conservative evidence bar (`MIN_QUESTIONS`), so
+// *finishing a run always reaches the bar and counts toward his level*. Lincoln's
+// knowledge builds through repetition — many short runs accumulate evidence across
+// sessions (the mastery rollup aggregates) — not through one long sitting. A bail
+// below the minimum still banks diamonds but does NOT move his level (#1326 intact).
+// NOTE (owner-confirm): MAX_QUESTIONS is Lincoln's attention span — easy to nudge
+// to 4 or 6. Keep it == MIN_QUESTIONS so a complete run == the minimum == counts.
+export const MAX_QUESTIONS = 5
 export const MIN_QUESTIONS = 5 // never end before 5 questions unless child manually exits
-export const MAX_SECONDS = 480 // 8 minutes
+export const MAX_SECONDS = 240 // 4 minutes — scaled down with the shorter run so time isn't the long pole
 export const LEVEL_UP_STREAK = 3 // 3 correct → harder
 export const LEVEL_DOWN_STREAK = 2 // 2 wrong → easier
 export const FRUSTRATION_LIMIT = 2 // 2 level-downs in a row → end

@@ -170,18 +170,19 @@ describe('QuestQuestionScreen — select-then-confirm answer cards', () => {
 describe('QuestQuestionScreen — progress / diamond visibility', () => {
   it('shows diamonds mined and how many questions remain', () => {
     renderScreen()
-    // totalCorrect=1 → 1 mined; MAX_QUESTIONS(10) - totalQuestions(2) → 8 to go.
+    // totalCorrect=1 → 1 mined; MAX_QUESTIONS(5) - totalQuestions(2) → 3 to go.
+    // The "to go" rescales with the shorter run cap.
     const tally = screen.getByText(/mined/)
     expect(tally.textContent).toContain('1 mined')
-    expect(tally.textContent).toContain('8 to go')
+    expect(tally.textContent).toContain('3 to go')
   })
 
   it('fills the diamond bag (progress bar) by diamonds mined, not question count', () => {
-    // totalCorrect=1 of MAX_QUESTIONS(10) → bag is 10% full. The bar now tells the
-    // same story as the "1 mined" tally — one coherent fill, not two competing bars.
+    // totalCorrect=1 of MAX_QUESTIONS(5) → bag is 20% full. The fill rescales with the
+    // shorter run, telling the same story as the "1 mined" tally — one coherent fill.
     renderScreen()
     const bag = screen.getByLabelText(/Diamond bag/)
-    expect(bag.getAttribute('aria-label')).toContain('10% full')
+    expect(bag.getAttribute('aria-label')).toContain('20% full')
   })
 
   it('keeps the diamond tally rendered on long (comprehension passage) questions', () => {
@@ -202,7 +203,7 @@ describe('QuestQuestionScreen — progress / diamond visibility', () => {
     })
     const tally = screen.getByText(/mined/)
     expect(tally.textContent).toContain('1 mined')
-    expect(tally.textContent).toContain('8 to go')
+    expect(tally.textContent).toContain('3 to go')
   })
 
   it('resets the selection when the question changes', () => {

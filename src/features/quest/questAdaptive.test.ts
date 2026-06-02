@@ -176,13 +176,13 @@ describe('computeNextState', () => {
 // ── shouldEndSession ───────────────────────────────────────────
 
 describe('shouldEndSession', () => {
-  it('ends when totalQuestions >= 10', () => {
-    const state = makeState({ totalQuestions: 10 })
+  it('ends when totalQuestions >= MAX_QUESTIONS (5 — the short run cap)', () => {
+    const state = makeState({ totalQuestions: 5 })
     expect(shouldEndSession(state)).toEqual({ end: true, timedOut: false })
   })
 
-  it('ends when elapsedSeconds >= 480', () => {
-    const state = makeState({ elapsedSeconds: 480 })
+  it('ends when elapsedSeconds >= MAX_SECONDS (240)', () => {
+    const state = makeState({ elapsedSeconds: 240 })
     expect(shouldEndSession(state)).toEqual({ end: true, timedOut: true })
   })
 
@@ -201,8 +201,9 @@ describe('shouldEndSession', () => {
     expect(shouldEndSession(state)).toEqual({ end: true, timedOut: true })
   })
 
-  it('does not end when no conditions met', () => {
-    const state = makeState({ totalQuestions: 5, elapsedSeconds: 200, levelDownsInARow: 1 })
+  it('does not end when no conditions met (below the short cap)', () => {
+    // totalQuestions must stay below MAX_QUESTIONS (now 5) or the cap itself ends it.
+    const state = makeState({ totalQuestions: 4, elapsedSeconds: 120, levelDownsInARow: 1 })
     expect(shouldEndSession(state)).toEqual({ end: false, timedOut: false })
   })
 
