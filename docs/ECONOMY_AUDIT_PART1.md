@@ -225,17 +225,19 @@ All files containing economy-related references (`totalXp`, `diamondBalance`, `f
 | Tier | minXp | Label |
 |---|---|---|
 | WOOD | 0 | Wood |
-| STONE | 200 | Stone |
-| IRON | 500 | Iron |
-| GOLD | 1,000 | Gold |
-| DIAMOND | 2,000 | Diamond |
+| STONE | 100 | Stone |
+| IRON | 750 | Iron |
+| GOLD | 1,500 | Gold |
+| DIAMOND | 2,500 | Diamond |
 | NETHERITE | 5,000 | Netherite |
 
-> **⚠️ KNOWN CONFLICT (as of 2026-06-02):** this table cites `tierMaterials.ts:12-19` as its source, but the live code there now ships **Stone 100 / Iron 750 / Gold 1500 / Diamond 2500** (Wood 0 and Netherite 5000 still agree) — the `200 / 500 / 1000 / 2000` values above are stale relative to current code. The same stale set propagates to the "Inconsistencies" comparison and Observation 1 below. The canonical threshold set is owned by the diamond-banking / XP-economy run — **do not edit either side** until that run resolves which is canonical.
+> **Canonical (resolved 2026-06-02):** these are the live values in `tierMaterials.ts` (`TIERS` + `calculateTier`), set by commit `cedc5b3` (2026-04-17, Phase A) — *"Lincoln at ~1000 XP now resolves to Iron by design — he hasn't really seen Iron yet and should experience it before Gold."* This **supersedes** the earlier `200 / 500 / 1000 / 2000` set (which propagated to the "Inconsistencies" comparison and Observation 1 below; those have been updated to match). The voxel `tierMaterials.ts` system is canonical; the legacy `armorTiers.ts` system (System B below) is deprecated.
 
 Used by `calculateTier()` in `tierMaterials.ts`, `checkAndUnlockArmor()`, and `addXpEvent()` for tier unlock gating.
 
-### System B: Legacy Armor Tiers (used for XP bar display only)
+### System B: Legacy Armor Tiers (deprecated — XP bar display only)
+
+> **Deprecated (2026-06-02):** the voxel `tierMaterials.ts` set (System A above) is canonical for all tier gating. This legacy `armorTiers.ts` ladder remains only as a display feed for `useXpLedger()` and is slated for removal; do not treat its thresholds as authoritative.
 
 **Source:** `src/core/xp/armorTiers.ts:42-106`
 
@@ -253,15 +255,15 @@ Used only by `useXpLedger()` hook for the `armorTier` and `nextTierProgress` ret
 
 ### Inconsistencies
 
-| Tier | System A (voxel) | System B (legacy) |
+| Tier | System A (voxel, canonical) | System B (legacy, deprecated) |
 |---|---|---|
-| Stone | 200 XP | N/A (leather=50, chain=150) |
-| Iron | 500 XP | 350 XP |
-| Gold | 1,000 XP | 600 XP |
-| Diamond | 2,000 XP | 1,000 XP |
+| Stone | 100 XP | N/A (leather=50, chain=150) |
+| Iron | 750 XP | 350 XP |
+| Gold | 1,500 XP | 600 XP |
+| Diamond | 2,500 XP | 1,000 XP |
 | Netherite | 5,000 XP | 1,800 XP |
 
-**The two systems use entirely different thresholds.** System A gates forge access. System B is used for a progress display that may show a different tier than what the forge system thinks.
+**The two systems use entirely different thresholds.** System A (voxel `tierMaterials.ts`) is canonical and gates forge access. System B (legacy `armorTiers.ts`) is deprecated and feeds only a progress display, so it may show a different tier than the forge system; reconcile by treating System A as source of truth.
 
 ### Individual Piece XP Unlock Thresholds
 
@@ -297,13 +299,13 @@ These thresholds determine when a piece becomes *available* to forge (at any unl
 
 2. **`pendingTierUpgrade` is set but not declared** in the `AvatarProfile` interface (`addXpEvent.ts:135`). It's preserved by `normalizeAvatarProfile` via spread (`normalizeProfile.ts:84`), but it's a ghost field.
 
-3. **`currentTier` default is `'stone'`** in both `normalizeAvatarProfile` and `defaultAvatarProfile`, even though WOOD tier starts at 0 XP. A brand-new profile with 0 XP would show `currentTier: 'stone'` — a tier that requires 200 XP.
+3. **`currentTier` default is `'stone'`** in both `normalizeAvatarProfile` and `defaultAvatarProfile`, even though WOOD tier starts at 0 XP. A brand-new profile with 0 XP would show `currentTier: 'stone'` — a tier that requires 100 XP. (Unowned — see "Orphaned items"; no active economy run holds this.)
 
 ---
 
 ## 7. Initial Observations
 
-1. **Two competing tier systems with different thresholds.** The voxel material tier system (WOOD at 0, STONE at 200, ... NETHERITE at 5,000) is used for actual forge gating, while the legacy armor tier system (Leather at 50, ... Netherite at 1,800) is used for some XP progress displays. A child could be shown "Diamond Scholar" title at 1,000 XP but not have access to Diamond-tier forging until 2,000 XP.
+1. **Two tier systems — resolved (2026-06-02).** The voxel material tier system (`tierMaterials.ts`: WOOD at 0, STONE at 100, IRON at 750, GOLD at 1,500, DIAMOND at 2,500, NETHERITE at 5,000) is **canonical** and is what actually gates forge access. The legacy armor tier system (`armorTiers.ts`: Leather at 50, ... Netherite at 1,800), which feeds some XP progress displays, is **deprecated**. Until it is removed, the display ladder can show a different label than the forge tier (e.g. a "Diamond Scholar" display title at 1,000 XP while Diamond-tier forging only unlocks at 2,500 XP) — treat the voxel set as source of truth wherever they disagree.
 
 2. **Diamond balance has no cached state and no transactional safety.** Balance is computed O(n) on every check by scanning all diamond ledger entries. The `spendDiamonds()` function has a read-then-write race condition — no Firestore transaction wraps the balance check + spend write, so concurrent spends could overdraw.
 

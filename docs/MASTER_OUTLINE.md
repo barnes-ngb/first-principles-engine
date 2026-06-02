@@ -89,8 +89,8 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 (Reference docs: `docs/ECONOMY_AUDIT_PART1.md`, `docs/ECONOMY_AUDIT_PART2.md`.)
 
 - XP = passive progression (tier unlock axis); Diamonds = active spend currency.
-- Current voxel tier thresholds: Wood 0, Stone 200, Iron 500, Gold 1000, Diamond 2000, Netherite 5000.
-  > **⚠️ KNOWN CONFLICT (as of 2026-06-02):** the live code (`src/features/avatar/voxel/tierMaterials.ts` — `TIERS` + `calculateTier`) ships **Stone 100 / Iron 750 / Gold 1500 / Diamond 2500** (Wood 0 and Netherite 5000 agree). This line states **200 / 500 / 1000 / 2000**. The canonical threshold set is owned by the diamond-banking / XP-economy run — **do not edit either side** until that run resolves which is canonical.
+- Current voxel tier thresholds: Wood 0, Stone 100, Iron 750, Gold 1500, Diamond 2500, Netherite 5000.
+  > Thresholds set by commit `cedc5b3` (2026-04-17, Phase A): Lincoln ~1000 XP → Iron by design. Supersedes the earlier `200/500/1000/2000` set.
 - Forge model: spend diamonds once to forge piece, then equip toggle is free.
 - `addXpEvent()` and `addDiamondEvent()` are the intended award gateways (dedup + transactional-safe patterns).
 - Parent admin UI supports manual awards/deductions across both currencies.
