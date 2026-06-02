@@ -50,7 +50,8 @@ import {
   QuestScreen,
   VALIDATION_RETRIES,
 } from './questTypes'
-import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, computeSentenceLevelFromQuestions, deriveSentenceFindings, canOverwriteWorkingLevel } from './workingLevels'
+import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, computeSentenceLevelFromQuestions, deriveSentenceFindings, canOverwriteWorkingLevel, computeQuestActivityMarker, sessionHighWaterLevel } from './workingLevels'
+import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import type { CurriculumLevelHint } from './workingLevels'
 import { WRITING_LEVEL_CAP, SENTENCE_LEVEL_CAP } from './questTypes'
 import { generateSpellWordQuestion } from './spellTheWord'
@@ -1123,6 +1124,30 @@ export function useQuestSession() {
             }
           } catch (err) {
             console.warn('Failed to merge quest blockers into skill snapshot', err)
+          }
+
+          // ── "Last mined" activity marker (visibility-only) ──────────────
+          // A sufficient quest that HOLDS the conservative level leaves the
+          // WorkingLevel (and its `updatedAt` = last level change) untouched, so
+          // the counted run looks invisible. Record a *separate* per-domain
+          // marker — last quest time + held/rose outcome + the session
+          // high-water mark — through the central writer. This never reads or
+          // mutates the level value, never-downgrade, or manual logic. If a
+          // manual pin is still active (<48 hr) the level write was skipped, so
+          // we skip the activity write too (rare; deferred edge).
+          if (
+            (questMode === 'phonics' || questMode === 'comprehension' || questMode === 'math') &&
+            canOverwriteWorkingLevel(existing.workingLevels?.[questMode])
+          ) {
+            const marker = computeQuestActivityMarker({
+              priorLevel: existing.workingLevels?.[questMode]?.level,
+              newLevel: newWorkingLevel?.level,
+              sessionHighWater: sessionHighWaterLevel(questions, finalState.currentLevel),
+            })
+            await writeSnapshotUpdate(familyId, activeChildId, {
+              masteredSkills: [],
+              recordQuestActivity: { domain: questMode, marker },
+            }).catch((err) => console.warn('Failed to record quest activity marker', err))
           }
         } catch (err) {
           // Don't block session save if snapshot update fails
