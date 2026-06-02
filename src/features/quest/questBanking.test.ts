@@ -9,7 +9,7 @@ import {
   perAnswerDiamondKey,
   perAnswerXpKey,
 } from './questBanking'
-import { MIN_QUESTIONS } from './questTypes'
+import { MAX_QUESTIONS, MIN_QUESTIONS } from './questTypes'
 import type { SessionQuestion } from './questTypes'
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -53,6 +53,13 @@ describe('hasSufficientCompletion — the conservative mastery gate', () => {
   it('is true at/above the threshold of answered questions', () => {
     expect(hasSufficientCompletion(session(MIN_QUESTIONS, 0))).toBe(true)
     expect(hasSufficientCompletion(session(10, 6))).toBe(true)
+  })
+
+  it('a complete short run (all MAX_QUESTIONS answered) always reaches the bar', () => {
+    // The whole point of the short-run alignment: MAX_QUESTIONS == MIN_QUESTIONS, so
+    // *finishing a run always counts*. A run can never end "just short" of the bar.
+    expect(MAX_QUESTIONS).toBe(MIN_QUESTIONS)
+    expect(hasSufficientCompletion(session(MAX_QUESTIONS, 3))).toBe(true)
   })
 
   it('does not count skipped or flagged questions toward sufficiency', () => {
