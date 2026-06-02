@@ -481,10 +481,14 @@ export default function EvaluationHistoryTab() {
 
   useEffect(() => {
     if (!activeChildId) return
+    // Show completed sessions AND partials (stopped-early quests). A partial
+    // banked its diamonds per-answer and counts toward hours, so it belongs in
+    // history — Lincoln's reading/phonics work no longer evaporates when he stops
+    // early. ('in-progress'/'resumed' are transient resume states, kept out.)
     const q = query(
       evaluationSessionsCollection(familyId),
       where('childId', '==', activeChildId),
-      where('status', '==', 'complete'),
+      where('status', 'in', ['complete', 'partial']),
     )
     getDocs(q).then((snap) => {
       setSessions(
@@ -520,6 +524,9 @@ export default function EvaluationHistoryTab() {
           <Chip size="small" label={selectedSession.domain} variant="outlined" />
           {isInteractive(selectedSession) && (
             <Chip size="small" label={`${activeChild?.name}'s Quest`} color="secondary" />
+          )}
+          {selectedSession.status === 'partial' && (
+            <Chip size="small" label="Partial" color="warning" variant="outlined" />
           )}
           {isFluency(selectedSession) && (
             <Chip size="small" label="Fluency" color="info" />
@@ -601,6 +608,9 @@ export default function EvaluationHistoryTab() {
                   <Typography variant="subtitle2">{sessionTitle(session)}</Typography>
                   {isInteractive(session) && (
                     <Chip label={`${activeChild?.name}'s Quest`} size="small" color="secondary" />
+                  )}
+                  {session.status === 'partial' && (
+                    <Chip label="Partial" size="small" color="warning" variant="outlined" />
                   )}
                 </Stack>
                 <Typography variant="caption" color="text.secondary">

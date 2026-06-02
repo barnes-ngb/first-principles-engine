@@ -175,7 +175,11 @@ export interface EvaluationSession {
   id?: string
   childId: string
   domain: EvaluationDomain
-  status: 'in-progress' | 'complete' | 'resumed' | 'abandoned'
+  // 'partial' = stopped-early quest that still counts: persists to history with
+  // its per-answer diamonds + hours, but never moves working levels / the
+  // snapshot (the conservative mastery gate). Stays resumable. ('in-progress' is
+  // the legacy resumable state, kept for back-compat reads.)
+  status: 'in-progress' | 'complete' | 'resumed' | 'abandoned' | 'partial'
   messages: ChatMessage[]
   findings: EvaluationFinding[]
   recommendations: EvaluationRecommendation[]
