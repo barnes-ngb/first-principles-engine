@@ -30,8 +30,10 @@ import {
   childrenCollection,
   dailyArmorSessionsCollection,
   dailyArmorSessionDocId,
+  stripUndefined,
   xpLedgerCollection,
 } from '../../core/firebase/firestore'
+import { buildRecalcLedgerDoc } from './avatarAdminWrites'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { getTodayDateString } from '../../core/avatar/getDailyArmorSession'
 import { normalizeAvatarProfile } from '../../features/avatar/normalizeProfile'
@@ -49,12 +51,9 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 
 // ── Helpers ──────────────────────────────────────────────────────
-
-function stripUndefined<T extends object>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, v]) => v !== undefined),
-  ) as Partial<T>
-}
+// `stripUndefined` (recursive, Firestore-safe) is now the shared util from
+// `core/firebase/firestore` — the former local shallow copy was removed so all
+// admin writes go through one stripper.
 
 function isPieceEarned(profile: AvatarProfile, pieceId: ArmorPiece): boolean {
   const entry = (profile.pieces ?? []).find((p) => p.pieceId === pieceId)
@@ -279,7 +278,7 @@ export default function AvatarAdminTab() {
         pieces: updatedPieces,
         currentTier: nextTier,
         updatedAt: new Date().toISOString(),
-      }))
+      }) as unknown as AvatarProfile)
 
       // Generate images for the new tier in parallel
       const TIER_PROMPTS: Record<string, Record<string, string>> = {
@@ -324,7 +323,7 @@ export default function AvatarAdminTab() {
                     }
                   : p,
               )
-              await setDoc(profileRef, stripUndefined({ ...current, pieces: newPieces, updatedAt: new Date().toISOString() }))
+              await setDoc(profileRef, stripUndefined({ ...current, pieces: newPieces, updatedAt: new Date().toISOString() }) as unknown as AvatarProfile)
             } catch (err) {
               console.warn(`Force upgrade image gen failed for ${pieceDef.id}:`, err)
             }
@@ -351,7 +350,7 @@ export default function AvatarAdminTab() {
         ...profile,
         pieces: (profile.pieces ?? []).filter((p) => p.pieceId !== deletePiece),
         updatedAt: new Date().toISOString(),
-      }))
+      }) as unknown as AvatarProfile)
       setFeedback({ severity: 'success', message: `Removed ${ARMOR_PIECES.find((p) => p.id === deletePiece)?.name ?? deletePiece}` })
     } catch (err) {
       console.error('Delete piece failed:', err)
@@ -368,7 +367,7 @@ export default function AvatarAdminTab() {
 
     try {
       // 1. Reset the avatarProfile fields (keep base character and photo transform)
-      await setDoc(profileRef, {
+      await setDoc(profileRef, stripUndefined({
         childId: profile.childId,
         themeStyle: profile.themeStyle,
         pieces: [],
@@ -378,7 +377,7 @@ export default function AvatarAdminTab() {
         armorSheetUrls: {},
         totalXp: 0,
         updatedAt: new Date().toISOString(),
-      } satisfies AvatarProfile)
+      } satisfies AvatarProfile) as unknown as AvatarProfile)
 
       // 2. Delete all xpLedger entries for this child (both per-event and cumulative docs)
       const xpLedgerDocs = await getDocs(
@@ -410,7 +409,7 @@ export default function AvatarAdminTab() {
     try {
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
       // Clear both baseCharacterUrl and photoTransformUrl so a fresh bare character generates
-      await setDoc(profileRef, {
+      await setDoc(profileRef, stripUndefined({
         childId: profile.childId,
         themeStyle: profile.themeStyle,
         pieces: profile.pieces ?? [],
@@ -418,7 +417,7 @@ export default function AvatarAdminTab() {
         totalXp: profile.totalXp,
         updatedAt: new Date().toISOString(),
         // Omitting baseCharacterUrl and photoTransformUrl clears them
-      } satisfies AvatarProfile)
+      } satisfies AvatarProfile) as unknown as AvatarProfile)
       setFeedback({ severity: 'success', message: 'Base character cleared — will regenerate on next visit to My Armor.' })
     } catch (err) {
       console.error('Regen base char failed:', err)
@@ -441,24 +440,23 @@ export default function AvatarAdminTab() {
         .filter((d) => !(d.data() as unknown as Record<string, unknown>)._deleted)
         .reduce((sum, d) => sum + ((d.data().amount as number) ?? 0), 0)
 
-      // Write real total to xpLedger and avatarProfile
+      // Write real total to the cumulative xpLedger doc (the protected economy
+      // surface) and the cached avatarProfile.totalXp. The ledger payload is
+      // built by the tested pure helper so undefined is guarded without altering
+      // childId / totalXp / sources semantics.
       const ledgerRef = doc(xpLedgerCollection(familyId), activeChildId)
       const ledgerSnap = await (await import('firebase/firestore')).getDoc(ledgerRef)
-      const existingSources = ledgerSnap.exists()
-        ? ledgerSnap.data().sources
-        : { routines: 0, quests: 0, books: 0 }
-      await setDoc(ledgerRef, {
-        childId: activeChildId,
-        totalXp: realTotal,
-        sources: existingSources,
-        lastUpdatedAt: new Date().toISOString(),
-      })
+      const existingSources = ledgerSnap.exists() ? ledgerSnap.data().sources : undefined
+      await setDoc(
+        ledgerRef,
+        buildRecalcLedgerDoc(activeChildId, realTotal, existingSources) as unknown as XpLedger,
+      )
 
       const profileRef = doc(avatarProfilesCollection(familyId), activeChildId)
       const profileSnap = await (await import('firebase/firestore')).getDoc(profileRef)
       if (profileSnap.exists()) {
         const p = profileSnap.data() as AvatarProfile
-        await setDoc(profileRef, stripUndefined({ ...p, totalXp: realTotal, updatedAt: new Date().toISOString() }))
+        await setDoc(profileRef, stripUndefined({ ...p, totalXp: realTotal, updatedAt: new Date().toISOString() }) as unknown as AvatarProfile)
       }
 
       setFeedback({ severity: 'success', message: `Recalculated: ${realTotal} XP` })
@@ -569,7 +567,7 @@ export default function AvatarAdminTab() {
         ...profile,
         pieces: updatedPieces,
         updatedAt: new Date().toISOString(),
-      }))
+      }) as unknown as AvatarProfile)
       setFeedback({ severity: 'success', message: 'Piece image URLs cleared — will regenerate next time each piece is viewed.' })
     } catch (err) {
       console.error('Regen piece images failed:', err)
@@ -593,7 +591,7 @@ export default function AvatarAdminTab() {
         ...profile,
         armorSheetUrls: updatedSheetUrls,
         updatedAt: new Date().toISOString(),
-      }))
+      }) as unknown as AvatarProfile)
 
       // Call the generateArmorSheet cloud function
       const fns = getFunctions(app)
