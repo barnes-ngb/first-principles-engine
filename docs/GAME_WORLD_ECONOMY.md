@@ -7,7 +7,7 @@ The game economy splits the single XP currency into two distinct currencies, mod
 ### XP (Experience)
 - **Purpose**: Progression / level — always climbing, never decreases
 - **Unlocks**: Tier access (Wood, Stone, Iron, Gold, Diamond, Netherite)
-  > **⚠️ KNOWN CONFLICT (as of 2026-06-02):** this doc names the tiers but states no numeric XP thresholds; where the sibling economy docs do (`MASTER_OUTLINE`, `PROJECT_CONTEXT`, `ECONOMY_AUDIT_PART1/2`), their `Stone 200 / Iron 500 / Gold 1000 / Diamond 2000` set conflicts with the live code (`tierMaterials.ts` ships `100 / 750 / 1500 / 2500`). Treat the numeric thresholds as owned by the diamond-banking / XP-economy run until resolved.
+  > **Canonical thresholds (resolved 2026-06-02):** Wood 0 / Stone 100 / Iron 750 / Gold 1500 / Diamond 2500 / Netherite 5000, per `src/features/avatar/voxel/tierMaterials.ts` (set by commit `cedc5b3`, 2026-04-17, Phase A). The sibling economy docs (`MASTER_OUTLINE`, `PROJECT_CONTEXT`, `ECONOMY_AUDIT_PART1/2`) now state this same set; the earlier `200 / 500 / 1000 / 2000` set is superseded.
 - **Earned from**: All activities (routine + active effort)
 - **Cannot be spent** — it's your permanent level
 
@@ -106,7 +106,7 @@ When Lincoln forges all 6 pieces in a tier AND his XP has reached the next tier'
 
 - Stonebridge world map (2.5D isometric, regions unlock with tiers)
 - Diamond shop for cosmetics (dyes, emblems, capes, particles — gated by tier)
-  > **Dye status note (verified 2026-06-02):** armor **dye is currently removed from the live 3D voxel path** — `applyTierToArmor` (`src/features/avatar/voxel/tierMaterials.ts`) intentionally ignores `armorColors` in "Phase A" (the per-tier palette is the visual signal; dye is slated to return in "Phase B"). The `ArmorDyePanel` UI still exists and persists dye colors, and the separate Minecraft-skin texture path (`minecraftSkin.ts` `getArmorColor`) still honors them — but the main 3D armor render does not. Emblems + crests **do** render (tier-accent tinted). Because dye is also listed here as a future tier-gated diamond-**shop** cosmetic, its eventual scope is entangled with the economy-shop spec — **flagged for the diamond-banking / XP-economy run**, not asserted resolved here.
+  > **Dye status (verified 2026-06-02):** dye is **not wired in the live 3D voxel path**. `applyTierToArmor` (`src/features/avatar/voxel/tierMaterials.ts`) intentionally ignores `armorColors` in Phase A (commit `03bce14`, "disable dye override") — the per-tier palette (Wood / Stone / Iron / …) is the visual signal there. Dye is **not gone**: the `ArmorDyePanel` UI still persists per-piece colors, and the separate Minecraft-skin texture path (`minecraftSkin.ts` `getArmorColor`) still honors them. Emblems + crests **do** render in 3D (tier-accent tinted). Net: emblems/crests render in 3D; dye is persisted-in-UI, honored-by-skin-path, and **planned as a future tier-gated diamond-shop cosmetic** (this list item).
 - World decorations (place items in Stonebridge with diamonds)
 - Pet companion system (wolf/cat/parrot/Sunny)
 - London's Workshop games as map locations
