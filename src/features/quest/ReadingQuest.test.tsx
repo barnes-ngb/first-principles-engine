@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-import QuestQuestionScreen from './ReadingQuest'
+import QuestQuestionScreen, { QuestFeedback } from './ReadingQuest'
 import type { MultipleChoiceQuestion, QuestState } from './questTypes'
 
 // TTS uses the Web Speech API (not in jsdom). Stub it; capture `speak` so we can
@@ -176,6 +176,14 @@ describe('QuestQuestionScreen — progress / diamond visibility', () => {
     expect(tally.textContent).toContain('8 to go')
   })
 
+  it('fills the diamond bag (progress bar) by diamonds mined, not question count', () => {
+    // totalCorrect=1 of MAX_QUESTIONS(10) → bag is 10% full. The bar now tells the
+    // same story as the "1 mined" tally — one coherent fill, not two competing bars.
+    renderScreen()
+    const bag = screen.getByLabelText(/Diamond bag/)
+    expect(bag.getAttribute('aria-label')).toContain('10% full')
+  })
+
   it('keeps the diamond tally rendered on long (comprehension passage) questions', () => {
     // Passage comprehension prompts are long and previously pushed progress off-screen.
     const longPrompt = [
@@ -213,5 +221,21 @@ describe('QuestQuestionScreen — progress / diamond visibility', () => {
     )
     // New question starts with nothing selected.
     expect(screen.queryByText('tap again to choose ✓')).toBeNull()
+  })
+})
+
+describe('QuestFeedback — per-answer reward + encouragement', () => {
+  it('banks a diamond and invites another one on a correct answer', () => {
+    render(<QuestFeedback correct correctAnswer="dog" childAnswer="dog" />)
+    expect(screen.getByText('+1 Diamond!')).toBeTruthy()
+    // No-shame, keep-going framing tied to each correct answer.
+    expect(screen.getByText(/Try another one!/)).toBeTruthy()
+  })
+
+  it('uses gentle "keep mining" framing (no shame) on a wrong answer', () => {
+    render(<QuestFeedback correct={false} correctAnswer="dog" childAnswer="dot" />)
+    expect(screen.queryByText('+1 Diamond!')).toBeNull()
+    expect(screen.getByText('Almost!')).toBeTruthy()
+    expect(screen.getByText(/Keep mining!/)).toBeTruthy()
   })
 })

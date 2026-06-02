@@ -130,10 +130,12 @@ export default function KnowledgeMinePage() {
     async function loadResume() {
       try {
         const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        // Resumable sessions are saved as 'partial' (new) — also accept legacy
+        // 'in-progress' docs saved before the partials-count change.
         const q = query(
           evaluationSessionsCollection(familyId),
           where('childId', '==', activeChildId),
-          where('status', '==', 'in-progress'),
+          where('status', 'in', ['partial', 'in-progress']),
           orderBy('evaluatedAt', 'desc'),
           firestoreLimit(1),
         )
@@ -141,7 +143,10 @@ export default function KnowledgeMinePage() {
         if (cancelled) return
         const sessions = snap.docs
           .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData>)
-          .filter((s) => s.sessionType === 'interactive' && s.evaluatedAt >= cutoff)
+          // Only offer to resume genuinely resumable docs: a 'partial' saved at
+          // endSession (e.g. AI failed before the mastery threshold) carries no
+          // savedQuestState, so it counts in Records but isn't resumable.
+          .filter((s) => s.sessionType === 'interactive' && s.evaluatedAt >= cutoff && !!s.savedQuestState)
         setResumeSession(sessions[0] ?? null)
       } catch {
         // Non-blocking — resume card is optional
