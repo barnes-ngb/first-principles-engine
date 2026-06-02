@@ -31,6 +31,7 @@ import { normalizeAvatarProfile } from './normalizeProfile'
 import { useAvatarProfile } from './useAvatarProfile'
 import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
 import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, DEFAULT_PROPORTIONS, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
+import { getChildAgeGroup } from '../../core/profile/childIdentity'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type {
   AccessoryId,
@@ -196,7 +197,9 @@ export default function MyAvatarPage() {
   const familyId = useFamilyId()
   const { activeChild, children, setActiveChildId, isChildProfile } = useActiveChild()
   const childId = activeChild?.id ?? ''
-  const isLincoln = activeChild?.name?.toLowerCase() === 'lincoln'
+  // Cosmetic age group from the child's real age (birthdate) — seeds avatar
+  // proportions/theme defaults below; never gates a feature (ARCH-15).
+  const childAgeGroup = getChildAgeGroup(activeChild)
 
   // Knowledge Mine launcher gate: capability, not name. The tile is shown only
   // once a reading evaluation has produced calibration data for this child.
@@ -204,6 +207,13 @@ export default function MyAvatarPage() {
   const hideKnowledgeMine = !canAccessKnowledgeMine(skillSnapshot)
 
   const [profile, setProfile] = useState<AvatarProfile | null>(null)
+  // Cosmetic "retro/minecraft look" flag (the old `isLincoln`). Follows the
+  // avatar profile's themeStyle once loaded, else seeds from the age group —
+  // derived from profile/age, never the child's name (ARCH-15). Personality,
+  // not access; capability gates stay snapshot-driven.
+  const isLincoln =
+    (profile?.themeStyle ?? (childAgeGroup === 'older' ? 'minecraft' : 'platformer')) ===
+    'minecraft'
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
@@ -308,19 +318,20 @@ export default function MyAvatarPage() {
       const { getDoc } = await import('firebase/firestore')
       const snap = await getDoc(profileRef)
       if (!snap.exists()) {
-        const ageGroup = isLincoln ? 'older' : 'younger'
+        // Seed avatar defaults from the child's age group (birthdate), not name.
+        const seedOlder = childAgeGroup === 'older'
         const newProfile: AvatarProfile = {
           childId,
-          themeStyle: isLincoln ? 'minecraft' : 'platformer',
+          themeStyle: seedOlder ? 'minecraft' : 'platformer',
           pieces: [],
-          currentTier: isLincoln ? 'wood' : 'basic',
-          characterFeatures: isLincoln ? LINCOLN_FEATURES : LONDON_FEATURES,
-          ageGroup,
+          currentTier: seedOlder ? 'wood' : 'basic',
+          characterFeatures: seedOlder ? LINCOLN_FEATURES : LONDON_FEATURES,
+          ageGroup: childAgeGroup,
           equippedPieces: [],
           unlockedPieces: [],
           totalXp: 0,
           updatedAt: new Date().toISOString(),
-          ...(isLincoln ? {} : {
+          ...(seedOlder ? {} : {
             customization: {
               shirtColor: '#E8A838',   // mustard yellow
               pantsColor: '#C4B998',   // khaki/tan
@@ -332,7 +343,7 @@ export default function MyAvatarPage() {
       }
     }
     void ensureProfile()
-  }, [familyId, childId, isLincoln])
+  }, [familyId, childId, childAgeGroup])
 
   // ── Real-time profile listener ─────────────────────────────────
   useEffect(() => {
@@ -1231,7 +1242,7 @@ export default function MyAvatarPage() {
 
   if (!profile) return null
 
-  const ageGroup = profile.ageGroup ?? (isLincoln ? 'older' : 'younger')
+  const ageGroup = profile.ageGroup ?? childAgeGroup
   const childDefaults = isLincoln ? LINCOLN_FEATURES : LONDON_FEATURES
   const features = profile.characterFeatures ?? childDefaults
 

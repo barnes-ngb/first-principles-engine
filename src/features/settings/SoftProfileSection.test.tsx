@@ -22,6 +22,13 @@ vi.mock('../../core/firebase/firestore', () => ({
 const mockUseChildren = vi.fn()
 vi.mock('../../core/hooks/useChildren', () => ({
   useChildren: () => mockUseChildren(),
+  // Canonical identity defaults for known profile children (ARCH-15).
+  getCanonicalIdentity: (name: string) =>
+    name.toLowerCase() === 'london'
+      ? { birthdate: '2020-02-20', grade: '1st grade' }
+      : name.toLowerCase() === 'lincoln'
+        ? { birthdate: '2015-09-30', grade: '4th grade' }
+        : undefined,
 }))
 
 import SoftProfileSection from './SoftProfileSection'
@@ -34,6 +41,8 @@ describe('SoftProfileSection', () => {
         {
           id: 'c-lincoln',
           name: 'Lincoln',
+          birthdate: '2015-09-30',
+          grade: '4th grade',
           motivators: 'Minecraft, Lego',
           interests: 'dinosaurs',
           strengths: 'persistence',
@@ -53,7 +62,33 @@ describe('SoftProfileSection', () => {
     expect(motivators.value).toBe('Minecraft, Lego')
   })
 
-  it('renders empty inputs for a child without the fields (no migration)', () => {
+  it('seeds birthdate/grade from the stored child doc', () => {
+    render(<SoftProfileSection />)
+    const birthdate = screen.getByLabelText(/Birthdate for Lincoln/i, {
+      selector: 'input',
+    }) as HTMLInputElement
+    const grade = screen.getByLabelText(/Grade for Lincoln/i, {
+      selector: 'input',
+    }) as HTMLInputElement
+    expect(birthdate.value).toBe('2015-09-30')
+    expect(grade.value).toBe('4th grade')
+  })
+
+  it('pre-fills identity from the canonical default when the doc is empty', () => {
+    render(<SoftProfileSection />)
+    // London has no stored birthdate/grade — the editor pre-fills the canonical
+    // default so backfill is one tap (parent still confirms via Save).
+    const birthdate = screen.getByLabelText(/Birthdate for London/i, {
+      selector: 'input',
+    }) as HTMLInputElement
+    const grade = screen.getByLabelText(/Grade for London/i, {
+      selector: 'input',
+    }) as HTMLInputElement
+    expect(birthdate.value).toBe('2020-02-20')
+    expect(grade.value).toBe('1st grade')
+  })
+
+  it('renders empty soft-profile inputs for a child without the fields (no migration)', () => {
     render(<SoftProfileSection />)
     const motivators = screen.getByLabelText(/Motivators for London/i, {
       selector: 'input',
@@ -65,7 +100,7 @@ describe('SoftProfileSection', () => {
     expect(interests.value).toBe('')
   })
 
-  it('writes all three fields (trimmed) on save', async () => {
+  it('writes identity + soft-profile fields (trimmed) on save', async () => {
     render(<SoftProfileSection />)
 
     const interests = screen.getByLabelText(/Interests for London/i, {
@@ -77,13 +112,18 @@ describe('SoftProfileSection', () => {
       screen.getByRole('button', { name: /Save London's profile/i }),
     )
 
+    // Identity writer + soft-profile writer = two updateDoc calls.
     await waitFor(() => {
-      expect(mockUpdateDoc).toHaveBeenCalledTimes(1)
+      expect(mockUpdateDoc).toHaveBeenCalledTimes(2)
     })
     expect(mockDoc).toHaveBeenCalledWith(
       expect.objectContaining({ familyId: 'fam-1' }),
       'c-london',
     )
+    expect(mockUpdateDoc).toHaveBeenCalledWith(expect.anything(), {
+      birthdate: '2020-02-20',
+      grade: '1st grade',
+    })
     expect(mockUpdateDoc).toHaveBeenCalledWith(expect.anything(), {
       motivators: '',
       interests: 'stories',

@@ -107,5 +107,16 @@ register, it did not change gating).
 
 The **Not-built** (London learner profile) and **N/A** (teach-back) rows need no gate — the former is a
 build, the latter doesn't apply.
+
+### ARCH-15 update (2026-06-02) — London now has a complete identity profile
+
+The data-gap that forced name-based gating (`ARCH-15`) is closed: both kids have a real identity profile
+(`birthdate` + `grade`) settable in **Settings › Child Profile**, pre-filled with London's real values
+(2020-02-20 / 1st grade) so it's one **Save** tap. This is **identity DATA, never a gate** — London's
+experience is still held on **capability** (snapshot calibration), exactly as before. Demographics may now
+**seed** sensible cosmetic/presentation defaults for a child with no avatar profile or snapshot yet
+(avatar age-group, worksheet font sizing) and feed records/AI-context — but no surface opens for London on
+age/grade/name. Worksheet generation, avatar/armor cosmetics, and `generateStory` interests are now
+profile-/age-derived rather than name-keyed, so London is wired the same way Lincoln is.
 </content>
 </invoke>

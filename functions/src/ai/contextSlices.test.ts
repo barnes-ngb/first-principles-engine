@@ -221,6 +221,19 @@ describe("formatChildProfile", () => {
     expect(result).not.toContain("Grade:");
   });
 
+  it("includes a derived age line when birthdate is present", () => {
+    const tenYearsAgo = `${new Date().getFullYear() - 10}-01-01`;
+    const result = formatChildProfile({ name: "Sam", birthdate: tenYearsAgo });
+    expect(result).toContain("Age: 10");
+  });
+
+  it("omits the age line when birthdate is absent or unparseable", () => {
+    expect(formatChildProfile({ name: "Sam" })).not.toContain("Age:");
+    expect(
+      formatChildProfile({ name: "Sam", birthdate: "not-a-date" }),
+    ).not.toContain("Age:");
+  });
+
   it("includes priority skills", () => {
     const result = formatChildProfile({
       name: "Lincoln",
