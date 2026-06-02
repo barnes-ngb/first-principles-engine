@@ -231,6 +231,8 @@ All files containing economy-related references (`totalXp`, `diamondBalance`, `f
 | DIAMOND | 2,000 | Diamond |
 | NETHERITE | 5,000 | Netherite |
 
+> **⚠️ KNOWN CONFLICT (as of 2026-06-02):** this table cites `tierMaterials.ts:12-19` as its source, but the live code there now ships **Stone 100 / Iron 750 / Gold 1500 / Diamond 2500** (Wood 0 and Netherite 5000 still agree) — the `200 / 500 / 1000 / 2000` values above are stale relative to current code. The same stale set propagates to the "Inconsistencies" comparison and Observation 1 below. The canonical threshold set is owned by the diamond-banking / XP-economy run — **do not edit either side** until that run resolves which is canonical.
+
 Used by `calculateTier()` in `tierMaterials.ts`, `checkAndUnlockArmor()`, and `addXpEvent()` for tier unlock gating.
 
 ### System B: Legacy Armor Tiers (used for XP bar display only)

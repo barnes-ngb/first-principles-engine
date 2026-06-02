@@ -128,6 +128,8 @@ There is exactly ONE place diamonds are spent: `forgeArmorPiece()`. No other spe
 | Diamond | 2,000 |
 | Netherite | 5,000 |
 
+> **⚠️ KNOWN CONFLICT (as of 2026-06-02):** this table cites `tierMaterials.ts:12-18` as its source, but the live code there now ships **Stone 100 / Iron 750 / Gold 1500 / Diamond 2500** (Wood 0 and Netherite 5000 still agree) — the `200 / 500 / 1000 / 2000` values above are stale relative to current code. Appendix A's pacing math (below) is computed on this same stale set. The canonical threshold set is owned by the diamond-banking / XP-economy run — **do not edit either side** until that run resolves which is canonical.
+
 ### Piece XP Thresholds (for unlocking individual pieces within Wood tier)
 
 **Source:** `src/features/avatar/voxel/buildArmorPiece.ts:159-166`
@@ -340,6 +342,8 @@ The system cleanly separates forge (costs diamonds) from equip (free). The auto-
 ### Observation
 
 The economy pacing seems reasonable: a full school year (~36 weeks) gives enough time to complete all tiers with margin. The XP thresholds for tier unlocking (200/500/1000/2000/5000) also align roughly with the earning rate, so kids won't have the XP to unlock a tier long before they can afford to forge it.
+
+> **⚠️ KNOWN CONFLICT (as of 2026-06-02):** this pacing math uses the `200/500/1000/2000/5000` thresholds, but the live code (`tierMaterials.ts`) ships `100/750/1500/2500/5000`. If the code set is canonical, the "XP to unlock vs. diamonds to afford" alignment re-derives differently (notably Iron/Gold/Diamond unlock later). Owned by the diamond-banking / XP-economy run — re-run this analysis only against the canonical set once that run resolves it.
 
 ## Appendix B: XP-only Awards (no diamond companion)
 
