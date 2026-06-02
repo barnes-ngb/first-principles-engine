@@ -289,7 +289,14 @@ export default function KidTodayView({
   const armorStatus = avatarProfile
     ? getDailyArmorStatusFromSession(avatarProfile, dailyArmorSession)
     : null
+  // Blocking gate stays on the active-tier `isSuitedUp` (unchanged) so the kid
+  // is never locked out of Today. The greeting banner below uses the honest
+  // daily-ritual axis: `isFullArmorOn` (all six slots on) vs the lighter
+  // `dailyRitualDone` (every forged slot on — a 5/6 kid still wins).
   const armorReady = armorStatus?.isSuitedUp ?? false
+  const isFullArmorOn = armorStatus?.isFullArmorOn ?? false
+  const dailyRitualDone = armorStatus?.isDailyRitualComplete ?? false
+  const slotsEquippedToday = armorStatus?.slotsEquippedToday ?? 0
   const showArmorGateBlocker = Boolean(armorStatus?.hasForgedPieces && !armorReady)
   const showArmorPrompt = Boolean(armorStatus && !armorStatus.hasForgedPieces)
   const equippedTodayVoxel = useMemo(
@@ -512,9 +519,9 @@ export default function KidTodayView({
         )}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
-            {armorReady ? `Ready for battle, ${child.name}!` : greeting}
+            {isFullArmorOn ? `Ready for battle, ${child.name}!` : greeting}
           </Typography>
-          {armorReady && (
+          {isFullArmorOn && (
             <Typography
               sx={{
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
@@ -525,7 +532,19 @@ export default function KidTodayView({
               Full armor on. Let's go!
             </Typography>
           )}
-          {!armorReady && avatarProfile && (
+          {!isFullArmorOn && dailyRitualDone && (
+            <Typography
+              sx={{
+                fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
+                fontSize: isLincoln ? '0.4rem' : '12px',
+                color: 'text.secondary',
+                mt: 0.25,
+              }}
+            >
+              Suited up for today ✓ — {slotsEquippedToday}/6 pieces on
+            </Typography>
+          )}
+          {!dailyRitualDone && avatarProfile && (
             <Typography
               sx={{
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',

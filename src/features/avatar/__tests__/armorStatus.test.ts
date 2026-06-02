@@ -242,6 +242,111 @@ describe('getDailyArmorStatus — single source of truth', () => {
   })
 })
 
+describe('daily-ritual axis (slots) vs forge-tier axis — separated', () => {
+  const allSix: ArmorPiece[] = [
+    'belt_of_truth',
+    'breastplate_of_righteousness',
+    'shoes_of_peace',
+    'shield_of_faith',
+    'helmet_of_salvation',
+    'sword_of_the_spirit',
+  ]
+
+  describe('3 Iron + 3 lower forged, all six equipped', () => {
+    // Active forge tier is iron (3 forged); the other 3 slots are forged at
+    // stone/wood. All six slots exist across tiers → full armor when all on.
+    const profile = makeProfile({
+      totalXp: 2000,
+      forgedPieces: {
+        wood: {
+          belt: forgedEntry, breastplate: forgedEntry, shoes: forgedEntry,
+          shield: forgedEntry, helmet: forgedEntry, sword: forgedEntry,
+        },
+        stone: {
+          belt: forgedEntry, breastplate: forgedEntry, shoes: forgedEntry,
+          shield: forgedEntry, helmet: forgedEntry, sword: forgedEntry,
+        },
+        iron: { belt: forgedEntry, breastplate: forgedEntry, shoes: forgedEntry },
+      },
+    })
+
+    it('all six slots on → isFullArmorOn true, daily line 6/6', () => {
+      const status = getDailyArmorStatus(profile, allSix)
+      expect(status.slotsForgedTotal).toBe(6)
+      expect(status.slotsEquippedToday).toBe(6)
+      expect(status.isFullArmorOn).toBe(true)
+      expect(status.isDailyRitualComplete).toBe(true)
+    })
+
+    it('forge line is independent of slot count (iron: 3/6 forged)', () => {
+      const status = getDailyArmorStatus(profile, allSix)
+      expect(status.activeForgeTier).toBe('iron')
+      expect(status.forgedInActiveTier).toBe(3)
+      // The forge-progress axis (3) never equals the slot axis (6) here.
+      expect(status.forgedInActiveTier).not.toBe(status.slotsEquippedToday)
+    })
+
+    it('only the 3 iron pieces equipped → NOT full armor (ghosts remain)', () => {
+      const status = getDailyArmorStatus(profile, [
+        'belt_of_truth',
+        'breastplate_of_righteousness',
+        'shoes_of_peace',
+      ])
+      expect(status.slotsEquippedToday).toBe(3)
+      expect(status.isFullArmorOn).toBe(false)
+      // Active-tier gate (iron 3/3) is satisfied even though full armor isn't.
+      expect(status.isSuitedUp).toBe(true)
+      // Daily ritual is NOT done — 3 forged slots still off.
+      expect(status.isDailyRitualComplete).toBe(false)
+    })
+  })
+
+  describe('only 5 slots forged', () => {
+    // 5 slots forged (sword never forged at any tier), all 5 equipped.
+    const profile = makeProfile({
+      totalXp: 800,
+      forgedPieces: {
+        wood: {
+          belt: forgedEntry, breastplate: forgedEntry, shoes: forgedEntry,
+          shield: forgedEntry, helmet: forgedEntry,
+        },
+      },
+    })
+    const fiveApplied: ArmorPiece[] = [
+      'belt_of_truth',
+      'breastplate_of_righteousness',
+      'shoes_of_peace',
+      'shield_of_faith',
+      'helmet_of_salvation',
+    ]
+
+    it('all 5 forged slots on → daily win, but NOT full armor', () => {
+      const status = getDailyArmorStatus(profile, fiveApplied)
+      expect(status.slotsForgedTotal).toBe(5)
+      expect(status.slotsEquippedToday).toBe(5)
+      // The 6th slot was never forged → ghost outline, no full-armor celebration.
+      expect(status.isFullArmorOn).toBe(false)
+      // The kid still gets the lighter daily acknowledgment.
+      expect(status.isDailyRitualComplete).toBe(true)
+    })
+
+    it('4 of 5 forged slots on → daily ritual not yet complete', () => {
+      const status = getDailyArmorStatus(profile, fiveApplied.slice(0, 4))
+      expect(status.slotsEquippedToday).toBe(4)
+      expect(status.isDailyRitualComplete).toBe(false)
+      expect(status.isFullArmorOn).toBe(false)
+    })
+  })
+
+  it('no forged pieces → neither full armor nor daily ritual', () => {
+    const status = getDailyArmorStatus(makeProfile({ totalXp: 0 }))
+    expect(status.slotsForgedTotal).toBe(0)
+    expect(status.slotsEquippedToday).toBe(0)
+    expect(status.isFullArmorOn).toBe(false)
+    expect(status.isDailyRitualComplete).toBe(false)
+  })
+})
+
 describe('getBestOfSlotForgedPieces', () => {
   it('returns highest tier per slot when multiple tiers forged', () => {
     const profile = makeProfile({

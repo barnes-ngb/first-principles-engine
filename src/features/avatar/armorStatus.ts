@@ -4,12 +4,23 @@
  * Every component that needs to know "is the kid suited up" MUST use
  * `getDailyArmorStatus()`. No component does its own forged-vs-equipped math.
  *
- * Key semantic decision:
- * - "Suited up" means all pieces forged **in the active forge tier** are
- *   equipped today. Lower-tier pieces that don't exist in the active tier
- *   are bonus visual pieces, not gate requirements.
- * - This matches what the gallery shows: only the active forge tier's pieces.
- *   A kid can't be blocked by a piece they can't see or interact with.
+ * TWO INDEPENDENT AXES — never conflate them into one number:
+ *
+ * 1. **Daily ritual (slots).** "Put on the whole armor." Measured in armor
+ *    SLOTS (belt, breastplate, shoes, shield, helmet, sword), best-of-slot
+ *    across all tiers. `slotsEquippedToday` / 6. `isFullArmorOn` is the
+ *    big-celebration gate: all six slots exist (forged at some tier) AND all
+ *    six are equipped today. `isDailyRitualComplete` is the lighter daily win:
+ *    every slot the kid has *forged* is on today (so a 5/6 kid still wins).
+ *
+ * 2. **Forge progress (tier climb).** A separate axis: how many pieces the kid
+ *    has forged in the active tier (`forgedInActiveTier` / 6). This drives the
+ *    "forge more to upgrade your set" display and never mixes with slot counts.
+ *
+ * Legacy "suited up" axis (`isSuitedUp` and the `gate*` fields) is the
+ * active-forge-tier gate — retained unchanged so XP awards, streaks, and the
+ * Today armor-gate screen keep their existing behavior. Display surfaces use
+ * the slot axis above.
  */
 import type { ArmorPiece, AvatarProfile, DailyArmorSession, VoxelArmorPieceId } from '../../core/types'
 import { getAppliedVoxelPieces, getForgedPiecesForTier } from './armorPieceState'
@@ -36,6 +47,27 @@ export interface DailyArmorStatus {
    * NOT for gate readiness.
    */
   allForgedSlots: VoxelArmorPieceId[]
+
+  // ── Daily-ritual axis (SLOTS, best-of-slot across tiers) ──────────
+  /** Distinct armor slots forged at *any* tier (max 6). */
+  slotsForgedTotal: number
+  /** Best-of-slot forged pieces equipped today (max 6). */
+  slotsEquippedToday: number
+  /**
+   * Big-celebration gate: all six slots exist (forged at some tier) AND all
+   * six are equipped today. Drives the "Full armor on!" fanfare + Hub banner.
+   */
+  isFullArmorOn: boolean
+  /**
+   * Lighter daily win: every slot the kid has forged is on today. True for a
+   * 5/6 kid who's equipped all five — keeps the daily ritual from feeling
+   * withheld. Distinct from the 6/6 `isFullArmorOn` celebration.
+   */
+  isDailyRitualComplete: boolean
+
+  // ── Forge-progress axis (tier climb) ──────────────────────────────
+  /** Pieces forged in the active forge tier (0–6). Tier-climb display only. */
+  forgedInActiveTier: number
 }
 
 /**
@@ -143,6 +175,13 @@ export function getDailyArmorStatus(
   const missing = gateRequired.filter((id) => !appliedTodayVoxel.includes(id))
   const hasForgedPieces = gateRequired.length > 0
 
+  // ── Daily-ritual axis (slots, best-of-slot across tiers) ──
+  const slotsForgedTotal = allForgedSlots.length
+  const slotsEquippedToday = allForgedSlots.filter((id) => appliedTodayVoxel.includes(id)).length
+  const isFullArmorOn =
+    slotsForgedTotal === ALL_ARMOR_VOXEL_PIECES.length && slotsEquippedToday === ALL_ARMOR_VOXEL_PIECES.length
+  const isDailyRitualComplete = slotsForgedTotal > 0 && slotsEquippedToday === slotsForgedTotal
+
   return {
     isSuitedUp: hasForgedPieces && missing.length === 0,
     gateRequired,
@@ -152,6 +191,11 @@ export function getDailyArmorStatus(
     hasForgedPieces,
     activeForgeTier,
     allForgedSlots,
+    slotsForgedTotal,
+    slotsEquippedToday,
+    isFullArmorOn,
+    isDailyRitualComplete,
+    forgedInActiveTier: getForgedPiecesForTier(profile, activeForgeTier).length,
   }
 }
 
