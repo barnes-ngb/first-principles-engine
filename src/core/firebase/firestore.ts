@@ -37,6 +37,7 @@ import type {
   SightWordProgress,
   SkillSnapshot,
   Sticker,
+  StonebridgeProgress,
   StoryGame,
   WeekPlan,
   WeeklyReview,
@@ -417,6 +418,13 @@ export const dailyArmorSessionsCollection = (
 /** Build doc ID for a daily armor session. */
 export const dailyArmorSessionDocId = (childId: string, date: string): string =>
   `${childId}-${date}`
+
+// ── Stonebridge (Banner Rally) mission progress ───────────────
+// Mission progress only — never XP / diamonds. Doc ID: {childId}
+export const stonebridgeProgressCollection = (
+  familyId: string,
+): CollectionReference<StonebridgeProgress> =>
+  collection(db, `families/${familyId}/stonebridgeProgress`) as CollectionReference<StonebridgeProgress>
 
 // ── Evaluation Sessions (Diagnostic Assessment Chat) ──────────
 

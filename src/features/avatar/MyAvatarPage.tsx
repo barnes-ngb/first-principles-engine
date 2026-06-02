@@ -77,7 +77,7 @@ import { getWeekRange } from '../../core/utils/time'
 import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
 import HeroLauncherTiles from './HeroLauncherTiles'
-import StonebridgePreviewCard from './StonebridgePreviewCard'
+import StonebridgeMissionCard from './stonebridge/StonebridgeMissionCard'
 
 type NextRecommendedAction =
   | { type: 'forge'; label: string }
@@ -1372,15 +1372,9 @@ export default function MyAvatarPage() {
         {/* Mission and Stonebridge surface above the 3D armor row — mission
             context comes first; armor is one pillar of the hub, not the whole page. */}
         <HeroMissionCard mission={mission} isLincoln={isLincoln} />
-        <StonebridgePreviewCard
-          isLincoln={isLincoln}
-          weekData={{
-            weekNumber: weekData?.weekNumber,
-            chapterTitle: weekData?.chapterTitle,
-            chapterIntro: weekData?.chapterIntro,
-            conundrumTitle: weekData?.conundrum?.title,
-          }}
-        />
+        {childId && (
+          <StonebridgeMissionCard familyId={familyId} childId={childId} isLincoln={isLincoln} />
+        )}
 
         {/* ── 3D Character Display ─────────────────────────────── */}
         <AvatarCharacterDisplay
