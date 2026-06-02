@@ -160,7 +160,7 @@ export function QuestFeedback({
           mt: 2,
         }}
       >
-        Keep mining! ⛏️
+        {correct ? 'Try another one! ⛏️' : 'Keep mining! ⛏️'}
       </Typography>
     </Box>
   )
@@ -445,7 +445,11 @@ export default function QuestQuestionScreen({
   domain = 'reading',
   questMode,
 }: QuestQuestionScreenProps) {
-  const progress = (questState.totalQuestions / MAX_QUESTIONS) * 100
+  // One coherent progress story: the bar IS the diamond bag filling. Each correct
+  // answer drops a diamond in (one tenth of a full session bag), so the bar and
+  // the "💎 N mined" tally below it tell the same story instead of competing
+  // (evolves #1324's question-count bar + separate diamond tally into one fill).
+  const diamondFill = Math.min(100, (questState.totalCorrect / MAX_QUESTIONS) * 100)
   const isMathQuest = domain === 'math'
   const isVoiceFirst = questMode === 'phonics' || questMode === 'comprehension'
   const tts = useTTS({ rate: 0.85 })
@@ -592,17 +596,18 @@ export default function QuestQuestionScreen({
         )}
       </Stack>
 
-      {/* Progress bar */}
+      {/* Diamond bag — fills as diamonds are mined (one per correct answer) */}
       <LinearProgress
         variant="determinate"
-        value={progress}
+        value={diamondFill}
+        aria-label={`Diamond bag ${Math.round(diamondFill)}% full`}
         sx={{
           height: 8,
           borderRadius: 4,
           bgcolor: MC.darkStone,
           mb: 1,
           '& .MuiLinearProgress-bar': {
-            bgcolor: MC.green,
+            bgcolor: MC.diamond,
             borderRadius: 4,
           },
         }}

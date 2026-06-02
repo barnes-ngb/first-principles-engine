@@ -388,6 +388,7 @@ describe('applyToSnapshot — additive edit ops (6a / Tier C Option 2)', () => {
       conceptualBlocks: false,
       supports: false,
       stopRules: false,
+      questActivity: false,
     })
   })
 })

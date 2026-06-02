@@ -134,7 +134,8 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 ## Economy (two-currency: XP + Diamonds)
 - **XP** = passive progression / tier-unlock axis; never spent. Earned from all activities.
 - **Diamonds** = active spend currency (forge armor, future cosmetics/decorations). Earned from active-effort activities only (quests, teach-back, Dad Lab, reading, etc.).
-- **Tier thresholds (XP):** Wood 0, Stone 200, Iron 500, Gold 1000, Diamond 2000, Netherite 5000. Biomes: Stonebridge Village → Caves → Mountains → Desert Temple → The End → The Nether.
+- **Tier thresholds (XP):** Wood 0, Stone 100, Iron 750, Gold 1500, Diamond 2500, Netherite 5000. Biomes: Stonebridge Village → Caves → Mountains → Desert Temple → The End → The Nether.
+  > Canonical per `src/features/avatar/voxel/tierMaterials.ts` (`TIERS` + `calculateTier`); set by commit `cedc5b3` (2026-04-17, Phase A — Lincoln ~1000 XP → Iron by design). Supersedes the earlier `200/500/1000/2000` set.
 - **Forge model:** spend diamonds once to forge a piece, then equip toggle is free. Per-tier totals (diamonds): 44 / 130 / 240 / 385 / 610 / 910.
 - **Gating:** loose gate (next tier visible but locked with reason); dual requirement (XP threshold AND prior tier fully forged); `forgedPieces[]` distinct from `equippedPieces`; tier-completion diamond bonuses (Wood 20 … Netherite 200). Daily Suit Up equips OWNED pieces only.
 - **Gateways:** `addXpEvent()` and `addDiamondEvent()` are the ONLY award paths (direct balance writes are bugs). `xpLedger` stores both via `currencyType`.

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-import QuestQuestionScreen from './ReadingQuest'
+import QuestQuestionScreen, { QuestFeedback } from './ReadingQuest'
 import type { MultipleChoiceQuestion, QuestState } from './questTypes'
 
 // TTS uses the Web Speech API (not in jsdom). Stub it; capture `speak` so we can
@@ -170,10 +170,19 @@ describe('QuestQuestionScreen — select-then-confirm answer cards', () => {
 describe('QuestQuestionScreen — progress / diamond visibility', () => {
   it('shows diamonds mined and how many questions remain', () => {
     renderScreen()
-    // totalCorrect=1 → 1 mined; MAX_QUESTIONS(10) - totalQuestions(2) → 8 to go.
+    // totalCorrect=1 → 1 mined; MAX_QUESTIONS(5) - totalQuestions(2) → 3 to go.
+    // The "to go" rescales with the shorter run cap.
     const tally = screen.getByText(/mined/)
     expect(tally.textContent).toContain('1 mined')
-    expect(tally.textContent).toContain('8 to go')
+    expect(tally.textContent).toContain('3 to go')
+  })
+
+  it('fills the diamond bag (progress bar) by diamonds mined, not question count', () => {
+    // totalCorrect=1 of MAX_QUESTIONS(5) → bag is 20% full. The fill rescales with the
+    // shorter run, telling the same story as the "1 mined" tally — one coherent fill.
+    renderScreen()
+    const bag = screen.getByLabelText(/Diamond bag/)
+    expect(bag.getAttribute('aria-label')).toContain('20% full')
   })
 
   it('keeps the diamond tally rendered on long (comprehension passage) questions', () => {
@@ -194,7 +203,7 @@ describe('QuestQuestionScreen — progress / diamond visibility', () => {
     })
     const tally = screen.getByText(/mined/)
     expect(tally.textContent).toContain('1 mined')
-    expect(tally.textContent).toContain('8 to go')
+    expect(tally.textContent).toContain('3 to go')
   })
 
   it('resets the selection when the question changes', () => {
@@ -213,5 +222,21 @@ describe('QuestQuestionScreen — progress / diamond visibility', () => {
     )
     // New question starts with nothing selected.
     expect(screen.queryByText('tap again to choose ✓')).toBeNull()
+  })
+})
+
+describe('QuestFeedback — per-answer reward + encouragement', () => {
+  it('banks a diamond and invites another one on a correct answer', () => {
+    render(<QuestFeedback correct correctAnswer="dog" childAnswer="dog" />)
+    expect(screen.getByText('+1 Diamond!')).toBeTruthy()
+    // No-shame, keep-going framing tied to each correct answer.
+    expect(screen.getByText(/Try another one!/)).toBeTruthy()
+  })
+
+  it('uses gentle "keep mining" framing (no shame) on a wrong answer', () => {
+    render(<QuestFeedback correct={false} correctAnswer="dog" childAnswer="dot" />)
+    expect(screen.queryByText('+1 Diamond!')).toBeNull()
+    expect(screen.getByText('Almost!')).toBeTruthy()
+    expect(screen.getByText(/Keep mining!/)).toBeTruthy()
   })
 })

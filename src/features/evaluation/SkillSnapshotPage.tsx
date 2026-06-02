@@ -346,6 +346,7 @@ export default function SkillSnapshotPage() {
           <WorkingLevelsSection
             childId={activeChildId}
             workingLevels={snapshot.workingLevels}
+            questActivity={snapshot.questActivity}
             onSaved={(text) => setSnack({ text, severity: 'success' })}
             onError={(text) => setSnack({ text, severity: 'error' })}
           />

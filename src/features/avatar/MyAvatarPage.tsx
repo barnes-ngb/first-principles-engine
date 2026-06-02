@@ -817,7 +817,22 @@ export default function MyAvatarPage() {
     await safeUpdateProfile(profileRef, {
       equippedPieces: [],
     })
-  }, [familyId, childId, profile])
+
+    // The ceremony resets equipped armor so the kid re-suits at the new tier.
+    // Clear the daily session's appliedPieces too — otherwise it keeps the
+    // pre-ceremony pieces and, since getDailyArmorStatusFromSession reads the
+    // session as the primary source, the character would still show the old
+    // armor (DailyArmorSession ↔ AvatarProfile equipped-state drift).
+    if (session) {
+      const docId = dailyArmorSessionDocId(childId, today)
+      const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
+      await setDoc(sessionRef, stripUndefined({
+        ...session,
+        appliedPieces: [],
+        manuallyUnequipped: [],
+      }) as unknown as DailyArmorSession)
+    }
+  }, [familyId, childId, profile, session, today])
 
   // ── Piece tap handler — single tap to equip/unequip ────────────
   const handlePieceTap = useCallback(

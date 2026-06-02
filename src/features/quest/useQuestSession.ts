@@ -23,6 +23,13 @@ import { domainToSubjectBucket } from '../../core/utils/domainMapping'
 import { useSessionTimer } from '../../core/utils/sessionTimer'
 import { todayKey } from '../../core/utils/dateKey'
 import { calculateStreak, computeNextState, formatSkillLabel, shouldEndSession } from './questAdaptive'
+import {
+  XP_PER_DIAMOND,
+  correctAnswerIndices,
+  hasSufficientCompletion,
+  perAnswerDiamondKey,
+  perAnswerXpKey,
+} from './questBanking'
 import { checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, shouldFlagAsError, validateQuestion } from './questHelpers'
 import type {
   AnswerInputMethod,
@@ -43,7 +50,8 @@ import {
   QuestScreen,
   VALIDATION_RETRIES,
 } from './questTypes'
-import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, computeSentenceLevelFromQuestions, deriveSentenceFindings, canOverwriteWorkingLevel } from './workingLevels'
+import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, computeSentenceLevelFromQuestions, deriveSentenceFindings, canOverwriteWorkingLevel, computeQuestActivityMarker, sessionHighWaterLevel } from './workingLevels'
+import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import type { CurriculumLevelHint } from './workingLevels'
 import { WRITING_LEVEL_CAP, SENTENCE_LEVEL_CAP } from './questTypes'
 import { generateSpellWordQuestion } from './spellTheWord'
@@ -574,7 +582,9 @@ export function useQuestSession() {
       setCurrentPassageText('')
       conversationRef.current = []
       bonusRoundUsedRef.current = false
-      sessionIdRef.current = null
+      // Establish the session identity up front so per-answer reward banking has a
+      // stable doc id to dedup against (endSession / resetToIntro reuse it).
+      sessionIdRef.current = `interactive_${activeChildId}_${Date.now()}`
       hoursLoggedRef.current = false
       // ── Spell-the-word: reset per-session bookkeeping + load the word bank ──
       // Only the reading/phonics surface mixes in spell-word (encoding lives in
@@ -769,6 +779,37 @@ export function useQuestSession() {
     [activeChildId, activeChild, familyId, chat, aiError],
   )
 
+  // ── Per-answer reward banking ─────────────────────────────────
+  // Bank one correct answer's reward (1 diamond + XP) immediately, deduped
+  // through the xpLedger by a per-answer key. Called live from submitAnswer so
+  // mid-session progress is durable (partials count by construction), and again
+  // as an idempotent backfill at endSession — the matching key guarantees a
+  // diamond is never awarded twice across the two paths.
+  const bankAnswerReward = useCallback(
+    (sessionId: string, index: number, domain: EvaluationDomain) => {
+      if (!familyId || !activeChildId) return
+      // 1 diamond (spendable) — this is what fills the bag as it's mined.
+      void addDiamondEvent({
+        familyId,
+        childId: activeChildId,
+        amount: 1,
+        type: DIAMOND_EVENTS.QUEST_COMPLETE,
+        reason: `Quest: ${domain} (correct answer)`,
+        dedupKey: perAnswerDiamondKey(sessionId, index),
+      }).catch((err) => console.warn('Failed to bank quest diamond', err))
+      // XP toward armor progression (kept identical per-correct rate).
+      void addXpEvent(
+        familyId,
+        activeChildId,
+        'QUEST_DIAMOND',
+        XP_PER_DIAMOND,
+        perAnswerXpKey(sessionId, index),
+        { domain },
+      ).catch((err) => console.warn('Failed to bank quest diamond XP', err))
+    },
+    [familyId, activeChildId],
+  )
+
   // ── End session ───────────────────────────────────────────────
 
   const endSession = useCallback(
@@ -874,6 +915,12 @@ export function useQuestSession() {
       const docId = sessionIdRef.current ?? `interactive_${activeChildId}_${Date.now()}`
       sessionIdRef.current = docId
 
+      // Conservative completion gate: only a session with enough answered signal
+      // moves working levels / the snapshot and earns the completion bonus. A
+      // short bail still persists (marked 'partial'), banks its diamonds, and
+      // counts toward hours — it just never moves his level or the foundation map.
+      const sufficient = hasSufficientCompletion(questions)
+
       const skippedCount = questions.filter((q) => q.skipped).length
       const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
 
@@ -881,7 +928,7 @@ export function useQuestSession() {
       const session: EvaluationSession & InteractiveSessionData = {
         childId: activeChildId,
         domain,
-        status: 'complete',
+        status: sufficient ? 'complete' : 'partial',
         messages: [],
         findings: [...findings, ...writingFindings],
         recommendations: sessionRecommendations,
@@ -926,179 +973,192 @@ export function useQuestSession() {
         }
       }
 
-      // Award XP via addXpEvent (handles dedup, avatar profile update, armor unlocks)
-      // 1) Quest completion bonus (flat 15 XP)
-      addXpEvent(
-        familyId,
-        activeChildId,
-        'QUEST_COMPLETE',
-        15,
-        `quest-complete_${docId}`,
-        { domain },
-      ).catch((err) => console.warn('Failed to award quest completion XP', err))
+      // Award XP/diamonds via addXpEvent/addDiamondEvent (deduped, avatar-profile
+      // update + armor unlocks handled inside).
+      // 1) Per-answer reward backfill — each correct answer was already banked
+      //    live in submitAnswer (1 diamond + XP, deduped by the same per-answer
+      //    keys). Re-bank idempotently here so a dropped live write, or a session
+      //    resumed under this doc id, still lands every diamond exactly once.
+      //    Never double-awards: the keys match the live path.
+      for (const idx of correctAnswerIndices(questions)) {
+        bankAnswerReward(docId, idx, domain)
+      }
 
-      // 2) Diamond bonus (2 XP per diamond mined)
-      const XP_PER_DIAMOND = 2
-      const questXp = finalState.totalCorrect * XP_PER_DIAMOND
-
-      if (questXp > 0) {
-        const dedupKey = `quest_${docId}`
+      // 2) Quest completion bonus (flat 15 XP) — a real, sufficiently-complete
+      //    session only. A short partial banks its diamonds but earns no
+      //    completion bonus (it didn't complete a quest).
+      if (sufficient) {
         addXpEvent(
           familyId,
           activeChildId,
-          'QUEST_DIAMOND',
-          questXp,
-          dedupKey,
-          {
-            domain,
-            questionsCorrect: String(finalState.totalCorrect),
-            questionsTotal: String(finalState.totalQuestions),
-            finalLevel: String(finalState.currentLevel),
-          },
-        ).catch((err) => console.warn('Failed to award quest diamond XP', err))
+          'QUEST_COMPLETE',
+          15,
+          `quest-complete_${docId}`,
+          { domain },
+        ).catch((err) => console.warn('Failed to award quest completion XP', err))
       }
 
-      // 3) Award diamonds: 1 per correct answer
-      if (finalState.totalCorrect > 0) {
-        addDiamondEvent({
-          familyId,
-          childId: activeChildId,
-          amount: finalState.totalCorrect,
-          type: DIAMOND_EVENTS.QUEST_COMPLETE,
-          reason: `Quest: ${domain} (${finalState.totalCorrect} correct)`,
-          dedupKey: `quest-complete_${docId}-diamond`,
-        }).catch((err) => console.warn('Failed to award quest diamonds', err))
-      }
+      // Auto-apply findings to skill snapshot + update working level — the
+      // mastery loop. GATED on sufficient completion: a short partial banked its
+      // diamonds/history/hours above, but it must NEVER move his working level or
+      // the foundation map. (computeWorkingLevelFromSession already self-guards at
+      // the same MIN_QUESTIONS floor; this gate extends that protection to
+      // findings → priority skills, conceptual blocks, and the learning-map
+      // coverage update, so a 2-question bail leaves the snapshot untouched.)
+      if (sufficient) {
+        try {
+          const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
+          const snapshotSnap = await getDoc(snapshotRef)
+          const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
+            ? snapshotSnap.data()
+            : {}
 
-      // Auto-apply findings to skill snapshot + update working level
-      try {
-        const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
-        const snapshotSnap = await getDoc(snapshotRef)
-        const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
-          ? snapshotSnap.data()
-          : {}
+          // Findings = AI quest findings + writing seeding findings (FEAT-11):
+          // spelling (`writing.spelling.*`) + sentence (`writing.composition.sentence`).
+          // Both are emerging-only, so they seed a priority skill (a "teach this
+          // next" marker) for the central mastery loop to advance later — they never
+          // mark spelling or sentence mastered inline.
+          const combinedFindings = [...findings, ...writingFindings]
 
-        // Findings = AI quest findings + writing seeding findings (FEAT-11):
-        // spelling (`writing.spelling.*`) + sentence (`writing.composition.sentence`).
-        // Both are emerging-only, so they seed a priority skill (a "teach this
-        // next" marker) for the central mastery loop to advance later — they never
-        // mark spelling or sentence mastered inline.
-        const combinedFindings = [...findings, ...writingFindings]
+          // Build priority skills from findings (if any)
+          const newPrioritySkills: PrioritySkill[] = combinedFindings
+            .filter((f) => f.status === 'emerging' || f.status === 'not-yet')
+            .map((f) => ({
+              tag: f.skill,
+              label: formatSkillLabel(f.skill),
+              level: SkillLevel.Emerging,
+              masteryGate: MasteryGate.NotYet,
+              notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
+            }))
 
-        // Build priority skills from findings (if any)
-        const newPrioritySkills: PrioritySkill[] = combinedFindings
-          .filter((f) => f.status === 'emerging' || f.status === 'not-yet')
-          .map((f) => ({
-            tag: f.skill,
-            label: formatSkillLabel(f.skill),
-            level: SkillLevel.Emerging,
-            masteryGate: MasteryGate.NotYet,
-            notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
-          }))
-
-        // Update mastered skills
-        for (const f of combinedFindings) {
-          if (f.status === 'mastered') {
-            const idx = newPrioritySkills.findIndex((s) => s.tag === f.skill)
-            if (idx < 0) {
-              newPrioritySkills.push({
-                tag: f.skill,
-                label: formatSkillLabel(f.skill),
-                level: SkillLevel.Secure,
-                masteryGate: MasteryGate.IndependentConsistent,
-                notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
-              })
+          // Update mastered skills
+          for (const f of combinedFindings) {
+            if (f.status === 'mastered') {
+              const idx = newPrioritySkills.findIndex((s) => s.tag === f.skill)
+              if (idx < 0) {
+                newPrioritySkills.push({
+                  tag: f.skill,
+                  label: formatSkillLabel(f.skill),
+                  level: SkillLevel.Secure,
+                  masteryGate: MasteryGate.IndependentConsistent,
+                  notes: `${f.evidence} (Quest ${new Date().toLocaleDateString()})`,
+                })
+              }
             }
           }
-        }
 
-        // Merge: keep existing skills not covered by quest findings
-        const existingSkills = (existing.prioritySkills || []).filter(
-          (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
-        )
+          // Merge: keep existing skills not covered by quest findings
+          const existingSkills = (existing.prioritySkills || []).filter(
+            (s) => !newPrioritySkills.some((n) => n.tag === s.tag),
+          )
 
-        // Compute new working level from this session
-        const newWorkingLevel = computeWorkingLevelFromSession(
-          questions, finalState.currentLevel, questMode,
-        )
+          // Compute new working level from this session
+          const newWorkingLevel = computeWorkingLevelFromSession(
+            questions, finalState.currentLevel, questMode,
+          )
 
-        // Merge working levels, respecting manual override protection
-        let mergedWorkingLevels = existing.workingLevels ?? {}
-        if (newWorkingLevel && questMode && questMode !== 'fluency') {
-          const modeKey = questMode as 'phonics' | 'comprehension' | 'math'
-          const currentLevel = mergedWorkingLevels[modeKey]
-          if (canOverwriteWorkingLevel(currentLevel)) {
-            mergedWorkingLevels = { ...mergedWorkingLevels, [modeKey]: newWorkingLevel }
-          }
-        }
-
-        // FEAT-11: derive the SPELLING working level from the spell-word subset
-        // only — a separate signal from phonics so spelling routes by its own gap
-        // and is never folded into the phonics number (and leaves room for a
-        // future, distinct composition level).
-        const writingLevel = computeWritingLevelFromSpellingQuestions(questions)
-        if (writingLevel && canOverwriteWorkingLevel(mergedWorkingLevels.writing)) {
-          mergedWorkingLevels = { ...mergedWorkingLevels, writing: writingLevel }
-        }
-
-        // FEAT-11 Phase 2: derive the SENTENCE working level from the
-        // build-sentence subset only — a separate signal from both phonics and
-        // spelling, so sentence-building routes by its own gap and is never folded
-        // into the spelling number (and leaves room for a future composition level).
-        const sentenceLevel = computeSentenceLevelFromQuestions(questions)
-        if (sentenceLevel && canOverwriteWorkingLevel(mergedWorkingLevels.sentence)) {
-          mergedWorkingLevels = { ...mergedWorkingLevels, sentence: sentenceLevel }
-        }
-
-        const updated = {
-          childId: activeChildId,
-          prioritySkills: combinedFindings.length > 0
-            ? [...existingSkills, ...newPrioritySkills]
-            : existing.prioritySkills || [],
-          supports: existing.supports || [],
-          stopRules: existing.stopRules || [],
-          evidenceDefinitions: existing.evidenceDefinitions || [],
-          workingLevels: mergedWorkingLevels,
-          updatedAt: new Date().toISOString(),
-        }
-
-        await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
-
-        // ── Phase 1: detect + merge blockers, then advance lifecycle on all blocks ──
-        try {
-          const detected = detectBlockersFromSession(questions, questMode, { sessionId: docId })
-          let merged: ConceptualBlock[] = existing.conceptualBlocks ?? []
-          for (const b of detected) {
-            if (!b.id) continue
-            merged = mergeBlock(merged, b as Parameters<typeof mergeBlock>[1])
+          // Merge working levels, respecting manual override protection
+          let mergedWorkingLevels = existing.workingLevels ?? {}
+          if (newWorkingLevel && questMode && questMode !== 'fluency') {
+            const modeKey = questMode as 'phonics' | 'comprehension' | 'math'
+            const currentLevel = mergedWorkingLevels[modeKey]
+            if (canOverwriteWorkingLevel(currentLevel)) {
+              mergedWorkingLevels = { ...mergedWorkingLevels, [modeKey]: newWorkingLevel }
+            }
           }
 
-          // Advance lifecycle using this session's correct/total counts per skill.
-          const evidence = sessionEvidenceFromQuestions(questions)
-          const next = updateBlockerLifecycle(merged, evidence)
-          const changed =
-            detected.length > 0 ||
-            next.length !== (existing.conceptualBlocks ?? []).length ||
-            next.some((b, i) => b.status !== (existing.conceptualBlocks ?? [])[i]?.status)
+          // FEAT-11: derive the SPELLING working level from the spell-word subset
+          // only — a separate signal from phonics so spelling routes by its own gap
+          // and is never folded into the phonics number (and leaves room for a
+          // future, distinct composition level).
+          const writingLevel = computeWritingLevelFromSpellingQuestions(questions)
+          if (writingLevel && canOverwriteWorkingLevel(mergedWorkingLevels.writing)) {
+            mergedWorkingLevels = { ...mergedWorkingLevels, writing: writingLevel }
+          }
 
-          if (changed) {
-            await updateDoc(snapshotRef, {
-              conceptualBlocks: JSON.parse(JSON.stringify(next)),
-              blocksUpdatedAt: new Date().toISOString(),
+          // FEAT-11 Phase 2: derive the SENTENCE working level from the
+          // build-sentence subset only — a separate signal from both phonics and
+          // spelling, so sentence-building routes by its own gap and is never folded
+          // into the spelling number (and leaves room for a future composition level).
+          const sentenceLevel = computeSentenceLevelFromQuestions(questions)
+          if (sentenceLevel && canOverwriteWorkingLevel(mergedWorkingLevels.sentence)) {
+            mergedWorkingLevels = { ...mergedWorkingLevels, sentence: sentenceLevel }
+          }
+
+          const updated = {
+            childId: activeChildId,
+            prioritySkills: combinedFindings.length > 0
+              ? [...existingSkills, ...newPrioritySkills]
+              : existing.prioritySkills || [],
+            supports: existing.supports || [],
+            stopRules: existing.stopRules || [],
+            evidenceDefinitions: existing.evidenceDefinitions || [],
+            workingLevels: mergedWorkingLevels,
+            updatedAt: new Date().toISOString(),
+          }
+
+          await setDoc(snapshotRef, JSON.parse(JSON.stringify(updated)), { merge: true })
+
+          // ── Phase 1: detect + merge blockers, then advance lifecycle on all blocks ──
+          try {
+            const detected = detectBlockersFromSession(questions, questMode, { sessionId: docId })
+            let merged: ConceptualBlock[] = existing.conceptualBlocks ?? []
+            for (const b of detected) {
+              if (!b.id) continue
+              merged = mergeBlock(merged, b as Parameters<typeof mergeBlock>[1])
+            }
+
+            // Advance lifecycle using this session's correct/total counts per skill.
+            const evidence = sessionEvidenceFromQuestions(questions)
+            const next = updateBlockerLifecycle(merged, evidence)
+            const changed =
+              detected.length > 0 ||
+              next.length !== (existing.conceptualBlocks ?? []).length ||
+              next.some((b, i) => b.status !== (existing.conceptualBlocks ?? [])[i]?.status)
+
+            if (changed) {
+              await updateDoc(snapshotRef, {
+                conceptualBlocks: JSON.parse(JSON.stringify(next)),
+                blocksUpdatedAt: new Date().toISOString(),
+              })
+            }
+          } catch (err) {
+            console.warn('Failed to merge quest blockers into skill snapshot', err)
+          }
+
+          // ── "Last mined" activity marker (visibility-only) ──────────────
+          // A sufficient quest that HOLDS the conservative level leaves the
+          // WorkingLevel (and its `updatedAt` = last level change) untouched, so
+          // the counted run looks invisible. Record a *separate* per-domain
+          // marker — last quest time + held/rose outcome + the session
+          // high-water mark — through the central writer. This never reads or
+          // mutates the level value, never-downgrade, or manual logic. If a
+          // manual pin is still active (<48 hr) the level write was skipped, so
+          // we skip the activity write too (rare; deferred edge).
+          if (
+            (questMode === 'phonics' || questMode === 'comprehension' || questMode === 'math') &&
+            canOverwriteWorkingLevel(existing.workingLevels?.[questMode])
+          ) {
+            const marker = computeQuestActivityMarker({
+              priorLevel: existing.workingLevels?.[questMode]?.level,
+              newLevel: newWorkingLevel?.level,
+              sessionHighWater: sessionHighWaterLevel(questions, finalState.currentLevel),
             })
+            await writeSnapshotUpdate(familyId, activeChildId, {
+              masteredSkills: [],
+              recordQuestActivity: { domain: questMode, marker },
+            }).catch((err) => console.warn('Failed to record quest activity marker', err))
           }
         } catch (err) {
-          console.warn('Failed to merge quest blockers into skill snapshot', err)
+          // Don't block session save if snapshot update fails
+          console.warn('Failed to auto-apply quest findings/working level to skill snapshot', err)
         }
-      } catch (err) {
-        // Don't block session save if snapshot update fails
-        console.warn('Failed to auto-apply quest findings/working level to skill snapshot', err)
-      }
 
-      // Update Learning Map from findings (fire-and-forget)
-      if (findings.length > 0) {
-        updateSkillMapFromFindings(familyId, activeChildId, findings)
-          .catch((err) => console.warn('[LearningMap] Failed to update from quest findings', err))
+        // Update Learning Map from findings (fire-and-forget)
+        if (findings.length > 0) {
+          updateSkillMapFromFindings(familyId, activeChildId, findings)
+            .catch((err) => console.warn('[LearningMap] Failed to update from quest findings', err))
+        }
       }
 
       // Track per-word progress (fire-and-forget)
@@ -1224,7 +1284,7 @@ export function useQuestSession() {
         console.warn('[Quest] Failed to auto-complete evaluation item (non-blocking):', err)
       }
     },
-    [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns, questState?.elapsedSeconds, sessionTimer],
+    [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns, questState?.elapsedSeconds, sessionTimer, bankAnswerReward],
   )
 
   // ── Submit answer ─────────────────────────────────────────────
@@ -1260,6 +1320,14 @@ export function useQuestSession() {
 
       const updatedQuestions = [...answeredQuestions, sessionQ]
       setAnsweredQuestions(updatedQuestions)
+
+      // Bank this answer's diamond + XP the instant it's earned (deduped by the
+      // question's index in the session). This is what makes a partial count: the
+      // reward is durable even if the child stops before the session ends. The
+      // end-of-session backfill re-banks idempotently, so no double-award.
+      if (correct && sessionIdRef.current) {
+        bankAnswerReward(sessionIdRef.current, updatedQuestions.length - 1, activeDomainRef.current)
+      }
 
       // Show feedback
       setLastAnswer({
@@ -1498,7 +1566,7 @@ export function useQuestSession() {
         await endSession(updatedQuestions, newState, false)
       }
     },
-    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
+    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession, bankAnswerReward],
   )
 
   // ── Skip question ───────────────────────────────────────────
@@ -1981,7 +2049,11 @@ export function useQuestSession() {
       const partialSession: EvaluationSession & InteractiveSessionData = {
         childId: activeChildId,
         domain,
-        status: 'in-progress',
+        // 'partial' — persists AND shows in Records → Evaluations (alongside
+        // 'complete') with the diamonds already banked per-answer, while staying
+        // resumable (the resume card + resumeSession both accept 'partial'). His
+        // reading/phonics work no longer evaporates when he stops early.
+        status: 'partial',
         messages: [],
         findings,
         recommendations: [],
@@ -2008,13 +2080,34 @@ export function useQuestSession() {
       setDoc(ref, JSON.parse(JSON.stringify(partialSession))).catch((err) =>
         console.error('Failed to auto-save partial quest session', err),
       )
+
+      // Count the partial toward instructional hours (idle-aware), exactly like a
+      // completed session. Additive + guarded by hoursLoggedRef so a session that
+      // already logged at endSession can't double-count (resetToIntro and
+      // endSession are mutually exclusive per session anyway).
+      if (!hoursLoggedRef.current) {
+        hoursLoggedRef.current = true
+        const activeSeconds = sessionTimer.stop()
+        const minutes = Math.ceil(activeSeconds / 60 / 5) * 5
+        if (minutes >= 5) {
+          addDoc(hoursCollection(familyId), {
+            childId: activeChildId,
+            date: todayKey(),
+            minutes,
+            subjectBucket: domainToSubjectBucket(domain),
+            quickCapture: true,
+            notes: `${activeQuestModeRef.current || domain} quest session (partial)`,
+            source: 'knowledge-mine',
+          }).catch((err) => console.error('[SessionTimer] Failed to log partial quest hours:', err))
+        }
+      }
     }
 
     if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
     }
-    sessionTimer.stop() // discard idle-aware timer without logging
+    sessionTimer.stop() // idempotent — no-op if the partial path already stopped/logged it
     setScreen(QuestScreen.Intro)
     setQuestState(null)
     setCurrentQuestion(null)

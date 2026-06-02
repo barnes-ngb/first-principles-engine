@@ -117,16 +117,18 @@ There is exactly ONE place diamonds are spent: `forgeArmorPiece()`. No other spe
 
 ### Tier XP Thresholds (for unlocking tiers)
 
-**Source:** `src/features/avatar/voxel/tierMaterials.ts:12-18`
+**Source:** `src/features/avatar/voxel/tierMaterials.ts:12-19`
 
 | Tier | Min XP to Unlock |
 |---|---|
 | Wood | 0 |
-| Stone | 200 |
-| Iron | 500 |
-| Gold | 1,000 |
-| Diamond | 2,000 |
+| Stone | 100 |
+| Iron | 750 |
+| Gold | 1,500 |
+| Diamond | 2,500 |
 | Netherite | 5,000 |
+
+> **Canonical (resolved 2026-06-02):** these are the live values in `tierMaterials.ts`, set by commit `cedc5b3` (2026-04-17, Phase A — Lincoln ~1000 XP → Iron by design), superseding the earlier `200 / 500 / 1000 / 2000` set. **Pacing against this canonical curve is re-derived in Appendix C** (XP tier-unlock timing + forge-affordability alignment); Appendix A's *diamond/forge-cost* tables remain valid (forge costs did not change).
 
 ### Piece XP Thresholds (for unlocking individual pieces within Wood tier)
 
@@ -339,7 +341,10 @@ The system cleanly separates forge (costs diamonds) from equip (free). The auto-
 
 ### Observation
 
-The economy pacing seems reasonable: a full school year (~36 weeks) gives enough time to complete all tiers with margin. The XP thresholds for tier unlocking (200/500/1000/2000/5000) also align roughly with the earning rate, so kids won't have the XP to unlock a tier long before they can afford to forge it.
+The diamond earn-rate and forge-cost tables above are **unchanged** by the tier-threshold
+update — forge costs (`forgeCosts.ts`) did not move, so "~20 weeks to forge everything at
+~120 diamonds/week" still holds. What had to be re-derived is the **XP tier-unlock pacing**
+and its alignment with forge affordability against the canonical curve. See Appendix C.
 
 ## Appendix B: XP-only Awards (no diamond companion)
 
@@ -354,3 +359,84 @@ These activities award XP but not diamonds. Intentional or oversight?
 | Evaluation complete | 25 | 0 | Significant effort, missing diamonds |
 | Daily armor equip | 5 | 0 | Meta-reward for using the system |
 | Admin/manual award | varies | 0 | XP only — no diamond companion |
+
+## Appendix C: XP Tier-Unlock Pacing (re-derived 2026-06-02, canonical curve)
+
+**Canonical thresholds** (`src/features/avatar/voxel/tierMaterials.ts`): Wood 0 / Stone 100 /
+Iron 750 / Gold 1,500 / Diamond 2,500 / Netherite 5,000. This supersedes the
+`200/500/1000/2000/5000` set the original Appendix A pacing was computed on.
+
+### C.1 Earn-rate model — ⚠️ assumptions, flag for human sanity-check
+
+XP gates the tiers, so the pacing turns on **XP earned per week**, not diamonds. There is no
+production telemetry here; the rates below are a **product judgment** built from the
+`XP_EVENTS` constants (`src/core/types/xp.ts`) and the §1 earning call sites. **Please
+sanity-check these baskets against how Lincoln actually uses the app before relying on the
+week counts.**
+
+**Typical active school day basket (XP):**
+
+| Source | XP | Event |
+|---|---|---|
+| Must-do checklist (1 prayer @5 + 4 items @3) | 17 | `CHECKLIST_PRAYER` + `CHECKLIST_ITEM` |
+| All must-do done | 10 | `CHECKLIST_DAY_COMPLETE` |
+| Quest complete | 15 | `QUEST_COMPLETE` |
+| Quest diamonds mined (~5 correct × 2) | 10 | `QUEST_DIAMOND` |
+| Book reading session | 15 | `BOOK_READ` |
+| **Day total** | **67** | |
+
+**Weekly extras (less than daily):** ~2 teach-backs (2×15=30) + 1 book completion (25) +
+1 Dad Lab (20) + 1 evaluation (25) ≈ **100/week**.
+
+This yields three planning rates (5 active days/week):
+
+- **Conservative** (must-do + quest only, no book, few extras): ~**210 XP/week**
+- **Central** (typical basket, not every optional every day): ~**300 XP/week**
+- **Fuller** (full daily basket + all weekly extras): ~**435 XP/week**
+
+> Note: `WEEKLY_ALL_COMPLETE` (50) and `BOOK_PAGE_READ` (1/page) are **NOT WIRED** (§5 Bugs
+> 1–2), so they are excluded from these baskets. Wiring them would raise the rate.
+
+### C.2 Time-to-tier under the canonical curve
+
+Cumulative XP from 0, and weeks to reach each tier at the three rates:
+
+| Tier | Cumulative XP | Gap from prev tier | @210/wk | @300/wk (central) | @435/wk |
+|---|---|---|---|---|---|
+| Stone     | 100   | +100  | ~0.5 wk  | ~0.3 wk  | ~0.2 wk |
+| Iron      | 750   | +650  | ~3.6 wk  | ~2.5 wk  | ~1.7 wk |
+| Gold      | 1,500 | +750  | ~7.1 wk  | ~5.0 wk  | ~3.4 wk |
+| Diamond   | 2,500 | +1,000| ~11.9 wk | ~8.3 wk  | ~5.7 wk |
+| Netherite | 5,000 | +2,500| ~23.8 wk | ~16.7 wk | ~11.5 wk |
+
+**Stone→Iron is the intentionally-enlarged early gap (Phase A).** Relative to the old curve
+(Stone→Iron was 500−200 = **300 XP**), the canonical curve makes it **650 XP** — roughly
+double. The effect: Stone is reached almost immediately (a quick first-win on day ~1–2), then
+the child does a **meaningful, multi-week climb to Iron** so Iron lands as the first *earned*
+material milestone. At the central rate Lincoln reaches **Iron in ~2–3 weeks** and does not
+touch **Gold until ~week 5** — i.e. he **experiences Iron well before Gold**, exactly the
+Phase A intent. The gaps then keep widening (Iron→Gold 750, Gold→Diamond 1,000,
+Diamond→Netherite 2,500) so the top tiers stay aspirational rather than auto-granted.
+
+### C.3 XP-unlock vs. forge-affordability alignment (re-derived)
+
+Earlier text claimed "XP-to-unlock and diamonds-to-afford align roughly." On the canonical
+curve this is **no longer the right framing** — XP now unlocks each tier **ahead of** the
+diamonds needed to forge it. Using diamond accrual ~120/wk (Appendix A, unchanged) and the
+central XP rate (~300/wk):
+
+| Tier unlock | XP week (central) | Diamonds banked by then (~120/wk) | Cumulative forge cost through tier | Affordability at unlock |
+|---|---|---|---|---|
+| Stone   | ~0.3 wk  | ~40   | 174 (Wood 44 + Stone 130)   | partial — forging trails unlock |
+| Iron    | ~2.5 wk  | ~300  | 414                          | ~72% of cumulative cost |
+| Gold    | ~5.0 wk  | ~600  | 799                          | ~75% |
+| Diamond | ~8.3 wk  | ~1,000| 1,409                        | ~71% |
+| Netherite | ~16.7 wk | ~2,000 | 2,319                      | ~86% |
+
+**Conclusion:** the tier becomes **visible/accessible** (XP unlock) before the child has
+banked enough diamonds to **forge all six pieces** of it — diamonds run roughly **70–85% of
+the cumulative forge cost** at each unlock moment. This is a reasonable shape: unlocking a
+tier is itself a reward (the new material lights up and forging becomes possible), and the
+diamond grind to actually forge the set trails by a week or two. It is **not** the old
+"unlock ≈ afford" coupling, and docs/UX copy should not imply a child can forge a whole tier
+the moment it unlocks. (All week counts inherit the §C.1 assumption flag.)
