@@ -40,6 +40,7 @@ import type {
 } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey } from '../../core/utils/dateKey'
+import { isChapterToGo } from './chapterPool.logic'
 
 const questionTypeEmoji: Record<string, string> = {
   comprehension: '\u{1F50D}',
@@ -229,9 +230,10 @@ export default function KidChapterPool({
     [familyId, childId, bookProgress.bookId, onChapterAnswered],
   )
 
-  // Determine which chapters to show
+  // Determine which chapters to show. Parent-skipped chapters (FUNC-07) are not
+  // answerable by the kid, so they're excluded alongside answered ones.
   const pool = bookProgress.questionPool
-  const unanswered = pool.filter((item) => !item.answered)
+  const unanswered = pool.filter(isChapterToGo)
   const today = todayKey()
 
   // Answered-today items: show as compact "saved" cards with delete option
@@ -246,7 +248,7 @@ export default function KidChapterPool({
     if (todaysChapters && todaysChapters.length > 0) {
       return pool
         .filter(
-          (item) => !item.answered && todaysChapters.includes(item.chapter),
+          (item) => isChapterToGo(item) && todaysChapters.includes(item.chapter),
         )
         .sort((a, b) => a.chapter - b.chapter)
     } else if (unanswered.length > 0) {
