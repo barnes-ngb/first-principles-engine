@@ -4,10 +4,12 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { ChapterQuestionPoolItem } from '../../core/types'
+import { bookProgressDocId } from '../../core/firebase/firestore'
 import {
   isBookFinished,
   isChapterPoolVisible,
   isChapterToGo,
+  isReadAloudSectionVisible,
   repairLegacySkips,
 } from './chapterPool.logic'
 
@@ -130,6 +132,42 @@ describe('repairLegacySkips (one-time migration)', () => {
     expect(isChapterPoolVisible(repaired)).toBe(true) // section comes back
     expect(isBookFinished(repaired)).toBe(false) // genuinely not finished
     expect(repaired.filter(isChapterToGo)).toHaveLength(2)
+  })
+})
+
+describe("shared read-aloud book reaches every child's Today (FUNC-09)", () => {
+  it('mounts the read-aloud section for a child with NO per-child pool yet', () => {
+    // London: shared weeks/{weekStart}.readAloudBookId resolves a book, but no
+    // per-child bookProgress/question pool has been generated for him. The
+    // section must still mount so the shared book reaches his Today.
+    expect(isReadAloudSectionVisible(true, undefined)).toBe(true)
+    expect(isReadAloudSectionVisible(true, [])).toBe(true)
+  })
+
+  it('does not mount when there is no shared book', () => {
+    expect(isReadAloudSectionVisible(false, undefined)).toBe(false)
+    expect(isReadAloudSectionVisible(false, [toGo(1)])).toBe(false)
+  })
+
+  it('shows the section while a per-child pool still has to-go chapters', () => {
+    expect(isReadAloudSectionVisible(true, [answered(1), toGo(2)])).toBe(true)
+  })
+
+  it('unmounts the section once the per-child pool is finished (FUNC-07 unchanged)', () => {
+    // Section visibility is decoupled from plan presence, NOT from completion:
+    // a finished book still closes the kid section.
+    expect(isReadAloudSectionVisible(true, [answered(1), skipped(2)])).toBe(false)
+  })
+
+  it('keeps bookProgress per-child while the book id stays shared', () => {
+    // Both kids resolve the SAME shared book id, but write/read their own
+    // bookProgress doc — one child's answers never appear under the other.
+    const sharedBookId = 'lion-witch-wardrobe'
+    const lincolnDoc = bookProgressDocId('lincoln', sharedBookId)
+    const londonDoc = bookProgressDocId('london', sharedBookId)
+    expect(lincolnDoc).not.toBe(londonDoc)
+    expect(lincolnDoc).toContain(sharedBookId)
+    expect(londonDoc).toContain(sharedBookId)
   })
 })
 

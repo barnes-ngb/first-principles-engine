@@ -54,7 +54,7 @@ import KidChecklist from './KidChecklist'
 import { computeQuestProgress } from './kidQuestGate'
 import KidCelebration from './KidCelebration'
 import KidChapterPool from './KidChapterPool'
-import { isChapterPoolVisible } from './chapterPool.logic'
+import { isChapterPoolVisible, isReadAloudSectionVisible } from './chapterPool.logic'
 import { useBookProgress } from './useBookProgress'
 import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
@@ -613,18 +613,33 @@ export default function KidTodayView({
         </Box>
       )}
 
-      {/* ── KID CHAPTER POOL (read-aloud discussion) ── */}
-      {selectedBook && bookProgress && isChapterPoolVisible(bookProgress.questionPool) && (
+      {/* ── KID READ-ALOUD SECTION (FUNC-09) ──
+          Mounts on the SHARED week book (selectedBook), independent of whether
+          this child has a populated per-child pool. With a per-child pool that
+          still has to-go chapters, the kid answers them (KidChapterPool). Without
+          a pool yet (e.g. a child with no plan), the shared book still reaches
+          their Today via a gentle placeholder; the per-child pool/answers fill in
+          independently. */}
+      {selectedBook && isReadAloudSectionVisible(true, bookProgress?.questionPool) && (
         <SectionErrorBoundary section="chapter pool">
-          <KidChapterPool
-            book={selectedBook}
-            bookProgress={bookProgress}
-            familyId={familyId}
-            childId={child.id}
-            dayLog={dayLog}
-            weekFocus={weekFocus}
-            onChapterAnswered={updateChapter}
-          />
+          {bookProgress && isChapterPoolVisible(bookProgress.questionPool) ? (
+            <KidChapterPool
+              book={selectedBook}
+              bookProgress={bookProgress}
+              familyId={familyId}
+              childId={child.id}
+              dayLog={dayLog}
+              weekFocus={weekFocus}
+              onChapterAnswered={updateChapter}
+            />
+          ) : (
+            <SectionCard title={`\u{1F4D6} ${selectedBook.title}`}>
+              <Typography variant="body2" color="text.secondary">
+                This is today&apos;s read-aloud book. A grown-up will read it with
+                you and add questions to talk about.
+              </Typography>
+            </SectionCard>
+          )}
         </SectionErrorBoundary>
       )}
 
