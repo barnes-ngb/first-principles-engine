@@ -53,6 +53,7 @@ import KidCaptureForm from './KidCaptureForm'
 import KidChecklist from './KidChecklist'
 import KidCelebration from './KidCelebration'
 import KidChapterPool from './KidChapterPool'
+import { isChapterPoolVisible } from './chapterPool.logic'
 import { useBookProgress } from './useBookProgress'
 import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
@@ -634,7 +635,7 @@ export default function KidTodayView({
       )}
 
       {/* ── KID CHAPTER POOL (read-aloud discussion) ── */}
-      {selectedBook && bookProgress && bookProgress.questionPool.some((item) => !item.answered) && (
+      {selectedBook && bookProgress && isChapterPoolVisible(bookProgress.questionPool) && (
         <SectionErrorBoundary section="chapter pool">
           <KidChapterPool
             book={selectedBook}
