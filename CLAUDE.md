@@ -142,18 +142,18 @@ const items = snapshot.docs.map((doc) => ({
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
 - `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useAudioRecording, useSpeechRecognition, useTranscription, useTTS, useActivityConfigs, useScanToActivityConfig, useCertificateProgress, useMonthlyReviews)
-- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
+- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `stonebridge.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, domain mapping, blocker lifecycle, workbook matching, session timer, image compression, `sanitizeJson` (client port of the functions LLM-JSON parser — deliberate duplication, `// TODO: consolidate`)
 - `src/core/ai/` — AI service interface (useAI hook), feature flags, prompt templates (`prompts/plannerPrompts.ts`)
-- `src/core/profile/` — Profile context provider and hook (family + children)
+- `src/core/profile/` — Profile context provider and hook (family + children), child identity/age helpers (`childIdentity.ts`, `childAge.ts`)
 - `src/core/xp/` — XP ledger, armor tiers, armor unlock logic
 - `src/core/avatar/` — Daily armor session management (`getDailyArmorSession.ts`)
 - `src/core/curriculum/` — Curriculum knowledge map, skill mapping, finding integration (curriculumMap, mapFindingToNode, skillStatus, updateSkillMapFromFindings, useSkillMap)
-- `src/core/family/` — Shared family writers (`updateChildSoftProfile` — motivators/interests/strengths)
+- `src/core/family/` — Shared family writers (`updateChildSoftProfile` — motivators/interests/strengths, `updateChildIdentity` — birthdate/grade)
 - `src/core/observability/` — Client error reporting (ErrorReporterSync, scrubError, anonymize, errorSink, buildInfo)
 - `src/core/data/` — Database seed data
 - `src/features/auth/` — Auth guard route wrapper
-- `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), VoxelCharacter (Three.js character, armor, poses, materials, camera), `voxel/` sub-module (armor meshes, pose definitions)
+- `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), VoxelCharacter (Three.js character, armor, poses, materials, camera), `voxel/` sub-module (armor meshes, pose definitions), `stonebridge/` sub-module (Banner Rally missions, progress computation, location art, banner-raise celebrations)
 - `src/features/books/` — Bookshelf, book editor/reader, generate chat, review chat, sight word dashboard, story guide, print/PDF
 - `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
 - `src/features/engine/` — Engine page and engine logic
@@ -279,9 +279,9 @@ All under `families/{familyId}/`:
 | `bookThemes` | Book theme presets and custom themes |
 | `childSkillMaps` | Per-child curriculum knowledge maps (read into `shellyChat` AI context as the `childSkillMap` coverage slice — `loadChildSkillMapContext` / `formatChildSkillMap`; read-only, owned by `updateSkillMapFromFindings`) |
 | `bookProgress` | Per-child read-aloud book progress and question pools |
-| `errorLogs` | Scrubbed client error records (written by `src/core/observability/`) |
 | `featureRequests` | Silent friction / feature-request log from Shelly chat (feedback metadata, **not** a child's record — written fire-and-forget via `logFeatureRequest`, deduped by `dedupKey`, separate from the confirm-gated `applyChatAction` path; consumed by Step 5b's scheduled `fileFeatureRequests` CF → GitHub issue, which writes back `status: 'filed'` + `githubIssueUrl`) |
-| `errorLog` | Scrubbed client error records (path: `families/{familyId}/errorLog/{autoId}`) |
+| `errorLog` | Scrubbed client error records (written by `src/core/observability/`, path: `families/{familyId}/errorLog/{autoId}`) |
+| `stonebridgeProgress` | Per-child Stonebridge Banner Rally mission state (current mission, derived counters, completed missions, raised banners, baselines — read-only on the XP/diamond economy) |
 
 **Global collections** (not under `families/`):
 
@@ -314,7 +314,7 @@ All under `families/{familyId}/`:
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task:**
-   - Complex reasoning (plan, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview): Claude Sonnet (`claude-sonnet-4-6`)
+   - Complex reasoning (plan, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview, weeklyReview, analyzePatterns): Claude Sonnet (`claude-sonnet-4-6`)
    - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
    - Image generation: gpt-image-1.5 (scenes, armor sheets, base character, starter avatar, transparent stickers, photo transform, armor pieces, sketch enhancement)
 
@@ -378,14 +378,14 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,620L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
-- **chat.ts CF (2,466L)** — `buildQuestPrompt` alone is 400+ lines. Highest-leverage decomposition target: extract prompt builders to separate files.
+- **PlannerChatPage.tsx (2,627L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **chat.ts CF (2,544L)** — `buildQuestPrompt` alone is 400+ lines. Highest-leverage decomposition target: extract prompt builders to separate files.
 - **BookEditorPage.tsx (2,278L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
-- **useQuestSession.ts (1,870L)** — Quest, comprehension, fluency all in one hook. Consider splitting by quest domain.
-- **MyAvatarPage.tsx (1,804L)** — Decomposed from 1,862L. Grew +152 from forge + portal. State management + ceremony flow. Stable.
-- **ShellyChatPage.tsx (611L)** — ARCH-09 FIXED (1,632→611L). Decomposed into `useShellyChatState`, `useShellyChatFlows`, `useShellyChatActions`, plus pure modules (`reflectionSuggestions`, `parseFollowups`, `parseChatActions`, `parseFriction`). Portal write layer (Tiers A+B+C Option 2) is live and confirm-gated. Stable.
+- **useQuestSession.ts (2,161L)** — Quest, comprehension, fluency, encoding (build-word/spell-word/build-sentence) all in one hook. Consider splitting by quest domain.
+- **MyAvatarPage.tsx (1,875L)** — Decomposed from 1,862L. Grew from forge + portal + Stonebridge Banner Rally. State management + ceremony flow. Stable.
+- **ShellyChatPage.tsx (645L)** — ARCH-09 FIXED (1,632→645L). Decomposed into `useShellyChatState`, `useShellyChatFlows`, `useShellyChatActions`, plus pure modules (`reflectionSuggestions`, `parseFollowups`, `parseChatActions`, `parseFriction`). Portal write layer (Tiers A+B+C Option 2) is live and confirm-gated. Stable.
 - **WorkshopPage.tsx (1,623L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
-- **VoxelCharacter.tsx (1,562L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
+- **VoxelCharacter.tsx (1,606L)** — Three.js render code at `src/features/avatar/VoxelCharacter.tsx`. Splitting the render loop is risky. Leave as-is.
 - **Ladder system** — UI surfaces removed (ARCH-07): the `/ladders` route now redirects to `/progress`, and the `src/features/ladders/` directory + the dead `LadderQuickLog` were deleted now that the disposition system is live. The data layer is intentionally retained: the `ladderRef` artifact tag (still scored by `scoreArtifactsForPortfolio` and shown in `ArtifactCard`), the `ladderProgress` collection (historical data), and the `Ladder*` types in `common.ts`.
 - **evaluate.ts (weekly review)** — Registered in `TASK_CONTEXT` as `weeklyReview` and now calls `buildContextForTask` to fetch shared slices (charter, childProfile, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports). Still not routed through the `chat` dispatch — it's a dedicated scheduled CF + `generateWeeklyReviewNow` callable, not a chat task handler — so it composes its own systemPrompt from `[sharedSlices, WEEKLY_REVIEW_ADDENDUM]`. `assembleWeekContext` provides the week-scoped dayLogs/hours/plans/books/teach-backs/missedDays that shared slices don't cover. Books slice = created / completed / reading sessions (cumulative minutes on touched books); teach-backs slice = count / subject breakdown / audio-vs-text / up to 3 brief examples with audio URLs. Both are persisted on the `weeklyReviews/{weekKey}_{childId}` doc as `evidence` so the rendered "Week in Evidence" section reads without re-querying.
 - **WorkbookConfig → ActivityConfig migration** — Both systems exist. ActivityConfig is the new primary (66 refs vs 27). workbookConfigs still read by quest starting level check and certificate scan. Plan: complete migration, remove workbookConfig references.
