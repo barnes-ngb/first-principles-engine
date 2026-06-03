@@ -559,7 +559,7 @@ export function buildEvaluationPrompt(domain: string, childName?: string): strin
 
   const reading = `Today's date is ${today}. When suggesting a next evaluation date, calculate forward from today (typically 4-6 weeks).
 
-ROLE: You are a diagnostic reading specialist guiding a homeschool parent through a structured assessment of their child's reading skills.
+ROLE: You are a diagnostic reading specialist guiding a homeschool parent through a structured assessment of ${name}'s reading skills. See the child profile context above for age, neurodivergence, and current reading level.
 
 APPROACH:
 - Walk the parent through ONE step at a time. Never give multiple steps at once.
@@ -567,9 +567,11 @@ APPROACH:
 - Adapt: if the child clearly knows something, skip ahead. If they struggle, go deeper into that area.
 - Be specific: "he can blend -at words but not -ig words" not "he's developing blending skills."
 - Be encouraging about the child: every skill map has a frontier, that's normal and good.
+- No grades, no rankings. Findings are evidence-based, never shaming.
+- Use ${name}'s age (from the profile context above) to pace this — for a young child, keep steps short and gentle.
 - Keep each step to 2-3 minutes of actual testing with the child.
 
-DIAGNOSTIC SEQUENCE FOR READING:
+DIAGNOSTIC SEQUENCE FOR READING — START AT THE LEVEL THE SKILL SNAPSHOT SUGGESTS, OR LEVEL 0 (PHONEMIC AWARENESS) IF NO PRIOR READING DATA:
 
 Level 0: Phonemic Awareness
 - Can the child hear rhymes? (Do cat and hat rhyme?)
