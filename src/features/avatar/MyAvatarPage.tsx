@@ -31,6 +31,7 @@ import { normalizeAvatarProfile } from './normalizeProfile'
 import { useAvatarProfile } from './useAvatarProfile'
 import { safeUpdateProfile, safeSetProfile } from './safeProfileWrite'
 import { ARMOR_PIECES, ARMOR_PIECE_TO_VOXEL, DEFAULT_PROPORTIONS, LINCOLN_FEATURES, LONDON_FEATURES } from '../../core/types'
+import { getChildAgeGroup } from '../../core/profile/childIdentity'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type {
   AccessoryId,
@@ -65,7 +66,7 @@ import Particles from './Particles'
 import UnlockCelebration from './UnlockCelebration'
 import TierUpgradeCelebration from './TierUpgradeCelebration'
 import TierUpCeremony from '../../components/avatar/TierUpCeremony'
-import { deriveUnlockedTiersFromForged, getDisplayArmorTier, getTierLockReason } from './armorTierProgress'
+import { ALL_ARMOR_VOXEL_PIECES, deriveUnlockedTiersFromForged, getDisplayArmorTier, getTierLockReason } from './armorTierProgress'
 import { calculateTier } from './voxel/tierMaterials'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
@@ -77,7 +78,7 @@ import { getWeekRange } from '../../core/utils/time'
 import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
 import HeroLauncherTiles from './HeroLauncherTiles'
-import StonebridgePreviewCard from './StonebridgePreviewCard'
+import StonebridgeMissionCard from './stonebridge/StonebridgeMissionCard'
 
 type NextRecommendedAction =
   | { type: 'forge'; label: string }
@@ -167,7 +168,7 @@ function isConsecutiveDay(prev: string, current: string): boolean {
 
 // ── Fanfare (Web Audio API) ────────────────────────────────────────
 
-function playArmorFanfare(delaySeconds = 0) {
+function playArmorFanfare(delaySeconds = 0, peakGain = 0.15) {
   try {
     const ctx = new AudioContext()
     const notes = [523, 659, 784, 1047] // C5, E5, G5, C6
@@ -179,13 +180,44 @@ function playArmorFanfare(delaySeconds = 0) {
       osc.frequency.value = freq
       osc.type = 'triangle'
       const t = ctx.currentTime + delaySeconds + i * 0.12
-      gain.gain.setValueAtTime(0.15, t)
+      gain.gain.setValueAtTime(peakGain, t)
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3)
       osc.start(t)
       osc.stop(t + 0.3)
     })
   } catch {
     // Web Audio not available — silently skip
+  }
+}
+
+/**
+ * Announce a suit-up milestone. Two distinct celebrations on the daily-ritual
+ * axis — never the forge-tier axis:
+ *  - `fullArmorOn` (all six slots on) → big fanfare + "ready for battle" TTS.
+ *  - `ritualDone` (every *forged* slot on, but <6 forged) → a lighter daily
+ *    win so a 5/6 kid still gets acknowledged instead of feeling withheld.
+ */
+function announceSuitUp(fullArmorOn: boolean, ritualDone: boolean) {
+  if (fullArmorOn) {
+    playArmorFanfare(1.5)
+    if ('speechSynthesis' in window) {
+      window.setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(
+          "Full armor on! You're ready for battle, warrior!",
+        )
+        utterance.rate = 0.85
+        window.speechSynthesis.speak(utterance)
+      }, 1800) // After fanfare completes
+    }
+  } else if (ritualDone) {
+    playArmorFanfare(0, 0.08) // lighter chime than the 6/6 celebration
+    if ('speechSynthesis' in window) {
+      window.setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance('Suited up for today! Way to go!')
+        utterance.rate = 0.9
+        window.speechSynthesis.speak(utterance)
+      }, 600)
+    }
   }
 }
 
@@ -196,7 +228,9 @@ export default function MyAvatarPage() {
   const familyId = useFamilyId()
   const { activeChild, children, setActiveChildId, isChildProfile } = useActiveChild()
   const childId = activeChild?.id ?? ''
-  const isLincoln = activeChild?.name?.toLowerCase() === 'lincoln'
+  // Cosmetic age group from the child's real age (birthdate) — seeds avatar
+  // proportions/theme defaults below; never gates a feature (ARCH-15).
+  const childAgeGroup = getChildAgeGroup(activeChild)
 
   // Knowledge Mine launcher gate: capability, not name. The tile is shown only
   // once a reading evaluation has produced calibration data for this child.
@@ -204,6 +238,13 @@ export default function MyAvatarPage() {
   const hideKnowledgeMine = !canAccessKnowledgeMine(skillSnapshot)
 
   const [profile, setProfile] = useState<AvatarProfile | null>(null)
+  // Cosmetic "retro/minecraft look" flag (the old `isLincoln`). Follows the
+  // avatar profile's themeStyle once loaded, else seeds from the age group —
+  // derived from profile/age, never the child's name (ARCH-15). Personality,
+  // not access; capability gates stay snapshot-driven.
+  const isLincoln =
+    (profile?.themeStyle ?? (childAgeGroup === 'older' ? 'minecraft' : 'platformer')) ===
+    'minecraft'
   const [session, setSession] = useState<DailyArmorSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedPiece, setSelectedPiece] = useState<ArmorPieceMeta | null>(null)
@@ -308,19 +349,20 @@ export default function MyAvatarPage() {
       const { getDoc } = await import('firebase/firestore')
       const snap = await getDoc(profileRef)
       if (!snap.exists()) {
-        const ageGroup = isLincoln ? 'older' : 'younger'
+        // Seed avatar defaults from the child's age group (birthdate), not name.
+        const seedOlder = childAgeGroup === 'older'
         const newProfile: AvatarProfile = {
           childId,
-          themeStyle: isLincoln ? 'minecraft' : 'platformer',
+          themeStyle: seedOlder ? 'minecraft' : 'platformer',
           pieces: [],
-          currentTier: isLincoln ? 'wood' : 'basic',
-          characterFeatures: isLincoln ? LINCOLN_FEATURES : LONDON_FEATURES,
-          ageGroup,
+          currentTier: seedOlder ? 'wood' : 'basic',
+          characterFeatures: seedOlder ? LINCOLN_FEATURES : LONDON_FEATURES,
+          ageGroup: childAgeGroup,
           equippedPieces: [],
           unlockedPieces: [],
           totalXp: 0,
           updatedAt: new Date().toISOString(),
-          ...(isLincoln ? {} : {
+          ...(seedOlder ? {} : {
             customization: {
               shirtColor: '#E8A838',   // mustard yellow
               pantsColor: '#C4B998',   // khaki/tan
@@ -332,7 +374,7 @@ export default function MyAvatarPage() {
       }
     }
     void ensureProfile()
-  }, [familyId, childId, isLincoln])
+  }, [familyId, childId, childAgeGroup])
 
   // ── Real-time profile listener ─────────────────────────────────
   useEffect(() => {
@@ -718,27 +760,22 @@ export default function MyAvatarPage() {
       setAnimateEquipId(voxelPieceId)
 
       const updatedApplied = [...(session.appliedPieces ?? []), armorPieceId]
-      // Use unified status for completion check (active-tier gate, not cross-tier)
+      // Two axes: `suitedUp` (active-tier gate) drives the XP/streak economy
+      // unchanged; `isFullArmorOn`/`isDailyRitualComplete` drive celebrations.
       const status = getDailyArmorStatusFromSession(profile, { appliedPieces: updatedApplied })
-      const allApplied = status.isSuitedUp
+      const suitedUp = status.isSuitedUp
 
-      if (allApplied) {
-        playArmorFanfare(1.5)
-        // TTS "Ready for battle!" announcement
-        if ('speechSynthesis' in window) {
-          setTimeout(() => {
-            const utterance = new SpeechSynthesisUtterance(
-              "Full armor on! You're ready for battle, warrior!",
-            )
-            utterance.rate = 0.85
-            window.speechSynthesis.speak(utterance)
-          }, 1800) // After fanfare completes
-        }
-      }
+      announceSuitUp(status.isFullArmorOn, status.isDailyRitualComplete)
 
       // Remove from manuallyUnequipped if re-equipping
       const currentManual = session.manuallyUnequipped ?? []
       const updatedManual = currentManual.filter((id) => id !== voxelPieceId)
+
+      // Optimistically reflect the equip so the status/banner recompute this
+      // frame rather than a beat behind the Firestore subscription.
+      setSession((prev) =>
+        prev ? ({ ...prev, appliedPieces: updatedApplied, manuallyUnequipped: updatedManual }) as DailyArmorSession : prev,
+      )
 
       // Write to Firestore
       const docId = dailyArmorSessionDocId(childId, today)
@@ -747,7 +784,7 @@ export default function MyAvatarPage() {
         ...session,
         appliedPieces: updatedApplied,
         manuallyUnequipped: updatedManual,
-        ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
+        ...(suitedUp ? { completedAt: new Date().toISOString() } : {}),
       }) as unknown as DailyArmorSession)
 
       // Also update equippedPieces on avatar profile
@@ -759,7 +796,7 @@ export default function MyAvatarPage() {
         lastArmorEquipDate: today,
       })
 
-      if (allApplied) {
+      if (suitedUp) {
         void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
           .catch((err) => console.error('[XP] Award failed:', err))
         void checkArmorStreak(profile)
@@ -786,6 +823,17 @@ export default function MyAvatarPage() {
     const updatedManual = currentManual.includes(voxelPieceId)
       ? currentManual
       : [...currentManual, voxelPieceId]
+
+    // Optimistically reflect the unequip so the status/banner downgrade at once.
+    setSession((prev) =>
+      prev
+        ? ({
+            ...prev,
+            appliedPieces: (prev.appliedPieces ?? []).filter((p) => p !== armorPieceId),
+            manuallyUnequipped: updatedManual,
+          }) as DailyArmorSession
+        : prev,
+    )
 
     const docId = dailyArmorSessionDocId(childId, today)
     const sessionRef = doc(dailyArmorSessionsCollection(familyId), docId)
@@ -899,9 +947,16 @@ export default function MyAvatarPage() {
     // Build the complete applied list atomically (avoids stale closure overwrites)
     const updatedApplied = [...(session.appliedPieces ?? []), ...toEquipArmorIds]
     const allEquippedVoxel = [...getAppliedVoxelPieces(updatedApplied)]
-    // Gate completion uses active-tier pieces (matches gallery), not cross-tier union
+    // `suitedUp` (active-tier gate) drives XP/streak unchanged; full-armor /
+    // daily-ritual flags drive the celebration tier.
     const status = getDailyArmorStatusFromSession(profile, { appliedPieces: updatedApplied })
-    const allApplied = status.isSuitedUp
+    const suitedUp = status.isSuitedUp
+
+    // Optimistically reflect the full suit-up so the status/banner recompute
+    // immediately rather than waiting on the Firestore subscription.
+    setSession((prev) =>
+      prev ? ({ ...prev, appliedPieces: updatedApplied, manuallyUnequipped: [] }) as DailyArmorSession : prev,
+    )
 
     // Single Firestore write for the session — all pieces at once
     const docId = dailyArmorSessionDocId(childId, today)
@@ -910,7 +965,7 @@ export default function MyAvatarPage() {
       ...session,
       appliedPieces: updatedApplied,
       manuallyUnequipped: [],
-      ...(allApplied ? { completedAt: new Date().toISOString() } : {}),
+      ...(suitedUp ? { completedAt: new Date().toISOString() } : {}),
     }) as unknown as DailyArmorSession)
 
     // Update profile equippedPieces in one write
@@ -925,17 +980,9 @@ export default function MyAvatarPage() {
       setTimeout(() => setAnimateEquipId(voxelId), i * 200)
     })
 
-    if (allApplied) {
-      playArmorFanfare(1.5)
-      if ('speechSynthesis' in window) {
-        setTimeout(() => {
-          const utterance = new SpeechSynthesisUtterance(
-            "Full armor on! You're ready for battle, warrior!",
-          )
-          utterance.rate = 0.85
-          window.speechSynthesis.speak(utterance)
-        }, 1800)
-      }
+    announceSuitUp(status.isFullArmorOn, status.isDailyRitualComplete)
+
+    if (suitedUp) {
       void addXpEvent(familyId, childId, 'ARMOR_DAILY_COMPLETE', 5, `armor_daily_${today}`)
         .catch((err) => console.error('[XP] Award failed:', err))
       void checkArmorStreak(profile)
@@ -1009,7 +1056,14 @@ export default function MyAvatarPage() {
   const appliedVoxel = getAppliedVoxelPieces(appliedPieces)
   const unlockedVoxel = profile ? getVisiblePieces(profile) : []
   const armorStatus = profile ? getDailyArmorStatusFromSession(profile, session) : null
-  const allEarnedApplied = armorStatus?.isSuitedUp ?? false
+  // Daily-ritual axis (slots) — drives display + "ready" recommendations.
+  // `dailyRitualDone` = every forged slot is on today (a 5/6 kid still wins);
+  // `isFullArmorOn` = all six slots forged AND on (the big celebration).
+  const dailyRitualDone = armorStatus?.isDailyRitualComplete ?? false
+  const isFullArmorOn = armorStatus?.isFullArmorOn ?? false
+  const slotsEquippedToday = armorStatus?.slotsEquippedToday ?? 0
+  const slotsForgedTotal = armorStatus?.slotsForgedTotal ?? 0
+  const forgedInActiveTier = armorStatus?.forgedInActiveTier ?? 0
   const nextUnlock = profile ? getNextUnlock(profile) : null
   const allSixUnlocked = unlockedVoxel.length === 6
   const nextUnlockProgress = (() => {
@@ -1024,7 +1078,6 @@ export default function MyAvatarPage() {
 
   // Always compute display tier from totalXp so it stays honest (not stale stored value).
   const currentTierName = profile ? calculateTier(profile.totalXp) : 'WOOD'
-  const forgedCount = armorStatus?.gateTotal ?? 0
   const nextForgeAction = profile ? getNextForgeAction(profile) : null
 
   // Show tier reveal banner when active tier just unlocked and no pieces forged in it yet
@@ -1038,12 +1091,12 @@ export default function MyAvatarPage() {
   })()
 
   const nextRecommendedAction: NextRecommendedAction = (() => {
-    // All gate-required pieces equipped → ready to go
-    if (allEarnedApplied && armorStatus?.hasForgedPieces) {
+    // Every forged slot is on today → ready to go
+    if (dailyRitualDone && armorStatus?.hasForgedPieces) {
       return { type: 'start_day', label: 'Start your day' }
     }
     // Forged pieces exist but not all equipped today → suit up
-    if (armorStatus && armorStatus.hasForgedPieces && !armorStatus.isSuitedUp) {
+    if (armorStatus && armorStatus.hasForgedPieces && !dailyRitualDone) {
       return { type: 'suit_up', label: 'Suit up' }
     }
     // Next forge action: show diamond cost / tier lock reason
@@ -1061,7 +1114,7 @@ export default function MyAvatarPage() {
   })()
 
   const mission: HeroMission = (() => {
-    if (!allEarnedApplied) {
+    if (!dailyRitualDone) {
       return {
         icon: '⚡',
         title: "Today's Mission",
@@ -1200,7 +1253,7 @@ export default function MyAvatarPage() {
         title: `${activeChild?.name ?? 'Avatar'} - ${currentTierName} Tier Armor`,
         type: EvidenceType.Photo,
         createdAt: new Date().toISOString(),
-        content: `Avatar screenshot: ${currentTierName} tier, ${profile.totalXp} XP, ${appliedVoxel.length}/${forgedCount} pieces equipped`,
+        content: `Avatar screenshot: ${currentTierName} tier, ${profile.totalXp} XP, ${slotsEquippedToday}/${ALL_ARMOR_VOXEL_PIECES.length} pieces on today`,
         tags: {
           engineStage: EngineStage.Share,
           domain: 'Character',
@@ -1219,7 +1272,7 @@ export default function MyAvatarPage() {
     } finally {
       setSavingToPortfolio(false)
     }
-  }, [familyId, childId, profile, activeChild, currentTierName, appliedVoxel.length, forgedCount])
+  }, [familyId, childId, profile, activeChild, currentTierName, slotsEquippedToday])
 
   if (loading) {
     return (
@@ -1231,7 +1284,7 @@ export default function MyAvatarPage() {
 
   if (!profile) return null
 
-  const ageGroup = profile.ageGroup ?? (isLincoln ? 'older' : 'younger')
+  const ageGroup = profile.ageGroup ?? childAgeGroup
   const childDefaults = isLincoln ? LINCOLN_FEATURES : LONDON_FEATURES
   const features = profile.characterFeatures ?? childDefaults
 
@@ -1372,15 +1425,9 @@ export default function MyAvatarPage() {
         {/* Mission and Stonebridge surface above the 3D armor row — mission
             context comes first; armor is one pillar of the hub, not the whole page. */}
         <HeroMissionCard mission={mission} isLincoln={isLincoln} />
-        <StonebridgePreviewCard
-          isLincoln={isLincoln}
-          weekData={{
-            weekNumber: weekData?.weekNumber,
-            chapterTitle: weekData?.chapterTitle,
-            chapterIntro: weekData?.chapterIntro,
-            conundrumTitle: weekData?.conundrum?.title,
-          }}
-        />
+        {childId && (
+          <StonebridgeMissionCard familyId={familyId} childId={childId} isLincoln={isLincoln} />
+        )}
 
         {/* ── 3D Character Display ─────────────────────────────── */}
         <AvatarCharacterDisplay
@@ -1484,9 +1531,13 @@ export default function MyAvatarPage() {
           morningReset={morningReset}
           unlockedVoxel={unlockedVoxel}
           appliedVoxel={appliedVoxel}
-          allEarnedApplied={allEarnedApplied}
+          dailyRitualDone={dailyRitualDone}
+          isFullArmorOn={isFullArmorOn}
+          slotsEquippedToday={slotsEquippedToday}
+          slotsForgedTotal={slotsForgedTotal}
+          forgedInActiveTier={forgedInActiveTier}
+          activeForgeTier={activeForgeTierComputed}
           allSixUnlocked={allSixUnlocked}
-          forgedCount={forgedCount}
           nextUnlock={nextUnlock}
           currentTierName={currentTierName}
           nextUnlockProgress={nextUnlockProgress}

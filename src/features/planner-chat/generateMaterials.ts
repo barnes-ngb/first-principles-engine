@@ -1,13 +1,64 @@
 import type { DraftDayPlan, SkillSnapshot } from '../../core/types'
+import { computeAge, getChildAgeGroup } from '../../core/profile/childIdentity'
 
 export interface GeneratedMaterial {
   dayName: string
   html: string
 }
 
+/**
+ * The child-identity fields worksheet generation reads. Profile DATA only —
+ * age (from `birthdate`) and `ageGroup` calibrate *presentation* (font sizes,
+ * problem counts), and `motivators`/`interests` pick the *theme*. Nothing here
+ * gates a feature, and no branch keys on the child's name (ARCH-15).
+ */
+export interface MaterialsChild {
+  name: string
+  birthdate?: string
+  grade?: string
+  motivators?: string
+  interests?: string
+  strengths?: string
+}
+
+/** Pick a worksheet theme from the child's interests/motivators (never name). */
+function deriveWorksheetTheme(
+  child: MaterialsChild,
+  ageGroup: 'older' | 'younger',
+): { themeStyle: string; isStory: boolean } {
+  const text = `${child.motivators ?? ''} ${child.interests ?? ''}`.toLowerCase()
+  const hasMinecraft = /minecraft/.test(text)
+  const hasStory =
+    /stor|adventure|book|fairy|dragon|fantas|princess|knight|magic|draw|art|animal/.test(
+      text,
+    )
+  // Minecraft fans get the blocky theme; story/art kids (or, absent any signal,
+  // the younger presentation default) get adventure/story; everyone else gets a
+  // neutral "themed around their interests" prompt.
+  const isStory = !hasMinecraft && (hasStory || ageGroup === 'younger')
+  const themeStyle = hasMinecraft
+    ? 'Minecraft-themed'
+    : isStory
+      ? 'adventure and story themed'
+      : 'fun and colorful, themed around the child\'s interests'
+  return { themeStyle, isStory }
+}
+
+/** Snapshot-derived working-level line, or '' when there's no snapshot yet. */
+function formatWorkingLevels(snapshot: SkillSnapshot | null): string {
+  const wl = snapshot?.workingLevels
+  if (!wl) return ''
+  const entries = Object.entries(wl)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}: level ${(v as { level: number }).level}`)
+  return entries.length
+    ? `CURRENT WORKING LEVELS (calibrate difficulty to these): ${entries.join(', ')}.`
+    : ''
+}
+
 export function buildMaterialsPrompt(
   day: DraftDayPlan,
-  childName: string,
+  child: MaterialsChild,
   snapshot: SkillSnapshot | null,
   theme?: string,
   conundrum?: { title?: string; scenario?: string; question?: string },
@@ -17,29 +68,42 @@ export function buildMaterialsPrompt(
 ): string {
   const items = day.items.filter((i) => i.accepted && !i.isAppBlock)
 
-  const childContext = childName === 'Lincoln'
-    ? `Lincoln (10): Speech + neurodivergence. ~3rd grade math, ~1st grade reading. Phonics recently clicking. Motivators: Minecraft, Lego, Art. Short routines, frequent wins.`
-    : childName === 'London'
-      ? `London (6): Kindergarten. Story-driven, creates own books. Knows most letter sounds. Motivators: Stories, drawing, book-making.`
-      : `${childName}: elementary-level student`
+  const childName = child.name
+  const age = computeAge(child.birthdate)
+  const ageGroup = getChildAgeGroup(child)
+  const isYounger = ageGroup === 'younger'
+  const { themeStyle, isStory } = deriveWorksheetTheme(child, ageGroup)
 
-  // Build skill-level guidance for specific content generation
-  const skillGuidance = childName === 'Lincoln'
-    ? `LINCOLN'S CURRENT LEVELS (use these to calibrate difficulty):
-  - Math: ~3rd grade. Comfortable with addition/subtraction to 100. Working on regrouping. Multiplication introduced (2s, 5s, 10s).
-  - Reading: ~1st grade decoding, improving. CVC words solid, working on blends and digraphs. Sight words: Dolch 1st grade list.
-  - Writing: Short sentences. Needs lined paper with visual guides. Prefers copying to composing.
-  - Speech: Working on /r/, /l/, multi-syllable words. Keep sentences short (5-8 words).`
-    : childName === 'London'
-      ? `LONDON'S CURRENT LEVELS (use these to calibrate difficulty):
-  - Math: Counting to 100, number recognition, one-to-one correspondence, simple addition to 10.
-  - Reading: Most letter sounds known, beginning CVC words. Loves being read to. Prefers stories over drills.
-  - Writing: Letter formation, name writing, simple words. Needs large lines.`
-      : ''
+  // Identity context, assembled from profile data — no hardcoded per-child prose.
+  const traits = [
+    age !== undefined ? `age ${age}` : null,
+    child.grade ? child.grade : null,
+  ]
+    .filter(Boolean)
+    .join(', ')
+  const softBits = [
+    child.motivators?.trim() ? `Motivators: ${child.motivators.trim()}.` : '',
+    child.interests?.trim() ? `Interests: ${child.interests.trim()}.` : '',
+    child.strengths?.trim() ? `Strengths: ${child.strengths.trim()}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const childContext = traits
+    ? `${childName} (${traits}). ${softBits}`.trim()
+    : `${childName}: elementary-level student. ${softBits}`.trim()
 
-  const themeStyle = childName === 'London'
-    ? 'adventure and story themed'
-    : 'Minecraft-themed'
+  // Skill calibration: prefer real snapshot data; otherwise seed a sensible
+  // default from grade/age (data may SEED, never gate).
+  const workingLevels = formatWorkingLevels(snapshot)
+  const skillGuidance = workingLevels
+    ? workingLevels
+    : `No skill snapshot yet — calibrate difficulty to ${
+        child.grade
+          ? `${child.grade} level`
+          : age !== undefined
+            ? `age ${age}`
+            : 'an early-elementary level'
+      } and keep it accessible; adjust from there.`
 
   return `Generate printable ${themeStyle} worksheets for ${childName}'s ${day.day} activities.
 
@@ -68,15 +132,15 @@ IMPORTANT: Connect at least 2 worksheets to this theme:
 CRITICAL RULES — READ THESE CAREFULLY:
 1. Return ONLY valid HTML. No markdown fences, no backticks, no explanation outside the HTML.
 2. Start directly with <html> tag.
-${childName === 'London' ? `3. Every worksheet must be ADVENTURE/STORY THEMED:
+${isStory ? `3. Every worksheet must be ADVENTURE/STORY THEMED:
    - Math problems use story characters and adventure scenarios (dragons, explorers, treasure, animals)
    - Reading/phonics uses adventure vocabulary and simple stories
    - Prompts connect to imagination and drawing
-   - Headers use adventure emojis: 🦕 🗺️ 🌟 🎨 🏰 🐉` : `3. Every worksheet must be MINECRAFT THEMED:
-   - Math problems use Minecraft items (blocks, diamonds, creepers, etc.)
-   - Phonics/reading uses Minecraft vocabulary where possible
-   - Story prompts set in Minecraft worlds
-   - Headers use blocky/pixel style with emojis: ⛏️ ⚔️ 🧱 💎 🏔️`}
+   - Headers use adventure emojis: 🦕 🗺️ 🌟 🎨 🏰 🐉` : `3. Every worksheet must be ${themeStyle.toUpperCase()}:
+   - Math problems use characters/items from the child's interests${child.interests?.trim() ? ` (${child.interests.trim()})` : child.motivators?.trim() ? ` (${child.motivators.trim()})` : ''}
+   - Phonics/reading uses vocabulary from that theme where possible
+   - Story/writing prompts are set in that world
+   - Headers use playful emojis that fit the theme`}
 4. Each activity gets its own page with page-break-before.
 5. **ABSOLUTELY NO BLANK FORMS.** Every worksheet MUST contain REAL, FILLED-IN content.
    - WRONG: "Problem 1: ___" or "Write a math problem here" or empty boxes
@@ -96,8 +160,8 @@ MATH: Generate 6-8 ACTUAL problems with REAL numbers at the child's level.
   Include 2 guided examples at top WITH SOLUTIONS SHOWN (worked out step by step).
   Show work space with place value boxes after each problem.
   Include answer key at bottom.
-${childName === 'London' ? `  For London (age 6):
-  Generate 4-6 problems at kindergarten level (addition/subtraction to 10, counting, number recognition).
+${isYounger ? `  For a younger learner${age !== undefined ? ` (age ${age})` : ''}:
+  Generate 4-6 problems at an early level (addition/subtraction to 10, counting, number recognition).
   Example: "A dragon has 3 eggs in one nest and 4 in another. How many eggs total?"
   Use large fonts, pictures, and simple number lines.
   Include visual counting aids (dot groups, tally marks).` : ''}
@@ -122,21 +186,21 @@ FORMATION/PRAYER: Generate a reflection page with ACTUAL content.
   Specific prompts: "What does this verse mean for your day today?"
   Gratitude list: "Name 3 things you're grateful for today: 1.___ 2.___ 3.___"
   Prayer space: "What do you want to talk to God about?"
-${childName === 'London'
+${isStory
     ? `  Drawing connection: "Draw a picture of something you want to thank God for today."`
-    : `  Minecraft tie-in: "In your Minecraft world, what would you build to show gratitude?"`}
+    : `  Interest tie-in: "Connect today's gratitude to ${themeStyle} — what would you build or make to show it?"`}
 
-${childName === 'London' ? `DRAWING + WRITING: Generate a story-based activity.
+${isStory ? `DRAWING + WRITING: Generate a story-based activity.
   Adventure prompt: "You found a baby dragon in the forest! Draw your dragon and write its name."
   Large drawing box (at least 250px tall)
   2-3 lined spaces for writing (large lines, 40px height)
   Word bank: 5-6 simple words with pictures: "dragon, fly, fire, egg, cave, friend"
-  Sentence starter: "My dragon is..."` : `WRITING: Generate a themed writing prompt with REAL scaffolding.
-  Minecraft scenario: "You discovered a new biome called the Crystal Caverns! It's full of glowing crystals and underground rivers. Describe what you see, hear, and feel."
+  Sentence starter: "My dragon is..."` : `WRITING: Generate a ${themeStyle} writing prompt with REAL scaffolding.
+  Scenario: an immersive scene from the child's theme (e.g. discovering a new place full of vivid detail). Describe what you see, hear, and feel.
   Picture area (empty box for drawing)
-  Word bank with 8-10 SPECIFIC helpful vocabulary words: "glowing, crystals, underground, sparkling, echo, dripping, mysterious, cavern, stalactite, river"
+  Word bank with 8-10 SPECIFIC helpful vocabulary words drawn from that theme.
   4-6 lined spaces for writing
-  Sentence starters: "When I entered the cavern, I saw..." "The most amazing thing was..."`}
+  Sentence starters: "When I arrived, I saw..." "The most amazing thing was..."`}
 
 SPEECH: Generate a practice card with REAL target content.
   Target sounds/words listed clearly in large font (e.g., for /s/ blends: "stop, step, star, stick, stone, stamp")
@@ -152,7 +216,7 @@ SELF-CHECK BEFORE OUTPUTTING:
   ✓ Is there an answer key with ACTUAL answers?
   ✓ Could the child sit down RIGHT NOW and do this with zero teacher prep?
   If any check fails, regenerate that section with real content.
-${childName === 'London' ? `  ✓ Are fonts large enough for a 6-year-old? (minimum 16pt body, 18pt problems)
+${isYounger ? `  ✓ Are fonts large enough for a young learner? (minimum 16pt body, 18pt problems)
   ✓ Is there a drawing space on every page?
   ✓ Are word banks 5-6 words max with simple vocabulary?
   ✓ Is there NO more than one paragraph of instructions per activity?` : ''}
@@ -179,7 +243,7 @@ DESIGN:
   .word-bank { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; background: #f5f5f5; border-radius: 6px; }
   .word-bank-item { background: white; border: 1px solid #ddd; padding: 6px 14px; border-radius: 20px; font-size: 14pt; }
   .drawing-box { width: 100%; height: 200px; border: 2px dashed #aaa; border-radius: 8px; margin: 12px 0; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 14pt; }
-${childName === 'London' ? `  body { font-size: 16pt; }
+${isYounger ? `  body { font-size: 16pt; }
   .problem { font-size: 18pt; padding: 16px; }
   .line { height: 45px; margin: 12px 0; }
   .drawing-box { height: 280px; }

@@ -42,6 +42,7 @@ export interface ChatTaskContext {
   childId: string;
   childData: {
     name: string;
+    birthdate?: string;
     grade?: string;
     motivators?: string;
     interests?: string;

@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-06-01.
+> Where everything lives. Updated 2026-06-02.
 
 ---
 
@@ -57,6 +57,7 @@
 | `DOC_INDEX_UPDATES_FOR_STORY_GEN_V2.md` | **HISTORICAL** | Companion patch doc for `DESIGN_STORY_GENERATION_V2.md` indexing. Already applied to this index. |
 | `DESIGN_VOICE_INPUT_MODULE.md` | **PHASE 1 SHIPPED** (2026-05-27) | Reusable voice-input module — `useAudioRecording` + `useTranscription` hooks + `<VoiceInput>` component routing per-child between Whisper (server) and Web Speech (browser) via `child.voiceInputEnhanced`. Adds new `transcribeAudio` Firebase callable, writes per-transcription `transcriptionEvents` substrate for future trouble-word tracking (§12), and migrates `BookGenerateChat` composer as the first integration. Phase 2 (migrating other voice surfaces) and Phase 3 (confidence-aware correction UX) deferred. See `VOICE_INPUT_USAGE.md` for the developer guide. |
 | `VOICE_INPUT_USAGE.md` | **NEW** (2026-05-27) | Developer guide for the voice input module. Shows how to drop `<VoiceInput>` into a new surface, the per-profile flag semantics, server contract, and migration recipe from raw `useSpeechRecognition`. |
+| `WRITING_SPELLING_DESIGN.md` | **CURRENT** (Phases 1–2 decided, IN PROGRESS) | Writing & spelling progression design for Lincoln (`FEAT-11`). Tap/voice-only (no forced typing); blend sight-word + phonics frontier word source; spelling as own tracked signal; phases: 1 = spell-the-word (tile assembly in quest), 2 = build-the-sentence. Phase 3 (dictate→reorder voice on-ramp) deferred. |
 | `CAPTURE_PIPELINE_INVESTIGATION_2026-04-07.md` | **RESOLVED** | Today page capture pipeline: 3 fragmented entry points (camera icon, pre-completion scan, post-completion scan) competing for same visibility gate. Unified into single AI-routed handler. Worksheets→scans, everything else→artifacts. |
 | `CLEANUP_AUDIT_2026_04_07.md` | **HISTORICAL** | Point-in-time audit (Apr 7): ladder deprecation status, milestone reachability, WorkbookConfig→ActivityConfig migration gaps |
 | `HERO_HUB_ANIMATION_TUNING.md` | **CURRENT** | Hero Hub animation debug workflow — `?heroDebug=1` tuning panel, centralized config in `heroAnimationTuning.ts` |

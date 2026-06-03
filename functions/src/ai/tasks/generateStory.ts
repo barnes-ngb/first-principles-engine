@@ -150,7 +150,7 @@ export const handleGenerateStory = async (
     .doc(`families/${familyId}/children/${childId}`)
     .get();
   const childFullData = childFullDoc.data() as
-    | { birthdate?: string }
+    | { birthdate?: string; interests?: string; motivators?: string }
     | undefined;
   if (childFullData?.birthdate) {
     const birth = new Date(childFullData.birthdate);
@@ -159,12 +159,22 @@ export const handleGenerateStory = async (
     );
   }
 
-  // Child-specific interests and reading level
-  const isLondon = storyChildName.toLowerCase() === "london";
-  const childInterests = isLondon
-    ? "animals, drawing, fairy tales, colors, nature"
-    : "Minecraft, dragons, quests, building, adventures";
-  const readingLevel = isLondon ? "pre-K to kindergarten" : "1st grade";
+  // Interests come from the child's profile, never their name (ARCH-15). When
+  // no interests are recorded yet, seed a sensible default by age (data may
+  // seed defaults, never gate). Reading level is seeded from age, not name.
+  const isYoungReader = storyChildAge <= 7;
+  const profileInterests =
+    childData.interests?.trim() ||
+    childFullData?.interests?.trim() ||
+    childData.motivators?.trim() ||
+    childFullData?.motivators?.trim() ||
+    "";
+  const childInterests =
+    profileInterests ||
+    (isYoungReader
+      ? "animals, drawing, fairy tales, colors, nature"
+      : "dragons, quests, building, adventures");
+  const readingLevel = isYoungReader ? "pre-K to kindergarten" : "1st grade";
 
   // Resolve theme guidance from preset or custom Firestore theme
   const themeGuidance = await resolveThemeGuidance(db, familyId, storyConfig.theme);

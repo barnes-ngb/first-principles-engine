@@ -23,7 +23,9 @@ export default function ArmorGateScreen({
   equippedToday = [],
 }: ArmorGateScreenProps) {
   const navigate = useNavigate()
-  const isLincoln = childName.toLowerCase() === 'lincoln'
+  // Cosmetic retro/minecraft styling follows the avatar profile's themeStyle —
+  // not the child's name (ARCH-15). `childName` is used only for the greeting.
+  const isLincoln = avatarProfile?.themeStyle === 'minecraft'
 
   return (
     <Page>

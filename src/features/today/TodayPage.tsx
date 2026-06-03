@@ -516,7 +516,14 @@ export default function TodayPage() {
 
       const prompt = buildMaterialsPrompt(
         todayPlan,
-        activeChild?.name ?? 'Student',
+        {
+          name: activeChild?.name ?? 'Student',
+          birthdate: activeChild?.birthdate,
+          grade: activeChild?.grade,
+          motivators: activeChild?.motivators,
+          interests: activeChild?.interests,
+          strengths: activeChild?.strengths,
+        },
         todaySnapshot,
         weekFocus?.theme,
       )
