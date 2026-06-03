@@ -280,8 +280,8 @@ All under `families/{familyId}/`:
 | `childSkillMaps` | Per-child curriculum knowledge maps (read into `shellyChat` AI context as the `childSkillMap` coverage slice — `loadChildSkillMapContext` / `formatChildSkillMap`; read-only, owned by `updateSkillMapFromFindings`) |
 | `bookProgress` | Per-child read-aloud book progress and question pools |
 | `featureRequests` | Silent friction / feature-request log from Shelly chat (feedback metadata, **not** a child's record — written fire-and-forget via `logFeatureRequest`, deduped by `dedupKey`, separate from the confirm-gated `applyChatAction` path; consumed by Step 5b's scheduled `fileFeatureRequests` CF → GitHub issue, which writes back `status: 'filed'` + `githubIssueUrl`) |
-| `errorLog` | Scrubbed client error records (written by `src/core/observability/`, path: `families/{familyId}/errorLog/{autoId}`) |
-| `stonebridgeProgress` | Per-child Stonebridge Banner Rally mission state (current mission, derived counters, completed missions, raised banners, baselines — read-only on the XP/diamond economy) |
+| `errorLog` | Scrubbed client error records (path: `families/{familyId}/errorLog/{autoId}`) |
+| `stonebridgeProgress` | Per-child Banner Rally mission progress (doc ID: `{childId}`). Derived read-only from XP ledger reading events — never stores or mutates XP/diamonds. Tracks current mission, active mission counters, completed missions, raised banners, and per-mission reading-action baselines. Written by `useStonebridgeProgress`. |
 
 **Global collections** (not under `families/`):
 
