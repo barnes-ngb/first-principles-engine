@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-06-02.
+> Where everything lives. Updated 2026-06-03.
 
 ---
 
@@ -77,6 +77,8 @@
 | `review/ARCHITECTURE_AUDIT_2026-05.md` | **HISTORICAL** (2026-05-29) | May 2026 architecture audit — baseline green, Band 1 largest file analysis (ARCH-01–09), decomposition candidates |
 | `review/ARCHITECTURE_AUDIT_2026-06.md` | **CURRENT** (2026-06-01) | June 2026 monthly architecture audit |
 | `review/DECISION_FUNC-01_source_of_truth.md` | **CURRENT** (2026-05-30) | "Where is Lincoln" source-of-truth decision — layered ownership with named write-through (Model 2 adopted) |
+| `review/INTEGRATION_MAP.md` | **CURRENT** (2026-06-01) | Integration seams audit — cross-feature data flow, dead-ends, routing gaps. Referenced from FEAT-07/08/09/10. |
+| `review/PER_CHILD_DELINEATION_AUDIT.md` | **CURRENT** (2026-06-01) | Per-child data separation audit — shared-vs-per-child writes, cross-kid bleed risks. Referenced from DATA-04/DATA-05/FUNC-05. |
 | `review/prompts/` | **CURRENT** (2026-05-29) | Reusable audit prompts: `PROMPT_ARCH_AUDIT.md` (monthly), `PROMPT_AUTO_ARCH_FIX.md` (auto-fix runner), `PROMPT_BACKUP_CHECK.md`, `PROMPT_FIX.md` (issue runner) |
 | `design-pass-v1/copy-pass-audit.md` | **CURRENT** | Design pass copy audit — terminology, tone, label consistency across UI surfaces |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |

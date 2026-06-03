@@ -51,12 +51,12 @@ Tiers 1–3 stay as they are. This home base **is** Tier 4, made concrete.
 ## 5. Architecture map (as of 2026-05-29)
 
 **Stack:** React + TypeScript + Vite · Firebase (Auth/Firestore/Storage/Functions/Hosting) · MUI ·
-Three.js r128 (3D avatar) · Anthropic Claude (Sonnet 4.6 primary, Haiku 4.5 for image-prompt rewrites) ·
-OpenAI DALL-E 3 + gpt-image-1.
+Three.js r128 (3D avatar) · Anthropic Claude (Sonnet 4.6 primary, Haiku 4.5 for routine chat) ·
+OpenAI gpt-image-1.5 (image generation — migrated from DALL-E 3 + gpt-image-1 per PR #1217).
 
-**Scale (verified against repo):** ~160,818 TS lines · 135 commits on main · 34 Firestore collections ·
-24 Cloud Functions · 17 chat task types · 33 routes · 125 test files · 2,038 tests passing ·
-build/lint/tsc all green.
+**Scale (verified against HEALTH_REPORT 2026-06-02):** ~172,317 TS lines · 129 commits on main ·
+36 Firestore collections · 25 Cloud Functions · 17 chat task types · 33 routes · 160 test files ·
+2,441 tests passing · build/lint/tsc all green.
 
 **The core loop (this is what "functional review" traces):**
 
