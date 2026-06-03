@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
 import { useStonebridgeProgress } from './useStonebridgeProgress'
 import StonebridgeLocationArt from './StonebridgeLocationArt'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
+import StonebridgeVillage from './StonebridgeVillage'
 
 interface StonebridgeMissionCardProps {
   familyId: string
@@ -23,11 +25,14 @@ export default function StonebridgeMissionCard({ familyId, childId, isLincoln }:
   const {
     mission,
     active,
+    completedMissions,
     raisedBanners,
     justCompletedMissionId,
     clearJustCompleted,
     loading,
   } = useStonebridgeProgress(familyId, childId)
+
+  const [villageOpen, setVillageOpen] = useState(false)
 
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
@@ -144,7 +149,44 @@ export default function StonebridgeMissionCard({ familyId, childId, isLincoln }:
         >
           {active.current} / {active.target} reading actions
         </Typography>
+
+        {/* Open the full village board (all locations + Banner Hall) */}
+        <Box
+          onClick={() => setVillageOpen(true)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') setVillageOpen(true)
+          }}
+          sx={{
+            mt: 1.25,
+            py: 0.75,
+            textAlign: 'center',
+            borderRadius: isLincoln ? '6px' : '12px',
+            border: `1px solid ${accent}66`,
+            background: `${accent}1a`,
+            cursor: 'pointer',
+            fontFamily: titleFont,
+            fontSize: isLincoln ? '9px' : '13px',
+            fontWeight: 700,
+            color: isLincoln ? '#F7D774' : '#7a3f67',
+            transition: 'background 0.2s ease',
+            '&:hover': { background: `${accent}2e` },
+          }}
+        >
+          🏰 Open Stonebridge
+        </Box>
       </Box>
+
+      <StonebridgeVillage
+        open={villageOpen}
+        onClose={() => setVillageOpen(false)}
+        isLincoln={isLincoln}
+        completedMissions={completedMissions}
+        raisedBanners={raisedBanners}
+        currentMissionId={mission.id}
+        active={active}
+      />
 
       <BannerRaiseCelebration
         missionId={justCompletedMissionId}
