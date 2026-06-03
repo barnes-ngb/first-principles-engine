@@ -373,6 +373,59 @@ describe("buildEvaluationPrompt — math (G26)", () => {
   });
 });
 
+describe("buildEvaluationPrompt — reading parity (start-at-L0, no-shame, age-gentle)", () => {
+  // The reading branch was brought to parity with math: it must start at the
+  // floor when there's no data, never frame anything as a grade, and pace
+  // gently by the child's age. These three lines mirror the math branch.
+
+  it("instructs starting at Level 0 (phonemic awareness) when there's no prior reading data", () => {
+    const prompt = buildEvaluationPrompt("reading", "London");
+    expect(prompt).toMatch(/Level 0 \(phonemic awareness\)/i);
+    expect(prompt).toMatch(/no prior reading data/i);
+  });
+
+  it("includes the 'no grades, no rankings / never shaming' framing", () => {
+    const prompt = buildEvaluationPrompt("reading", "London");
+    expect(prompt).toMatch(/No grades.*no rankings|never shaming/i);
+  });
+
+  it("references the child's age from the profile and asks for gentle, short steps for a young child", () => {
+    const prompt = buildEvaluationPrompt("reading", "London");
+    expect(prompt).toMatch(/age/i);
+    expect(prompt).toMatch(/young child/i);
+    expect(prompt).toMatch(/gentle/i);
+  });
+
+  // ── Behavior-preserving: level structure + diagnostic flow + extraction ──
+  it("keeps the Level 0-6 reading diagnostic sequence intact", () => {
+    const prompt = buildEvaluationPrompt("reading", "London");
+    expect(prompt).toContain("Level 0: Phonemic Awareness");
+    expect(prompt).toContain("Level 1: Letter-Sound Knowledge");
+    expect(prompt).toContain("Level 2: CVC Blending");
+    expect(prompt).toContain("Level 3: Digraphs");
+    expect(prompt).toContain("Level 4: Consonant Blends");
+    expect(prompt).toContain("Level 5: Long Vowels & Silent-E");
+    expect(prompt).toContain("Level 6: Vowel Teams");
+  });
+
+  it("still teaches the AI to emit <finding> and <complete> blocks", () => {
+    const prompt = buildEvaluationPrompt("reading", "London");
+    expect(prompt).toContain("<finding>");
+    expect(prompt).toContain("</finding>");
+    expect(prompt).toContain("<complete>");
+    expect(prompt).toContain("</complete>");
+  });
+
+  // ── Math branch untouched: the reading-only parity phrasing must not leak ──
+  it("leaves the math branch untouched (reading-only phrasing does not appear in math)", () => {
+    const math = buildEvaluationPrompt("math", "London");
+    expect(math).not.toMatch(/no prior reading data/i);
+    expect(math).not.toContain("diagnostic reading specialist");
+    // Math keeps its own floor wording ("L1 if no data"), not the reading floor.
+    expect(math).toMatch(/L1 IF NO DATA/i);
+  });
+});
+
 // ── Story Generation V2 Phase 1: buildPageBeats ────────────────
 
 describe("buildPageBeats", () => {
