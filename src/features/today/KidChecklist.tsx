@@ -107,17 +107,6 @@ export default function KidChecklist({
     [dayLog, persistDayLogImmediate, child.id, familyId, today, onXpToast],
   )
 
-  const handleSkipItem = useCallback(
-    (itemIndex: number) => {
-      if (!dayLog?.checklist) return
-      const updated = dayLog.checklist.map((ci, i) =>
-        i === itemIndex ? { ...ci, skipped: true } : ci,
-      )
-      persistDayLogImmediate({ ...dayLog, checklist: updated })
-    },
-    [dayLog, persistDayLogImmediate],
-  )
-
   const getAbsoluteIndex = useCallback(
     (chooseItem: ChecklistItem) => {
       return checklist.indexOf(chooseItem)
@@ -194,17 +183,6 @@ export default function KidChecklist({
                   <Typography variant="body2" color="text.secondary">
                     {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
                   </Typography>
-                  {!item.completed && (
-                    <Button
-                      size="small"
-                      variant="text"
-                      color="inherit"
-                      onClick={(e) => { e.stopPropagation(); handleSkipItem(absIndex) }}
-                      sx={{ opacity: 0.5, fontSize: '0.75rem', minWidth: 'auto', ml: 1 }}
-                    >
-                      Skip
-                    </Button>
-                  )}
                 </Stack>
                 {/* Book item quick link */}
                 {isBookItem(item) && !item.completed && (
