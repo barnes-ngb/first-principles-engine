@@ -28,6 +28,7 @@ import {
   doc,
   getDocs,
   query,
+  updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore'
@@ -44,6 +45,7 @@ import {
   hoursAdjustmentsCollection,
   hoursCollection,
 } from '../../core/firebase/firestore'
+import { migrateUnattributedAdjustments } from '../../core/firebase/migrateHoursAdjustments'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
   Artifact,
@@ -139,6 +141,12 @@ function HoursComplianceTab() {
 
   const childNameLower = activeChild?.name.toLowerCase() ?? ''
 
+  // DATA-09: id → display name for the adjustment attribution column.
+  const childNameById = useMemo(
+    () => new Map(children.map((c) => [c.id, c.name])),
+    [children],
+  )
+
   // Filter data by active child
   const hoursEntries = useMemo(
     () => allHoursEntries.filter((e) => e.childId === activeChildId),
@@ -148,8 +156,11 @@ function HoursComplianceTab() {
     () => allDayLogs.filter((l) => l.childId === activeChildId),
     [allDayLogs, activeChildId],
   )
+  // DATA-09: an adjustment shows for this child when it's tagged to them or to
+  // 'both' (legitimate family-wide time). Legacy unattributed docs are migrated
+  // to 'both' on load, so this is hours-neutral vs. the old `!childId` widening.
   const adjustments = useMemo(
-    () => allAdjustments.filter((a) => !a.childId || a.childId === activeChildId),
+    () => allAdjustments.filter((a) => a.childId === activeChildId || a.childId === 'both'),
     [allAdjustments, activeChildId],
   )
   const artifacts = useMemo(
@@ -167,6 +178,15 @@ function HoursComplianceTab() {
   const [adjReason, setAdjReason] = useState('')
   const [adjSubject, setAdjSubject] = useState<SubjectBucket | ''>('')
   const [adjSaving, setAdjSaving] = useState(false)
+  // DATA-09: every new adjustment is deliberately attributed — to a specific
+  // child (default) or explicitly to 'both'. 'both' is never a silent default.
+  const [adjChildId, setAdjChildId] = useState<string>('')
+
+  // Keep the attribution default in sync with the active child; 'both' must be
+  // a deliberate re-selection, never inherited silently.
+  useEffect(() => {
+    setAdjChildId(activeChildId ?? '')
+  }, [activeChildId])
 
   // Backfill state
   const [backfillOpen, setBackfillOpen] = useState(false)
@@ -266,9 +286,24 @@ function HoursComplianceTab() {
 
   useEffect(() => {
     let cancelled = false
-    fetchRecords()
+    // DATA-09: stamp any legacy unattributed adjustments as 'both' before the
+    // first read so the explicit child/'both' filter stays hours-neutral.
+    // Idempotent — a no-op once migrated.
+    migrateUnattributedAdjustments(familyId)
+      .then((migrated) => {
+        if (migrated > 0 && !cancelled) {
+          setSnackMessage({
+            text: `Attributed ${migrated} legacy adjustment${migrated === 1 ? '' : 's'} to "Both kids" (totals unchanged)`,
+            severity: 'success',
+          })
+        }
+      })
+      .catch((err) => {
+        console.warn('[DATA-09] adjustment migration failed', err)
+      })
+      .then(() => fetchRecords())
       .then((data) => {
-        if (!cancelled) applyRecords(data)
+        if (data && !cancelled) applyRecords(data)
       })
       .catch((err) => {
         if (!cancelled) {
@@ -277,7 +312,7 @@ function HoursComplianceTab() {
         }
       })
     return () => { cancelled = true }
-  }, [fetchRecords, applyRecords])
+  }, [fetchRecords, applyRecords, familyId])
 
   const summary = useMemo(
     () => computeHoursSummary(dayLogs, hoursEntries, adjustments, activeChildId),
@@ -325,13 +360,13 @@ function HoursComplianceTab() {
   // Manual adjustment
   const handleAddAdjustment = useCallback(async () => {
     if (!adjMinutes || !adjReason.trim()) return
-    // DATA-05: never write an unattributed adjustment — it would inflate every
-    // child's compliance totals.
-    if (!activeChildId) return
+    // DATA-05/DATA-09: never write an unattributed adjustment. It must be tagged
+    // to a specific child or explicitly to 'both' — both are deliberate choices.
+    if (!adjChildId) return
     setAdjSaving(true)
     try {
       await addDoc(hoursAdjustmentsCollection(familyId), assertAttributed({
-        childId: activeChildId,
+        childId: adjChildId,
         date: adjDate,
         minutes: Number(adjMinutes),
         reason: adjReason.trim(),
@@ -350,7 +385,21 @@ function HoursComplianceTab() {
     } finally {
       setAdjSaving(false)
     }
-  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, activeChildId, fetchRecords, applyRecords])
+  }, [adjDate, adjMinutes, adjReason, adjSubject, familyId, adjChildId, fetchRecords, applyRecords])
+
+  // DATA-09: reassign an existing adjustment's attribution — lets a parent move
+  // a 'both' adjustment (including a migrated legacy one) onto a specific child.
+  const handleReassignAdjustment = useCallback(async (adjId: string, newChildId: string) => {
+    if (!adjId || !newChildId) return
+    try {
+      await updateDoc(doc(hoursAdjustmentsCollection(familyId), adjId), { childId: newChildId })
+      const data = await fetchRecords()
+      applyRecords(data)
+      setSnackMessage({ text: 'Adjustment reassigned', severity: 'success' })
+    } catch (err) {
+      setSnackMessage({ text: `Failed to reassign adjustment: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+    }
+  }, [familyId, fetchRecords, applyRecords])
 
   // Backfill handler
   const handleSaveBackfill = useCallback(async () => {
@@ -843,6 +892,22 @@ function HoursComplianceTab() {
                 ))}
               </Select>
             </FormControl>
+            {/* DATA-09: explicit attribution — a specific child or 'both'. */}
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <InputLabel>Attribute to</InputLabel>
+              <Select
+                value={adjChildId}
+                label="Attribute to"
+                onChange={(e) => setAdjChildId(e.target.value)}
+              >
+                {children.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.name}
+                  </MenuItem>
+                ))}
+                <MenuItem value="both">Both kids</MenuItem>
+              </Select>
+            </FormControl>
           </Stack>
           <TextField
             label="Reason"
@@ -856,7 +921,7 @@ function HoursComplianceTab() {
             variant="outlined"
             size="small"
             onClick={handleAddAdjustment}
-            disabled={adjSaving || !adjMinutes || !adjReason.trim()}
+            disabled={adjSaving || !adjMinutes || !adjReason.trim() || !adjChildId}
             sx={{ alignSelf: 'flex-start' }}
           >
             Add Adjustment
@@ -873,6 +938,7 @@ function HoursComplianceTab() {
                     <TableCell align="right">Minutes</TableCell>
                     <TableCell>Subject</TableCell>
                     <TableCell>Reason</TableCell>
+                    <TableCell>Attributed to</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -885,6 +951,32 @@ function HoursComplianceTab() {
                       </TableCell>
                       <TableCell>{adj.subjectBucket ?? '—'}</TableCell>
                       <TableCell>{adj.reason}</TableCell>
+                      {/* DATA-09: 'both' rows (incl. migrated legacy docs) can be
+                          reassigned to a specific child; others show their owner. */}
+                      <TableCell>
+                        {adj.childId === 'both' ? (
+                          <FormControl size="small" variant="standard" sx={{ minWidth: 110 }}>
+                            <Select
+                              value="both"
+                              disabled={!adj.id}
+                              onChange={(e) => {
+                                if (adj.id && e.target.value !== 'both') {
+                                  void handleReassignAdjustment(adj.id, e.target.value)
+                                }
+                              }}
+                            >
+                              <MenuItem value="both">Both kids</MenuItem>
+                              {children.map((c) => (
+                                <MenuItem key={c.id} value={c.id}>
+                                  Assign to {c.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        ) : (
+                          childNameById.get(adj.childId ?? '') ?? adj.childId ?? '—'
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
