@@ -8,6 +8,7 @@ import { addDoc } from 'firebase/firestore'
 import SectionCard from '../../components/SectionCard'
 import { hoursAdjustmentsCollection } from '../../core/firebase/firestore'
 import type { SubjectBucket } from '../../core/types/enums'
+import { assertAttributed } from './records.logic'
 
 interface QuickActivity {
   label: string
@@ -70,9 +71,11 @@ export default function QuickAddHours({ familyId, childId, childName, date, onSa
 
   const handleSave = useCallback(async () => {
     if (!selectedActivity || !selectedMinutes) return
+    // DATA-05: never write an unattributed adjustment.
+    if (!childId) return
     setSaving(true)
     try {
-      await addDoc(hoursAdjustmentsCollection(familyId), {
+      await addDoc(hoursAdjustmentsCollection(familyId), assertAttributed({
         childId,
         date,
         subjectBucket: selectedActivity.subject,
@@ -81,7 +84,7 @@ export default function QuickAddHours({ familyId, childId, childName, date, onSa
         source: 'quick-add',
         location: selectedActivity.subject === 'PE' ? 'Outside' : 'Home',
         createdAt: new Date().toISOString(),
-      })
+      }))
 
       setRecentlyAdded(prev => [...prev, { label: selectedActivity.label, minutes: selectedMinutes }])
       setSelectedActivity(null)

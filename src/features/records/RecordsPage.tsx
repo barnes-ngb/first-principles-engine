@@ -63,6 +63,7 @@ import ChapterResponsesTab from './ChapterResponsesTab'
 import EvaluationHistoryTab from './EvaluationHistoryTab'
 import PortfolioPage from './PortfolioPage'
 import {
+  assertAttributed,
   buildComplianceZip,
   computeHoursSummary,
   deriveChildIdFromDocId,
@@ -324,16 +325,19 @@ function HoursComplianceTab() {
   // Manual adjustment
   const handleAddAdjustment = useCallback(async () => {
     if (!adjMinutes || !adjReason.trim()) return
+    // DATA-05: never write an unattributed adjustment — it would inflate every
+    // child's compliance totals.
+    if (!activeChildId) return
     setAdjSaving(true)
     try {
-      await addDoc(hoursAdjustmentsCollection(familyId), {
+      await addDoc(hoursAdjustmentsCollection(familyId), assertAttributed({
         childId: activeChildId,
         date: adjDate,
         minutes: Number(adjMinutes),
         reason: adjReason.trim(),
         subjectBucket: adjSubject || undefined,
         createdAt: new Date().toISOString(),
-      })
+      }))
 
       setAdjMinutes('')
       setAdjReason('')
@@ -360,7 +364,7 @@ function HoursComplianceTab() {
         if (entry.hours <= 0) continue
         const minutes = Math.round(entry.hours * 60)
 
-        await addDoc(hoursAdjustmentsCollection(familyId), {
+        await addDoc(hoursAdjustmentsCollection(familyId), assertAttributed({
           childId: activeChildId,
           date: midMonth,
           subjectBucket: entry.subject,
@@ -368,7 +372,7 @@ function HoursComplianceTab() {
           reason: `Historical backfill: ${entry.subject} for ${year}-${String(month).padStart(2, '0')}`,
           source: 'backfill',
           createdAt: new Date().toISOString(),
-        })
+        }))
       }
 
       setBackfillOpen(false)
@@ -418,7 +422,7 @@ function HoursComplianceTab() {
           const minutes = Math.round(hours * 60)
           if (minutes <= 0) continue
 
-          await addDoc(hoursAdjustmentsCollection(familyId), {
+          await addDoc(hoursAdjustmentsCollection(familyId), assertAttributed({
             childId: activeChildId,
             date: midMonth,
             subjectBucket: subject,
@@ -427,7 +431,7 @@ function HoursComplianceTab() {
             source: 'backfill',
             location: 'Home',
             createdAt: new Date().toISOString(),
-          })
+          }))
         }
 
         m++

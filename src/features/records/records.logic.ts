@@ -41,6 +41,34 @@ export type HoursSummary = {
   byDate: Record<string, number>
 }
 
+// ─── DATA-05: per-kid adjustment attribution ─────────────────────────────────
+//
+// `HoursAdjustment.childId` is optional on the READ type because legacy
+// documents exist without it. Every adjustment we WRITE from now on, though,
+// must be attributed to a child: the safety-net filters in `computeHoursSummary`
+// / `computeMonthlyTrend` currently fold unattributed (`!a.childId`) adjustments
+// into EVERY child's totals, which silently inflates both kids (the DATA-05
+// leak). New writes go through `NewHoursAdjustment` + `assertAttributed` so a
+// `childId` can never be omitted at the source — a safe, additive guard that
+// changes no existing totals. (Closing the read-side leak and handling the
+// already-stored unattributed records are the propose-and-confirm Step 2.)
+
+/** A hours adjustment guaranteed to carry a `childId` — the shape every new
+ *  write must use so it can never be counted toward another child (DATA-05). */
+export type NewHoursAdjustment = Omit<HoursAdjustment, 'id' | 'childId'> & {
+  childId: string
+}
+
+/** Runtime guard for the write path: throws if an adjustment would be persisted
+ *  without a `childId`. Pure + testable; callers pass the assembled payload and
+ *  receive it back unchanged when valid. */
+export const assertAttributed = (adj: NewHoursAdjustment): NewHoursAdjustment => {
+  if (!adj.childId) {
+    throw new Error('hoursAdjustment requires a childId (DATA-05 attribution)')
+  }
+  return adj
+}
+
 export const entryMinutes = (entry: HoursEntry): number => {
   if (entry.minutes != null) return entry.minutes
   if (entry.hours != null) return Math.round(entry.hours * 60)
