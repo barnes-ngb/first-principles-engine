@@ -14,6 +14,7 @@ import {
   SubjectBucket,
 } from '../../core/types/enums'
 import {
+  assertAttributed,
   buildComplianceZip,
   computeHoursSummary,
   computeMonthlyTrend,
@@ -452,6 +453,111 @@ describe('computeHoursSummary', () => {
     expect(summary.totalMinutes).toBe(30)
     expect(summary.bySubject.length).toBe(1)
     expect(summary.bySubject[0].subjectBucket).toBe('Reading')
+  })
+})
+
+// ─── DATA-05: per-kid hours-adjustment attribution ───────────────────────────
+
+describe('assertAttributed (DATA-05 write guard)', () => {
+  it('returns the adjustment unchanged when a childId is present', () => {
+    const adj = {
+      childId: 'lincoln',
+      date: '2026-01-10',
+      minutes: 30,
+      reason: 'extra reading',
+      subjectBucket: SubjectBucket.Reading,
+    }
+    expect(assertAttributed(adj)).toBe(adj)
+  })
+
+  it('throws when childId is missing, so no unattributed record can be written', () => {
+    expect(() =>
+      // @ts-expect-error — intentionally omitting childId to prove the guard
+      assertAttributed({ date: '2026-01-10', minutes: 30, reason: 'x' }),
+    ).toThrow(/childId/)
+  })
+
+  it('throws when childId is an empty string', () => {
+    expect(() =>
+      assertAttributed({ childId: '', date: '2026-01-10', minutes: 30, reason: 'x' }),
+    ).toThrow(/childId/)
+  })
+})
+
+describe('computeHoursSummary — adjustment attribution (DATA-05)', () => {
+  // Two kids, each with a day log, plus adjustments attributed to specific kids.
+  const dayLogs: DayLog[] = [
+    {
+      childId: 'lincoln',
+      date: '2026-01-10',
+      blocks: [
+        { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 60, location: 'Home' },
+      ],
+    },
+    {
+      childId: 'london',
+      date: '2026-01-10',
+      blocks: [
+        { type: DayBlockType.Math, subjectBucket: SubjectBucket.Math, actualMinutes: 40, location: 'Home' },
+      ],
+    },
+  ]
+
+  it('counts an attributed adjustment for that child ONLY — never cross-kid', () => {
+    const adjustments: HoursAdjustment[] = [
+      { childId: 'lincoln', date: '2026-01-11', minutes: 20, reason: 'extra reading', subjectBucket: SubjectBucket.Reading },
+    ]
+
+    const lincoln = computeHoursSummary(dayLogs, [], adjustments, 'lincoln')
+    const london = computeHoursSummary(dayLogs, [], adjustments, 'london')
+
+    // Lincoln gets his 60 day-log + 20 adjustment.
+    expect(lincoln.totalMinutes).toBe(80)
+    expect(lincoln.adjustmentMinutes).toBe(20)
+    // London's total is untouched by Lincoln's adjustment (no cross-kid leak).
+    expect(london.totalMinutes).toBe(40)
+    expect(london.adjustmentMinutes).toBe(0)
+  })
+
+  it('does not double-count an attributed adjustment across the two kids', () => {
+    const adjustments: HoursAdjustment[] = [
+      { childId: 'lincoln', date: '2026-01-11', minutes: 20, reason: 'extra reading', subjectBucket: SubjectBucket.Reading },
+    ]
+    const lincoln = computeHoursSummary(dayLogs, [], adjustments, 'lincoln')
+    const london = computeHoursSummary(dayLogs, [], adjustments, 'london')
+    // The 20 adjustment minutes appear exactly once across both per-kid totals.
+    expect(lincoln.adjustmentMinutes + london.adjustmentMinutes).toBe(20)
+  })
+
+  // ── Documents the leak DATA-05 closes. This characterization test asserts the
+  // CURRENT (leaky) behavior so the before-state is explicit; when Step 2
+  // (computation scoping) is CONFIRMED, this expectation flips to 0 and the
+  // skipped test below is enabled. Do not "fix" this test on its own — the
+  // number change is propose-and-confirm. ──
+  it('CURRENT LEAK: an unattributed adjustment inflates BOTH kids (DATA-05, pre-Step-2)', () => {
+    const unattributed: HoursAdjustment[] = [
+      { date: '2026-01-12', minutes: 50, reason: 'legacy backfill, no childId', subjectBucket: SubjectBucket.Reading },
+    ]
+    const lincoln = computeHoursSummary(dayLogs, [], unattributed, 'lincoln')
+    const london = computeHoursSummary(dayLogs, [], unattributed, 'london')
+    // The same 50 minutes is counted for BOTH kids — the leak.
+    expect(lincoln.adjustmentMinutes).toBe(50)
+    expect(london.adjustmentMinutes).toBe(50)
+  })
+
+  // ── PROPOSED (Step 2 — awaiting human confirmation). Enable by removing
+  // `.skip` once the computation-scoping change is approved: an unattributed
+  // adjustment must count for NEITHER kid until it is attributed. ──
+  it.skip('PROPOSED (Step 2): an unattributed adjustment does NOT inflate per-kid totals', () => {
+    const unattributed: HoursAdjustment[] = [
+      { date: '2026-01-12', minutes: 50, reason: 'legacy backfill, no childId', subjectBucket: SubjectBucket.Reading },
+    ]
+    const lincoln = computeHoursSummary(dayLogs, [], unattributed, 'lincoln')
+    const london = computeHoursSummary(dayLogs, [], unattributed, 'london')
+    expect(lincoln.adjustmentMinutes).toBe(0)
+    expect(london.adjustmentMinutes).toBe(0)
+    expect(lincoln.totalMinutes).toBe(60)
+    expect(london.totalMinutes).toBe(40)
   })
 })
 
