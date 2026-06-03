@@ -5,6 +5,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import LocationOnIcon from '@mui/icons-material/LocationOn'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
+import PersonIcon from '@mui/icons-material/Person'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -149,6 +150,9 @@ export default function CurriculumTab() {
   // Confirm complete dialog
   const [confirmComplete, setConfirmComplete] = useState<ActivityConfig | null>(null)
 
+  // Reassign-owner dialog (DATA-08): move a workbook to its real child owner.
+  const [reassign, setReassign] = useState<ActivityConfig | null>(null)
+
   // Edit routines dialog
   const [editRoutinesOpen, setEditRoutinesOpen] = useState(false)
 
@@ -202,6 +206,13 @@ export default function CurriculumTab() {
   const handleDelete = async (config: ActivityConfig) => {
     await deleteConfig(config.id)
     setSnack(`"${config.name}" removed`)
+  }
+
+  const handleReassign = async (config: ActivityConfig, childId: string) => {
+    await updateConfig(config.id, { childId })
+    const owner = childList.find((c) => c.id === childId)?.name ?? childId
+    setReassign(null)
+    setSnack(`"${config.name}" assigned to ${owner}`)
   }
 
   const handleSaveRoutines = async (updated: ActivityConfig[]) => {
@@ -499,6 +510,7 @@ export default function CurriculumTab() {
                     config={config}
                     recentScans={matchedScans}
                     onOpenMenu={openMenu}
+                    onReassign={() => setReassign(config)}
                     onScanCapture={(file) => void handleCardCapture(config, file)}
                     scanning={scanning && scanningConfigId === config.id}
                   />
@@ -653,6 +665,17 @@ export default function CurriculumTab() {
           <CheckCircleOutlineIcon fontSize="small" sx={{ mr: 1 }} />
           Mark as complete
         </MenuItem>
+        {menuConfig?.type === 'workbook' && (
+          <MenuItem
+            onClick={() => {
+              if (menuConfig) setReassign(menuConfig)
+              closeMenu()
+            }}
+          >
+            <PersonIcon fontSize="small" sx={{ mr: 1 }} />
+            Assign to a child
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             if (menuConfig) void handleDelete(menuConfig)
@@ -689,6 +712,32 @@ export default function CurriculumTab() {
           >
             Mark Complete
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Reassign workbook owner dialog (DATA-08) */}
+      <Dialog open={reassign !== null} onClose={() => setReassign(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Assign to a child</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 1 }}>
+            Workbooks belong to one child. Who owns &ldquo;{reassign?.name}&rdquo;?
+          </DialogContentText>
+          <Stack spacing={1} sx={{ mt: 1 }}>
+            {childList.map((c) => (
+              <Button
+                key={c.id}
+                variant={reassign?.childId === c.id ? 'contained' : 'outlined'}
+                onClick={() => {
+                  if (reassign) void handleReassign(reassign, c.id)
+                }}
+              >
+                {c.name}
+              </Button>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReassign(null)}>Cancel</Button>
         </DialogActions>
       </Dialog>
 
@@ -815,11 +864,12 @@ interface WorkbookCardProps {
   config: ActivityConfig
   recentScans: ScanRecord[]
   onOpenMenu: (e: React.MouseEvent<HTMLElement>, config: ActivityConfig) => void
+  onReassign: () => void
   onScanCapture: (file: File) => void
   scanning: boolean
 }
 
-function WorkbookCard({ config, recentScans, onOpenMenu, onScanCapture, scanning }: WorkbookCardProps) {
+function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCapture, scanning }: WorkbookCardProps) {
   const progress =
     config.currentPosition && config.totalUnits
       ? (config.currentPosition / config.totalUnits) * 100
@@ -842,6 +892,21 @@ function WorkbookCard({ config, recentScans, onOpenMenu, onScanCapture, scanning
           <MoreVertIcon fontSize="small" />
         </IconButton>
       </Box>
+
+      {/* DATA-08 reconciliation: a workbook tagged 'both' bleeds across kids. */}
+      {config.childId === 'both' && (
+        <Alert
+          severity="warning"
+          sx={{ mt: 1.5 }}
+          action={
+            <Button color="inherit" size="small" onClick={onReassign}>
+              Assign
+            </Button>
+          }
+        >
+          This workbook is shared with every child. Assign it to its real owner.
+        </Alert>
+      )}
 
       {/* Position + progress bar */}
       {config.currentPosition != null && (
