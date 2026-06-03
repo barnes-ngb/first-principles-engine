@@ -307,3 +307,145 @@ like a "level."
 - **Two display-only gaps remain (§6A plan-count, §6B currency).** Neither is a data-integrity bug — both are
   *denominator/iconography* mismatches between parent and kid framings. §6A is a home-base follow-up; §6B is
   the Hero Hub build chat's lane.
+
+---
+
+# DATA-07 — Family-wide escape-hatch sweep (read-only bleed audit)
+
+**Status:** Read-only sweep · docs-only · no code/type/rules touched.
+**Date:** 2026-06-03.
+**Why this section exists.** Per-child bleeds keep surfacing *after* the data is declared sound, because
+earlier traces checked whether *storage* is scoped per-child — but every bleed found so far comes from one
+pattern: a **family-wide escape hatch in a query**. A strict `where('childId','==',X)` **cannot** bleed (a
+record for the other kid, or an untagged one, drops out). Only **non-strict** child filters can. So the
+complete, precise way to find every remaining bleed is to **enumerate every non-strict child filter** and
+classify each. This sweep does that. **No fix is proposed.**
+
+## 7.0 The three non-strict shapes
+
+| Shape | Why it can bleed |
+|---|---|
+| `where('childId','in',[childId,'both'])` | a record tagged `'both'` matches **every** kid's query |
+| `!a.childId \|\| a.childId === childId` | an **untagged** record counts for whoever is active |
+| read on a per-child collection with **no** `childId` filter | reads everyone's |
+
+## 7.1 Enumeration — every non-strict child filter found
+
+Whole-codebase grep (`src/`, `functions/`) for `'both'` literals, `where('childId','in',…)`, `!*.childId ||`
+widenings, and per-child reads omitting a `childId` filter. (Pure `if (!childId || …) return` *guard clauses*
+— the bulk of the `!childId ||` hits — are **not** filters and are excluded; they only early-return when the
+id is missing.)
+
+### A. Activity-config cluster — `in [childId, 'both']` — **BLEED-RISK**
+
+All readers of `activityConfigs` use the identical hatch, so a config tagged `'both'` surfaces to **both** kids:
+
+| `file:line` | Collection | Clause |
+|---|---|---|
+| `useActivityConfigs.ts:71` | `activityConfigs` | `where('childId','in',[childId,'both'])` — **primary live reader** (Curriculum tab, Today) |
+| `useScanToActivityConfig.ts:68` | `activityConfigs` | `where('childId','in',[childId,'both'])` |
+| `useCertificateProgress.ts:78,142` | `activityConfigs` | `where('childId','in',[childId,'both']), where('type','==','workbook')` |
+| `updateActivityPosition.ts:21` | `activityConfigs` | `where('childId','in',[childId,'both'])` |
+| `mergeDuplicateConfigs.ts:163` | `activityConfigs` | `where('childId','in',[childId,'both'])` |
+| `migrateActivityConfigs.ts:29,326` | `activityConfigs` | `where('childId','in',[childId,'both'])` (already-migrated check) |
+| `useQuestSession.ts:501` | `activityConfigs` | `where('childId','in',[activeChildId,'both']), where('type','==','workbook')` — quest reading-level hint |
+
+→ **Diagnosed in §7.2.** This is the cluster that makes **London's Curriculum show Lincoln's workbooks**.
+
+### B. Hours adjustments — `!a.childId || a.childId === childId` — **INTENDED family-wide** (already pinned)
+
+| `file:line` | Collection | Clause |
+|---|---|---|
+| `records.logic.ts:150,264` | `hoursAdjustments` | `adjustments.filter((a) => !a.childId \|\| a.childId === childId)` |
+| `RecordsPage.tsx:152` | `hoursAdjustments` | same |
+
+→ Pinned as **DATA-05** (compute-scoping + re-attribute unattributed records; propose-and-confirm, touches
+the hours invariant). Listed here for completeness — this is the *one place a reader intentionally widens
+past `=== childId`*. Not re-opened by this sweep.
+
+### C. Legacy bare-day migration — `!bareData.childId ||` — **BLEED-RISK (low-incidence, legacy-only)**
+
+| `file:line` | Collection | Clause |
+|---|---|---|
+| `useDayLog.ts:201` | `days` (bare-date legacy doc) | `if (!bareData.childId \|\| bareData.childId === selectedChildId)` |
+
+A one-time migration of the oldest legacy `days/{date}` docs (no `childId` in the doc id). If such a doc has
+**no** `childId`, it is migrated to **whichever child is active** when the migration fires — mis-attributing
+a legacy day's log to the wrong kid. Bounded to the oldest pre-`{date}_{childId}` documents only; whether any
+still exist is 🔍 a live-export question. Not the active-child-switch bleed class (it's a write-time claim),
+but it *is* a genuine non-strict widening, so it's flagged rather than buried.
+
+### D. Sticker library — `childProfile ?? 'both'` — **INTENDED family-wide**
+
+| `file:line` | Collection | Clause |
+|---|---|---|
+| `StickerLibraryTab.tsx:42,52,70,141,226-229` | `stickerLibrary` (family-level) | `sticker.childProfile ?? 'both'` |
+| `StickerPicker.tsx:109,165-166,199,244` | `stickerLibrary` | `cp !== 'both' && cp !== childProfile` (filter) |
+| `BookEditorPage.tsx:639-642`, `useBackgroundReimagine.ts:206`, `SketchScanner.tsx:96` | — | auto-tag a sticker `'both'` |
+
+`stickerLibrary` is a **family-level** collection (`firestore.ts:367`) of shared art assets; `childProfile` is
+an optional *preference* tag, and `'both'` (the default) deliberately shows a sticker to everyone. The picker
+*narrows* by `childProfile` when set. Shared-by-design — not a bug.
+
+### E. Planner config resolution — `cfg.childId === 'both' ? activeChildId` — **INTENDED (read-side)**
+
+| `file:line` | Clause |
+|---|---|
+| `PlannerChatPage.tsx:301` | `childId: cfg.childId === 'both' ? activeChildId ?? '' : cfg.childId` |
+
+This *consumes* a `'both'` config by substituting the active child when building a plan. It doesn't widen a
+query — it resolves the shared tag to a concrete kid. Correct read-side behavior; not a bleed.
+
+### F. Per-child reads with **no** `childId` filter
+
+Sweep found **no** per-child collection read that omits a `childId` filter. The two unfiltered
+`collection(db,'families',…)` reads (`firestore.ts:478,481`) are `shellyChatThreads` and its `messages`
+subcollection — **parent-scoped**, not child-scoped (Shelly chat is a parent tool), so no per-child filter is
+expected. Nothing to flag.
+
+## 7.2 Data-shape diagnosis — the activity-config `'both'` bleed (cluster A)
+
+**Question (from the run):** do single-child configs *actually* get tagged `'both'`, and are the existing
+"Good and the Beautiful" configs `'both'` or per-child? Traced the writers / seed / migrate code:
+
+- **`ensureDefaultActivityConfigs` (`migrateActivityConfigs.ts:323-355`)** — for each `DEFAULT_ROUTINE_CONFIGS`
+  entry it sets `const cid = sharedNames.includes(name) ? 'both' : childId`, where
+  `sharedNames = ['prayer and scripture', 'handwriting (while read-aloud)']` (`:345`). So **only** Prayer/Scripture
+  and Handwriting are seeded `'both'`; **"Good and the Beautiful Reading"/"…Math" are seeded per-child** (`childId`).
+- **`migrateToActivityConfigs` (`migrateActivityConfigs.ts:53-200`)** — its inline `defaults` array hard-codes
+  `childId: 'both'` for Prayer/Scripture (`:55`) and Handwriting (`:72`) and `childId` (per-child) for the rest;
+  GATB is **not** in this list. Converted **workbook** configs inherit `childId: wb.childId || childId` (`:147`) —
+  so a legacy workbook already tagged `'both'` stays `'both'` through migration.
+
+**Conclusion.** The **default seeders never tag GATB `'both'`** — by code, GATB workbooks are per-child. A GATB
+(or any single-child) workbook currently showing in **London's** Curriculum that belongs to Lincoln was tagged
+`'both'` by a **manual / inherited path**, the candidates being:
+1. **`EditRoutinesDialog.tsx:51`** — its "add row" button hard-codes `childId: 'both'` for every new routine,
+   so anything added there is born family-wide.
+2. **`AddActivityDialog`** — offers a literal **"Both"** option (`CHILD_OPTIONS`, `:47-51`; state `:74`); if a
+   workbook was added with "Both" selected it's `'both'`.
+3. **Inherited legacy tag** — a pre-migration `workbookConfig` tagged `'both'` carried through `wb.childId` at
+   `migrateActivityConfigs.ts:147`.
+
+Which of these produced the live `'both'` GATB rows is 🔍 a live-export question (read the actual `childId`
+field on London's surfaced configs). **No fix proposed** — re-attributing mis-tagged configs (and deciding
+whether `EditRoutinesDialog`'s default-to-`'both'` and the "Both" option should stay) is a confirm-gated
+follow-up, per the run's out-of-scope boundary.
+
+## 7.3 Summary table
+
+| Hatch | `file:line` | Classification |
+|---|---|---|
+| Activity-config readers `in [childId,'both']` | `useActivityConfigs.ts:71` + 6 siblings + `useQuestSession.ts:501` | **Bleed-risk** — London sees Lincoln's `'both'` configs |
+| `EditRoutinesDialog` new-row default `childId:'both'` | `EditRoutinesDialog.tsx:51` | **Bleed-risk source** (writer) |
+| `AddActivityDialog` "Both" option | `AddActivityDialog.tsx:50,74` | **Bleed-risk source** (writer, user-chosen) |
+| Workbook tag inheritance | `migrateActivityConfigs.ts:147` | **Bleed-risk source** (inherited legacy) |
+| Legacy bare-day claim | `useDayLog.ts:201` | **Bleed-risk** (low, legacy-only, write-time) |
+| Hours adjustments widening | `records.logic.ts:150,264`, `RecordsPage.tsx:152` | **Intended** (pinned DATA-05) |
+| Sticker `childProfile ?? 'both'` | `StickerLibraryTab/StickerPicker/Book*` | **Intended** (shared art) |
+| Planner `'both'`→active resolution | `PlannerChatPage.tsx:301` | **Intended** (read-side) |
+| Unfiltered per-child reads | — | **None found** (`shellyChatThreads` is parent-scoped) |
+
+**Net:** the activity-config cluster is the only *new* bleed vector this sweep surfaces (DATA-05 covers hours).
+GATB-for-London is **not** a seeding bug — it's a manual/inherited `'both'` tag read by seven `in [childId,'both']`
+queries. Fix = confirm-gated re-attribution, deferred per scope.
