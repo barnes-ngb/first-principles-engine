@@ -151,7 +151,13 @@ export default function AddActivityDialog({
                   size="small"
                   variant={type === t.value ? 'filled' : 'outlined'}
                   color={type === t.value ? 'primary' : 'default'}
-                  onClick={() => setType(t.value)}
+                  onClick={() => {
+                    setType(t.value)
+                    // DATA-08: workbooks are per-child — never 'both'.
+                    if (t.value === 'workbook' && selectedChild === 'both') {
+                      setSelectedChild(childId)
+                    }
+                  }}
                 />
               ))}
             </Stack>
@@ -212,16 +218,19 @@ export default function AddActivityDialog({
           <Box>
             <Typography variant="caption" color="text.secondary">Which child</Typography>
             <Stack direction="row" spacing={0.5}>
-              {CHILD_OPTIONS.map((c) => (
-                <Chip
-                  key={c.value}
-                  label={c.label}
-                  size="small"
-                  variant={selectedChild === c.value ? 'filled' : 'outlined'}
-                  color={selectedChild === c.value ? 'primary' : 'default'}
-                  onClick={() => setSelectedChild(c.value)}
-                />
-              ))}
+              {CHILD_OPTIONS
+                // DATA-08: 'both' is only valid for shared routines, never workbooks.
+                .filter((c) => c.value !== 'both' || type !== 'workbook')
+                .map((c) => (
+                  <Chip
+                    key={c.value}
+                    label={c.label}
+                    size="small"
+                    variant={selectedChild === c.value ? 'filled' : 'outlined'}
+                    color={selectedChild === c.value ? 'primary' : 'default'}
+                    onClick={() => setSelectedChild(c.value)}
+                  />
+                ))}
             </Stack>
           </Box>
 

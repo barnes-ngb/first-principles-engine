@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   deleteDoc,
   doc,
@@ -43,12 +43,41 @@ export interface NewActivityConfig {
   notes?: string
 }
 
+/**
+ * DATA-08: workbooks are per-child (same curriculum, different lessons → a
+ * separate config per child), so a workbook-type config may never be owned by
+ * `'both'`. `'both'` stays legitimate for shared *routines*. A `'both'` workbook
+ * surfaces to every child through the `in [childId,'both']` reader, which is how
+ * London ended up seeing Lincoln's GATB workbooks.
+ */
+export function isWorkbookOwnerInvalid(
+  type: ActivityType | undefined,
+  childId: string | undefined,
+): boolean {
+  return type === 'workbook' && childId === 'both'
+}
+
+/** Throws if a workbook-type config would be saved as `childId: 'both'`. */
+export function assertWorkbookOwner(
+  type: ActivityType | undefined,
+  childId: string | undefined,
+): void {
+  if (isWorkbookOwnerInvalid(type, childId)) {
+    throw new Error(
+      'Workbook activities must belong to a specific child, not "both". Assign it to a child.',
+    )
+  }
+}
+
 export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const familyId = useFamilyId()
   const [configs, setConfigs] = useState<ActivityConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [migrationDone, setMigrationDone] = useState(false)
+  // Latest configs snapshot for writers that need to read existing docs
+  // (e.g. type-aware guards) without re-creating their callbacks.
+  const configsRef = useRef<ActivityConfig[]>([])
 
   // Run migration on first load if needed, then ensure defaults exist
   useEffect(() => {
@@ -77,6 +106,7 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
         const items = snap.docs
           .map((d) => ({ ...(d.data() as ActivityConfig), id: d.id }))
           .sort((a, b) => a.sortOrder - b.sortOrder)
+        configsRef.current = items
         setConfigs(items)
         setLoading(false)
         setError(null)
@@ -94,6 +124,7 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const addConfig = useCallback(
     async (data: NewActivityConfig) => {
       if (!familyId) return
+      assertWorkbookOwner(data.type, data.childId)
       const now = new Date().toISOString()
       const ref = doc(activityConfigsCollection(familyId))
       const batch = writeBatch(db)
@@ -112,6 +143,13 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const updateConfig = useCallback(
     async (id: string, updates: Partial<ActivityConfig>) => {
       if (!familyId) return
+      // Guard reassignment: a workbook can't be moved to (or kept as) 'both'.
+      // Fall back to the existing doc's type when the update only touches childId.
+      const existing = configsRef.current.find((c) => c.id === id)
+      assertWorkbookOwner(
+        updates.type ?? existing?.type,
+        updates.childId ?? existing?.childId,
+      )
       const ref = doc(activityConfigsCollection(familyId), id)
       await updateDoc(ref, {
         ...updates,

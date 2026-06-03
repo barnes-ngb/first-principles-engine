@@ -141,7 +141,8 @@ export async function migrateToActivityConfigs(
       subjectBucket: wb.subjectBucket || 'Other',
       defaultMinutes: wb.defaultMinutes ?? 30,
       frequency: 'daily',
-      childId: wb.childId || childId,
+      // DATA-08: workbooks are per-child — never inherit a 'both' tag.
+      childId: wb.childId && wb.childId !== 'both' ? wb.childId : childId,
       sortOrder: isApp ? 71 : 11,
       curriculum: wb.curriculum?.provider ?? wb.name,
       totalUnits: wb.totalUnits,
