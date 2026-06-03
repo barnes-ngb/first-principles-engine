@@ -66,6 +66,14 @@ export interface BookProgress {
   completedAt?: string
   createdAt: string
   updatedAt: string
+  /**
+   * One-time repair flag (FUNC-07). Absent/false means the doc predates the
+   * skip≠answered split, where skipping wrote `answered: true` (conflating skip
+   * with answer). On first load such docs are migrated: every `skipped` item is
+   * treated as a legacy skip and reset to answerable, then this flag is set so
+   * deliberate parent skips are preserved going forward.
+   */
+  migratedSkipModel?: boolean
 }
 
 export interface WeekPlan {
@@ -302,7 +310,7 @@ export interface ChecklistItem {
   mastery?: 'got-it' | 'working' | 'stuck'
   /** Guidance note when an item is skipped. */
   skipGuidance?: string
-  /** Whether this item was explicitly skipped by the child. */
+  /** Whether this item was skipped. Skipping is a parent-only action (FUNC-08). */
   skipped?: boolean
   /** Why this item was skipped (only set when skipped: true). */
   skipReason?: SkipReason

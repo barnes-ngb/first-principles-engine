@@ -19,7 +19,7 @@ import type {
   ChapterQuestionPoolItem,
   DayLog,
 } from '../../core/types'
-import { todayKey } from '../../core/utils/dateKey'
+import { isChapterToGo } from './chapterPool.logic'
 
 const questionTypeEmoji: Record<string, string> = {
   comprehension: '\u{1F50D}',
@@ -71,7 +71,7 @@ export default function ChapterQuestionPool({
     if (persisted && persisted.length > 0) {
       const unansweredSet = new Set(
         bookProgress.questionPool
-          .filter((item) => !item.answered)
+          .filter(isChapterToGo)
           .map((item) => item.chapter),
       )
       const valid = persisted.filter((ch) => unansweredSet.has(ch))
@@ -144,9 +144,11 @@ export default function ChapterQuestionPool({
   }
 
   const pool = bookProgress.questionPool
-  const unanswered = pool.filter((item) => !item.answered)
+  // "To go" = neither answered nor parent-skipped. Skip no longer implies
+  // answered (FUNC-07), so it gets its own bucket independent of `answered`.
+  const unanswered = pool.filter(isChapterToGo)
   const answered = pool.filter((item) => item.answered && !item.skipped)
-  const skipped = pool.filter((item) => item.answered && item.skipped)
+  const skipped = pool.filter((item) => item.skipped)
   const doneCount = answered.length + skipped.length
 
   // All chapters answered — celebration state
@@ -203,7 +205,7 @@ export default function ChapterQuestionPool({
   }
 
   const selectedItems = pool
-    .filter((item) => !item.answered && effectiveSelected.has(item.chapter))
+    .filter((item) => isChapterToGo(item) && effectiveSelected.has(item.chapter))
     .sort((a, b) => a.chapter - b.chapter)
 
   const handleSaveNote = async (item: ChapterQuestionPoolItem) => {
@@ -232,9 +234,11 @@ export default function ChapterQuestionPool({
     setSkipConfirmChapter(null)
     setSkippingChapter(chapter)
     try {
+      // Skip is a parent-only action and must NOT mark the chapter answered
+      // (FUNC-07). Skipped chapters are "done for completion" but distinct from
+      // answered, so the kid section stays visible until everything is answered
+      // or parent-skipped.
       await onChapterAnswered(chapter, {
-        answered: true,
-        answeredDate: todayKey(),
         skipped: true,
       })
       setSelectedChapters((prev) => {

@@ -29,7 +29,7 @@ import {
   dailyArmorSessionsCollection,
 } from '../../core/firebase/firestore'
 import { getDailyArmorSession } from '../../core/avatar/getDailyArmorSession'
-import type { Artifact, ChapterBook, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
+import type { Artifact, ChapterBook, Child, DailyArmorSession, DayLog } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
@@ -51,8 +51,10 @@ import { useTodayMiningMinutes } from './useTodayMiningMinutes'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
 import KidChecklist from './KidChecklist'
+import { computeQuestProgress } from './kidQuestGate'
 import KidCelebration from './KidCelebration'
 import KidChapterPool from './KidChapterPool'
+import { isChapterPoolVisible, isReadAloudSectionVisible } from './chapterPool.logic'
 import { useBookProgress } from './useBookProgress'
 import KidConundrumResponse from './KidConundrumResponse'
 import KidTeachBack from './KidTeachBack'
@@ -139,28 +141,6 @@ function getCelebration(today: string, isLincoln: boolean): string {
  * Categorize checklist items into must-do and choose groups.
  * Falls back to treating the first 3 items as must-do if no category is set.
  */
-function categorizeItems(checklist: ChecklistItem[]): {
-  mustDo: ChecklistItem[]
-  choose: ChecklistItem[]
-} {
-  const hasCategories = checklist.some((item) => item.category)
-
-  if (hasCategories) {
-    return {
-      mustDo: checklist.filter(
-        (item) => item.category === 'must-do' || (!item.category && item.mvdEssential),
-      ),
-      choose: checklist.filter((item) => item.category === 'choose'),
-    }
-  }
-
-  // Fallback: first 3 items are must-do, rest are choose
-  return {
-    mustDo: checklist.slice(0, Math.min(3, checklist.length)),
-    choose: checklist.slice(3),
-  }
-}
-
 export default function KidTodayView({
   dayLog,
   child,
@@ -228,16 +208,16 @@ export default function KidTodayView({
   )
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
-  const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
-
-  const mustDoDone = mustDo.length > 0 && mustDo.every((item) => item.completed)
-  const mustDoRemaining = mustDo.filter((item) => !item.completed && !item.skipped).length
-
-  // Gate: 3+ must-do items completed unlocks Workshop and Books
-  const mustDoCompleted = mustDo.filter((i) => i.completed).length
-  const mustDoSkipped = mustDo.filter((i) => i.skipped).length
-  const gateThreshold = Math.min(3, mustDo.length)
-  const gateUnlocked = mustDoCompleted >= gateThreshold
+  const {
+    mustDo,
+    choose,
+    mustDoDone,
+    mustDoRemaining,
+    mustDoCompleted,
+    mustDoSkipped,
+    gateThreshold,
+    gateUnlocked,
+  } = useMemo(() => computeQuestProgress(checklist), [checklist])
 
   // Track which choose items have been selected (by their index in the choose array)
   const maxChoices = 2
@@ -633,18 +613,33 @@ export default function KidTodayView({
         </Box>
       )}
 
-      {/* ── KID CHAPTER POOL (read-aloud discussion) ── */}
-      {selectedBook && bookProgress && bookProgress.questionPool.some((item) => !item.answered) && (
+      {/* ── KID READ-ALOUD SECTION (FUNC-09) ──
+          Mounts on the SHARED week book (selectedBook), independent of whether
+          this child has a populated per-child pool. With a per-child pool that
+          still has to-go chapters, the kid answers them (KidChapterPool). Without
+          a pool yet (e.g. a child with no plan), the shared book still reaches
+          their Today via a gentle placeholder; the per-child pool/answers fill in
+          independently. */}
+      {selectedBook && isReadAloudSectionVisible(true, bookProgress?.questionPool) && (
         <SectionErrorBoundary section="chapter pool">
-          <KidChapterPool
-            book={selectedBook}
-            bookProgress={bookProgress}
-            familyId={familyId}
-            childId={child.id}
-            dayLog={dayLog}
-            weekFocus={weekFocus}
-            onChapterAnswered={updateChapter}
-          />
+          {bookProgress && isChapterPoolVisible(bookProgress.questionPool) ? (
+            <KidChapterPool
+              book={selectedBook}
+              bookProgress={bookProgress}
+              familyId={familyId}
+              childId={child.id}
+              dayLog={dayLog}
+              weekFocus={weekFocus}
+              onChapterAnswered={updateChapter}
+            />
+          ) : (
+            <SectionCard title={`\u{1F4D6} ${selectedBook.title}`}>
+              <Typography variant="body2" color="text.secondary">
+                This is today&apos;s read-aloud book. A grown-up will read it with
+                you and add questions to talk about.
+              </Typography>
+            </SectionCard>
+          )}
         </SectionErrorBoundary>
       )}
 
