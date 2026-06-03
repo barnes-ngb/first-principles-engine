@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { addDoc, getDocs } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
@@ -6,8 +6,11 @@ import { useProfile } from '../profile/useProfile'
 import { childrenCollection } from '../firebase/firestore'
 import type { Child } from '../types'
 import { UserProfile } from '../types/enums'
-
-const ACTIVE_CHILD_KEY = 'fpe_active_child_id'
+import {
+  getActiveChildId,
+  setActiveChildIdShared,
+  subscribeActiveChildId,
+} from './activeChildStore'
 
 /**
  * Canonical profile children. `birthdate`/`grade` are the real identity values
@@ -94,14 +97,17 @@ export function useChildren(): UseChildrenResult {
   const familyId = useFamilyId()
   const { profile } = useProfile()
   const [children, setChildren] = useState<Child[]>([])
-  const [selectedChildId, setSelectedChildIdState] = useState(
-    () => localStorage.getItem(ACTIVE_CHILD_KEY) ?? '',
+  // Selected child lives in a shared external store so every consumer
+  // (AppShell header, Plan My Week selector, …) sees the same value and
+  // re-renders together — see activeChildStore.ts.
+  const selectedChildId = useSyncExternalStore(
+    subscribeActiveChildId,
+    getActiveChildId,
   )
   const [isLoading, setIsLoading] = useState(true)
 
   const setSelectedChildId = useCallback((id: string) => {
-    localStorage.setItem(ACTIVE_CHILD_KEY, id)
-    setSelectedChildIdState(id)
+    setActiveChildIdShared(id)
   }, [])
 
   useEffect(() => {
@@ -151,19 +157,16 @@ export function useChildren(): UseChildrenResult {
 
       setChildren(loaded)
 
-      // Restore persisted child or auto-select based on profile
-      const persisted = localStorage.getItem(ACTIVE_CHILD_KEY)
-      const profileMatch = matchChildToProfile(loaded, profile)
-      setSelectedChildIdState((cur) => {
-        // Keep current if still valid
-        if (cur && loaded.some((c) => c.id === cur)) return cur
-        // Restore persisted if valid
-        if (persisted && loaded.some((c) => c.id === persisted)) return persisted
-        // Fall back to profile match or first child
+      // Restore persisted child or auto-select based on profile. The shared
+      // store is seeded from localStorage at import, so getActiveChildId()
+      // already reflects the persisted choice. Only override when it's missing
+      // or no longer points at a real child.
+      const cur = getActiveChildId()
+      if (!cur || !loaded.some((c) => c.id === cur)) {
+        const profileMatch = matchChildToProfile(loaded, profile)
         const next = profileMatch ?? loaded[0]?.id ?? ''
-        if (next) localStorage.setItem(ACTIVE_CHILD_KEY, next)
-        return next
-      })
+        if (next) setActiveChildIdShared(next)
+      }
 
       setIsLoading(false)
     }
