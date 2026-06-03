@@ -11,6 +11,8 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import PrintIcon from '@mui/icons-material/Print'
+import SkipNextIcon from '@mui/icons-material/SkipNext'
+import UndoIcon from '@mui/icons-material/Undo'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -311,6 +313,15 @@ export default function TodayChecklist({
     persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
   }
 
+  // Skipping is a parent-only action (FUNC-08): mark an item the kid shouldn't
+  // do today as skipped (removed from the kid's to-do set, never auto-completed).
+  const handleToggleSkip = (index: number) => {
+    const updatedChecklist = rawChecklist.map((ci, i) =>
+      i === index ? { ...ci, skipped: !ci.skipped } : ci,
+    )
+    persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+  }
+
   const handleEditLabel = (index: number, newLabel: string) => {
     const updatedChecklist = rawChecklist.map((ci, i) =>
       i === index ? { ...ci, label: newLabel } : ci
@@ -511,7 +522,7 @@ export default function TodayChecklist({
                     variant="standard"
                     value={item.label}
                     onChange={(e) => handleEditLabel(index, e.target.value)}
-                    sx={{ flex: 1 }}
+                    sx={{ flex: 1, ...(item.skipped ? { textDecoration: 'line-through', opacity: 0.5 } : {}) }}
                     inputProps={{ style: { fontSize: '0.875rem' } }}
                   />
                   {/* Editable minutes */}
@@ -525,12 +536,43 @@ export default function TodayChecklist({
                     inputProps={{ min: 0, style: { fontSize: '0.875rem', textAlign: 'right' } }}
                   />
                   <Typography variant="caption" color="text.secondary">m</Typography>
+                  {/* Skip toggle (parent-only) — exclude an item from the kid's quests without deleting it */}
+                  <Tooltip title={item.skipped ? 'Un-skip' : 'Skip for the kid'}>
+                    <IconButton
+                      size="small"
+                      onClick={() => handleToggleSkip(index)}
+                      color={item.skipped ? 'warning' : 'default'}
+                    >
+                      {item.skipped ? <UndoIcon fontSize="small" /> : <SkipNextIcon fontSize="small" />}
+                    </IconButton>
+                  </Tooltip>
                   {/* Delete button */}
                   <IconButton size="small" onClick={() => handleDeleteItem(index)} color="error">
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
                 </Box>
+              )
+            }
+
+            // Parent-skipped items: compact, struck-through, with an un-skip affordance.
+            // Skipped ≠ completed — it just drops the item from the kid's quests.
+            if (item.skipped) {
+              return (
+                <Stack key={index} direction="row" alignItems="center" spacing={0.5} sx={{ opacity: 0.6 }}>
+                  <Typography variant="body2" sx={{ flex: 1, textDecoration: 'line-through' }}>
+                    {item.label} — skipped
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="text"
+                    startIcon={<UndoIcon sx={{ fontSize: 16 }} />}
+                    onClick={() => handleToggleSkip(index)}
+                    sx={{ fontSize: '0.7rem', textTransform: 'none' }}
+                  >
+                    Un-skip
+                  </Button>
+                </Stack>
               )
             }
 

@@ -29,7 +29,7 @@ import {
   dailyArmorSessionsCollection,
 } from '../../core/firebase/firestore'
 import { getDailyArmorSession } from '../../core/avatar/getDailyArmorSession'
-import type { Artifact, ChapterBook, ChecklistItem, Child, DailyArmorSession, DayLog } from '../../core/types'
+import type { Artifact, ChapterBook, Child, DailyArmorSession, DayLog } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
@@ -51,6 +51,7 @@ import { useTodayMiningMinutes } from './useTodayMiningMinutes'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
 import KidChecklist from './KidChecklist'
+import { computeQuestProgress } from './kidQuestGate'
 import KidCelebration from './KidCelebration'
 import KidChapterPool from './KidChapterPool'
 import { isChapterPoolVisible } from './chapterPool.logic'
@@ -140,28 +141,6 @@ function getCelebration(today: string, isLincoln: boolean): string {
  * Categorize checklist items into must-do and choose groups.
  * Falls back to treating the first 3 items as must-do if no category is set.
  */
-function categorizeItems(checklist: ChecklistItem[]): {
-  mustDo: ChecklistItem[]
-  choose: ChecklistItem[]
-} {
-  const hasCategories = checklist.some((item) => item.category)
-
-  if (hasCategories) {
-    return {
-      mustDo: checklist.filter(
-        (item) => item.category === 'must-do' || (!item.category && item.mvdEssential),
-      ),
-      choose: checklist.filter((item) => item.category === 'choose'),
-    }
-  }
-
-  // Fallback: first 3 items are must-do, rest are choose
-  return {
-    mustDo: checklist.slice(0, Math.min(3, checklist.length)),
-    choose: checklist.slice(3),
-  }
-}
-
 export default function KidTodayView({
   dayLog,
   child,
@@ -229,16 +208,16 @@ export default function KidTodayView({
   )
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
-  const { mustDo, choose } = useMemo(() => categorizeItems(checklist), [checklist])
-
-  const mustDoDone = mustDo.length > 0 && mustDo.every((item) => item.completed)
-  const mustDoRemaining = mustDo.filter((item) => !item.completed && !item.skipped).length
-
-  // Gate: 3+ must-do items completed unlocks Workshop and Books
-  const mustDoCompleted = mustDo.filter((i) => i.completed).length
-  const mustDoSkipped = mustDo.filter((i) => i.skipped).length
-  const gateThreshold = Math.min(3, mustDo.length)
-  const gateUnlocked = mustDoCompleted >= gateThreshold
+  const {
+    mustDo,
+    choose,
+    mustDoDone,
+    mustDoRemaining,
+    mustDoCompleted,
+    mustDoSkipped,
+    gateThreshold,
+    gateUnlocked,
+  } = useMemo(() => computeQuestProgress(checklist), [checklist])
 
   // Track which choose items have been selected (by their index in the choose array)
   const maxChoices = 2
