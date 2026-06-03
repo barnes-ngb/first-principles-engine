@@ -21,6 +21,13 @@ function formatMonthLabel(month: string): string {
   return d.toLocaleString(undefined, { month: 'long', year: 'numeric' })
 }
 
+/** `YYYY-MM` for the month before `now` — the oldest draft worth nudging on. */
+function previousMonthKey(now: Date): string {
+  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}`
+}
+
 export default function DraftReadyCard({ familyId }: DraftReadyCardProps) {
   const navigate = useNavigate()
   const { reviews, loading } = useMonthlyReviews(familyId)
@@ -33,8 +40,14 @@ export default function DraftReadyCard({ familyId }: DraftReadyCardProps) {
   }, [children])
 
   const latestDraft = useMemo(() => {
+    // Only nudge on a draft for the current or previous month. A draft for an
+    // older month (e.g. a March book still unpublished in June, or a stale
+    // scheduler run) is no longer a useful "ready to publish" prompt and reads
+    // as a bug — it stays accessible from the Progress route, just not here.
+    const cutoff = previousMonthKey(new Date())
     const drafts = reviews.filter(
-      (r) => r.status === MonthlyReviewStatus.Draft,
+      (r) =>
+        r.status === MonthlyReviewStatus.Draft && (r.month ?? '') >= cutoff,
     )
     if (drafts.length === 0) return null
     return [...drafts].sort((a, b) =>

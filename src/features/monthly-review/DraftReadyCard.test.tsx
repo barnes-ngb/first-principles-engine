@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Child, MonthlyReview } from '../../core/types'
 import { MonthlyReviewStatus } from '../../core/types/enums'
@@ -68,6 +68,17 @@ function renderCard() {
 }
 
 describe('DraftReadyCard', () => {
+  // The card only nudges on drafts for the current/previous month, so pin the
+  // clock to April 2026 — making the April/March fixtures non-stale.
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-15T12:00:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('renders when at least one review has status=draft', () => {
     reviewsRef.current = [makeReview({ status: MonthlyReviewStatus.Draft })]
     childrenRef.current = [{ id: 'lincoln', name: 'Lincoln' } as Child]
@@ -113,5 +124,20 @@ describe('DraftReadyCard', () => {
     expect(
       screen.queryByText(/March 2026 book ready for London/i),
     ).not.toBeInTheDocument()
+  })
+
+  it('hides a stale draft from an old month', () => {
+    // It is now June 2026; a March draft lingering unpublished must not nudge.
+    vi.setSystemTime(new Date('2026-06-03T12:00:00Z'))
+    reviewsRef.current = [
+      makeReview({
+        id: 'lincoln_2026-03',
+        month: '2026-03',
+        generatedAt: '2026-04-01T00:00:00Z',
+      }),
+    ]
+    childrenRef.current = [{ id: 'lincoln', name: 'Lincoln' } as Child]
+    renderCard()
+    expect(screen.queryByText(/book ready for/i)).not.toBeInTheDocument()
   })
 })
