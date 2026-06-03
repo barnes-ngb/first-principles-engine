@@ -50,7 +50,7 @@ London uses it today.
 | **Story Workshop** | Ready | — | `src/features/workshop/WorkshopPage.tsx`, `steps/` | No age/name access gate; story/adventure/card game types all available. London's drawing/story strength makes this a natural Ready surface. Universal must-do gate fronts it, not a London block. |
 | **Conundrum** | Ready | — | `src/features/today/KidConundrumResponse.tsx:378,382-385` (`londonPrompt`, `londonDrawingPrompt`), generated in `functions/src/ai/tasks/conundrum.ts:121,130` | **London-tuned**: he gets a simpler `londonPrompt` and a **drawing-first** `londonDrawingPrompt` (photo capture), generated "accessible to a 6-year-old." Safe by construction. |
 | **Chapter question pool** | Ready | (Optional) age-shaped question variants | `KidTodayView.tsx` → `KidChapterPool.tsx`, `bookProgress` | Works for London (shared read-aloud pool); no per-child variant, but read-aloud is age-independent and parent-mediated. Untuned but safe. |
-| **Reading evaluation** | Ready (infra) | A London learner profile (see below) | `src/features/evaluate/EvaluateChatPage.tsx:566-577` (phonics/comprehension working-level derivation) | The eval → snapshot → working-level flow is per-child and works for London today; what's missing is London's *starting* profile/defaults, tracked as its own row below. |
+| **Reading evaluation** | Ready (infra) | A London learner profile (see below) | `src/features/evaluate/EvaluateChatPage.tsx:566-577` (phonics/comprehension working-level derivation) | The eval → snapshot → working-level flow is per-child and works for London today; what's missing is London's *starting* profile/defaults, tracked as its own row below. **K-1 experience reconned 2026-06-03 (`docs/review/LONDON_EVAL_READINESS.md`): READY AS-IS for a 6-year-old.** The eval is **parent-mediated/oral** (Shelly instructs the parent; London answers aloud; the parent types observations — London never reads or types the chat), and the reading diagnostic **starts at a true K floor** (Level 0 phonemic awareness, `chat.ts:574`) with 2–3-min steps and encouraging framing — so "can't read yet / voice-first" is satisfied by design. Three **optional, non-blocking** polish items (reading-prompt parity with the math prompt) are logged in the hand-off below. |
 | **Math evaluation (FEAT-06)** | **Ready (infra)** | A London learner profile (see row below) — same dependency as Reading eval. | `EvaluateChatPage.tsx:578-584` (math working-level derivation), `:742-746` (live "Evaluate Math" tab), `functions/src/ai/chat.ts:692-824` (guided math diagnostic prompt) | **Reconciled 2026-06-01:** the guided math-eval flow **is** at reading parity and live for Lincoln — a working **Evaluate Math** tab, a server-side diagnostic prompt, and findings → `workingLevels.math` (plus a live Math Quest + scan-derived math levels). The prior "Hold-until-tuned / no guided flow" status was **stale** (FEAT-06 now RESOLVED). What's actually missing is the same thing the Reading-eval row needs: **London's starting profile/defaults** (`londonDefaults`), tracked in the row below. Build, don't gate — incomplete for London, not harmful. **ARCH-16 (2026-06-01):** the Math Quest tile is now gated on `hasMathCalibration` (math working level or `math.`-prefixed priority skill) independently of the Reading quests — so a math-only child (incl. a future math-evaluated London) sees only the Math Quest, never the Reading quests. See hand-off §1 for the open "hold London from the entire Mine" question. |
 | **Formal London learner profile** | **Not-built** | A London equivalent of Lincoln's defaults (priority skills, supports, stop rules, starting levels). | `src/features/evaluation/lincolnDefaults.ts` (no London equivalent) | `lincolnDefaults.ts` seeds Lincoln; there is **no `londonDefaults`**. Until built, a parent must set London's snapshot manually. Underpins both eval rows above. |
 | **Functions — per-child AI context** | Ready (shared) | — | `functions/src/ai/contextSlices.ts:83-84` (charter names both kids), TASK_CONTEXT slices | Context is assembled from London's own `skillSnapshot`/profile; the charter preamble already describes London (6, story-driven). No London-specific slice needed — slices are child-agnostic and fed his data. |
@@ -118,5 +118,29 @@ experience is still held on **capability** (snapshot calibration), exactly as be
 (avatar age-group, worksheet font sizing) and feed records/AI-context — but no surface opens for London on
 age/grade/name. Worksheet generation, avatar/armor cosmetics, and `generateStory` interests are now
 profile-/age-derived rather than name-keyed, so London is wired the same way Lincoln is.
+
+### Reading-eval K-1 readiness (2026-06-03) — READY AS-IS; one optional polish slice
+
+Read-only recon of whether the **reading evaluation** is age-appropriate for London's *first* eval, full
+findings in **`docs/review/LONDON_EVAL_READINESS.md`**. **Verdict: London can be evaluated now.** The eval
+is **parent-mediated and oral** — Shelly instructs the **parent** one short step at a time, London answers
+aloud, the parent types observations; London never reads or types the chat — and the reading diagnostic
+**starts at a true pre-reading K floor** (Level 0 phonemic awareness → letter sounds → CVC), caps steps at
+2–3 min, and frames everything as a "frontier," not a score. So the early-reader / voice-first / no-shame
+criteria are satisfied **by design** for a 6-year-old. *(The child-direct Knowledge-Mine quest is the
+surface where reading/voice/tap load actually bites — it stays held behind `canAccessKnowledgeMine` until
+London is evaluated/tuned; the eval is what opens it.)*
+
+**Optional, non-blocking polish slice** (reading-prompt-only — bring `buildEvaluationPrompt`'s reading
+branch to parity with the already-shipped math branch; a few lines in **one function**,
+`functions/src/ai/chat.ts`, behaviour-additive, no propose-and-confirm surface touched):
+
+3. **Reading-eval prompt → math-prompt parity (gentle-polish, do only on assignment).** Add to the reading
+   branch of `buildEvaluationPrompt` (`chat.ts:556-688`): (a) an explicit *"for a young/early reader with
+   no prior snapshot, START AT LEVEL 0"* line (mirrors `chat.ts:709`, makes the floor explicit not just
+   implicit); (b) the explicit *"no grades, no rankings — never shaming"* guard the math branch already has
+   (`chat.ts:703`); (c) a *"see child profile for age; for a 6-year-old keep steps very short, phrasing
+   simple, lead with an easy win"* line (mirrors `chat.ts:695`, so the eval *uses* the age it already
+   receives). **Not required for London's first eval** — it's already ready; this is marginal gentling.
 </content>
 </invoke>
