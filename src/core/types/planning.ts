@@ -310,7 +310,7 @@ export interface ChecklistItem {
   mastery?: 'got-it' | 'working' | 'stuck'
   /** Guidance note when an item is skipped. */
   skipGuidance?: string
-  /** Whether this item was explicitly skipped by the child. */
+  /** Whether this item was skipped. Skipping is a parent-only action (FUNC-08). */
   skipped?: boolean
   /** Why this item was skipped (only set when skipped: true). */
   skipReason?: SkipReason
