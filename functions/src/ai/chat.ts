@@ -2406,6 +2406,7 @@ export const chat = onCall(
     // ── Load child profile (skip if no childId — e.g. shellyChat general mode) ──
     let childData: {
       name: string;
+      birthdate?: string;
       grade?: string;
       motivators?: string;
       interests?: string;
@@ -2443,6 +2444,7 @@ export const chat = onCall(
 
       childData = childSnap.data() as {
         name: string;
+        birthdate?: string;
         grade?: string;
         motivators?: string;
         interests?: string;

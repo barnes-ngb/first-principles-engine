@@ -260,8 +260,24 @@ export function compressEngagement(summaries: EngagementEntry[]): string {
 
 // ── Child profile formatter ─────────────────────────────────────
 
+/** Whole-year age from a birthdate string, or undefined when unavailable. */
+function ageFromBirthdate(birthdate?: string): number | undefined {
+  if (!birthdate) return undefined;
+  const birth = new Date(birthdate);
+  if (Number.isNaN(birth.getTime())) return undefined;
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) {
+    age -= 1;
+  }
+  return age >= 0 ? age : undefined;
+}
+
 interface ChildContext {
   name: string;
+  /** Real identity (ARCH-15) — additive context for AI calibration, never a gate. */
+  birthdate?: string;
   grade?: string;
   /** Human-owned soft-profile fields on `children` (Shelly portal Phase 0). */
   motivators?: string;
@@ -275,6 +291,10 @@ interface ChildContext {
 export function formatChildProfile(child: ChildContext): string {
   const lines: string[] = ["CHILD PROFILE:"];
   lines.push(`Name: ${child.name}`);
+  const age = ageFromBirthdate(child.birthdate);
+  if (age !== undefined) {
+    lines.push(`Age: ${age}`);
+  }
   if (child.grade) {
     lines.push(`Grade: ${child.grade}`);
   }
@@ -316,6 +336,7 @@ export interface SliceContext {
   childId: string;
   childData: {
     name: string;
+    birthdate?: string;
     grade?: string;
     motivators?: string;
     interests?: string;
@@ -349,6 +370,7 @@ export async function buildContextForTask(
   if (slices.includes("childProfile")) {
     sections.push(formatChildProfile({
       name: childData.name,
+      birthdate: childData.birthdate,
       grade: childData.grade,
       motivators: childData.motivators,
       interests: childData.interests,

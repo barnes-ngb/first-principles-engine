@@ -2150,7 +2150,14 @@ Generate a plan for Monday through Friday.`.trim()
       return `===== ${day.day} =====
 ${buildMaterialsPrompt(
   day,
-  childName,
+  {
+    name: childName,
+    birthdate: activeChild?.birthdate,
+    grade: activeChild?.grade,
+    motivators: activeChild?.motivators,
+    interests: activeChild?.interests,
+    strengths: activeChild?.strengths,
+  },
   snapshot,
   weekPlan?.theme,
   weekPlan?.conundrum,
@@ -2193,7 +2200,7 @@ ${dayPrompts}`
     } finally {
       setPrintingMaterials(false)
     }
-  }, [activeChildId, currentDraft, activeChild?.name, snapshot, weekPlan, aiChat, familyId])
+  }, [activeChildId, currentDraft, activeChild, snapshot, weekPlan, aiChat, familyId])
 
   // Reset conversation state (shared by both Start New Plan and Clear Applied Plan)
   const resetConversationState = useCallback(async () => {

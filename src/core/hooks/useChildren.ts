@@ -9,11 +9,36 @@ import { UserProfile } from '../types/enums'
 
 const ACTIVE_CHILD_KEY = 'fpe_active_child_id'
 
-/** Canonical child names that correspond to profiles. */
-export const PROFILE_CHILDREN: Array<{ profile: UserProfile; name: string }> = [
-  { profile: UserProfile.Lincoln, name: 'Lincoln' },
-  { profile: UserProfile.London, name: 'London' },
+/**
+ * Canonical profile children. `birthdate`/`grade` are the real identity values
+ * (ARCH-15) used to (1) populate a brand-new child doc on auto-create and
+ * (2) pre-fill the Settings identity editor so backfilling an existing doc is
+ * one tap (the parent still confirms with Save — propose → confirm → write).
+ * These are identity DATA, never gates.
+ */
+export const PROFILE_CHILDREN: Array<{
+  profile: UserProfile
+  name: string
+  birthdate: string
+  grade: string
+}> = [
+  { profile: UserProfile.Lincoln, name: 'Lincoln', birthdate: '2015-09-30', grade: '4th grade' },
+  { profile: UserProfile.London, name: 'London', birthdate: '2020-02-20', grade: '1st grade' },
 ]
+
+/**
+ * Canonical identity defaults for a child matched by name, or `undefined` for
+ * a non-profile child. Used to pre-fill the Settings editor; never written
+ * without the parent confirming.
+ */
+export function getCanonicalIdentity(
+  name: string,
+): { birthdate: string; grade: string } | undefined {
+  const entry = PROFILE_CHILDREN.find(
+    (p) => p.name.toLowerCase() === name.trim().toLowerCase(),
+  )
+  return entry ? { birthdate: entry.birthdate, grade: entry.grade } : undefined
+}
 
 function matchChildToProfile(
   children: Child[],
@@ -107,7 +132,16 @@ export function useChildren(): UseChildrenResult {
       if (missing.length > 0) {
         const created: Child[] = []
         for (const m of missing) {
-          const data = { id: '', name: m.name, createdAt: new Date().toISOString() }
+          // Brand-new doc: seed real identity (birthdate/grade) alongside name.
+          // This is doc creation, not a record edit — existing docs are backfilled
+          // by the parent via the Settings identity editor (propose → confirm).
+          const data = {
+            id: '',
+            name: m.name,
+            birthdate: m.birthdate,
+            grade: m.grade,
+            createdAt: new Date().toISOString(),
+          }
           const ref = await addDoc(childrenCollection(familyId), data)
           if (cancelled) return
           created.push({ ...data, id: ref.id })
