@@ -14,6 +14,51 @@ import {
   type StonebridgeMission,
 } from './missions'
 
+/** Visual state of a location on the Stonebridge village board. */
+export const VillageLocationState = {
+  /** Banner raised — the location is healed (lit art). */
+  Repaired: 'repaired',
+  /** The one in-focus mission, shown with its progress bar. */
+  Active: 'active',
+  /** Not yet reached — shown muted as anticipation. */
+  Upcoming: 'upcoming',
+} as const
+export type VillageLocationState = (typeof VillageLocationState)[keyof typeof VillageLocationState]
+
+/** One location tile on the village board. */
+export interface VillageLocation {
+  mission: StonebridgeMission
+  state: VillageLocationState
+}
+
+/**
+ * Derive the village board (every location + its visual state) from the persisted
+ * progress fields. Pure and read-only — no Firestore, no XP.
+ *
+ * Precedence: a completed mission is always {@link VillageLocationState.Repaired}
+ * (so the parked-on capstone shows repaired, never active); the single
+ * `currentMissionId` is the only {@link VillageLocationState.Active} tile when it
+ * isn't yet complete; everything else is {@link VillageLocationState.Upcoming}.
+ * This guarantees at most one active mission at a time (focus).
+ */
+export function deriveVillageBoard(
+  completedMissions: string[],
+  currentMissionId: string,
+): VillageLocation[] {
+  const completed = new Set(completedMissions)
+  return STONEBRIDGE_MISSIONS.map((mission) => {
+    let state: VillageLocationState
+    if (completed.has(mission.id)) {
+      state = VillageLocationState.Repaired
+    } else if (mission.id === currentMissionId) {
+      state = VillageLocationState.Active
+    } else {
+      state = VillageLocationState.Upcoming
+    }
+    return { mission, state }
+  })
+}
+
 /** Reading-activity event types counted toward Banner Rally missions. */
 export const READING_ACTION_TYPES = ['BOOK_READ', 'QUEST_COMPLETE'] as const
 
