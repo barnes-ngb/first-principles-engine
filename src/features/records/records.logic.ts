@@ -41,17 +41,21 @@ export type HoursSummary = {
   byDate: Record<string, number>
 }
 
-// ─── DATA-05: per-kid adjustment attribution ─────────────────────────────────
+// ─── DATA-05 / DATA-09: per-kid adjustment attribution ───────────────────────
 //
 // `HoursAdjustment.childId` is optional on the READ type because legacy
-// documents exist without it. Every adjustment we WRITE from now on, though,
-// must be attributed to a child: the safety-net filters in `computeHoursSummary`
-// / `computeMonthlyTrend` currently fold unattributed (`!a.childId`) adjustments
-// into EVERY child's totals, which silently inflates both kids (the DATA-05
-// leak). New writes go through `NewHoursAdjustment` + `assertAttributed` so a
-// `childId` can never be omitted at the source — a safe, additive guard that
-// changes no existing totals. (Closing the read-side leak and handling the
-// already-stored unattributed records are the propose-and-confirm Step 2.)
+// documents exist without it. Every adjustment we WRITE must be attributed to a
+// child (or explicitly to 'both'): new writes go through `NewHoursAdjustment` +
+// `assertAttributed` so a `childId` can never be omitted at the source.
+//
+// DATA-09 closed the read-side leak: the filters in `computeHoursSummary` /
+// `computeMonthlyTrend` previously folded unattributed (`!a.childId`)
+// adjustments into EVERY child's totals (silently inflating both kids — the
+// DATA-05 leak). They now match `childId === child || childId === 'both'`, so a
+// 'both' adjustment counts for both kids (legitimate family-wide time) while a
+// child-tagged one counts only for that child. The already-stored unattributed
+// docs are migrated to 'both' (`migrateUnattributedAdjustments`), which
+// preserves their prior count-for-both behavior — hours-neutral by design.
 
 /** A hours adjustment guaranteed to carry a `childId` — the shape every new
  *  write must use so it can never be counted toward another child (DATA-05). */
@@ -146,8 +150,12 @@ export const computeHoursSummary = (
   const filteredEntries = childId
     ? hoursEntries.filter((e) => e.childId === childId)
     : hoursEntries
+  // DATA-09: explicit attribution — an adjustment counts for this child only
+  // when it is tagged to them or to 'both' (legitimate family-wide time, e.g.
+  // Dad Lab). The former `!a.childId` clause silently widened unattributed docs
+  // onto BOTH kids (the DATA-05 leak); those legacy docs are migrated to 'both'.
   const filteredAdj = childId
-    ? adjustments.filter((a) => !a.childId || a.childId === childId)
+    ? adjustments.filter((a) => a.childId === childId || a.childId === 'both')
     : adjustments
 
   const bySubjectMap = new Map<string, { total: number; home: number }>()
@@ -260,8 +268,9 @@ export const computeMonthlyTrend = (
   const filteredEntries = childId
     ? hoursEntries.filter((e) => e.childId === childId)
     : hoursEntries
+  // DATA-09: mirror computeHoursSummary's explicit child/'both' attribution.
   const filteredAdj = childId
-    ? adjustments.filter((a) => !a.childId || a.childId === childId)
+    ? adjustments.filter((a) => a.childId === childId || a.childId === 'both')
     : adjustments
 
   // Build month buckets across the inclusive range.

@@ -529,26 +529,11 @@ describe('computeHoursSummary — adjustment attribution (DATA-05)', () => {
     expect(lincoln.adjustmentMinutes + london.adjustmentMinutes).toBe(20)
   })
 
-  // ── Documents the leak DATA-05 closes. This characterization test asserts the
-  // CURRENT (leaky) behavior so the before-state is explicit; when Step 2
-  // (computation scoping) is CONFIRMED, this expectation flips to 0 and the
-  // skipped test below is enabled. Do not "fix" this test on its own — the
-  // number change is propose-and-confirm. ──
-  it('CURRENT LEAK: an unattributed adjustment inflates BOTH kids (DATA-05, pre-Step-2)', () => {
-    const unattributed: HoursAdjustment[] = [
-      { date: '2026-01-12', minutes: 50, reason: 'legacy backfill, no childId', subjectBucket: SubjectBucket.Reading },
-    ]
-    const lincoln = computeHoursSummary(dayLogs, [], unattributed, 'lincoln')
-    const london = computeHoursSummary(dayLogs, [], unattributed, 'london')
-    // The same 50 minutes is counted for BOTH kids — the leak.
-    expect(lincoln.adjustmentMinutes).toBe(50)
-    expect(london.adjustmentMinutes).toBe(50)
-  })
-
-  // ── PROPOSED (Step 2 — awaiting human confirmation). Enable by removing
-  // `.skip` once the computation-scoping change is approved: an unattributed
-  // adjustment must count for NEITHER kid until it is attributed. ──
-  it.skip('PROPOSED (Step 2): an unattributed adjustment does NOT inflate per-kid totals', () => {
+  // ── DATA-09: the DATA-05 leak is now CLOSED. The read filter matches
+  // `childId === child || childId === 'both'`, so a still-unattributed
+  // (`!childId`) adjustment counts for NEITHER kid (the legacy docs are migrated
+  // to 'both' at the data layer to stay hours-neutral — see the test below). ──
+  it('DATA-09: an unattributed adjustment counts for NEITHER kid (leak closed)', () => {
     const unattributed: HoursAdjustment[] = [
       { date: '2026-01-12', minutes: 50, reason: 'legacy backfill, no childId', subjectBucket: SubjectBucket.Reading },
     ]
@@ -556,8 +541,38 @@ describe('computeHoursSummary — adjustment attribution (DATA-05)', () => {
     const london = computeHoursSummary(dayLogs, [], unattributed, 'london')
     expect(lincoln.adjustmentMinutes).toBe(0)
     expect(london.adjustmentMinutes).toBe(0)
+    // Day-log totals are untouched — only the leaking adjustment is excluded.
     expect(lincoln.totalMinutes).toBe(60)
     expect(london.totalMinutes).toBe(40)
+  })
+
+  it("DATA-09: a 'both' adjustment counts for BOTH kids (legitimate family-wide time)", () => {
+    const shared: HoursAdjustment[] = [
+      { childId: 'both', date: '2026-01-12', minutes: 50, reason: 'Dad Lab — counts for both', subjectBucket: SubjectBucket.Science },
+    ]
+    const lincoln = computeHoursSummary(dayLogs, [], shared, 'lincoln')
+    const london = computeHoursSummary(dayLogs, [], shared, 'london')
+    expect(lincoln.adjustmentMinutes).toBe(50)
+    expect(london.adjustmentMinutes).toBe(50)
+    expect(lincoln.totalMinutes).toBe(110) // 60 day-log + 50 shared
+    expect(london.totalMinutes).toBe(90) //  40 day-log + 50 shared
+  })
+
+  it("DATA-09 hours-neutral: migrating an unattributed adjustment to 'both' preserves the prior per-kid totals", () => {
+    // Pre-DATA-09, an unattributed (`!childId`) adjustment counted for BOTH kids
+    // (the leak): Lincoln 60 + 50 = 110, London 40 + 50 = 90, 50 adj-minutes
+    // each. The migration stamps it 'both', which under the new filter must
+    // reproduce EXACTLY those figures — so no compliance total moves.
+    const afterMigration: HoursAdjustment[] = [
+      { childId: 'both', date: '2026-01-12', minutes: 50, reason: 'legacy backfill', subjectBucket: SubjectBucket.Reading },
+    ]
+    const lincoln = computeHoursSummary(dayLogs, [], afterMigration, 'lincoln')
+    const london = computeHoursSummary(dayLogs, [], afterMigration, 'london')
+    // Identical to the documented pre-migration count-for-both behavior.
+    expect(lincoln.adjustmentMinutes).toBe(50)
+    expect(lincoln.totalMinutes).toBe(110)
+    expect(london.adjustmentMinutes).toBe(50)
+    expect(london.totalMinutes).toBe(90)
   })
 })
 
@@ -609,9 +624,12 @@ describe('computeMonthlyTrend', () => {
   const hoursEntries: HoursEntry[] = [
     { childId: 'lincoln', date: '2026-01-20', minutes: 60, subjectBucket: SubjectBucket.Science, location: 'Home' },
   ]
+  // DATA-09: attributed to Lincoln (this whole dataset is Lincoln's). Pre-DATA-09
+  // these were unattributed and counted via the `!childId` leak; the new filter
+  // requires explicit attribution, so the reconciliation intent is unchanged.
   const adjustments: HoursAdjustment[] = [
-    { date: '2026-02-15', minutes: 15, reason: 'extra math', subjectBucket: SubjectBucket.Math },
-    { date: '2026-02-16', minutes: -10, reason: 'overcounted reading', subjectBucket: SubjectBucket.Reading },
+    { childId: 'lincoln', date: '2026-02-15', minutes: 15, reason: 'extra math', subjectBucket: SubjectBucket.Math },
+    { childId: 'lincoln', date: '2026-02-16', minutes: -10, reason: 'overcounted reading', subjectBucket: SubjectBucket.Reading },
   ]
 
   // Expected core minutes by month (core = Reading/LangArts/Math/Science/SocialStudies):
