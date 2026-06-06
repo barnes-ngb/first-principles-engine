@@ -1,24 +1,19 @@
-# Code Health Report — 2026-06-03
+# Code Health Report — 2026-06-06
 
 ## Metrics
 
-| Metric | Value | Change from last report (2026-06-02) |
+| Metric | Value | Change from last report (2026-06-03) |
 |--------|-------|--------------------------------------|
-| **Total lines** | **175,836** | +3,519 |
-| **Commits (main)** | **120** | −9 ⚠️ (see note) |
-| **Test files** | **168** | +8 |
-| **Tests passing** | **2,544** | +103 |
-| **Tests total** | **2,545** | +104 (1 skipped) |
-| **Test files running** | **167** | +8 |
-| **Firestore collections** | **37** | +1 (`stonebridgeProgress` — auto-fixed in CLAUDE.md) |
+| **Total lines** | **176,171** | +335 |
+| **Commits (main)** | **124** | +4 |
+| **Test files** | **169** | +1 |
+| **Tests passing** | **2,554** | +10 |
+| **Tests total** | **2,554** | +9 (0 skipped, 0 failing) |
+| **Firestore collections** | **37** | +0 |
 | **Cloud Functions** | **25** | +0 |
 | **Chat task types** | **17** | +0 |
 | **Routes** | **33** | +0 |
-| **Bundle size** | **3,901 kB / 1,149 kB gzip** | +23 kB |
-
-> **Commit count note:** `git fetch origin main` showed another forced update (`+ 237bfda...c7af96e main -> origin/main`). Commit count dropped from 129 → 120. This is the same pattern as last report. Human: verify forced-push to main is intentional (ongoing rebase/squash workflow).
-
-> **Test growth:** 2,544 tests pass across 167 files — up +103 tests and +8 files from last report. Healthy pace.
+| **Bundle size** | **3,904 kB / 1,150 kB gzip** | +3 kB |
 
 ---
 
@@ -26,11 +21,11 @@
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| **Build** | ✅ PASS | `tsc -b && vite build` clean in 18.43s |
-| **Lint** | ⚠️ 3 WARNINGS | 0 errors; 3 `react-hooks/exhaustive-deps` warnings (unchanged from last report) |
-| **Tests** | ✅ PASS | 2,544 passing, 1 skipped, 0 failing |
+| **Build** | ✅ PASS | `tsc -b && vite build` clean in 14.25s |
+| **Lint** | ⚠️ 3 WARNINGS | 0 errors; 3 `react-hooks/exhaustive-deps` warnings (unchanged from last 3 reports) |
+| **Tests** | ✅ PASS | 2,554 passing, 0 skipped, 0 failing |
 | **TypeScript** | ✅ PASS | Implied by clean build |
-| **npm audit (prod)** | ✅ PASS | 0 production vulnerabilities |
+| **npm audit (prod)** | 🚨 2 HIGH | **react-router** — see Issues below |
 
 ### Lint Warnings (unchanged from last report)
 
@@ -40,7 +35,7 @@ src/features/quest/useQuestSession.ts:779 — useCallback missing dep: sessionTi
 src/features/quest/useQuestSession.ts:2026 — useCallback missing dep: sessionTimer
 ```
 
-All three are `sessionTimer` ref omissions. Adding `sessionTimer` to deps would cause re-subscription loops — intentional omission. Suppression with `eslint-disable-next-line react-hooks/exhaustive-deps` on each line would silence these cleanly. Not auto-fixed (needs inline comment placement).
+All three are `sessionTimer` ref omissions. Intentional — adding to deps would cause re-subscription loops. Add `eslint-disable-next-line react-hooks/exhaustive-deps` on each line to clean up lint output.
 
 ---
 
@@ -48,19 +43,19 @@ All three are `sessionTimer` ref omissions. Adding `sessionTimer` to deps would 
 
 ### Stats Comparison (MASTER_OUTLINE vs Computed)
 
-| Claim | Doc value | Computed | Status |
+| Claim | Doc value (prev) | Computed | Status |
 |-------|-----------|----------|--------|
-| TypeScript lines | 172,317 | 175,836 | **DRIFT** (+2.0%) — auto-fixed |
-| Commits | 129 | 120 | **DRIFT** (forced-push) — auto-fixed |
-| Test files | 160 | 168 | **DRIFT** (+5.0%) — auto-fixed |
-| Firestore collections | 36 | 37 | **ERROR** (+1 new) — auto-fixed |
+| TypeScript lines | 175,836 | 176,171 | **DRIFT** (+335, +0.2%) — auto-fixed |
+| Commits | 120 | 124 | **DRIFT** (+4) — auto-fixed |
+| Test files | 168 | 169 | **DRIFT** (+1) — auto-fixed |
+| Firestore collections | 37 | 37 | ✅ OK |
 | Cloud Functions | 25 | 25 | ✅ OK |
 | Chat task types | 17 | 17 | ✅ OK |
 | Routes | 33 | 33 | ✅ OK |
 
 ### Missing File References
 
-Same 5 files as last two reports — all historical PR log references, not live path references. No action needed.
+Same 5 files as previous reports — all historical PR log references, not live path references. No action needed.
 
 | File | Status |
 |------|--------|
@@ -72,14 +67,14 @@ Same 5 files as last two reports — all historical PR log references, not live 
 
 ### Nav Accuracy
 
-Code nav matches MASTER_OUTLINE items. Same minor ordering discrepancy as last report: "Ask AI" is last in `AppShell.tsx` but listed between Books and Game Workshop in MASTER_OUTLINE. All items present; ordering-only gap, not flagged.
+Code nav matches MASTER_OUTLINE. Same ordering-only gap as prior reports: "Ask AI" is last in `AppShell.tsx` vs mid-list in MASTER_OUTLINE. All items present. ✅
 
-**Parent (code order):** Today, Plan My Week, Weekly Review, Progress, Records, Books, Game Workshop, Dad Lab, Settings, Ask AI  
+**Parent (code order):** Today, Plan My Week, Weekly Review, Progress, Records, Books, Game Workshop, Dad Lab, Settings, Ask AI
 **Kid (code order):** Today, Knowledge Mine, My Books, Books About Me, My Hero, My Stuff, Game Workshop, Dad Lab
 
 ### Collections — CLAUDE.md vs Code
 
-New collection `stonebridgeProgress` detected (not in CLAUDE.md). Added in this audit. See Auto-Fixed below.
+All 37 collection helpers in `firestore.ts` are documented. ✅
 
 ### Task Types — Registry vs SYSTEM_PROMPTS.md
 
@@ -87,11 +82,11 @@ All 17 task types documented in `docs/SYSTEM_PROMPTS.md`. `chat` and `generate` 
 
 ### Unindexed Docs
 
-No new unindexed docs found. ✅
+No unindexed docs found. ✅
 
 ### Stale Docs (marked CURRENT but >30 days since last commit)
 
-No stale docs found by git log check. ✅ (Note: `docs/investigations/backend-reliability-assessment.md` flagged last report — either updated or not picked up by this check.)
+No stale docs detected by git log check. ✅
 
 ---
 
@@ -99,73 +94,82 @@ No stale docs found by git log check. ✅ (Note: `docs/investigations/backend-re
 
 | Lines | File | Change from last report | Flag |
 |-------|------|------------------------|------|
-| 2,627 | `src/features/planner-chat/PlannerChatPage.tsx` | +7 | Known debt — stable |
-| 2,544 | `functions/src/ai/chat.ts` | +4 | Growing — decomposition target |
-| 2,278 | `src/features/books/BookEditorPage.tsx` | +0 | Known debt — stable |
-| 2,161 | `src/features/quest/useQuestSession.ts` | +0 | Stable — still above 2,000L threshold |
-| 1,875 | `src/features/avatar/MyAvatarPage.tsx` | **+51** | Growing |
+| 2,627 | `src/features/planner-chat/PlannerChatPage.tsx` | +0 | Known debt — stable |
+| 2,544 | `functions/src/ai/chat.ts` | +0 | Known debt — highest-value decomp target |
+| 2,278 | `src/features/books/BookEditorPage.tsx` | +0 | Stable |
+| 2,161 | `src/features/quest/useQuestSession.ts` | +0 | **Third consecutive report above 2,000L** |
+| 1,875 | `src/features/avatar/MyAvatarPage.tsx` | +0 | Stable |
 | 1,623 | `src/features/workshop/WorkshopPage.tsx` | +0 | Stable |
 | 1,606 | `src/features/avatar/VoxelCharacter.tsx` | +0 | Stable |
-| 1,566 | `functions/src/ai/contextSlices.ts` | **+22** | Growing — watch |
-| 1,482 | `src/features/records/records.logic.test.ts` | +106 | Test file — OK |
+| 1,566 | `functions/src/ai/contextSlices.ts` | +0 | Stable |
+| 1,500 | `src/features/records/records.logic.test.ts` | +18 | Test file — OK |
 | 1,363 | `src/features/planner-chat/chatPlanner.logic.ts` | +0 | — |
+| 1,251 | `src/features/records/RecordsPage.tsx` | **+92** | Growing — watch |
 | 1,162 | `src/features/evaluate/EvaluateChatPage.tsx` | +0 | — |
-| 1,159 | `src/features/records/RecordsPage.tsx` | +4 | — |
 | 1,156 | `src/features/planner-chat/chatPlanner.logic.test.ts` | +0 | Test file — OK |
 | 1,123 | `src/features/shelly-chat/useShellyChatFlows.ts` | +0 | — |
-| 1,112 | `src/features/today/TodayChecklist.tsx` | **+42** | Growing |
+| 1,112 | `src/features/today/TodayChecklist.tsx` | +0 | — |
 | 1,104 | `src/features/settings/AvatarAdminTab.tsx` | +0 | — |
-| 1,103 | `src/features/today/TodayPage.tsx` | +7 | — |
+| 1,103 | `src/features/today/TodayPage.tsx` | +0 | — |
 | 1,065 | `src/features/quest/ReadingQuest.tsx` | +0 | — |
-| 1,054 | `src/features/today/KidTodayView.tsx` | +14 | — |
+| 1,054 | `src/features/today/KidTodayView.tsx` | +0 | — |
 | 1,050 | `functions/src/ai/evaluate.ts` | +0 | — |
+| 918 | `functions/src/ai/tasks/monthlyReviewData.ts` | new entry | — |
+| 913 | `src/features/avatar/voxel/buildArmorPiece.ts` | new entry | — |
+| 908 | `functions/src/ai/chat.test.ts` | new entry | — |
 
 ## Decomposition Candidates
 
 | File | Lines | Priority | Notes |
 |------|-------|----------|-------|
-| `useQuestSession.ts` | 2,161 | HIGH | Above 2,000L for second consecutive report. Quest, comprehension, fluency all in one hook. CLAUDE.md names this as debt. Splitting by quest domain is the right move. |
-| `chat.ts` (CF) | 2,544 | HIGH | `buildQuestPrompt` alone is 400+ lines. CLAUDE.md notes highest-leverage decomp: extract prompt builders to separate files. |
-| `contextSlices.ts` | 1,566 | MEDIUM | +22 this cycle. Growing with each new task type. |
-| `PlannerChatPage.tsx` | 2,627 | LOW | Stable (+7). State management is ~1,700L. Known debt, no urgency. |
+| `useQuestSession.ts` | 2,161 | HIGH | Third consecutive report above 2,000L. No growth but no progress. Quest/comprehension/fluency/encoding all in one hook. |
+| `chat.ts` (CF) | 2,544 | HIGH | `buildQuestPrompt` alone is 400+ lines. Extract prompt builders to `tasks/` files. |
+| `RecordsPage.tsx` | 1,251 | WATCH | +92 this cycle — notable growth. |
+| `contextSlices.ts` | 1,566 | MEDIUM | Stable this cycle. Growing with each new task type. |
+| `PlannerChatPage.tsx` | 2,627 | LOW | Stable. State management ~1,700L. Known debt, no urgency. |
 
 ---
 
 ## Issues Found
 
 ### Auto-Fixed
-- Updated MASTER_OUTLINE.md TypeScript lines: 172,317 → 175,836
-- Updated MASTER_OUTLINE.md commits: 129 → 120 (forced-push noted)
-- Updated MASTER_OUTLINE.md test files: 160 → 168
-- Updated MASTER_OUTLINE.md Firestore collections: 36 → 37
-- Added `stonebridgeProgress` collection to CLAUDE.md Firestore table (Banner Rally per-child mission progress, derived read-only from XP ledger reading events — never touches XP/diamond economy)
+- Updated MASTER_OUTLINE.md TypeScript lines: 175,836 → 176,171
+- Updated MASTER_OUTLINE.md commits: 120 → 124
+- Updated MASTER_OUTLINE.md test files: 168 → 169
 
 ### Needs Human Attention
 
-1. **Forced push to `origin/main` (second consecutive report)** — Another forced update: `+ 237bfda...c7af96e main -> origin/main`. Commit count 129 → 120. This is recurring — either the rebase/squash workflow is expected, or there's a process concern. Recommend confirming whether this is the intended workflow or a git hygiene issue.
+1. **🚨 react-router HIGH security vulnerabilities (NEW — was 0 production vulns last report)** — `npm audit --production` now shows 2 HIGH + 2 moderate in `react-router` (7.0.0–7.14.2 affected):
+   - GHSA-49rj-9fvp-4h2h: Arbitrary constructor invocation via TYPE_ERROR deserialization (potential unauth RCE)
+   - GHSA-2j2x-hqr9-3h42: Open redirect via protocol-relative URL
+   - GHSA-8x6r-g9mw-2r78: DoS via unbounded path expansion in `__manifest`
+   - GHSA-rxv8-25v2-qmq8: DoS via reflected user input in single-fetch
+   - `npm audit fix` reports a safe non-breaking fix is available. Run `npm audit fix`, verify build + tests pass, then push. **Production dependency — prioritize.**
 
-2. **`useQuestSession.ts` at 2,161 lines — second consecutive report above threshold** — No growth this cycle but still above 2,000L. Decomposition run should be assigned if not already planned.
+2. **`useQuestSession.ts` at 2,161 lines — third consecutive report above threshold** — No growth but no assigned decomposition run. Recommend scheduling the split (quest / comprehension / fluency / encoding) soon.
 
-3. **Lint warnings** (3) — `sessionTimer` dependency omissions in `EvaluateChatPage.tsx:282`, `useQuestSession.ts:779`, and `useQuestSession.ts:2026`. Intentional omissions but should get `eslint-disable-next-line` suppressions to keep lint clean.
+3. **`RecordsPage.tsx` grew +92 lines this cycle** — Now 1,251 lines. Worth watching before it becomes a decomposition problem.
 
-4. **Bundle size 3.9MB** — main chunk is 3,901 kB (1,149 kB gzip, +7 kB from last report). Route-level React.lazy splitting would reduce initial load. Heaviest: Three.js (avatar), jsPDF (print), curriculum map data. Architectural decision required.
+4. **Lint warnings** (3, unchanged for 3+ reports) — `sessionTimer` dependency omissions. Add `eslint-disable-next-line react-hooks/exhaustive-deps` to clean up. Locations:
+   - `src/features/evaluate/EvaluateChatPage.tsx:282`
+   - `src/features/quest/useQuestSession.ts:779`
+   - `src/features/quest/useQuestSession.ts:2026`
 
-5. **Dead exports in `src/core/types/`** — same 20 items as last report. Verify before removing — may be used in tests or dynamic imports:
-   - `ReadingTags`, `MathTags`, `ALL_SKILL_TAGS` in `skillTags.ts`
-   - `WorkingLevelSource`, `QuestOutcome` in `evaluation.ts`
-   - 10 zod schema exports in `zod.ts`
-   - `getPresetTheme`, `resolveBookCreator` in `books.ts`
-   - `CardDifficulty` in `workshop.ts`
-   - `PIECE_POSITIONS` in `xp.ts`
-   - `SUPPORT_LEVEL_ORDER` in `enums.ts`
+5. **Bundle size 3.9MB** — Route-level React.lazy splitting would reduce initial load. Heaviest: Three.js (avatar), jsPDF (print), curriculum map data. Architectural decision required.
 
-6. **npm audit: 9 total vulnerabilities (8 moderate, 1 critical) in dev deps** — 0 production vulnerabilities. Run `npm audit` for details. Consider `npm audit fix` for non-breaking resolutions.
+6. **Dead exports in `src/core/utils/`** — Detected by grep scan. Verify before removing (may be used in tests or dynamic imports):
+   - `blockerLifecycle.ts`: `RESOLVING_THRESHOLD`, `RESOLVED_THRESHOLD`, `RESOLVED_MIN_SESSIONS`, `TARGETED_EVIDENCE_WEIGHT`
+   - `sessionTimer.ts`: `IDLE_THRESHOLD_MS`, `MAX_SESSION_SECONDS`
+   - `complianceMapping.ts`: `inferMoSubjects`, `resolveSubjectBucket`, `inferThemeSubjects`, `autoTagBlocks`
+   - `format.ts`: `normalizeDateString`, `parseDateInput`
+   - `energyPatterns.ts`: `EnergyTrend`, `analyzeDayOfWeekPatterns`, `detectStreaks`, `detectTrend`, `analyzeEnergyPatterns`
+   - `workbookMatching.ts`: `normalizeWorkbookName`
 
 ---
 
 ## Charter Alignment
 
-All 17 chat task types verified. `chat` and `generate` both route to `chatHandler.ts` which calls `buildContextForTask` (includes charter context slice). All 15 dedicated task files reference charter context via `buildContextForTask` or `CHARTER_PREAMBLE`. ✅
+All 17 chat task types verified. `chat` and `generate` both route to `chatHandler.ts` which calls `buildContextForTask` (includes charter context slice). All 15 dedicated task files reference charter context. ✅
 
 ---
 
@@ -194,12 +198,12 @@ All 17 chat task types verified. `chat` and `generate` both route to `chatHandle
 | 0 | dad-lab |
 | 0 | auth |
 
-Zero-test features are primarily UI pages (progress tabs, login flow, auth guard, 404) where vitest coverage is low-value compared to Firestore integration behavior. `dad-lab` is the only zero-test feature with meaningful business logic — still flagging for future test run assignment.
+Zero-test features are primarily UI pages (progress tabs, login flow, auth guard, 404). `dad-lab` remains the only zero-test feature with meaningful business logic.
 
 ---
 
 ## Dependency Notes
 
-- `npm audit --production`: **0 vulnerabilities** ✅
-- `npm audit` (all): 9 vulnerabilities (8 moderate, 1 critical) — dev deps only
-- npm v10.9.7 installed; v11.16.0 available (major) — low priority upgrade
+- **react-router**: 2 HIGH + 2 moderate production vulnerabilities. Safe fix available via `npm audit fix`. Priority upgrade.
+- **npm**: New major version available (10.9.7 → 11.16.0) — cosmetic, no urgency.
+- **Dev-only vulnerabilities**: 9 total (8 moderate, 1 critical) — same as last report. Not production-exposed.
