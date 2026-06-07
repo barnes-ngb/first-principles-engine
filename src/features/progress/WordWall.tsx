@@ -17,14 +17,15 @@ import PatternSummary from './PatternSummary'
 import { useWordWall } from './useWordWall'
 import type { WordFilter } from './useWordWall'
 import type { WordProgress } from '../../core/types'
+import { kidPalette } from '../../app/tokens'
 
 const MC = {
-  bg: 'rgba(0,0,0,0.92)',
-  gold: '#FCDB5B',
-  green: '#7EFC20',
-  diamond: '#5BFCEE',
-  stone: '#8B8B8B',
-  darkStone: '#3C3C3C',
+  bg: kidPalette.bg,
+  gold: kidPalette.gold,
+  green: kidPalette.xpGreen,
+  diamond: kidPalette.diamond,
+  stone: kidPalette.stone,
+  darkStone: kidPalette.darkStone,
   font: '"Press Start 2P", monospace',
 } as const
 

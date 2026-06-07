@@ -8,15 +8,16 @@ import type { ArmorTierInfo } from '../../core/xp/armorTiers'
 import { getArmorTier, getNextTierProgress } from '../../core/xp/armorTiers'
 import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import type { QuestStreak } from './questTypes'
+import { kidPalette } from '../../app/tokens'
 
 const MC = {
-  bg: 'rgba(0,0,0,0.92)',
-  gold: '#FCDB5B',
-  green: '#7EFC20',
-  diamond: '#5BFCEE',
-  stone: '#8B8B8B',
+  bg: kidPalette.bg,
+  gold: kidPalette.gold,
+  green: kidPalette.xpGreen,
+  diamond: kidPalette.diamond,
+  stone: kidPalette.stone,
   white: '#FFFFFF',
-  darkStone: '#3C3C3C',
+  darkStone: kidPalette.darkStone,
   font: '"Press Start 2P", monospace',
 } as const
 
@@ -288,7 +289,7 @@ export default function QuestSummary({
                 left: 0,
                 height: '100%',
                 width: `${progress * 100}%`,
-                background: 'linear-gradient(180deg, #7EFC20 0%, #5BC010 50%, #3A8008 100%)',
+                background: `linear-gradient(180deg, ${MC.green} 0%, #5BC010 50%, #3A8008 100%)`,
                 transition: 'width 0.5s ease-out',
               }}
             />

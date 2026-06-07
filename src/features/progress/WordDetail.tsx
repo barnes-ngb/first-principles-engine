@@ -7,6 +7,7 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import type { WordProgress } from '../../core/types'
+import { kidPalette } from '../../app/tokens'
 
 interface WordDetailProps {
   word: WordProgress | null
@@ -34,7 +35,7 @@ export default function WordDetail({
           fontFamily: '"Press Start 2P", monospace',
           fontSize: '0.7rem',
           bgcolor: 'rgba(0,0,0,0.92)',
-          color: '#FCDB5B',
+          color: kidPalette.gold,
         }}
       >
         {word.word}
@@ -72,7 +73,7 @@ export default function WordDetail({
         <Button
           size="small"
           onClick={() => onAddToStory(word.word)}
-          sx={{ color: '#5BFCEE', fontSize: '0.7rem' }}
+          sx={{ color: kidPalette.diamond, fontSize: '0.7rem' }}
         >
           Add to story
         </Button>
@@ -80,12 +81,12 @@ export default function WordDetail({
           <Button
             size="small"
             onClick={() => onMarkAsKnown(word.word)}
-            sx={{ color: '#7EFC20', fontSize: '0.7rem' }}
+            sx={{ color: kidPalette.xpGreen, fontSize: '0.7rem' }}
           >
             Mark as known
           </Button>
         )}
-        <Button size="small" onClick={onClose} sx={{ color: '#8B8B8B' }}>
+        <Button size="small" onClick={onClose} sx={{ color: kidPalette.stone }}>
           Close
         </Button>
       </DialogActions>
@@ -100,7 +101,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
         sx={{
           fontFamily: '"Press Start 2P", monospace',
           fontSize: '0.4rem',
-          color: '#8B8B8B',
+          color: kidPalette.stone,
           lineHeight: 1.8,
         }}
       >
