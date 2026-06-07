@@ -165,7 +165,7 @@ No stale docs detected by git log check. ✅
 
 ## Charter Alignment
 
-All 17 chat task types verified. `chat` and `generate` both route to `chatHandler.ts` which calls `buildContextForTask` (includes charter context slice). All 15 dedicated task files reference charter context. ✅
+`chat` and `generate` route to `chatHandler.ts` which calls `buildContextForTask`. ⚠️ **5 task types missing charter in TASK_CONTEXT (ETHOS-01 OPEN):** `quest`, `generateStory`, `reviseStory`, `revisePage`, `scan` — none have `"charter"` in their `contextSlices.ts` TASK_CONTEXT entry. `analyzePatterns` also missing (low risk — internal analysis). Fix: add `"charter"` as first element to each of those 6 TASK_CONTEXT arrays (~6 lines). The other 11 task types include charter. See `docs/review/REVIEW_HOME_BASE.md` ETHOS-01.
 
 ---
 
