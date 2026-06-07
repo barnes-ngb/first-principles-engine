@@ -367,7 +367,7 @@ Other chat-dispatched task types (17 total in `tasks/index.ts` registry) are ind
 | `src/features/avatar/MyAvatarPage.tsx` | Hero Hub shell + avatar systems |
 | `src/features/avatar/HeroMissionCard.tsx` | Hero Hub mission card logic + rendering |
 | `src/features/avatar/HeroLauncherTiles.tsx` | Hero Hub launcher tiles (Mine/Workshop/Books); per-child filter |
-| `src/features/avatar/StonebridgePreviewCard.tsx` | Stonebridge narrative preview surface |
+| `src/features/avatar/stonebridge/StonebridgeMissionCard.tsx` | Stonebridge live mission card (replaced StonebridgePreviewCard) |
 | `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
 | `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |
 | `src/features/avatar/armorGate.ts` | Forge tier gate logic + phantom piece fix |

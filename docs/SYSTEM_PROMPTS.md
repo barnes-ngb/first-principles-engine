@@ -2,7 +2,7 @@
 
 > Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
-> Last updated: 2026-05-29 (health audit auto-fix: added chapterQuestions, reviseStory, monthlyReview task entries; section 4 prose may lag current implementations)
+> Last updated: 2026-06-07 (health audit auto-fix: added reviseStory, revisePage, chapterQuestions, monthlyReview to CHAT_TASKS registry diagram; section 4 prose may lag current implementations)
 
 ---
 
@@ -38,6 +38,8 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       evaluate   → handleEvaluate
                                       quest      → handleQuest
                                       generateStory → handleGenerateStory
+                                      reviseStory → handleReviseStory
+                                      revisePage → handleRevisePage
                                       workshop   → handleWorkshop
                                       analyzeWorkbook → handleAnalyzeWorkbook
                                       disposition → handleDisposition
@@ -45,6 +47,8 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       weeklyFocus → handleWeeklyFocus
                                       scan       → handleScan
                                       shellyChat → handleShellyChat
+                                      chapterQuestions → handleChapterQuestions
+                                      monthlyReview → handleMonthlyReview
                                            ↓
                                   tasks/<handler>.ts
                                     → buildContextForTask(taskType, ...)  [contextSlices.ts]
