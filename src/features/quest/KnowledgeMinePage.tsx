@@ -8,6 +8,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import Page from '../../components/Page'
+import { ErrorState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -491,9 +492,9 @@ export default function KnowledgeMinePage() {
 
       {/* Error display */}
       {quest.aiError && (
-        <Alert severity="error" sx={{ mt: 2 }}>
-          Something went wrong: {quest.aiError.message}
-        </Alert>
+        <Box sx={{ mt: 2 }}>
+          <ErrorState message="Something went wrong" error={quest.aiError} />
+        </Box>
       )}
     </Page>
   )

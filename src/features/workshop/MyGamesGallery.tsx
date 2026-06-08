@@ -15,6 +15,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import MicIcon from '@mui/icons-material/Mic'
 import { deleteDoc, doc, getDocs, orderBy, query, where } from 'firebase/firestore'
 import { ref, listAll, deleteObject } from 'firebase/storage'
+import { LoadingState } from '../../components/states'
 import { db, storyGamesCollection, artifactsCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import type { Child, StoryGame } from '../../core/types'
@@ -194,11 +195,7 @@ export default function MyGamesGallery({
   }
 
   if (loading) {
-    return (
-      <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
-        Loading your games...
-      </Typography>
-    )
+    return <LoadingState fullHeight label="Loading your games…" />
   }
 
   // Filter: kids see own games + others' finished games; parents see all
