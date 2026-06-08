@@ -8,6 +8,7 @@ import { getDocs, orderBy, query, where } from 'firebase/firestore'
 
 import ArtifactGallery from '../../components/ArtifactGallery'
 import Page from '../../components/Page'
+import { LoadingState } from '../../components/states'
 import PhotoCapture from '../../components/PhotoCapture'
 import AudioRecorder from '../../components/AudioRecorder'
 import SectionCard from '../../components/SectionCard'
@@ -204,7 +205,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
   if (loading) {
     return (
       <Page>
-        <Typography color="text.secondary">Loading...</Typography>
+        <LoadingState fullHeight label="Loading..." />
       </Page>
     )
   }

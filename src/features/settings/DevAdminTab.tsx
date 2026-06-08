@@ -27,6 +27,7 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 
+import { LoadingState } from '../../components/states'
 import type { BackfillResult } from './backfillWorkingLevels'
 import { backfillWorkingLevels } from './backfillWorkingLevels'
 import type { BackfillBlockIdsResult } from './backfillBlockIds'
@@ -512,7 +513,7 @@ export default function DevAdminTab() {
           Chapter Book Library
         </Typography>
         {loadingBooks && bookCount === null ? (
-          <CircularProgress size={24} />
+          <LoadingState />
         ) : (
           <Typography variant="body2" color="text.secondary" gutterBottom>
             <code>chapterBooks</code> collection: <strong>{bookCount ?? '?'}</strong> book(s)
@@ -668,7 +669,7 @@ export default function DevAdminTab() {
             )}
           </Stack>
         ) : (
-          <CircularProgress size={24} />
+          <LoadingState />
         )}
       </Box>
 
@@ -721,7 +722,7 @@ export default function DevAdminTab() {
             )}
           </Stack>
         ) : weekInfo?.readAloudBookId ? (
-          <CircularProgress size={24} />
+          <LoadingState />
         ) : (
           <Typography variant="body2" color="text.secondary">
             No read-aloud book set for this week.

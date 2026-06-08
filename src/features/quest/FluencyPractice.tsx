@@ -9,15 +9,18 @@ import { useTTS } from '../../core/hooks/useTTS'
 import type { FluencySelfRating } from './questTypes'
 import { QuestScreen } from './questTypes'
 import type { useQuestSession } from './useQuestSession'
+import { kidPalette } from '../../app/tokens'
 
 const MC = {
-  bg: 'rgba(0,0,0,0.92)',
-  gold: '#FCDB5B',
-  green: '#7EFC20',
-  diamond: '#5BFCEE',
-  stone: '#8B8B8B',
+  bg: kidPalette.bg,
+  gold: kidPalette.gold,
+  green: kidPalette.xpGreen,
+  diamond: kidPalette.diamond,
+  stone: kidPalette.stone,
   white: '#FFFFFF',
-  darkStone: '#3C3C3C',
+  darkStone: kidPalette.darkStone,
+  // Near-duplicate of kidPalette.red (#FC5B5B) preserved verbatim — reconciling
+  // it is a deliberate later decision, not a silent rename here.
   red: '#FF6B6B',
   font: '"Press Start 2P", monospace',
 } as const

@@ -1,6 +1,7 @@
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { POSES } from './voxel/poseSystem'
+import { kidPalette } from '../../app/tokens'
 
 interface PoseButtonsProps {
   onPose: (poseId: string) => void
@@ -46,13 +47,13 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true, pos
               scrollSnapAlign: 'start',
               borderRadius: isLincoln ? '8px' : '50%',
               border: isActive
-                ? '2px solid #FFD700'
+                ? `2px solid ${kidPalette.goldBright}`
                 : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
               background: isActive
                 ? (isLincoln ? 'rgba(255,215,0,0.12)' : 'rgba(255,215,0,0.1)')
                 : (isLincoln ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'),
               color: isActive
-                ? '#FFD700'
+                ? kidPalette.goldBright
                 : (isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)'),
               cursor: isDimmed ? 'default' : 'pointer',
               transition: 'all 0.2s ease',
@@ -72,7 +73,7 @@ export default function PoseButtons({ onPose, currentPose, isLincoln = true, pos
                 background: isActive
                   ? (isLincoln ? 'rgba(255,215,0,0.2)' : 'rgba(255,215,0,0.18)')
                   : (isLincoln ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'),
-                borderColor: isActive ? '#FFD700' : (isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)'),
+                borderColor: isActive ? kidPalette.goldBright : (isLincoln ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)'),
                 transform: 'translateY(-1px)',
               },
               '&:active': isDimmed ? {} : {

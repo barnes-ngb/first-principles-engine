@@ -4,11 +4,11 @@ import { getDocs, limit, orderBy, query } from 'firebase/firestore'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
+import { EmptyState, ErrorState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { errorLogsCollection } from '../../core/firebase/firestore'
 import type { ErrorLog } from '../../core/types/errorLog'
@@ -84,22 +84,12 @@ export default function DiagnosticsTab() {
         information — type and location only, no names or content.
       </Typography>
 
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-          <CircularProgress size={28} />
-        </Box>
-      )}
+      {loading && <LoadingState fullHeight />}
 
-      {error && (
-        <Typography variant="body2" color="error">
-          {error}
-        </Typography>
-      )}
+      {error && <ErrorState message={error} />}
 
       {!loading && !error && entries.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
-          No errors recorded. 🎉
-        </Typography>
+        <EmptyState title="No errors recorded. 🎉" />
       )}
 
       {!loading &&

@@ -17,6 +17,7 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Tooltip from '@mui/material/Tooltip'
 
 import Page from '../../components/Page'
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { artifactsCollection, hoursCollection } from '../../core/firebase/firestore'
@@ -325,9 +326,7 @@ export default function BookReaderPage() {
   if (loading) {
     return (
       <Page>
-        <Stack alignItems="center" py={4}>
-          <CircularProgress />
-        </Stack>
+        <LoadingState fullHeight />
       </Page>
     )
   }
@@ -335,10 +334,14 @@ export default function BookReaderPage() {
   if (!book) {
     return (
       <Page>
-        <Typography color="text.secondary">Book not found.</Typography>
-        <Button onClick={() => navigate('/books')} startIcon={<ArrowBackIcon />}>
-          Back to My Books
-        </Button>
+        <EmptyState
+          title="Book not found."
+          action={
+            <Button onClick={() => navigate('/books')} startIcon={<ArrowBackIcon />}>
+              Back to My Books
+            </Button>
+          }
+        />
       </Page>
     )
   }

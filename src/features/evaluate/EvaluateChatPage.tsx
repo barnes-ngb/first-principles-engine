@@ -10,7 +10,6 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -26,6 +25,7 @@ import { addDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where 
 
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
+import { LoadingState, ErrorState } from '../../components/states'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -806,7 +806,7 @@ export default function EvaluateChatPage() {
         </Alert>
       ) : initializing ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-          <CircularProgress />
+          <LoadingState size={40} />
         </Box>
       ) : (
         <Stack spacing={2}>
@@ -879,7 +879,7 @@ export default function EvaluateChatPage() {
                 ))}
                 {aiLoading && (
                   <Box sx={{ alignSelf: 'flex-start', px: 2, py: 1 }}>
-                    <CircularProgress size={20} />
+                    <LoadingState size={20} />
                   </Box>
                 )}
                 <div ref={chatEndRef} />
@@ -912,7 +912,7 @@ export default function EvaluateChatPage() {
           )}
 
           {aiError && (
-            <Alert severity="error">AI error: {aiError.message}</Alert>
+            <ErrorState message={`AI error: ${aiError.message}`} />
           )}
 
           {/* Findings panel */}

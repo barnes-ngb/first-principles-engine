@@ -2,13 +2,14 @@ import Box from '@mui/material/Box'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import type { PatternSummary as PatternSummaryType } from './useWordWall'
+import { kidPalette } from '../../app/tokens'
 
 const MC = {
-  bg: 'rgba(0,0,0,0.92)',
-  gold: '#FCDB5B',
-  green: '#7EFC20',
-  stone: '#8B8B8B',
-  darkStone: '#3C3C3C',
+  bg: kidPalette.bg,
+  gold: kidPalette.gold,
+  green: kidPalette.xpGreen,
+  stone: kidPalette.stone,
+  darkStone: kidPalette.darkStone,
   font: '"Press Start 2P", monospace',
 } as const
 

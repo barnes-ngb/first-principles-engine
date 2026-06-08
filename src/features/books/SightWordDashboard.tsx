@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -15,6 +14,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 
 import Page from '../../components/Page'
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { SightWordProgress } from '../../core/types'
@@ -80,9 +80,7 @@ export default function SightWordDashboard() {
   if (loading) {
     return (
       <Page>
-        <Stack alignItems="center" py={4}>
-          <CircularProgress />
-        </Stack>
+        <LoadingState fullHeight />
       </Page>
     )
   }
@@ -103,22 +101,20 @@ export default function SightWordDashboard() {
       </Stack>
 
       {allProgress.length === 0 ? (
-        <Box sx={{ textAlign: 'center', py: 6 }}>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No sight words tracked yet
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Create a sight word story to start tracking progress!
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AutoFixHighIcon />}
-            onClick={() => navigate('/books/create-story')}
-            sx={{ minHeight: 48 }}
-          >
-            Create Sight Word Story
-          </Button>
-        </Box>
+        <EmptyState
+          title="No sight words tracked yet"
+          description="Create a sight word story to start tracking progress!"
+          action={
+            <Button
+              variant="contained"
+              startIcon={<AutoFixHighIcon />}
+              onClick={() => navigate('/books/create-story')}
+              sx={{ minHeight: 48 }}
+            >
+              Create Sight Word Story
+            </Button>
+          }
+        />
       ) : (
         <>
           {/* Summary bar */}

@@ -13,6 +13,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import SectionCard from '../../components/SectionCard'
+import { EmptyState } from '../../components/states'
 import type {
   BookProgress,
   ChapterBook,
@@ -125,20 +126,16 @@ export default function ChapterQuestionPool({
   if (!bookProgress) {
     return (
       <SectionCard title={`\u{1F4D6} ${book.title}`}>
-        <Stack spacing={1.5} alignItems="center" sx={{ py: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            Chapter questions haven&apos;t been generated yet.
-          </Typography>
-          {onRetryGeneration && (
-            <Button
-              variant="contained"
-              size="small"
-              onClick={() => onRetryGeneration()}
-            >
-              Generate chapter questions
-            </Button>
-          )}
-        </Stack>
+        <EmptyState
+          title="Chapter questions haven't been generated yet."
+          action={
+            onRetryGeneration ? (
+              <Button variant="contained" size="small" onClick={() => onRetryGeneration()}>
+                Generate chapter questions
+              </Button>
+            ) : undefined
+          }
+        />
       </SectionCard>
     )
   }

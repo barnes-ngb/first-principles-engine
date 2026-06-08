@@ -13,6 +13,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import ScanButton from '../../components/ScanButton'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
+import { ErrorState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
@@ -197,19 +198,16 @@ export default function CertificateScanSection() {
 
       {/* Loading state */}
       {scanning && (
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
-          <CircularProgress size={20} />
-          <Typography variant="body2" color="text.secondary">
-            Analyzing image...
-          </Typography>
-        </Stack>
+        <Box sx={{ mt: 1 }}>
+          <LoadingState label="Analyzing image..." />
+        </Box>
       )}
 
       {/* Scan error */}
       {scanError && (
-        <Alert severity="error" sx={{ mt: 1 }}>
-          {scanError}
-        </Alert>
+        <Box sx={{ mt: 1 }}>
+          <ErrorState message={scanError} />
+        </Box>
       )}
 
       {/* Results display */}
@@ -245,9 +243,9 @@ export default function CertificateScanSection() {
 
       {/* Update error */}
       {updateError && (
-        <Alert severity="error" sx={{ mt: 1 }}>
-          Failed to update progress: {updateError}
-        </Alert>
+        <Box sx={{ mt: 1 }}>
+          <ErrorState message={`Failed to update progress: ${updateError}`} />
+        </Box>
       )}
 
       {/* Confirmation dialog */}

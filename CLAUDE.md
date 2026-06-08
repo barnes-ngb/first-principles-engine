@@ -141,7 +141,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components (SectionErrorBoundary, ErrorBoundary, ScanButton/ScanResultsPanel, XpDiamondBar, ChildSelector, PhotoCapture, `VoiceInput/` — reusable Whisper/Web-Speech voice input module, `avatar/` — TierUpCeremony)
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useAudioRecording, useSpeechRecognition, useTranscription, useTTS, useActivityConfigs, useScanToActivityConfig, useCertificateProgress, useMonthlyReviews)
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useChildSkillSnapshot, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useAudioRecording, useSpeechRecognition, useTranscription, useTTS, useActivityConfigs, useScanToActivityConfig, useCertificateProgress, useMonthlyReviews)
 - `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `stonebridge.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, domain mapping, blocker lifecycle, workbook matching, session timer, image compression, `sanitizeJson` (client port of the functions LLM-JSON parser — deliberate duplication, `// TODO: consolidate`)
 - `src/core/ai/` — AI service interface (useAI hook), feature flags, prompt templates (`prompts/plannerPrompts.ts`)
@@ -172,6 +172,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/settings/` — AI usage, account, avatar admin, sticker library, Dev tab (admin-only: chapter book seeding, Sunday cleanup, working levels backfill)
 - `src/features/shelly-chat/` — Shelly AI chat assistant. Decomposed (ARCH-09): `ShellyChatPage` thin shell, `useShellyChatState` (state/refs), `useShellyChatFlows` (effects + send/image/upload/thread-CRUD handlers), `useShellyChatActions` (portal write layer — propose→confirm→write for sight words, profile soft fields, and additive skill-snapshot edits), `reflectionSuggestions`, `parseFollowups`, `parseChatActions`, `parseFriction`, `logFeatureRequest`. Portal scope: Tier A+B complete (sight words + `editProfileField`), Tier C Option 2 live (additive snapshot edits via `skillSnapshotWrites.ts`). All writes are confirm-gated. See `docs/barnes-shelly-chat-portal-design.md` for full design.
 - `src/features/today/` — Parent Today (decomposed: TodayPage shell + TodayChecklist, WeekFocusCard, UnifiedCaptureCard, TeachBackSection, ChapterQuestionPool) + Kid Today (decomposed: KidTodayView shell + KidChecklist, KidTeachBack, KidChapterPool, KidConundrumResponse, KidExtraLogger, KidCelebration) + routine sync, XP, scan advance, rollover, budget enforcement
+- `src/features/ui-preview/` — Component gallery (dev-only, unlinked from nav)
 - `src/features/weekly-review/` — Weekly review page
 - `src/features/workshop/` — Story Game Workshop (board/adventure/card games), `steps/` sub-module (wizard step components)
 - `src/features/monthly-review/` — Monthly review books (reader, kid books-about-me page, generate/publish controls, photo handling)
@@ -184,7 +185,7 @@ const items = snapshot.docs.map((doc) => ({
 - runs daily school (Normal Day / Minimum Viable Day)
 - captures evidence artifacts (notes/photos/audio)
 - visualizes weekly progress (Flywheel)
-- tracks growth (Ladders + Milestones)
+- tracks growth (Dispositions + Milestones + Curriculum Map)
 - exports records (MO-friendly: logs + hours + portfolio + eval)
 - adapts weekly via AI-powered evaluation loop
 

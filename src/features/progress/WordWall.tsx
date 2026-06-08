@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Container from '@mui/material/Container'
 import Fab from '@mui/material/Fab'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
+import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import WordBlock from './WordBlock'
@@ -17,14 +17,15 @@ import PatternSummary from './PatternSummary'
 import { useWordWall } from './useWordWall'
 import type { WordFilter } from './useWordWall'
 import type { WordProgress } from '../../core/types'
+import { kidPalette } from '../../app/tokens'
 
 const MC = {
-  bg: 'rgba(0,0,0,0.92)',
-  gold: '#FCDB5B',
-  green: '#7EFC20',
-  diamond: '#5BFCEE',
-  stone: '#8B8B8B',
-  darkStone: '#3C3C3C',
+  bg: kidPalette.bg,
+  gold: kidPalette.gold,
+  green: kidPalette.xpGreen,
+  diamond: kidPalette.diamond,
+  stone: kidPalette.stone,
+  darkStone: kidPalette.darkStone,
   font: '"Press Start 2P", monospace',
 } as const
 
@@ -103,8 +104,8 @@ export default function WordWall() {
 
   if (loading) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4, textAlign: 'center' }}>
-        <CircularProgress />
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <LoadingState fullHeight />
       </Container>
     )
   }

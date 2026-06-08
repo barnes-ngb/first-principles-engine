@@ -7,6 +7,7 @@ import Typography from '@mui/material/Typography'
 import LockIcon from '@mui/icons-material/Lock'
 import type { AvatarProfile } from '../../core/types'
 import { generateMinecraftSkin, downloadMinecraftSkin } from './voxel/minecraftSkin'
+import { kidPalette } from '../../app/tokens'
 
 interface MinecraftSkinExportProps {
   profile: AvatarProfile
@@ -25,7 +26,7 @@ export default function MinecraftSkinExport({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   const isLocked = tierName === 'WOOD'
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
   const handleOpen = useCallback(() => {

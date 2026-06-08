@@ -4,6 +4,9 @@ import { HERO_VIVIDNESS } from './heroVividness'
 
 // ── Glow colors per tier (Iron+ only) ────────────────────────────
 
+// TODO(ARCH-21): GOLD (0xffd700) = kidPalette.goldBright in numeric form.
+// Deferred — adopt once the voxel lane can be render-verified (string token vs
+// number-typed Record).
 const GLOW_COLORS: Record<string, number> = {
   IRON: 0xccccff, // silver-white
   GOLD: 0xffd700, // gold

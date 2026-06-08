@@ -24,6 +24,7 @@ import MenuBookIcon from '@mui/icons-material/MenuBook'
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
+import { EmptyState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
@@ -252,14 +253,10 @@ export default function PortfolioPage() {
           </Stack>
 
           {!activeChildId ? (
-            <Stack spacing={2} alignItems="center" sx={{ py: 4 }}>
-              <Typography variant="h6" color="text.secondary">
-                Select a profile to view Portfolio
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Use the profile menu to choose a child, or visit Settings.
-              </Typography>
-            </Stack>
+            <EmptyState
+              title="Select a profile to view Portfolio"
+              description="Use the profile menu to choose a child, or visit Settings."
+            />
           ) : (
             <>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
@@ -338,9 +335,7 @@ export default function PortfolioPage() {
           <Divider />
 
           {artifacts.length === 0 ? (
-            <Typography color="text.secondary">
-              No artifacts found for {monthLabel}.
-            </Typography>
+            <EmptyState title={`No artifacts found for ${monthLabel}.`} />
           ) : (
             <Stack spacing={1}>
               {scored.map(({ artifact, score }) => {

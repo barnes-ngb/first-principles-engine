@@ -288,6 +288,63 @@ This vocabulary will be swept through `features/today/`, `features/records/`, an
 
 ---
 
+## Measurement-sensitivity guardrail (the mechanic carries the message)
+
+The no-judge vocabulary rail governs the *words* a learner reads. This rail governs the *mechanics* —
+the counters, streaks, scores, and progress-to-target bars. **Both apply.** Kind words wrapped around a
+"0/10" still ship a verdict, because **the mechanic carries the message**. For Lincoln specifically — a
+perfectionist who is sensitive to measurement — a counter that can read as "how far short you are" lands
+as judgment even when every string around it is gentle.
+
+**Principle.** Each measurement mechanic on a kid surface is a **deliberate choice**, reviewed against
+Lincoln's sensitivity — not an accident of iteration. When a counter appears on a kid screen, someone
+chose to measure that thing, in that framing, in front of him. That choice deserves the same care we give
+the word list.
+
+**Preference, not prohibition.** Measurement isn't banned — it's chosen on purpose. The preference is for
+**accumulating / one-direction** framings over **implied-target / scored** framings *where the latter
+would induce shame on a low day*:
+
+- **Favor:** collect, earn, "N done", "N mined", a bag that fills, a count that only goes up.
+- **Use with care:** "3/10", "0/N", percentages, and **streaks that can break**. These imply a target the
+  child can fall short of, and a streak that resets turns a single hard day into a visible loss.
+
+This is a preference, not a ban: a fraction or a streak can be the right call when it genuinely motivates
+without threatening. The rule is that picking the scored framing is a decision made on purpose, not a
+default reached for.
+
+**Complements no-judge vocabulary.** That rail = words; this rail = mechanics. A surface passes only when
+*both* read as "here is what you built," never "here is where you fell short."
+
+### Live surfaces to review against this rail
+
+A quick read of the current kid-facing surfaces (`features/today/`, `features/avatar/`, `features/quest/`)
+turns up these measurement mechanics. Listed here as **review items only — no code is changed by this
+guardrail.** Disposition (keep / soften / rework) is a per-surface call for Nathan (see the open question
+below).
+
+| Surface | Mechanic | Framing | Suggested review |
+|---|---|---|---|
+| **Faith Stats — Courage** (`FIRST_PRINCIPLES_ALIGNMENT.md` above; derivation in `/docs/design-pass-v1`) | `Courage = suit-up streak × tier multiplier` | **Breakable streak** — the clearest test case | **Rework candidate:** a breakable streak → an accumulating "days suited up" badge count that never resets down. |
+| **Armor suit-up streak** (`avatar/MyAvatarPage.tsx` `checkArmorStreak`) | `armorStreak`, resets on a missed day | **Breakable streak** (feeds Courage) | **Rework candidate:** same — accumulate lifetime suit-up days rather than reset on a gap. |
+| **Quest "day streak"** (`quest/QuestSummary.tsx`) | `{n} day streak!` on Quest Complete | **Breakable streak** | **Rework candidate:** celebrate the day's diamonds mined (accumulating) rather than a streak that a missed day breaks. |
+| **Kid Today must-do counter** (`today/KidChecklist.tsx`, `today/KidTodayView.tsx`) | `X of N quests done`, `X/N quests done`, gate dots | **Implied-target fraction (0/N)** | **Soften candidate:** lead with "N done" (accumulating) and keep the gate framing as "N more to craft" rather than a bare `0/N` on a fresh day. |
+| **Suit-up pieces counter** (`today/KidTodayView.tsx`) | `{n}/6 pieces on` | **Implied-target fraction** | **Soften candidate:** acceptable as a daily-ritual readout; consider "N pieces on" if `/6` reads as a shortfall. |
+| **Stonebridge mission bar** (`avatar/stonebridge/StonebridgeMissionCard.tsx`) | `X / Y reading actions` + progress bar | **Progress-to-target bar** | **Keep / soften:** target is a *repair goal* (build toward), surplus carries forward — closer to accumulating; watch the `X / Y` label on a zero day. |
+| **XP-to-next-tier / next-piece** (`avatar/MinecraftXpBar.tsx`, `avatar/MyAvatarPage.tsx`) | `{xp} XP to {next}`, % bar to next unlock | **Progress-to-target bar** | **Keep:** frames an *unlock ahead* (earn toward), not a shortfall behind; one-direction by construction. |
+| **Accumulating counters** — `+X XP today`, `X XP earned`, diamonds mined, `X min mined today`, `🚩 N banners raised`, diamond balance (`today/`, `avatar/`, `quest/ReadingQuest.tsx`) | count only goes up | **Accumulating / one-direction** | **Keep:** these are the preferred shape — collect/earn, never a target to fall short of. |
+
+### Open question for Nathan
+
+This rail is written in a **deliberate-moderation** stance — measurement is used on purpose, not minimized
+on principle. The live code already reflects that (the Courage streak exists by choice). The unsettled
+question from the original thread — *minimize measurement* vs *measurement-in-moderation* — is left open
+**per surface**: whether any of the listed mechanics (especially the three breakable streaks) should
+actually change is a decision for Nathan, to be made surface-by-surface in a later run. This guardrail
+documents the rail and the review list; it does **not** change any mechanic.
+
+---
+
 ## Quest Complete mom-note guardrail
 
 Quest Complete (the celebration screen Lincoln sees on quest completion) always renders a **Note from Mom** card. The note is **hand-written by Shelly** in her parallel "Shelly noticed" insight surface — it is never AI-generated.

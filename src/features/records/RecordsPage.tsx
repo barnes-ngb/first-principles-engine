@@ -36,6 +36,7 @@ import {
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
@@ -670,14 +671,10 @@ function HoursComplianceTab() {
             />
           </Stack>
           {!activeChildId ? (
-            <Stack spacing={2} alignItems="center" sx={{ py: 4 }}>
-              <Typography variant="h6" color="text.secondary">
-                Select a profile to view Records
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Use the profile menu to choose a child, or visit Settings.
-              </Typography>
-            </Stack>
+            <EmptyState
+              title="Select a profile to view Records"
+              description="Use the profile menu to choose a child, or visit Settings."
+            />
           ) : null}
 
           {activeChildId && (
@@ -687,7 +684,7 @@ function HoursComplianceTab() {
           )}
 
           {activeChildId && isLoading && (
-            <Typography color="text.secondary">Loading records...</Typography>
+            <LoadingState label="Loading records..." />
           )}
 
           {activeChildId && !isLoading && (

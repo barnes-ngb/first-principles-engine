@@ -6,6 +6,7 @@ import LockIcon from '@mui/icons-material/Lock'
 
 import type { ShieldEmblem } from '../../core/types'
 import { SHIELD_EMBLEM_OPTIONS } from './voxel/buildShieldEmblem'
+import { kidPalette } from '../../app/tokens'
 
 interface ShieldEmblemPickerProps {
   currentEmblem: ShieldEmblem | undefined
@@ -22,7 +23,7 @@ export default function ShieldEmblemPicker({
 }: ShieldEmblemPickerProps) {
   const [open, setOpen] = useState(false)
 
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const selected = currentEmblem ?? 'cross'
 

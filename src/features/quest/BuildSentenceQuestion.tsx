@@ -15,18 +15,19 @@ import {
   SENTENCE_PERIOD_TILE,
   assembleSentence,
 } from './buildTheSentence'
+import { kidPalette } from '../../app/tokens'
 
 // ── Minecraft color palette (matches the word-tile screen) ──────────
 
 const MC = {
-  bg: 'rgba(0,0,0,0.92)',
-  gold: '#FCDB5B',
-  green: '#7EFC20',
-  diamond: '#5BFCEE',
-  stone: '#8B8B8B',
-  red: '#FC5B5B',
+  bg: kidPalette.bg,
+  gold: kidPalette.gold,
+  green: kidPalette.xpGreen,
+  diamond: kidPalette.diamond,
+  stone: kidPalette.stone,
+  red: kidPalette.red,
   white: '#FFFFFF',
-  darkStone: '#3C3C3C',
+  darkStone: kidPalette.darkStone,
   font: '"Press Start 2P", monospace',
 } as const
 

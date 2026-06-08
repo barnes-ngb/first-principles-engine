@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Container from '@mui/material/Container'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
@@ -12,6 +11,7 @@ import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import ChildFilterChips, {
   CHILD_FILTER_ALL,
 } from '../../components/ChildFilterChips'
+import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useMonthlyReviews } from '../../core/hooks/useMonthlyReviews'
@@ -91,11 +91,7 @@ export default function MonthlyBooksTab() {
         />
       </Box>
 
-      {loading && (
-        <Stack alignItems="center" sx={{ py: 6 }}>
-          <CircularProgress />
-        </Stack>
-      )}
+      {loading && <LoadingState fullHeight />}
 
       {!loading && filtered.length === 0 && <EmptyState />}
 

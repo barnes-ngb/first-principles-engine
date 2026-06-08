@@ -11,13 +11,13 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
 **Scale (current):**
-- TypeScript lines: **175,836** total
-- Commits: **120**
-- Tests: **168 test files**
+- TypeScript lines: **176,992** total
+- Commits: **134**
+- Tests: **176 test files**
 - Firestore collections/doc helpers: **37** in `firestore.ts`
 - Cloud Functions: **25**
 - Chat task types: **17**
-- Routes: **33**
+- Routes: **34**
 
 ## Navigation
 **Parent:** Today, Plan My Week, Weekly Review, Progress (Learning Profile · **Monthly Books** · Learning Map · Curriculum · Skill Snapshot · Word Wall), Records, Books, Ask AI, Game Workshop, Dad Lab, Settings  
@@ -170,12 +170,11 @@ Ordered smallest → largest per `/docs/design-pass-v1/README.md` §Suggested im
 3. **In-app character tuner** — slider playground directly in production UX.
 4. **Curriculum scanning expansion** — workbook photo → AI skill mapping refinement.
 5. **Eval close-the-loop automation** — re-eval triggers from engagement patterns.
-6. **Math evaluation parity** — reading-style evaluation flow for math.
+6. **Math evaluation Phase 2** — parent-facing results UI for math guided evaluation (guided eval shipped May 2026).
 7. **London-specific evaluation flow** — age-adjusted assessment UX.
-8. **Tier-up ceremony** — armor shatter / reveal celebration on tier transitions.
-9. **Screenshot & share** — export avatar to PNG.
-10. **Minecraft skin export** — 64x64 skin output from avatar config.
-11. **Seasonal themes** — date-aware winter/fall/Christmas/Easter theming.
+8. **Screenshot & share** — export avatar to PNG.
+9. **Minecraft skin export** — 64x64 skin output from avatar config.
+10. **Seasonal themes** — date-aware winter/fall/Christmas/Easter theming.
 
 ### Avatar System — Remaining
 - Faith Stats bars (Strength/Wisdom/Mercy/Courage) under XP bar — derivation formulas pending Shelly review per `/docs/design-pass-v1/README.md` §State management (HIGH).
@@ -367,7 +366,7 @@ Other chat-dispatched task types (17 total in `tasks/index.ts` registry) are ind
 | `src/features/avatar/MyAvatarPage.tsx` | Hero Hub shell + avatar systems |
 | `src/features/avatar/HeroMissionCard.tsx` | Hero Hub mission card logic + rendering |
 | `src/features/avatar/HeroLauncherTiles.tsx` | Hero Hub launcher tiles (Mine/Workshop/Books); per-child filter |
-| `src/features/avatar/StonebridgePreviewCard.tsx` | Stonebridge narrative preview surface |
+| `src/features/avatar/stonebridge/StonebridgeMissionCard.tsx` | Stonebridge live mission card (replaced StonebridgePreviewCard) |
 | `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
 | `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |
 | `src/features/avatar/armorGate.ts` | Forge tier gate logic + phantom piece fix |

@@ -8,6 +8,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import Page from '../../components/Page'
+import { ErrorState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -26,15 +27,16 @@ import { hasMathCalibration, hasReadingCalibration } from './knowledgeMineAccess
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
 import { useQuestSession } from './useQuestSession'
+import { kidPalette } from '../../app/tokens'
 
 const MC = {
-  bg: 'rgba(0,0,0,0.92)',
-  gold: '#FCDB5B',
-  green: '#7EFC20',
-  diamond: '#5BFCEE',
-  stone: '#8B8B8B',
+  bg: kidPalette.bg,
+  gold: kidPalette.gold,
+  green: kidPalette.xpGreen,
+  diamond: kidPalette.diamond,
+  stone: kidPalette.stone,
   white: '#FFFFFF',
-  darkStone: '#3C3C3C',
+  darkStone: kidPalette.darkStone,
   font: '"Press Start 2P", monospace',
 } as const
 
@@ -490,9 +492,9 @@ export default function KnowledgeMinePage() {
 
       {/* Error display */}
       {quest.aiError && (
-        <Alert severity="error" sx={{ mt: 2 }}>
-          Something went wrong: {quest.aiError.message}
-        </Alert>
+        <Box sx={{ mt: 2 }}>
+          <ErrorState message="Something went wrong" error={quest.aiError} />
+        </Box>
       )}
     </Page>
   )
