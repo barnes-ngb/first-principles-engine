@@ -93,6 +93,8 @@ export interface ShellyChatState {
 
   // ── Refs ─────────────────────────────────────────────────────
   fileInputRef: RefObject<HTMLInputElement | null>
+  /** The message TextField's underlying input/textarea — focused when seeded via `?seed=` (FEAT-12 Phase 2). */
+  chatInputRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>
   messagesEndRef: RefObject<HTMLDivElement | null>
   autoSendTriggered: RefObject<boolean>
   imageIdeaTimeoutFired: RefObject<boolean>
@@ -144,6 +146,7 @@ export function useShellyChatState(initialThreadId: string | null): ShellyChatSt
 
   // ── Refs ─────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const chatInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoSendTriggered = useRef(false)
   const imageIdeaTimeoutFired = useRef(false)
@@ -194,6 +197,7 @@ export function useShellyChatState(initialThreadId: string | null): ShellyChatSt
     loadingQuestions,
     setLoadingQuestions,
     fileInputRef,
+    chatInputRef,
     messagesEndRef,
     autoSendTriggered,
     imageIdeaTimeoutFired,
