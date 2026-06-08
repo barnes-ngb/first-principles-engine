@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -14,6 +13,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
 import { deleteDoc, doc, getDocs, orderBy, query, setDoc } from 'firebase/firestore'
 
+import { EmptyState, LoadingState } from '../../components/states'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
 import type { Sticker, StickerTag } from '../../core/types'
@@ -91,18 +91,15 @@ export default function StickerLibraryTab() {
   }, [deleteTarget, familyId])
 
   if (loading) {
-    return (
-      <Stack alignItems="center" py={4}>
-        <CircularProgress />
-      </Stack>
-    )
+    return <LoadingState fullHeight />
   }
 
   if (stickers.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-        No stickers yet. Generate some in the book editor!
-      </Typography>
+      <EmptyState
+        title="No stickers yet"
+        description="Generate some in the book editor!"
+      />
     )
   }
 

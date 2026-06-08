@@ -5,7 +5,6 @@ import MoreVertIcon from '@mui/icons-material/MoreVert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import ListItemIcon from '@mui/material/ListItemIcon'
@@ -16,6 +15,7 @@ import Popover from '@mui/material/Popover'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
+import { LoadingState } from '../../components/states'
 import type { ActivityConfig } from '../../core/types'
 import type { ActivityFrequency } from '../../core/types/enums'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
@@ -62,11 +62,7 @@ export default function ActivityConfigList({
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-        <CircularProgress size={24} />
-      </Box>
-    )
+    return <LoadingState fullHeight />
   }
 
   const activeConfigs = configs.filter((c) => !c.completed)

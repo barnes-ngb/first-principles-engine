@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  CircularProgress,
   Stack,
   Table,
   TableBody,
@@ -12,6 +11,7 @@ import {
 import { getDocs, query, where } from 'firebase/firestore'
 
 import SectionCard from '../../components/SectionCard'
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { aiUsageCollection } from '../../core/firebase/firestore'
 import type { AIUsageEntry } from '../../core/types'
@@ -173,9 +173,7 @@ export default function AIUsagePanel() {
   if (loading) {
     return (
       <SectionCard title="AI Usage — This Month">
-        <Stack alignItems="center" py={3}>
-          <CircularProgress size={28} />
-        </Stack>
+        <LoadingState fullHeight />
       </SectionCard>
     )
   }
@@ -262,9 +260,7 @@ export default function AIUsagePanel() {
         )}
 
         {totalCalls === 0 && (
-          <Typography color="text.secondary">
-            No AI usage recorded this month.
-          </Typography>
+          <EmptyState title="No AI usage recorded this month." />
         )}
       </Stack>
     </SectionCard>
