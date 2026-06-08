@@ -34,6 +34,10 @@ export interface TierMaterials {
   edgeOpacity: number
 }
 
+// TODO(ARCH-21): this numeric tier palette is deferred from the kidPalette
+// migration. Most shades here are deliberate non-token near-dupes (e.g. 0x8A8A8A
+// vs token stone #8B8B8B, 0xF4C430 vs goldBright), so this is a render-verified
+// Batch-2 reconciliation — not a straight token swap.
 export const TIER_MATERIALS: Record<string, TierMaterials> = {
   wood: {
     primary: 0xB8865B,      // warm light brown

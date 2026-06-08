@@ -115,6 +115,9 @@ function buildCrown(hU: number): THREE.Group {
   const g = new THREE.Group()
   g.name = 'accessory_crown'
 
+  // TODO(ARCH-21): these are kidPalette.goldBright / goldDeep in numeric form.
+  // Adopt the tokens once the voxel lane can be render-verified — they're string
+  // tokens and these call sites are number-typed (form-swap forbidden per hand-off).
   const gold = 0xffd700
   const darkGold = 0xdaa520
   // Horizontal band (sits on top of head)

@@ -92,6 +92,9 @@ export type BodyLayout = ReturnType<typeof getBodyLayout>
 
 // ── Armor piece colors (defaults before tier is applied) ─────────────
 
+// TODO(ARCH-21): the 0xffd700 accents (and 0xdaa520 belt) = kidPalette
+// goldBright/goldDeep in numeric form. Deferred — adopt once the voxel lane can
+// be render-verified (string token vs number-typed call site).
 export const ARMOR_PIECE_COLORS: Record<VoxelArmorPieceId, { color: number; accent: number }> = {
   belt:        { color: 0xdaa520, accent: 0xffd700 },
   breastplate: { color: 0xb87333, accent: 0xffd700 },
