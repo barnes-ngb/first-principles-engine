@@ -18,6 +18,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
 import type { ActiveSession, GeneratedArt, GeneratedGame, VoiceRecordingMap } from '../../core/types'
 import { db } from '../../core/firebase/firestore'
+import { kidPalette } from '../../app/tokens'
 import { useTTS } from '../../core/hooks/useTTS'
 import { TurnPhase } from '../../core/types/workshop'
 import GameBoard from './GameBoard'
@@ -513,7 +514,7 @@ export default function GamePlayView({
               icon={
                 !profile && !player.avatarUrl
                   ? isWinner
-                    ? <EmojiEventsIcon sx={{ fontSize: 16, color: '#ffd700 !important' }} />
+                    ? <EmojiEventsIcon sx={{ fontSize: 16, color: `${kidPalette.goldBright} !important` }} />
                     : isFinished
                       ? <CheckCircleIcon sx={{ fontSize: 16, color: 'rgba(255,255,255,0.8) !important' }} />
                       : undefined
@@ -522,7 +523,7 @@ export default function GamePlayView({
               label={
                 <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
                   {(profile || player.avatarUrl) && isWinner && (
-                    <EmojiEventsIcon sx={{ fontSize: 14, color: '#ffd700' }} />
+                    <EmojiEventsIcon sx={{ fontSize: 14, color: kidPalette.goldBright }} />
                   )}
                   {(profile || player.avatarUrl) && isFinished && !isWinner && (
                     <CheckCircleIcon sx={{ fontSize: 14, color: 'rgba(255,255,255,0.8)' }} />
@@ -713,7 +714,7 @@ export default function GamePlayView({
                   },
                 }}
               >
-                <EmojiEventsIcon sx={{ fontSize: 48, color: '#ffd700', mb: 1 }} />
+                <EmojiEventsIcon sx={{ fontSize: 48, color: kidPalette.goldBright, mb: 1 }} />
                 <Typography variant="h5" sx={{ mb: 1, fontWeight: 700 }}>
                   {state.winner} wins!
                 </Typography>

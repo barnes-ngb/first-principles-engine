@@ -2,6 +2,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
 import type { Child } from '../../core/types'
+import { kidPalette } from '../../app/tokens'
 
 interface KidCelebrationProps {
   allDone: boolean
@@ -31,8 +32,8 @@ export default function KidCelebration({
             px: 2,
             bgcolor: isLincoln ? 'rgba(0,0,0,0.85)' : 'success.50',
             borderRadius: isLincoln ? 0 : 3,
-            border: isLincoln ? '3px solid #FCDB5B' : '2px solid',
-            borderColor: isLincoln ? '#FCDB5B' : 'success.200',
+            border: isLincoln ? `3px solid ${kidPalette.gold}` : '2px solid',
+            borderColor: isLincoln ? kidPalette.gold : 'success.200',
             my: 2,
           }}
         >
@@ -41,7 +42,7 @@ export default function KidCelebration({
               sx={{
                 fontFamily: '"Press Start 2P", monospace',
                 fontSize: '0.6rem',
-                color: '#FCDB5B',
+                color: kidPalette.gold,
                 mb: 1,
                 letterSpacing: 1,
               }}
@@ -103,7 +104,7 @@ export default function KidCelebration({
                 ? {
                     fontFamily: '"Press Start 2P", monospace',
                     fontSize: '0.65rem',
-                    color: '#7EFC20',
+                    color: kidPalette.xpGreen,
                   }
                 : {}),
             }}

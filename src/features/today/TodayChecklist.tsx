@@ -50,6 +50,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
+import { kidPalette } from '../../app/tokens'
 
 const subjectBucketColor: Record<string, string> = {
   Reading: '#3b82f6',
@@ -462,7 +463,7 @@ export default function TodayChecklist({
                 fontFamily: '"Press Start 2P", monospace',
                 fontSize: '0.45rem',
                 bgcolor: xp > 0 ? '#1A1A1A' : undefined,
-                color: xp > 0 ? '#7EFC20' : undefined,
+                color: xp > 0 ? kidPalette.xpGreen : undefined,
                 border: xp > 0 ? '2px solid #3A3A3A' : undefined,
                 borderRadius: 0,
               } : {}}
