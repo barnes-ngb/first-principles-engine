@@ -311,6 +311,57 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
           </Box>
         </Box>
       )}
+
+      {/* Read-aloud reading recap — factual, parent-mode only. Additive to the
+          existing book stats; mirrors the "Hours by subject" box styling. */}
+      {mode === 'parent' &&
+        review.reading &&
+        review.reading.books.length > 0 && (
+          <Box>
+            <Typography
+              variant="subtitle2"
+              sx={{ mb: 1, color: 'text.secondary' }}
+            >
+              Read-aloud this month
+            </Typography>
+            <Box
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 2,
+                overflow: 'hidden',
+              }}
+            >
+              {review.reading.books.map((book, idx, arr) => (
+                <Stack
+                  key={`${book.title}-${idx}`}
+                  direction="row"
+                  justifyContent="space-between"
+                  alignItems="baseline"
+                  spacing={1}
+                  sx={{
+                    px: 2,
+                    py: 1,
+                    borderBottom:
+                      idx === arr.length - 1 ? 'none' : '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
+                  <Typography variant="body2">{book.title}</Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}
+                  >
+                    {book.chaptersAnswered} ch · {book.questionsAnswered} Q
+                    {book.questionsSkipped > 0
+                      ? ` · ${book.questionsSkipped} skipped`
+                      : ''}
+                  </Typography>
+                </Stack>
+              ))}
+            </Box>
+          </Box>
+        )}
     </Stack>
   )
 }

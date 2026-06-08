@@ -5,6 +5,7 @@ import {
   getPreviousMonth,
   loadDadLabReportsInMonth,
   loadPhotosForMonth,
+  loadReadingForMonth,
   type DadLabEntry,
 } from "./monthlyReviewData.js";
 
@@ -475,5 +476,98 @@ describe("loadPhotosForMonth — Dad Lab photo extraction", () => {
     );
 
     expect(result.photos).toHaveLength(0);
+  });
+});
+
+describe("loadReadingForMonth", () => {
+  const path = "families/fam/bookProgress";
+  const LINCOLN = "child_abc123";
+
+  it("counts answered chapters/questions whose answeredDate falls in the month", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: `${LINCOLN}_book1`,
+          data: {
+            childId: LINCOLN,
+            bookId: "book1",
+            bookTitle: "Prince Caspian",
+            totalChapters: 15,
+            questionPool: [
+              { chapter: 1, answered: true, answeredDate: "2026-04-03" },
+              { chapter: 2, answered: true, answeredDate: "2026-04-10" },
+              { chapter: 3, answered: false, skipped: true },
+              // Out of month — should not count.
+              { chapter: 4, answered: true, answeredDate: "2026-05-02" },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = await loadReadingForMonth(
+      db,
+      "fam",
+      LINCOLN,
+      "2026-04-01",
+      "2026-04-30",
+    );
+
+    expect(result.books).toHaveLength(1);
+    expect(result.books[0].title).toBe("Prince Caspian");
+    expect(result.books[0].chaptersAnswered).toBe(2);
+    expect(result.books[0].questionsAnswered).toBe(2);
+    expect(result.books[0].questionsSkipped).toBe(1);
+    expect(result.totalQuestionsAnswered).toBe(2);
+    expect(result.totalChaptersAnswered).toBe(2);
+    expect(result.totalQuestionsSkipped).toBe(1);
+  });
+
+  it("omits a book that had no dated answer this month", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: `${LINCOLN}_book1`,
+          data: {
+            childId: LINCOLN,
+            bookId: "book1",
+            bookTitle: "Skips Only",
+            totalChapters: 5,
+            questionPool: [
+              { chapter: 1, answered: false, skipped: true },
+              { chapter: 2, answered: true, answeredDate: "2026-03-30" },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = await loadReadingForMonth(
+      db,
+      "fam",
+      LINCOLN,
+      "2026-04-01",
+      "2026-04-30",
+    );
+
+    expect(result.books).toHaveLength(0);
+    expect(result.totalQuestionsAnswered).toBe(0);
+  });
+
+  it("returns an empty summary when the child has no bookProgress docs", async () => {
+    const db = makeFakeDb({ [path]: [] });
+
+    const result = await loadReadingForMonth(
+      db,
+      "fam",
+      LINCOLN,
+      "2026-04-01",
+      "2026-04-30",
+    );
+
+    expect(result.books).toEqual([]);
+    expect(result.totalChaptersAnswered).toBe(0);
+    expect(result.totalQuestionsAnswered).toBe(0);
+    expect(result.totalQuestionsSkipped).toBe(0);
   });
 });

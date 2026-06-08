@@ -48,6 +48,9 @@ import type { Firestore } from "firebase-admin/firestore";
  *     startDate single-field (auto) — loadConundrumsForMonth — no entry needed
  *   skillSnapshots:
  *     direct doc fetch — loadBlockers — no index needed
+ *   bookProgress:
+ *     (childId ASC) single-field (auto) — loadReadingForMonth (childId equality
+ *     only; the month filter runs in memory over each doc's questionPool).
  *
  * All indexes are defined in `firestore.indexes.json`. If you add a new query
  * here, also add the index there and update this list.
@@ -169,6 +172,30 @@ export interface DiamondSummary {
   routineEvents: number;
 }
 
+/** One read-aloud book that had a question answered this month. */
+export interface ReadingBookSummary {
+  bookId: string;
+  title: string;
+  totalChapters: number;
+  /** Distinct chapters with a question answered this month. */
+  chaptersAnswered: number;
+  /** Pool questions answered this month (answeredDate within range). */
+  questionsAnswered: number;
+  /**
+   * Parent-skipped questions on this book. Skips carry no date, so this is the
+   * book's running skip count — only surfaced for books active this month.
+   */
+  questionsSkipped: number;
+}
+
+/** Read-aloud reading activity for the month, derived from `bookProgress`. */
+export interface ReadingSummary {
+  books: ReadingBookSummary[];
+  totalChaptersAnswered: number;
+  totalQuestionsAnswered: number;
+  totalQuestionsSkipped: number;
+}
+
 export interface MonthAggregate {
   month: string;
   monthStart: string;
@@ -204,6 +231,7 @@ export interface MonthAggregate {
   hours: HoursSummary;
   diamonds: DiamondSummary;
   questCount: number;
+  reading: ReadingSummary;
 }
 
 // ── Date helpers ──────────────────────────────────────────────
@@ -849,6 +877,88 @@ export async function loadQuestCountForMonth(
   }
 }
 
+/**
+ * Read-aloud reading for the month, derived from per-child `bookProgress` docs.
+ *
+ * A book counts as "read this month" only when at least one question pool item
+ * was answered this month (`answered === true` and `answeredDate` within the
+ * range). Skips carry no date, so a book with only skips is not attributed to
+ * any month; skip counts are surfaced only for books that were actively read
+ * this month. Coverage, not pace — no "behind"/"ahead" framing downstream.
+ */
+export async function loadReadingForMonth(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  start: string,
+  end: string,
+): Promise<ReadingSummary> {
+  const empty: ReadingSummary = {
+    books: [],
+    totalChaptersAnswered: 0,
+    totalQuestionsAnswered: 0,
+    totalQuestionsSkipped: 0,
+  };
+
+  try {
+    const snap = await db
+      .collection(`families/${familyId}/bookProgress`)
+      .where("childId", "==", childId)
+      .get();
+
+    const books: ReadingBookSummary[] = [];
+    for (const doc of snap.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      const pool = Array.isArray(d.questionPool)
+        ? (d.questionPool as Array<{
+            chapter?: number;
+            answered?: boolean;
+            answeredDate?: string;
+            skipped?: boolean;
+          }>)
+        : [];
+
+      const chaptersThisMonth = new Set<number>();
+      let questionsAnswered = 0;
+      let questionsSkipped = 0;
+      for (const item of pool) {
+        const day = item.answeredDate?.slice(0, 10);
+        if (item.answered && day && day >= start && day <= end) {
+          questionsAnswered++;
+          if (typeof item.chapter === "number") {
+            chaptersThisMonth.add(item.chapter);
+          }
+        }
+        if (item.skipped) questionsSkipped++;
+      }
+
+      // No dated answer this month → not this month's reading.
+      if (questionsAnswered === 0) continue;
+
+      books.push({
+        bookId: (d.bookId as string) ?? doc.id,
+        title: (d.bookTitle as string) ?? "Untitled book",
+        totalChapters: typeof d.totalChapters === "number" ? d.totalChapters : 0,
+        chaptersAnswered: chaptersThisMonth.size,
+        questionsAnswered,
+        questionsSkipped,
+      });
+    }
+
+    books.sort((a, b) => b.questionsAnswered - a.questionsAnswered);
+
+    return {
+      books,
+      totalChaptersAnswered: books.reduce((s, b) => s + b.chaptersAnswered, 0),
+      totalQuestionsAnswered: books.reduce((s, b) => s + b.questionsAnswered, 0),
+      totalQuestionsSkipped: books.reduce((s, b) => s + b.questionsSkipped, 0),
+    };
+  } catch (err) {
+    console.warn("[monthlyReview] loadReadingForMonth failed:", err);
+    return empty;
+  }
+}
+
 // ── Top-level aggregator ──────────────────────────────────────
 
 export async function aggregateMonthData(
@@ -872,6 +982,7 @@ export async function aggregateMonthData(
     hours,
     diamonds,
     questCount,
+    reading,
   ] = await Promise.all([
     loadDayLogsForMonth(db, familyId, childId, start, end),
     loadWeeklyReviewsForMonth(db, familyId, childId, start, end),
@@ -882,6 +993,7 @@ export async function aggregateMonthData(
     loadHoursForMonth(db, familyId, childId, start, end),
     loadDiamondsForMonth(db, familyId, childId, start, end),
     loadQuestCountForMonth(db, familyId, childId, start, end),
+    loadReadingForMonth(db, familyId, childId, start, end),
   ]);
 
   const photosResult = await loadPhotosForMonth(
@@ -914,5 +1026,6 @@ export async function aggregateMonthData(
     hours,
     diamonds,
     questCount,
+    reading,
   };
 }
