@@ -127,6 +127,17 @@ function isScannableWorkbook(item: ChecklistItemType): boolean {
   )
 }
 
+/**
+ * Academic/subject items get the "find a video for this" affordance (FEAT-12
+ * Phase 2). Formation/routine items (Prayer/Scripture/Devotion) don't — they
+ * match `noSparklePatterns` and carry no subject. An item qualifies when it has
+ * a `subjectBucket` or one can be inferred from its label.
+ */
+function isSubjectItem(item: ChecklistItemType): boolean {
+  if (noSparklePatterns.some((p) => p.test(item.label || ''))) return false
+  return !!(item.subjectBucket ?? inferSubjectBucket(item.label))
+}
+
 function formatTime12h(date: Date): string {
   const h = date.getHours()
   const m = date.getMinutes()
@@ -418,6 +429,17 @@ export default function TodayChecklist({
     persistDayLogImmediate(withXp)
   }
 
+  // FEAT-12 Phase 2: open Shelly's chat with the lesson topic pre-filled in the
+  // input. Pre-fill only — never auto-send — so the metered web search fires on
+  // Shelly's tap, not on navigation.
+  const handleFindVideo = (item: ChecklistItemType) => {
+    const topic = ((item as ChecklistItemType & { title?: string }).title || item.label || '')
+      .replace(/\s*\(\d+m\)\s*$/, '')
+      .trim()
+    if (!topic) return
+    navigate(`/chat?seed=${encodeURIComponent(`Find a short video to help teach: ${topic}`)}`)
+  }
+
   const handleSaveGradeNote = (index: number, text: string) => {
     if (!dayLog?.checklist || !text.trim()) return
     const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
@@ -705,6 +727,14 @@ export default function TodayChecklist({
                       </Tooltip>
                     )
                   })()}
+                  {/* FEAT-12 Phase 2: find a video for subject items (pre-fills Shelly's chat) */}
+                  {!item.completed && isSubjectItem(item) && (
+                    <Tooltip title="Find a video for this">
+                      <IconButton size="small" onClick={() => handleFindVideo(item)}>
+                        <OndemandVideoIcon fontSize="small" color="action" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                 </Stack>
                 {/* Content guide (what to cover today) */}
                 {item.contentGuide && !item.completed && (
