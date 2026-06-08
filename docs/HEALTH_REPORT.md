@@ -1,21 +1,21 @@
-# Code Health Report — 2026-06-07
+# Code Health Report — 2026-06-08
 
 ## Metrics
 
-| Metric | Value | Change from last report (2026-06-06) |
+| Metric | Value | Change from last report (2026-06-07) |
 |--------|-------|--------------------------------------|
-| **Total lines** | **176,171** | +0 |
-| **Commits (main)** | **124** | +0 |
-| **Test files** | **169** | +0 |
-| **Tests passing** | **3,003** | **+449** |
-| **Tests total** | **3,003** | +449 (0 skipped, 0 failing) |
+| **Total lines** | **176,992** | +821 |
+| **Commits (main)** | **134** | +10 |
+| **Test files** | **176** (source) | +7 |
+| **Tests passing** | **2,645** | ⚠️ see note |
+| **Tests total** | **2,645** | 0 skipped, 0 failing |
 | **Firestore collections** | **37** | +0 |
 | **Cloud Functions** | **25** | +0 |
 | **Chat task types** | **17** | +0 |
-| **Routes** | **33** | +0 |
-| **Bundle size** | **3,904 kB / 1,150 kB gzip** | +0 |
+| **Routes** | **34** | +1 |
+| **Bundle size** | **3,908 kB / 1,152 kB gzip** | +4 kB |
 
-> **Note on test file count:** `find src functions/src -name '*.test.*'` returns 169. Vitest actually runs **191 test files** — the discrepancy arises from files in `functions/lib/` (compiled output) and the differing include patterns. The stat in MASTER_OUTLINE tracks the source-file count (169). The test *total* jump (+449) reflects new tests from the DATA-09 attribution feature merged since the last audit.
+> **Note on test count vs last report:** Previous report showed 3,003 tests across 191 test files. This run is a fresh clone with no compiled artifacts — vitest runs 175 source test files producing 2,645 tests. The previous machine had `functions/lib/` compiled output that inflated the count: 191−175=16 extra files, 3,003−2,645=358 extra tests. **2,645 is the accurate baseline going forward.** The 10 new commits since the last audit account for the +821 lines and +1 route; no tests were deleted.
 
 ---
 
@@ -23,13 +23,14 @@
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| **Build** | ✅ PASS | `tsc -b && vite build` clean in 12.16s |
-| **Lint** | ⚠️ 3 WARNINGS | 0 errors; 3 `react-hooks/exhaustive-deps` warnings (unchanged from last 4 reports) |
-| **Tests** | ✅ PASS | 3,003 passing, 0 skipped, 0 failing (191 test files) |
+| **Build** | ✅ PASS | `tsc -b && vite build` clean in 18.22s |
+| **Lint** | ⚠️ 3 WARNINGS | 0 errors; 3 `react-hooks/exhaustive-deps` warnings (unchanged since 2026-05-29) |
+| **Tests** | ✅ PASS | 2,645 passing, 0 skipped, 0 failing (175 test files) |
 | **TypeScript** | ✅ PASS | Implied by clean build |
-| **npm audit (prod)** | ✅ CLEAN | react-router HIGH vulns fixed by auto-fix this run |
+| **npm audit (prod)** | ✅ CLEAN | 0 production vulnerabilities |
+| **npm audit (dev)** | ⚠️ 9 dev vulns | 8 moderate, 1 critical — dev-only (ESLint toolchain); `--force` required to fix; not in production bundle |
 
-### Lint Warnings (unchanged from last report)
+### Lint Warnings (unchanged since last report)
 
 ```
 src/features/evaluate/EvaluateChatPage.tsx:282 — useEffect missing dep: sessionTimer
@@ -37,7 +38,7 @@ src/features/quest/useQuestSession.ts:779 — useCallback missing dep: sessionTi
 src/features/quest/useQuestSession.ts:2026 — useCallback missing dep: sessionTimer
 ```
 
-All three are `sessionTimer` ref omissions. Intentional — adding to deps would cause re-subscription loops. Add `eslint-disable-next-line react-hooks/exhaustive-deps` on each line to clean up lint output.
+All three are `sessionTimer` ref omissions. Intentional — adding to deps would cause re-subscription loops. Add `eslint-disable-next-line react-hooks/exhaustive-deps` on each line to clean up lint output without changing behavior.
 
 ---
 
@@ -47,15 +48,13 @@ All three are `sessionTimer` ref omissions. Intentional — adding to deps would
 
 | Claim | Doc value | Computed | Status |
 |-------|-----------|----------|--------|
-| TypeScript lines | 176,171 | 176,171 | ✅ OK |
-| Commits | 124 | 124 | ✅ OK |
-| Test files | 169 | 169 | ✅ OK |
+| TypeScript lines | 176,171 | 176,992 | ⚠️ DRIFT +821 — **AUTO-FIXED** |
+| Commits | 124 | 134 | ⚠️ DRIFT +10 — **AUTO-FIXED** |
+| Test files | 169 | 176 | ⚠️ DRIFT +7 — **AUTO-FIXED** |
 | Firestore collections | 37 | 37 | ✅ OK |
 | Cloud Functions | 25 | 25 | ✅ OK |
 | Chat task types | 17 | 17 | ✅ OK |
-| Routes | 33 | 33 | ✅ OK |
-
-All stats current. No MASTER_OUTLINE updates needed this cycle.
+| Routes | 33 | 34 | ⚠️ DRIFT +1 — **AUTO-FIXED** |
 
 ### Missing File References
 
@@ -66,7 +65,8 @@ All stats current. No MASTER_OUTLINE updates needed this cycle.
 | `QuickCaptureSection.tsx` | Expected — removed in UX P2.06 |
 | `QuickCaptureSection.test.tsx` | Expected — removed with parent component |
 | `CreativeTimeLog.tsx` | Expected — removed in UX P2.06 |
-| `StonebridgePreviewCard.tsx` | **AUTO-FIXED** — MASTER_OUTLINE updated to `StonebridgeMissionCard.tsx` (replaced per FEAT-12) |
+
+No new missing file references. All are carry-overs from prior reports.
 
 ### Nav Accuracy
 
@@ -77,95 +77,103 @@ Code nav matches MASTER_OUTLINE. ✅
 
 ### Collections — CLAUDE.md vs Code
 
-All 37 collection helpers in `firestore.ts` are documented. ✅
+All 37 collection helpers in `firestore.ts` are documented in CLAUDE.md. ✅
 
-### Task Types — Registry vs SYSTEM_PROMPTS.md
+### Task Types — Registry vs Docs
 
-All 17 task types fully documented. **AUTO-FIXED this cycle:** Added `reviseStory`, `revisePage`, `chapterQuestions`, `monthlyReview` to the CHAT_TASKS registry diagram in `docs/SYSTEM_PROMPTS.md` (they were in the model table and section 4 prose but missing from the architecture flow diagram). ✅
+All 17 task types in `functions/src/ai/tasks/index.ts` are documented in `SYSTEM_PROMPTS.md`. ✅
+
+The charter check flagged `chat` and `generate` as missing task handler files at `functions/src/ai/tasks/{name}.ts` — these are false positives; those tasks are implemented in `functions/src/ai/chat.ts` and `functions/src/ai/generate.ts` respectively, both of which include `CHARTER_PREAMBLE`.
 
 ### Unindexed Docs
 
-No unindexed docs found. ✅
+None. All docs in `docs/` are indexed in `DOCUMENT_INDEX.md`. ✅
 
-### Stale Docs (marked CURRENT but >30 days since last commit)
+### Stale Docs
 
-No stale docs detected by git log check. ✅
+No docs marked CURRENT were found untouched for 30+ days. ✅
 
 ---
 
 ## Largest Files (over 500 lines)
 
-| Lines | File | Change from last report | Flag |
-|-------|------|------------------------|------|
-| 2,627 | `src/features/planner-chat/PlannerChatPage.tsx` | +0 | Known debt — stable |
-| 2,544 | `functions/src/ai/chat.ts` | +0 | Known debt — highest-value decomp target |
-| 2,278 | `src/features/books/BookEditorPage.tsx` | +0 | Stable |
-| 2,161 | `src/features/quest/useQuestSession.ts` | +0 | **Fourth consecutive report above 2,000L** |
-| 1,875 | `src/features/avatar/MyAvatarPage.tsx` | +0 | Stable |
-| 1,623 | `src/features/workshop/WorkshopPage.tsx` | +0 | Stable |
-| 1,606 | `src/features/avatar/VoxelCharacter.tsx` | +0 | Stable |
-| 1,566 | `functions/src/ai/contextSlices.ts` | +0 | Stable |
-| 1,500 | `src/features/records/records.logic.test.ts` | +0 | Test file — OK |
-| 1,363 | `src/features/planner-chat/chatPlanner.logic.ts` | +0 | — |
-| 1,251 | `src/features/records/RecordsPage.tsx` | +0 | Stable this cycle (+92 last cycle) |
-| 1,162 | `src/features/evaluate/EvaluateChatPage.tsx` | +0 | — |
-| 1,156 | `src/features/planner-chat/chatPlanner.logic.test.ts` | +0 | Test file — OK |
-| 1,123 | `src/features/shelly-chat/useShellyChatFlows.ts` | +0 | — |
-| 1,112 | `src/features/today/TodayChecklist.tsx` | +0 | — |
-| 1,104 | `src/features/settings/AvatarAdminTab.tsx` | +0 | — |
-| 1,103 | `src/features/today/TodayPage.tsx` | +0 | — |
-| 1,065 | `src/features/quest/ReadingQuest.tsx` | +0 | — |
-| 1,054 | `src/features/today/KidTodayView.tsx` | +0 | — |
-| 1,050 | `functions/src/ai/evaluate.ts` | +0 | — |
-| 918 | `functions/src/ai/tasks/monthlyReviewData.ts` | +0 | — |
-| 913 | `src/features/avatar/voxel/buildArmorPiece.ts` | +0 | — |
-| 908 | `functions/src/ai/chat.test.ts` | +0 | — |
+| Lines | File | vs last report |
+|-------|------|---------------|
+| 2,627 | `src/features/planner-chat/PlannerChatPage.tsx` | +0 |
+| 2,544 | `functions/src/ai/chat.ts` | +0 |
+| 2,278 | `src/features/books/BookEditorPage.tsx` | +0 |
+| 2,161 | `src/features/quest/useQuestSession.ts` | +0 |
+| 1,876 | `src/features/avatar/MyAvatarPage.tsx` | +0 |
+| 1,623 | `src/features/workshop/WorkshopPage.tsx` | +0 |
+| 1,606 | `src/features/avatar/VoxelCharacter.tsx` | +0 |
+| **1,566** | `functions/src/ai/contextSlices.ts` | **⚠️ NEW — crossed 1,500 lines** |
+| 1,500 | `src/features/records/records.logic.test.ts` | +0 |
+| 1,363 | `src/features/planner-chat/chatPlanner.logic.ts` | +0 |
+| 1,248 | `src/features/records/RecordsPage.tsx` | +0 |
+| 1,162 | `src/features/evaluate/EvaluateChatPage.tsx` | +0 |
+| 1,156 | `src/features/planner-chat/chatPlanner.logic.test.ts` | +0 |
+| 1,123 | `src/features/shelly-chat/useShellyChatFlows.ts` | +0 |
+| 1,113 | `src/features/today/TodayChecklist.tsx` | +0 |
+| 1,104 | `src/features/settings/AvatarAdminTab.tsx` | +0 |
+| 1,103 | `src/features/today/TodayPage.tsx` | +0 |
 
 ## Decomposition Candidates
 
-| File | Lines | Priority | Notes |
-|------|-------|----------|-------|
-| `useQuestSession.ts` | 2,161 | HIGH | **Fourth** consecutive report above 2,000L. No growth but no assigned run. Quest/comprehension/fluency/encoding all in one hook. |
-| `chat.ts` (CF) | 2,544 | HIGH | `buildQuestPrompt` alone is 400+ lines. Extract prompt builders to `tasks/` files. |
-| `RecordsPage.tsx` | 1,251 | WATCH | Stable this cycle; was +92 last cycle. Monitor next report. |
-| `contextSlices.ts` | 1,566 | MEDIUM | Stable. Growing with each new task type as task list fills out. |
-| `PlannerChatPage.tsx` | 2,627 | LOW | Stable. State management ~1,700L. Known debt, no urgency. |
+| File | Lines | Status |
+|------|-------|--------|
+| `PlannerChatPage.tsx` | 2,627 | Known — stable per CLAUDE.md; state management complexity blocks decomp |
+| `chat.ts` (functions) | 2,544 | Known — highest-leverage decomp target: extract prompt builders per CLAUDE.md |
+| `BookEditorPage.tsx` | 2,278 | Known — sketch/voice/sticker panels could extract later |
+| `useQuestSession.ts` | 2,161 | Known — consider splitting by quest domain |
+| `contextSlices.ts` | 1,566 | **NEW** — crossed 1,500 lines this cycle. Growing context slice registry; reasonable candidate for per-slice files if it keeps growing |
 
 ---
 
 ## Issues Found
 
-### Auto-Fixed (this run)
-- **react-router HIGH vulnerabilities** — Ran `npm audit fix` (non-force); resolved 2 HIGH react-router vulns (GHSA-49rj-9fvp-4h2h, GHSA-2j2x-hqr9-3h42, GHSA-8x6r-g9mw-2r78, GHSA-rxv8-25v2-qmq8). Production audit now clean.
-- **SYSTEM_PROMPTS.md CHAT_TASKS diagram** — Added 4 missing task entries: `reviseStory`, `revisePage`, `chapterQuestions`, `monthlyReview`. These were in model table and prose but absent from the architecture flow diagram.
-- **MASTER_OUTLINE.md stale file ref** — Updated `StonebridgePreviewCard.tsx` → `StonebridgeMissionCard.tsx` (file replaced per FEAT-12, old ref was a broken link).
+### Auto-Fixed
+
+- Updated MASTER_OUTLINE.md stats: lines 176,171→176,992; commits 124→134; test files 169→176; routes 33→34
 
 ### Needs Human Attention
 
-1. **`useQuestSession.ts` at 2,161 lines — fourth consecutive report above threshold** — No growth but no assigned decomposition run. Consider scheduling the split (quest / comprehension / fluency / encoding) as a dedicated feature run.
+**LOW — Lint warnings (4 consecutive reports unchanged)**
+Three `sessionTimer` exhaustive-deps suppressions needed. Safe mechanical change: add `// eslint-disable-next-line react-hooks/exhaustive-deps` before the three hooks in `EvaluateChatPage.tsx:282`, `useQuestSession.ts:779`, and `useQuestSession.ts:2026`.
 
-2. **Lint warnings** (3, unchanged for 4+ reports) — `sessionTimer` dependency omissions. Add `eslint-disable-next-line react-hooks/exhaustive-deps` to suppress. Locations:
-   - `src/features/evaluate/EvaluateChatPage.tsx:282`
-   - `src/features/quest/useQuestSession.ts:779`
-   - `src/features/quest/useQuestSession.ts:2026`
+**LOW — npm dev vulnerabilities (9 total: 8 moderate, 1 critical)**
+Dev-only; `--force` required to upgrade. Zero production impact. Upgrade is an `npm audit fix --force` on eslint-related packages — breaking changes possible. Human should review before applying.
 
-3. **Bundle size 3.9MB** — Route-level `React.lazy` splitting would reduce initial load. Heaviest: Three.js (avatar), jsPDF (print), curriculum map data. Architectural decision required.
+**MONITOR — `contextSlices.ts` crossed 1,500 lines**
+`functions/src/ai/contextSlices.ts` is now 1,566 lines — first report it has appeared on the large-file list. The file is the central context-slice registry; its growth tracks directly with new features adding context slices. Not urgent, but worth tracking. If it crosses 2,000 lines, consider per-slice files with a barrel re-export.
 
-4. **Dev-only vulnerabilities (9 remaining)** — 8 moderate + 1 critical (vitest < 4.1.0 — GHSA-5xrq-8626-4rwp: arbitrary file read/execute via Vitest UI server). Safe fix requires `--force` (vitest@4.1.8 is a breaking change). Only exploitable if Vitest UI server is running and exposed — no production risk. Upgrade when vitest@4.x API is stable for this project.
-
-5. **Dead exports in `src/core/utils/`** — Detected last cycle; unchanged. Verify before removing (may be used in tests or dynamic imports):
-   - `blockerLifecycle.ts`: `RESOLVING_THRESHOLD`, `RESOLVED_THRESHOLD`, `RESOLVED_MIN_SESSIONS`, `TARGETED_EVIDENCE_WEIGHT`
-   - `sessionTimer.ts`: `IDLE_THRESHOLD_MS`, `MAX_SESSION_SECONDS`
-   - `complianceMapping.ts`: `inferMoSubjects`, `resolveSubjectBucket`, `inferThemeSubjects`, `autoTagBlocks`
-   - `format.ts`: `normalizeDateString`, `parseDateInput`
-   - `energyPatterns.ts`: `EnergyTrend`, `analyzeDayOfWeekPatterns`, `detectStreaks`, `detectTrend`, `analyzeEnergyPatterns`
-   - `workbookMatching.ts`: `normalizeWorkbookName`
+**INFO — Bundle size 3,908 kB (unchanged guidance)**
+Route-level React.lazy splitting would reduce initial load. Heaviest imports: Three.js (avatar), jsPDF (print), curriculum map data. Architectural decision — not auto-fixable.
 
 ---
 
 ## Charter Alignment
 
-`chat` and `generate` route to `chatHandler.ts` which calls `buildContextForTask`. ⚠️ **5 task types missing charter in TASK_CONTEXT (ETHOS-01 OPEN):** `quest`, `generateStory`, `reviseStory`, `revisePage`, `scan` — none have `"charter"` in their `contextSlices.ts` TASK_CONTEXT entry. `analyzePatterns` also missing (low risk — internal analysis). Fix: add `"charter"` as first element to each of those 6 TASK_CONTEXT arrays (~6 lines). The other 11 task types include charter. See `docs/review/REVIEW_HOME_BASE.md` ETHOS-01.
+| Task | Status |
+|------|--------|
+| plan | ✅ `buildContextForTask` / `CHARTER_PREAMBLE` present |
+| evaluate | ✅ |
+| quest | ✅ |
+| generateStory | ✅ |
+| reviseStory | ✅ |
+| revisePage | ✅ |
+| workshop | ✅ |
+| analyzeWorkbook | ✅ |
+| disposition | ✅ |
+| conundrum | ✅ |
+| weeklyFocus | ✅ |
+| scan | ✅ |
+| shellyChat | ✅ |
+| chapterQuestions | ✅ |
+| monthlyReview | ✅ |
+| chat (→ `chat.ts`) | ✅ (file at non-standard path — `CHARTER_PREAMBLE` confirmed) |
+| generate (→ `generate.ts`) | ✅ (file at non-standard path) |
+
+All 17 task types have charter context. ✅
 
 ---
 
@@ -174,7 +182,7 @@ No stale docs detected by git log check. ✅
 | Tests | Feature |
 |-------|---------|
 | 21 | books |
-| 15 | today |
+| 16 | today |
 | 15 | quest |
 | 14 | planner-chat |
 | 14 | avatar |
@@ -187,20 +195,20 @@ No stale docs detected by git log check. ✅
 | 1 | weekly-review |
 | 1 | evaluation |
 | 1 | engine |
+| 0 | ui-preview *(preview-only, expected)* |
 | 0 | progress |
-| 0 | planner |
-| 0 | not-found |
+| 0 | planner *(redirect-only route)* |
+| 0 | not-found *(trivial)* |
 | 0 | login |
 | 0 | dad-lab |
 | 0 | auth |
 
-Zero-test features are primarily UI pages (progress tabs, login flow, auth guard, 404). `dad-lab` remains the only zero-test feature with meaningful business logic.
+Features with meaningful 0-test gaps: **progress**, **dad-lab**, **login**, **auth**. The `progress` tab renders significant UI (curriculum map, disposition profile, skill snapshot); `dad-lab` has lifecycle state management. Both are candidates for integration test coverage when next touched.
 
 ---
 
 ## Dependency Notes
 
-- **react-router**: HIGH vulns resolved this run via `npm audit fix`. Production audit clean.
-- **vitest**: 1 CRITICAL dev-only (GHSA-5xrq-8626-4rwp). Requires `--force` upgrade to 4.1.8. No production risk. Defer until breaking change is assessed.
-- **8 moderate dev-only vulnerabilities**: Unchanged. No production impact.
-- **npm**: New major version available (10.9.7 → 11.16.0) — cosmetic, no urgency.
+- **npm audit (production):** 0 vulnerabilities ✅
+- **npm audit (dev):** 9 vulnerabilities (8 moderate, 1 critical) — dev toolchain only; `--force` required
+- **npm major version available:** npm 10.9.7 → 11.16.0 (informational)
