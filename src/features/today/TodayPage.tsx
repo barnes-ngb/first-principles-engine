@@ -22,7 +22,6 @@ import {
   onSnapshot,
   orderBy,
   query,
-  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore'
@@ -59,13 +58,13 @@ import {
   SubjectBucket,
   UserProfile,
 } from '../../core/types/enums'
-import { todayKey } from '../../core/utils/dateKey'
 import { getWeekRange } from '../../core/utils/time'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import ChapterQuestionPool from './ChapterQuestionPool'
 import { buildChapterPoolItem } from './chapterPool.logic'
 import { useBookProgress } from './useBookProgress'
+import { applyChapterPoolForChild } from './applyChapterPoolForChild'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
 import TeachBackSection from './TeachBackSection'
@@ -331,32 +330,21 @@ export default function TodayPage() {
         )
         .filter((item): item is ChapterQuestionPoolItem => item !== null)
 
-      if (existing) {
-        await updateDoc(progressRef, {
-          questionPool: [...existing.questionPool, ...newPoolItems],
-          updatedAt: new Date().toISOString(),
-        })
-      } else {
-        const newProgress: BookProgress = {
-          bookId: selectedBook.id,
-          childId: selectedChildId,
-          bookTitle: selectedBook.title,
-          author: selectedBook.author,
-          totalChapters: selectedBook.totalChapters,
-          questionPool: newPoolItems,
-          startedAt: todayKey(),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }
-        await setDoc(progressRef, newProgress)
-      }
+      // The read-aloud is a family book: write the SAME pool to every learner so
+      // each kid (Lincoln + London) gets the questions on their Today and records
+      // their own answers (FEAT-17). create-or-append per child, deduped by chapter.
+      await Promise.all(
+        children.map((child) =>
+          applyChapterPoolForChild(familyId, child.id, selectedBook, newPoolItems),
+        ),
+      )
 
       setSnackMessage({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
     } catch (err) {
       console.error('Failed to retry chapter question generation', err)
       setSnackMessage({ text: "Couldn't generate chapter questions.", severity: 'error' })
     }
-  }, [selectedBook, selectedChildId, familyId, activeChild, weekFocus, aiChat, setSnackMessage])
+  }, [selectedBook, selectedChildId, familyId, activeChild, weekFocus, aiChat, setSnackMessage, children])
 
   // Ensure default activity configs exist (routine, formation, workbooks)
   // so the planner generates full-length plans even if the user hasn't visited Settings.
