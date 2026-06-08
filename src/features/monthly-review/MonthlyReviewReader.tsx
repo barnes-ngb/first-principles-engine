@@ -4,7 +4,6 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
@@ -13,6 +12,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { app } from '../../core/firebase/firebase'
 import { useMonthlyReview } from '../../core/hooks/useMonthlyReviews'
@@ -186,68 +186,36 @@ export function MonthlyReviewReader({
   }, [familyId, review])
 
   if (loading) {
-    return (
-      <Box
-        sx={{
-          minHeight: '100dvh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    )
+    return <LoadingState fullHeight />
   }
 
   if (!review) {
     return (
-      <Box
-        sx={{
-          minHeight: '100dvh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 2,
-          px: 3,
-        }}
-      >
-        <Typography color="text.secondary">
-          This book isn't available.
-        </Typography>
-        {onExit && (
-          <Button onClick={onExit} startIcon={<ArrowBackIcon />}>
-            Back
-          </Button>
-        )}
-      </Box>
+      <EmptyState
+        title="This book isn't available."
+        action={
+          onExit ? (
+            <Button onClick={onExit} startIcon={<ArrowBackIcon />}>
+              Back
+            </Button>
+          ) : undefined
+        }
+      />
     )
   }
 
   if (totalPages === 0) {
     return (
-      <Box
-        sx={{
-          minHeight: '100dvh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 2,
-          px: 3,
-          textAlign: 'center',
-        }}
-      >
-        <Typography color="text.secondary">
-          This book has no pages yet.
-        </Typography>
-        {onExit && (
-          <Button onClick={onExit} startIcon={<ArrowBackIcon />}>
-            Back
-          </Button>
-        )}
-      </Box>
+      <EmptyState
+        title="This book has no pages yet."
+        action={
+          onExit ? (
+            <Button onClick={onExit} startIcon={<ArrowBackIcon />}>
+              Back
+            </Button>
+          ) : undefined
+        }
+      />
     )
   }
 
