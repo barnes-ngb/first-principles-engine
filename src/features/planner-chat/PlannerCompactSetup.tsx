@@ -10,7 +10,7 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 
-import type { BookProgress, ChapterBook, WorkbookConfig } from '../../core/types'
+import type { BookLookupResult, BookProgress, ChapterBook, WorkbookConfig } from '../../core/types'
 import ChapterBookPicker from './ChapterBookPicker'
 
 interface PlannerCompactSetupProps {
@@ -23,6 +23,7 @@ interface PlannerCompactSetupProps {
   selectedBook: ChapterBook | null
   onSelectedBookChange: (book: ChapterBook | null) => void
   onBookAdded?: (book: ChapterBook) => void
+  onLookupBook?: (title: string) => Promise<BookLookupResult | null>
   bookProgress: BookProgress | null
   chapterBooksLoading?: boolean
   chapterBooksLoadError?: boolean
@@ -49,6 +50,7 @@ export default function PlannerCompactSetup({
   selectedBook,
   onSelectedBookChange,
   onBookAdded,
+  onLookupBook,
   bookProgress,
   chapterBooksLoading,
   chapterBooksLoadError,
@@ -103,6 +105,7 @@ export default function PlannerCompactSetup({
         selectedBook={selectedBook}
         onSelectedBookChange={onSelectedBookChange}
         onBookAdded={onBookAdded}
+        onLookup={onLookupBook}
         bookProgress={bookProgress}
         variant="wizard"
         loading={chapterBooksLoading}
