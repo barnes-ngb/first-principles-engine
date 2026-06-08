@@ -23,6 +23,12 @@ function emptyAggregate(): MonthAggregate {
     hours: { totalMinutes: 0, minutesBySubject: {} },
     diamonds: { totalDiamonds: 0, questEvents: 0, routineEvents: 0 },
     questCount: 0,
+    reading: {
+      books: [],
+      totalChaptersAnswered: 0,
+      totalQuestionsAnswered: 0,
+      totalQuestionsSkipped: 0,
+    },
   };
 }
 
@@ -167,6 +173,39 @@ describe("composeMonthlyReview", () => {
     expect(ref).toBeDefined();
     expect("subjectTag" in ref).toBe(false);
     expect(ref.score).toBe(5);
+  });
+
+  it("omits the reading recap entirely when no reading happened", () => {
+    const review = composeMonthlyReview(baseInput());
+    // Additive + Firestore-safe: the key is absent (not undefined) when empty.
+    expect("reading" in review).toBe(false);
+    expect(findUndefinedPaths(review)).toEqual([]);
+  });
+
+  it("includes the reading recap when books were read this month", () => {
+    const data = emptyAggregate();
+    data.reading = {
+      books: [
+        {
+          bookId: "b1",
+          title: "Prince Caspian",
+          totalChapters: 15,
+          chaptersAnswered: 3,
+          questionsAnswered: 3,
+          questionsSkipped: 1,
+        },
+      ],
+      totalChaptersAnswered: 3,
+      totalQuestionsAnswered: 3,
+      totalQuestionsSkipped: 1,
+    };
+    const review = composeMonthlyReview(baseInput({ data }));
+    expect(review.reading).toBeDefined();
+    expect(review.reading!.books).toHaveLength(1);
+    expect(review.reading!.books[0].title).toBe("Prince Caspian");
+    expect(review.reading!.totalQuestionsAnswered).toBe(3);
+    // Still no undefined leaves once the optional recap is populated.
+    expect(findUndefinedPaths(review)).toEqual([]);
   });
 });
 

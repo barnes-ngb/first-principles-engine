@@ -126,6 +126,26 @@ export interface MonthStats {
   totalDiamonds: number
 }
 
+/** One read-aloud book that had a question answered this month. */
+export interface MonthlyReviewReadingBook {
+  title: string
+  totalChapters: number
+  /** Distinct chapters with a question answered this month. */
+  chaptersAnswered: number
+  /** Pool questions answered this month. */
+  questionsAnswered: number
+  /** Parent-skipped questions on this book (skips carry no date). */
+  questionsSkipped: number
+}
+
+/** Read-aloud reading recap for the month, derived from `bookProgress`. */
+export interface MonthlyReviewReading {
+  books: MonthlyReviewReadingBook[]
+  totalChaptersAnswered: number
+  totalQuestionsAnswered: number
+  totalQuestionsSkipped: number
+}
+
 export interface SourceRefs {
   weeklyReviewIds: string[]
   /** ISO timestamp of the disposition profile snapshot used. */
@@ -170,6 +190,8 @@ export interface MonthlyReview {
   unplacedPhotos: PhotoRef[]
 
   stats: MonthStats
+  /** Read-aloud reading recap. Absent on reviews from before this field / months with no reading. */
+  reading?: MonthlyReviewReading
   sourceRefs: SourceRefs
 
   shellyNote?: ShellyNote
