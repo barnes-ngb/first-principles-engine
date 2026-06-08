@@ -19,6 +19,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import VoiceInput from '../../components/VoiceInput'
+import { LoadingState } from '../../components/states'
 import { useBookReview } from './useBookReview'
 
 // ── Age helper (mirrors BookGenerateChat) ─────────────────────────
@@ -123,11 +124,7 @@ export default function BookReviewChat() {
   // ── Loading / not-found ──────────────────────────────────────────
 
   if (isLoading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-        <CircularProgress />
-      </Box>
-    )
+    return <LoadingState fullHeight />
   }
 
   if (!book) {
