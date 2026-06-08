@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import Box from '@mui/material/Box'
-import CircularProgress from '@mui/material/CircularProgress'
 import Container from '@mui/material/Container'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { monthlyReviewsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -73,32 +73,21 @@ export default function KidBooksAboutMePage() {
         </Typography>
       </Stack>
 
-      {loading && (
-        <Stack alignItems="center" sx={{ py: 6 }}>
-          <CircularProgress />
-        </Stack>
-      )}
+      {loading && <LoadingState fullHeight />}
 
       {!loading && reviews.length === 0 && (
         <Box
           sx={{
-            py: 6,
-            px: 3,
-            textAlign: 'center',
             border: '1px dashed',
             borderColor: 'divider',
             borderRadius: 2,
           }}
         >
-          <AutoStoriesIcon
-            sx={{ fontSize: 64, color: 'text.disabled', mb: 1 }}
+          <EmptyState
+            icon={<AutoStoriesIcon />}
+            title="Your first book is coming!"
+            description="Mom is working on it."
           />
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            Your first book is coming!
-          </Typography>
-          <Typography color="text.secondary">
-            Mom is working on it.
-          </Typography>
         </Box>
       )}
 

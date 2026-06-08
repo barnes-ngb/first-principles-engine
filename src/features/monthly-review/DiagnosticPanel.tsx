@@ -1,12 +1,12 @@
 import { useCallback, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { getFunctions, httpsCallable } from 'firebase/functions'
-import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
 import Typography from '@mui/material/Typography'
 
+import { ErrorState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { app } from '../../core/firebase/firebase'
 import type { MonthlyReview } from '../../core/types'
@@ -128,9 +128,9 @@ export function DiagnosticPanel({ review }: DiagnosticPanelProps) {
       </Box>
 
       {error && (
-        <Alert severity="error" sx={{ mt: 2 }}>
-          {error}
-        </Alert>
+        <Box sx={{ mt: 2 }}>
+          <ErrorState message={error} />
+        </Box>
       )}
 
       {audit && (
