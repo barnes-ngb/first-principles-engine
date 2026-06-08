@@ -429,17 +429,6 @@ export default function TodayChecklist({
     persistDayLogImmediate(withXp)
   }
 
-  // FEAT-12 Phase 2: open Shelly's chat with the lesson topic pre-filled in the
-  // input. Pre-fill only — never auto-send — so the metered web search fires on
-  // Shelly's tap, not on navigation.
-  const handleFindVideo = (item: ChecklistItemType) => {
-    const topic = ((item as ChecklistItemType & { title?: string }).title || item.label || '')
-      .replace(/\s*\(\d+m\)\s*$/, '')
-      .trim()
-    if (!topic) return
-    navigate(`/chat?seed=${encodeURIComponent(`Find a short video to help teach: ${topic}`)}`)
-  }
-
   const handleSaveGradeNote = (index: number, text: string) => {
     if (!dayLog?.checklist || !text.trim()) return
     const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
