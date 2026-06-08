@@ -21,6 +21,7 @@ import { deleteDoc, doc, getDocs, orderBy, query, where } from 'firebase/firesto
 import { deleteObject, ref } from 'firebase/storage'
 
 import SectionCard from '../../components/SectionCard'
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
@@ -344,9 +345,7 @@ export default function ChapterResponsesTab() {
   if (loading) {
     return (
       <Container maxWidth="lg" sx={{ py: 3 }}>
-        <Typography color="text.secondary">
-          Loading chapter responses...
-        </Typography>
+        <LoadingState fullHeight label="Loading chapter responses..." />
       </Container>
     )
   }
@@ -355,13 +354,10 @@ export default function ChapterResponsesTab() {
     return (
       <Container maxWidth="lg" sx={{ py: 3 }}>
         <SectionCard title="Book Responses">
-          <Typography color="text.secondary" sx={{ py: 2 }}>
-            No chapter responses recorded yet.
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            When {activeChild?.name ?? 'your child'} records thoughts on the
-            read-aloud book, they&apos;ll appear here.
-          </Typography>
+          <EmptyState
+            title="No chapter responses recorded yet."
+            description={`When ${activeChild?.name ?? 'your child'} records thoughts on the read-aloud book, they'll appear here.`}
+          />
         </SectionCard>
       </Container>
     )
