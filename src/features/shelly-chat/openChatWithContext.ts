@@ -23,8 +23,8 @@ export const openChatWithContext = async (
     chatContext: context.chatContext,
     context: {
       source: context.source,
-      itemTitle: context.itemTitle,
-      weekTheme: context.weekTheme,
+      ...(context.itemTitle ? { itemTitle: context.itemTitle } : {}),
+      ...(context.weekTheme ? { weekTheme: context.weekTheme } : {}),
     },
     archived: false,
   })
