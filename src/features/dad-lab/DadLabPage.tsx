@@ -25,6 +25,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 
 import ArtifactGallery from '../../components/ArtifactGallery'
+import { EmptyState, LoadingState } from '../../components/states'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
@@ -382,7 +383,7 @@ Duration: [estimated minutes]`,
         </Button>
       </Stack>
 
-      {loading && <Typography color="text.secondary">Loading...</Typography>}
+      {loading && <LoadingState label="Loading..." />}
 
       {/* ── Section 1: Planned Labs ── */}
       {planned.length > 0 && (
@@ -458,9 +459,9 @@ Duration: [estimated minutes]`,
       )}
 
       {!loading && reports.length === 0 && (
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          No labs yet. Plan your first Saturday lab!
-        </Typography>
+        <Box sx={{ mb: 3 }}>
+          <EmptyState title="No labs yet" description="Plan your first Saturday lab!" />
+        </Box>
       )}
 
       <LabSuggestions
