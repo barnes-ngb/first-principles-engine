@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -32,6 +31,7 @@ import DownloadIcon from '@mui/icons-material/Download'
 
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
@@ -247,9 +247,7 @@ export default function BookshelfPage() {
   if (loading) {
     return (
       <Page>
-        <Stack alignItems="center" py={4}>
-          <CircularProgress />
-        </Stack>
+        <LoadingState fullHeight />
       </Page>
     )
   }
@@ -453,26 +451,26 @@ export default function BookshelfPage() {
 
       {books.length === 0 ? (
         /* Empty state */
-        <Box sx={{ textAlign: 'center', py: 6 }}>
-          <MenuBookIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No books yet!
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            {isLincoln
+        <EmptyState
+          icon={<MenuBookIcon />}
+          title="No books yet!"
+          description={
+            isLincoln
               ? 'Craft your first book — tell a story, add photos, make it epic!'
-              : 'Make your first book — write a story and draw the pictures!'}
-          </Typography>
-          <Button
-            variant="contained"
-            size="large"
-            startIcon={<AddIcon />}
-            onClick={() => setShowNewDialog(true)}
-            sx={{ minHeight: 56, px: 4 }}
-          >
-            Make a new book
-          </Button>
-        </Box>
+              : 'Make your first book — write a story and draw the pictures!'
+          }
+          action={
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<AddIcon />}
+              onClick={() => setShowNewDialog(true)}
+              sx={{ minHeight: 56, px: 4 }}
+            >
+              Make a new book
+            </Button>
+          }
+        />
       ) : (
         /* Book grid */
         <Box

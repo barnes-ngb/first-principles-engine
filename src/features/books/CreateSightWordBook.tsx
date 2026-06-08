@@ -15,6 +15,7 @@ import EditIcon from '@mui/icons-material/Edit'
 import PublishIcon from '@mui/icons-material/Publish'
 
 import Page from '../../components/Page'
+import { ErrorState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Book, BookPage } from '../../core/types'
@@ -313,9 +314,7 @@ export default function CreateSightWordBook() {
         {generating ? 'Generating...' : 'Generate Story'}
       </Button>
 
-      {genError && (
-        <Alert severity="error">{genError.message}</Alert>
-      )}
+      {genError && <ErrorState message={genError.message} />}
 
       {/* Preview */}
       {preview && (
