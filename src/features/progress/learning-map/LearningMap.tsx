@@ -1,6 +1,5 @@
 import { type SyntheticEvent, useCallback, useState } from 'react'
 import Box from '@mui/material/Box'
-import CircularProgress from '@mui/material/CircularProgress'
 import Container from '@mui/material/Container'
 import LinearProgress from '@mui/material/LinearProgress'
 import Stack from '@mui/material/Stack'
@@ -8,6 +7,7 @@ import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
 
+import { EmptyState, LoadingState } from '../../../components/states'
 import { useActiveChild } from '../../../core/hooks/useActiveChild'
 import { CURRICULUM_MAPS } from '../../../core/curriculum/curriculumMap'
 import type { CurriculumNode } from '../../../core/curriculum/curriculumMap'
@@ -43,16 +43,16 @@ export default function LearningMap() {
 
   if (!activeChild) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4, textAlign: 'center' }}>
-        <Typography color="text.secondary">Select a child to view their learning map.</Typography>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <EmptyState title="Select a child to view their learning map." />
       </Container>
     )
   }
 
   if (isLoading) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4, textAlign: 'center' }}>
-        <CircularProgress />
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <LoadingState fullHeight />
       </Container>
     )
   }

@@ -34,6 +34,7 @@ import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanButton from '../../components/ScanButton'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
+import { EmptyState, ErrorState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { scansCollection } from '../../core/firebase/firestore'
@@ -450,10 +451,7 @@ export default function CurriculumTab() {
   if (loading) {
     return (
       <Container maxWidth="lg" sx={{ py: 3 }}>
-        <Stack alignItems="center" spacing={2}>
-          <CircularProgress />
-          <Typography color="text.secondary">Loading curriculum...</Typography>
-        </Stack>
+        <LoadingState fullHeight label="Loading curriculum..." />
       </Container>
     )
   }
@@ -482,9 +480,10 @@ export default function CurriculumTab() {
           title={`This week\u2019s scans${weeklyScans.length > 0 ? ` (${weeklyScans.length})` : ''}`}
         >
           {weeklyScans.length === 0 ? (
-            <Typography color="text.secondary" variant="body2">
-              No scans this week yet — capture work on the Today page to see AI analysis here.
-            </Typography>
+            <EmptyState
+              title="No scans this week yet"
+              description="Capture work on the Today page to see AI analysis here."
+            />
           ) : (
             <Stack spacing={0.5}>
               {weeklyScans.map((scanRec) => (
@@ -497,9 +496,10 @@ export default function CurriculumTab() {
         {/* Active Workbooks */}
         <SectionCard title="Active Workbooks">
           {workbooks.length === 0 ? (
-            <Typography color="text.secondary" variant="body2">
-              No workbooks configured. Scan a page or add one manually.
-            </Typography>
+            <EmptyState
+              title="No workbooks configured"
+              description="Scan a page or add one manually."
+            />
           ) : (
             <Stack spacing={2}>
               {workbooks.map((config) => {
@@ -530,9 +530,7 @@ export default function CurriculumTab() {
           }
         >
           {routines.length === 0 ? (
-            <Typography color="text.secondary" variant="body2">
-              No routine activities configured.
-            </Typography>
+            <EmptyState title="No routine activities configured." />
           ) : (
             <List dense disablePadding>
               {routines.map((config) => (
@@ -623,18 +621,15 @@ export default function CurriculumTab() {
           )}
 
           {scanning && (
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
-              <CircularProgress size={20} />
-              <Typography variant="body2" color="text.secondary">
-                Analyzing image...
-              </Typography>
-            </Stack>
+            <Box sx={{ mt: 1 }}>
+              <LoadingState label="Analyzing image..." />
+            </Box>
           )}
 
           {scanError && (
-            <Alert severity="error" sx={{ mt: 1 }}>
-              {scanError}
-            </Alert>
+            <Box sx={{ mt: 1 }}>
+              <ErrorState message={scanError} />
+            </Box>
           )}
 
           {scanResult?.results && (
@@ -794,9 +789,7 @@ export default function CurriculumTab() {
                   {certPreview.updates.masteredSkills.join(', ')}
                 </Typography>
               )}
-              {certError && (
-                <Alert severity="error">{certError}</Alert>
-              )}
+              {certError && <ErrorState message={certError} />}
             </Stack>
           )}
         </DialogContent>

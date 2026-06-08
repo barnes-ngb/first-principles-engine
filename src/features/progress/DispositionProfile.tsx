@@ -6,7 +6,6 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -14,6 +13,7 @@ import Typography from '@mui/material/Typography'
 import { deleteField, doc, getDoc, updateDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
+import { ErrorState, LoadingState } from '../../components/states'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useAI, TaskType } from '../../core/ai/useAI'
@@ -284,21 +284,12 @@ export default function DispositionProfile() {
         </Box>
       )}
 
-      {loading && (
-        <Box sx={{ textAlign: 'center', py: 4 }}>
-          <CircularProgress sx={{ mb: 2 }} />
-          <Typography color="text.secondary">
-            Analyzing 4 weeks of learning data...
-          </Typography>
-        </Box>
-      )}
+      {loading && <LoadingState fullHeight label="Analyzing 4 weeks of learning data..." />}
 
       {error && (
-        <Alert severity="error" sx={{ my: 2 }} action={
-          <Button color="inherit" size="small" onClick={() => handleGenerate(true)}>Retry</Button>
-        }>
-          {error}
-        </Alert>
+        <Box sx={{ my: 2 }}>
+          <ErrorState message={error} onRetry={() => handleGenerate(true)} />
+        </Box>
       )}
 
       {result && (
