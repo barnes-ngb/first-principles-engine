@@ -46,7 +46,10 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { BookProgress, ChapterBook, ChapterQuestionPoolItem } from '../../core/types'
 import { SEED_CHAPTER_BOOKS } from '../../core/data/chapterBooks'
 import { buildChapterPoolItem } from '../today/chapterPool.logic'
-import { applyChapterPoolForChild } from '../today/applyChapterPoolForChild'
+import {
+  applyChapterPoolToAll,
+  collectExistingChapterPool,
+} from '../today/applyChapterPoolForChild'
 import { getWeekRange } from '../../core/utils/time'
 import { parseDateYmd } from '../../core/utils/format'
 
@@ -294,6 +297,20 @@ export default function DevAdminTab() {
     void check()
   }, [weekInfo?.readAloudBookId, selectedChildId, familyId])
 
+  // Re-read the SELECTED child's pool count from Firestore so the displayed count
+  // reflects whatever they actually have now (newly generated and/or backfilled).
+  const refreshSelectedPoolCount = async () => {
+    if (!weekInfo?.readAloudBookId || !selectedChildId || !familyId) return
+    try {
+      const progressId = bookProgressDocId(selectedChildId, weekInfo.readAloudBookId)
+      const snap = await getDoc(doc(bookProgressCollection(familyId), progressId))
+      const count = snap.exists() ? ((snap.data() as BookProgress).questionPool?.length ?? 0) : 0
+      setPoolInfo((prev) => (prev ? { ...prev, poolCount: count } : prev))
+    } catch (err) {
+      console.error('Failed to refresh pool count', err)
+    }
+  }
+
   const handleGenerateChapterQuestions = async () => {
     if (!weekInfo?.readAloudBookId || !selectedChildId || !familyId) return
     setGeneratingPool(true)
@@ -308,18 +325,28 @@ export default function DevAdminTab() {
         return
       }
 
-      const progressId = bookProgressDocId(selectedChildId, bookId)
-      const progressRef = doc(bookProgressCollection(familyId), progressId)
-      const progressSnap = await getDoc(progressRef)
-      const existing = progressSnap.exists() ? (progressSnap.data() as BookProgress) : null
+      // Collect the family's existing pool across EVERY learner (canonical "same
+      // questions"), then copy it to every kid — siblings who already have a
+      // chapter no-op, kids missing it get the exact item. Backfills any kid who
+      // lacks a book another sibling already set up, WITHOUT regenerating (FEAT-19).
+      const existingMap = await collectExistingChapterPool(familyId, children, bookId)
+      const backfilled = await applyChapterPoolToAll(
+        familyId, children, book, [...existingMap.values()],
+      )
 
-      const existingChapters = existing?.questionPool?.map((q) => q.chapter) ?? []
+      // AI-generate ONLY chapters no kid has yet.
       const missingChapters = book.chapters?.filter(
-        (c) => !existingChapters.includes(c.number),
+        (c) => !existingMap.has(c.number),
       ) ?? []
 
       if (missingChapters.length === 0) {
-        setPoolStatus({ severity: 'info', text: 'All chapters already have questions.' })
+        setPoolStatus({
+          severity: backfilled > 0 ? 'success' : 'info',
+          text: backfilled > 0
+            ? `Copied existing chapter questions to ${backfilled} more child${backfilled > 1 ? 'ren' : ''}.`
+            : 'All chapters already have questions.',
+        })
+        await refreshSelectedPoolCount()
         setGeneratingPool(false)
         return
       }
@@ -361,18 +388,15 @@ export default function DevAdminTab() {
         )
         .filter((item): item is ChapterQuestionPoolItem => item !== null)
 
-      // The read-aloud is a family book: write the SAME pool to every learner so
-      // each kid (Lincoln + London) gets the questions on their Today and records
-      // their own answers (FEAT-17). create-or-append per child, deduped by chapter.
-      await Promise.all(
-        children.map((child) =>
-          applyChapterPoolForChild(familyId, child.id, book, newPoolItems),
-        ),
-      )
+      // The read-aloud is a family book: write the SAME newly-generated pool to
+      // every learner so each kid (Lincoln + London) gets the questions on their
+      // Today and records their own answers (FEAT-17). Deduped by chapter.
+      await applyChapterPoolToAll(familyId, children, book, newPoolItems)
 
       setPoolStatus({ severity: 'success', text: `Generated ${newPoolItems.length} chapter questions!` })
-      // Refresh pool info
-      setPoolInfo((prev) => prev ? { ...prev, poolCount: (prev.poolCount ?? 0) + newPoolItems.length } : prev)
+      // Refresh pool info from the selected child's actual doc (it may have also
+      // received backfilled copies for chapters a sibling already had).
+      await refreshSelectedPoolCount()
     } catch (err) {
       console.error('Failed to generate chapter questions', err)
       setPoolStatus({ severity: 'error', text: `Failed: ${err}` })

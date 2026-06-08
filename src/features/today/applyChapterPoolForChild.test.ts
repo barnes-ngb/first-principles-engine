@@ -21,7 +21,11 @@ vi.mock('../../core/firebase/firestore', () => ({
   bookProgressDocId: (childId: string, bookId: string) => `${childId}_${bookId}`,
 }))
 
-import { applyChapterPoolForChild } from './applyChapterPoolForChild'
+import {
+  applyChapterPoolForChild,
+  applyChapterPoolToAll,
+  collectExistingChapterPool,
+} from './applyChapterPoolForChild'
 
 const book = {
   id: 'lion-witch-wardrobe',
@@ -128,9 +132,113 @@ describe('applyChapterPoolForChild', () => {
     }
     getDoc.mockResolvedValue({ exists: () => true, data: () => existing })
 
-    await applyChapterPoolForChild('fam1', 'lincoln1', book, [item(1), item(2)])
+    const wrote = await applyChapterPoolForChild('fam1', 'lincoln1', book, [item(1), item(2)])
 
+    expect(wrote).toBe(false)
     expect(setDoc).not.toHaveBeenCalled()
     expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('returns true when it creates or appends', async () => {
+    getDoc.mockResolvedValueOnce({ exists: () => false })
+    expect(await applyChapterPoolForChild('fam1', 'london1', book, [item(1)])).toBe(true)
+  })
+})
+
+const progress = (
+  childId: string,
+  pool: ChapterQuestionPoolItem[],
+): BookProgress => ({
+  bookId: book.id,
+  childId,
+  bookTitle: book.title,
+  author: book.author,
+  totalChapters: book.totalChapters,
+  questionPool: pool,
+  startedAt: '2026-06-01',
+  createdAt: '2026-06-01T00:00:00.000Z',
+  updatedAt: '2026-06-01T00:00:00.000Z',
+})
+
+const children = [{ id: 'lincoln1' }, { id: 'london1' }]
+
+describe('collectExistingChapterPool', () => {
+  it('merges chapters across kids and strips per-child answer state', async () => {
+    const lincoln = progress('lincoln1', [
+      {
+        ...item(1),
+        chapterTitle: 'Chapter One',
+        answered: true,
+        answeredDate: '2026-06-02',
+        audioUrl: 'https://example.com/a.webm',
+        responseNote: 'great answer',
+        skipped: true,
+      },
+      item(2),
+    ])
+    const london = progress('london1', [item(3)])
+    getDoc
+      .mockResolvedValueOnce({ exists: () => true, data: () => lincoln })
+      .mockResolvedValueOnce({ exists: () => true, data: () => london })
+
+    const map = await collectExistingChapterPool('fam1', children, book.id)
+
+    expect([...map.keys()].sort((a, b) => a - b)).toEqual([1, 2, 3])
+    const ch1 = map.get(1)
+    // Canonical "same questions" — keep the question + title, drop all answer state.
+    expect(ch1?.answered).toBe(false)
+    expect(ch1?.chapterTitle).toBe('Chapter One')
+    expect(ch1).not.toHaveProperty('answeredDate')
+    expect(ch1).not.toHaveProperty('audioUrl')
+    expect(ch1).not.toHaveProperty('responseNote')
+    expect(ch1).not.toHaveProperty('skipped')
+  })
+
+  it("takes the first kid's item per chapter (canonical across siblings)", async () => {
+    const lincoln = progress('lincoln1', [
+      { ...item(1), question: 'Lincoln version' },
+    ])
+    const london = progress('london1', [
+      { ...item(1), question: 'London version' },
+    ])
+    getDoc
+      .mockResolvedValueOnce({ exists: () => true, data: () => lincoln })
+      .mockResolvedValueOnce({ exists: () => true, data: () => london })
+
+    const map = await collectExistingChapterPool('fam1', children, book.id)
+
+    expect(map.get(1)?.question).toBe('Lincoln version')
+  })
+
+  it('returns an empty map when no kid has the book', async () => {
+    getDoc.mockResolvedValue({ exists: () => false })
+
+    const map = await collectExistingChapterPool('fam1', children, book.id)
+
+    expect(map.size).toBe(0)
+  })
+})
+
+describe('applyChapterPoolToAll', () => {
+  it('no-ops on an empty pool — never touches Firestore or creates an empty doc', async () => {
+    const written = await applyChapterPoolToAll('fam1', children, book, [])
+
+    expect(written).toBe(0)
+    expect(getDoc).not.toHaveBeenCalled()
+    expect(setDoc).not.toHaveBeenCalled()
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('counts only children that actually received a write (sibling backfill)', async () => {
+    // Lincoln already has both chapters (no-op); London has none (created).
+    getDoc
+      .mockResolvedValueOnce({ exists: () => true, data: () => progress('lincoln1', [item(1), item(2)]) })
+      .mockResolvedValueOnce({ exists: () => false })
+
+    const written = await applyChapterPoolToAll('fam1', children, book, [item(1), item(2)])
+
+    expect(written).toBe(1)
+    expect(setDoc).toHaveBeenCalledTimes(1) // London created
+    expect(updateDoc).not.toHaveBeenCalled() // Lincoln no-op
   })
 })
