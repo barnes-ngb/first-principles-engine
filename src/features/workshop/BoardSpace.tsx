@@ -3,6 +3,7 @@ import Typography from '@mui/material/Typography'
 import type { BoardSpaceType } from '../../core/types/workshop'
 import type { AvatarProfile } from '../../core/types'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
+import { kidPalette } from '../../app/tokens'
 
 const SPACE_COLORS: Record<BoardSpaceType, string> = {
   normal: '#e3f2fd',
@@ -78,14 +79,14 @@ export default function BoardSpace({
         bgcolor: bgColor,
         borderRadius: 1.5,
         border: isLast
-          ? '3px solid #ffd700'
+          ? `3px solid ${kidPalette.goldBright}`
           : isActive
             ? '3px solid'
             : type === 'challenge'
               ? '2px solid #ff9800'
               : '1px solid',
         borderColor: isLast
-          ? '#ffd700'
+          ? kidPalette.goldBright
           : isActive
             ? 'primary.main'
             : type === 'challenge'
@@ -313,7 +314,7 @@ export default function BoardSpace({
                     height: tokenSize,
                     borderRadius: profile ? '4px' : '50%',
                     bgcolor: !profile && !player.avatarUrl ? player.color : 'transparent',
-                    border: isActiveToken ? '2px solid #ffd700' : '2px solid white',
+                    border: isActiveToken ? `2px solid ${kidPalette.goldBright}` : '2px solid white',
                     overflow: 'hidden',
                     display: 'flex',
                     alignItems: 'center',

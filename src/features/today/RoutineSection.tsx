@@ -13,6 +13,7 @@ import type {
 import { RoutineItemKey } from '../../core/types/enums'
 import { ALL_ROUTINE_ITEMS } from './daylog.model'
 import { calculateXp, XP_VALUES } from './xp'
+import { kidPalette } from '../../app/tokens'
 import ReadingRoutineItems from './ReadingRoutineItems'
 import MathRoutineItems from './MathRoutineItems'
 import SpeechRoutineItems from './SpeechRoutineItems'
@@ -180,7 +181,7 @@ export default function RoutineSection({
               fontFamily: '"Press Start 2P", monospace',
               fontSize: '0.5rem',
               bgcolor: xp > 0 ? '#1A1A1A' : undefined,
-              color: xp > 0 ? '#7EFC20' : undefined,
+              color: xp > 0 ? kidPalette.xpGreen : undefined,
               border: xp > 0 ? '2px solid #3A3A3A' : undefined,
               borderRadius: 0,
               '& .MuiChip-label': { px: 1.5 },
