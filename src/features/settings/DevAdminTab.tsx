@@ -45,8 +45,8 @@ import {
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { BookProgress, ChapterBook, ChapterQuestionPoolItem } from '../../core/types'
 import { SEED_CHAPTER_BOOKS } from '../../core/data/chapterBooks'
-import { todayKey } from '../../core/utils/dateKey'
 import { buildChapterPoolItem } from '../today/chapterPool.logic'
+import { applyChapterPoolForChild } from '../today/applyChapterPoolForChild'
 import { getWeekRange } from '../../core/utils/time'
 import { parseDateYmd } from '../../core/utils/format'
 
@@ -65,7 +65,7 @@ type StatusMsg = {
 export default function DevAdminTab() {
   // ── Shared hooks ───────────────────────────────────────────────────
   const familyId = useFamilyId()
-  const { activeChild, activeChildId: selectedChildId } = useActiveChild()
+  const { activeChild, activeChildId: selectedChildId, children } = useActiveChild()
   const { chat: aiChat } = useAI()
 
   // ── Section A: Chapter Book Library ──────────────────────────────
@@ -361,25 +361,14 @@ export default function DevAdminTab() {
         )
         .filter((item): item is ChapterQuestionPoolItem => item !== null)
 
-      if (existing) {
-        await updateDoc(progressRef, {
-          questionPool: [...existing.questionPool, ...newPoolItems],
-          updatedAt: new Date().toISOString(),
-        })
-      } else {
-        const newProgress: BookProgress = {
-          bookId: book.id,
-          childId: selectedChildId,
-          bookTitle: book.title,
-          author: book.author,
-          totalChapters: book.totalChapters,
-          questionPool: newPoolItems,
-          startedAt: todayKey(),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }
-        await setDoc(progressRef, newProgress)
-      }
+      // The read-aloud is a family book: write the SAME pool to every learner so
+      // each kid (Lincoln + London) gets the questions on their Today and records
+      // their own answers (FEAT-17). create-or-append per child, deduped by chapter.
+      await Promise.all(
+        children.map((child) =>
+          applyChapterPoolForChild(familyId, child.id, book, newPoolItems),
+        ),
+      )
 
       setPoolStatus({ severity: 'success', text: `Generated ${newPoolItems.length} chapter questions!` })
       // Refresh pool info

@@ -73,10 +73,10 @@ import {
   SubjectBucket,
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
-import { todayKey } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
 import { buildChapterPoolItem } from '../today/chapterPool.logic'
+import { applyChapterPoolForChild } from '../today/applyChapterPoolForChild'
 import { dayLogDocId } from '../today/daylog.model'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -1986,29 +1986,18 @@ Generate a plan for Monday through Friday.`.trim()
               )
               .filter((item): item is ChapterQuestionPoolItem => item !== null)
 
-            if (existing) {
-              await updateDoc(progressRef, {
-                questionPool: [...existing.questionPool, ...newPoolItems],
-                updatedAt: new Date().toISOString(),
-              })
-            } else {
-              const newProgress: BookProgress = {
-                bookId: selectedBook.id,
-                childId: activeChildId,
-                bookTitle: selectedBook.title,
-                author: selectedBook.author,
-                totalChapters: selectedBook.totalChapters,
-                questionPool: newPoolItems,
-                startedAt: todayKey(),
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              }
-              await setDoc(progressRef, newProgress)
-            }
+            // The read-aloud is a family book: write the SAME pool to every learner
+            // so each kid (Lincoln + London) gets the questions on their Today and
+            // records their own answers (FEAT-17). create-or-append, deduped by chapter.
+            await Promise.all(
+              children.map((child) =>
+                applyChapterPoolForChild(familyId, child.id, selectedBook, newPoolItems),
+              ),
+            )
 
             setSnack({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
 
-            // Refresh bookProgress state
+            // Refresh bookProgress state for the active child (the one viewing this page).
             const refreshed = await getDoc(progressRef)
             if (refreshed.exists()) {
               setBookProgress({ ...refreshed.data() as BookProgress, id: refreshed.id })
@@ -2028,7 +2017,7 @@ Generate a plan for Monday through Friday.`.trim()
       console.error('Failed to apply plan', err)
       setSnack({ text: 'Failed to apply plan.', severity: 'error' })
     }
-  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat])
+  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
