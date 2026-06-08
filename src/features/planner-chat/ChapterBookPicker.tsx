@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
+import SearchIcon from '@mui/icons-material/Search'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -16,9 +17,14 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { addDoc } from 'firebase/firestore'
 
-import { LoadingState } from '../../components/states'
+import { ErrorState, LoadingState } from '../../components/states'
 import { chapterBooksCollection } from '../../core/firebase/firestore'
-import type { BookProgress, ChapterBook, ChapterBookChapter } from '../../core/types'
+import type {
+  BookLookupResult,
+  BookProgress,
+  ChapterBook,
+  ChapterBookChapter,
+} from '../../core/types'
 
 const NONE_VALUE = '__none__'
 const ADD_VALUE = '__add__'
@@ -35,6 +41,13 @@ export interface ChapterBookPickerProps {
   loading?: boolean
   /** Set when the chapterBooks load failed. Falls back to a plain text input so Shelly can still type a title. */
   loadError?: boolean
+  /**
+   * Optional AI title lookup. When provided, a "Look it up" button appears beside
+   * the Title field in the add-book form; on success the form is pre-filled (all
+   * fields stay editable). Returns null/throws on failure — the form stays usable
+   * for manual entry. When omitted, the button is hidden.
+   */
+  onLookup?: (title: string) => Promise<BookLookupResult | null>
 }
 
 export default function ChapterBookPicker({
@@ -46,6 +59,7 @@ export default function ChapterBookPicker({
   variant = 'wizard',
   loading = false,
   loadError = false,
+  onLookup,
 }: ChapterBookPickerProps) {
   const [addingOpen, setAddingOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -54,6 +68,13 @@ export default function ChapterBookPicker({
   const [newAuthor, setNewAuthor] = useState('')
   const [newChapters, setNewChapters] = useState('')
   const [newChapterTitles, setNewChapterTitles] = useState('')
+  // Lookup ("Look it up") state
+  const [lookingUp, setLookingUp] = useState(false)
+  const [lookupError, setLookupError] = useState<string | null>(null)
+  // Stashed lookup data not surfaced as editable fields — applied on save.
+  const [lookupSummary, setLookupSummary] = useState<string | undefined>(undefined)
+  const [lookupMovie, setLookupMovie] = useState<BookLookupResult['movie']>(undefined)
+  const [lookupChapters, setLookupChapters] = useState<ChapterBookChapter[]>([])
 
   const currentValue = selectedBook ? selectedBook.id : NONE_VALUE
 
@@ -63,6 +84,50 @@ export default function ChapterBookPicker({
     setNewChapters('')
     setNewChapterTitles('')
     setSaveError(null)
+    setLookupError(null)
+    setLookupSummary(undefined)
+    setLookupMovie(undefined)
+    setLookupChapters([])
+  }
+
+  const handleLookup = async () => {
+    if (!onLookup) return
+    const title = newTitle.trim()
+    if (!title) {
+      setLookupError('Type a title first, then look it up.')
+      return
+    }
+    setLookingUp(true)
+    setLookupError(null)
+    try {
+      const result = await onLookup(title)
+      if (!result || !result.title) {
+        setLookupError("Couldn't find that book — type the details below.")
+        return
+      }
+      // Pre-fill the editable fields (Shelly reviews + corrects before saving).
+      setNewTitle(result.title)
+      setNewAuthor(result.author ?? '')
+      if (Number.isFinite(result.totalChapters) && result.totalChapters > 0) {
+        setNewChapters(String(result.totalChapters))
+      }
+      const chapters = result.chapters ?? []
+      if (chapters.length > 0) {
+        const sorted = [...chapters].sort((a, b) => a.number - b.number)
+        setNewChapterTitles(sorted.map((c) => c.title ?? '').join('\n'))
+        setLookupChapters(sorted)
+      } else {
+        setLookupChapters([])
+      }
+      // Stash non-editable data for persistence on save.
+      setLookupSummary(result.summary)
+      setLookupMovie(result.movie)
+    } catch (err) {
+      console.error('Book lookup failed', err)
+      setLookupError("Lookup didn't work — type the details below.")
+    } finally {
+      setLookingUp(false)
+    }
   }
 
   const handleSelectChange = (e: SelectChangeEvent<string>) => {
@@ -96,8 +161,13 @@ export default function ChapterBookPicker({
         .split('\n')
         .map((line) => line.trim())
       const chapters: ChapterBookChapter[] = Array.from({ length: totalChapters }, (_, i) => {
-        const t = titleLines[i]
-        return t ? { number: i + 1, title: t } : { number: i + 1 }
+        const number = i + 1
+        const looked = lookupChapters.find((c) => c.number === number)
+        const chapterTitle = titleLines[i] || looked?.title
+        const chapter: ChapterBookChapter = { number }
+        if (chapterTitle) chapter.title = chapterTitle
+        if (looked?.summary) chapter.summary = looked.summary
+        return chapter
       })
 
       const bookData: ChapterBook = {
@@ -107,6 +177,11 @@ export default function ChapterBookPicker({
         totalChapters,
         chapters,
         createdAt: new Date().toISOString(),
+        // Persist lookup-derived fields when present (Firestore rejects undefined).
+        ...(lookupSummary ? { summary: lookupSummary } : {}),
+        ...(lookupMovie
+          ? { hasMovie: lookupMovie.exists, ...(lookupMovie.notes ? { movieNotes: lookupMovie.notes } : {}) }
+          : {}),
       }
 
       const ref = await addDoc(chapterBooksCollection(), bookData)
@@ -249,15 +324,35 @@ export default function ChapterBookPicker({
             Add a new book to your library
           </Typography>
           <Stack spacing={1.5}>
-            <TextField
-              size="small"
-              label="Title"
-              required
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="e.g., Prince Caspian"
-              fullWidth
-            />
+            <Stack direction="row" spacing={1} alignItems="flex-start">
+              <TextField
+                size="small"
+                label="Title"
+                required
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="e.g., Prince Caspian"
+                fullWidth
+              />
+              {onLookup && (
+                <Tooltip title="Use AI to fill in the author, chapter count, and summary from the title.">
+                  <span>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={handleLookup}
+                      disabled={lookingUp || saving || !newTitle.trim()}
+                      startIcon={lookingUp ? <CircularProgress size={14} /> : <SearchIcon fontSize="small" />}
+                      sx={{ whiteSpace: 'nowrap', mt: 0.25 }}
+                    >
+                      {lookingUp ? 'Looking...' : 'Look it up'}
+                    </Button>
+                  </span>
+                </Tooltip>
+              )}
+            </Stack>
+            {lookingUp && <LoadingState size={16} label="Looking up book details..." />}
+            {lookupError && <ErrorState message={lookupError} />}
             <TextField
               size="small"
               label="Author"

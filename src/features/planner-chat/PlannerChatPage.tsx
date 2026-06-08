@@ -20,6 +20,7 @@ import Page from '../../components/Page'
 import { LoadingState } from '../../components/states'
 import { AIFeatureFlag, useAIFeatureFlags } from '../../core/ai/featureFlags'
 import { useAI, TaskType, useGenerateActivity } from '../../core/ai/useAI'
+import { deriveChildAge } from '../../core/profile/childAge'
 import type { ChatMessage as AIChatMessage, GeneratedActivity } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
@@ -42,6 +43,7 @@ import { useDebounce } from '../../core/hooks/useDebounce'
 import type {
   AppBlock,
   AssignmentCandidate,
+  BookLookupResult,
   BookProgress,
   ChapterBook,
   ChapterQuestionPoolItem,
@@ -74,6 +76,7 @@ import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { todayKey } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
+import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -414,6 +417,36 @@ export default function PlannerChatPage() {
       return next
     })
   }, [])
+
+  // AI title lookup for the "Add a new book" form — pre-fills the form fields.
+  const handleLookupBook = useCallback(
+    async (title: string): Promise<BookLookupResult | null> => {
+      if (!activeChildId) return null
+      const age = activeChild ? deriveChildAge(activeChild) : null
+      const result = await aiChat({
+        familyId,
+        childId: activeChildId,
+        taskType: TaskType.BookLookup,
+        messages: [
+          {
+            role: 'user',
+            content: JSON.stringify({
+              title,
+              childName: activeChild?.name,
+              ...(age != null ? { childAge: age } : {}),
+            }),
+          },
+        ],
+      })
+      if (!result?.message) return null
+      try {
+        return JSON.parse(result.message) as BookLookupResult
+      } catch {
+        return null
+      }
+    },
+    [aiChat, familyId, activeChildId, activeChild],
+  )
 
   // dailyRoutine is now derived from activity configs (already filtered for completed)
   // No need to filter for completed programs — activity configs handle that via `completed` flag
@@ -1947,13 +1980,11 @@ Generate a plan for Monday through Friday.`.trim()
               return
             }
 
-            const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
-              chapter: q.chapter,
-              chapterTitle: selectedBook.chapters?.find((c) => c.number === q.chapter)?.title,
-              questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
-              question: q.question,
-              answered: false,
-            }))
+            const newPoolItems: ChapterQuestionPoolItem[] = questions
+              .map((q) =>
+                buildChapterPoolItem(q, selectedBook.chapters?.find((c) => c.number === q.chapter)?.title),
+              )
+              .filter((item): item is ChapterQuestionPoolItem => item !== null)
 
             if (existing) {
               await updateDoc(progressRef, {
@@ -2339,6 +2370,7 @@ ${dayPrompts}`
               selectedBook={selectedBook}
               onSelectedBookChange={handleSelectedBookChange}
               onBookAdded={handleBookAdded}
+              onLookupBook={handleLookupBook}
               bookProgress={bookProgress}
               chapterBooksLoading={chapterBooksLoading}
               chapterBooksLoadError={chapterBooksLoadError}
@@ -2375,6 +2407,7 @@ ${dayPrompts}`
               selectedBook={selectedBook}
               onSelectedBookChange={handleSelectedBookChange}
               onBookAdded={handleBookAdded}
+              onLookupBook={handleLookupBook}
               bookProgress={bookProgress}
               chapterBooksLoading={chapterBooksLoading}
               chapterBooksLoadError={chapterBooksLoadError}
@@ -2428,6 +2461,7 @@ ${dayPrompts}`
                 variant="compact"
                 loading={chapterBooksLoading}
                 loadError={chapterBooksLoadError}
+                onLookup={handleLookupBook}
               />
             </Box>
           )}
@@ -2479,6 +2513,7 @@ ${dayPrompts}`
                   variant="compact"
                   loading={chapterBooksLoading}
                   loadError={chapterBooksLoadError}
+                  onLookup={handleLookupBook}
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                   Today&apos;s chapter question won&apos;t regenerate automatically — open the Today page and tap Refresh on the chapter question card.

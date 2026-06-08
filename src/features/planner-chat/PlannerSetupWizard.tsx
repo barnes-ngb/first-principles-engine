@@ -14,6 +14,7 @@ import Typography from '@mui/material/Typography'
 
 import type {
   ActivityConfig,
+  BookLookupResult,
   BookProgress,
   ChapterBook,
   PhotoLabel,
@@ -40,6 +41,7 @@ interface PlannerSetupWizardProps {
   selectedBook: ChapterBook | null
   onSelectedBookChange: (book: ChapterBook | null) => void
   onBookAdded?: (book: ChapterBook) => void
+  onLookupBook?: (title: string) => Promise<BookLookupResult | null>
   bookProgress: BookProgress | null
   weekNotes: string
   onWeekNotesChange: (v: string) => void
@@ -77,6 +79,7 @@ export default function PlannerSetupWizard({
   selectedBook,
   onSelectedBookChange,
   onBookAdded,
+  onLookupBook,
   bookProgress,
   chapterBooksLoading,
   chapterBooksLoadError,
@@ -121,6 +124,7 @@ export default function PlannerSetupWizard({
         selectedBook={selectedBook}
         onSelectedBookChange={onSelectedBookChange}
         onBookAdded={onBookAdded}
+        onLookup={onLookupBook}
         bookProgress={bookProgress}
         variant="wizard"
         loading={chapterBooksLoading}

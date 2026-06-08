@@ -37,7 +37,27 @@ export interface ChapterBook {
   chapters?: ChapterBookChapter[]
   coverImageUrl?: string
   ageRange?: string
+  /** AI-generated book summary (from the "Look it up" lookup), age-pitched. */
+  summary?: string
+  /** True when a well-known film adaptation exists (from lookup). */
+  hasMovie?: boolean
+  /** Notable book-vs-film differences (from lookup). Stored for Slice 2. */
+  movieNotes?: string
   createdAt: string
+}
+
+/**
+ * Result of the `bookLookup` AI task — used to pre-fill the "Add a new book"
+ * form. Every field stays editable before save. Shape mirrors the task's
+ * strict-JSON contract in `functions/src/ai/tasks/bookLookup.ts`.
+ */
+export interface BookLookupResult {
+  title: string
+  author: string
+  totalChapters: number
+  summary?: string
+  chapters?: ChapterBookChapter[]
+  movie?: { exists: boolean; title?: string; notes?: string }
 }
 
 export interface ChapterQuestionPoolItem {
