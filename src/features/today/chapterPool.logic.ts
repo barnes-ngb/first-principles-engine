@@ -1,5 +1,40 @@
 import type { ChapterQuestionPoolItem } from '../../core/types'
 
+/** The raw AI-generated question shape the three create paths parse and map. */
+export interface RawChapterQuestion {
+  chapter: number
+  questionType: string
+  question: string
+}
+
+/**
+ * Build a single `questionPool` item from a raw AI question, omitting
+ * `chapterTitle` entirely when there's no title.
+ *
+ * The app's Firestore is plain `getFirestore(app)` (no
+ * `ignoreUndefinedProperties`), so writing `chapterTitle: undefined` inside a
+ * pool item makes `setDoc` reject the whole `BookProgress` doc with
+ * `invalid-argument` (Unsupported field value: undefined). Books without
+ * per-chapter titles (e.g. Prince Caspian) hit this on every create path, so
+ * the spread below NEVER includes `chapterTitle` unless a real title is present.
+ *
+ * Returns `null` for malformed questions (missing/empty `questionType` or
+ * `question`) so callers can skip them rather than write a broken pool entry.
+ */
+export function buildChapterPoolItem(
+  q: RawChapterQuestion,
+  chapterTitle?: string,
+): ChapterQuestionPoolItem | null {
+  if (!q.questionType || !q.question) return null
+  return {
+    chapter: q.chapter,
+    questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
+    question: q.question,
+    answered: false,
+    ...(chapterTitle ? { chapterTitle } : {}),
+  }
+}
+
 /**
  * Chapter-pool completion semantics (FUNC-07).
  *

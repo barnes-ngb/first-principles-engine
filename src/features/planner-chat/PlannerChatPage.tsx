@@ -74,6 +74,7 @@ import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { todayKey } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { getWeekRange } from '../engine/engine.logic'
+import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import { dayLogDocId } from '../today/daylog.model'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -1947,13 +1948,11 @@ Generate a plan for Monday through Friday.`.trim()
               return
             }
 
-            const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
-              chapter: q.chapter,
-              chapterTitle: selectedBook.chapters?.find((c) => c.number === q.chapter)?.title,
-              questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
-              question: q.question,
-              answered: false,
-            }))
+            const newPoolItems: ChapterQuestionPoolItem[] = questions
+              .map((q) =>
+                buildChapterPoolItem(q, selectedBook.chapters?.find((c) => c.number === q.chapter)?.title),
+              )
+              .filter((item): item is ChapterQuestionPoolItem => item !== null)
 
             if (existing) {
               await updateDoc(progressRef, {

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import type { ChapterQuestionPoolItem } from '../../core/types'
 import { bookProgressDocId } from '../../core/firebase/firestore'
 import {
+  buildChapterPoolItem,
   isBookFinished,
   isChapterPoolVisible,
   isChapterToGo,
@@ -28,6 +29,38 @@ const answered = (chapter: number) =>
 const skipped = (chapter: number) =>
   make({ chapter, answered: false, skipped: true })
 const toGo = (chapter: number) => make({ chapter })
+
+describe('buildChapterPoolItem', () => {
+  const rawQ = { chapter: 4, questionType: 'comprehension', question: 'What happened?' }
+
+  it('omits chapterTitle entirely when no title is given (untitled chapter)', () => {
+    const item = buildChapterPoolItem(rawQ)
+    // Never write `chapterTitle: undefined` — plain Firestore rejects the doc.
+    expect(item).not.toBeNull()
+    expect(item).not.toHaveProperty('chapterTitle')
+    expect(item).toEqual({
+      chapter: 4,
+      questionType: 'comprehension',
+      question: 'What happened?',
+      answered: false,
+    })
+  })
+
+  it('carries a real chapter title onto the pool item', () => {
+    const item = buildChapterPoolItem(rawQ, 'The Island')
+    expect(item?.chapterTitle).toBe('The Island')
+  })
+
+  it('omits chapterTitle for an empty-string title', () => {
+    const item = buildChapterPoolItem(rawQ, '')
+    expect(item).not.toHaveProperty('chapterTitle')
+  })
+
+  it('returns null for a malformed question (missing type or text)', () => {
+    expect(buildChapterPoolItem({ chapter: 1, questionType: '', question: 'Q' })).toBeNull()
+    expect(buildChapterPoolItem({ chapter: 1, questionType: 'comprehension', question: '' })).toBeNull()
+  })
+})
 
 describe('isChapterToGo', () => {
   it('is true only when a chapter is neither answered nor parent-skipped', () => {

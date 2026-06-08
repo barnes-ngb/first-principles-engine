@@ -46,6 +46,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { BookProgress, ChapterBook, ChapterQuestionPoolItem } from '../../core/types'
 import { SEED_CHAPTER_BOOKS } from '../../core/data/chapterBooks'
 import { todayKey } from '../../core/utils/dateKey'
+import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import { getWeekRange } from '../../core/utils/time'
 import { parseDateYmd } from '../../core/utils/format'
 
@@ -354,13 +355,11 @@ export default function DevAdminTab() {
         return
       }
 
-      const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
-        chapter: q.chapter,
-        chapterTitle: book.chapters?.find((c) => c.number === q.chapter)?.title,
-        questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
-        question: q.question,
-        answered: false,
-      }))
+      const newPoolItems: ChapterQuestionPoolItem[] = questions
+        .map((q) =>
+          buildChapterPoolItem(q, book.chapters?.find((c) => c.number === q.chapter)?.title),
+        )
+        .filter((item): item is ChapterQuestionPoolItem => item !== null)
 
       if (existing) {
         await updateDoc(progressRef, {

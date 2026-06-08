@@ -64,6 +64,7 @@ import { getWeekRange } from '../../core/utils/time'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import ChapterQuestionPool from './ChapterQuestionPool'
+import { buildChapterPoolItem } from './chapterPool.logic'
 import { useBookProgress } from './useBookProgress'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
@@ -324,13 +325,11 @@ export default function TodayPage() {
         return
       }
 
-      const newPoolItems: ChapterQuestionPoolItem[] = questions.map((q) => ({
-        chapter: q.chapter,
-        chapterTitle: selectedBook.chapters?.find((c) => c.number === q.chapter)?.title,
-        questionType: q.questionType as ChapterQuestionPoolItem['questionType'],
-        question: q.question,
-        answered: false,
-      }))
+      const newPoolItems: ChapterQuestionPoolItem[] = questions
+        .map((q) =>
+          buildChapterPoolItem(q, selectedBook.chapters?.find((c) => c.number === q.chapter)?.title),
+        )
+        .filter((item): item is ChapterQuestionPoolItem => item !== null)
 
       if (existing) {
         await updateDoc(progressRef, {
