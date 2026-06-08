@@ -322,6 +322,23 @@ Rules:
 - Be conservative: ordinary requests the app CAN already handle are not friction — only capture unmet wants or real workflow frustration.`;
 }
 
+/**
+ * Build the WEB SEARCH guidance addendum for the shellyChat system prompt
+ * (FEAT-12 Phase 1).
+ *
+ * Tells the assistant it may use Anthropic's server-side web search to look up
+ * current/local information that helps Shelly plan — activities, events,
+ * materials, videos, and facts — and to cite what it finds with markdown links.
+ * Parent-scoped only (shellyChat is already Shelly-only; web search is never
+ * wired into any kid-facing task). Kept deliberately separate so it does not
+ * disturb the role, `<action>`/`<friction>` grammars, or the `[FOLLOWUP]`
+ * instruction. Takes no arguments and is stable.
+ */
+export function buildWebSearchAddendum(): string {
+  return `
+WEB SEARCH: You can search the web for current or local information when it would genuinely help Shelly plan — local activities and events, where to find materials or curricula, videos to watch or learn from together, and up-to-date facts. Use it when the answer depends on current, local, or specific information you don't already have; don't search for things you already know. When you draw on what you find, cite your sources as markdown links ([title](url)) so Shelly can tap through, and keep the answer practical and planning-oriented. Favor recent, reputable sources, and stay within Shelly's homeschool-planning context.`;
+}
+
 export const handleShellyChat = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
@@ -553,6 +570,7 @@ Example: If she says "Lincoln seems bored with reading" and the data shows posit
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
+  const webSearchAddendum = buildWebSearchAddendum();
 
   const systemPrompt = `${sharedContext}
 
@@ -562,6 +580,7 @@ ${roleSection}
 ${sightWordActionAddendum}
 ${snapshotActionAddendum}
 ${frictionCaptureAddendum}
+${webSearchAddendum}
 
 After your response, suggest 2-3 brief follow-up questions Shelly might want to ask. Format them on new lines at the very end of your response, each prefixed with "[FOLLOWUP] ". Keep each under 50 characters. These should be specific to what you just discussed, not generic.
 
@@ -614,6 +633,9 @@ Example:
       maxTokens: 2000,
       systemPrompt,
       messages: recentMessages,
+      // FEAT-12 Phase 1: parent-facing web search, capped per turn. Vision path
+      // (above) intentionally stays search-free for Phase 1.
+      webSearch: { maxUses: 4 },
     });
   }
 

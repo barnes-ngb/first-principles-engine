@@ -75,6 +75,15 @@ export async function callClaude(opts: {
   messages: Array<{ role: string; content: string }>;
   /** Optional temperature override; when omitted, Anthropic's default applies. */
   temperature?: number;
+  /**
+   * When set, enables Anthropic's server-side web search tool on this call,
+   * capped at `maxUses` searches per turn. **Off by default** — when omitted,
+   * no `tools` are sent and the request is identical to a plain text completion,
+   * so every other task that calls `callClaude` is unaffected. Parent-facing
+   * tasks only (Phase 1 wires this on the text path; the vision helpers below do
+   * not pass tools). See FEAT-12.
+   */
+  webSearch?: { maxUses: number };
 }): Promise<{ text: string; inputTokens: number; outputTokens: number; stopReason: string }> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey: opts.apiKey });
@@ -88,11 +97,30 @@ export async function callClaude(opts: {
       content: m.content,
     })),
     ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+    ...(opts.webSearch
+      ? {
+          tools: [
+            {
+              type: "web_search_20250305" as const,
+              name: "web_search" as const,
+              max_uses: opts.webSearch.maxUses,
+            },
+          ],
+        }
+      : {}),
   });
 
-  const firstBlock = completion.content[0];
-  const text =
-    firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+  // Concatenate every text block. With web search the response interleaves
+  // server_tool_use / web_search_tool_result blocks with the model's text (and
+  // the final, citation-bearing answer is usually NOT content[0]), so reading
+  // only the first block would drop the answer. For a plain single-text-block
+  // response this yields exactly that block's text — identical to before.
+  let text = "";
+  for (const block of completion.content) {
+    if (block.type === "text") {
+      text += (text ? "\n\n" : "") + block.text;
+    }
+  }
 
   return {
     text,

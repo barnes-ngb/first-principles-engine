@@ -4,6 +4,7 @@ import {
   buildShellyChatRoleSection,
   buildSightWordActionAddendum,
   buildSnapshotActionAddendum,
+  buildWebSearchAddendum,
   formatConundrumTitle,
   formatDispositionProfile,
   formatRecentTeachBacks,
@@ -493,6 +494,28 @@ describe("buildFrictionCaptureAddendum", () => {
   it("takes no arguments and is stable (no leaked template placeholder)", () => {
     expect(buildFrictionCaptureAddendum()).toBe(buildFrictionCaptureAddendum());
     expect(buildFrictionCaptureAddendum()).not.toContain("${");
+  });
+});
+
+// ── 7d. Web-search guidance addendum (FEAT-12 Phase 1) ──
+
+describe("buildWebSearchAddendum", () => {
+  it("tells the assistant it may search the web for planning info and cite links", () => {
+    const out = buildWebSearchAddendum();
+    expect(out).toContain("WEB SEARCH");
+    // Names the planning use cases, including videos.
+    expect(out.toLowerCase()).toContain("activities");
+    expect(out.toLowerCase()).toContain("videos");
+    // Requires cited markdown links.
+    expect(out).toContain("[title](url)");
+    // Keeps it planning-oriented and conservative about when to search.
+    expect(out.toLowerCase()).toContain("planning");
+    expect(out.toLowerCase()).toContain("don't search for things you already know");
+  });
+
+  it("takes no arguments and is stable (no leaked template placeholder)", () => {
+    expect(buildWebSearchAddendum()).toBe(buildWebSearchAddendum());
+    expect(buildWebSearchAddendum()).not.toContain("${");
   });
 });
 
