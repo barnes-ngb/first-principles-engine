@@ -3,7 +3,6 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -18,6 +17,7 @@ import { addDoc, deleteField, doc, getDoc, getDocs, limit as fsLimit, onSnapshot
 import { useNavigate } from 'react-router-dom'
 import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
+import { LoadingState } from '../../components/states'
 import { AIFeatureFlag, useAIFeatureFlags } from '../../core/ai/featureFlags'
 import { useAI, TaskType, useGenerateActivity } from '../../core/ai/useAI'
 import type { ChatMessage as AIChatMessage, GeneratedActivity } from '../../core/ai/useAI'
@@ -2325,7 +2325,7 @@ ${dayPrompts}`
 
           {phase === 'setup' && hasPriorPlan === null && (
             <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper', display: 'flex', justifyContent: 'center' }}>
-              <CircularProgress size={24} />
+              <LoadingState size={24} />
             </Box>
           )}
 
@@ -2605,7 +2605,7 @@ ${dayPrompts}`
             gap: 1,
           }}
         >
-          <CircularProgress size={20} />
+          <LoadingState size={20} />
           <Typography variant="body2">Generating activity...</Typography>
         </Box>
       )}
