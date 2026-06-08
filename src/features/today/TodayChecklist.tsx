@@ -31,12 +31,14 @@ import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import type {
+  ChatContext,
   ChecklistItem as ChecklistItemType,
   ConceptualBlock,
   CurriculumDetected,
   DayLog,
   SkillSnapshot,
 } from '../../core/types'
+import { openChatWithContext } from '../shelly-chat'
 import {
   PlanType,
   RoutineItemKey,
@@ -447,6 +449,30 @@ export default function TodayChecklist({
     setGradeNote(null)
   }
 
+  // Seed Shelly's chat with a video-oriented query for this lesson (FEAT-14 /
+  // FEAT-13 Phase 2). openChatWithContext creates a thread with a trailing user
+  // message; ShellyChatPage's auto-send effect then triggers her reply, which —
+  // with Phase 1's parent web search on — returns kid-friendly video links.
+  const handleFindVideo = (item: ChecklistItemType) => {
+    const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
+    const scanTopic = bucket ? scanFeedbackBySubject[bucket]?.topic : undefined
+    const rawTitle = (item as ChecklistItemType & { title?: string }).title
+    // Best topic = scan-feedback topic ?? title ?? label (minutes suffix stripped).
+    const cleanLabel = item.label.replace(/\s*\(\d+m\)\s*$/, '').trim()
+    const topic = (scanTopic || rawTitle || cleanLabel).trim()
+    const subjectSuffix = bucket ? ` (${bucket})` : ''
+    const seed = `Find a short, kid-friendly video to help teach: ${topic}${subjectSuffix}`
+    const name = selectedChild?.name?.toLowerCase()
+    const chatContext: ChatContext =
+      name === 'lincoln' ? 'lincoln' : name === 'london' ? 'london' : 'general'
+    void openChatWithContext(familyId, navigate, {
+      source: 'general',
+      chatContext,
+      itemTitle: topic,
+      initialMessage: seed,
+    })
+  }
+
   return (
     <SectionCard title="Today's Plan" action={
       hasPlanItems ? (
@@ -666,6 +692,20 @@ export default function TodayChecklist({
                         onClick={() => navigate(`/books/${item.bookId}`)}
                       >
                         <MenuBookIcon fontSize="small" color="primary" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {/* Find a video — seeds Shelly's chat with this lesson's topic
+                      (FEAT-14). Academic items only: skip prayer/scripture, which
+                      getSparkleMode flags as 'none'. */}
+                  {!item.completed && getSparkleMode(item) !== 'none' && (
+                    <Tooltip title="Find a video for this lesson">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleFindVideo(item)}
+                        aria-label="Find a video for this lesson"
+                      >
+                        <OndemandVideoIcon fontSize="small" color="action" sx={{ opacity: 0.6 }} />
                       </IconButton>
                     </Tooltip>
                   )}
