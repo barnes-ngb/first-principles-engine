@@ -16,6 +16,7 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { addDoc } from 'firebase/firestore'
 
+import { LoadingState } from '../../components/states'
 import { chapterBooksCollection } from '../../core/firebase/firestore'
 import type { BookProgress, ChapterBook, ChapterBookChapter } from '../../core/types'
 
@@ -144,14 +145,7 @@ export default function ChapterBookPicker({
           displayEmpty
           notched
           label="Read-aloud book"
-          renderValue={() => (
-            <Stack direction="row" spacing={1} alignItems="center">
-              <CircularProgress size={14} />
-              <Typography variant="body2" color="text.secondary">
-                Loading chapter books...
-              </Typography>
-            </Stack>
-          )}
+          renderValue={() => <LoadingState size={14} label="Loading chapter books..." />}
         >
           <MenuItem value="" />
         </Select>
