@@ -170,12 +170,11 @@ Ordered smallest → largest per `/docs/design-pass-v1/README.md` §Suggested im
 3. **In-app character tuner** — slider playground directly in production UX.
 4. **Curriculum scanning expansion** — workbook photo → AI skill mapping refinement.
 5. **Eval close-the-loop automation** — re-eval triggers from engagement patterns.
-6. **Math evaluation parity** — reading-style evaluation flow for math.
+6. **Math evaluation Phase 2** — parent-facing results UI for math guided evaluation (guided eval shipped May 2026).
 7. **London-specific evaluation flow** — age-adjusted assessment UX.
-8. **Tier-up ceremony** — armor shatter / reveal celebration on tier transitions.
-9. **Screenshot & share** — export avatar to PNG.
-10. **Minecraft skin export** — 64x64 skin output from avatar config.
-11. **Seasonal themes** — date-aware winter/fall/Christmas/Easter theming.
+8. **Screenshot & share** — export avatar to PNG.
+9. **Minecraft skin export** — 64x64 skin output from avatar config.
+10. **Seasonal themes** — date-aware winter/fall/Christmas/Easter theming.
 
 ### Avatar System — Remaining
 - Faith Stats bars (Strength/Wisdom/Mercy/Courage) under XP bar — derivation formulas pending Shelly review per `/docs/design-pass-v1/README.md` §State management (HIGH).

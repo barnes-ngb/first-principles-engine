@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-06-03.
+> Where everything lives. Updated 2026-06-08.
 
 ---
 
@@ -13,7 +13,7 @@
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative at 31 collections + 2 subcollections. |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative at 37 collections (35 family-scoped + 1 global + 1 settings) + 3 subcollections. |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
@@ -30,7 +30,7 @@
 | `SHELLY_PORTAL_CONTEXT.md` | **CURRENT** | Code-verified recon reference for the Shelly Chat control portal build — corrects the design brief against actual code |
 | `SHELLY_PORTAL_FEEDBACK_LOOP.md` | **CURRENT** | Friction log → GitHub issue feedback loop (shipped end-to-end) — ops notes, secret setup, Step 5a+5b architecture |
 | `barnes-shelly-chat-portal-design.md` | **CURRENT** | Shelly Chat control portal design doc — feature-complete (Tier A reads, Tier B confirmed writes, Tier C Option 2 additive snapshot edits) |
-| `PROJECT_CONTEXT.md` | **CURRENT** (auto-generated 2026-05-29) | Synthesized project context file for Claude.ai — family context, current sprint, nav structure, AI task registry, key design decisions. Regenerated on demand from repo docs + Drive docs. |
+| `PROJECT_CONTEXT.md` | **STALE** (auto-generated 2026-05-29) | Synthesized project context file for Claude.ai — family context, current sprint, nav structure, AI task registry, key design decisions. Regenerated on demand from repo docs + Drive docs. Stats lag current HEALTH_REPORT by ~15k lines and ~965 tests; regenerate from MASTER_OUTLINE v15 + HEALTH_REPORT 2026-06-07. |
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls, per-function model + cost-per-call mapping |
 | `SYSTEM_PROMPTS.md` | **CURRENT** (v4, updated 2026-05-29) | Task dispatch, model selection, context slices — 17 task types in `tasks/index.ts` registry (plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview); `analyzeEvaluationPatterns` exported separately |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
@@ -79,6 +79,10 @@
 | `review/DECISION_FUNC-01_source_of_truth.md` | **CURRENT** (2026-05-30) | "Where is Lincoln" source-of-truth decision — layered ownership with named write-through (Model 2 adopted) |
 | `review/INTEGRATION_MAP.md` | **CURRENT** (2026-06-01) | Integration seams audit — cross-feature data flow, dead-ends, routing gaps. Referenced from FEAT-07/08/09/10. |
 | `review/PER_CHILD_DELINEATION_AUDIT.md` | **CURRENT** (2026-06-01) | Per-child data separation audit — shared-vs-per-child writes, cross-kid bleed risks. Referenced from DATA-04/DATA-05/FUNC-05. |
+| `review/UI_CONSISTENCY_AUDIT.md` | **CURRENT** | UI consistency audit — hardcoded colors, inline sx usage, theme compliance |
+| `review/UI_BATCH2_HEX_RECONCILIATION.md` | **CURRENT** | MUI hex vs theme palette reconciliation for batch 2 surfaces |
+| `review/DATA_COMPONENT_TRACE.md` | **CURRENT** | Data component trace — data flow through UI components |
+| `review/LONDON_EVAL_READINESS.md` | **CURRENT** | London evaluation readiness assessment — age-adjusted UX gap analysis |
 | `review/prompts/` | **CURRENT** (2026-05-29) | Reusable audit prompts: `PROMPT_ARCH_AUDIT.md` (monthly), `PROMPT_AUTO_ARCH_FIX.md` (auto-fix runner), `PROMPT_BACKUP_CHECK.md`, `PROMPT_FIX.md` (issue runner) |
 | `design-pass-v1/copy-pass-audit.md` | **CURRENT** | Design pass copy audit — terminology, tone, label consistency across UI surfaces |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
