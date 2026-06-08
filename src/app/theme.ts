@@ -1,6 +1,7 @@
 import { createTheme } from '@mui/material/styles'
 import type { ThemeOptions } from '@mui/material/styles'
 import type { ThemeMode } from '../core/types/enums'
+import { kidPalette } from './tokens'
 
 /* ------------------------------------------------------------------ */
 /*  Per-mode palette, shape, typography & component overrides          */
@@ -17,9 +18,9 @@ const lincolnPalette = {
   primary: { main: '#5A8C32' },
   secondary: { main: '#8B6914' },
   background: { default: '#c6d9a8', paper: '#ede4cf' },
-  success: { main: '#7EFC20' },   // XP green (matches in-game XP bar)
+  success: { main: kidPalette.xpGreen },   // XP green (matches in-game XP bar)
   info: { main: '#5DECF5' },      // Diamond cyan
-  warning: { main: '#FCDB5B' },   // Gold yellow
+  warning: { main: kidPalette.gold },   // Gold yellow
 }
 
 /* Super Mario palette — Mario red, coin gold, sky blue */
@@ -303,7 +304,7 @@ export function buildTheme(mode: ThemeMode) {
             ...(mode === 'lincoln'
               ? {
                   borderRadius: 0,
-                  background: 'linear-gradient(180deg, #7EFC20 0%, #5BC010 50%, #3A8008 100%)',
+                  background: `linear-gradient(180deg, ${kidPalette.xpGreen} 0%, #5BC010 50%, #3A8008 100%)`,
                 }
               : {}),
           },

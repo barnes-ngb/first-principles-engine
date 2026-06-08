@@ -3,11 +3,12 @@ import { useNavigate, useRouteError } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
+import { kidPalette } from '../../app/tokens'
 
 const MC = {
-  bg: 'rgba(0,0,0,0.92)',
-  gold: '#FCDB5B',
-  stone: '#8B8B8B',
+  bg: kidPalette.bg,
+  gold: kidPalette.gold,
+  stone: kidPalette.stone,
   white: '#FFFFFF',
   font: '"Press Start 2P", monospace',
 } as const
