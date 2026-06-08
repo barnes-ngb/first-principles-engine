@@ -26,6 +26,7 @@ import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
+import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { app } from '../../core/firebase/firebase'
 import { weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
@@ -389,7 +390,7 @@ export default function WeeklyReviewPage() {
 
       {(childrenLoading || isLoading) && activeChildId && (
         <SectionCard title="Loading">
-          <Typography color="text.secondary">Loading review...</Typography>
+          <LoadingState label="Loading review…" />
         </SectionCard>
       )}
 
