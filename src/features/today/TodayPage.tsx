@@ -7,7 +7,6 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Fab from '@mui/material/Fab'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
@@ -34,6 +33,7 @@ import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SaveIndicator from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
+import { LoadingState } from '../../components/states'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -801,10 +801,7 @@ export default function TodayPage() {
         )}
         {selectedChildId && (
           <SectionCard title="DayLog">
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <CircularProgress size={20} />
-              <Typography color="text.secondary">Loading today&apos;s log...</Typography>
-            </Box>
+            <LoadingState label="Loading today's log..." />
           </SectionCard>
         )}
       </Page>

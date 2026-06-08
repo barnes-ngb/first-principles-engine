@@ -19,6 +19,7 @@ import { addDoc, doc, updateDoc } from 'firebase/firestore'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
+import { EmptyState } from '../../components/states'
 import { kidPalette } from '../../app/tokens'
 import {
   artifactsCollection,
@@ -747,9 +748,7 @@ export default function UnifiedCaptureCard({
         <SectionCard title="Artifacts">
           <Stack spacing={2}>
             {todayArtifacts.length === 0 ? (
-              <Typography color="text.secondary">
-                No artifacts logged yet today.
-              </Typography>
+              <EmptyState title="No artifacts logged yet today." />
             ) : (
               <List dense>
                 {todayArtifacts.map((artifact) => (
