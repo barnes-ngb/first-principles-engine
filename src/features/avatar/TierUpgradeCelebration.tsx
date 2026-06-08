@@ -4,6 +4,7 @@ import Typography from '@mui/material/Typography'
 
 import type { AvatarProfile } from '../../core/types'
 import { TIER_COMPLETION_BONUSES } from '../../core/xp/forgeCosts'
+import { kidPalette } from '../../app/tokens'
 
 export interface TierUpgrade {
   from: string
@@ -50,7 +51,7 @@ export default function TierUpgradeCelebration({
 
   const { from: fromTier, to: toTier } = upgrade
   const isLincoln = profile.themeStyle === 'minecraft'
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
   const fromLabel = TIER_LABELS[fromTier] ?? fromTier.toUpperCase()
@@ -58,8 +59,8 @@ export default function TierUpgradeCelebration({
   const bonus = TIER_COMPLETION_BONUSES[fromTier] ?? 0
 
   const particleColors = isLincoln
-    ? ['#7EFC20', '#FFD700', '#00BFFF', '#FF6B35']
-    : ['#FF69B4', '#FFD700', '#9C27B0', '#00BCD4']
+    ? [kidPalette.xpGreen, kidPalette.goldBright, '#00BFFF', '#FF6B35']
+    : ['#FF69B4', kidPalette.goldBright, '#9C27B0', '#00BCD4']
 
   return (
     <Box
@@ -210,7 +211,7 @@ export default function TierUpgradeCelebration({
             fontFamily: titleFont,
             fontSize: isLincoln ? '13px' : '1rem',
             fontWeight: 700,
-            color: isLincoln ? '#FFD700' : '#E65100',
+            color: isLincoln ? kidPalette.goldBright : '#E65100',
             textAlign: 'center',
             animation: 'nextTierSlide 0.5s ease-out 1.2s both',
             '@keyframes nextTierSlide': {

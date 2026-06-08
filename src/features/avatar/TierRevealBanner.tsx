@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
+import { kidPalette } from '../../app/tokens'
 
 interface TierRevealBannerProps {
   tierName: string
@@ -44,7 +45,7 @@ export default function TierRevealBanner({ tierName, isLincoln }: TierRevealBann
           fontFamily: titleFont,
           fontSize: isLincoln ? '12px' : '15px',
           fontWeight: 700,
-          color: isLincoln ? '#FFD700' : '#7B1FA2',
+          color: isLincoln ? kidPalette.goldBright : '#7B1FA2',
           lineHeight: 1.4,
           mb: 0.5,
         }}

@@ -3,6 +3,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
 import { ARMOR_DEBUG_DEFAULTS, type ArmorDebugOverrides, type ArmorDebugPieceValues } from './voxel/armorDebugTuning'
+import { kidPalette } from '../../app/tokens'
 
 // ── Slider definitions ──────────────────────────────────────────────
 
@@ -75,12 +76,12 @@ export default function ArmorDebugPanel({ values, onChange }: ArmorDebugPanelPro
 
   return (
     <Box sx={{ mx: 1, mb: 1, p: 1.25, borderRadius: 1.5, border: '1px solid rgba(126,252,32,0.25)', background: 'rgba(8,12,18,0.78)' }}>
-      <Typography sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '10px', color: '#7EFC20', mb: 1 }}>
+      <Typography sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '10px', color: kidPalette.xpGreen, mb: 1 }}>
         Armor Debug
       </Typography>
 
       {/* Helmet */}
-      <Typography sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#DAA520', mb: 0.5 }}>
+      <Typography sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: kidPalette.goldDeep, mb: 0.5 }}>
         Helmet
       </Typography>
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 0.5, mb: 1.25 }}>
@@ -90,7 +91,7 @@ export default function ArmorDebugPanel({ values, onChange }: ArmorDebugPanelPro
       </Box>
 
       {/* Shoes */}
-      <Typography sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#DAA520', mb: 0.5 }}>
+      <Typography sx={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: kidPalette.goldDeep, mb: 0.5 }}>
         Shoes
       </Typography>
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 0.5 }}>
@@ -101,7 +102,7 @@ export default function ArmorDebugPanel({ values, onChange }: ArmorDebugPanelPro
       <Box
         component="button"
         onClick={() => onChange(ARMOR_DEBUG_DEFAULTS)}
-        sx={{ mt: 1, px: 1.25, py: 0.5, borderRadius: 1, border: '1px solid rgba(126,252,32,0.4)', background: 'transparent', color: '#7EFC20', cursor: 'pointer' }}
+        sx={{ mt: 1, px: 1.25, py: 0.5, borderRadius: 1, border: '1px solid rgba(126,252,32,0.4)', background: 'transparent', color: kidPalette.xpGreen, cursor: 'pointer' }}
       >
         Reset defaults
       </Box>

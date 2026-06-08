@@ -3,6 +3,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
 import type { CharacterProportions } from '../../core/types'
+import { kidPalette } from '../../app/tokens'
 
 interface SliderDef {
   key: keyof CharacterProportions
@@ -63,7 +64,7 @@ export default function CharacterTunerPanel({
 }: CharacterTunerPanelProps) {
   const [activeGroup, setActiveGroup] = useState<'body' | 'outfit' | 'colors'>('body')
 
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const bodyFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const borderColor = isLincoln ? 'rgba(218,165,32,0.35)' : 'rgba(232,160,191,0.25)'
@@ -112,7 +113,7 @@ export default function CharacterTunerPanel({
           sx={{
             fontFamily: titleFont,
             fontSize: isLincoln ? '11px' : '17px',
-            color: isLincoln ? '#DAA520' : accentColor,
+            color: isLincoln ? kidPalette.goldDeep : accentColor,
             fontWeight: 600,
           }}
         >
@@ -155,13 +156,13 @@ export default function CharacterTunerPanel({
                 py: 0.75,
                 borderRadius: isLincoln ? '4px' : '12px',
                 border: isActive
-                  ? `1.5px solid ${isLincoln ? '#DAA520' : accentColor}`
+                  ? `1.5px solid ${isLincoln ? kidPalette.goldDeep : accentColor}`
                   : `1px solid ${isLincoln ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
                 background: isActive
                   ? (isLincoln ? 'rgba(218,165,32,0.12)' : 'rgba(232,160,191,0.1)')
                   : 'transparent',
                 color: isActive
-                  ? (isLincoln ? '#DAA520' : accentColor)
+                  ? (isLincoln ? kidPalette.goldDeep : accentColor)
                   : (isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'),
                 fontFamily: bodyFont,
                 fontSize: isLincoln ? '10px' : '14px',
@@ -221,7 +222,7 @@ export default function CharacterTunerPanel({
                       width: 20,
                       height: 20,
                       borderRadius: isLincoln ? '3px' : '50%',
-                      background: isLincoln ? '#DAA520' : accentColor,
+                      background: isLincoln ? kidPalette.goldDeep : accentColor,
                       border: `2px solid ${isLincoln ? '#0d1117' : '#fff'}`,
                       boxShadow: `0 0 6px ${isLincoln ? 'rgba(218,165,32,0.4)' : 'rgba(232,160,191,0.4)'}`,
                       cursor: 'grab',
@@ -230,7 +231,7 @@ export default function CharacterTunerPanel({
                       width: 20,
                       height: 20,
                       borderRadius: isLincoln ? '3px' : '50%',
-                      background: isLincoln ? '#DAA520' : accentColor,
+                      background: isLincoln ? kidPalette.goldDeep : accentColor,
                       border: `2px solid ${isLincoln ? '#0d1117' : '#fff'}`,
                     },
                   }}
@@ -276,7 +277,7 @@ export default function CharacterTunerPanel({
                   borderRadius: '12px',
                   border: 'none',
                   background: proportions.cape
-                    ? (isLincoln ? '#DAA520' : accentColor)
+                    ? (isLincoln ? kidPalette.goldDeep : accentColor)
                     : (isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'),
                   position: 'relative',
                   cursor: 'pointer',

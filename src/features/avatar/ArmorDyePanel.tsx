@@ -9,6 +9,7 @@ import type { ArmorColors, VoxelArmorPieceId } from '../../core/types'
 import { VOXEL_TO_ARMOR_PIECE } from '../../core/types'
 import { ArmorIcon } from './icons/ArmorIcons'
 import type { ArmorTierColor } from './icons/ArmorIcons'
+import { kidPalette } from '../../app/tokens'
 
 interface ArmorDyePanelProps {
   armorColors: ArmorColors | undefined
@@ -58,7 +59,7 @@ export default function ArmorDyePanel({
   const [open, setOpen] = useState(false)
   const [activePiece, setActivePiece] = useState<VoxelArmorPieceId | null>(null)
 
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const tierColor = tierName.toLowerCase() as ArmorTierColor
 

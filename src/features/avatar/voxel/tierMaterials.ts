@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
 import { HERO_VIVIDNESS, getHeroTierTint } from './heroVividness'
+import { kidPalette } from '../../../app/tokens'
 
 // ── Tier definitions ─────────────────────────────────────────────
 
@@ -262,7 +263,7 @@ export function getTierTextColor(tier: string): string {
     case 'WOOD':      return '#B8922E'
     case 'STONE':     return '#AAAAAA'
     case 'IRON':      return '#8A8A8A'
-    case 'GOLD':      return '#FFD700'
+    case 'GOLD':      return kidPalette.goldBright
     case 'DIAMOND':   return '#7DF9FF'
     case 'NETHERITE': return '#8B7777'
     default:          return '#AAAAAA'

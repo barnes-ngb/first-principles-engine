@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { kidPalette } from '../../app/tokens'
 
 interface ParticleDef {
   angle: number
@@ -37,7 +38,7 @@ function generateParticles(themeStyle: 'minecraft' | 'platformer', tier: string,
     if (themeStyle === 'minecraft') {
       if (tier === 'diamond') {
         shape = 'diamond'
-        color = i % 2 === 0 ? '#4FC3F7' : '#FFD700'
+        color = i % 2 === 0 ? '#4FC3F7' : kidPalette.goldBright
       } else if (tier === 'netherite') {
         shape = 'spark'
         color = i % 2 === 0 ? '#9C27B0' : '#CE93D8'
@@ -48,7 +49,7 @@ function generateParticles(themeStyle: 'minecraft' | 'platformer', tier: string,
     } else {
       // platformer — stars in pastel colors
       shape = 'star'
-      const pastels = ['#FF9EBC', '#FFD700', '#B39DDB', '#80DEEA', '#FFAB91']
+      const pastels = ['#FF9EBC', kidPalette.goldBright, '#B39DDB', '#80DEEA', '#FFAB91']
       color = pastels[i % pastels.length]
     }
 

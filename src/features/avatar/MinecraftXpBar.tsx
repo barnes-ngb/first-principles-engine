@@ -3,6 +3,7 @@ import Box from '@mui/material/Box'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { getNextTierProgress } from '../../core/xp/armorTiers'
+import { kidPalette } from '../../app/tokens'
 
 /**
  * Minecraft-style experience bar.
@@ -77,7 +78,7 @@ export default function MinecraftXpBar({
               sx={{
                 fontFamily: '"Press Start 2P", monospace',
                 fontSize: '12px',
-                color: '#7EFC20',
+                color: kidPalette.xpGreen,
               }}
             >
               +{todayXp} today
@@ -124,7 +125,7 @@ export default function MinecraftXpBar({
             width: `${progress * 100}%`,
             background: isMaxTier
               ? 'linear-gradient(180deg, #B388FF 0%, #7C4DFF 50%, #651FFF 100%)'
-              : `linear-gradient(180deg, #7EFC20 0%, #5BC010 50%, #3A8008 100%)`,
+              : `linear-gradient(180deg, ${kidPalette.xpGreen} 0%, #5BC010 50%, #3A8008 100%)`,
             transition: 'width 0.6s ease-out',
             // Leading edge glow
             boxShadow: progress > 0 && progress < 1
@@ -155,7 +156,7 @@ export default function MinecraftXpBar({
             transform: 'translate(-50%, -50%)',
             fontFamily: '"Press Start 2P", monospace',
             fontSize: compact ? '12px' : '12px',
-            color: '#7EFC20',
+            color: kidPalette.xpGreen,
             textShadow: '0 0 4px rgba(0,0,0,0.8), 1px 1px 0 #000',
             lineHeight: 1,
           }}

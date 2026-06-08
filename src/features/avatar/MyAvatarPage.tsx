@@ -79,6 +79,7 @@ import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
 import HeroLauncherTiles from './HeroLauncherTiles'
 import StonebridgeMissionCard from './stonebridge/StonebridgeMissionCard'
+import { kidPalette } from '../../app/tokens'
 
 type NextRecommendedAction =
   | { type: 'forge'; label: string }
@@ -336,7 +337,7 @@ export default function MyAvatarPage() {
   const today = getTodayDateString()
 
   // Theme
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const bgColor = isLincoln ? '#0d1117' : '#faf5ef'
   const textColor = isLincoln ? '#e0e0e0' : '#3d3d3d'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
@@ -1362,7 +1363,7 @@ export default function MyAvatarPage() {
               {children.map((child) => {
                 const isActive = child.id === childId
                 const childIsLincoln = child.name.toLowerCase() === 'lincoln'
-                const childAccent = childIsLincoln ? '#7EFC20' : '#E8A0BF'
+                const childAccent = childIsLincoln ? kidPalette.xpGreen : '#E8A0BF'
                 return (
                   <Box
                     key={child.id}

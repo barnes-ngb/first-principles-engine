@@ -4,6 +4,7 @@ import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
 
 import { TIER_BIOMES, getBiomeName } from './tierBiomes'
+import { kidPalette } from '../../app/tokens'
 
 interface PortalTransitionProps {
   fromTier: string  // Used for future biome-exit animation
@@ -50,7 +51,7 @@ export default function PortalTransition({ toTier, onComplete }: PortalTransitio
           ? 'radial-gradient(ellipse at center, #1a0033 0%, #0d001a 40%, #000 70%)'
           : phase === 'reveal'
             ? `radial-gradient(ellipse at center, ${biome?.bgTint ?? 'rgba(0,0,0,0.9)'} 0%, rgba(13,17,23,0.98) 100%)`
-            : 'rgba(0,0,0,0.92)',
+            : kidPalette.bg,
         transition: 'background 1.5s ease',
         animation: phase === 'portal' ? 'portalWarp 2s ease-in-out' : undefined,
         '@keyframes portalWarp': {

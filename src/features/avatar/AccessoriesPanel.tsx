@@ -3,6 +3,7 @@ import Typography from '@mui/material/Typography'
 
 import type { AccessoryId, AccessorySlot } from '../../core/types'
 import { ACCESSORIES, ACCESSORY_SLOTS } from '../../core/types'
+import { kidPalette } from '../../app/tokens'
 
 interface AccessoriesPanelProps {
   totalXp: number
@@ -27,7 +28,7 @@ export default function AccessoriesPanel({
   isLincoln,
   onToggle,
 }: AccessoriesPanelProps) {
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
   // Check if any accessories are unlocked yet
