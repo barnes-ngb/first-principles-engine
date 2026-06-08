@@ -28,6 +28,7 @@ import ShellyChatPage from '../features/shelly-chat/ShellyChatPage'
 import MonthlyReviewReaderPage from '../features/monthly-review/MonthlyReviewReaderPage'
 import KidBooksAboutMePage from '../features/monthly-review/KidBooksAboutMePage'
 import KidBookReaderPage from '../features/monthly-review/KidBookReaderPage'
+import UiPreviewPage from '../features/ui-preview/UiPreviewPage'
 
 const routes = [
   {
@@ -83,6 +84,9 @@ const routes = [
       { path: '/records/portfolio', element: <PortfolioPage /> },
       { path: '/settings', element: <SettingsPage /> },
       { path: '/chat', element: <ShellyChatPage /> },
+      // Unlinked preview gallery for shared state components (UI Batch 3a).
+      // Not surfaced in any nav; reachable only by direct URL.
+      { path: '/ui-preview', element: <UiPreviewPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },
