@@ -4,7 +4,6 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
@@ -13,6 +12,7 @@ import Typography from '@mui/material/Typography'
 
 import { doc, getDoc } from 'firebase/firestore'
 
+import { ErrorState, LoadingState } from '../../components/states'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
@@ -317,19 +317,13 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
       <DialogTitle>Lab Suggestions</DialogTitle>
       <DialogContent>
         {(aiLoading || childrenLoading) && (
-          <Stack alignItems="center" spacing={2} sx={{ py: 4 }}>
-            <CircularProgress />
-            <Typography color="text.secondary">Thinking up lab ideas...</Typography>
-          </Stack>
+          <LoadingState fullHeight label="Thinking up lab ideas..." />
         )}
 
         {error && (
-          <Stack spacing={1} sx={{ py: 2 }}>
-            <Typography color="error">{error}</Typography>
-            <Button variant="outlined" size="small" onClick={fetchSuggestions}>
-              Try Again
-            </Button>
-          </Stack>
+          <Box sx={{ py: 2 }}>
+            <ErrorState message={error} onRetry={fetchSuggestions} />
+          </Box>
         )}
 
         {storySuggestion && (
