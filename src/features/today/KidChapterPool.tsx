@@ -41,6 +41,7 @@ import type {
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey } from '../../core/utils/dateKey'
 import { isChapterToGo } from './chapterPool.logic'
+import { kidPalette } from '../../app/tokens'
 
 const questionTypeEmoji: Record<string, string> = {
   comprehension: '\u{1F50D}',
@@ -288,7 +289,7 @@ export default function KidChapterPool({
     <Box
       sx={{
         bgcolor: 'rgba(0,0,0,0.85)',
-        border: '2px solid #5BFCEE',
+        border: `2px solid ${kidPalette.diamond}`,
         borderRadius: 2,
         p: 2,
       }}
@@ -297,7 +298,7 @@ export default function KidChapterPool({
         sx={{
           fontFamily: mcFont,
           fontSize: '0.55rem',
-          color: '#5BFCEE',
+          color: kidPalette.diamond,
           mb: 2,
         }}
       >
@@ -375,7 +376,7 @@ export default function KidChapterPool({
               sx={{
                 p: 2,
                 borderRadius: 2,
-                border: '1px solid #FCDB5B',
+                border: `1px solid ${kidPalette.gold}`,
                 bgcolor: 'rgba(0,0,0,0.6)',
               }}
             >
@@ -385,7 +386,7 @@ export default function KidChapterPool({
                   sx={{
                     fontFamily: mcFont,
                     fontSize: '0.55rem',
-                    color: '#FCDB5B',
+                    color: kidPalette.gold,
                     letterSpacing: 1,
                   }}
                 >
@@ -421,7 +422,7 @@ export default function KidChapterPool({
                     sx={{
                       fontFamily: mcFont,
                       fontSize: '0.45rem',
-                      bgcolor: isRecordingThis ? '#ff4444' : '#5BFCEE',
+                      bgcolor: isRecordingThis ? '#ff4444' : kidPalette.diamond,
                       color: isRecordingThis ? '#fff' : '#000',
                       '&:hover': {
                         bgcolor: isRecordingThis ? '#cc0000' : '#4DE0D2',
@@ -480,8 +481,8 @@ export default function KidChapterPool({
                         sx={{
                           fontFamily: mcFont,
                           fontSize: '0.4rem',
-                          borderColor: '#FCDB5B',
-                          color: '#FCDB5B',
+                          borderColor: kidPalette.gold,
+                          color: kidPalette.gold,
                         }}
                       >
                         Redo

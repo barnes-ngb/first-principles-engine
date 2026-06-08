@@ -22,6 +22,7 @@ import Page from '../../components/Page'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
+import { kidPalette } from '../../app/tokens'
 import {
   artifactsCollection,
   chapterBooksCollection,
@@ -553,7 +554,7 @@ export default function KidTodayView({
               sx={{
                 fontFamily: isLincoln ? '"Press Start 2P", monospace' : undefined,
                 fontSize: isLincoln ? '0.55rem' : '0.75rem',
-                color: isLincoln ? '#7EFC20' : 'success.main',
+                color: isLincoln ? kidPalette.xpGreen : 'success.main',
                 textShadow: isLincoln ? '1px 1px 0 rgba(0,0,0,0.3)' : undefined,
                 mt: 0.5,
               }}
@@ -780,7 +781,7 @@ export default function KidTodayView({
             }}
           >
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <MenuBookIcon sx={{ color: isLincoln ? '#FCDB5B' : 'info.main', fontSize: 28 }} />
+              <MenuBookIcon sx={{ color: isLincoln ? kidPalette.gold : 'info.main', fontSize: 28 }} />
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography
                   variant="body1"
@@ -809,7 +810,7 @@ export default function KidTodayView({
               <Typography
                 variant="body2"
                 sx={{
-                  color: isLincoln ? '#FCDB5B' : 'info.main',
+                  color: isLincoln ? kidPalette.gold : 'info.main',
                   fontWeight: 600,
                   ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
                 }}
@@ -839,7 +840,7 @@ export default function KidTodayView({
             }}
           >
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <MenuBookIcon sx={{ color: isLincoln ? '#5BFCEE' : 'success.main', fontSize: 28 }} />
+              <MenuBookIcon sx={{ color: isLincoln ? kidPalette.diamond : 'success.main', fontSize: 28 }} />
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography
                   variant="body1"
@@ -868,7 +869,7 @@ export default function KidTodayView({
               <Typography
                 variant="body2"
                 sx={{
-                  color: isLincoln ? '#5BFCEE' : 'success.main',
+                  color: isLincoln ? kidPalette.diamond : 'success.main',
                   fontWeight: 600,
                   ...(isLincoln ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.45rem' } : {}),
                 }}

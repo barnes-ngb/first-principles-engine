@@ -3,6 +3,8 @@ import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
+import { kidPalette } from '../../app/tokens'
+
 interface KidMiningCardProps {
   todayMinedMinutes: number
   isLincoln: boolean
@@ -25,7 +27,7 @@ export default function KidMiningCard({
         borderRadius: 2,
         bgcolor: isLincoln ? 'rgba(0,0,0,0.75)' : 'grey.50',
         border: '1px solid',
-        borderColor: isLincoln ? '#5BFCEE' : 'info.light',
+        borderColor: isLincoln ? kidPalette.diamond : 'info.light',
       }}
     >
       <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1 }}>
@@ -60,7 +62,7 @@ export default function KidMiningCard({
         sx={{
           color: isLincoln
             ? hasMined
-              ? '#5BFCEE'
+              ? kidPalette.diamond
               : 'rgba(255,255,255,0.6)'
             : hasMined
               ? 'info.main'
@@ -85,8 +87,8 @@ export default function KidMiningCard({
             ? {
                 fontFamily: mcFont,
                 fontSize: '0.5rem',
-                bgcolor: '#3C3C3C',
-                color: '#5BFCEE',
+                bgcolor: kidPalette.darkStone,
+                color: kidPalette.diamond,
                 minHeight: 48,
                 '&:hover': { bgcolor: '#4C4C4C' },
               }

@@ -19,6 +19,7 @@ import { addDoc, doc, updateDoc } from 'firebase/firestore'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
+import { kidPalette } from '../../app/tokens'
 import {
   artifactsCollection,
   hoursCollection,
@@ -91,10 +92,10 @@ function getKidTheme(childName: string | undefined): KidThemeTokens {
   const isLincoln = (childName ?? '').toLowerCase() === 'lincoln'
   if (isLincoln) {
     return {
-      accent: '#7EFC20',
+      accent: kidPalette.xpGreen,
       saveColor: 'success',
       fontFamily: '"Press Start 2P", monospace',
-      chipSelectedBg: '#7EFC20',
+      chipSelectedBg: kidPalette.xpGreen,
     }
   }
   // London / default story palette
