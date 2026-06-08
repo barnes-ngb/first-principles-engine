@@ -25,6 +25,7 @@ import Snackbar from '@mui/material/Snackbar'
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
+import { EmptyState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
@@ -251,14 +252,10 @@ export default function EvaluationsPage() {
           </Stack>
 
           {!activeChildId ? (
-            <Stack spacing={2} alignItems="center" sx={{ py: 4 }}>
-              <Typography variant="h6" color="text.secondary">
-                Select a profile to create evaluations
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Use the profile menu to choose a child, or visit Settings.
-              </Typography>
-            </Stack>
+            <EmptyState
+              title="Select a profile to create evaluations"
+              description="Use the profile menu to choose a child, or visit Settings."
+            />
           ) : (
             <Typography variant="subtitle2" color="text.secondary">
               Evaluation for {activeChild?.name ?? 'child'} — {monthLabel}
@@ -370,9 +367,7 @@ export default function EvaluationsPage() {
             Sample Artifacts ({draft.sampleArtifactIds.length} selected)
           </Typography>
           {childArtifacts.length === 0 ? (
-            <Typography color="text.secondary" variant="body2">
-              No artifacts found for this child in {monthLabel}.
-            </Typography>
+            <EmptyState title={`No artifacts found for this child in ${monthLabel}.`} />
           ) : (
             <Stack spacing={1}>
               {childArtifacts.map((art) => (

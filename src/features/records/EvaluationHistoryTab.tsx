@@ -10,6 +10,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { getDocs, query, where } from 'firebase/firestore'
 import { useNavigate } from 'react-router-dom'
 
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -501,15 +502,11 @@ export default function EvaluationHistoryTab() {
   }, [familyId, activeChildId])
 
   if (!activeChildId) {
-    return (
-      <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
-        Select a child to view evaluations.
-      </Typography>
-    )
+    return <EmptyState title="Select a child to view evaluations." />
   }
 
   if (loading) {
-    return <Typography color="text.secondary">Loading evaluations...</Typography>
+    return <LoadingState fullHeight label="Loading evaluations..." />
   }
 
   if (selectedSession) {
@@ -573,21 +570,19 @@ export default function EvaluationHistoryTab() {
       )}
 
       {filteredSessions.length === 0 && sessions.length > 0 ? (
-        <Typography color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-          No {filter === 'interactive' ? 'Knowledge Mine' : 'guided'} sessions yet.
-        </Typography>
+        <EmptyState
+          title={`No ${filter === 'interactive' ? 'Knowledge Mine' : 'guided'} sessions yet.`}
+        />
       ) : sessions.length === 0 ? (
-        <Box sx={{ textAlign: 'center', py: 4 }}>
-          <Typography color="text.secondary" gutterBottom>
-            No evaluations yet.
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Run an evaluation to map {activeChild?.name}&apos;s skill frontier.
-          </Typography>
-          <Button variant="outlined" sx={{ mt: 2 }} href="/evaluate">
-            Evaluate {activeChild?.name}&apos;s Skills
-          </Button>
-        </Box>
+        <EmptyState
+          title="No evaluations yet."
+          description={`Run an evaluation to map ${activeChild?.name}'s skill frontier.`}
+          action={
+            <Button variant="outlined" href="/evaluate">
+              Evaluate {activeChild?.name}&apos;s Skills
+            </Button>
+          }
+        />
       ) : (
         <Stack spacing={1}>
           {filteredSessions.map((session) => (
