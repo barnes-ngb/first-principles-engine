@@ -95,6 +95,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     imageQuestions, setImageQuestions,
     imageAnswers, setImageAnswers,
     setLoadingQuestions,
+    chatInputRef,
     messagesEndRef,
     autoSendTriggered,
     imageIdeaTimeoutFired,
@@ -116,6 +117,29 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only on mount
+
+  // ── Seed the input from `?seed=` (FEAT-12 Phase 2) ────────────
+  // A Today subject item can deep-link here with the lesson topic pre-filled
+  // in the input box. Seed the input ONLY — never create a thread/message and
+  // never auto-send — so the metered web search fires only on Shelly's send
+  // tap. Clear the `seed` param afterward so a refresh doesn't re-seed.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const seed = params.get('seed')
+    if (!seed) return
+    setInput(seed)
+    // Focus so she can review/edit and send with one tap.
+    requestAnimationFrame(() => chatInputRef.current?.focus())
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('seed')
+        return next
+      },
+      { replace: true },
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only on mount
 

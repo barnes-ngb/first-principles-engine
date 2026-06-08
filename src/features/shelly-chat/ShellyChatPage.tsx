@@ -105,6 +105,7 @@ export default function ShellyChatPage() {
     imageAnswers, setImageAnswers,
     loadingQuestions,
     fileInputRef,
+    chatInputRef,
     messagesEndRef,
   } = state
 
@@ -554,6 +555,7 @@ export default function ShellyChatPage() {
             maxRows={4}
             size="small"
             placeholder="Ask Shelly's AI..."
+            inputRef={chatInputRef}
             value={input}
             onChange={(e) => { setInput(e.target.value); if (followUps.length) setFollowUps([]) }}
             onKeyDown={handleKeyDown}
