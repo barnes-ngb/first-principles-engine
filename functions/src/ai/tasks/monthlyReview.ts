@@ -66,6 +66,21 @@ interface MonthStats {
   totalDiamonds: number;
 }
 
+interface MonthlyReviewReadingBook {
+  title: string;
+  totalChapters: number;
+  chaptersAnswered: number;
+  questionsAnswered: number;
+  questionsSkipped: number;
+}
+
+interface MonthlyReviewReading {
+  books: MonthlyReviewReadingBook[];
+  totalChaptersAnswered: number;
+  totalQuestionsAnswered: number;
+  totalQuestionsSkipped: number;
+}
+
 interface SourceRefs {
   weeklyReviewIds: string[];
   dispositionProfileSnapshotAt?: string;
@@ -86,6 +101,8 @@ export interface MonthlyReviewPayload {
   curatedPhotos: PhotoRef[];
   unplacedPhotos: PhotoRef[];
   stats: MonthStats;
+  /** Read-aloud reading recap. Omitted when no reading happened this month. */
+  reading?: MonthlyReviewReading;
   sourceRefs: SourceRefs;
 }
 
@@ -413,8 +430,19 @@ workedThrough
 byTheNumbers
   kidMode: 1 sentence body, warm and short. No mention of specific numbers
     (the tiles show numbers). Body is closing thought, not stat recap.
-  parentMode: 2-3 sentences body. Can reference total hours, books, blockers.
+  parentMode: 2-3 sentences body, plus a reading-review beat when reading data
+    is present (see below). Can reference total hours, books, blockers.
     Closing observation about the month's shape.
+
+READING REVIEW (parentMode of byTheNumbers ONLY)
+  When the user message has a "Read-aloud reading this month" section with at
+  least one book listed, add ONE short reading-review beat to the byTheNumbers
+  parentMode body: how read-aloud reading went this month — engagement,
+  comprehension, growth. Name the book(s) and what was discussed. Frame it as
+  coverage, never pace: skipped chapters are a parent choice, never "behind"
+  or a failure, and never graded. If the reading section says "(no read-aloud
+  chapters discussed this month)", omit this entirely — do not invent reading.
+  This beat lives only in parentMode; kidMode byTheNumbers stays per its rule.
 
 SECTIONS REQUIRED (exact keys, both modes per section):
 1. cover — headline only (per length guide). Kid mode body is empty string.
@@ -542,6 +570,18 @@ function buildMonthlyReviewUserPrompt(input: PromptInputs): string {
     .map((c) => `- ${c.weekKey}: ${c.question.slice(0, 140)}`)
     .join("\n");
 
+  const readingLines = data.reading.books
+    .map(
+      (b) =>
+        `- "${b.title}": ${b.chaptersAnswered} chapter${b.chaptersAnswered === 1 ? "" : "s"} discussed` +
+        `, ${b.questionsAnswered} question${b.questionsAnswered === 1 ? "" : "s"} answered` +
+        (b.questionsSkipped
+          ? `, ${b.questionsSkipped} skipped`
+          : "") +
+        (b.totalChapters ? ` (of ${b.totalChapters} chapters total)` : ""),
+    )
+    .join("\n");
+
   const photoSection = formatPhotoSection(hero, placement);
 
   const totalHours = Math.round((data.hours.totalMinutes / 60) * 10) / 10;
@@ -579,6 +619,9 @@ ${dadLabLines || "(none)"}
 
 ## Conundrums posed this month
 ${conundrumLines || "(none)"}
+
+## Read-aloud reading this month
+${readingLines || "(no read-aloud chapters discussed this month)"}
 
 ${photoSection}
 
@@ -867,6 +910,23 @@ export function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload 
     blockerSnapshotAt: new Date().toISOString(),
   };
 
+  // Reading recap is additive and optional. Only set it when there was reading
+  // this month — Firestore rejects `undefined`, so omit the key otherwise.
+  const reading: MonthlyReviewReading | undefined = data.reading.books.length
+    ? {
+        books: data.reading.books.map((b) => ({
+          title: b.title,
+          totalChapters: b.totalChapters,
+          chaptersAnswered: b.chaptersAnswered,
+          questionsAnswered: b.questionsAnswered,
+          questionsSkipped: b.questionsSkipped,
+        })),
+        totalChaptersAnswered: data.reading.totalChaptersAnswered,
+        totalQuestionsAnswered: data.reading.totalQuestionsAnswered,
+        totalQuestionsSkipped: data.reading.totalQuestionsSkipped,
+      }
+    : undefined;
+
   return {
     id,
     familyId,
@@ -882,6 +942,7 @@ export function composeMonthlyReview(input: ComposeInput): MonthlyReviewPayload 
     curatedPhotos,
     unplacedPhotos: placement.more,
     stats,
+    ...(reading ? { reading } : {}),
     sourceRefs,
   };
 }

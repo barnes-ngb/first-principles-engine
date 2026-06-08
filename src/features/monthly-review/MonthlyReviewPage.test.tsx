@@ -171,6 +171,74 @@ describe('MonthlyReviewPage — empty-section UX', () => {
     expect(screen.queryByText('154.0h')).not.toBeInTheDocument()
   })
 
+  it('renders the read-aloud reading recap in parent mode when reading exists', () => {
+    const page = makePage({
+      id: 'stats',
+      sectionType: SectionType.ByTheNumbers,
+      kidMode: { headline: 'By the Numbers' },
+      parentMode: { headline: 'By the Numbers' },
+    })
+    const review = makeReview({
+      reading: {
+        books: [
+          {
+            title: 'Prince Caspian',
+            totalChapters: 15,
+            chaptersAnswered: 3,
+            questionsAnswered: 3,
+            questionsSkipped: 1,
+          },
+        ],
+        totalChaptersAnswered: 3,
+        totalQuestionsAnswered: 3,
+        totalQuestionsSkipped: 1,
+      },
+    })
+    render(<MonthlyReviewPage page={page} review={review} mode="parent" />)
+    expect(screen.getByText(/Read-aloud this month/i)).toBeInTheDocument()
+    expect(screen.getByText('Prince Caspian')).toBeInTheDocument()
+    expect(screen.getByText(/3 ch · 3 Q · 1 skipped/i)).toBeInTheDocument()
+  })
+
+  it('does not render the reading recap in kid mode', () => {
+    const page = makePage({
+      id: 'stats',
+      sectionType: SectionType.ByTheNumbers,
+      kidMode: { headline: 'By the Numbers' },
+      parentMode: { headline: 'By the Numbers' },
+    })
+    const review = makeReview({
+      reading: {
+        books: [
+          {
+            title: 'Prince Caspian',
+            totalChapters: 15,
+            chaptersAnswered: 3,
+            questionsAnswered: 3,
+            questionsSkipped: 0,
+          },
+        ],
+        totalChaptersAnswered: 3,
+        totalQuestionsAnswered: 3,
+        totalQuestionsSkipped: 0,
+      },
+    })
+    render(<MonthlyReviewPage page={page} review={review} mode="kid" />)
+    expect(screen.queryByText(/Read-aloud this month/i)).not.toBeInTheDocument()
+  })
+
+  it('omits the reading recap when no reading data is present (parent mode)', () => {
+    const page = makePage({
+      id: 'stats',
+      sectionType: SectionType.ByTheNumbers,
+      kidMode: { headline: 'By the Numbers' },
+      parentMode: { headline: 'By the Numbers' },
+    })
+    const review = makeReview()
+    render(<MonthlyReviewPage page={page} review={review} mode="parent" />)
+    expect(screen.queryByText(/Read-aloud this month/i)).not.toBeInTheDocument()
+  })
+
   it('does not show the notice when a section has photos (parent mode)', () => {
     const page = makePage({
       photoRefs: {
