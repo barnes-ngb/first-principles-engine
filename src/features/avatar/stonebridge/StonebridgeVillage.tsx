@@ -11,6 +11,7 @@ import {
   VillageLocationState,
   type MissionComputation,
 } from './computeStonebridgeProgress'
+import { kidPalette } from '../../../app/tokens'
 
 interface StonebridgeVillageProps {
   open: boolean
@@ -87,7 +88,7 @@ export default function StonebridgeVillage({
             sx={{
               fontFamily: titleFont,
               fontSize: isLincoln ? '14px' : '18px',
-              color: isLincoln ? '#7EFC20' : '#7a3f67',
+              color: isLincoln ? kidPalette.xpGreen : '#7a3f67',
             }}
           >
             ✕

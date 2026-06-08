@@ -6,6 +6,7 @@ import LockIcon from '@mui/icons-material/Lock'
 
 import type { HelmetCrest } from '../../core/types'
 import { HELMET_CREST_OPTIONS } from './voxel/buildHelmetCrest'
+import { kidPalette } from '../../app/tokens'
 
 interface HelmetCrestPickerProps {
   currentCrest: HelmetCrest | undefined
@@ -22,7 +23,7 @@ export default function HelmetCrestPicker({
 }: HelmetCrestPickerProps) {
   const [open, setOpen] = useState(false)
 
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const selected = currentCrest ?? 'none'
 

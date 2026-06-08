@@ -11,6 +11,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import type { ArmorPiece, AvatarProfile } from '../../core/types'
 import { ARMOR_PIECES } from '../../core/types'
 import { useTTS } from '../../core/hooks/useTTS'
+import { kidPalette } from '../../app/tokens'
 
 interface VerseCardProps {
   pieceId: ArmorPiece | null
@@ -72,7 +73,7 @@ export default function VerseCard({
 
   const bgColor = isLincoln ? '#0d1117' : '#fffef9'
   const textColor = isLincoln ? '#e0e0e0' : '#3d3d3d'
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
   const words = pieceDef ? pieceDef.verseText.split(/\s+/) : []
@@ -300,7 +301,7 @@ export default function VerseCard({
                   backgroundColor: currentWordIndex === idx
                     ? (isLincoln ? 'rgba(126,252,32,0.25)' : 'rgba(255,200,50,0.3)')
                     : 'transparent',
-                  color: currentWordIndex === idx ? (isLincoln ? '#7EFC20' : '#b8860b') : textColor,
+                  color: currentWordIndex === idx ? (isLincoln ? kidPalette.xpGreen : '#b8860b') : textColor,
                   transform: currentWordIndex === idx ? 'scale(1.1)' : 'scale(1)',
                   fontWeight: currentWordIndex === idx ? 600 : 400,
                   '&:hover': {
@@ -404,7 +405,7 @@ export default function VerseCard({
               sx={{
                 fontFamily: titleFont,
                 fontSize: isLincoln ? '13px' : '16px',
-                color: isLincoln ? '#7EFC20' : '#9C27B0',
+                color: isLincoln ? kidPalette.xpGreen : '#9C27B0',
                 fontWeight: 700,
                 textAlign: 'center',
               }}

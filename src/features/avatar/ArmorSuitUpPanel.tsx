@@ -6,6 +6,7 @@ import type { ArmorPieceMeta } from './voxel/buildArmorPiece'
 import { getMorningSuitUpMessage } from '../../core/avatar/getDailyArmorSession'
 import { ALL_ARMOR_VOXEL_PIECES } from './armorTierProgress'
 import { getTierTextColor } from './voxel/tierMaterials'
+import { kidPalette } from '../../app/tokens'
 
 interface ArmorSuitUpPanelProps {
   profile: AvatarProfile
@@ -105,7 +106,7 @@ export default function ArmorSuitUpPanel({
               fontFamily: titleFont,
               fontSize: isLincoln ? '12px' : '16px',
               fontWeight: 600,
-              color: isLincoln ? '#FFD700' : '#9C27B0',
+              color: isLincoln ? kidPalette.goldBright : '#9C27B0',
               lineHeight: 1.6,
             }}
           >
@@ -221,7 +222,7 @@ export default function ArmorSuitUpPanel({
               fontFamily: titleFont,
               fontSize: isLincoln ? '14px' : '18px',
               fontWeight: 700,
-              color: isLincoln ? '#FFD700' : '#9C27B0',
+              color: isLincoln ? kidPalette.goldBright : '#9C27B0',
               textShadow: isLincoln ? '0 0 12px rgba(255,215,0,0.3)' : 'none',
               animation: 'countPulse 0.4s ease-out',
               '@keyframes countPulse': {

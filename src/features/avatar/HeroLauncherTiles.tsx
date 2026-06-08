@@ -1,6 +1,7 @@
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router-dom'
+import { kidPalette } from '../../app/tokens'
 
 export interface HeroLauncherTile {
   id: 'mine' | 'workshop' | 'books'
@@ -31,7 +32,7 @@ export default function HeroLauncherTiles({ isLincoln, hideMine = false }: HeroL
   const bgGradient = isLincoln
     ? 'linear-gradient(160deg, rgba(14,20,28,0.95), rgba(20,28,40,0.95))'
     : 'linear-gradient(160deg, rgba(255,245,250,0.98), rgba(247,236,244,0.96))'
-  const activeColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const activeColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const textColor = isLincoln ? 'rgba(255,255,255,0.9)' : 'rgba(32,16,24,0.82)'
 
   return (

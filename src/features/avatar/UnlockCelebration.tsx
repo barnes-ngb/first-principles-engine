@@ -3,6 +3,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import type { ArmorPiece, AvatarProfile } from '../../core/types'
 import { ARMOR_PIECES } from '../../core/types'
+import { kidPalette } from '../../app/tokens'
 
 interface UnlockCelebrationProps {
   newPiece: ArmorPiece | null
@@ -65,7 +66,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        bgcolor: isLincoln ? 'rgba(0,0,0,0.92)' : 'rgba(255,240,250,0.95)',
+        bgcolor: isLincoln ? kidPalette.bg : 'rgba(255,240,250,0.95)',
         animation: 'celebrationFadeIn 0.4s ease-out',
         cursor: 'pointer',
         '@keyframes celebrationFadeIn': {
@@ -85,7 +86,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
                 position: 'absolute',
                 width: 12,
                 height: 12,
-                bgcolor: p.colorIdx === 0 ? '#7EFC20' : p.colorIdx === 1 ? '#FFD700' : '#00BFFF',
+                bgcolor: p.colorIdx === 0 ? kidPalette.xpGreen : p.colorIdx === 1 ? kidPalette.goldBright : '#00BFFF',
                 left: `${p.left}%`,
                 top: `${p.top}%`,
                 animation: `pixelExplode${i % 4} 1.2s ease-out forwards`,
@@ -139,7 +140,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
               height: 180,
               objectFit: 'contain',
               borderRadius: isLincoln ? 0 : 4,
-              border: `4px solid ${isLincoln ? '#7EFC20' : '#E8A0BF'}`,
+              border: `4px solid ${isLincoln ? kidPalette.xpGreen : '#E8A0BF'}`,
               imageRendering: isLincoln ? 'pixelated' : 'auto',
               animation: 'bounceIn 0.6s ease-out',
               '@keyframes bounceIn': {
@@ -156,7 +157,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
             fontSize: isLincoln ? '18px' : '1.6rem',
             fontWeight: 700,
-            color: isLincoln ? '#7EFC20' : '#9C27B0',
+            color: isLincoln ? kidPalette.xpGreen : '#9C27B0',
             textAlign: 'center',
             textShadow: isLincoln ? '0 0 20px rgba(126,252,32,0.8)' : '0 0 20px rgba(156,39,176,0.4)',
           }}
@@ -169,7 +170,7 @@ export default function UnlockCelebration({ newPiece, profile, onDismiss }: Unlo
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
             fontSize: isLincoln ? '14px' : '1.1rem',
             fontWeight: 700,
-            color: isLincoln ? '#FFD700' : '#E91E63',
+            color: isLincoln ? kidPalette.goldBright : '#E91E63',
             textAlign: 'center',
           }}
         >

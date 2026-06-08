@@ -292,6 +292,8 @@ export function animateParticles(particles: FallingParticle[]): void {
 
 export function addChristmasStar(skyGroup: THREE.Group): void {
   const geo = new THREE.BoxGeometry(0.15, 0.15, 0.15)
+  // TODO(ARCH-21): 0xFFD700 = kidPalette.goldBright in numeric form. Deferred —
+  // adopt once the voxel lane can be render-verified.
   const mat = new THREE.MeshBasicMaterial({
     color: 0xFFD700,
     transparent: true,

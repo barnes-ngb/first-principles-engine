@@ -86,6 +86,9 @@ function buildPedestal(tierColor: number): THREE.Group {
   pedestal.add(top)
 
   // Gold edge glow on top step
+  // TODO(ARCH-21): the 0xFFD700 gold literals in this file = kidPalette.goldBright
+  // in numeric form. Deferred — adopt once the voxel lane can be render-verified
+  // (string token vs number-typed Three.js color / light args).
   const glowMat = new THREE.MeshBasicMaterial({ color: 0xFFD700, transparent: true, opacity: 0.25 })
   const edges: [number, number, number, number, number, number][] = [
     [0, 0.63, 1.1, 2.2, 0.02, 0.02],     // front

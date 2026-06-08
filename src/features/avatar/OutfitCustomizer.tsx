@@ -3,6 +3,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
 import type { OutfitCustomization } from '../../core/types'
+import { kidPalette } from '../../app/tokens'
 
 interface OutfitCustomizerProps {
   customization: OutfitCustomization | undefined
@@ -65,7 +66,7 @@ export default function OutfitCustomizer({
     },
   ]
 
-  const accentColor = isLincoln ? '#7EFC20' : '#E8A0BF'
+  const accentColor = isLincoln ? kidPalette.xpGreen : '#E8A0BF'
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
   return (

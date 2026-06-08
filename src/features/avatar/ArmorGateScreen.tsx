@@ -8,6 +8,7 @@ import type { AvatarProfile, VoxelArmorPieceId } from '../../core/types'
 import type { ArmorGateStatus } from './armorGate'
 import { VOXEL_ARMOR_PIECES } from './voxel/buildArmorPiece'
 import AvatarThumbnail from './AvatarThumbnail'
+import { kidPalette } from '../../app/tokens'
 
 interface ArmorGateScreenProps {
   gateStatus: ArmorGateStatus
@@ -106,13 +107,13 @@ export default function ArmorGateScreen({
             px: 4,
             py: 1.5,
             borderRadius: isLincoln ? '2px' : '24px',
-            borderColor: isLincoln ? '#7EFC20' : '#4caf50',
-            color: isLincoln ? '#7EFC20' : '#4caf50',
+            borderColor: isLincoln ? kidPalette.xpGreen : '#4caf50',
+            color: isLincoln ? kidPalette.xpGreen : '#4caf50',
             fontFamily: isLincoln ? '"Press Start 2P", monospace' : 'monospace',
             fontSize: isLincoln ? '12px' : '16px',
             fontWeight: 500,
             '&:hover': {
-              borderColor: isLincoln ? '#7EFC20' : '#4caf50',
+              borderColor: isLincoln ? kidPalette.xpGreen : '#4caf50',
               bgcolor: isLincoln ? 'rgba(126,252,32,0.15)' : 'rgba(76,175,80,0.15)',
             },
           }}
