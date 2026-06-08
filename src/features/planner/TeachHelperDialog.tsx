@@ -16,6 +16,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
 
+import { ErrorState, LoadingState } from '../../components/states'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useGenerateActivity } from '../../core/ai/useAI'
 import { lessonCardsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
@@ -291,9 +292,7 @@ ${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'G
 
           {/* Lesson content: saved card or generic template */}
           {loadingCard ? (
-            <Typography variant="body2" color="text.secondary">
-              Loading lesson card…
-            </Typography>
+            <LoadingState label="Loading lesson card…" />
           ) : activeLessonCard ? (
             /* ── SPECIFIC lesson card from planning ── */
             <>
@@ -375,9 +374,11 @@ ${item.subjectBucket === 'Reading' || item.subjectBucket === 'LanguageArts' ? 'G
               </Button>
 
               {(generateError || localError) && (
-                <Alert severity="error" sx={{ mt: 1 }}>
-                  {localError || generateError?.message || 'Failed to generate lesson card'}
-                </Alert>
+                <Box sx={{ mt: 1 }}>
+                  <ErrorState
+                    message={localError || generateError?.message || 'Failed to generate lesson card'}
+                  />
+                </Box>
               )}
             </>
           )}
