@@ -674,9 +674,9 @@ export default function TodayChecklist({
                       </IconButton>
                     </Tooltip>
                   )}
-                  {/* Find a video — seeds Shelly's chat with this lesson's topic
-                      (FEAT-14). Academic items only: skip prayer/scripture, which
-                      getSparkleMode flags as 'none'. */}
+                  {/* Find a video — opens the in-context lesson video dialog for
+                      this lesson's topic (FEAT-14 / FEAT-21). Academic items only:
+                      skip prayer/scripture, which getSparkleMode flags as 'none'. */}
                   {!item.completed && getSparkleMode(item) !== 'none' && (
                     <Tooltip title="Find a video for this lesson">
                       <IconButton
