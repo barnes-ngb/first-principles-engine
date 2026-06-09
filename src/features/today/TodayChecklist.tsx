@@ -31,14 +31,13 @@ import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import type {
-  ChatContext,
   ChecklistItem as ChecklistItemType,
   ConceptualBlock,
   CurriculumDetected,
   DayLog,
   SkillSnapshot,
 } from '../../core/types'
-import { openChatWithContext } from '../shelly-chat'
+import LessonVideoDialog from './LessonVideoDialog'
 import {
   PlanType,
   RoutineItemKey,
@@ -201,6 +200,10 @@ export default function TodayChecklist({
   const [expandedCaptureIndex, setExpandedCaptureIndex] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [showDeferred, setShowDeferred] = useState(false)
+  // FEAT-20: in-context Lesson Video dialog target (null = closed).
+  const [videoLesson, setVideoLesson] = useState<
+    { topic: string; lessonObjective?: string; subjectBucket?: string } | null
+  >(null)
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(id)
@@ -427,10 +430,11 @@ export default function TodayChecklist({
     setGradeNote(null)
   }
 
-  // Seed Shelly's chat with a video-oriented query for this lesson (FEAT-14 /
-  // FEAT-13 Phase 2). openChatWithContext creates a thread with a trailing user
-  // message; ShellyChatPage's auto-send effect then triggers her reply, which —
-  // with Phase 1's parent web search on — returns kid-friendly video links.
+  // FEAT-20: open the in-context Lesson Video dialog scoped to this lesson. The
+  // dialog runs a scoped `lessonVideo` search (age + objective + soft interest)
+  // and shows a structured best pick + "Find another" — keeping Shelly on Today
+  // instead of navigating to her chat. (Supersedes the prior chat-seed path;
+  // openChatWithContext is kept for other callers but no longer used here.)
   const handleFindVideo = (item: ChecklistItemType) => {
     const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
     const scanTopic = bucket ? scanFeedbackBySubject[bucket]?.topic : undefined
@@ -438,19 +442,12 @@ export default function TodayChecklist({
     // Best topic = scan-feedback topic ?? title ?? label (minutes suffix stripped).
     const cleanLabel = item.label.replace(/\s*\(\d+m\)\s*$/, '').trim()
     const topic = (scanTopic || rawTitle || cleanLabel).trim()
-    // FEAT-20: fold the lesson objective (contentGuide — "what to cover today",
-    // e.g. "Lesson 35 — emerging syllables and simple sentences") into the seed
-    // so the video search scopes to this specific lesson, not just the subject.
-    const note = item.contentGuide?.trim()
-    const seed = `Find a short, kid-friendly video to help teach: ${topic}${note ? ` — ${note}` : ''}`
-    const name = selectedChild?.name?.toLowerCase()
-    const chatContext: ChatContext =
-      name === 'lincoln' ? 'lincoln' : name === 'london' ? 'london' : 'general'
-    void openChatWithContext(familyId, navigate, {
-      source: 'general',
-      chatContext,
-      itemTitle: topic,
-      initialMessage: seed,
+    // Lesson objective (contentGuide — "what to cover today", e.g. "Lesson 35 —
+    // emerging syllables and simple sentences") scopes the search to this lesson.
+    setVideoLesson({
+      topic,
+      lessonObjective: item.contentGuide?.trim() || undefined,
+      subjectBucket: bucket || undefined,
     })
   }
 
@@ -1152,6 +1149,18 @@ export default function TodayChecklist({
           </Typography>
         </Stack>
       )}
+
+      {/* FEAT-20: in-context Lesson Video dialog (parent-only). */}
+      <LessonVideoDialog
+        open={videoLesson !== null}
+        onClose={() => setVideoLesson(null)}
+        familyId={familyId}
+        childId={selectedChildId}
+        childName={selectedChild.name}
+        topic={videoLesson?.topic ?? ''}
+        lessonObjective={videoLesson?.lessonObjective}
+        subjectBucket={videoLesson?.subjectBucket}
+      />
     </SectionCard>
   )
 }
