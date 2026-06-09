@@ -127,17 +127,6 @@ function isScannableWorkbook(item: ChecklistItemType): boolean {
   )
 }
 
-/**
- * Academic/subject items get the "find a video for this" affordance (FEAT-12
- * Phase 2). Formation/routine items (Prayer/Scripture/Devotion) don't — they
- * match `noSparklePatterns` and carry no subject. An item qualifies when it has
- * a `subjectBucket` or one can be inferred from its label.
- */
-function isSubjectItem(item: ChecklistItemType): boolean {
-  if (noSparklePatterns.some((p) => p.test(item.label || ''))) return false
-  return !!(item.subjectBucket ?? inferSubjectBucket(item.label))
-}
-
 function formatTime12h(date: Date): string {
   const h = date.getHours()
   const m = date.getMinutes()
@@ -449,8 +438,7 @@ export default function TodayChecklist({
     // Best topic = scan-feedback topic ?? title ?? label (minutes suffix stripped).
     const cleanLabel = item.label.replace(/\s*\(\d+m\)\s*$/, '').trim()
     const topic = (scanTopic || rawTitle || cleanLabel).trim()
-    const subjectSuffix = bucket ? ` (${bucket})` : ''
-    const seed = `Find a short, kid-friendly video to help teach: ${topic}${subjectSuffix}`
+    const seed = `Find a short, kid-friendly video to help teach: ${topic}`
     const name = selectedChild?.name?.toLowerCase()
     const chatContext: ChatContext =
       name === 'lincoln' ? 'lincoln' : name === 'london' ? 'london' : 'general'
@@ -716,14 +704,6 @@ export default function TodayChecklist({
                       </Tooltip>
                     )
                   })()}
-                  {/* FEAT-12 Phase 2: find a video for subject items (pre-fills Shelly's chat) */}
-                  {!item.completed && isSubjectItem(item) && (
-                    <Tooltip title="Find a video for this">
-                      <IconButton size="small" onClick={() => handleFindVideo(item)}>
-                        <OndemandVideoIcon fontSize="small" color="action" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
                 </Stack>
                 {/* Content guide (what to cover today) */}
                 {item.contentGuide && !item.completed && (
