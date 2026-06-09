@@ -12,6 +12,7 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import { ErrorState, LoadingState } from '../../components/states'
@@ -22,6 +23,42 @@ import { assertAttributed } from '../records/records.logic'
 
 /** Quick watch-time durations offered in the in-dialog logger. */
 const WATCH_DURATIONS = [15, 30, 45] as const
+
+/**
+ * Quick-steer chips (FEAT-23). Each chip is a ONE-TAP action: tapping re-finds
+ * immediately with that single human steer phrase, passed to the server as
+ * `refine`. The free-form box handles combinations. The lesson topic always
+ * stays the anchor server-side.
+ */
+const STEER_GROUPS: { group: string; chips: { label: string; phrase: string }[] }[] = [
+  {
+    group: 'Energy',
+    chips: [
+      { label: 'More high-energy', phrase: 'more high-energy, lively, and engaging' },
+      { label: 'Calmer / lower-key', phrase: 'calmer, lower-key, low-stimulation' },
+    ],
+  },
+  {
+    group: 'Style',
+    chips: [
+      { label: 'Song / music', phrase: 'a song or music video' },
+      {
+        label: 'Movement / exercise',
+        phrase:
+          'a get-up-and-move / exercise video the child can do along with — still teaching this topic',
+      },
+      { label: 'Hands-on demo', phrase: 'a hands-on demonstration' },
+      { label: 'Whiteboard explainer', phrase: 'a whiteboard-style explainer' },
+    ],
+  },
+  {
+    group: 'Length',
+    chips: [
+      { label: 'Shorter (under ~3 min)', phrase: 'shorter — under about 3 minutes' },
+      { label: 'A bit longer', phrase: 'a bit longer / more in-depth' },
+    ],
+  },
+]
 
 /** Structured best-pick returned by the `lessonVideo` task. */
 interface LessonVideoPick {
@@ -80,9 +117,11 @@ export default function LessonVideoDialog({
   const [logging, setLogging] = useState(false)
   const [loggedMinutes, setLoggedMinutes] = useState<number | null>(null)
   const [logError, setLogError] = useState<string | null>(null)
+  // Refine free-form box (FEAT-23): typed steer for the next re-find.
+  const [refineText, setRefineText] = useState('')
 
   const search = useCallback(
-    async (exclude: string[]) => {
+    async (exclude: string[], refine?: string) => {
       if (!familyId || !childId) return
       setLoading(true)
       setError(null)
@@ -99,6 +138,7 @@ export default function LessonVideoDialog({
                 lessonObjective: lessonObjective || undefined,
                 subjectBucket: subjectBucket || undefined,
                 exclude,
+                refine: refine?.trim() || undefined,
               }),
             },
           ],
@@ -130,12 +170,14 @@ export default function LessonVideoDialog({
       setExcluded([])
       setLoggedMinutes(null)
       setLogError(null)
+      setRefineText('')
       return
     }
     setPick(null)
     setExcluded([])
     setLoggedMinutes(null)
     setLogError(null)
+    setRefineText('')
     void search([])
     // search identity is stable for a given lesson; run on open only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,6 +185,17 @@ export default function LessonVideoDialog({
 
   const handleFindAnother = () => {
     void search(excluded)
+  }
+
+  // FEAT-23: re-find honoring a steer (chip phrase or typed box text). Reuses
+  // the accumulated `excluded` so already-shown videos aren't repeated.
+  const handleSteer = (refine: string) => {
+    void search(excluded, refine)
+  }
+
+  const handleRefineSubmit = () => {
+    const text = refineText.trim()
+    if (text) void search(excluded, text)
   }
 
   // Log watch time to hours under the lesson's subject (FEAT-22). DATA-05:
@@ -255,6 +308,53 @@ export default function LessonVideoDialog({
                 {logError}
               </Typography>
             )}
+
+            {/* FEAT-23: Refine — quick-steer chips (one-tap re-find) + a
+                free-form box. Each re-find keeps the lesson topic as the anchor
+                and reuses the accumulated exclusions so picks stay fresh. */}
+            <Divider sx={{ my: 0.5 }} />
+            <Typography variant="subtitle2">Refine this pick</Typography>
+            {STEER_GROUPS.map(({ group, chips }) => (
+              <Stack key={group} spacing={0.5}>
+                <Typography variant="caption" color="text.secondary">
+                  {group}
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  {chips.map(({ label, phrase }) => (
+                    <Chip
+                      key={label}
+                      label={label}
+                      variant="outlined"
+                      onClick={() => handleSteer(phrase)}
+                      disabled={loading}
+                    />
+                  ))}
+                </Stack>
+              </Stack>
+            ))}
+            <Stack direction="row" spacing={1} alignItems="flex-start">
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Ask for something specific…"
+                value={refineText}
+                onChange={(e) => setRefineText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handleRefineSubmit()
+                  }
+                }}
+                disabled={loading}
+              />
+              <Button
+                variant="outlined"
+                onClick={handleRefineSubmit}
+                disabled={loading || !refineText.trim()}
+              >
+                Find
+              </Button>
+            </Stack>
           </Stack>
         )}
       </DialogContent>
