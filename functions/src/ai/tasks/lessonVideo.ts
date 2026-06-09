@@ -40,6 +40,7 @@ export const handleLessonVideo = async (
   let lessonObjective = "";
   let subjectBucket = "";
   let exclude: string[] = [];
+  let refine = "";
 
   try {
     const userMsg = messages[messages.length - 1]?.content ?? "{}";
@@ -48,10 +49,12 @@ export const handleLessonVideo = async (
       lessonObjective?: string;
       subjectBucket?: string;
       exclude?: string[];
+      refine?: string;
     }>(userMsg);
     lessonTopic = (input.lessonTopic ?? "").trim();
     lessonObjective = (input.lessonObjective ?? "").trim();
     subjectBucket = (input.subjectBucket ?? "").trim();
+    refine = (input.refine ?? "").trim();
     if (Array.isArray(input.exclude)) {
       exclude = input.exclude.filter((u): u is string => typeof u === "string" && !!u.trim());
     }
@@ -69,6 +72,7 @@ export const handleLessonVideo = async (
     subjectBucket,
     childId,
     excludeCount: exclude.length,
+    refine: refine || undefined,
   });
 
   // Child profile (age + motivators + interests) built server-side from the
@@ -87,6 +91,14 @@ export const handleLessonVideo = async (
   if (subjectBucket) lessonLines.push(`Subject: ${subjectBucket}`);
   const excludeLine = exclude.length
     ? `\n\nDo NOT return any of these already-shown videos (pick a different one):\n${exclude.map((u) => `- ${u}`).join("\n")}`
+    : "";
+
+  // FEAT-23: parent steer. Strong preference for kind/energy/length — but the
+  // lesson topic stays the anchor (relevance/accuracy/age-fit always win).
+  const refineBlock = refine
+    ? `
+
+REFINEMENT: The parent asked to refine the result: "${refine}". Treat this as a STRONG preference for the kind / energy / length of video — but never at the expense of relevance to the lesson topic, accuracy, or age-appropriateness. The lesson topic stays the anchor: e.g. a "movement / exercise" request means a get-up-and-move video that still teaches THIS topic.`
     : "";
 
   const systemPrompt = `${CHARTER_PREAMBLE}
@@ -111,7 +123,7 @@ Rules:
 - "why" = 1-2 sentences on why this video fits the lesson and the child.
 - "lengthNote" = the approximate length (e.g. "about 4 minutes").
 - "themeTieIn" = 1 sentence on the interest tie-in if you used one; OMIT this
-  field entirely when the pick is a plain best-fit video with no theme tie-in.
+  field entirely when the pick is a plain best-fit video with no theme tie-in.${refineBlock}
 
 Return ONLY a single JSON object, no prose, no code fences:
 {"title": "...", "url": "...", "source": "...", "why": "...", "lengthNote": "...", "themeTieIn": "..."}`;
