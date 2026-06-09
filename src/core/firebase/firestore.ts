@@ -4,7 +4,7 @@ import {
   doc,
   type DocumentReference,
   type FirestoreDataConverter,
-  getFirestore,
+  initializeFirestore,
   type QueryDocumentSnapshot,
   type SnapshotOptions,
 } from 'firebase/firestore'
@@ -48,7 +48,7 @@ import type { ChildSkillMap } from '../curriculum/skillStatus'
 import type { ErrorLog } from '../types/errorLog'
 import { app } from './firebase'
 
-export const db = getFirestore(app)
+export const db = initializeFirestore(app, { ignoreUndefinedProperties: true })
 
 /** Recursively strip `undefined` values, which Firestore rejects. */
 export function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
