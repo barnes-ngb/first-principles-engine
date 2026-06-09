@@ -2,7 +2,7 @@
 
 > Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
-> Last updated: 2026-06-07 (health audit auto-fix: added reviseStory, revisePage, chapterQuestions, monthlyReview to CHAT_TASKS registry diagram; section 4 prose may lag current implementations)
+> Last updated: 2026-06-09 (health audit auto-fix: added bookLookup, lessonVideo to CHAT_TASKS registry diagram and model table; section 4 prose may lag current implementations)
 
 ---
 
@@ -48,6 +48,8 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       scan       → handleScan
                                       shellyChat → handleShellyChat
                                       chapterQuestions → handleChapterQuestions
+                                      bookLookup → handleBookLookup
+                                      lessonVideo → handleLessonVideo
                                       monthlyReview → handleMonthlyReview
                                            ↓
                                   tasks/<handler>.ts
@@ -104,6 +106,8 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `chapterQuestions` | `claude-sonnet-4-6` | Chapter book discussion question generation |
 | `reviseStory` | `claude-sonnet-4-6` | Generate Chat AI story revision (full-story context) |
 | `monthlyReview` | `claude-sonnet-4-6` | Monthly review book generation (narrative + photo curation) |
+| `bookLookup` | `claude-sonnet-4-6` | Chapter book title/chapter metadata lookup for "Add a book" form |
+| `lessonVideo` | `claude-sonnet-4-6` | Kid-friendly lesson video finder (web search enabled) for Lesson Video dialog |
 | `generate` | `claude-haiku-4-5-20251001` | Activity/lesson generation |
 | `chat` | `claude-haiku-4-5-20251001` | General chat |
 
