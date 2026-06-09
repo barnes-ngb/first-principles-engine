@@ -332,11 +332,25 @@ Rules:
  * Parent-scoped only (shellyChat is already Shelly-only; web search is never
  * wired into any kid-facing task). Kept deliberately separate so it does not
  * disturb the role, `<action>`/`<friction>` grammars, or the `[FOLLOWUP]`
- * instruction. Takes no arguments and is stable.
+ * instruction.
+ *
+ * When a child is in context (child-scoped tab), an extra teaching-video block
+ * (FEAT-20) tells the assistant to pitch any lesson-teaching video to that
+ * child's age and to SOFTLY prefer their interests — without over-narrowing the
+ * search or asking which child it's for (the chat is already child-scoped). On
+ * the general (no-child) branch this block is omitted, so general and non-video
+ * web-search behavior is unchanged.
  */
-export function buildWebSearchAddendum(): string {
-  return `
+export function buildWebSearchAddendum(childName?: string): string {
+  const base = `
 WEB SEARCH: You can search the web for current or local information when it would genuinely help Shelly plan — local activities and events, where to find materials or curricula, videos to watch or learn from together, and up-to-date facts. Use it when the answer depends on current, local, or specific information you don't already have; don't search for things you already know. When you draw on what you find, cite your sources as markdown links ([title](url)) so Shelly can tap through, and keep the answer practical and planning-oriented. Favor recent, reputable sources, and stay within Shelly's homeschool-planning context.`;
+  if (!childName) return base;
+  return `${base}
+
+TEACHING VIDEOS for ${childName}: When you search for a video to teach ${childName} a specific lesson, scope it to ${childName} using the CHILD PROFILE above:
+- Pitch to ${childName}'s age and level — simpler, shorter, and gentler for a younger child.
+- SOFTLY prefer a video that ties to ${childName}'s interests/motivators (from the profile above) — but only when a quality, on-topic, age-appropriate match exists. Interest fit is a tiebreaker, never a filter: never sacrifice relevance, accuracy, or quality for theme. If no good themed match exists, pick the best plain video on the topic.
+- This chat is already about ${childName} — don't ask "which child is this for?". Use the known child.`;
 }
 
 export const handleShellyChat = async (
@@ -570,7 +584,7 @@ Example: If she says "Lincoln seems bored with reading" and the data shows posit
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
-  const webSearchAddendum = buildWebSearchAddendum();
+  const webSearchAddendum = buildWebSearchAddendum(childId && childName ? childName : undefined);
 
   const systemPrompt = `${sharedContext}
 

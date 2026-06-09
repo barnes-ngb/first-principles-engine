@@ -438,7 +438,11 @@ export default function TodayChecklist({
     // Best topic = scan-feedback topic ?? title ?? label (minutes suffix stripped).
     const cleanLabel = item.label.replace(/\s*\(\d+m\)\s*$/, '').trim()
     const topic = (scanTopic || rawTitle || cleanLabel).trim()
-    const seed = `Find a short, kid-friendly video to help teach: ${topic}`
+    // FEAT-20: fold the lesson objective (contentGuide — "what to cover today",
+    // e.g. "Lesson 35 — emerging syllables and simple sentences") into the seed
+    // so the video search scopes to this specific lesson, not just the subject.
+    const note = item.contentGuide?.trim()
+    const seed = `Find a short, kid-friendly video to help teach: ${topic}${note ? ` — ${note}` : ''}`
     const name = selectedChild?.name?.toLowerCase()
     const chatContext: ChatContext =
       name === 'lincoln' ? 'lincoln' : name === 'london' ? 'london' : 'general'
