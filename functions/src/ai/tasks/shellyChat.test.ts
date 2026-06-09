@@ -513,9 +513,31 @@ describe("buildWebSearchAddendum", () => {
     expect(out.toLowerCase()).toContain("don't search for things you already know");
   });
 
-  it("takes no arguments and is stable (no leaked template placeholder)", () => {
+  it("is stable with no leaked template placeholder (general + child-scoped)", () => {
     expect(buildWebSearchAddendum()).toBe(buildWebSearchAddendum());
     expect(buildWebSearchAddendum()).not.toContain("${");
+    expect(buildWebSearchAddendum("Lincoln")).not.toContain("${");
+  });
+
+  it("omits the teaching-video block on the general (no-child) branch", () => {
+    const out = buildWebSearchAddendum();
+    expect(out).not.toContain("TEACHING VIDEOS");
+    expect(out.toLowerCase()).not.toContain("which child is this for");
+  });
+
+  it("scopes teaching videos to the child by age and soft interest preference when child-scoped (FEAT-20)", () => {
+    const out = buildWebSearchAddendum("Lincoln");
+    expect(out).toContain("TEACHING VIDEOS for Lincoln");
+    // Age/level pitch.
+    expect(out.toLowerCase()).toContain("age");
+    // Soft preference, never a hard filter.
+    expect(out.toLowerCase()).toContain("softly prefer");
+    expect(out.toLowerCase()).toContain("tiebreaker, never a filter");
+    expect(out.toLowerCase()).toContain("best plain video");
+    // Doesn't ask which child when already child-scoped.
+    expect(out.toLowerCase()).toContain("don't ask");
+    // Still includes the base web-search guidance.
+    expect(out).toContain("WEB SEARCH");
   });
 });
 
