@@ -169,6 +169,7 @@ export default function TodayChecklist({
   selectedChild,
   selectedChildId,
   familyId,
+  today,
   planType,
   activeRoutineItems,
   persistDayLogImmediate,
@@ -1157,6 +1158,7 @@ export default function TodayChecklist({
         familyId={familyId}
         childId={selectedChildId}
         childName={selectedChild.name}
+        date={today}
         topic={videoLesson?.topic ?? ''}
         lessonObjective={videoLesson?.lessonObjective}
         subjectBucket={videoLesson?.subjectBucket}
