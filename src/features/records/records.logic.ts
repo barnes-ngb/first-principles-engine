@@ -66,14 +66,16 @@ export type NewHoursAdjustment = Omit<HoursAdjustment, 'id' | 'childId'> & {
   childId: string
 }
 
-/** Runtime guard for the write path: throws if an adjustment would be persisted
+/** Runtime guard for the write path: throws if a record would be persisted
  *  without a `childId`. Pure + testable; callers pass the assembled payload and
- *  receive it back unchanged when valid. */
-export const assertAttributed = (adj: NewHoursAdjustment): NewHoursAdjustment => {
-  if (!adj.childId) {
-    throw new Error('hoursAdjustment requires a childId (DATA-05 attribution)')
+ *  receive it back unchanged when valid. Generic so it guards both adjustment
+ *  writes (`NewHoursAdjustment`) and normal hours-entry writes (FEAT-24 Quick
+ *  Add) — any payload that carries a required `childId`. */
+export const assertAttributed = <T extends { childId: string }>(entry: T): T => {
+  if (!entry.childId) {
+    throw new Error('hours write requires a childId (DATA-05 attribution)')
   }
-  return adj
+  return entry
 }
 
 export const entryMinutes = (entry: HoursEntry): number => {
