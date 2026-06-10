@@ -20,9 +20,10 @@ interface MonthlyTrendProps {
 }
 
 export default function MonthlyTrend({ dayLogs, hoursEntries, adjustments, startDate, endDate, childId }: MonthlyTrendProps) {
-  // Reconciled with the canonical compliance figure (DATA-01): this chart now
-  // reads computeMonthlyTrend() from records.logic, which shares the exact data
-  // sources, core-bucket set, and block-vs-checklist rule used by
+  // Reconciled with the canonical compliance figure (DATA-01/DATA-11): this
+  // chart reads computeMonthlyTrend() from records.logic, which consumes the
+  // SAME shared counting path (collectHoursContributions — child filtering,
+  // day logs + hours entries + adjustments, partial-day rule) as
   // computeHoursSummary(). The cumulative core/total below therefore match the
   // summary / MO-compliance cards for any data within [startDate, endDate].
   const months = useMemo(() => {
