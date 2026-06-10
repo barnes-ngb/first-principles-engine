@@ -2,6 +2,8 @@ import JSZip from 'jszip'
 
 import type {
   Artifact,
+  ChecklistItem,
+  DayBlock,
   DayLog,
   Evaluation,
   HoursAdjustment,
@@ -48,10 +50,11 @@ export type HoursSummary = {
 // child (or explicitly to 'both'): new writes go through `NewHoursAdjustment` +
 // `assertAttributed` so a `childId` can never be omitted at the source.
 //
-// DATA-09 closed the read-side leak: the filters in `computeHoursSummary` /
-// `computeMonthlyTrend` previously folded unattributed (`!a.childId`)
+// DATA-09 closed the read-side leak: the read filter (now in ONE place —
+// `collectHoursContributions`, consumed by both `computeHoursSummary` and
+// `computeMonthlyTrend`) previously folded unattributed (`!a.childId`)
 // adjustments into EVERY child's totals (silently inflating both kids — the
-// DATA-05 leak). They now match `childId === child || childId === 'both'`, so a
+// DATA-05 leak). It now matches `childId === child || childId === 'both'`, so a
 // 'both' adjustment counts for both kids (legitimate family-wide time) while a
 // child-tagged one counts only for that child. The already-stored unattributed
 // docs are migrated to 'both' (`migrateUnattributedAdjustments`), which
@@ -93,23 +96,47 @@ export type DayLogContribution = {
   location?: string
 }
 
+/** Item-level half of the partial-day rule, for a day block: ACTUAL minutes if
+ *  logged, else zero. A block's `plannedMinutes` never count — an untracked
+ *  block on a tracked day contributes nothing (the documented partial-day
+ *  edge). */
+const blockCountedMinutes = (block: DayBlock): number => block.actualMinutes ?? 0
+
+/** Item-level half of the partial-day rule, for a checklist item: PLANNED
+ *  minutes for a COMPLETED item (`estimatedMinutes ?? plannedMinutes ?? "(Nm)"
+ *  parsed from the label`), else zero. An item's own `actualMinutes`
+ *  (quest/fluency auto-complete) is deliberately NOT consulted — counting it
+ *  would move stored compliance totals (DATA-11). */
+const checklistItemCountedMinutes = (item: ChecklistItem): number => {
+  if (!item.completed) return 0
+  return (
+    item.estimatedMinutes ??
+    item.plannedMinutes ??
+    parseMinutesFromChecklist(item.label)
+  )
+}
+
 /**
  * Canonical per-day-log minute extraction — the SINGLE source of truth for how a
  * day log converts into counted minutes. Used by both `computeHoursSummary`
  * (totals / compliance) and `computeMonthlyTrend` (the trend chart) so the two
  * can never diverge (DATA-01).
  *
- * Rule: if ANY block has tracked `actualMinutes`, use block-level actuals and
- * ignore the checklist; otherwise fall back to completed checklist items
- * (estimatedMinutes ?? plannedMinutes ?? minutes parsed from the label).
+ * Partial-day rule (codified HERE, nowhere else): an item counts its ACTUAL
+ * minutes if logged, else its PLANNED minutes if it is a completed checklist
+ * item, else ZERO. Concretely: if ANY block has tracked `actualMinutes`, the
+ * day counts block actuals only — untracked blocks count zero, and the
+ * checklist is ignored even when completed (it is the plan for the same time,
+ * not extra time). Only when NO block tracked time does the day fall back to
+ * completed checklist items via `checklistItemCountedMinutes`.
  */
 export const dayLogMinuteContributions = (log: DayLog): DayLogContribution[] => {
   const out: DayLogContribution[] = []
-  const hasActualBlockMinutes = log.blocks.some((b) => (b.actualMinutes ?? 0) > 0)
+  const hasActualBlockMinutes = log.blocks.some((b) => blockCountedMinutes(b) > 0)
 
   if (hasActualBlockMinutes) {
     for (const block of log.blocks) {
-      const minutes = block.actualMinutes ?? 0
+      const minutes = blockCountedMinutes(block)
       if (minutes <= 0) continue
       out.push({
         subjectBucket: block.subjectBucket ?? 'Other',
@@ -119,11 +146,7 @@ export const dayLogMinuteContributions = (log: DayLog): DayLogContribution[] => 
     }
   } else if (log.checklist) {
     for (const item of log.checklist) {
-      if (!item.completed) continue
-      const minutes =
-        item.estimatedMinutes ??
-        item.plannedMinutes ??
-        parseMinutesFromChecklist(item.label)
+      const minutes = checklistItemCountedMinutes(item)
       if (minutes <= 0) continue
       out.push({
         subjectBucket: item.subjectBucket ?? 'Other',
@@ -137,13 +160,38 @@ export const dayLogMinuteContributions = (log: DayLog): DayLogContribution[] => 
   return out
 }
 
-export const computeHoursSummary = (
+// ─── Shared counting path (DATA-11) ─────────────────────────────────────────
+
+/** One counted minute contribution from any hours source, with the source it
+ *  came from. The full additive model is: hours entries + day logs +
+ *  adjustments. */
+export type HoursContribution = DayLogContribution & {
+  date: string
+  kind: 'entry' | 'day-log' | 'adjustment'
+}
+
+/**
+ * THE single counting path for hours (DATA-11). Applies the child-id
+ * safety-net filter and the DATA-09 child/'both' adjustment attribution ONCE,
+ * then emits every counted minute from the three additive sources:
+ *
+ *   1. hours entries (Dad Lab, manual, quest/evaluation sessions) — non-positive
+ *      entries are skipped;
+ *   2. day logs — via `dayLogMinuteContributions` (the partial-day rule);
+ *   3. adjustments (manual, backfill, video-watch, …) — ALL emitted, including
+ *      zero and negative minutes (corrections must subtract everywhere).
+ *
+ * `computeHoursSummary` (compliance totals) and `computeMonthlyTrend` (the
+ * trend chart) both consume this list and only differ in how they fold it, so
+ * the surfaces cannot drift.
+ */
+export const collectHoursContributions = (
   dayLogs: DayLog[],
   hoursEntries: HoursEntry[],
   adjustments: HoursAdjustment[],
   childId?: string,
-): HoursSummary => {
-  // When childId is provided, enforce filtering as a safety net
+): HoursContribution[] => {
+  // When childId is provided, enforce filtering as a safety net.
   const filteredLogs = childId
     ? dayLogs.filter((l) => l.childId === childId)
     : dayLogs
@@ -158,44 +206,63 @@ export const computeHoursSummary = (
     ? adjustments.filter((a) => a.childId === childId || a.childId === 'both')
     : adjustments
 
-  const bySubjectMap = new Map<string, { total: number; home: number }>()
-  const byDate: Record<string, number> = {}
+  const out: HoursContribution[] = []
 
   // ── SOURCE 1: Hours entries (Dad Lab, manual entries, etc.) ──
   for (const entry of filteredEntries) {
     const minutes = entryMinutes(entry)
     if (minutes <= 0) continue
-    const bucket = entry.subjectBucket ?? 'Other'
-    const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
-    existing.total += minutes
-    if (entry.location === LearningLocation.Home) existing.home += minutes
-    bySubjectMap.set(bucket, existing)
-    byDate[entry.date] = (byDate[entry.date] ?? 0) + minutes
+    out.push({
+      kind: 'entry',
+      date: entry.date,
+      subjectBucket: entry.subjectBucket ?? 'Other',
+      minutes,
+      location: entry.location,
+    })
   }
 
   // ── SOURCE 2: Day logs (block actuals preferred, else completed checklist) ──
-  // Uses the shared `dayLogMinuteContributions` rule so this total can never
-  // diverge from the trend chart (DATA-01).
   for (const log of filteredLogs) {
-    for (const { subjectBucket, minutes, location } of dayLogMinuteContributions(log)) {
-      const existing = bySubjectMap.get(subjectBucket) ?? { total: 0, home: 0 }
-      existing.total += minutes
-      if (location === LearningLocation.Home) existing.home += minutes
-      bySubjectMap.set(subjectBucket, existing)
-      byDate[log.date] = (byDate[log.date] ?? 0) + minutes
+    for (const contribution of dayLogMinuteContributions(log)) {
+      out.push({ kind: 'day-log', date: log.date, ...contribution })
     }
   }
 
-  // Apply adjustments
-  let adjustmentMinutes = 0
+  // ── SOURCE 3: Adjustments — every doc counts, including negative corrections
+  // (no minutes guard, unlike entries). ──
   for (const adj of filteredAdj) {
-    adjustmentMinutes += adj.minutes
-    const bucket = adj.subjectBucket ?? 'Other'
-    const existing = bySubjectMap.get(bucket) ?? { total: 0, home: 0 }
-    existing.total += adj.minutes
-    if (adj.location === LearningLocation.Home) existing.home += adj.minutes
-    bySubjectMap.set(bucket, existing)
-    byDate[adj.date] = (byDate[adj.date] ?? 0) + adj.minutes
+    out.push({
+      kind: 'adjustment',
+      date: adj.date,
+      subjectBucket: adj.subjectBucket ?? 'Other',
+      minutes: adj.minutes,
+      location: adj.location,
+    })
+  }
+
+  return out
+}
+
+export const computeHoursSummary = (
+  dayLogs: DayLog[],
+  hoursEntries: HoursEntry[],
+  adjustments: HoursAdjustment[],
+  childId?: string,
+): HoursSummary => {
+  const bySubjectMap = new Map<string, { total: number; home: number }>()
+  const byDate: Record<string, number> = {}
+  let adjustmentMinutes = 0
+
+  // Single shared counting path (DATA-11): filtering, all three additive
+  // sources, and the partial-day rule live in `collectHoursContributions`, so
+  // this total can never diverge from the trend chart.
+  for (const c of collectHoursContributions(dayLogs, hoursEntries, adjustments, childId)) {
+    if (c.kind === 'adjustment') adjustmentMinutes += c.minutes
+    const existing = bySubjectMap.get(c.subjectBucket) ?? { total: 0, home: 0 }
+    existing.total += c.minutes
+    if (c.location === LearningLocation.Home) existing.home += c.minutes
+    bySubjectMap.set(c.subjectBucket, existing)
+    byDate[c.date] = (byDate[c.date] ?? 0) + c.minutes
   }
 
   const bySubject: HoursSummaryRow[] = Array.from(bySubjectMap.entries())
@@ -244,11 +311,12 @@ export type MonthlyTrendDatum = {
 }
 
 /**
- * Per-month hours aggregation for the Monthly Trend chart. Uses the SAME data
- * sources and the SAME core-bucket set and per-day-log rule as
- * `computeHoursSummary`, so the cumulative core/total at the end of the period
- * reconciles exactly with the canonical compliance figure for any dataset whose
- * dates fall within [startDate, endDate] (DATA-01).
+ * Per-month hours aggregation for the Monthly Trend chart. Consumes the SAME
+ * shared counting path (`collectHoursContributions` — child filtering, all
+ * three additive sources, partial-day rule) as `computeHoursSummary` (DATA-11),
+ * so the cumulative core/total at the end of the period reconciles exactly with
+ * the canonical compliance figure for any dataset whose dates fall within
+ * [startDate, endDate] (DATA-01).
  *
  * Buckets are created for every month in the inclusive range; months with no
  * activity render as zero.
@@ -261,18 +329,6 @@ export const computeMonthlyTrend = (
   endDate: string,
   childId?: string,
 ): MonthlyTrendDatum[] => {
-  // Mirror computeHoursSummary's child-id safety-net filtering.
-  const filteredLogs = childId
-    ? dayLogs.filter((l) => l.childId === childId)
-    : dayLogs
-  const filteredEntries = childId
-    ? hoursEntries.filter((e) => e.childId === childId)
-    : hoursEntries
-  // DATA-09: mirror computeHoursSummary's explicit child/'both' attribution.
-  const filteredAdj = childId
-    ? adjustments.filter((a) => a.childId === childId || a.childId === 'both')
-    : adjustments
-
   // Build month buckets across the inclusive range.
   const [startY, startM] = startDate.split('-').map(Number)
   const [endY, endM] = endDate.split('-').map(Number)
@@ -296,23 +352,11 @@ export const computeMonthlyTrend = (
     else bucket.nonCore += minutes
   }
 
-  // SOURCE 1: hours entries
-  for (const entry of filteredEntries) {
-    const minutes = entryMinutes(entry)
-    if (minutes <= 0) continue
-    tally(entry.date, entry.subjectBucket ?? 'Other', minutes)
-  }
-
-  // SOURCE 2: day logs (shared canonical rule)
-  for (const log of filteredLogs) {
-    for (const { subjectBucket, minutes } of dayLogMinuteContributions(log)) {
-      tally(log.date, subjectBucket, minutes)
-    }
-  }
-
-  // Adjustments (may be negative — no minutes guard, matching computeHoursSummary)
-  for (const adj of filteredAdj) {
-    tally(adj.date, adj.subjectBucket ?? 'Other', adj.minutes)
+  // Single shared counting path (DATA-11) — the same contributions
+  // computeHoursSummary folds into the compliance totals, including negative
+  // adjustments; only minutes dated outside the range fall out (no bucket).
+  for (const c of collectHoursContributions(dayLogs, hoursEntries, adjustments, childId)) {
+    tally(c.date, c.subjectBucket, c.minutes)
   }
 
   const result: MonthlyTrendDatum[] = []

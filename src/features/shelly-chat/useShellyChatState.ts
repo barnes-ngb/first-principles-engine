@@ -93,7 +93,7 @@ export interface ShellyChatState {
 
   // ── Refs ─────────────────────────────────────────────────────
   fileInputRef: RefObject<HTMLInputElement | null>
-  /** The message TextField's underlying input/textarea — focused when seeded via `?seed=` (FEAT-12 Phase 2). */
+  /** The message TextField's underlying input/textarea. */
   chatInputRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>
   messagesEndRef: RefObject<HTMLDivElement | null>
   autoSendTriggered: RefObject<boolean>
