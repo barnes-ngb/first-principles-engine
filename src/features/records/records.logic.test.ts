@@ -16,6 +16,7 @@ import {
 import {
   assertAttributed,
   buildComplianceZip,
+  collectHoursContributions,
   computeHoursSummary,
   computeMonthlyTrend,
   deriveChildIdFromDocId,
@@ -573,6 +574,59 @@ describe('computeHoursSummary — adjustment attribution (DATA-05)', () => {
     expect(lincoln.totalMinutes).toBe(110)
     expect(london.adjustmentMinutes).toBe(50)
     expect(london.totalMinutes).toBe(90)
+  })
+})
+
+// ─── collectHoursContributions (DATA-11 single counting path) ────────────────
+
+describe('collectHoursContributions (DATA-11)', () => {
+  const dayLogs: DayLog[] = [
+    {
+      childId: 'lincoln',
+      date: '2026-01-10',
+      blocks: [
+        { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 30, location: 'Home' },
+      ],
+    },
+  ]
+  const hoursEntries: HoursEntry[] = [
+    { childId: 'lincoln', date: '2026-01-11', minutes: 25, subjectBucket: SubjectBucket.Science, location: 'Home' },
+    { childId: 'lincoln', date: '2026-01-12', minutes: 0, subjectBucket: SubjectBucket.Math }, // non-positive → skipped
+  ]
+  const adjustments: HoursAdjustment[] = [
+    { childId: 'lincoln', date: '2026-01-13', minutes: 15, reason: 'Watched video: fractions', subjectBucket: SubjectBucket.Math, source: 'video-watch' },
+    { childId: 'lincoln', date: '2026-01-14', minutes: -10, reason: 'overcounted', subjectBucket: SubjectBucket.Reading },
+  ]
+
+  it('emits all three additive sources with their kind; skips non-positive entries; keeps negative adjustments', () => {
+    const contributions = collectHoursContributions(dayLogs, hoursEntries, adjustments, 'lincoln')
+
+    expect(contributions.map((c) => c.kind)).toEqual(['entry', 'day-log', 'adjustment', 'adjustment'])
+    // The zero-minute entry is skipped; the negative adjustment is NOT.
+    expect(contributions.find((c) => c.minutes === 0)).toBeUndefined()
+    expect(contributions.find((c) => c.minutes === -10)?.kind).toBe('adjustment')
+  })
+
+  it("a video-watch adjustment lands identically in the compliance summary and the monthly trend", () => {
+    const videoWatch = adjustments.filter((a) => a.source === 'video-watch')
+    const summary = computeHoursSummary(dayLogs, [], videoWatch, 'lincoln')
+    const trend = computeMonthlyTrend(dayLogs, [], videoWatch, '2026-01', '2026-01', 'lincoln')
+
+    expect(summary.adjustmentMinutes).toBe(15)
+    expect(summary.totalMinutes).toBe(45) // 30 day-log + 15 video-watch
+    expect(trend[0].totalMinutes).toBe(45)
+    expect(trend[0].coreMinutes).toBe(summary.coreMinutes) // Math is core
+  })
+
+  it('applies the DATA-09 child/both attribution once, in the shared path', () => {
+    const shared: HoursAdjustment[] = [
+      { childId: 'both', date: '2026-01-13', minutes: 50, reason: 'Dad Lab', subjectBucket: SubjectBucket.Science },
+      { date: '2026-01-13', minutes: 99, reason: 'legacy unattributed', subjectBucket: SubjectBucket.Science },
+    ]
+    const contributions = collectHoursContributions([], [], shared, 'lincoln')
+    // 'both' counts; unattributed counts for no one.
+    expect(contributions).toHaveLength(1)
+    expect(contributions[0].minutes).toBe(50)
   })
 })
 
