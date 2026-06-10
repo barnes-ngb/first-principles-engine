@@ -26,6 +26,7 @@
 | `HEALTH_REPORT.md` | **CURRENT** | Weekly code health metrics — line counts, test coverage, bundle size, tech debt tracking |
 | `ARCH-10_rules_hardening_plan.md` | **CURRENT** | Firestore rules hardening recon — feasibility, regression baseline, proposed rule structure. Build pending. |
 | `LONDON_BACKLOG.md` | **CURRENT** | Active London deferral register — per-surface breakdown of what works today vs. what's held until tuned for a 6-year-old |
+| `COMPLIANCE_YEAR_END_CLOSEOUT.md` | **CURRENT** | Annual compliance closeout checklist — MO year-end (June) hours verification, exports, freeze window, July data-hygiene handoff |
 | `SESSION_TIMER_HOURS_2026-04-14.md` | **HISTORICAL** | Implementation doc for auto-tracked instructional hours via session timer (shipped Apr 14, 2026) |
 | `SHELLY_PORTAL_CONTEXT.md` | **CURRENT** | Code-verified recon reference for the Shelly Chat control portal build — corrects the design brief against actual code |
 | `SHELLY_PORTAL_FEEDBACK_LOOP.md` | **CURRENT** | Friction log → GitHub issue feedback loop (shipped end-to-end) — ops notes, secret setup, Step 5a+5b architecture |

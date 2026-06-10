@@ -62,6 +62,9 @@ export function useDadLabReports() {
 
       const minutesPerSubject = Math.round(report.totalMinutes / report.subjectTags.length)
 
+      // INTENTIONAL (DATA-04, resolved 2026-06-09): Dad Lab is a whole-family
+      // activity by design — compliance hours credit to every child on each lab.
+      // See docs/review/REVIEW_HOME_BASE.md DATA-04.
       for (const child of children) {
         for (const subject of report.subjectTags) {
           await addDoc(hoursCollection(familyId), {
@@ -100,7 +103,10 @@ export function useDadLabReports() {
       // Only sync compliance hours for completed labs
       if (report.status === 'complete') {
         await syncComplianceHours(reportId, report)
-        // Award XP to each child for Dad Lab completion
+        // Award XP to each child for Dad Lab completion.
+        // INTENTIONAL (DATA-04, resolved 2026-06-09): Dad Lab is a whole-family
+        // activity by design — XP + diamonds credit to every child on each lab.
+        // See docs/review/REVIEW_HOME_BASE.md DATA-04.
         for (const child of children) {
           void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 20, `dadlab-${reportId}`, {
             reason: `Dad Lab: ${report.title || 'experiment'}`,
@@ -135,6 +141,9 @@ export function useDadLabReports() {
         const report = reports.find((r) => r.id === reportId)
         if (report) {
           await syncComplianceHours(reportId, { ...report, status })
+          // INTENTIONAL (DATA-04, resolved 2026-06-09): Dad Lab is a whole-family
+          // activity by design — XP + diamonds credit to every child on each lab.
+          // See docs/review/REVIEW_HOME_BASE.md DATA-04.
           for (const child of children) {
             void addXpEvent(familyId, child.id, 'DAD_LAB_COMPLETE', 20, `dadlab-${reportId}`, {
               reason: `Dad Lab: ${report.title || 'experiment'}`,
