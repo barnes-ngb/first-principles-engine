@@ -12,8 +12,8 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 
 **Scale (current):**
 - TypeScript lines: **179,214** total
-- Commits: **119**
-- Tests: **178 test files**
+- Commits: **118**
+- Tests: **177 test files**
 - Firestore collections/doc helpers: **37** in `firestore.ts`
 - Cloud Functions: **25**
 - Chat task types: **19**
