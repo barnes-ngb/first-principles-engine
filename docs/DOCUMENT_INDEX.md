@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-06-08.
+> Where everything lives. Updated 2026-06-14.
 
 ---
 
@@ -13,7 +13,7 @@
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative at 37 collections (35 family-scoped + 1 global + 1 settings) + 3 subcollections. |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative at 36 collections (35 family-scoped + 1 global) + 3 subcollections + 1 settings document. |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
@@ -33,7 +33,7 @@
 | `barnes-shelly-chat-portal-design.md` | **CURRENT** | Shelly Chat control portal design doc — feature-complete (Tier A reads, Tier B confirmed writes, Tier C Option 2 additive snapshot edits) |
 | `PROJECT_CONTEXT.md` | **STALE** (auto-generated 2026-05-29) | Synthesized project context file for Claude.ai — family context, current sprint, nav structure, AI task registry, key design decisions. Regenerated on demand from repo docs + Drive docs. Stats lag current HEALTH_REPORT by ~15k lines and ~965 tests; regenerate from MASTER_OUTLINE v15 + HEALTH_REPORT 2026-06-07. |
 | `PROFILE_LIMITS_AUDIT.md` | **CURRENT** | Profile-based rate limits and experience audit — AI usage caps, generation limits, cost controls, per-function model + cost-per-call mapping |
-| `SYSTEM_PROMPTS.md` | **CURRENT** (v4, updated 2026-05-29) | Task dispatch, model selection, context slices — 17 task types in `tasks/index.ts` registry (plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview); `analyzeEvaluationPatterns` exported separately |
+| `SYSTEM_PROMPTS.md` | **CURRENT** (v4, updated 2026-05-29) | Task dispatch, model selection, context slices — 19 task types in `tasks/index.ts` registry (plan, chat, generate, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, bookLookup, lessonVideo, monthlyReview); `analyzeEvaluationPatterns` exported separately |
 | `barnes-testing-guide-v2.md` | **STALE** | Needs update — missing Knowledge Mine, Workshop, Books, Avatar/Armor coverage |
 | `SCRIPT_CONVENTIONS.md` | **CURRENT** | Cross-platform npm script conventions (cross-env, path separators, admin scripts) |
 | `KNOWLEDGE_MINE_AUDIT_2026-04.md` | **NEW** | Knowledge Mine audit (Part 1/4): quest type inventory, level system analysis, Level 7 mystery resolution, difficulty progression, Lincoln constraint compliance |
@@ -156,7 +156,7 @@ These are family/values documents maintained outside the repo. They inform AI pr
 | File | Purpose |
 |---|---|
 | `CLAUDE.md` | AI assistant instructions: build commands, constraints, conventions, project context |
-| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `zod.ts` |
+| `src/core/types/` | Domain types split by area: `common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `stonebridge.ts`, `zod.ts` |
 | `src/core/types/enums.ts` | All enum-like `as const` objects and companion types |
 | `functions/src/ai/chat.ts` | Cloud Function: system prompt assembly, enriched context, quest prompt |
 | `src/features/quest/questTypes.ts` | Knowledge Mine types (QuestState, SessionQuestion, InteractiveSessionData) |

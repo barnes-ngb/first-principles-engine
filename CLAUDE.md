@@ -306,7 +306,7 @@ All under `families/{familyId}/`:
 
 ### Providers
 - **Claude (Anthropic):** Primary provider for reasoning, planning, evaluation, content generation
-- **OpenAI:** Image generation (DALL-E) for visual materials
+- **OpenAI:** Image generation (gpt-image-1.5) for visual materials
 
 ### AI Rules of Engagement
 1. **Feature flags for AI paths.** Local logic in planner-chat stays as fallback. AI paths are opt-in via config.
@@ -315,7 +315,7 @@ All under `families/{familyId}/`:
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task:**
-   - Complex reasoning (plan, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview, weeklyReview, analyzePatterns): Claude Sonnet (`claude-sonnet-4-6`)
+   - Complex reasoning (plan, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, bookLookup, lessonVideo, monthlyReview, weeklyReview, analyzePatterns): Claude Sonnet (`claude-sonnet-4-6`)
    - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
    - Image generation: gpt-image-1.5 (scenes, armor sheets, base character, starter avatar, transparent stickers, photo transform, armor pieces, sketch enhancement)
 
@@ -327,10 +327,10 @@ All under `families/{familyId}/`:
 
 ### Prompt Files
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
-- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview)
+- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, bookLookup, lessonVideo, monthlyReview)
 
 ### Cloud Functions (25 exported)
-- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions, monthlyReview)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions, bookLookup, lessonVideo, monthlyReview)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger
@@ -354,8 +354,8 @@ All under `families/{familyId}/`:
 - `functions/src/ai/aiService.ts` — Core AI service orchestration
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
 - `functions/src/ai/health.ts` — Health check endpoint
-- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview, transcribeAudio
-- `functions/src/ai/tasks/index.ts` — Chat task registry (CHAT_TASKS dispatch table, 17 task types)
+- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, bookLookup, lessonVideo, monthlyReview, transcribeAudio
+- `functions/src/ai/tasks/index.ts` — Chat task registry (CHAT_TASKS dispatch table, 19 task types)
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/monthlyReview.ts` — Monthly review callables (generate / publish / unpublish)
@@ -379,8 +379,8 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,627L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
-- **chat.ts CF (2,544L)** — `buildQuestPrompt` alone is 400+ lines. Highest-leverage decomposition target: extract prompt builders to separate files.
+- **PlannerChatPage.tsx (2,669L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **chat.ts CF (2,548L)** — `buildQuestPrompt` alone is 400+ lines. Highest-leverage decomposition target: extract prompt builders to separate files.
 - **BookEditorPage.tsx (2,278L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
 - **useQuestSession.ts (2,161L)** — Quest, comprehension, fluency, encoding (build-word/spell-word/build-sentence) all in one hook. Consider splitting by quest domain.
 - **MyAvatarPage.tsx (1,875L)** — Decomposed from 1,862L. Grew from forge + portal + Stonebridge Banner Rally. State management + ceremony flow. Stable.

@@ -51,9 +51,9 @@ src/
 │   ├── records/       Hours, compliance, evaluations, portfolio
 │   ├── evaluate/      Reading evaluation chat
 │   ├── settings/      AI usage, account, avatar admin
-│   └── ...            engine, kids, ladders, login, weekly-review, etc.
+│   └── ...            engine, evaluate, evaluation, login, weekly-review, etc.
 functions/
-└── src/ai/        19 Cloud Functions (AI task dispatch, image gen, weekly review)
+└── src/ai/        25 Cloud Functions (AI task dispatch, image gen, weekly review, monthly review, transcription)
 ```
 
 ## Documentation
