@@ -1,5 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import type { AvatarProfile } from '../types'
+import { describe, expect, it } from 'vitest'
 import { ensureNewProfileStructure } from './checkAndUnlockArmor'
 
 // ── ensureNewProfileStructure (pure migration logic) ──────────────────

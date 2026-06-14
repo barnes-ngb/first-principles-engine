@@ -5,8 +5,8 @@ import type { EvaluationFinding } from '../types/evaluation'
 const mockGetDoc = vi.fn()
 const mockSetDoc = vi.fn()
 const mockGetDocs = vi.fn()
-const mockDoc = vi.fn((..._args: unknown[]) => `mock-doc-ref`)
-const mockQuery = vi.fn((..._args: unknown[]) => 'mock-query')
+const mockDoc = vi.fn(() => `mock-doc-ref`)
+const mockQuery = vi.fn(() => 'mock-query')
 const mockWhere = vi.fn()
 
 vi.mock('firebase/firestore', () => ({
