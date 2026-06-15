@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
+import { DIAMOND_EVENTS } from '../types/xp'
+
 // ── Mock Firestore ─────────────────────────────────────────────
 const mockGetDoc = vi.fn()
 const mockDoc = vi.fn((..._args: unknown[]) => `mock-doc-${_args.join('-')}`)
@@ -41,7 +43,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 0,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'test',
       dedupKey: 'zero-test',
     })
@@ -58,7 +60,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 0,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'test',
       dedupKey: 'no-profile',
     })
@@ -72,7 +74,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 5,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'quest complete',
       dedupKey: 'quest-1',
     })
@@ -86,7 +88,7 @@ describe('addDiamondEvent', () => {
       'MANUAL_AWARD',
       5,
       'quest-1',
-      { reason: 'quest complete', awardedBy: 'auto', diamondType: 'QUEST_DIAMOND' },
+      { reason: 'quest complete', awardedBy: 'auto', diamondType: DIAMOND_EVENTS.QUEST_COMPLETE },
       { currencyType: 'diamond', category: 'earn' },
     )
   })
@@ -96,7 +98,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: -10,
-      type: 'FORGE_SPEND',
+      type: DIAMOND_EVENTS.FORGE_PIECE,
       reason: 'forge belt',
       dedupKey: 'forge-belt',
       category: 'forge',
@@ -111,7 +113,7 @@ describe('addDiamondEvent', () => {
       'MANUAL_DEDUCT',
       -10,
       'forge-belt',
-      { reason: 'forge belt', awardedBy: 'auto', diamondType: 'FORGE_SPEND' },
+      { reason: 'forge belt', awardedBy: 'auto', diamondType: DIAMOND_EVENTS.FORGE_PIECE },
       { currencyType: 'diamond', category: 'forge', itemId: 'belt' },
     )
   })
@@ -121,7 +123,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 3,
-      type: 'PARENT_AWARD',
+      type: DIAMOND_EVENTS.MANUAL_AWARD,
       reason: 'bonus for great work',
       dedupKey: 'parent-1',
       awardedBy: 'parent',
@@ -138,7 +140,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 5,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'quest complete',
       dedupKey: 'already-awarded',
     })
@@ -154,7 +156,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 5,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'quest',
       dedupKey: 'fail-test',
     })
@@ -171,7 +173,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 5,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'quest',
       dedupKey: 'string-error',
     })
@@ -185,7 +187,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 3,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'quest',
       dedupKey: 'default-cat',
     })
@@ -199,7 +201,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 3,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'quest',
       dedupKey: 'no-item',
     })
@@ -218,7 +220,7 @@ describe('addDiamondEvent', () => {
       familyId: 'fam-1',
       childId: 'child-1',
       amount: 5,
-      type: 'QUEST_DIAMOND',
+      type: DIAMOND_EVENTS.QUEST_COMPLETE,
       reason: 'quest',
       dedupKey: 'fresh-balance',
     })
