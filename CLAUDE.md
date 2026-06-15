@@ -315,7 +315,7 @@ All under `families/{familyId}/`:
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task:**
-   - Complex reasoning (plan, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview, weeklyReview, analyzePatterns): Claude Sonnet (`claude-sonnet-4-6`)
+   - Complex reasoning (plan, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview, weeklyReview, analyzePatterns, bookLookup, lessonVideo): Claude Sonnet (`claude-sonnet-4-6`)
    - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
    - Image generation: gpt-image-1.5 (scenes, armor sheets, base character, starter avatar, transparent stickers, photo transform, armor pieces, sketch enhancement)
 
@@ -327,10 +327,10 @@ All under `families/{familyId}/`:
 
 ### Prompt Files
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
-- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview)
+- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, monthlyReview, bookLookup, lessonVideo)
 
 ### Cloud Functions (25 exported)
-- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions, monthlyReview)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions, monthlyReview, bookLookup, lessonVideo)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger

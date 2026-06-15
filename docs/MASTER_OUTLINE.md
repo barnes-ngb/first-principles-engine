@@ -12,7 +12,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 
 **Scale (current):**
 - TypeScript lines: **179,214** total
-- Commits: **119**
+- Commits: **118**
 - Tests: **178 test files**
 - Firestore collections/doc helpers: **37** in `firestore.ts`
 - Cloud Functions: **25**
@@ -345,7 +345,7 @@ Two distinct chat-shaped tasks exist; do not conflate them. (This bit Chat-Link 
 | `chat` | `src/features/books/StoryGuidePage.tsx:90` (kid story-shaping prompt) and `src/features/books/useComprehensionQuestions.ts:68` (comprehension Q generation). Lightweight, kid-facing utility. | `["charter", "childProfile"]` only (`functions/src/ai/contextSlices.ts:52`). Model: Haiku. `maxTokens: 1024`. | Must NOT gain Lincoln's eval / disposition / teach-back context — would dump heavy data into kid prompts. Pinned by a cross-task isolation test in `contextSlices.test.ts`. |
 | `shellyChat` | `src/features/shelly-chat/ShellyChatPage.tsx:523`. Shelly's main chat UI. | 14 shared slices via `buildContextForTask("shellyChat", …)` (`contextSlices.ts:65-70`) plus 8 supplemental queries in `tasks/shellyChat.ts`. Model: Sonnet. `maxTokens: 2000`. | Supplemental block includes disposition profile (from `child.dispositionCache.result.dispositions` with `dispositionOverrides` applied), 5-row weekly review strip, conundrum title, completion patterns, conundrum/chapter response counts, and recent teach-backs (last 14 days, limit 10). Child-scoped `PLANNING-PARTNER MODE` addendum in the role section. |
 
-Other chat-dispatched task types (17 total in `tasks/index.ts` registry) are independent: `plan`, `generate`, `evaluate`, `quest`, `generateStory`, `reviseStory`, `revisePage`, `workshop`, `analyzeWorkbook`, `disposition`, `conundrum`, `weeklyFocus`, `scan`, `shellyChat`, `chapterQuestions`, `monthlyReview`, `chat`. `analyzeEvaluationPatterns` is exported separately.
+Other chat-dispatched task types (19 total in `tasks/index.ts` registry) are independent: `plan`, `generate`, `evaluate`, `quest`, `generateStory`, `reviseStory`, `revisePage`, `workshop`, `analyzeWorkbook`, `disposition`, `conundrum`, `weeklyFocus`, `scan`, `shellyChat`, `chapterQuestions`, `monthlyReview`, `chat`, `bookLookup`, `lessonVideo`. `analyzeEvaluationPatterns` is exported separately.
 
 ### Known Technical Debt
 - **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount (N thumbnails = N renderers). Consider: single shared renderer with static snapshots, or CSS/canvas 2D fallback for thumbnails where 3D isn't needed. Not blocking but worth addressing before avatar features expand.
@@ -370,8 +370,8 @@ Other chat-dispatched task types (17 total in `tasks/index.ts` registry) are ind
 | `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
 | `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |
 | `src/features/avatar/armorGate.ts` | Forge tier gate logic + phantom piece fix |
-| `functions/src/ai/tasks/index.ts` | Chat task registry (17 task types) |
+| `functions/src/ai/tasks/index.ts` | Chat task registry (19 task types) |
 
 ---
 
-Last updated: April 13, 2026
+Last updated: June 15, 2026
