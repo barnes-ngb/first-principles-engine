@@ -5,8 +5,8 @@ import type { EvaluationFinding } from '../types/evaluation'
 const mockGetDoc = vi.fn()
 const mockSetDoc = vi.fn()
 const mockGetDocs = vi.fn()
-const mockDoc = vi.fn(() => `mock-doc-ref`)
-const mockQuery = vi.fn(() => 'mock-query')
+const mockDoc = vi.fn((...args: unknown[]) => `mock-doc-${args.join('-')}`)
+const mockQuery = vi.fn((...args: unknown[]) => `mock-query-${args.length}`)
 const mockWhere = vi.fn()
 
 vi.mock('firebase/firestore', () => ({
@@ -39,7 +39,7 @@ describe('updateSkillMapFromFindings', () => {
 
   it('does nothing when familyId is empty', async () => {
     await updateSkillMapFromFindings('', 'child-1', [
-      { skill: 'phonics.cvc', status: 'mastered', evidence: 'test' },
+      { skill: 'phonics.cvc', status: 'mastered', evidence: 'test', testedAt: '2026-01-01' },
     ])
     expect(mockGetDoc).not.toHaveBeenCalled()
     expect(mockSetDoc).not.toHaveBeenCalled()
@@ -47,7 +47,7 @@ describe('updateSkillMapFromFindings', () => {
 
   it('does nothing when childId is empty', async () => {
     await updateSkillMapFromFindings('fam-1', '', [
-      { skill: 'phonics.cvc', status: 'mastered', evidence: 'test' },
+      { skill: 'phonics.cvc', status: 'mastered', evidence: 'test', testedAt: '2026-01-01' },
     ])
     expect(mockGetDoc).not.toHaveBeenCalled()
   })
@@ -59,7 +59,7 @@ describe('updateSkillMapFromFindings', () => {
 
   it('creates a new skill map when none exists', async () => {
     const findings: EvaluationFinding[] = [
-      { skill: 'phonics.cvc', status: 'mastered', evidence: 'Blended CVC words' },
+      { skill: 'phonics.cvc', status: 'mastered', evidence: 'Blended CVC words', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -76,7 +76,7 @@ describe('updateSkillMapFromFindings', () => {
 
   it('maps emerging findings to in-progress status', async () => {
     const findings: EvaluationFinding[] = [
-      { skill: 'phonics.blends', status: 'emerging', evidence: 'Working on blends' },
+      { skill: 'phonics.blends', status: 'emerging', evidence: 'Working on blends', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -88,7 +88,7 @@ describe('updateSkillMapFromFindings', () => {
 
   it('maps not-yet findings to in-progress status', async () => {
     const findings: EvaluationFinding[] = [
-      { skill: 'math.addition', status: 'not-yet', evidence: 'Not there yet' },
+      { skill: 'math.addition', status: 'not-yet', evidence: 'Not there yet', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -100,8 +100,8 @@ describe('updateSkillMapFromFindings', () => {
 
   it('skips findings with not-tested status', async () => {
     const findings: EvaluationFinding[] = [
-      { skill: 'phonics.cvc', status: 'mastered', evidence: 'yes' },
-      { skill: 'math.fractions', status: 'not-tested', evidence: 'skipped' },
+      { skill: 'phonics.cvc', status: 'mastered', evidence: 'yes', testedAt: '2026-01-01' },
+      { skill: 'math.fractions', status: 'not-tested', evidence: 'skipped', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -130,7 +130,7 @@ describe('updateSkillMapFromFindings', () => {
     })
 
     const findings: EvaluationFinding[] = [
-      { skill: 'phonics.cvc', status: 'emerging', evidence: 'Regressed?' },
+      { skill: 'phonics.cvc', status: 'emerging', evidence: 'Regressed?', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -188,7 +188,7 @@ describe('updateSkillMapFromFindings', () => {
     })
 
     const findings: EvaluationFinding[] = [
-      { skill: 'phonics.blends', status: 'emerging', evidence: 'Still working on it' },
+      { skill: 'phonics.blends', status: 'emerging', evidence: 'Still working on it', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -200,9 +200,9 @@ describe('updateSkillMapFromFindings', () => {
 
   it('handles multiple findings from different domains', async () => {
     const findings: EvaluationFinding[] = [
-      { skill: 'phonics.cvc', status: 'mastered', evidence: 'CVC mastered' },
-      { skill: 'math.addition', status: 'emerging', evidence: 'Working on addition' },
-      { skill: 'speech.articulation.r', status: 'not-yet', evidence: 'R sound needs work' },
+      { skill: 'phonics.cvc', status: 'mastered', evidence: 'CVC mastered', testedAt: '2026-01-01' },
+      { skill: 'math.addition', status: 'emerging', evidence: 'Working on addition', testedAt: '2026-01-01' },
+      { skill: 'speech.articulation.r', status: 'not-yet', evidence: 'R sound needs work', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -216,8 +216,8 @@ describe('updateSkillMapFromFindings', () => {
 
   it('skips unmapped finding tags gracefully', async () => {
     const findings: EvaluationFinding[] = [
-      { skill: 'completely.unknown.skill', status: 'mastered', evidence: 'test' },
-      { skill: 'phonics.cvc', status: 'mastered', evidence: 'CVC done' },
+      { skill: 'completely.unknown.skill', status: 'mastered', evidence: 'test', testedAt: '2026-01-01' },
+      { skill: 'phonics.cvc', status: 'mastered', evidence: 'CVC done', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -246,7 +246,7 @@ describe('updateSkillMapFromFindings', () => {
     })
 
     const findings: EvaluationFinding[] = [
-      { skill: 'phonics.cvc', status: 'mastered', evidence: 'CVC done' },
+      { skill: 'phonics.cvc', status: 'mastered', evidence: 'CVC done', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
@@ -259,7 +259,7 @@ describe('updateSkillMapFromFindings', () => {
 
   it('stores evidence as notes on the skill node', async () => {
     const findings: EvaluationFinding[] = [
-      { skill: 'phonics.cvc', status: 'mastered', evidence: 'Blended 5 CVC words with 0 errors' },
+      { skill: 'phonics.cvc', status: 'mastered', evidence: 'Blended 5 CVC words with 0 errors', testedAt: '2026-01-01' },
     ]
 
     await updateSkillMapFromFindings('fam-1', 'child-1', findings)
