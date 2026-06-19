@@ -374,4 +374,16 @@ Other chat-dispatched task types (17 total in `tasks/index.ts` registry) are ind
 
 ---
 
-Last updated: April 13, 2026
+## Business Track (Barnes Bros)
+
+The family business workstream is documented separately in
+`docs/GARDEN_DEFENSE_QUEST_PLAN.md` (Garden Defense Quest, v0.1) and tracked in the review ledger
+under **FEAT-29** (business-track anchor), which groups its July build dependencies: **FEAT-28**
+(clean-IP "Block Garden" theme config) and **FEAT-27** (Workshop print/export = the "kit
+assembler"). It productizes the existing story + art + sticker + print pipeline into a repeatable
+kit SKU — an extension of shipped features, not a rebuild. No app-surface change rides on FEAT-29
+itself; build work lands via the FEAT-27 / FEAT-28 run-prompts under normal ledger discipline.
+
+---
+
+Last updated: June 19, 2026 (Business Track section added; other sections current as of April 13, 2026)
