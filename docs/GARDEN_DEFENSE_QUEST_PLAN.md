@@ -171,7 +171,7 @@ These need Nathan's input; the first sets the entire unit-cost model.
 
 | # | Decision | Why it matters | Status |
 |---|---|---|---|
-| D1 | **Home-print vs. print-service** | Sets unit cost against the Xbox goal; generalizes the old hero-book print question to all kits | OPEN — **next input** |
+| D1 | **Home-print vs. print-service** | Sets unit cost against the Xbox goal; generalizes the old hero-book print question to all kits | **RESOLVED** (2026-06-19) — home-print + Instant Ink; see Unit Economics |
 | D2 | Custom-kit guardrails | Narrow fields vs. open requests determines whether custom work eats throughput | Leaning narrow |
 | D3 | Positioning (GDQ-leads vs. parallel lines) | §5 working assumption | Leaning GDQ-leads |
 | D4 | First sellable format | Starter-only vs. starter+party beta in the first push | OPEN |
@@ -179,6 +179,55 @@ These need Nathan's input; the first sets the entire unit-cost model.
 Revenue context: the idea doc's mixed-month example (~20 starters + 6 party + 5 custom + add-ons)
 models ~$800/month, concentrated in the party tier. One to two strong months reaches a typical
 Xbox target — but D1 sets the true margin, so resolve it before committing to the math.
+
+---
+
+## Unit Economics (D1 resolved — 2026-06-19)
+
+**Decision:** Home-print on the family HP DeskJet 2755e with an active HP Instant Ink plan for the
+proving phase. Per-kit service printing is rejected — at low volume it roughly doubles COGS.
+**Action item:** the Instant Ink subscription has lapsed; re-enroll before production.
+
+**Why Instant Ink is the hinge:** Instant Ink bills per page printed, not per ink used — a
+full-bleed color illustration costs the same as a text page. On an entry-level inkjet that turns
+the worst-case ink scenario into a flat ~$0.04–0.05/page. At ~20 kits/month (~240 pages) the
+$12.99 / 300-page plan fits with rollover headroom; overage is $1.50 per extra set of 10–15 pages.
+
+**Goal anchor:** Xbox Series S — ~$300 on sale to ~$400 MSRP (Series X ~$600 if aiming higher).
+
+**Cost per starter kit (~12 printed pages):**
+
+| Component | Cost |
+|---|---|
+| ~8 color pages (ink + paper) | ~$0.55 |
+| ~3 cardstock (clue cards + badge) | ~$0.36 |
+| 1 sticker sheet (ink + sticker paper) | ~$0.40 |
+| Packaging | ~$0.50 |
+| Variable COGS | ~$1.80 |
+| + Instant Ink plan (~$13/mo ÷ ~20 kits) | ~$0.65 |
+| **All-in COGS / starter** | **~$2.50** |
+
+**Margins & units to goal** (local sales; $15 starter, ~$40 small party kit):
+
+| | Net / unit | To ~$300 | To ~$350 | To ~$400 |
+|---|---|---|---|---|
+| Starter | ~$12.50 | ~24 | ~28 | ~32 |
+| Small party kit | ~$32 | ~10 | ~11 | ~13 |
+
+The mixed-month example in §10 (~$800 revenue) nets ~$680–700 after COGS — roughly one strong
+month to a Series S, or ~11–13 party kits on the party tier alone.
+
+**Caveats (carry into scaling):**
+- The 2755e is entry-level — fine for proving (10–20 kits), not built for sustained volume. If
+  monthly volume holds, budget a sturdier printer and keep it Instant-Ink-eligible so the per-page
+  economics survive the upgrade.
+- Instant Ink requires the printer stay connected; cancelling disables the subscription cartridges.
+  Size the plan to real volume + rollover.
+- Bulk-ordering from a sticker service is worth revisiting *only* for the one repeated, non-custom
+  Seed Vault sticker sheet, purely for premium quality, once a design is locked.
+
+> Figures are planning estimates (defensible ranges, not quotes); a real local-print quote and
+> actual per-kit page count will tighten them.
 
 ---
 
