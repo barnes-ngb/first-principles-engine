@@ -3,9 +3,9 @@
 **Version:** v0.1 — June 19, 2026 (working draft)
 **Status:** Strategy locked at the skeleton level; economics decisions open (see §10).
 **Relationship to other docs:** The repo's business-track strategy reference, tracked in the
-review ledger under FEAT-29 (anchor) — which groups the July build dependencies FEAT-27 (kit
-assembler) and FEAT-28 (Block Garden theme). Grounds the original GDQ idea sketch in the actual
-FPE codebase and the June 19 pipeline recon.
+review ledger under **FEAT-29** (anchor) — which groups the July build dependencies FEAT-27
+(kit assembler) and FEAT-28 (Block Garden theme). Grounds the original GDQ idea sketch in the
+actual FPE codebase and the June 19 pipeline recon.
 
 ---
 
