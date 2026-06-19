@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { addDoc } from 'firebase/firestore'
-import { stickerLibraryCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { EnhanceSketchRequest } from '../../core/ai/useAI'
+import type { Artifact } from '../../core/types'
+import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 
 export interface ReimagineJob {
   id: string
@@ -212,6 +214,37 @@ export function useBackgroundReimagine({
     [familyId, childId, childName, job?.resultUrl, job?.resultStoragePath],
   )
 
+  // ── Persist the enhanced illustration as a portfolio artifact ─────
+  // Mirrors the original-sketch artifact write in useBook.addSketchToPage
+  // so the portfolio shows both the raw sketch and the enhanced version.
+  const saveEnhancedArtifact = useCallback(
+    async (url?: string, storagePath?: string) => {
+      const saveUrl = url ?? job?.resultUrl
+      if (!familyId || !childId || !saveUrl) return
+      try {
+        const artifact: Omit<Artifact, 'id'> = {
+          childId,
+          title: 'Enhanced illustration',
+          type: EvidenceType.Photo,
+          uri: saveUrl,
+          storagePath: storagePath ?? job?.resultStoragePath ?? '',
+          createdAt: new Date().toISOString(),
+          content: 'AI-enhanced illustration created from a hand-drawn sketch',
+          tags: {
+            engineStage: EngineStage.Build,
+            domain: 'art',
+            subjectBucket: SubjectBucket.Art,
+            location: 'Home',
+          },
+        }
+        await addDoc(artifactsCollection(familyId), artifact)
+      } catch {
+        // Best effort — don't block the user
+      }
+    },
+    [familyId, childId, job?.resultUrl, job?.resultStoragePath],
+  )
+
   // ── Auto-save every reimagine result to gallery ──────────────────
   const autoSavedRef = useRef<string | null>(null)
   useEffect(() => {
@@ -220,8 +253,9 @@ export function useBackgroundReimagine({
     if (autoSavedRef.current === job.id) return
     autoSavedRef.current = job.id
     void saveToGallery(job.resultUrl, job.resultStoragePath)
+    void saveEnhancedArtifact(job.resultUrl, job.resultStoragePath)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job?.id, job?.status, saveToGallery])
+  }, [job?.id, job?.status, saveToGallery, saveEnhancedArtifact])
 
   const handleSaveToGallery = useCallback(async () => {
     // Already auto-saved, just dismiss

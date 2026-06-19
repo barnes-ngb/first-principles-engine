@@ -15,6 +15,8 @@ import MenuBookIcon from '@mui/icons-material/MenuBook'
 import StopIcon from '@mui/icons-material/Stop'
 import CircularProgress from '@mui/material/CircularProgress'
 import Tooltip from '@mui/material/Tooltip'
+import Snackbar from '@mui/material/Snackbar'
+import Alert from '@mui/material/Alert'
 
 import Page from '../../components/Page'
 import { EmptyState, LoadingState } from '../../components/states'
@@ -125,6 +127,7 @@ export default function BookReaderPage() {
   const [swipeOffset, setSwipeOffset] = useState(0)
   const [printing, setPrinting] = useState(false)
   const [showPrintSettings, setShowPrintSettings] = useState(false)
+  const [printSkipNotice, setPrintSkipNotice] = useState<string | null>(null)
   const [totalWordsEncountered, setTotalWordsEncountered] = useState(0)
   const seenPagesRef = useRef<Set<number>>(new Set())
 
@@ -312,12 +315,17 @@ export default function BookReaderPage() {
     setShowPrintSettings(false)
     setPrinting(true)
     try {
-      await printBook(book, {
+      const { skippedImageCount } = await printBook(book, {
         childName,
         isLincoln,
         sightWords: book.sightWords,
         settings,
       })
+      if (skippedImageCount > 0) {
+        setPrintSkipNotice(
+          `${skippedImageCount} image${skippedImageCount === 1 ? '' : 's'} couldn't be embedded and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
+        )
+      }
     } finally {
       setPrinting(false)
     }
@@ -771,6 +779,17 @@ export default function BookReaderPage() {
         onPrint={(s) => { void handleDownloadPdf(s) }}
         hasSightWords={(book.sightWords?.length ?? 0) > 0}
       />
+
+      {/* Print: skipped-image notice */}
+      <Snackbar
+        open={!!printSkipNotice}
+        autoHideDuration={8000}
+        onClose={() => setPrintSkipNotice(null)}
+      >
+        <Alert severity="warning" onClose={() => setPrintSkipNotice(null)} sx={{ width: '100%' }}>
+          {printSkipNotice}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

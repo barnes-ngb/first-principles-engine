@@ -15,7 +15,6 @@ export interface PrintSettings {
   pageSize: 'letter' | 'half-letter' | 'a4' | 'booklet' | 'mini-5x7' | 'square-6'
   background: 'white' | 'cream' | 'dark'
   sightWordStyle: 'highlighted' | 'bold' | 'plain'
-  quality: 'standard' | 'product'
   trimMarks: boolean
   includeCover: boolean
   includePageNumbers: boolean
@@ -27,7 +26,6 @@ const DEFAULT_SETTINGS: PrintSettings = {
   pageSize: 'half-letter',
   background: 'white',
   sightWordStyle: 'highlighted',
-  quality: 'standard',
   trimMarks: false,
   includeCover: true,
   includePageNumbers: true,
@@ -176,28 +174,12 @@ export default function PrintSettingsDialog({
             </Stack>
           </div>
 
-          {/* Product Ready */}
+          {/* Finishing */}
           <div>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Quality
+              Finishing
             </Typography>
             <Stack spacing={1}>
-              <ToggleButtonGroup
-                value={settings.quality}
-                exclusive
-                onChange={(_, val) => {
-                  if (val) setSettings((s) => ({ ...s, quality: val }))
-                }}
-                size="small"
-                sx={{ flexWrap: 'wrap' }}
-              >
-                <ToggleButton value="standard" sx={{ textTransform: 'none' }}>
-                  Standard
-                </ToggleButton>
-                <ToggleButton value="product" sx={{ textTransform: 'none' }}>
-                  High quality (300 DPI)
-                </ToggleButton>
-              </ToggleButtonGroup>
               <ToggleButtonGroup
                 value={settings.trimMarks ? 'on' : 'off'}
                 exclusive
