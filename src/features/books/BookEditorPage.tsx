@@ -59,7 +59,7 @@ import { SubjectBucket, UserProfile } from '../../core/types/enums'
 import { useAI } from '../../core/ai/useAI'
 import type { Book, BookPage, BookTheme, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
-import type { EnhanceSketchRequest, ImageGenRequest } from '../../core/ai/useAI'
+import type { ImageGenRequest } from '../../core/ai/useAI'
 import PageEditor from './PageEditor'
 import StickerPicker from './StickerPicker'
 import DrawingChoiceDialog from './DrawingChoiceDialog'
@@ -157,11 +157,10 @@ export default function BookEditorPage() {
     reorderPages,
     addSketchToPage,
     applySketchEnhancement,
-    pickSketchVersion,
     restoreImageVersion,
   } = useBook(familyId, bookId)
 
-  const { generateImage, enhanceSketch, loading: aiLoading, error: aiError } = useAI()
+  const { generateImage, loading: aiLoading, error: aiError } = useAI()
 
   // ── Themed child (drives editor palette / font / world chips) ───
   // Reads from book.createdFor so Shelly can re-theme the editor without
@@ -217,13 +216,6 @@ export default function BookEditorPage() {
 
   // Sticker state
   const [showStickerPicker, setShowStickerPicker] = useState(false)
-
-  // Sketch enhance state
-  const [sketchImageId, setSketchImageId] = useState<string | null>(null)
-  const [sketchEnhancing, setSketchEnhancing] = useState(false)
-  const [sketchEnhanceStyle, setSketchEnhanceStyle] = useState<EnhanceSketchRequest['style']>('storybook')
-  const [showSketchCompare, setShowSketchCompare] = useState(false)
-  const [sketchComparePageId, setSketchComparePageId] = useState<string | null>(null)
 
   // Combined drawing flow state
   const [showDrawingCapture, setShowDrawingCapture] = useState(false)
@@ -411,57 +403,6 @@ export default function BookEditorPage() {
   }, [editorHistory, updatePage])
 
   useUndoRedoKeys(handleUndo, handleRedo)
-
-  // ── Sketch: enhance ─────────────────────────────────────────────
-  const handleEnhanceSketch = useCallback(async () => {
-    if (!sketchImageId || !sketchComparePageId || !book) return
-    const page = book.pages.find((p) => p.id === sketchComparePageId)
-    const img = page?.images.find((i) => i.id === sketchImageId)
-    if (!img?.storagePath) return
-
-    setSketchEnhancing(true)
-    setReimagineError(null)
-    try {
-      const result = await Promise.race([
-        enhanceSketch({
-          familyId,
-          sketchStoragePath: img.storagePath,
-          style: sketchEnhanceStyle,
-          theme: book?.theme,
-        }),
-        new Promise<null>((_, reject) =>
-          setTimeout(() => reject(new Error(
-            'Enhancement is taking too long — the image service may be busy. Please try again.'
-          )), 120_000),
-        ),
-      ])
-
-      if (result?.url) {
-        applySketchEnhancement(sketchComparePageId, sketchImageId, result.url, result.storagePath)
-        setShowSketchCompare(true)
-      } else {
-        const aiMsg = aiError?.message || 'AI enhancement returned no image'
-        setReimagineError(`Enhancement failed: ${aiMsg}`)
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err)
-      console.error('Sketch enhancement failed:', err)
-      setReimagineError(`Enhancement failed: ${errMsg}`)
-    } finally {
-      setSketchEnhancing(false)
-    }
-  }, [sketchImageId, sketchComparePageId, book, enhanceSketch, familyId, sketchEnhanceStyle, applySketchEnhancement, aiError])
-
-  const handlePickSketchVersion = useCallback(
-    (version: 'original' | 'enhanced') => {
-      if (!sketchImageId || !sketchComparePageId) return
-      pickSketchVersion(sketchComparePageId, sketchImageId, version)
-      setShowSketchCompare(false)
-      setSketchImageId(null)
-      setSketchComparePageId(null)
-    },
-    [sketchImageId, sketchComparePageId, pickSketchVersion],
-  )
 
   // ── Combined drawing flow ───────────────────────────────────────
   const handleDrawingCapture = useCallback((file: File) => {
@@ -1355,139 +1296,6 @@ export default function BookEditorPage() {
         onPickPostCleanup={(choice, intensity, transparent) => { void handlePostCleanupChoice(choice, intensity, transparent) }}
         onRetryResult={handleRetryDrawingResult}
       />
-
-      {/* Sketch: "Use my drawing" / "Make it fancy" choice */}
-      {sketchImageId && !showSketchCompare && !sketchEnhancing && (
-        <Box sx={{ mt: 1, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-            Your drawing is on the page! What next?
-          </Typography>
-          <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-            <Button
-              variant="contained"
-              onClick={() => { setSketchImageId(null); setSketchComparePageId(null) }}
-              sx={{ minHeight: 48, fontWeight: 600 }}
-            >
-              Use my drawing
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<AutoAwesomeIcon />}
-              onClick={() => { void handleEnhanceSketch() }}
-              sx={{ minHeight: 48, fontWeight: 600 }}
-            >
-              Make it fancy
-            </Button>
-          </Stack>
-          <Box sx={{ mt: 1.5 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-              Enhancement style:
-            </Typography>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap">
-              {([
-                { value: 'storybook' as const, label: 'Storybook' },
-                { value: 'comic' as const, label: 'Comic' },
-                { value: 'realistic' as const, label: 'Realistic' },
-                { value: 'minecraft' as const, label: 'Pixel Art' },
-              ]).map((s) => (
-                <Chip
-                  key={s.value}
-                  label={s.label}
-                  size="small"
-                  variant={sketchEnhanceStyle === s.value ? 'filled' : 'outlined'}
-                  onClick={() => setSketchEnhanceStyle(s.value)}
-                />
-              ))}
-            </Stack>
-          </Box>
-        </Box>
-      )}
-
-      {/* Sketch: Enhancing loading state */}
-      {sketchEnhancing && (
-        <Box sx={{ mt: 1, p: 3, border: '1px solid', borderColor: 'divider', borderRadius: 2, textAlign: 'center' }}>
-          <CircularProgress size={36} sx={{ mb: 1 }} />
-          <Typography variant="body1" fontWeight={600}>
-            Making it fancy...
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            The AI is turning your drawing into a polished illustration
-          </Typography>
-        </Box>
-      )}
-
-      {/* Sketch: Side-by-side comparison after enhancement */}
-      {showSketchCompare && sketchImageId && sketchComparePageId && (() => {
-        const cmpPage = book?.pages.find((p) => p.id === sketchComparePageId)
-        const cmpImg = cmpPage?.images.find((i) => i.id === sketchImageId)
-        if (!cmpImg) return null
-        return (
-          <Box sx={{ mt: 1, p: 2, border: '2px solid', borderColor: 'secondary.main', borderRadius: 2 }}>
-            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5, textAlign: 'center' }}>
-              Pick your favorite!
-            </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              {/* Original */}
-              <Box sx={{ flex: 1, textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                  Your drawing
-                </Typography>
-                <Box
-                  component="img"
-                  src={cmpImg.originalSketchUrl}
-                  alt="Original sketch"
-                  sx={{
-                    width: '100%',
-                    maxHeight: 240,
-                    objectFit: 'contain',
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    mb: 1,
-                  }}
-                />
-                <Button
-                  variant="contained"
-                  fullWidth
-                  onClick={() => handlePickSketchVersion('original')}
-                  sx={{ minHeight: 44 }}
-                >
-                  Use this one
-                </Button>
-              </Box>
-              {/* Enhanced */}
-              <Box sx={{ flex: 1, textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                  Fancy version
-                </Typography>
-                <Box
-                  component="img"
-                  src={cmpImg.enhancedUrl}
-                  alt="AI-enhanced version"
-                  sx={{
-                    width: '100%',
-                    maxHeight: 240,
-                    objectFit: 'contain',
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    mb: 1,
-                  }}
-                />
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  fullWidth
-                  onClick={() => handlePickSketchVersion('enhanced')}
-                  sx={{ minHeight: 44 }}
-                >
-                  Use this one
-                </Button>
-              </Box>
-            </Stack>
-          </Box>
-        )
-      })()}
 
       {/* Page strip */}
       <Box
