@@ -19,6 +19,8 @@ import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
+import Snackbar from '@mui/material/Snackbar'
+import Alert from '@mui/material/Alert'
 import AddIcon from '@mui/icons-material/Add'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
@@ -97,17 +99,23 @@ export default function BookshelfPage() {
   // Print state
   const [showPrintSettings, setShowPrintSettings] = useState(false)
   const [printTarget, setPrintTarget] = useState<Book | null>(null)
+  const [printSkipNotice, setPrintSkipNotice] = useState<string | null>(null)
 
   const handlePrintBook = useCallback(
     async (settings: PrintSettings) => {
       if (!printTarget?.id) return
       setShowPrintSettings(false)
-      await printBook(printTarget, {
+      const { skippedImageCount } = await printBook(printTarget, {
         childName,
         isLincoln,
         sightWords: printTarget.sightWords,
         settings,
       })
+      if (skippedImageCount > 0) {
+        setPrintSkipNotice(
+          `${skippedImageCount} image${skippedImageCount === 1 ? '' : 's'} couldn't be embedded and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
+        )
+      }
       setPrintTarget(null)
     },
     [printTarget, childName, isLincoln],
@@ -859,6 +867,17 @@ export default function BookshelfPage() {
         onPrint={(s) => { void handlePrintBook(s) }}
         hasSightWords={(printTarget?.sightWords?.length ?? 0) > 0}
       />
+
+      {/* Print: skipped-image notice */}
+      <Snackbar
+        open={!!printSkipNotice}
+        autoHideDuration={8000}
+        onClose={() => setPrintSkipNotice(null)}
+      >
+        <Alert severity="warning" onClose={() => setPrintSkipNotice(null)} sx={{ width: '100%' }}>
+          {printSkipNotice}
+        </Alert>
+      </Snackbar>
 
       {/* New book dialog — two tabs: Blank Book / Generate a Book */}
       <Dialog open={showNewDialog} onClose={handleCloseNewDialog} maxWidth="sm" fullWidth>

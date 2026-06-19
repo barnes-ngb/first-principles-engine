@@ -298,6 +298,7 @@ export default function BookEditorPage() {
   // Print state
   const [printing, setPrinting] = useState(false)
   const [showPrintSettings, setShowPrintSettings] = useState(false)
+  const [printSkipNotice, setPrintSkipNotice] = useState<string | null>(null)
 
   const activePage = useMemo(
     () => book?.pages[activePageIndex] ?? null,
@@ -841,12 +842,17 @@ export default function BookEditorPage() {
     setShowPrintSettings(false)
     setPrinting(true)
     try {
-      await printBook(book, {
+      const { skippedImageCount } = await printBook(book, {
         childName,
         isLincoln,
         sightWords: book.sightWords,
         settings,
       })
+      if (skippedImageCount > 0) {
+        setPrintSkipNotice(
+          `${skippedImageCount} image${skippedImageCount === 1 ? '' : 's'} couldn't be embedded and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
+        )
+      }
     } finally {
       setPrinting(false)
     }
@@ -2035,6 +2041,17 @@ export default function BookEditorPage() {
       >
         <Alert severity="info" onClose={() => bgReimagine.setAutoDismissedMessage(null)} sx={{ width: '100%' }}>
           {bgReimagine.autoDismissedMessage}
+        </Alert>
+      </Snackbar>
+
+      {/* ── Print: skipped-image notice ── */}
+      <Snackbar
+        open={!!printSkipNotice}
+        autoHideDuration={8000}
+        onClose={() => setPrintSkipNotice(null)}
+      >
+        <Alert severity="warning" onClose={() => setPrintSkipNotice(null)} sx={{ width: '100%' }}>
+          {printSkipNotice}
         </Alert>
       </Snackbar>
 
