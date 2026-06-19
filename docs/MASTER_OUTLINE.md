@@ -11,9 +11,9 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
 **Scale (current):**
-- TypeScript lines: **178,993** total
-- Commits: **125**
-- Tests: **177 test files**
+- TypeScript lines: **179,214** total
+- Commits: **119**
+- Tests: **178 test files**
 - Firestore collections/doc helpers: **37** in `firestore.ts`
 - Cloud Functions: **25**
 - Chat task types: **19**
@@ -323,7 +323,7 @@ Ordered smallest → largest per `/docs/design-pass-v1/README.md` §Suggested im
 - **Image version history**: `PageImage.previousVersions[]` preserves up to 5 previous URLs when images are replaced (reimagine, sketch enhance). Accessible via "Previous versions" in background menu.
 - **Contextual action bar**: Top chip row shows "Delete sticker" / "Remove background" / "Change" based on which image is selected in PageEditor.
 - **Reimagine placement clarity**: Dialog splits "Add to page" into "Replace background" (full-page) vs "Add as sticker" (movable/resizable).
-- **Auto-save to gallery**: Every reimagine result auto-saves to sticker gallery on completion, regardless of placement choice.
+- **Auto-save to gallery + portfolio**: Every reimagine result auto-saves to the sticker gallery on completion, regardless of placement choice, and is also written as a portfolio artifact (the enhanced illustration) so the portfolio shows both the raw sketch and the enhanced version. (The legacy side-by-side "Make it fancy" picker was orphaned dead code and has been removed — `bgReimagine`/`enhanceSketch` is the canonical path.)
 - **Sketch cleanup auto-detects background color**: `cleanSketchBackground` (in `src/features/books/cleanSketch.ts`) samples the image's outer ring and takes the per-channel median to find the dominant background color, then makes pixels close to it transparent (with feathered edges). Works on white paper, brown tables, lined notebooks, colored construction paper — anything roughly uniform around the drawing. Falls back to a conservative HSL paper-detect when border samples are too varied (busy tablecloths, hand in frame).
 - **Cleaned drawings default to sticker**: After "Clean up", the user picks Reimagine as sticker / Add as sticker / Reimagine as scene / Save to gallery. "Add as sticker" creates a `type: 'sticker'` PageImage with a centered 40%-width default position. The legacy "promote cleanup result to background photo" path is gone — cleaned drawings are always positionable overlays.
 - **Cleanup → Reimagine pipeline (transparent by default)**: When the user picks "Reimagine as sticker" on a cleaned drawing, the transparent PNG is uploaded as the sketch source for `enhanceSketch` with `transparent: true`. The Cloud Function passes `background: 'transparent'` to `gpt-image-1` and adds a "no background, no shadows on ground, clean cutout" instruction to the prompt — producing a sticker-ready PNG instead of an illustration with a fresh AI-generated background. The reimagine intensity dialog also exposes a "Keep transparent background (for stickers)" toggle so the user can override (default ON for cleaned sources, OFF for raw photos). "Reimagine as scene" routes through the same pipeline with the toggle off, producing a full illustrated background.

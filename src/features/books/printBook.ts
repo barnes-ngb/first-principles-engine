@@ -33,7 +33,6 @@ const DEFAULT_SETTINGS: PrintSettings = {
   pageSize: 'half-letter',
   background: 'white',
   sightWordStyle: 'highlighted',
-  quality: 'standard',
   trimMarks: false,
   includeCover: true,
   includePageNumbers: true,
@@ -850,7 +849,13 @@ async function renderBooklet(
 
 /* ───────────────────── main entry ───────────────────── */
 
-export async function printBook(book: Book, opts: PrintBookOptions): Promise<void> {
+/** Result of a print run. `skippedImageCount` = images that couldn't be embedded
+ * (Firebase SDK + CORS fetch both failed) and were left blank in the PDF. */
+export interface PrintBookResult {
+  skippedImageCount: number
+}
+
+export async function printBook(book: Book, opts: PrintBookOptions): Promise<PrintBookResult> {
   const endTotal = startStep('printBook')
   const { childName } = opts
   const settings: PrintSettings = { ...DEFAULT_SETTINGS, ...opts.settings }
@@ -863,6 +868,9 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
   const endPrefetch = startStep('printBook.prefetchImages')
   const imageMap = await prefetchBookImages(book)
   endPrefetch()
+  // Any prefetched image that didn't resolve to a data: URI couldn't be embedded
+  // (both getBlob and the CORS fetch fallback failed) — it renders blank.
+  const skippedImageCount = [...imageMap.values()].filter((v) => !v.startsWith('data:')).length
   const resolveUrl = (url: string) => imageMap.get(url) ?? url
 
   // Calculate PDF page dimensions (with optional bleed for trim marks)
@@ -935,6 +943,8 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<voi
     .toLowerCase()
   pdf.save(`${slug}.pdf`)
   endTotal()
+
+  return { skippedImageCount }
 }
 
 /* ───────────────────── utilities ───────────────────── */
