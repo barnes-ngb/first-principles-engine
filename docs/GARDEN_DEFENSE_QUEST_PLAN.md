@@ -153,7 +153,8 @@ Success gate: a parent who owes you nothing says "yes, I'd pay for that."
 
 ## 9. Track B — App integration (July+, the real build)
 
-In order, each spawning its own Claude Code run-prompt under normal ledger discipline:
+In order, each spawning its own Claude Code run-prompt under normal ledger discipline (FEAT-30 first
+slice underway as of June — freeze lifted):
 
 1. **FEAT-28 — Garden themes config.** Add two clean non-branded garden-theme presets — Garden
    Defense (flagship) + Gentle Garden (spinoff), cartoon house style — and a third style option;
@@ -266,6 +267,48 @@ month to a Series S, or ~11–13 party kits on the party tier alone.
 **Distribution order** (start where trust exists, move outward): warm network → homeschool /
 parent groups → local birthday-party angle → one-page website → Pinterest → YouTube demos →
 Etsy/Marketplace last.
+
+---
+
+## Sales Channels
+
+Two product forms route differently, so "where do we sell" has two answers. The **digital PDF kit**
+($8, zero COGS, instant delivery) can go national and online cheaply. The **physical printed kit**
+($15+) stays **local** — shipping a $15 item eats the modeled margin.
+
+**Tier 1 — local, now, zero infrastructure.** Warm network, co-op, church: cash/Venmo, local pickup,
+no fees, highest trust — where the first 10–20 kits go and the product is validated. Then local
+parent/homeschool Facebook groups and library/co-op boards (the birthday-party angle lands hardest
+here, since those parents are actively hunting activities). A craft-fair or church-bazaar table when
+ready — also the home for the perler beads and dog bandanas, and the best place to demo a party kit
+live.
+
+**Tier 2 — a link, not a storefront.** Not e-commerce early; a shareable URL. A one-page no-code site
+(Carrd, Big Cartel, simple Squarespace) or a Google Form + payment link with photos, prices, and an
+order button. Two jobs: sells the PDF to remote buyers, and takes order intake for local printed
+kits. Earns its place once sales repeat and you want something for craft-fair signage (a QR code) and
+social bios — not before.
+
+**Tier 3 — marketplaces, for reach.** Etsy is the natural home for the **digital** kit specifically —
+instant download, payment, and marketplace-facilitator sales-tax remittance handled for you; ~9–10%
+fees are painless on a zero-COGS $8 PDF, and parents literally search "printable birthday treasure
+hunt" there. Lead digital on Etsy; keep physical local (Facebook Marketplace covers local physical
+for free). Etsy is "later" — worth the listing effort only once a product is proven.
+
+**Discovery layer (feeds the link; not a checkout).** Pinterest is the standout — effectively a
+search engine for "kids party activity," where printables overperform; the highest-ROI traffic for
+this product. Then Instagram/YouTube with Sunny as the brand thread (the boys demoing kits doubles as
+Speech / Language Arts hours). These point traffic at the link or Etsy.
+
+**Two boundaries.** Nathan runs every account, payment, and customer message — the kids never touch
+the customer side. And the storefront stays **separate from the FPE app**: the app is the internal
+production tool and the kids' space; the store is external and parent-run. The business tab tracks
+sales (`businessLog`) but is **not** the checkout — blurring them would put customers a click from
+the kids' app.
+
+**Sequencing.** Prove locally with zero infrastructure → add a single link once sales repeat → point
+Pinterest at it → stand up Etsy for the digital line when it's earned. The website isn't the starting
+move; the warm network is.
 
 ---
 

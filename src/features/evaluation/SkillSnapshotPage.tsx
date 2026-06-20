@@ -33,12 +33,7 @@ import type {
   SupportDefault,
 } from '../../core/types'
 import { MasteryGate, SkillLevel, UserProfile } from '../../core/types/enums'
-import {
-  defaultEvidenceDefinitions,
-  defaultPrioritySkills,
-  defaultStopRules,
-  defaultSupports,
-} from './lincolnDefaults'
+import { getDefaultsForChild } from './childDefaults'
 import FoundationsSection from '../evaluate/FoundationsSection'
 import MasteryCheckoffPanel from '../evaluate/MasteryCheckoffPanel'
 import QuickCheckPanel from './QuickCheckPanel'
@@ -129,14 +124,16 @@ export default function SkillSnapshotPage() {
 
   const handleLoadDefaults = useCallback(() => {
     if (!snapshot) return
+    // Per-child starter defaults, selected by grade/age band (never by name).
+    const defaults = getDefaultsForChild(activeChild)
     void persist({
       ...snapshot,
-      prioritySkills: defaultPrioritySkills,
-      supports: defaultSupports,
-      stopRules: defaultStopRules,
-      evidenceDefinitions: defaultEvidenceDefinitions,
+      prioritySkills: defaults.prioritySkills,
+      supports: defaults.supports,
+      stopRules: defaults.stopRules,
+      evidenceDefinitions: defaults.evidenceDefinitions,
     })
-  }, [snapshot, persist])
+  }, [snapshot, persist, activeChild])
 
   // --- Priority Skills CRUD ---
   const handleAddSkill = useCallback(() => {
@@ -326,7 +323,7 @@ export default function SkillSnapshotPage() {
             <SaveIndicator state={saveState} />
             {snapshot.prioritySkills.length === 0 && (
               <Button size="small" variant="outlined" onClick={handleLoadDefaults}>
-                Load Lincoln Defaults
+                Load Starter Defaults
               </Button>
             )}
           </Stack>
