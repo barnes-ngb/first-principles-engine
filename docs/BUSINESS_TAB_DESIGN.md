@@ -1,7 +1,8 @@
 # Barnes Bros Business Tab — Design Spec
 
-**Version:** v0.1 — June 19, 2026 (design capture; build is July+, operate-mode holds through June 30)
-**Status:** Design shaped; first build slice sequenced. No app work until July 1.
+**Version:** v0.1 — June 19, 2026 (design captured during operate-mode, since lifted)
+**Status:** Design shaped; build underway — FEAT-30 chunk 1 (foundation) landed; remaining chunks in
+progress.
 **Companions:** `GARDEN_DEFENSE_QUEST_PLAN.md` (strategy/economics) and `SEED_VAULT_V1_RUNBOOK.md`
 (physical build). Ledger anchor: **FEAT-29**; depends on **FEAT-27** (kit assembler) and **FEAT-28**
 (clean-IP theme).
@@ -117,7 +118,9 @@ time; console and Game Pass prices move.
 3. Sticker-sheet composer (two modes).
 4. Kit assembler (FEAT-27).
 
-## Operate-mode note
+## Build status
 
-Design captured June 19 during operate-mode (no app features until July 1). Build begins July; the
-first slice is tracked as the business-tab operations-and-goal row in the ledger.
+The operate-mode freeze has been lifted (compliance requirements met) and the build is underway —
+FEAT-30 chunk 1 (types, collections, route, nav, shell) landed; the operations + goal surface builds
+in chunks from there. Design was captured June 19 during operate-mode (historical context); the
+business-tab build is tracked under FEAT-30 in the ledger.
