@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, setDoc } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
-import { childSkillMapsCollection, skillSnapshotsCollection } from '../firebase/firestore'
+import {
+  childSkillMapsCollection,
+  sightWordProgressCollection,
+  skillSnapshotsCollection,
+} from '../firebase/firestore'
 import type { SkillSnapshot } from '../types/evaluation'
+import type { SightWordProgress } from '../types/books'
 import { CURRICULUM_MAPS } from './curriculumMap'
 import type { ChildSkillMap, DomainSummary, SkillNodeStatus } from './skillStatus'
 import { SkillStatus } from './skillStatus'
@@ -30,10 +35,32 @@ interface UseSkillMapResult {
 }
 
 /**
- * Read the child's working levels + completed programs and fold the implied
- * mastery into `base`. Persists only the changed nodes (no write when nothing
- * changed). Returns the healed map (or `base` unchanged when there's nothing to
- * apply or the snapshot read fails). Never throws.
+ * Read the child's active sight-word list (per-child `sightWordProgress` docs).
+ * Read-only — never writes. Returns `[]` on any failure so sight words simply
+ * contribute nothing rather than blocking the re-derivation.
+ */
+async function loadSightWordProgress(
+  familyId: string,
+  childId: string,
+): Promise<SightWordProgress[]> {
+  try {
+    const snap = await getDocs(query(sightWordProgressCollection(familyId)))
+    // Per-child docs are keyed `{childId}_{word}` (same convention as the hook).
+    return snap.docs
+      .filter((d) => d.id.startsWith(`${childId}_`))
+      .map((d) => d.data() as SightWordProgress)
+  } catch (err) {
+    console.warn('[LearningMap] Sight-word read failed (non-fatal)', err)
+    return []
+  }
+}
+
+/**
+ * Read the child's working levels + completed programs + sight-word list +
+ * snapshot priority skills, and fold the implied mastery into `base`. Persists
+ * only the changed nodes (no write when nothing changed). Returns the healed map
+ * (or `base` unchanged when there's nothing to apply or the snapshot read fails).
+ * Never throws.
  */
 async function reDeriveMastery(
   familyId: string,
@@ -46,10 +73,14 @@ async function reDeriveMastery(
     if (!snapshotSnap.exists()) return base
 
     const snapshot = snapshotSnap.data() as SkillSnapshot
+    const sightWordProgress = await loadSightWordProgress(familyId, childId)
     const { skills, changedNodeIds } = applyReDerivedMastery(
       base.skills,
       snapshot.workingLevels,
       snapshot.completedPrograms,
+      undefined,
+      sightWordProgress,
+      snapshot.prioritySkills,
     )
 
     if (changedNodeIds.length === 0) return base

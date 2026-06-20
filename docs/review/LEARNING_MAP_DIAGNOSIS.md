@@ -5,6 +5,10 @@
 > inspects and reports, and proposes the fix for a later run.
 > **Created:** 2026-06-20 · **Companion to:** the eventual fix run; `docs/review/REVIEW_HOME_BASE.md` (ledger).
 > **Lens:** no-shame / coverage-not-pace — the map must never under-credit what a child has truly covered.
+>
+> **STATUS: FULLY RESOLVED (FEAT-35 chunk 1 + FEAT-36 chunk 2).** All three "learned" signals now feed the
+> re-derivation engine: **working levels + completed programs** (FEAT-35), and **sight-word list mastery +
+> snapshot priority-skill mastery** (FEAT-36) — upgrade-only, manual-frozen, persist-delta, per-child clean.
 
 ## TL;DR
 The map is fed only by per-skill *findings* (eval/quest/scan/capture) plus a one-time init. It **never reads
@@ -36,7 +40,8 @@ level stay unmarked and read as missing. The fix reuses maps that already exist.
    (`src/core/curriculum/deriveWorkingLevelMastery.ts`) + the self-healing pass on every map load in
    `useSkillMap.ts`: working levels (and `completedPrograms`) now fold into the map as implied mastery,
    upgrade-only, manual-frozen, persist-delta. The **sight-word + snapshot priority-skill mastery** inputs
-   land in the **chunk-2 follow-up** (see below).
+   were added in the **chunk-2 follow-up (FEAT-36)** on the same terms — all three learned signals now feed
+   the map (see "Chunk-2 follow-up — DONE" below).
 2. **"Mastered" findings are rare.** Quest/eval mostly emit frontier findings (emerging/not-yet →
    "Working On" via `findingStatusToSkillStatus`); skills rarely flip to "Mastered" unless explicitly checked
    off. The map under-reports systematically.
@@ -94,6 +99,18 @@ Confirmed at fix time by routing every tag in the five maps through `mapFindingT
   `math` nodes), so a math-8 child never lights a reading-fluency node. The spelling (`writing`) key
   deliberately permits both `reading`+`writing` (spelling a CVC implies decoding it).
 
-### Chunk-2 follow-up (after FEAT-35 merges)
-Sight-word mastery (`sightWordProgress`) and snapshot **priority-skill** mastery gates as additional
-re-derivation inputs (Option B's signal-folding). Out of scope for chunk 1; lands as a separate run.
+### Chunk-2 follow-up — DONE (FEAT-36)
+Sight-word mastery (`sightWordProgress`) and snapshot **priority-skill** mastery gates folded into the same
+re-derivation engine (Option B's signal-folding), on the chunk-1 terms (upgrade-only, manual-freeze,
+persist-delta, read-only, per-child clean):
+- **Sight words → `reading.phonics.sightWords`.** `deriveSightWordMastery` reads the child's active
+  `sightWordProgress` list: mastered share `>= SIGHT_WORD_MASTERED_THRESHOLD` (proposed **0.8 / 80%**) →
+  node **Mastered**; else `>= SIGHT_WORD_INPROGRESS_MIN` (proposed **1**) word past `new` → **InProgress**;
+  empty/all-`new` list → nothing. **Both thresholds are named, exported consts flagged for Nathan to tune.**
+- **Snapshot priority skills → mapped nodes.** `deriveSnapshotPrioritySkillMastery` marks every priority skill
+  at the top mastery gate (`MasteryGate.IndependentConsistent` = 3) **Mastered**, routing its tag via
+  `mapFindingToNode` (tags resolving to no node contribute nothing).
+- Both are stamped `source: 'evaluation'`, fold in via `applyReDerivedMastery` (Mastered-wins on node
+  collision), and `useSkillMap` reads the sight-word list + snapshot priority skills read-only (never writes
+  `sightWordProgress`/snapshot). Speech still falls back to findings-only (no working/sight-word/priority
+  signal). **All three learned signals now feed the map — this diagnosis is fully resolved.**
