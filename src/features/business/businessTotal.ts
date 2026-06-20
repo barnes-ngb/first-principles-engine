@@ -21,6 +21,19 @@ export function sumBusinessLog(entries: readonly BusinessLogEntry[]): number {
   }, 0)
 }
 
+/**
+ * Derived CONFIRMED money-in total (FEAT-30 chunk 4).
+ *
+ * Only entries a parent has OK'd (`confirmed === true`) count — this is the
+ * honest figure the thermometer climbs on. A missing/`undefined` `confirmed`
+ * is treated as PENDING and excluded, so any pre-chunk-4 entry stays uncounted
+ * until confirmed. Shares the same defensive amount handling as
+ * `sumBusinessLog` (non-finite / negative amounts floor to 0).
+ */
+export function sumConfirmedBusinessLog(entries: readonly BusinessLogEntry[]): number {
+  return sumBusinessLog(entries.filter((entry) => entry.confirmed === true))
+}
+
 /** Format a dollar amount for kid-facing display (e.g. `$15`, `$8.50`). */
 export function formatMoney(amount: number): string {
   if (!Number.isFinite(amount)) return '$0'
