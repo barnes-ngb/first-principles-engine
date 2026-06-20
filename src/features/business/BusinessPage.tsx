@@ -1,20 +1,27 @@
+import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
+import SaleEntryForm from './SaleEntryForm'
+import SalesLogList from './SalesLogList'
+import { useBusinessLog } from './useBusinessLog'
 
 /**
- * Barnes Bros — Lincoln's business tab (FEAT-30, chunk 1: foundation).
+ * Barnes Bros — Lincoln's business tab (FEAT-30).
  *
- * Empty shell only. The two regions below are placeholders for the first
- * build slice's two halves (see docs/BUSINESS_TAB_DESIGN.md):
- *   • Operations — sales/earnings log, inventory, order pipeline.
- *   • Goal — the additive Xbox + games thermometer and goal builder.
+ * Chunk 1 landed the shell + two regions. Chunk 2 fills the Operations region
+ * with the sales/earnings log: the tap-friendly entry, the recent-sales list,
+ * and the derived running total the chunk-3 thermometer will climb on.
  *
- * No data wiring or logic yet — those land in later chunks.
+ * The Goal region stays a placeholder for chunk 3 (thermometer + goal builder).
  */
 export default function BusinessPage() {
+  const { activeChildId } = useActiveChild()
+  const { entries, total, loading, addSale } = useBusinessLog()
+
   return (
     <Page>
       <div>
@@ -28,9 +35,16 @@ export default function BusinessPage() {
 
       <SectionErrorBoundary section="business operations">
         <SectionCard title="Operations">
-          <Typography variant="body2" color="text.secondary">
-            Your sales and earnings will show up here soon.
-          </Typography>
+          <Stack spacing={3}>
+            {activeChildId ? (
+              <SaleEntryForm childId={activeChildId} onLogSale={addSale} />
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Loading…
+              </Typography>
+            )}
+            <SalesLogList entries={entries} total={total} loading={loading} />
+          </Stack>
         </SectionCard>
       </SectionErrorBoundary>
 

@@ -20,6 +20,7 @@
 export const BusinessItemType = {
   StarterKit: 'StarterKit',
   PartyKit: 'PartyKit',
+  CustomKit: 'CustomKit',
   StickerSheet: 'StickerSheet',
   Book: 'Book',
   Other: 'Other',
@@ -30,6 +31,7 @@ export type BusinessItemType = (typeof BusinessItemType)[keyof typeof BusinessIt
 export const BusinessItemTypeLabel: Record<BusinessItemType, string> = {
   [BusinessItemType.StarterKit]: 'Starter Kit',
   [BusinessItemType.PartyKit]: 'Party Kit',
+  [BusinessItemType.CustomKit]: 'Custom Kit',
   [BusinessItemType.StickerSheet]: 'Sticker Sheet',
   [BusinessItemType.Book]: 'Book',
   [BusinessItemType.Other]: 'Other',
