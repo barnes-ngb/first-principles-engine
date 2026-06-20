@@ -4,6 +4,7 @@ import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
+import Link from '@mui/material/Link'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import MenuItem from '@mui/material/MenuItem'
@@ -15,6 +16,7 @@ import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import RemoveIcon from '@mui/icons-material/Remove'
 import { addDoc, doc, updateDoc } from 'firebase/firestore'
+import { Link as RouterLink } from 'react-router-dom'
 
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
@@ -780,6 +782,14 @@ export default function UnifiedCaptureCard({
       {!isKid && (
         <SectionCard title="Artifacts">
           <Stack spacing={2}>
+            <Link
+              component={RouterLink}
+              to="/records/portfolio"
+              variant="body2"
+              sx={{ alignSelf: 'flex-start', fontWeight: 600 }}
+            >
+              View all work in Portfolio →
+            </Link>
             {todayArtifacts.length === 0 ? (
               <EmptyState title="No artifacts logged yet today." />
             ) : (

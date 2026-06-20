@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import UnifiedCaptureCard from '../UnifiedCaptureCard'
@@ -97,18 +98,20 @@ function renderCard(overrides: {
   const activeChild =
     overrides.activeChild ?? children.find((c) => c.id === selectedChildId)
   const utils = render(
-    <UnifiedCaptureCard
-      familyId="fam-1"
-      selectedChildId={selectedChildId}
-      today="2026-05-17"
-      weekPlanId="week-1"
-      selectableChildren={children}
-      todayArtifacts={[]}
-      setTodayArtifacts={setTodayArtifacts}
-      onSnackMessage={onSnackMessage}
-      variant={overrides.variant}
-      activeChild={activeChild}
-    />,
+    <MemoryRouter>
+      <UnifiedCaptureCard
+        familyId="fam-1"
+        selectedChildId={selectedChildId}
+        today="2026-05-17"
+        weekPlanId="week-1"
+        selectableChildren={children}
+        todayArtifacts={[]}
+        setTodayArtifacts={setTodayArtifacts}
+        onSnackMessage={onSnackMessage}
+        variant={overrides.variant}
+        activeChild={activeChild}
+      />
+    </MemoryRouter>,
   )
   return { ...utils, onSnackMessage, setTodayArtifacts }
 }
@@ -291,16 +294,18 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     const { rerender } = renderCard()
     expect(screen.getByText(/Counts toward Lincoln's school hours/i)).toBeInTheDocument()
     rerender(
-      <UnifiedCaptureCard
-        familyId="fam-1"
-        selectedChildId="london"
-        today="2026-05-17"
-        weekPlanId="week-1"
-        selectableChildren={children}
-        todayArtifacts={[]}
-        setTodayArtifacts={vi.fn()}
-        onSnackMessage={vi.fn()}
-      />,
+      <MemoryRouter>
+        <UnifiedCaptureCard
+          familyId="fam-1"
+          selectedChildId="london"
+          today="2026-05-17"
+          weekPlanId="week-1"
+          selectableChildren={children}
+          todayArtifacts={[]}
+          setTodayArtifacts={vi.fn()}
+          onSnackMessage={vi.fn()}
+        />
+      </MemoryRouter>,
     )
     expect(screen.getByText(/Counts toward London's school hours/i)).toBeInTheDocument()
   })
