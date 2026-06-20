@@ -172,9 +172,9 @@ These need Nathan's input; the first sets the entire unit-cost model.
 | # | Decision | Why it matters | Status |
 |---|---|---|---|
 | D1 | **Home-print vs. print-service** | Sets unit cost against the Xbox goal; generalizes the old hero-book print question to all kits | **RESOLVED** (2026-06-19) — home-print + Instant Ink; see Unit Economics |
-| D2 | Custom-kit guardrails | Narrow fields vs. open requests determines whether custom work eats throughput | Leaning narrow |
-| D3 | Positioning (GDQ-leads vs. parallel lines) | §5 working assumption | Leaning GDQ-leads |
-| D4 | First sellable format | Starter-only vs. starter+party beta in the first push | OPEN |
+| D2 | Custom-kit guardrails | Narrow fields vs. open requests determines whether custom work eats throughput | **RESOLVED** (2026-06-19) — narrow fixed menu: name, plant-defender, creature, color, difficulty; no open-ended requests |
+| D3 | Positioning (GDQ-leads vs. parallel lines) | §5 working assumption | **RESOLVED** (2026-06-19) — GDQ-leads (template SKU; hero books = custom tier; stickers/prints add-ons; beads/bandanas craft-fair; treats out) |
+| D4 | First sellable format | Starter-only vs. starter+party beta in the first push | **RESOLVED** (2026-06-19) — starter-first ($15 printed, $8 PDF fallback); party kit ($35–45) as validated fast-follow |
 
 Revenue context: the idea doc's mixed-month example (~20 starters + 6 party + 5 custom + add-ons)
 models ~$800/month, concentrated in the party tier. One to two strong months reaches a typical
