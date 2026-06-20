@@ -36,6 +36,7 @@ export default function ProgressPage() {
             onChange={handleChange}
             variant="scrollable"
             scrollButtons="auto"
+            allowScrollButtonsMobile
           >
             <Tab label="Learning Profile" />
             <Tab label="Monthly Books" />

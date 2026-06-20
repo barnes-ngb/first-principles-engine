@@ -109,7 +109,13 @@ export default function RecordsPage() {
           maxShowCount={3}
         />
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={activeTab} onChange={handleTabChange}>
+          <Tabs
+            value={activeTab}
+            onChange={handleTabChange}
+            variant="scrollable"
+            scrollButtons="auto"
+            allowScrollButtonsMobile
+          >
             <Tab label="Hours & Compliance" />
             <Tab label="Evaluations" />
             <Tab label="Portfolio" />
