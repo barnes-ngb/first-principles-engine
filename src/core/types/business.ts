@@ -57,6 +57,17 @@ export interface BusinessLogEntry {
   note?: string
   /** ISO timestamp when the entry was logged. */
   createdAt: string
+  /**
+   * Parent-confirmation flag (FEAT-30 chunk 4). A sale counts toward the
+   * goal/thermometer ONLY once a parent OKs it — this keeps the meter honest
+   * (real money, not practice taps) while the kid keeps the freedom to log.
+   *
+   * Treat a missing/`undefined` value as PENDING (not counted). This is the
+   * safe default: any pre-chunk-4 entry naturally stays uncounted until OK'd.
+   */
+  confirmed?: boolean
+  /** ISO timestamp when a parent confirmed the sale. Set alongside `confirmed`. */
+  confirmedAt?: string
 }
 
 /**

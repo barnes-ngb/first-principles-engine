@@ -5,6 +5,7 @@ import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useProfile } from '../../core/profile/useProfile'
 import GoalBuilder from './GoalBuilder'
 import GoalThermometer from './GoalThermometer'
 import SaleEntryForm from './SaleEntryForm'
@@ -19,11 +20,24 @@ import { useBusinessLog } from './useBusinessLog'
  * with the sales/earnings log: the tap-friendly entry, the recent-sales list,
  * and the derived running total. Chunk 3 fills the Goal region with the goal
  * builder (the milestone stack Lincoln assembles) + the additive thermometer
- * that climbs on the chunk-2 money-in total.
+ * that climbs on the money-in total. Chunk 4 makes a sale parent-confirmed: the
+ * thermometer + log headline climb only on the CONFIRMED total, and the confirm
+ * / unconfirm / remove controls are parent-gated (`canEdit`). Kids still log and
+ * see pending sales; only a parent OKs them onto the meter.
  */
 export default function BusinessPage() {
   const { activeChildId } = useActiveChild()
-  const { entries, total, loading, addSale } = useBusinessLog()
+  const { canEdit } = useProfile()
+  const {
+    entries,
+    total,
+    confirmedTotal,
+    loading,
+    addSale,
+    confirmSale,
+    unconfirm,
+    removeSale,
+  } = useBusinessLog()
   const { milestones, saving, saveMilestones } = useBusinessGoal(activeChildId)
 
   return (
@@ -47,7 +61,16 @@ export default function BusinessPage() {
                 Loading…
               </Typography>
             )}
-            <SalesLogList entries={entries} total={total} loading={loading} />
+            <SalesLogList
+              entries={entries}
+              confirmedTotal={confirmedTotal}
+              total={total}
+              loading={loading}
+              canConfirm={canEdit}
+              onConfirm={confirmSale}
+              onUnconfirm={unconfirm}
+              onRemove={removeSale}
+            />
           </Stack>
         </SectionCard>
       </SectionErrorBoundary>
@@ -56,7 +79,7 @@ export default function BusinessPage() {
         <SectionCard title="Goal">
           {activeChildId ? (
             <Stack spacing={3}>
-              <GoalThermometer milestones={milestones} total={total} />
+              <GoalThermometer milestones={milestones} total={confirmedTotal} />
               <GoalBuilder
                 childId={activeChildId}
                 milestones={milestones}
