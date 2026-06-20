@@ -24,7 +24,7 @@ npm run dev             # Start dev server
 |---|---|
 | `npm run dev` | Start Vite dev server |
 | `npm run build` | TypeScript check + Vite production build |
-| `npm test` | Run Vitest test suite (958 tests) |
+| `npm test` | Run Vitest test suite (2,746 tests) |
 | `npm run lint` | Run ESLint |
 | `npx tsc -b` | Type-check only (no emit) |
 | `npm run deploy` | Build + deploy to Firebase (hosting + rules) |
@@ -36,7 +36,7 @@ npm run dev             # Start dev server
 ```
 src/
 ├── app/           App shell, routing, theme
-├── components/    Shared UI components (22 files)
+├── components/    Shared UI components (36 files)
 ├── core/          Auth, profile, firebase, hooks, types, utils, AI, XP
 ├── features/      21 feature modules
 │   ├── today/         Parent + Kid daily dashboard
@@ -51,9 +51,9 @@ src/
 │   ├── records/       Hours, compliance, evaluations, portfolio
 │   ├── evaluate/      Reading evaluation chat
 │   ├── settings/      AI usage, account, avatar admin
-│   └── ...            engine, kids, ladders, login, weekly-review, etc.
+│   └── ...            engine, evaluation, login, monthly-review, weekly-review, etc.
 functions/
-└── src/ai/        19 Cloud Functions (AI task dispatch, image gen, weekly review)
+└── src/ai/        25 Cloud Functions (AI task dispatch, image gen, reviews, transcription)
 ```
 
 ## Documentation

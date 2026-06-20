@@ -21,8 +21,8 @@
 
 ### Environment Setup
 
-- **Node.js**: 18+ (check: `node -v`)
-- **npm**: 9+ (check: `npm -v`)
+- **Node.js**: 20+ (check: `node -v`)
+- **npm**: 10+ (check: `npm -v`)
 - **Firebase CLI**: installed globally (`npm i -g firebase-tools`)
 - **Firebase project**: configured and authenticated (`firebase login`)
 

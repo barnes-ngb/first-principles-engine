@@ -54,9 +54,9 @@ Tiers 1–3 stay as they are. This home base **is** Tier 4, made concrete.
 Three.js r128 (3D avatar) · Anthropic Claude (Sonnet 4.6 primary, Haiku 4.5 for routine chat) ·
 OpenAI gpt-image-1.5 (image generation — migrated from DALL-E 3 + gpt-image-1 per PR #1217).
 
-**Scale (verified against HEALTH_REPORT 2026-06-02):** ~172,317 TS lines · 129 commits on main ·
-36 Firestore collections · 25 Cloud Functions · 17 chat task types · 33 routes · 160 test files ·
-2,441 tests passing · build/lint/tsc all green.
+**Scale (verified against code 2026-06-20):** ~180,429 TS lines · 117 commits on main ·
+37 Firestore collections · 25 Cloud Functions · 19 chat task types · 34 routes · 181 test files ·
+2,746 tests passing · build/lint/tsc all green.
 
 **The core loop (this is what "functional review" traces):**
 
