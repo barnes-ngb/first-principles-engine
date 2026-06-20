@@ -17,6 +17,9 @@
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
+| `GARDEN_DEFENSE_QUEST_PLAN.md` | **CURRENT** (v0.1, 2026-06-19) | Barnes Bros business-track strategy — Garden Defense Quest kit brand. FPE reuse map, product/price line, roles, curriculum tie-in, Track A (physical proof) / Track B (app build → FEAT-27/FEAT-28), open economics decisions (D1 home-print vs service), safety/IP guardrails. Ledger anchor: FEAT-29. |
+| `SEED_VAULT_V1_RUNBOOK.md` | **CURRENT** (v1, 2026-06-19) | Seed Vault first-kit build runbook — phased build (story + stickers via FPE tools; clue cards/map/badge by hand), roles (London/Lincoln/Nathan), 3–5 family test. Doubles as TEST-03 pipeline verification. Companion to `GARDEN_DEFENSE_QUEST_PLAN.md`; iterations feed the FEAT-27 kit assembler. |
+| `BUSINESS_TAB_DESIGN.md` | **CURRENT** (v0.1, 2026-06-19) | Barnes Bros business-tab design spec — curation layer (locked "report of a book"), Lincoln-operator ops + goal surface, tiered Xbox+games thermometer, sticker composer, kit assembler. July build. Anchored by FEAT-29; first slice tracked as the new operations+goal row. |
 | `ENGINE_V2.md` | **CURRENT** | Learning framework: family snapshot, curriculum mapping, energy modes, weekly rhythm |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
 | `ECONOMY_AUDIT_PART1.md` | **CURRENT** | Economy code inventory — earning/spending paths, collection audit, event types |
