@@ -5,8 +5,11 @@ import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import GoalBuilder from './GoalBuilder'
+import GoalThermometer from './GoalThermometer'
 import SaleEntryForm from './SaleEntryForm'
 import SalesLogList from './SalesLogList'
+import { useBusinessGoal } from './useBusinessGoal'
 import { useBusinessLog } from './useBusinessLog'
 
 /**
@@ -14,13 +17,14 @@ import { useBusinessLog } from './useBusinessLog'
  *
  * Chunk 1 landed the shell + two regions. Chunk 2 fills the Operations region
  * with the sales/earnings log: the tap-friendly entry, the recent-sales list,
- * and the derived running total the chunk-3 thermometer will climb on.
- *
- * The Goal region stays a placeholder for chunk 3 (thermometer + goal builder).
+ * and the derived running total. Chunk 3 fills the Goal region with the goal
+ * builder (the milestone stack Lincoln assembles) + the additive thermometer
+ * that climbs on the chunk-2 money-in total.
  */
 export default function BusinessPage() {
   const { activeChildId } = useActiveChild()
   const { entries, total, loading, addSale } = useBusinessLog()
+  const { milestones, saving, saveMilestones } = useBusinessGoal(activeChildId)
 
   return (
     <Page>
@@ -50,9 +54,21 @@ export default function BusinessPage() {
 
       <SectionErrorBoundary section="business goal">
         <SectionCard title="Goal">
-          <Typography variant="body2" color="text.secondary">
-            Your Xbox goal meter will live here soon.
-          </Typography>
+          {activeChildId ? (
+            <Stack spacing={3}>
+              <GoalThermometer milestones={milestones} total={total} />
+              <GoalBuilder
+                childId={activeChildId}
+                milestones={milestones}
+                saving={saving}
+                onSave={saveMilestones}
+              />
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Loading…
+            </Typography>
+          )}
         </SectionCard>
       </SectionErrorBoundary>
     </Page>
