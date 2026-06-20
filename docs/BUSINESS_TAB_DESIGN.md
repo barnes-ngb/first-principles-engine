@@ -67,14 +67,16 @@ Anything money-, customer-, or listing-related is **parent-gated.** Lincoln sees
 **Production path (reuses existing tools)**
 - Sticker-sheet composer — two modes: (a) **arrange existing** library stickers onto a sheet (pure
   curation, cheap); (b) **generate new** stickers seeded from a book's own illustrations (reuses
-  sticker-gen).
+  sticker-gen). Both draw from the **Sticker/Character Studio** (FEAT-33, `STICKER_CHARACTER_STUDIO.md`)
+  — the upstream library where stickers/characters are made; the composer references those assets.
 - Kit assembler — frozen pieces → print package (FEAT-27, rides the existing print path).
 
 **Cross-cutting must-haves**
 - Curriculum capture — business work auto-logs as school (packing/pricing = Math/Practical Arts,
   art = Art, writing = Language Arts), the way making already does.
 - Parent gate — on money, customers, listings.
-- Clean-IP theme (FEAT-28) — business output never leaks a brand.
+- Clean-IP themes (FEAT-28) — the two garden themes (Garden Defense + Gentle Garden) in a cartoon
+  house style; business output never leaks a brand.
 
 ## Goal stack (Xbox + games)
 
