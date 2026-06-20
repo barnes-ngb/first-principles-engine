@@ -29,6 +29,7 @@ import MonthlyReviewReaderPage from '../features/monthly-review/MonthlyReviewRea
 import KidBooksAboutMePage from '../features/monthly-review/KidBooksAboutMePage'
 import KidBookReaderPage from '../features/monthly-review/KidBookReaderPage'
 import UiPreviewPage from '../features/ui-preview/UiPreviewPage'
+import BusinessPage from '../features/business/BusinessPage'
 
 const routes = [
   {
@@ -77,6 +78,7 @@ const routes = [
       { path: '/hero', element: <Navigate to="/avatar" replace /> },
       { path: '/armor', element: <Navigate to="/avatar" replace /> },
       { path: '/workshop', element: <WorkshopPage /> },
+      { path: '/business', element: <BusinessPage /> },
       { path: '/ladders', element: <Navigate to="/progress" replace /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
       { path: '/records', element: <RecordsPage /> },
