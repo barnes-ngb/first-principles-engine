@@ -36,6 +36,7 @@ const kidNavItems = [
   { label: 'Books About Me', to: '/books-about-me' },
   { label: 'My Hero', to: '/avatar' },
   { label: 'My Stuff', to: '/records/portfolio' },
+  { label: 'Barnes Bros', to: '/business' },
   { label: 'Game Workshop', to: '/workshop' },
   { label: 'Dad Lab', to: '/dad-lab' },
 ]

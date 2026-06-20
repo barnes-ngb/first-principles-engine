@@ -17,6 +17,8 @@ import type {
   Book,
   BookProgress,
   BookThemeConfig,
+  BusinessGoal,
+  BusinessLogEntry,
   ChapterBook,
   ChapterResponse,
   Child,
@@ -513,6 +515,47 @@ export const bookProgressCollection = (
 /** Book progress doc ID: {childId}_{bookId} */
 export const bookProgressDocId = (childId: string, bookId: string): string =>
   `${childId}_${bookId}`
+
+// ── Barnes Bros Business (FEAT-30) ──────────────────────────────
+
+const businessLogConverter: FirestoreDataConverter<BusinessLogEntry> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as BusinessLogEntry
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * Append-only sales/earnings event log. Use `addDoc` only — entries are never
+ * mutated (additive thermometer). Path: families/{familyId}/businessLog/{autoId}
+ */
+export const businessLogCollection = (
+  familyId: string,
+): CollectionReference<BusinessLogEntry> =>
+  collection(db, `families/${familyId}/businessLog`).withConverter(
+    businessLogConverter,
+  ) as CollectionReference<BusinessLogEntry>
+
+const businessGoalConverter: FirestoreDataConverter<BusinessGoal> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as BusinessGoal
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * Goal config (the milestone stack). One doc per child operator — write via
+ * `setDoc(..., { merge: true })` / `updateDoc`, never bare `setDoc`.
+ * Doc ID: {childId}
+ */
+export const businessGoalsCollection = (
+  familyId: string,
+): CollectionReference<BusinessGoal> =>
+  collection(db, `families/${familyId}/businessGoals`).withConverter(
+    businessGoalConverter,
+  ) as CollectionReference<BusinessGoal>
 
 // ── Error Log (ARCH-11 client error reporting) ──────────────────
 
