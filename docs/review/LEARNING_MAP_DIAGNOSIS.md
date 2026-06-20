@@ -28,11 +28,15 @@ level stay unmarked and read as missing. The fix reuses maps that already exist.
   findings** + skill-snapshot **completedPrograms** only.
 
 ## The bug — root causes
-1. **(Primary) Working levels never reach the map.** Zero `workingLevel` references in
-   `src/core/curriculum/`. Lincoln's climb through quest/Knowledge-Mine levels
+1. **(Primary) Working levels never reach the map. — RESOLVED by FEAT-35 (chunk 1).** Zero `workingLevel`
+   references in `src/core/curriculum/`. Lincoln's climb through quest/Knowledge-Mine levels
    (`skillSnapshot.workingLevels.{phonics,comprehension,math,writing,sentence}`) is his strongest mastery
-   signal and is invisible here. At working level N, levels 1..N-1 are demonstrably past but never marked →
-   "missing-but-learned."
+   signal and was invisible here. At working level N, levels 1..N-1 are demonstrably past but were never
+   marked → "missing-but-learned." **Fixed** by the re-derivation engine
+   (`src/core/curriculum/deriveWorkingLevelMastery.ts`) + the self-healing pass on every map load in
+   `useSkillMap.ts`: working levels (and `completedPrograms`) now fold into the map as implied mastery,
+   upgrade-only, manual-frozen, persist-delta. The **sight-word + snapshot priority-skill mastery** inputs
+   land in the **chunk-2 follow-up** (see below).
 2. **"Mastered" findings are rare.** Quest/eval mostly emit frontier findings (emerging/not-yet →
    "Working On" via `findingStatusToSkillStatus`); skills rarely flip to "Mastered" unless explicitly checked
    off. The map under-reports systematically.
@@ -74,3 +78,22 @@ implied mastery derives with **no new taxonomy** by *inverting* those maps:
   derive into reading nodes.
 - Confirm the level→node ordering aligns with the curriculum node order per domain (the tag→level maps are
   approximate/substring-matched; inverting them must not assert mastery a node ordering would contradict).
+
+### Tag-resolution recon (FEAT-35) — which of the 5 maps' tags resolve via `mapFindingToNode`
+Confirmed at fix time by routing every tag in the five maps through `mapFindingToNode`:
+- **Many tags resolve cleanly** to the expected domain node (e.g. phonics `cvc`→`reading.phonics.cvc`,
+  math `counting`→`math.number.counting`, all sentence tags→`writing.composition.sentence`).
+- **Some tags don't resolve at all** (return `null`) — e.g. phonics `letter-recognition`/`short-vowel`/
+  `silent-e`/`diphthong*`/`le-ending*`/`final-stable`; most comprehension tags (`literal-recall`/`recall`/
+  `sequencing`/`character`/`cause-effect`/`compare-contrast`/`theme`/`critical-thinking`/`evaluation`/
+  `synthesis`); several math tags (`number-sense`/`doubles`/`making-10`/`fact-family`/`borrowing`/…); writing
+  `phonetic`/`conventional`. These simply **contribute nothing** to the derivation (safe, additive) — the
+  node still gets covered when a *lower* resolving tag in the same key implies it mastered.
+- **One genuine cross-domain mismapping:** math `multiplication.fluency` (L8) substring-matches `…fluency`
+  → `reading.fluency.accuracy`. FEAT-35's **per-key domain guard** drops this (the `math` key only permits
+  `math` nodes), so a math-8 child never lights a reading-fluency node. The spelling (`writing`) key
+  deliberately permits both `reading`+`writing` (spelling a CVC implies decoding it).
+
+### Chunk-2 follow-up (after FEAT-35 merges)
+Sight-word mastery (`sightWordProgress`) and snapshot **priority-skill** mastery gates as additional
+re-derivation inputs (Option B's signal-folding). Out of scope for chunk 1; lands as a separate run.
