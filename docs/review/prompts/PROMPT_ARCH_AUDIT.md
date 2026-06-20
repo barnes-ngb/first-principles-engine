@@ -14,10 +14,11 @@ one issue at a time, reviewed). Mechanical, zero-risk doc corrections may be app
 
 ## Step 0 — Orient
 
-1. Read `docs/review/REVIEW_HOME_BASE.md` (the issue ledger in §6 is your working memory).
-2. Read the latest `docs/HEALTH_REPORT.md` so you don't re-derive what Tier 1 already computed.
-3. Read `docs/MASTER_OUTLINE.md` (current version header) and `CLAUDE.md` (tech debt section).
-4. Confirm a clean baseline before judging anything. Run these yourself in your environment (do not ask the human to run anything):
+1. Read `docs/PROCESS_OVERVIEW.md` **first** — how this project is developed, the audit pipeline (incl. the COLLISION rule), and the kid learning loop. The three lenses below come straight from it.
+2. Read `docs/review/REVIEW_HOME_BASE.md` (the issue ledger in §6 is your working memory).
+3. Read the latest `docs/HEALTH_REPORT.md` so you don't re-derive what Tier 1 already computed.
+4. Read `docs/MASTER_OUTLINE.md` (current version header) and `CLAUDE.md` (tech debt section + AI Development Operating Model).
+5. Confirm a clean baseline before judging anything. Run these yourself in your environment (do not ask the human to run anything):
 
    ```bash
    npm run lint
@@ -27,6 +28,27 @@ one issue at a time, reviewed). Mechanical, zero-risk doc corrections may be app
    ```
 
    Record pass/fail. If the baseline is red, that is the first finding and the audit stops at triage.
+
+## Step 0.5 — Audit lenses (apply across every step)
+
+Carry these three lenses through Steps 1–4. They cut across the bands — a finding can be both an
+architecture issue *and* a lens hit; note the lens in the finding. Grounded in `docs/PROCESS_OVERVIEW.md`
+(the kid learning loop + Strategic Direction).
+
+1. **Learning-loop integrity.** Does the capture → save+state-label → evaluate → plan → teach → re-evaluate
+   loop actually **close**? In particular: is **every kid's work saved *and* state-labeled** (artifact/day-log
+   persisted *and* tagged so it counts toward compliance)? Trace at least one real path for a break. Re-check
+   the known weak links called out in `PROCESS_OVERVIEW.md` (iii): sparse-upload days, Lincoln doing Knowledge
+   Mine only ~weekly, the learning-map "shows missing things he's actually learned" under-reporting bug, and
+   Knowledge Mine being too limited / needing more levels.
+2. **Multi-kid generality.** Is anything **hard-coded to one kid** (name/age branches, single-child storage
+   keys, London-shaped gaps — e.g. the just-fixed chapter-question London gap, ARCH-15 identity coupling) that
+   would **block a clean kid-add**? The engine is shared with distinct per-child paths; gate on **capability,
+   never on name**. Flag any new name-gating as a regression.
+3. **MO→TX compliance.** Compliance must track **both** Missouri and Texas (TX is stricter in respects MO
+   isn't, and MO-only exports won't transfer). Flag anywhere state rules/exports are **MO-hardcoded** such
+   that a MO ⇄ TX toggle couldn't be added cleanly. Building the TX feature is out of scope; *not deepening MO
+   assumptions* is in scope.
 
 ## Step 1 — Architecture & tech debt (BAND 1, primary)
 
