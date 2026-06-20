@@ -1,14 +1,14 @@
-# Code Health Report — 2026-06-13
+# Code Health Report — 2026-06-20
 
 ## Metrics
 
-| Metric | Value | Change from last report (2026-06-09) |
+| Metric | Value | Change from last report (2026-06-13) |
 |--------|-------|--------------------------------------|
-| **Total lines** | **179,214** | +221 |
-| **Commits (main)** | **119** | −6 (prior report counted branch commits; 119 is correct origin/main baseline) |
-| **Test files** | **181** | +4 |
-| **Tests passing** | **2,744** | +62 |
-| **Tests total** | **2,744** | 0 skipped, 0 failing |
+| **Total lines** | **180,429** | +1,215 |
+| **Commits (main)** | **117** | −2 |
+| **Test files (source)** | **182** | +1 |
+| **Test files (vitest run)** | **204** | +23 (includes compiled functions/lib JS) |
+| **Tests passing** | **3,204** | +460 |
 | **Firestore collections** | **37** | +0 |
 | **Cloud Functions** | **25** | +0 |
 | **Chat task types** | **19** | +0 |
@@ -21,9 +21,9 @@
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| **Build** | ✅ PASS | `tsc -b && vite build` clean in 12.73s |
+| **Build** | ✅ PASS | `tsc -b && vite build` clean in 15.28s |
 | **Lint** | ⚠️ 3 WARNINGS | 0 errors; 3 `react-hooks/exhaustive-deps` warnings (unchanged since 2026-05-29) |
-| **Tests** | ✅ PASS | 2,744 passing, 0 skipped, 0 failing (181 test files) |
+| **Tests** | ✅ PASS | 3,204 passing, 0 skipped, 0 failing (204 test files via vitest) |
 | **TypeScript** | ✅ PASS | Implied by clean build |
 | **npm audit (prod)** | ✅ CLEAN | 0 production vulnerabilities after fix (see Auto-Fixed below) |
 
@@ -35,15 +35,17 @@
 
 | Claim | Doc value (before fix) | Computed | Status |
 |-------|------------------------|----------|--------|
-| TypeScript lines | 178,993 | 179,214 | ⚠️ DRIFT +221 — **AUTO-FIXED** |
-| Commits | 125 | 119 | ⚠️ CORRECTION (prior count included branch commits) — **AUTO-FIXED** |
-| Test files | 177 | 178 | ⚠️ DRIFT +1 — **AUTO-FIXED** |
+| TypeScript lines | 179,214 | 180,429 | ⚠️ DRIFT +1,215 — **AUTO-FIXED** |
+| Commits | 119 | 117 | ⚠️ DRIFT −2 — **AUTO-FIXED** |
+| Test files | 178 | 182 | ⚠️ DRIFT +4 — **AUTO-FIXED** |
 | Firestore collections | 37 | 37 | ✅ OK |
 | Cloud Functions | 25 | 25 | ✅ OK |
 | Chat task types | 19 | 19 | ✅ OK |
 | Routes | 34 | 34 | ✅ OK |
 
-> **Note on CF count method:** The multi-line export block for `generateMonthlyReview / generateMonthlyReviewNow / publishMonthlyReview / unpublishMonthlyReview / auditMonthlyReviewSources` in `functions/src/index.ts` requires parsing the full export block, not just single-line grep. Verified at 25 by Python parser.
+> **Note on CF count method:** The grep pattern only matches 20 due to the multi-line export block for `generateMonthlyReview / generateMonthlyReviewNow / publishMonthlyReview / unpublishMonthlyReview / auditMonthlyReviewSources`. Manual count of `functions/src/index.ts` confirms 25.
+
+> **Note on test file count:** `find src functions -name '*.test.*'` returns 182 source test files. Vitest runs 204 (includes compiled `.js` test files in `functions/lib/`). MASTER_OUTLINE tracks source test files (182).
 
 ### Missing File References
 
@@ -87,14 +89,14 @@ All 19 task types present in `tasks/index.ts` are documented in `SYSTEM_PROMPTS.
 
 | Lines | File | Change from last report |
 |-------|------|------------------------|
-| 2,669 | `src/features/planner-chat/PlannerChatPage.tsx` | +42 |
+| 2,669 | `src/features/planner-chat/PlannerChatPage.tsx` | +0 |
 | 2,548 | `functions/src/ai/chat.ts` | +0 |
-| 2,278 | `src/features/books/BookEditorPage.tsx` | +0 |
 | 2,161 | `src/features/quest/useQuestSession.ts` | +0 |
-| 1,876 | `src/features/avatar/MyAvatarPage.tsx` | +1 |
+| 2,103 | `src/features/books/BookEditorPage.tsx` | **−175** (was 2,278) |
+| 1,876 | `src/features/avatar/MyAvatarPage.tsx` | +0 |
 | 1,623 | `src/features/workshop/WorkshopPage.tsx` | +0 |
 | 1,606 | `src/features/avatar/VoxelCharacter.tsx` | +0 |
-| 1,566 | `functions/src/ai/contextSlices.ts` | +7 |
+| 1,566 | `functions/src/ai/contextSlices.ts` | +0 |
 | 1,554 | `src/features/records/records.logic.test.ts` | +0 |
 | 1,363 | `src/features/planner-chat/chatPlanner.logic.ts` | +0 |
 | 1,248 | `src/features/records/RecordsPage.tsx` | +0 |
@@ -102,19 +104,26 @@ All 19 task types present in `tasks/index.ts` are documented in `SYSTEM_PROMPTS.
 | 1,162 | `src/features/evaluate/EvaluateChatPage.tsx` | +0 |
 | 1,156 | `src/features/planner-chat/chatPlanner.logic.test.ts` | +0 |
 | 1,123 | `src/features/shelly-chat/useShellyChatFlows.ts` | +0 |
+| 1,104 | `src/features/settings/AvatarAdminTab.tsx` | +0 |
+| 1,094 | `src/features/today/TodayPage.tsx` | +0 |
+| 1,066 | `src/features/quest/ReadingQuest.tsx` | +0 |
+| 1,055 | `src/features/today/KidTodayView.tsx` | +0 |
+| 1,050 | `functions/src/ai/evaluate.ts` | +0 |
+| 1,031 | `functions/src/ai/tasks/monthlyReviewData.ts` | NEW ENTRANT |
 
 ---
 
 ## Decomposition Candidates
 
-No new files crossed 2,000 lines this cycle.
+`BookEditorPage.tsx` shrank 2,278→2,103 (−175 lines). Still above 2,000 but trending down.
 
 | File | Lines | Status |
 |------|-------|--------|
-| `PlannerChatPage.tsx` | 2,669 | KNOWN — state management ~1,700L, complex interconnected state. Stable. (+42 growth, watch.) |
-| `chat.ts` (CF) | 2,548 | KNOWN — `buildQuestPrompt` alone 400+ lines. Highest-leverage target. Stable. |
-| `BookEditorPage.tsx` | 2,278 | KNOWN — handlers interleaved but clear section boundaries. Stable. |
+| `PlannerChatPage.tsx` | 2,669 | KNOWN — state management ~1,700L. Stable. (No change this cycle.) |
+| `chat.ts` (CF) | 2,548 | KNOWN — `buildQuestPrompt` alone 400+ lines. Stable. |
+| `BookEditorPage.tsx` | 2,103 | KNOWN — shrank −175 this cycle. Positive trend. |
 | `useQuestSession.ts` | 2,161 | KNOWN — quest/comprehension/fluency/encoding all in one hook. Stable. |
+| `monthlyReviewData.ts` | 1,031 | NEW ENTRANT — functions-side data assembly for monthly review. Watch. |
 
 ---
 
@@ -122,15 +131,15 @@ No new files crossed 2,000 lines this cycle.
 
 ### Auto-Fixed
 
-- **MASTER_OUTLINE.md stats updated:** Lines 178,993→179,214; Commits 125→119; Test files 177→178
-- **npm audit fix applied:** `@grpc/grpc-js` high-severity crash vulnerabilities (GHSA-5375-pq7m-f5r2, GHSA-99f4-grh7-6pcq) resolved by patching `package-lock.json`. Production audit now clean (0 vulnerabilities).
+- **MASTER_OUTLINE.md stats updated:** Lines 179,214→180,429; Commits 119→117; Test files 178→182
+- **npm audit fix applied:** `protobufjs` moderate-severity vulnerability resolved. Production audit now clean (0 vulnerabilities).
 
 ### Needs Human Attention
 
 - **Lint warnings (3, unchanged):** `react-hooks/exhaustive-deps` warnings in `EvaluateChatPage.tsx:282`, `useQuestSession.ts:779`, `useQuestSession.ts:2026` — all involve `sessionTimer`. Not auto-fixable without reviewing timer semantics.
 - **Bundle size 3,916 kB:** Route-level React.lazy splitting would reduce initial load. Heaviest imports: Three.js (avatar), jsPDF (print), curriculum map data. Architectural decision required.
-- **Dev dependencies — 13 vulnerabilities (8 moderate, 5 high):** All are dev-only (not in production bundle). `npm audit fix --force` required for remaining dev deps — involves breaking changes. Low priority.
-- **PlannerChatPage.tsx growing:** +42 lines this cycle (2,627→2,669). Still KNOWN/stable but trending upward. Worth watching over next 2–3 audits.
+- **Dev dependencies — 9 vulnerabilities (1 low, 8 moderate):** All are dev-only (not in production bundle). `npm audit fix --force` required for remaining dev deps — involves breaking changes. Low priority.
+- **CLAUDE.md Known Technical Debt section:** `BookEditorPage.tsx` listed as 2,278L but is now 2,103L (−175). Consider updating the listed value on next intentional CLAUDE.md edit pass.
 
 ---
 
@@ -138,7 +147,7 @@ No new files crossed 2,000 lines this cycle.
 
 All 19 task types verified to reference `buildContextForTask`, `CHARTER_PREAMBLE`, or `charterContext`:
 
-- `chat` and `generate` tasks are handled in `tasks/chatHandler.ts` (not standalone files) — both verified to have charter context via `buildContextForTask`. ✅
+- `chat` and `generate` tasks are handled via the dispatch table in `functions/src/ai/chat.ts` (not standalone task files) — both verified to have charter context via `buildContextForTask` (line 1995 in chat.ts). ✅
 
 ✅ No charter gaps.
 
@@ -176,6 +185,6 @@ Features with 0 tests: `progress`, `planner`, `dad-lab`, `auth` — unchanged fr
 
 ## Dependency Notes
 
-- **npm audit (production):** ✅ 0 vulnerabilities (post-fix)
-- **npm audit (all):** 13 vulnerabilities (8 moderate, 5 high) — all dev-only
+- **npm audit (production):** ✅ 0 vulnerabilities (post-fix; protobufjs patched this cycle)
+- **npm audit (all):** 9 vulnerabilities (1 low, 8 moderate) — all dev-only
 - **npm update available:** npm 10.9.7 → 11.17.0 (major version, low priority)
