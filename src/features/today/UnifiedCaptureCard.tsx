@@ -301,7 +301,8 @@ export default function UnifiedCaptureCard({
   ])
 
   const handlePhotoCapture = useCallback(
-    async (file: File) => {
+    async (files: File[]) => {
+      if (files.length === 0) return
       setMediaUploading(true)
       try {
         const title = activityName.trim() || `Photo ${today}`
@@ -309,13 +310,23 @@ export default function UnifiedCaptureCard({
           ...buildArtifactBase(title, EvidenceType.Photo),
           activityName: activityName.trim() || undefined,
         }
+        // ONE artifact for the whole batch; upload each file under the same docId.
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        const ext = file.name.split('.').pop() ?? 'jpg'
-        const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        const urls: string[] = []
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i]
+          const ext = file.name.split('.').pop() ?? 'jpg'
+          // Index-prefixed so filenames stay distinct even within the same ms.
+          const filename = `${i}-${generateFilename(ext)}`
+          const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+          urls.push(downloadUrl)
+        }
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), {
+          uri: urls[0], // cover, back-compat
+          mediaUrls: urls,
+        })
         setTodayArtifacts((prev) => [
-          { ...artifact, id: docRef.id, uri: downloadUrl },
+          { ...artifact, id: docRef.id, uri: urls[0], mediaUrls: urls },
           ...prev,
         ])
         const minutes = parsedDuration
@@ -344,7 +355,7 @@ export default function UnifiedCaptureCard({
   )
 
   const handleAudioCapture = useCallback(
-    async (blob: Blob) => {
+    async (fileOrBlob: File | Blob) => {
       setMediaUploading(true)
       try {
         const title = activityName.trim() || `Audio ${today}`
@@ -353,11 +364,17 @@ export default function UnifiedCaptureCard({
           activityName: activityName.trim() || undefined,
         }
         const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        const filename = generateFilename('webm')
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, blob, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        // Uploaded files carry an extension in their name; recorded blobs are webm.
+        const ext =
+          fileOrBlob instanceof File ? fileOrBlob.name.split('.').pop() || 'webm' : 'webm'
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, fileOrBlob, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), {
+          uri: downloadUrl,
+          mediaUrls: [downloadUrl],
+        })
         setTodayArtifacts((prev) => [
-          { ...artifact, id: docRef.id, uri: downloadUrl },
+          { ...artifact, id: docRef.id, uri: downloadUrl, mediaUrls: [downloadUrl] },
           ...prev,
         ])
         const minutes = parsedDuration
@@ -701,11 +718,27 @@ export default function UnifiedCaptureCard({
               </Button>
             </>
           )}
-          {mediaTab === 'photo' && (
-            <PhotoCapture onCapture={handlePhotoCapture} uploading={mediaUploading} />
-          )}
+          {mediaTab === 'photo' &&
+            (isKid ? (
+              // Kid mode stays single-photo (one artifact per photo).
+              <PhotoCapture
+                onCapture={(file) => handlePhotoCapture([file])}
+                uploading={mediaUploading}
+              />
+            ) : (
+              // Parent mode stages several photos into ONE artifact.
+              <PhotoCapture
+                multiple
+                onCaptureBatch={handlePhotoCapture}
+                uploading={mediaUploading}
+              />
+            ))}
           {mediaTab === 'audio' && (
-            <AudioRecorder onCapture={handleAudioCapture} uploading={mediaUploading} />
+            <AudioRecorder
+              onCapture={handleAudioCapture}
+              uploading={mediaUploading}
+              allowUpload={!isKid}
+            />
           )}
 
           {isKid && kidTheme && (

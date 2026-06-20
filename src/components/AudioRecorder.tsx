@@ -6,20 +6,24 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
+import FileUploadIcon from '@mui/icons-material/FileUpload'
 
 type RecordingState = 'idle' | 'recording' | 'recorded'
 
 interface AudioRecorderProps {
-  /** Called with the recorded audio Blob when the user confirms. */
+  /** Called with the recorded (or uploaded) audio Blob/File when the user confirms. */
   onCapture: (blob: Blob) => void
   /** If true, show a spinner to indicate upload in progress. */
   uploading?: boolean
+  /** If true, show an "Upload audio file" control beside the recorder. */
+  allowUpload?: boolean
 }
 
-export default function AudioRecorder({ onCapture, uploading }: AudioRecorderProps) {
+export default function AudioRecorder({ onCapture, uploading, allowUpload }: AudioRecorderProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [state, setState] = useState<RecordingState>('idle')
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
@@ -97,6 +101,12 @@ export default function AudioRecorder({ onCapture, uploading }: AudioRecorderPro
     setElapsed(0)
   }, [audioUrl])
 
+  const handleFileSelected = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0]
+    if (selected) onCapture(selected)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [onCapture])
+
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
     const s = seconds % 60
@@ -112,14 +122,35 @@ export default function AudioRecorder({ onCapture, uploading }: AudioRecorderPro
       )}
 
       {state === 'idle' && (
-        <Button
-          variant="outlined"
-          startIcon={<MicIcon />}
-          onClick={startRecording}
-          sx={{ height: 56 }}
-        >
-          Start Recording
-        </Button>
+        <Stack spacing={1}>
+          <Button
+            variant="outlined"
+            startIcon={<MicIcon />}
+            onClick={startRecording}
+            sx={{ height: 56 }}
+          >
+            Start Recording
+          </Button>
+          {allowUpload && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*"
+                onChange={handleFileSelected}
+                style={{ display: 'none' }}
+              />
+              <Button
+                variant="text"
+                startIcon={<FileUploadIcon />}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                Upload audio file
+              </Button>
+            </>
+          )}
+        </Stack>
       )}
 
       {state === 'recording' && (
