@@ -18,7 +18,9 @@
  * downgrades**.
  */
 
-import type { WorkingLevels } from '../types/evaluation'
+import type { PrioritySkill, WorkingLevels } from '../types/evaluation'
+import { MasteryGate } from '../types/enums'
+import type { SightWordProgress } from '../types/books'
 import { CURRICULUM_NODE_MAP } from './curriculumMap'
 import type { CurriculumDomain } from './curriculumMap'
 import { getNodesForProgram, mapFindingToNode } from './mapFindingToNode'
@@ -112,6 +114,90 @@ export function deriveWorkingLevelMastery(
   return result
 }
 
+// ── Sight-word mastery → reading.phonics.sightWords ─────────────
+//
+// Chunk 2: the child's per-word `sightWordProgress` carries direct evidence of
+// sight-word recognition that the working-level/spelling signal only approximates.
+// Fold the *share of the active list* that is mastered into the one sight-word
+// curriculum node — read-only over `sightWordProgress`, never writes it.
+
+/** The single curriculum node sight-word progress informs. */
+const SIGHT_WORDS_NODE_ID = 'reading.phonics.sightWords'
+
+/**
+ * Share of the child's active sight-word list that must be at `mastered` for the
+ * node to read **Mastered**. **TUNABLE — flagged for Nathan.** Proposed 0.8 (80%).
+ */
+export const SIGHT_WORD_MASTERED_THRESHOLD = 0.8
+
+/**
+ * Minimum number of words showing *any* progress (anything past `new`) for the
+ * node to read **InProgress** when the mastered share is below the threshold.
+ * **TUNABLE — flagged for Nathan.** Proposed 1.
+ */
+export const SIGHT_WORD_INPROGRESS_MIN = 1
+
+/**
+ * Derive the sight-word node status from the child's active sight-word list.
+ *
+ * The list is the per-child `sightWordProgress` docs (each word's
+ * `masteryLevel` ∈ `new | practicing | familiar | mastered`):
+ * - mastered share `>= SIGHT_WORD_MASTERED_THRESHOLD` → node **Mastered**
+ * - else `>= SIGHT_WORD_INPROGRESS_MIN` words past `new` → node **InProgress**
+ * - an empty list (or an all-`new` list) contributes nothing.
+ *
+ * @returns `{ [SIGHT_WORDS_NODE_ID]: status }` or `{}` when nothing applies.
+ */
+export function deriveSightWordMastery(
+  progress: SightWordProgress[] | null | undefined,
+): Record<string, DerivedStatus> {
+  const list = progress ?? []
+  if (list.length === 0) return {}
+
+  const mastered = list.filter((p) => p.masteryLevel === 'mastered').length
+  const progressing = list.filter((p) => p.masteryLevel !== 'new').length
+
+  if (mastered / list.length >= SIGHT_WORD_MASTERED_THRESHOLD) {
+    return { [SIGHT_WORDS_NODE_ID]: SkillStatus.Mastered }
+  }
+  if (progressing >= SIGHT_WORD_INPROGRESS_MIN) {
+    return { [SIGHT_WORDS_NODE_ID]: SkillStatus.InProgress }
+  }
+  return {}
+}
+
+// ── Snapshot priority-skill mastery → nodes ─────────────────────
+//
+// Chunk 2: a priority skill whose `masteryGate` has reached the top level
+// (Independent + consistent) is, by definition, mastered. Route its tag to a
+// curriculum node and imply **Mastered**. Read-only over `skillSnapshot`.
+
+/** The mastery-gate level that counts as mastered (top of the 0–3 scale). */
+const MASTERY_GATE_MASTERED = MasteryGate.IndependentConsistent
+
+/**
+ * Derive node mastery from a snapshot's priority skills.
+ *
+ * A skill contributes only when `masteryGate === MASTERY_GATE_MASTERED`; its tag
+ * is routed to a curriculum node via {@link mapFindingToNode} and marked
+ * **Mastered**. Skills below the gate, or whose tag resolves to no node, are
+ * ignored.
+ *
+ * @returns nodeId → Mastered (only mastered-gate skills appear).
+ */
+export function deriveSnapshotPrioritySkillMastery(
+  prioritySkills: PrioritySkill[] | null | undefined,
+): Record<string, DerivedStatus> {
+  const result: Record<string, DerivedStatus> = {}
+  for (const skill of prioritySkills ?? []) {
+    if (skill.masteryGate !== MASTERY_GATE_MASTERED) continue
+    const nodeId = mapFindingToNode(skill.tag)
+    if (!nodeId || !CURRICULUM_NODE_MAP[nodeId]) continue
+    result[nodeId] = SkillStatus.Mastered
+  }
+  return result
+}
+
 /** Outcome of a re-derivation merge. */
 export interface ReDerivationResult {
   /** The merged skills record (a new object; input is not mutated). */
@@ -142,16 +228,26 @@ const STATUS_RANK: Record<SkillStatus, number> = {
  * `source: 'program'`. When both reach a node, the program's Mastered wins (it
  * outranks an in-progress derivation).
  *
+ * Chunk 2 adds two more `source: 'evaluation'` inputs on the same terms
+ * (Mastered-wins when several inputs reach one node, upgrade-only into the stored
+ * map, manual-frozen): **sight-word** list mastery (→ the one sight-word node) and
+ * **snapshot priority-skill** mastery (gate-3 skills → their nodes). Both are
+ * read-only over their sources.
+ *
  * @param existingSkills stored `ChildSkillMap.skills` (not mutated).
  * @param workingLevels  the child's `skillSnapshot.workingLevels`.
  * @param completedPrograms the child's `skillSnapshot.completedPrograms`.
  * @param now ISO timestamp stamped on changed nodes (injectable for tests).
+ * @param sightWordProgress the child's active `sightWordProgress` list (read-only).
+ * @param prioritySkills the child's `skillSnapshot.prioritySkills` (read-only).
  */
 export function applyReDerivedMastery(
   existingSkills: Record<string, SkillNodeStatus>,
   workingLevels: WorkingLevels | null | undefined,
   completedPrograms: string[] | null | undefined,
   now: string = new Date().toISOString(),
+  sightWordProgress?: SightWordProgress[] | null,
+  prioritySkills?: PrioritySkill[] | null,
 ): ReDerivationResult {
   // 1) Build the combined "incoming" status per node (Mastered wins).
   const incoming: Record<string, { status: DerivedStatus; source: SkillNodeStatus['source']; notes: string }> = {}
@@ -178,6 +274,31 @@ export function applyReDerivedMastery(
         source: 'program',
         notes: `Completed program: ${programId}`,
       }
+    }
+  }
+
+  // Sight-word list mastery → the one sight-word node (Mastered-wins upgrade).
+  for (const [nodeId, status] of Object.entries(deriveSightWordMastery(sightWordProgress))) {
+    const existingIncoming = incoming[nodeId]
+    if (existingIncoming && STATUS_RANK[existingIncoming.status] >= STATUS_RANK[status]) continue
+    incoming[nodeId] = {
+      status,
+      source: 'evaluation',
+      notes:
+        status === SkillStatus.Mastered
+          ? 'Implied mastered — sight-word list mostly mastered'
+          : 'Working on — practicing the sight-word list',
+    }
+  }
+
+  // Snapshot priority-skill mastery (gate-3) → their nodes (always Mastered).
+  for (const [nodeId, status] of Object.entries(deriveSnapshotPrioritySkillMastery(prioritySkills))) {
+    const existingIncoming = incoming[nodeId]
+    if (existingIncoming && STATUS_RANK[existingIncoming.status] >= STATUS_RANK[status]) continue
+    incoming[nodeId] = {
+      status,
+      source: 'evaluation',
+      notes: 'Implied mastered — priority skill at mastery gate',
     }
   }
 

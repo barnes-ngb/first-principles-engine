@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import type { WorkingLevel } from '../types/evaluation'
+import type { PrioritySkill, WorkingLevel } from '../types/evaluation'
+import type { SightWordProgress } from '../types/books'
+import { MasteryGate, SkillLevel } from '../types/enums'
 import {
   applyReDerivedMastery,
+  deriveSightWordMastery,
+  deriveSnapshotPrioritySkillMastery,
   deriveWorkingLevelMastery,
+  SIGHT_WORD_MASTERED_THRESHOLD,
 } from './deriveWorkingLevelMastery'
 import { CURRICULUM_NODE_MAP } from './curriculumMap'
 import type { SkillNodeStatus } from './skillStatus'
@@ -14,6 +19,27 @@ import { deriveWorkingLevelFromEvaluation } from '../../features/quest/workingLe
 // ── helpers ────────────────────────────────────────────────────
 function wl(level: number, source: WorkingLevel['source'] = 'quest'): WorkingLevel {
   return { level, updatedAt: '2026-01-01T00:00:00.000Z', source }
+}
+
+function sw(
+  word: string,
+  masteryLevel: SightWordProgress['masteryLevel'],
+): SightWordProgress {
+  return {
+    word,
+    encounters: 0,
+    selfReportedKnown: 0,
+    helpRequested: 0,
+    shellyConfirmed: false,
+    masteryLevel,
+    firstSeen: '2026-01-01T00:00:00.000Z',
+    lastSeen: '2026-01-01T00:00:00.000Z',
+    lastLevelChange: '2026-01-01T00:00:00.000Z',
+  }
+}
+
+function priority(tag: string, masteryGate?: PrioritySkill['masteryGate']): PrioritySkill {
+  return { tag, label: tag, level: SkillLevel.Secure, masteryGate }
 }
 
 function node(
@@ -187,5 +213,159 @@ describe('layering — quest workingLevels consumes the moved maps', () => {
     )
     const derived = deriveWorkingLevelMastery({ phonics: wl(lvl!.level) })
     expect(derived['reading.phonics.digraphs']).toBe(SkillStatus.InProgress)
+  })
+})
+
+// ── deriveSightWordMastery (chunk 2) ───────────────────────────
+describe('deriveSightWordMastery', () => {
+  const NODE = 'reading.phonics.sightWords'
+
+  it('marks the node Mastered at/above the mastered threshold (>= 80%)', () => {
+    // 4/5 = 80% mastered → meets the threshold exactly.
+    const list = [
+      sw('the', 'mastered'),
+      sw('was', 'mastered'),
+      sw('said', 'mastered'),
+      sw('are', 'mastered'),
+      sw('you', 'practicing'),
+    ]
+    expect(SIGHT_WORD_MASTERED_THRESHOLD).toBe(0.8)
+    expect(deriveSightWordMastery(list)[NODE]).toBe(SkillStatus.Mastered)
+  })
+
+  it('marks the node InProgress when partly learned but below the threshold', () => {
+    // 1/4 = 25% mastered (< 80%) but several words past `new` → InProgress.
+    const list = [
+      sw('the', 'mastered'),
+      sw('was', 'familiar'),
+      sw('said', 'practicing'),
+      sw('are', 'new'),
+    ]
+    expect(deriveSightWordMastery(list)[NODE]).toBe(SkillStatus.InProgress)
+  })
+
+  it('contributes nothing for an empty list', () => {
+    expect(deriveSightWordMastery([])).toEqual({})
+    expect(deriveSightWordMastery(undefined)).toEqual({})
+    expect(deriveSightWordMastery(null)).toEqual({})
+  })
+
+  it('contributes nothing when every word is still `new`', () => {
+    const list = [sw('the', 'new'), sw('was', 'new')]
+    expect(deriveSightWordMastery(list)).toEqual({})
+  })
+})
+
+// ── deriveSnapshotPrioritySkillMastery (chunk 2) ───────────────
+describe('deriveSnapshotPrioritySkillMastery', () => {
+  it('maps a gate-3 (mastered) priority skill to its node as Mastered', () => {
+    const result = deriveSnapshotPrioritySkillMastery([
+      priority('phonics.cvc', MasteryGate.IndependentConsistent),
+    ])
+    expect(result['reading.phonics.cvc']).toBe(SkillStatus.Mastered)
+  })
+
+  it('ignores priority skills below the mastery gate', () => {
+    expect(
+      deriveSnapshotPrioritySkillMastery([
+        priority('phonics.cvc', MasteryGate.MostlyIndependent),
+        priority('phonics.blends', MasteryGate.WithHelp),
+        priority('phonics.digraphs', undefined),
+      ]),
+    ).toEqual({})
+  })
+
+  it('ignores tags that resolve to no curriculum node', () => {
+    expect(
+      deriveSnapshotPrioritySkillMastery([
+        priority('totally.unknown.tag', MasteryGate.IndependentConsistent),
+      ]),
+    ).toEqual({})
+  })
+
+  it('contributes nothing for empty / missing priority skills', () => {
+    expect(deriveSnapshotPrioritySkillMastery([])).toEqual({})
+    expect(deriveSnapshotPrioritySkillMastery(undefined)).toEqual({})
+  })
+})
+
+// ── applyReDerivedMastery — chunk 2 inputs folded in ───────────
+describe('applyReDerivedMastery — sight-word + priority-skill inputs', () => {
+  const NOW = '2026-06-20T00:00:00.000Z'
+
+  it('writes sight-word mastery into the sight-word node (evaluation source)', () => {
+    const list = [sw('the', 'mastered'), sw('was', 'mastered'), sw('said', 'mastered'), sw('are', 'mastered'), sw('you', 'mastered')]
+    const { skills, changedNodeIds } = applyReDerivedMastery({}, undefined, [], NOW, list)
+    expect(skills['reading.phonics.sightWords']).toMatchObject({
+      status: SkillStatus.Mastered,
+      source: 'evaluation',
+      updatedAt: NOW,
+    })
+    expect(changedNodeIds).toContain('reading.phonics.sightWords')
+  })
+
+  it('writes snapshot priority-skill mastery into the mapped node', () => {
+    const { skills, changedNodeIds } = applyReDerivedMastery({}, undefined, [], NOW, undefined, [
+      priority('phonics.digraphs', MasteryGate.IndependentConsistent),
+    ])
+    expect(skills['reading.phonics.digraphs']).toMatchObject({
+      status: SkillStatus.Mastered,
+      source: 'evaluation',
+    })
+    expect(changedNodeIds).toContain('reading.phonics.digraphs')
+  })
+
+  it('keeps the manual FREEZE with the new inputs (sight-word node)', () => {
+    const existing: Record<string, SkillNodeStatus> = {
+      'reading.phonics.sightWords': node('reading.phonics.sightWords', SkillStatus.InProgress, 'manual'),
+    }
+    const list = [sw('the', 'mastered'), sw('was', 'mastered'), sw('said', 'mastered'), sw('are', 'mastered'), sw('you', 'mastered')]
+    const { skills, changedNodeIds } = applyReDerivedMastery(existing, undefined, [], NOW, list, [
+      priority('phonics.sightwords', MasteryGate.IndependentConsistent),
+    ])
+    expect(skills['reading.phonics.sightWords']).toEqual(existing['reading.phonics.sightWords'])
+    expect(changedNodeIds).not.toContain('reading.phonics.sightWords')
+  })
+
+  it('combines working-level + sight-word + snapshot inputs, upgrade-only', () => {
+    const list = [sw('the', 'mastered'), sw('was', 'mastered'), sw('said', 'mastered'), sw('are', 'mastered')]
+    const priorities = [priority('phonics.rcontrolled', MasteryGate.IndependentConsistent)]
+
+    const { skills, changedNodeIds } = applyReDerivedMastery(
+      {},
+      { phonics: wl(4) },
+      [],
+      NOW,
+      list,
+      priorities,
+    )
+    // working level: L1–L3 mastered, L4 in-progress
+    expect(skills['reading.phonics.cvc'].status).toBe(SkillStatus.Mastered)
+    expect(skills['reading.phonics.digraphs'].status).toBe(SkillStatus.InProgress)
+    // sight words: 100% mastered → node mastered
+    expect(skills['reading.phonics.sightWords'].status).toBe(SkillStatus.Mastered)
+    // snapshot: gate-3 r-controlled → node mastered (above the L4 frontier)
+    expect(skills['reading.phonics.rControlled'].status).toBe(SkillStatus.Mastered)
+    expect(changedNodeIds.length).toBeGreaterThan(0)
+  })
+
+  it('is idempotent with the new inputs — no write on a second pass', () => {
+    const list = [sw('the', 'mastered'), sw('was', 'mastered'), sw('said', 'mastered'), sw('are', 'mastered')]
+    const priorities = [priority('phonics.cvc', MasteryGate.IndependentConsistent)]
+
+    const first = applyReDerivedMastery({}, { phonics: wl(4) }, [], NOW, list, priorities)
+    expect(first.changedNodeIds.length).toBeGreaterThan(0)
+
+    const second = applyReDerivedMastery(first.skills, { phonics: wl(4) }, [], NOW, list, priorities)
+    expect(second.changedNodeIds).toEqual([])
+    expect(second.skills).toEqual(first.skills)
+  })
+
+  it('Mastered wins — a gate-3 priority skill upgrades a working-level in-progress node', () => {
+    // phonics L4 implies digraphs in-progress; a gate-3 digraphs priority skill masters it.
+    const { skills } = applyReDerivedMastery({}, { phonics: wl(4) }, [], NOW, undefined, [
+      priority('phonics.digraphs', MasteryGate.IndependentConsistent),
+    ])
+    expect(skills['reading.phonics.digraphs'].status).toBe(SkillStatus.Mastered)
   })
 })
