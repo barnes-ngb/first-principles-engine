@@ -13,6 +13,8 @@ import Select from '@mui/material/Select'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import useMediaQuery from '@mui/material/useMediaQuery'
+import { useTheme } from '@mui/material/styles'
 import { addDoc, getDocs, query, where } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
@@ -46,6 +48,8 @@ const currentMonth = currentDate.getMonth() + 1
 
 export default function PortfolioPage() {
   const familyId = useFamilyId()
+  const theme = useTheme()
+  const fullScreenPreview = useMediaQuery(theme.breakpoints.down('sm'))
   const [year, setYear] = useState(currentYear)
   const [month, setMonth] = useState(currentMonth)
   const { activeChildId, activeChild, children } = useActiveChild()
@@ -345,6 +349,13 @@ export default function PortfolioPage() {
                 const isPhoto = artType === EvidenceType.Photo || artType === 'photo'
                 const isAudio = artType === EvidenceType.Audio || artType === 'audio'
                 const isBookArtifact = /page book/i.test(artifact.title ?? '')
+                // Prefer the multi-media array (FEAT-25 capture); fall back to the
+                // single `uri` so existing one-photo/one-audio artifacts are unchanged.
+                const media = artifact.mediaUrls?.length
+                  ? artifact.mediaUrls
+                  : artifact.uri
+                    ? [artifact.uri]
+                    : []
 
                 return (
                   <Stack
@@ -370,26 +381,52 @@ export default function PortfolioPage() {
                       <MenuBookIcon sx={{ fontSize: 40, color: 'info.main', flexShrink: 0 }} />
                     )}
 
-                    {isPhoto && artifact.uri && (
-                      <Box
-                        component="img"
-                        src={artifact.uri}
-                        sx={{
-                          width: 64,
-                          height: 64,
-                          borderRadius: 1,
-                          objectFit: 'cover',
-                          cursor: 'pointer',
-                          flexShrink: 0,
-                        }}
-                        onClick={() => setPreviewImage(artifact.uri!)}
-                      />
+                    {isPhoto && media.length > 0 && (
+                      <Stack spacing={0.5} sx={{ flexShrink: 0 }}>
+                        <Stack
+                          direction="row"
+                          spacing={0.5}
+                          flexWrap="wrap"
+                          useFlexGap
+                          sx={{ maxWidth: 220 }}
+                        >
+                          {media.map((url, i) => (
+                            <Box
+                              key={`${url}-${i}`}
+                              component="img"
+                              src={url}
+                              sx={{
+                                width: 64,
+                                height: 64,
+                                borderRadius: 1,
+                                objectFit: 'cover',
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => setPreviewImage(url)}
+                            />
+                          ))}
+                        </Stack>
+                        {media.length >= 2 && (
+                          <Chip
+                            size="small"
+                            label={`${media.length} photos`}
+                            sx={{ alignSelf: 'flex-start' }}
+                          />
+                        )}
+                      </Stack>
                     )}
 
-                    {isAudio && artifact.uri && (
-                      <Box sx={{ flexShrink: 0 }}>
-                        <audio controls src={artifact.uri} style={{ height: 32, width: 200 }} />
-                      </Box>
+                    {isAudio && media.length > 0 && (
+                      <Stack spacing={0.5} sx={{ flexShrink: 0 }}>
+                        {media.map((url, i) => (
+                          <audio
+                            key={`${url}-${i}`}
+                            controls
+                            src={url}
+                            style={{ height: 32, width: 200 }}
+                          />
+                        ))}
+                      </Stack>
                     )}
 
                     <Stack spacing={0.5} flex={1}>
@@ -465,10 +502,35 @@ export default function PortfolioPage() {
         </Stack>
       </SectionCard>
 
-      <Dialog open={!!previewImage} onClose={() => setPreviewImage(null)} maxWidth="md">
-        <DialogContent sx={{ p: 0 }}>
+      <Dialog
+        open={!!previewImage}
+        onClose={() => setPreviewImage(null)}
+        maxWidth="lg"
+        fullWidth
+        fullScreen={fullScreenPreview}
+      >
+        <DialogContent
+          sx={{
+            p: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: 'common.black',
+            cursor: 'pointer',
+          }}
+          onClick={() => setPreviewImage(null)}
+        >
           {previewImage && (
-            <Box component="img" src={previewImage} sx={{ width: '100%', display: 'block' }} />
+            <Box
+              component="img"
+              src={previewImage}
+              sx={{
+                maxWidth: '100%',
+                maxHeight: '90vh',
+                objectFit: 'contain',
+                display: 'block',
+              }}
+            />
           )}
         </DialogContent>
       </Dialog>
