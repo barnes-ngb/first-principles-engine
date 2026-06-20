@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import UnifiedCaptureCard from '../UnifiedCaptureCard'
@@ -6,6 +7,7 @@ import type { Child } from '../../../core/types'
 
 type AddDocCall = { collectionKey: string; data: Record<string, unknown> }
 const addDocCalls: AddDocCall[] = []
+const updateDocCalls: Record<string, unknown>[] = []
 
 vi.mock('firebase/firestore', () => ({
   addDoc: vi.fn((col: { __key: string }, data: Record<string, unknown>) => {
@@ -13,7 +15,10 @@ vi.mock('firebase/firestore', () => ({
     return Promise.resolve({ id: `mock-${addDocCalls.length}` })
   }),
   doc: vi.fn(() => ({})),
-  updateDoc: vi.fn(() => Promise.resolve()),
+  updateDoc: vi.fn((_ref: unknown, data: Record<string, unknown>) => {
+    updateDocCalls.push(data)
+    return Promise.resolve()
+  }),
 }))
 
 vi.mock('../../../core/firebase/firestore', () => ({
@@ -22,15 +27,57 @@ vi.mock('../../../core/firebase/firestore', () => ({
 }))
 
 vi.mock('../../../core/firebase/upload', () => ({
-  generateFilename: vi.fn(() => 'file.webm'),
-  uploadArtifactFile: vi.fn(() => Promise.resolve({ downloadUrl: 'https://x/y' })),
+  generateFilename: vi.fn((ext: string) => `file.${ext}`),
+  // Echo the filename so each upload yields a distinct download URL.
+  uploadArtifactFile: vi.fn((_fam: string, _id: string, _file: unknown, filename: string) =>
+    Promise.resolve({ downloadUrl: `https://x/${filename}` }),
+  ),
 }))
 
+// Interactive stub: parent staging exposes a button that commits a batch of
+// photos via onCaptureBatch; the single onCapture path remains available.
 vi.mock('../../../components/PhotoCapture', () => ({
-  default: () => <div data-testid="photo-capture" />,
+  default: ({
+    onCaptureBatch,
+    onCapture,
+  }: {
+    onCaptureBatch?: (files: File[]) => void
+    onCapture?: (file: File) => void
+  }) => (
+    <div data-testid="photo-capture">
+      <button
+        data-testid="commit-multi-photos"
+        onClick={() =>
+          onCaptureBatch?.([
+            new File(['a'], 'a.jpg', { type: 'image/jpeg' }),
+            new File(['b'], 'b.jpg', { type: 'image/jpeg' }),
+            new File(['c'], 'c.jpg', { type: 'image/jpeg' }),
+          ])
+        }
+      >
+        commit batch
+      </button>
+      <button
+        data-testid="commit-single-photo"
+        onClick={() => onCapture?.(new File(['a'], 'a.jpg', { type: 'image/jpeg' }))}
+      >
+        commit single
+      </button>
+    </div>
+  ),
 }))
+// Interactive stub: exposes an upload-file button that routes a File to onCapture.
 vi.mock('../../../components/AudioRecorder', () => ({
-  default: () => <div data-testid="audio-recorder" />,
+  default: ({ onCapture }: { onCapture: (blob: Blob) => void }) => (
+    <div data-testid="audio-recorder">
+      <button
+        data-testid="upload-audio-file"
+        onClick={() => onCapture(new File(['x'], 'lesson.mp3', { type: 'audio/mpeg' }))}
+      >
+        upload file
+      </button>
+    </div>
+  ),
 }))
 
 const children: Child[] = [
@@ -44,24 +91,27 @@ function renderCard(overrides: {
   activeChild?: Child
 } = {}) {
   addDocCalls.length = 0
+  updateDocCalls.length = 0
   const onSnackMessage = vi.fn()
   const setTodayArtifacts = vi.fn()
   const selectedChildId = overrides.selectedChildId ?? 'lincoln'
   const activeChild =
     overrides.activeChild ?? children.find((c) => c.id === selectedChildId)
   const utils = render(
-    <UnifiedCaptureCard
-      familyId="fam-1"
-      selectedChildId={selectedChildId}
-      today="2026-05-17"
-      weekPlanId="week-1"
-      selectableChildren={children}
-      todayArtifacts={[]}
-      setTodayArtifacts={setTodayArtifacts}
-      onSnackMessage={onSnackMessage}
-      variant={overrides.variant}
-      activeChild={activeChild}
-    />,
+    <MemoryRouter>
+      <UnifiedCaptureCard
+        familyId="fam-1"
+        selectedChildId={selectedChildId}
+        today="2026-05-17"
+        weekPlanId="week-1"
+        selectableChildren={children}
+        todayArtifacts={[]}
+        setTodayArtifacts={setTodayArtifacts}
+        onSnackMessage={onSnackMessage}
+        variant={overrides.variant}
+        activeChild={activeChild}
+      />
+    </MemoryRouter>,
   )
   return { ...utils, onSnackMessage, setTodayArtifacts }
 }
@@ -244,16 +294,18 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     const { rerender } = renderCard()
     expect(screen.getByText(/Counts toward Lincoln's school hours/i)).toBeInTheDocument()
     rerender(
-      <UnifiedCaptureCard
-        familyId="fam-1"
-        selectedChildId="london"
-        today="2026-05-17"
-        weekPlanId="week-1"
-        selectableChildren={children}
-        todayArtifacts={[]}
-        setTodayArtifacts={vi.fn()}
-        onSnackMessage={vi.fn()}
-      />,
+      <MemoryRouter>
+        <UnifiedCaptureCard
+          familyId="fam-1"
+          selectedChildId="london"
+          today="2026-05-17"
+          weekPlanId="week-1"
+          selectableChildren={children}
+          todayArtifacts={[]}
+          setTodayArtifacts={vi.fn()}
+          onSnackMessage={vi.fn()}
+        />
+      </MemoryRouter>,
     )
     expect(screen.getByText(/Counts toward London's school hours/i)).toBeInTheDocument()
   })
@@ -273,6 +325,39 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     renderCard()
     fireEvent.click(screen.getByRole('button', { name: /audio/i }))
     expect(screen.getByTestId('audio-recorder')).toBeInTheDocument()
+  })
+
+  it('multi-photo commits ONE artifact with mediaUrls[] and uri === mediaUrls[0]', async () => {
+    renderCard()
+    fireEvent.click(screen.getByRole('button', { name: /photo/i }))
+    fireEvent.click(screen.getByTestId('commit-multi-photos'))
+
+    await waitFor(() => expect(updateDocCalls.length).toBe(1))
+    // Exactly ONE artifact doc for the whole batch.
+    expect(addDocCalls.filter((c) => c.collectionKey === 'artifacts')).toHaveLength(1)
+
+    const data = updateDocCalls[0] as { uri: string; mediaUrls: string[] }
+    expect(Array.isArray(data.mediaUrls)).toBe(true)
+    expect(data.mediaUrls.length).toBeGreaterThan(1)
+    expect(data.mediaUrls).toHaveLength(3)
+    // Distinct URLs (index-prefixed filenames) and cover === first.
+    expect(new Set(data.mediaUrls).size).toBe(3)
+    expect(data.uri).toBe(data.mediaUrls[0])
+  })
+
+  it('audio file upload creates one audio artifact with uri set', async () => {
+    const { onSnackMessage } = renderCard()
+    fireEvent.click(screen.getByRole('button', { name: /audio/i }))
+    fireEvent.click(screen.getByTestId('upload-audio-file'))
+
+    await waitFor(() => expect(updateDocCalls.length).toBe(1))
+    expect(addDocCalls.filter((c) => c.collectionKey === 'artifacts')).toHaveLength(1)
+
+    const data = updateDocCalls[0] as { uri: string; mediaUrls?: string[] }
+    // Extension derived from the uploaded file name (.mp3).
+    expect(data.uri).toBe('https://x/file.mp3')
+    expect(data.mediaUrls).toEqual(['https://x/file.mp3'])
+    expect(onSnackMessage).toHaveBeenCalledWith({ text: 'Captured', severity: 'success' })
   })
 
   it('hours notes combine activity name and note text', async () => {
