@@ -4,7 +4,8 @@
 **Status:** Strategy locked at the skeleton level; economics decisions open (see §10).
 **Relationship to other docs:** The repo's business-track strategy reference, tracked in the
 review ledger under **FEAT-29** (anchor) — which groups the July build dependencies FEAT-27
-(kit assembler) and FEAT-28 (Block Garden theme). Grounds the original GDQ idea sketch in the
+(kit assembler) and FEAT-28 (two clean-IP garden themes — Garden Defense + Gentle Garden, cartoon
+house style). Grounds the original GDQ idea sketch in the
 actual FPE codebase and the June 19 pipeline recon.
 
 ---
@@ -57,9 +58,10 @@ Two findings from June 19 reshape the build question decisively toward *extend, 
 
 - **Theming is parameterized end-to-end.** Every generator threads a theme through to both text
   and image prompts; Minecraft is only a per-child *cosmetic style default* (and is actively
-  stripped from stickers by the copyright rewrite). A clean non-branded "Block Garden" path is
-  therefore a **config addition**, not a refactor — the single biggest risk in extending the app
-  is retired. Tracked as **FEAT-28** (July).
+  stripped from stickers by the copyright rewrite). Clean non-branded garden-theme paths —
+  **Garden Defense** (battle flagship) and **Gentle Garden** (calm spinoff), both in a cartoon/
+  generalized house style — are therefore a **config addition**, not a refactor; the single biggest
+  risk in extending the app is retired. Tracked as **FEAT-28** (July).
 - **The only true net-new is Workshop print/export**, which *is* the July "kit assembler" by
   another name. Tracked as **FEAT-27** (July). Everything else is config + existing features.
 
@@ -153,8 +155,9 @@ Success gate: a parent who owes you nothing says "yes, I'd pay for that."
 
 In order, each spawning its own Claude Code run-prompt under normal ledger discipline:
 
-1. **FEAT-28 — Block Garden theme config.** Add a clean non-branded preset + a third style
-   option; flip the per-child Minecraft cosmetic default off for business output.
+1. **FEAT-28 — Garden themes config.** Add two clean non-branded garden-theme presets — Garden
+   Defense (flagship) + Gentle Garden (spinoff), cartoon house style — and a third style option;
+   flip the per-child Minecraft cosmetic default off for business output.
 2. **FEAT-27 — Kit assembler.** Expand Workshop print/export to render story + clue cards +
    defense map + badge into one print package from already-stored `storyGames` data. Mirror
    `printBook.ts`. This is the load-bearing build.
@@ -240,10 +243,10 @@ month to a Series S, or ~11–13 party kits on the party tier alone.
   with the child's age or neurodivergence.
 - **Product safety:** label "Ages 5+, contains small parts, adult setup recommended"; avoid tiny
   magnets, sharp objects, candy look-alikes.
-- **IP:** original names and creatures only — "Block Garden," "Sprout Cannon," "Blocky Bog
-  Monster." Avoid Plants vs. Zombies and Minecraft names, characters, and art. The app's
-  copyright-rewrite step already strips brand terms from generated art; the Block Garden theme
-  keeps business output clean by construction.
+- **IP:** original names and creatures only — "Garden Defense," "Gentle Garden," "Sprout Cannon,"
+  "Blocky Bog Monster." Avoid Plants vs. Zombies and Minecraft names, characters, and art. The app's
+  copyright-rewrite step already strips brand terms from generated art; the two clean-IP garden
+  themes (cartoon house style) keep business output clean by construction.
 - **Platform ages:** all public accounts (Etsy, Pinterest, Facebook Marketplace, YouTube) are
   parent-owned and parent-run.
 
