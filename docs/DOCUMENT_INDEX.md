@@ -89,6 +89,7 @@
 | `review/UI_BATCH2_HEX_RECONCILIATION.md` | **CURRENT** | MUI hex vs theme palette reconciliation for batch 2 surfaces |
 | `review/DATA_COMPONENT_TRACE.md` | **CURRENT** | Data component trace — data flow through UI components |
 | `review/LONDON_EVAL_READINESS.md` | **CURRENT** | London evaluation readiness assessment — age-adjusted UX gap analysis |
+| `review/LEARNING_MAP_DIAGNOSIS.md` | **CURRENT** (2026-06-20) | Why the Learning Map under-credits learned skills + proposed fix (companion to the fix run). Working levels never reach the map; fix reuses the `workingLevels.ts` tag→level maps. Anchored by DOC-06. |
 | `review/prompts/` | **CURRENT** (2026-05-29) | Reusable audit prompts: `PROMPT_ARCH_AUDIT.md` (monthly), `PROMPT_AUTO_ARCH_FIX.md` (auto-fix runner), `PROMPT_BACKUP_CHECK.md`, `PROMPT_FIX.md` (issue runner) |
 | `design-pass-v1/copy-pass-audit.md` | **CURRENT** | Design pass copy audit — terminology, tone, label consistency across UI surfaces |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
