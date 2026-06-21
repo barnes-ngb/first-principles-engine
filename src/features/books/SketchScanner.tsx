@@ -9,97 +9,45 @@ import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import TextField from '@mui/material/TextField'
-import MenuItem from '@mui/material/MenuItem'
+import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Box from '@mui/material/Box'
 import Tabs from '@mui/material/Tabs'
 import Tab from '@mui/material/Tab'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
+import UploadIcon from '@mui/icons-material/Upload'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useAI } from '../../core/ai/useAI'
 import { cleanSketchBackground } from './cleanSketch'
+import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
+import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
+import {
+  FANCY_STYLE_OPTIONS,
+  DEFAULT_FANCY_STYLE_ID,
+  resolveFancyEnhanceParams,
+} from './drawingStickerStyles'
 import { StickerCategory } from '../../core/types/enums'
-import type { StickerTag } from '../../core/types/books'
+import type { Sticker, StickerTag } from '../../core/types'
+import { STICKER_TAG_LABELS } from '../../core/types'
 
 interface SketchScannerProps {
   open: boolean
   onClose: () => void
   familyId: string
-  childId: string
-  childName: string
-  /** Called when user chooses "Add to Book" — passes the selected file */
-  onAddToBook?: (file: File) => void
-  /** Hide the "Add to Book" option (when opened outside book editor) */
-  hideAddToBook?: boolean
+  /** Pre-selects the "For" target on the tagging step. */
+  childProfile?: 'lincoln' | 'london'
+  /** Used for the default sticker label. */
+  childName?: string
+  /** Fired after each sticker (raw cleaned or fancy) is saved to the library. */
+  onSaved?: () => void
 }
 
-const STICKER_CATEGORIES = [
-  { value: StickerCategory.Animals, label: 'Animals' },
-  { value: StickerCategory.Nature, label: 'Nature' },
-  { value: StickerCategory.People, label: 'People' },
-  { value: StickerCategory.Fantasy, label: 'Fantasy' },
-  { value: StickerCategory.Vehicles, label: 'Vehicles' },
-  { value: StickerCategory.Minecraft, label: 'Minecraft' },
-  { value: StickerCategory.Custom, label: 'Custom' },
-] as const
-
-const TAG_OPTIONS: { value: StickerTag; label: string }[] = [
-  { value: 'animal', label: 'Animal' },
-  { value: 'nature', label: 'Nature' },
-  { value: 'character', label: 'Character' },
-  { value: 'object', label: 'Object' },
-  { value: 'fantasy', label: 'Fantasy' },
-  { value: 'vehicle', label: 'Vehicle' },
-  { value: 'food', label: 'Food' },
-  { value: 'minecraft', label: 'Minecraft' },
-]
-
-const CHECKERBOARD_BG =
-  'repeating-conic-gradient(#e0e0e0 0% 25%, transparent 0% 50%) 50% / 16px 16px'
-
-type Stage = 'capture' | 'cleaning' | 'preview' | 'saving' | 'done'
-type PreviewTab = 'original' | 'cleaned' | 'reimagined'
-
-async function saveAsSticker(
-  familyId: string,
-  childId: string,
-  file: File,
-  label: string,
-  category: StickerCategory,
-  tag: StickerTag,
-  extraFields?: {
-    originalUrl?: string
-    cleanedUrl?: string
-    reimaginedUrl?: string
-    selectedVersion?: PreviewTab
-  },
-) {
-  const path = `families/${familyId}/stickers/${Date.now()}_${file.name}`
-  const storageRef = ref(storage, path)
-  const snap = await uploadBytes(storageRef, file)
-  const url = await getDownloadURL(snap.ref)
-
-  await addDoc(stickerLibraryCollection(familyId), {
-    url,
-    storagePath: path,
-    label,
-    category,
-    childId,
-    createdAt: new Date().toISOString(),
-    tags: [tag],
-    childProfile: childId.includes('london')
-      ? 'london'
-      : childId.includes('lincoln')
-        ? 'lincoln'
-        : 'both',
-    ...(extraFields?.originalUrl && { originalUrl: extraFields.originalUrl }),
-    ...(extraFields?.cleanedUrl && { cleanedUrl: extraFields.cleanedUrl }),
-    ...(extraFields?.reimaginedUrl && { reimaginedUrl: extraFields.reimaginedUrl }),
-    ...(extraFields?.selectedVersion && { selectedVersion: extraFields.selectedVersion }),
-  })
-}
+type Stage = 'capture' | 'cleaning' | 'preview'
+type PreviewTab = 'original' | 'cleaned' | 'fancy'
+type SaveVersion = 'cleaned' | 'fancy'
 
 /** Upload a file to Firebase Storage and return { url, storagePath }. */
 async function uploadToStorage(familyId: string, file: File, subfolder: string) {
@@ -108,41 +56,56 @@ async function uploadToStorage(familyId: string, file: File, subfolder: string) 
   const storageRef = ref(storage, path)
   const snap = await uploadBytes(storageRef, file)
   const url = await getDownloadURL(snap.ref)
-  return { url, storagePath: path, ref: snap.ref }
+  return { url, storagePath: path }
 }
 
+/**
+ * Drawing → sticker studio (FEAT-33 slice 2). Standalone — no open book/page.
+ * A kid captures or uploads a drawing → it's cleaned to a transparent sticker →
+ * optionally a style picker transforms it into a polished version → the raw
+ * cleaned sticker and/or the fancy one can be saved to the library (the two
+ * product lines per drawing). Tagging is shared with the rest of the sticker
+ * UIs via `stickerTagging.ts`.
+ */
 export default function SketchScanner({
   open,
   onClose,
   familyId,
-  childId,
+  childProfile,
   childName,
-  onAddToBook,
-  hideAddToBook,
+  onSaved,
 }: SketchScannerProps) {
+  const defaultLabel = childName ? `${childName}'s drawing` : 'My drawing'
+
   const [stage, setStage] = useState<Stage>('capture')
   const [previewTab, setPreviewTab] = useState<PreviewTab>('cleaned')
 
-  // File / URL state for all three versions
+  // Original + cleaned versions
   const [originalFile, setOriginalFile] = useState<File | null>(null)
   const [originalUrl, setOriginalUrl] = useState<string | null>(null)
   const [originalStoragePath, setOriginalStoragePath] = useState<string | null>(null)
-
   const [cleanedFile, setCleanedFile] = useState<File | null>(null)
   const [cleanedUrl, setCleanedUrl] = useState<string | null>(null)
 
-  const [reimaginedUrl, setReimaginedUrl] = useState<string | null>(null)
-  const [reimaginedFile, setReimaginedFile] = useState<File | null>(null)
-  const [reimagining, setReimagining] = useState(false)
-  const [reimagineError, setReimagineError] = useState<string | null>(null)
+  // Fancy (theme-transformed) version
+  const [styleId, setStyleId] = useState<string>(DEFAULT_FANCY_STYLE_ID)
+  const [fancyUrl, setFancyUrl] = useState<string | null>(null)
+  const [fancyStoragePath, setFancyStoragePath] = useState<string | null>(null)
+  const [enhancing, setEnhancing] = useState(false)
+  const [enhanceError, setEnhanceError] = useState<string | null>(null)
 
-  // Sticker metadata
-  const [label, setLabel] = useState(`${childName}'s drawing`)
-  const [category, setCategory] = useState<StickerCategory>(StickerCategory.Custom)
-  const [tag, setTag] = useState<StickerTag>('object')
+  // Shared tagging (applies to whichever version is saved)
+  const [label, setLabel] = useState(defaultLabel)
+  const [tags, setTags] = useState<StickerTag[]>([])
+  const [profile, setProfile] = useState<'lincoln' | 'london' | 'both'>(childProfile ?? 'both')
+
+  // Save state
+  const [savingVersion, setSavingVersion] = useState<SaveVersion | null>(null)
+  const [savedVersions, setSavedVersions] = useState<Set<SaveVersion>>(new Set())
   const [error, setError] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
   const { enhanceSketch } = useAI()
 
   const reset = useCallback(() => {
@@ -151,17 +114,20 @@ export default function SketchScanner({
     setOriginalFile(null)
     setOriginalUrl(null)
     setOriginalStoragePath(null)
-    setCleanedUrl(null)
     setCleanedFile(null)
-    setReimaginedUrl(null)
-    setReimaginedFile(null)
-    setReimagining(false)
-    setReimagineError(null)
-    setLabel(`${childName}'s drawing`)
-    setCategory(StickerCategory.Custom)
-    setTag('object')
+    setCleanedUrl(null)
+    setStyleId(DEFAULT_FANCY_STYLE_ID)
+    setFancyUrl(null)
+    setFancyStoragePath(null)
+    setEnhancing(false)
+    setEnhanceError(null)
+    setLabel(defaultLabel)
+    setTags([])
+    setProfile(childProfile ?? 'both')
+    setSavingVersion(null)
+    setSavedVersions(new Set())
     setError(null)
-  }, [childName])
+  }, [defaultLabel, childProfile])
 
   const handleClose = useCallback(() => {
     reset()
@@ -171,6 +137,8 @@ export default function SketchScanner({
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
+      // Allow re-selecting the same file later.
+      e.target.value = ''
       if (!file) return
 
       setError(null)
@@ -182,6 +150,8 @@ export default function SketchScanner({
         const cleaned = await cleanSketchBackground(file)
         setCleanedFile(cleaned)
         setCleanedUrl(URL.createObjectURL(cleaned))
+        // Seed tags from the default label so saving is one tap if they don't edit.
+        setTags(suggestTagsFromPrompt(defaultLabel))
         setStage('preview')
         setPreviewTab('cleaned')
       } catch {
@@ -189,10 +159,10 @@ export default function SketchScanner({
         setStage('capture')
       }
     },
-    [],
+    [defaultLabel],
   )
 
-  // Upload original to storage (lazy — only when reimagine is first requested)
+  // Upload original to storage (lazy — only when the transform is first requested).
   const ensureOriginalUploaded = useCallback(async (): Promise<string | null> => {
     if (originalStoragePath) return originalStoragePath
     if (!originalFile) return null
@@ -205,93 +175,133 @@ export default function SketchScanner({
     }
   }, [originalFile, originalStoragePath, familyId])
 
-  const handleReimagine = useCallback(async () => {
-    if (reimaginedUrl || reimagining) return
-
-    setReimagining(true)
-    setReimagineError(null)
-    setPreviewTab('reimagined')
+  const handleMakeFancy = useCallback(async () => {
+    if (enhancing) return
+    setEnhancing(true)
+    setEnhanceError(null)
+    setPreviewTab('fancy')
 
     try {
       const storagePath = await ensureOriginalUploaded()
       if (!storagePath) {
-        setReimagineError('Failed to upload sketch. Please try again.')
-        setReimagining(false)
+        setEnhanceError('Failed to upload drawing. Please try again.')
         return
       }
 
       const result = await enhanceSketch({
         familyId,
         sketchStoragePath: storagePath,
-        style: 'storybook',
+        ...resolveFancyEnhanceParams(styleId),
       })
 
       if (result?.url) {
-        setReimaginedUrl(result.url)
-        // Fetch the image as a File so it can be saved as sticker / added to book
-        try {
-          const resp = await fetch(result.url)
-          const blob = await resp.blob()
-          setReimaginedFile(new File([blob], 'reimagined.png', { type: 'image/png' }))
-        } catch {
-          // URL is still valid for display even if we can't create a File
-        }
+        setFancyUrl(result.url)
+        setFancyStoragePath(result.storagePath)
+        // A fresh transform replaces any previously-saved fancy version.
+        setSavedVersions((prev) => {
+          if (!prev.has('fancy')) return prev
+          const next = new Set(prev)
+          next.delete('fancy')
+          return next
+        })
       } else {
-        setReimagineError('Enhancement returned no image. Please try again.')
+        setEnhanceError('Transform returned no image. Please try again.')
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Enhancement failed'
-      setReimagineError(msg)
+      setEnhanceError(err instanceof Error ? err.message : 'Transform failed')
     } finally {
-      setReimagining(false)
+      setEnhancing(false)
     }
-  }, [reimaginedUrl, reimagining, ensureOriginalUploaded, enhanceSketch, familyId])
+  }, [enhancing, ensureOriginalUploaded, enhanceSketch, familyId, styleId])
 
-  /** Get the file for the currently selected preview tab. */
-  const getActiveFile = useCallback((): File | null => {
-    if (previewTab === 'original') return originalFile
-    if (previewTab === 'reimagined') return reimaginedFile
-    return cleanedFile
-  }, [previewTab, originalFile, cleanedFile, reimaginedFile])
+  const saveSticker = useCallback(
+    async (version: SaveVersion) => {
+      const url = version === 'cleaned' ? cleanedUrl : fancyUrl
+      if (savingVersion || savedVersions.has(version)) return
 
-  const handleSaveAsSticker = useCallback(async () => {
-    const file = getActiveFile()
-    if (!file) return
-    setStage('saving')
-    setError(null)
-    try {
-      await saveAsSticker(familyId, childId, file, label, category, tag, {
-        originalUrl: originalUrl ?? undefined,
-        cleanedUrl: cleanedUrl ?? undefined,
-        reimaginedUrl: reimaginedUrl ?? undefined,
-        selectedVersion: previewTab,
-      })
-      setStage('done')
-    } catch {
-      setError('Failed to save sticker. Please try again.')
-      setStage('preview')
-    }
-  }, [getActiveFile, familyId, childId, label, category, tag, originalUrl, cleanedUrl, reimaginedUrl, previewTab])
+      setSavingVersion(version)
+      setError(null)
+      try {
+        let saveUrl = url
+        let savePath: string
 
-  const handleAddToBook = useCallback(() => {
-    const file = getActiveFile()
-    if (!file || !onAddToBook) return
-    onAddToBook(file)
-    handleClose()
-  }, [getActiveFile, onAddToBook, handleClose])
+        if (version === 'cleaned') {
+          if (!cleanedFile) return
+          const uploaded = await uploadToStorage(familyId, cleanedFile, 'stickers')
+          saveUrl = uploaded.url
+          savePath = uploaded.storagePath
+        } else {
+          if (!fancyUrl || !fancyStoragePath) return
+          savePath = fancyStoragePath
+        }
 
-  const showTransparencyBg = previewTab === 'cleaned' || previewTab === 'reimagined'
+        if (!saveUrl) return
+
+        const newSticker: Omit<Sticker, 'id'> = {
+          url: saveUrl,
+          storagePath: savePath,
+          label: label.trim() || defaultLabel,
+          category: StickerCategory.Custom,
+          childId: null,
+          createdAt: new Date().toISOString(),
+          tags: tags.length ? tags : ['object'],
+          childProfile: profile,
+        }
+        await addDoc(stickerLibraryCollection(familyId), newSticker as Sticker)
+        setSavedVersions((prev) => new Set(prev).add(version))
+        onSaved?.()
+      } catch {
+        setError('Failed to save sticker. Please try again.')
+      } finally {
+        setSavingVersion(null)
+      }
+    },
+    [
+      cleanedUrl,
+      fancyUrl,
+      fancyStoragePath,
+      cleanedFile,
+      savingVersion,
+      savedVersions,
+      familyId,
+      label,
+      defaultLabel,
+      tags,
+      profile,
+      onSaved,
+    ],
+  )
+
+  const toggleTag = useCallback((tag: StickerTag) => {
+    setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
+  }, [])
+
+  const showTransparencyBg = previewTab === 'cleaned' || previewTab === 'fancy'
+  const anySaved = savedVersions.size > 0
+
+  // The contextual save target for the footer (Original is reference-only).
+  const saveTarget: SaveVersion | null =
+    previewTab === 'cleaned' ? 'cleaned' : previewTab === 'fancy' ? 'fancy' : null
+  const saveTargetReady =
+    saveTarget === 'cleaned' ? !!cleanedFile : saveTarget === 'fancy' ? !!fancyUrl : false
 
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
-      <DialogTitle>Sketch Scanner</DialogTitle>
+      <DialogTitle>From a Drawing</DialogTitle>
 
       <DialogContent>
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileChange}
+          style={{ display: 'none' }}
+        />
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           onChange={handleFileChange}
           style={{ display: 'none' }}
         />
@@ -303,13 +313,21 @@ export default function SketchScanner({
               variant="outlined"
               size="large"
               startIcon={<CameraAltIcon />}
-              onClick={() => fileInputRef.current?.click()}
-              sx={{ py: 2, px: 4, fontSize: '1.1rem' }}
+              onClick={() => cameraInputRef.current?.click()}
+              sx={{ py: 2, px: 4, fontSize: '1.1rem', minWidth: 260 }}
             >
               Take Photo of Drawing
             </Button>
-            <Typography variant="body2" color="text.secondary">
-              Photograph a drawing on paper to turn it into a sticker
+            <Button
+              variant="text"
+              startIcon={<UploadIcon />}
+              onClick={() => fileInputRef.current?.click()}
+              sx={{ textTransform: 'none' }}
+            >
+              Upload a picture
+            </Button>
+            <Typography variant="body2" color="text.secondary" textAlign="center">
+              Photograph or upload a drawing to turn it into a sticker
             </Typography>
           </Stack>
         )}
@@ -318,30 +336,29 @@ export default function SketchScanner({
         {stage === 'cleaning' && (
           <Stack alignItems="center" spacing={2} sx={{ py: 4 }}>
             <CircularProgress />
-            <Typography>Removing paper background...</Typography>
+            <Typography>Removing the background...</Typography>
           </Stack>
         )}
 
         {/* Preview stage */}
-        {(stage === 'preview' || stage === 'saving') && (
+        {stage === 'preview' && (
           <Stack spacing={2}>
-            {/* Tab selector: Original | Cleaned | Reimagined */}
+            {/* Tab selector: Original | Cleaned | Fancy */}
             <Tabs
               value={previewTab}
-              onChange={(_, v: PreviewTab) => {
-                setPreviewTab(v)
-                if (v === 'reimagined' && !reimaginedUrl && !reimagining) {
-                  void handleReimagine()
-                }
-              }}
+              onChange={(_, v: PreviewTab) => setPreviewTab(v)}
               variant="fullWidth"
               sx={{ minHeight: 36 }}
             >
               <Tab label="Original" value="original" sx={{ minHeight: 36, py: 0.5 }} />
-              <Tab label="Cleaned" value="cleaned" sx={{ minHeight: 36, py: 0.5 }} />
               <Tab
-                label="Reimagined"
-                value="reimagined"
+                label={savedVersions.has('cleaned') ? 'Cleaned ✓' : 'Cleaned'}
+                value="cleaned"
+                sx={{ minHeight: 36, py: 0.5 }}
+              />
+              <Tab
+                label={savedVersions.has('fancy') ? 'Fancy ✓' : 'Fancy'}
+                value="fancy"
                 icon={<AutoAwesomeIcon sx={{ fontSize: 16 }} />}
                 iconPosition="start"
                 sx={{ minHeight: 36, py: 0.5 }}
@@ -363,7 +380,6 @@ export default function SketchScanner({
                 ...(showTransparencyBg && { background: CHECKERBOARD_BG }),
               }}
             >
-              {/* Original tab */}
               {previewTab === 'original' && originalUrl && (
                 <Box
                   component="img"
@@ -373,7 +389,6 @@ export default function SketchScanner({
                 />
               )}
 
-              {/* Cleaned tab */}
               {previewTab === 'cleaned' && cleanedUrl && (
                 <Box
                   component="img"
@@ -383,40 +398,92 @@ export default function SketchScanner({
                 />
               )}
 
-              {/* Reimagined tab */}
-              {previewTab === 'reimagined' && (
+              {previewTab === 'fancy' && (
                 <>
-                  {reimagining && (
+                  {enhancing && (
                     <Stack alignItems="center" spacing={1.5} sx={{ py: 4 }}>
                       <CircularProgress size={32} />
                       <Typography variant="body2" color="text.secondary">
-                        Reimagining {childName}&apos;s drawing...
+                        Making it fancy...
                       </Typography>
                     </Stack>
                   )}
-                  {!reimagining && reimaginedUrl && (
+                  {!enhancing && fancyUrl && (
                     <Box
                       component="img"
-                      src={reimaginedUrl}
-                      alt="AI-reimagined illustration"
+                      src={fancyUrl}
+                      alt="Fancy version"
                       sx={{ width: '100%', display: 'block' }}
                     />
                   )}
-                  {!reimagining && reimagineError && (
-                    <Stack alignItems="center" spacing={1.5} sx={{ py: 4 }}>
-                      <Typography variant="body2" color="error">
-                        {reimagineError}
+                  {!enhancing && !fancyUrl && (
+                    <Stack alignItems="center" spacing={1.5} sx={{ py: 3, px: 2, width: '100%' }}>
+                      <Typography variant="body2" color="text.secondary" textAlign="center">
+                        Pick a style, then make a polished version of the drawing.
                       </Typography>
-                      <Button size="small" onClick={handleReimagine}>
-                        Try Again
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, justifyContent: 'center' }}>
+                        {FANCY_STYLE_OPTIONS.map((option) => (
+                          <Chip
+                            key={option.id}
+                            label={`${option.emoji} ${option.label}`}
+                            size="small"
+                            variant={styleId === option.id ? 'filled' : 'outlined'}
+                            color={styleId === option.id ? 'primary' : 'default'}
+                            onClick={() => setStyleId(option.id)}
+                          />
+                        ))}
+                      </Box>
+                      <Button
+                        variant="contained"
+                        startIcon={<AutoAwesomeIcon />}
+                        onClick={() => void handleMakeFancy()}
+                        sx={{ minHeight: 44, textTransform: 'none' }}
+                      >
+                        Make it fancy
                       </Button>
+                      {enhanceError && (
+                        <Typography variant="body2" color="error" textAlign="center">
+                          {enhanceError}
+                        </Typography>
+                      )}
                     </Stack>
                   )}
                 </>
               )}
             </Box>
 
-            {/* Label */}
+            {/* Re-style controls once a fancy version exists */}
+            {previewTab === 'fancy' && fancyUrl && !enhancing && (
+              <Stack spacing={1}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                  {FANCY_STYLE_OPTIONS.map((option) => (
+                    <Chip
+                      key={option.id}
+                      label={`${option.emoji} ${option.label}`}
+                      size="small"
+                      variant={styleId === option.id ? 'filled' : 'outlined'}
+                      color={styleId === option.id ? 'primary' : 'default'}
+                      onClick={() => setStyleId(option.id)}
+                    />
+                  ))}
+                </Box>
+                <Button
+                  size="small"
+                  startIcon={<AutoAwesomeIcon />}
+                  onClick={() => void handleMakeFancy()}
+                  sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+                >
+                  Redo with this style
+                </Button>
+                {enhanceError && (
+                  <Typography variant="body2" color="error">
+                    {enhanceError}
+                  </Typography>
+                )}
+              </Stack>
+            )}
+
+            {/* Shared tagging */}
             <TextField
               label="Sticker label"
               value={label}
@@ -425,51 +492,51 @@ export default function SketchScanner({
               size="small"
             />
 
-            {/* Category */}
-            <TextField
-              label="Category"
-              select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as StickerCategory)}
-              fullWidth
-              size="small"
-            >
-              {STICKER_CATEGORIES.map((c) => (
-                <MenuItem key={c.value} value={c.value}>
-                  {c.label}
-                </MenuItem>
-              ))}
-            </TextField>
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                Tags (tap to select):
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                {STICKER_TAGS_ORDERED.map((tag) => (
+                  <Chip
+                    key={tag}
+                    label={STICKER_TAG_LABELS[tag]}
+                    size="small"
+                    variant={tags.includes(tag) ? 'filled' : 'outlined'}
+                    onClick={() => toggleTag(tag)}
+                  />
+                ))}
+              </Box>
+            </Box>
 
-            {/* Tag */}
-            <TextField
-              label="Tag"
-              select
-              value={tag}
-              onChange={(e) => setTag(e.target.value as StickerTag)}
-              fullWidth
-              size="small"
-            >
-              {TAG_OPTIONS.map((t) => (
-                <MenuItem key={t.value} value={t.value}>
-                  {t.label}
-                </MenuItem>
-              ))}
-            </TextField>
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                For:
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 0.75 }}>
+                {(['lincoln', 'london', 'both'] as const).map((p) => (
+                  <Chip
+                    key={p}
+                    label={p === 'both' ? 'Both' : p.charAt(0).toUpperCase() + p.slice(1)}
+                    size="small"
+                    variant={profile === p ? 'filled' : 'outlined'}
+                    onClick={() => setProfile(p)}
+                  />
+                ))}
+              </Box>
+            </Box>
+
+            {anySaved && (
+              <Stack direction="row" spacing={0.5} alignItems="center">
+                <CheckCircleIcon color="success" sx={{ fontSize: 18 }} />
+                <Typography variant="body2" color="success.main">
+                  Saved to your sticker library — you can save the other version too.
+                </Typography>
+              </Stack>
+            )}
           </Stack>
         )}
 
-        {/* Done stage */}
-        {stage === 'done' && (
-          <Stack alignItems="center" spacing={2} sx={{ py: 4 }}>
-            <Typography variant="h6">Sticker saved!</Typography>
-            <Typography variant="body2" color="text.secondary">
-              You can find it in the sticker library.
-            </Typography>
-          </Stack>
-        )}
-
-        {/* Error */}
         {error && (
           <Typography color="error" sx={{ mt: 1 }}>
             {error}
@@ -478,45 +545,43 @@ export default function SketchScanner({
       </DialogContent>
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        {stage === 'capture' && (
-          <Button onClick={handleClose}>Cancel</Button>
-        )}
+        {stage === 'capture' && <Button onClick={handleClose}>Cancel</Button>}
 
-        {(stage === 'preview' || stage === 'saving') && (
+        {stage === 'preview' && (
           <>
-            <Button onClick={reset} disabled={stage === 'saving'}>
+            <Button onClick={reset} disabled={savingVersion !== null}>
               Retake
             </Button>
             <Box sx={{ flex: 1 }} />
-            {!hideAddToBook && onAddToBook && (
-              <Button
-                variant="outlined"
-                onClick={handleAddToBook}
-                disabled={stage === 'saving' || (previewTab === 'reimagined' && reimagining)}
-                sx={{ minHeight: 44 }}
-              >
-                Add to Book
+            {anySaved && (
+              <Button variant="outlined" onClick={handleClose} disabled={savingVersion !== null}>
+                Done
               </Button>
             )}
-            <Button
-              variant="contained"
-              onClick={handleSaveAsSticker}
-              disabled={stage === 'saving' || !label.trim() || (previewTab === 'reimagined' && reimagining)}
-              sx={{ minHeight: 44 }}
-            >
-              {stage === 'saving' ? (
-                <CircularProgress size={22} color="inherit" />
-              ) : (
-                'Save as Sticker'
-              )}
-            </Button>
+            {saveTarget && (
+              <Button
+                variant="contained"
+                onClick={() => void saveSticker(saveTarget)}
+                disabled={
+                  savingVersion !== null ||
+                  !saveTargetReady ||
+                  !label.trim() ||
+                  savedVersions.has(saveTarget)
+                }
+                sx={{ minHeight: 44 }}
+              >
+                {savingVersion === saveTarget ? (
+                  <CircularProgress size={22} color="inherit" />
+                ) : savedVersions.has(saveTarget) ? (
+                  'Saved ✓'
+                ) : saveTarget === 'fancy' ? (
+                  'Save Fancy'
+                ) : (
+                  'Save Cleaned'
+                )}
+              </Button>
+            )}
           </>
-        )}
-
-        {stage === 'done' && (
-          <Button variant="contained" onClick={handleClose}>
-            Done
-          </Button>
         )}
       </DialogActions>
     </Dialog>
