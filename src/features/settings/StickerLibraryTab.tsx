@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -9,16 +10,20 @@ import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
-import { deleteDoc, doc, getDocs, orderBy, query, setDoc } from 'firebase/firestore'
+import { deleteDoc, doc, getDocs, orderBy, query, updateDoc } from 'firebase/firestore'
 
 import { EmptyState, LoadingState } from '../../components/states'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { useAI } from '../../core/ai/useAI'
 import type { Sticker, StickerTag } from '../../core/types'
 import { groupStickers } from '../books/stickerGrouping'
 import DrawingGroupCard from '../books/DrawingGroupCard'
+import { generateStickerVersion } from '../books/generateStickerVersion'
+import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from '../books/drawingStickerStyles'
 
 const STICKER_TAG_LABELS: Record<StickerTag, string> = {
   animal: 'Animal',
@@ -71,6 +76,7 @@ export default function StickerLibraryTab({
   groupByDrawing = false,
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
+  const { enhanceSketch } = useAI()
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [loading, setLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<Sticker | null>(null)
@@ -78,6 +84,12 @@ export default function StickerLibraryTab({
   const [editProfile, setEditProfile] = useState<'lincoln' | 'london' | 'both'>('both')
   const [deleteTarget, setDeleteTarget] = useState<Sticker | null>(null)
   const [saving, setSaving] = useState(false)
+  // "Make more versions" flow (FEAT-33 slice 4): theme picker for the sticker
+  // being edited. Adopts a standalone sticker into a drawing group on first use.
+  const [makeVersionsOpen, setMakeVersionsOpen] = useState(false)
+  const [makeStyleId, setMakeStyleId] = useState(DEFAULT_FANCY_STYLE_ID)
+  const [makingVersion, setMakingVersion] = useState(false)
+  const [makeError, setMakeError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!familyId) return
@@ -113,20 +125,62 @@ export default function StickerLibraryTab({
     setEditTarget(sticker)
     setEditTags(sticker.tags ?? ['other'])
     setEditProfile(sticker.childProfile ?? 'both')
+    setMakeVersionsOpen(false)
+    setMakeStyleId(DEFAULT_FANCY_STYLE_ID)
+    setMakeError(null)
   }, [])
 
   const handleSaveEdit = useCallback(async () => {
     if (!editTarget?.id) return
     setSaving(true)
-    const updated: Sticker = { ...editTarget, tags: editTags, childProfile: editProfile }
+    // Partial update (never a bare setDoc): editing tags/profile must not drop
+    // link fields (sourceDrawingId / theme / isOriginal) or anything else.
+    const patch = { tags: editTags, childProfile: editProfile }
     try {
-      await setDoc(doc(stickerLibraryCollection(familyId), editTarget.id), updated)
-      setStickers((prev) => prev.map((s) => s.id === editTarget.id ? updated : s))
+      await updateDoc(doc(stickerLibraryCollection(familyId), editTarget.id), patch)
+      setStickers((prev) => prev.map((s) => (s.id === editTarget.id ? { ...s, ...patch } : s)))
     } finally {
       setSaving(false)
       setEditTarget(null)
     }
   }, [editTarget, editTags, editProfile, familyId])
+
+  const handleMakeVersion = useCallback(async () => {
+    if (!editTarget?.id || makingVersion) return
+    setMakingVersion(true)
+    setMakeError(null)
+    try {
+      // Adopt if needed: a standalone sticker becomes a drawing group's original
+      // via an additive, non-destructive write. Never a bare setDoc.
+      let sourceDrawingId = editTarget.sourceDrawingId
+      let source = editTarget
+      if (!sourceDrawingId) {
+        sourceDrawingId = crypto.randomUUID()
+        const adoption = { sourceDrawingId, isOriginal: true }
+        await updateDoc(doc(stickerLibraryCollection(familyId), editTarget.id), adoption)
+        source = { ...editTarget, ...adoption }
+      }
+      const res = await generateStickerVersion({
+        familyId,
+        source,
+        styleId: makeStyleId,
+        sourceDrawingId,
+        label: editTarget.label,
+        enhanceSketch,
+      })
+      if (!res.ok) {
+        setMakeError(res.error)
+        return
+      }
+      setMakeVersionsOpen(false)
+      setEditTarget(null)
+      void load()
+    } catch (err) {
+      setMakeError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setMakingVersion(false)
+    }
+  }, [editTarget, makingVersion, makeStyleId, familyId, enhanceSketch, load])
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget?.id) return
@@ -236,10 +290,20 @@ export default function StickerLibraryTab({
                 borderRadius: 1,
               }}
             >
-              <IconButton size="small" onClick={() => handleOpenEdit(sticker)} sx={{ p: 0.5 }}>
+              <IconButton
+                size="small"
+                aria-label={`Edit ${sticker.label}`}
+                onClick={() => handleOpenEdit(sticker)}
+                sx={{ p: 0.5 }}
+              >
                 <EditIcon sx={{ fontSize: 14 }} />
               </IconButton>
-              <IconButton size="small" onClick={() => setDeleteTarget(sticker)} sx={{ p: 0.5 }}>
+              <IconButton
+                size="small"
+                aria-label={`Delete ${sticker.label}`}
+                onClick={() => setDeleteTarget(sticker)}
+                sx={{ p: 0.5 }}
+              >
                 <DeleteOutlineIcon sx={{ fontSize: 14 }} />
               </IconButton>
             </Stack>
@@ -300,6 +364,17 @@ export default function StickerLibraryTab({
                 ))}
               </Box>
             </Box>
+
+            {/* Make more versions (FEAT-33 slice 4): any sticker can grow a
+                themed version. Adopts standalone stickers into a drawing group. */}
+            <Button
+              variant="outlined"
+              startIcon={<AutoAwesomeIcon />}
+              onClick={() => { setMakeError(null); setMakeVersionsOpen(true) }}
+              sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+            >
+              Make more versions
+            </Button>
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -310,6 +385,55 @@ export default function StickerLibraryTab({
             disabled={saving}
           >
             {saving ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Make-more-versions theme picker (FEAT-33 slice 4) */}
+      <Dialog
+        open={makeVersionsOpen}
+        onClose={() => !makingVersion && setMakeVersionsOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Make another version</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+            <Typography variant="body2" color="text.secondary">
+              Pick a style — we'll imagine "{editTarget?.label}" that way and keep it with
+              this drawing.
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+              {FANCY_STYLE_OPTIONS.map((option) => (
+                <Chip
+                  key={option.id}
+                  label={`${option.emoji} ${option.label}`}
+                  size="small"
+                  variant={makeStyleId === option.id ? 'filled' : 'outlined'}
+                  color={makeStyleId === option.id ? 'primary' : 'default'}
+                  onClick={() => setMakeStyleId(option.id)}
+                />
+              ))}
+            </Box>
+            {makeError && (
+              <Typography variant="body2" color="error">
+                {makeError}
+              </Typography>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMakeVersionsOpen(false)} disabled={makingVersion}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={makingVersion ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
+            onClick={() => { void handleMakeVersion() }}
+            disabled={makingVersion}
+            sx={{ minHeight: 44 }}
+          >
+            {makingVersion ? 'Making...' : 'Make it'}
           </Button>
         </DialogActions>
       </Dialog>

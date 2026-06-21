@@ -14,6 +14,10 @@ vi.mock('../../core/firebase/firestore', () => ({
   stickerLibraryCollection: () => ({}),
 }))
 
+vi.mock('../../core/ai/useAI', () => ({
+  useAI: () => ({ enhanceSketch: vi.fn() }),
+}))
+
 const stickersFixture: Sticker[] = [
   {
     id: 'a',
@@ -51,7 +55,8 @@ vi.mock('firebase/firestore', () => ({
   query: (...args: unknown[]) => args,
   orderBy: () => 'orderBy',
   doc: () => ({}),
-  setDoc: vi.fn(),
+  updateDoc: vi.fn(),
+  addDoc: vi.fn(),
   deleteDoc: vi.fn(),
   getDocs: () =>
     Promise.resolve({
