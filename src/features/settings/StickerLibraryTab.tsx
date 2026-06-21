@@ -43,7 +43,20 @@ function withDefaults(sticker: Sticker): Sticker {
   }
 }
 
-export default function StickerLibraryTab() {
+interface StickerLibraryTabProps {
+  /** Bump to force a reload (e.g. after a new sticker is made elsewhere on the page). */
+  refreshSignal?: number
+  /** Empty-state copy. Defaults to the Settings/admin wording. */
+  emptyDescription?: string
+  /** When set, only show stickers for this child (or marked "both"). */
+  childProfileFilter?: 'lincoln' | 'london'
+}
+
+export default function StickerLibraryTab({
+  refreshSignal,
+  emptyDescription = 'Generate some in the book editor!',
+  childProfileFilter,
+}: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [loading, setLoading] = useState(false)
@@ -62,7 +75,14 @@ export default function StickerLibraryTab() {
     setLoading(false)
   }, [familyId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load() }, [load, refreshSignal])
+
+  const visibleStickers = childProfileFilter
+    ? stickers.filter((s) => {
+        const cp = s.childProfile ?? 'both'
+        return cp === 'both' || cp === childProfileFilter
+      })
+    : stickers
 
   const handleOpenEdit = useCallback((sticker: Sticker) => {
     setEditTarget(sticker)
@@ -94,11 +114,11 @@ export default function StickerLibraryTab() {
     return <LoadingState fullHeight />
   }
 
-  if (stickers.length === 0) {
+  if (visibleStickers.length === 0) {
     return (
       <EmptyState
         title="No stickers yet"
-        description="Generate some in the book editor!"
+        description={emptyDescription}
       />
     )
   }
@@ -106,7 +126,7 @@ export default function StickerLibraryTab() {
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        {stickers.length} sticker{stickers.length !== 1 ? 's' : ''} in your library
+        {visibleStickers.length} sticker{visibleStickers.length !== 1 ? 's' : ''} in your library
       </Typography>
 
       <Box
@@ -116,7 +136,7 @@ export default function StickerLibraryTab() {
           gap: 2,
         }}
       >
-        {stickers.map((sticker) => (
+        {visibleStickers.map((sticker) => (
           <Box
             key={sticker.id}
             sx={{
