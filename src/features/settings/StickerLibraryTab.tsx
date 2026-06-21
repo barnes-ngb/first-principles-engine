@@ -50,12 +50,15 @@ interface StickerLibraryTabProps {
   emptyDescription?: string
   /** When set, only show stickers for this child (or marked "both"). */
   childProfileFilter?: 'lincoln' | 'london'
+  /** When set, only show stickers whose tags include this tag. */
+  tagFilter?: StickerTag
 }
 
 export default function StickerLibraryTab({
   refreshSignal,
   emptyDescription = 'Generate some in the book editor!',
   childProfileFilter,
+  tagFilter,
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
   const [stickers, setStickers] = useState<Sticker[]>([])
@@ -77,12 +80,17 @@ export default function StickerLibraryTab({
 
   useEffect(() => { void load() }, [load, refreshSignal])
 
-  const visibleStickers = childProfileFilter
-    ? stickers.filter((s) => {
-        const cp = s.childProfile ?? 'both'
-        return cp === 'both' || cp === childProfileFilter
-      })
-    : stickers
+  const visibleStickers = stickers.filter((s) => {
+    if (childProfileFilter) {
+      const cp = s.childProfile ?? 'both'
+      if (cp !== 'both' && cp !== childProfileFilter) return false
+    }
+    if (tagFilter) {
+      const tags = s.tags ?? ['other']
+      if (!tags.includes(tagFilter)) return false
+    }
+    return true
+  })
 
   const handleOpenEdit = useCallback((sticker: Sticker) => {
     setEditTarget(sticker)
@@ -115,6 +123,16 @@ export default function StickerLibraryTab({
   }
 
   if (visibleStickers.length === 0) {
+    // When a tag filter hides everything, point the kid back at the filter
+    // rather than the generic "make your first one" copy.
+    if (tagFilter && stickers.length > 0) {
+      return (
+        <EmptyState
+          title={`No ${STICKER_TAG_LABELS[tagFilter]} stickers yet`}
+          description="Try another tag, or make one!"
+        />
+      )
+    }
     return (
       <EmptyState
         title="No stickers yet"
