@@ -35,6 +35,10 @@ const SOFT_PROFILE_FIELDS = ['motivators', 'interests', 'strengths'] as const
  * - Tier C Option 2 additive snapshot edits: `addPrioritySkill` (+`skill`),
  *   `addSupport` (+`support`), `addStopRule` (+`rule`), `markSkillProgress`
  *   (+`skill`, optional boolean `mastered`).
+ * - `proposePlanAdjustment` (chunk 2A/2): a HANDOFF, not a write — string
+ *   `childId` + non-empty `summary` + non-empty `rationale`, optional string
+ *   `scope` / `targetWeek`. On confirm it stages a planner brief and navigates;
+ *   it never touches a child record or the plan.
  *
  * Everything else — including a well-formed JSON object carrying an unknown
  * `kind`, an `editProfileField` targeting a disallowed field like
@@ -101,6 +105,27 @@ function toChatAction(payload: unknown): ChatAction | null {
     return mastered === undefined
       ? { kind: 'markSkillProgress', childId: obj.childId, skill: obj.skill.trim() }
       : { kind: 'markSkillProgress', childId: obj.childId, skill: obj.skill.trim(), mastered }
+  }
+
+  // ── proposePlanAdjustment — a HANDOFF, never a write (chunk 2A/2) ───
+  // Validate the brief shape; on confirm this stages a doc + navigates to the
+  // planner (no child-record write, no plan write). `summary` + `rationale` are
+  // required non-empty strings; `scope` / `targetWeek` are optional string hints
+  // (kept only when present and non-empty).
+  if (obj.kind === 'proposePlanAdjustment') {
+    if (typeof obj.summary !== 'string' || obj.summary.trim().length === 0) return null
+    if (typeof obj.rationale !== 'string' || obj.rationale.trim().length === 0) return null
+    const scope = typeof obj.scope === 'string' && obj.scope.trim().length > 0 ? obj.scope.trim() : undefined
+    const targetWeek =
+      typeof obj.targetWeek === 'string' && obj.targetWeek.trim().length > 0 ? obj.targetWeek.trim() : undefined
+    return {
+      kind: 'proposePlanAdjustment',
+      childId: obj.childId,
+      summary: obj.summary.trim(),
+      rationale: obj.rationale.trim(),
+      ...(scope ? { scope } : {}),
+      ...(targetWeek ? { targetWeek } : {}),
+    }
   }
 
   return null

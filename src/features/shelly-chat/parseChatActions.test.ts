@@ -224,6 +224,62 @@ describe('parseChatActions', () => {
     expect(actions).toEqual([])
   })
 
+  // ── proposePlanAdjustment — HANDOFF (chunk 2A/2) ───────────────────
+
+  it('parses a valid proposePlanAdjustment and strips the tag', () => {
+    const raw =
+      "Let's lighten next week.\n" +
+      '<action>{"kind": "proposePlanAdjustment", "childId": "lincoln", "summary": "Reduce math to 10 min/day", "rationale": "Frustration is spiking and persistence is dropping"}</action>'
+    const { actions, cleanText } = parseChatActions(raw)
+    expect(actions).toEqual([
+      {
+        kind: 'proposePlanAdjustment',
+        childId: 'lincoln',
+        summary: 'Reduce math to 10 min/day',
+        rationale: 'Frustration is spiking and persistence is dropping',
+      },
+    ])
+    expect(cleanText).toBe("Let's lighten next week.")
+    expect(cleanText).not.toContain('<action>')
+  })
+
+  it('keeps optional scope and targetWeek when present', () => {
+    const raw =
+      '<action>{"kind": "proposePlanAdjustment", "childId": "london", "summary": "Shift to an MVD week", "rationale": "Low energy at home", "scope": "math", "targetWeek": "2026-06-22"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([
+      {
+        kind: 'proposePlanAdjustment',
+        childId: 'london',
+        summary: 'Shift to an MVD week',
+        rationale: 'Low energy at home',
+        scope: 'math',
+        targetWeek: '2026-06-22',
+      },
+    ])
+  })
+
+  it('rejects a proposePlanAdjustment with a missing summary', () => {
+    const raw =
+      '<action>{"kind": "proposePlanAdjustment", "childId": "lincoln", "rationale": "too hard"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
+  })
+
+  it('rejects a proposePlanAdjustment with an empty rationale', () => {
+    const raw =
+      '<action>{"kind": "proposePlanAdjustment", "childId": "lincoln", "summary": "drop science", "rationale": "   "}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
+  })
+
+  it('rejects a proposePlanAdjustment with a missing childId', () => {
+    const raw =
+      '<action>{"kind": "proposePlanAdjustment", "summary": "drop science", "rationale": "no bandwidth"}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions).toEqual([])
+  })
+
   it('rejects an action with a missing word', () => {
     const raw = '<action>{"kind": "addSightWord", "childId": "lincoln"}</action>'
     const { actions } = parseChatActions(raw)
