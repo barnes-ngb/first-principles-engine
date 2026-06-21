@@ -300,6 +300,41 @@ Rules:
 }
 
 /**
+ * Build the `proposePlanAdjustment` HANDOFF grammar addendum (chunk 2A/2).
+ *
+ * When Shelly voices frustration that warrants a **next-week plan change** —
+ * drop/reduce/repace a subject, shift toward an MVD week, change the focus —
+ * the model proposes ONE `proposePlanAdjustment` action instead of a snapshot
+ * action. This is a HANDOFF, not a write: on Shelly's tap the chat stages a
+ * brief and opens Plan My Week, where she reviews and locks in via the existing
+ * flow. The chat never writes the plan. Snapshot-level tweaks (add a priority
+ * skill / support / stop rule, mark a skill) still use the additive `add*`
+ * actions; silent friction capture is untouched.
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like the other action
+ * grammars, since the brief binds to a specific child. Returns "" on the
+ * general (no-child) branch.
+ */
+export function buildPlanAdjustmentActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+PLAN-ADJUSTMENT HANDOFF (next-week plan change — NOT a snapshot edit, NOT a write): When Shelly voices frustration that warrants changing ${who}'s NEXT WEEK plan — drop or reduce a subject, repace it, shift toward a lighter / Minimum Viable week, or change the week's focus (e.g. "math is melting him down, let's pull way back next week", "reading isn't landing — can we do less and lean on read-alouds", "next week needs to be a survival week") — propose ONE plan-adjustment action. Ground it in the state you can see above (evaluation history, disposition signals, hours progress, coverage), not a guess.
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
+<action>{"kind":"proposePlanAdjustment","childId":"${childId}","summary":"Reduce math to 10 min/day and lead with a hands-on warm-up","rationale":"Frustration is spiking in math and his disposition signals show persistence dropping this week"}</action>
+
+Rules:
+- This is a HANDOFF. Confirming it opens Plan My Week with your brief preloaded — Shelly reviews and locks in the actual plan there. You do NOT write the plan, and you must NEVER claim the plan is changed or done.
+- "summary" is the one-line change she'll see in the planner; "rationale" is the grounded WHY (cite the signal). You may add "scope" or "targetWeek" as short optional hints, but they're not required.
+- Use this ONLY for next-week plan changes. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions instead. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when she clearly wants the plan to change.`;
+}
+
+/**
  * Build the `<friction>` grammar addendum for the shellyChat system prompt
  * (Build Step 5a — silent friction capture).
  *
@@ -583,6 +618,7 @@ Example: If she says "Lincoln seems bored with reading" and the data shows posit
   const roleSection = buildShellyChatRoleSection(childId && childName ? childName : undefined);
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
+  const planAdjustmentActionAddendum = buildPlanAdjustmentActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
   const webSearchAddendum = buildWebSearchAddendum(childId && childName ? childName : undefined);
 
@@ -593,6 +629,7 @@ ${supplementalContext}
 ${roleSection}
 ${sightWordActionAddendum}
 ${snapshotActionAddendum}
+${planAdjustmentActionAddendum}
 ${frictionCaptureAddendum}
 ${webSearchAddendum}
 

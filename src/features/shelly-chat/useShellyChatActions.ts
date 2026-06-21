@@ -23,6 +23,10 @@
 //     central writer (the UI never fabricates evidence).
 //   - Bind to the active child — `action.childId` must resolve to a family
 //     child AND match the active chat context, or the action is rejected.
+//   - `proposePlanAdjustment` is a HANDOFF, not a write (chunk 2A/2): it stages
+//     a brief to the planner's per-child inbox (`stagePlanAdjustment`) and
+//     navigates to Plan My Week. shelly-chat NEVER writes the weekly plan — the
+//     planner owns plan writes and applies via its existing lock-in path.
 
 import { useCallback, useState } from 'react'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
@@ -33,6 +37,7 @@ import type { ChatAction, Child } from '../../core/types'
 import { todayKey } from '../../core/utils/dateKey'
 import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import { addSightWord, removeSightWord } from '../books/useSightWordProgress'
+import { stagePlanAdjustment } from './stagePlanAdjustment'
 
 export type ActionStatus = 'pending' | 'applied' | 'dismissed'
 
@@ -50,6 +55,12 @@ export interface ShellyChatActionsDeps {
   activeChildId: string
   /** Thread the pending actions came from, so applies can annotate the message. */
   activeThreadId: string | null
+  /**
+   * Navigate to Plan My Week — called after a confirmed `proposePlanAdjustment`
+   * handoff has staged its brief. Optional so the hook stays decoupled from the
+   * router (and testable); the page wires it with `useNavigate`.
+   */
+  navigateToPlanner?: () => void
 }
 
 /** The Tier-C Option-2 additive snapshot kinds (6b). */
@@ -114,7 +125,7 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
  * or {@link dismissAction} on a tap.
  */
 export function useShellyChatActions(deps: ShellyChatActionsDeps) {
-  const { familyId, children, activeChildId, activeThreadId } = deps
+  const { familyId, children, activeChildId, activeThreadId, navigateToPlanner } = deps
 
   const [pending, setPending] = useState<PendingAction[]>([])
   // The assistant message the current `pending` set was parsed from — applied
@@ -189,6 +200,13 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         await updateChildSoftProfile(familyId, action.childId, {
           [action.field]: action.value,
         })
+      } else if (action.kind === 'proposePlanAdjustment') {
+        // HANDOFF, not a write (chunk 2A/2): stage the brief to the planner's
+        // per-child inbox. shelly-chat NEVER writes the plan — the planner owns
+        // plan writes and applies via its existing lock-in path. Navigation to
+        // the planner happens AFTER the inline confirm-audit below, so we don't
+        // unmount the page before the record lands.
+        await stagePlanAdjustment(familyId, action)
       } else {
         // Tier C Option 2 (6b) — additive snapshot edits routed through the
         // central writer. Additive-only fields; the writer auto-stamps each new
@@ -220,9 +238,16 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       }
 
       console.info('[shellyChat] applied action', action)
+
+      // Plan-adjustment handoff: the brief is staged + audited — now leave for
+      // Plan My Week, where Shelly reviews and locks in via the existing flow.
+      if (action.kind === 'proposePlanAdjustment') {
+        navigateToPlanner?.()
+      }
+
       return true
     },
-    [familyId, activeThreadId, pendingMessageId, rejectReason],
+    [familyId, activeThreadId, pendingMessageId, rejectReason, navigateToPlanner],
   )
 
   /** Dismiss a proposed action without writing. */

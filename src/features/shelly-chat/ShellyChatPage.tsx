@@ -1,4 +1,4 @@
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -76,6 +76,7 @@ export default function ShellyChatPage() {
   const { chat, generateImage, lastErrorRef } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
 
   // ── State + refs live in useShellyChatState; effects + handlers in
   //    useShellyChatFlows (ARCH-09). The page is a thin shell that composes
@@ -127,6 +128,9 @@ export default function ShellyChatPage() {
     children,
     activeChildId: contextChildId,
     activeThreadId,
+    // A confirmed proposePlanAdjustment HANDOFF stages its brief, then navigates
+    // here to Plan My Week — the chat never writes the plan itself.
+    navigateToPlanner: () => navigate('/planner'),
   })
 
   const {

@@ -3,6 +3,7 @@ import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
+import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
@@ -91,6 +92,41 @@ function SnapshotEditPreview({
   )
 }
 
+/** The plan-adjustment HANDOFF kind (chunk 2A/2) — not a write. */
+type PlanAdjustmentAction = Extract<ChatAction, { kind: 'proposePlanAdjustment' }>
+
+/**
+ * Preview for a `proposePlanAdjustment` HANDOFF. This is NOT a write — it hands
+ * a brief to Plan My Week, so the card is framed distinctly from the snapshot /
+ * sight-word / profile write cards: an "info" accent + a "Hand off to Plan My
+ * Week" label make clear that confirming opens the planner (where Shelly
+ * reviews and locks in), rather than committing a change to a child's record.
+ */
+function PlanAdjustmentPreview({
+  action,
+  childName,
+}: {
+  action: PlanAdjustmentAction
+  childName: string
+}) {
+  return (
+    <Stack spacing={0.25}>
+      <Typography
+        variant="caption"
+        sx={{ display: 'block', fontWeight: 700, color: 'info.main', letterSpacing: 0.2 }}
+      >
+        Hand off to Plan My Week — for {childName}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {action.summary}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+        Why: {action.rationale}
+      </Typography>
+    </Stack>
+  )
+}
+
 /**
  * Before → after preview for an `editProfileField` action. These are
  * replace-writes on freeform text, so Shelly must see exactly what changes
@@ -128,9 +164,12 @@ function ProfileEditPreview({
  * those are replace-writes on freeform text, and the Tier-C Option-2 additive
  * snapshot edits (priority skill / support / stop rule / mark progress) framed
  * as visibly weightier cards (accent border + "Updates {child}'s skill
- * snapshot" label) since they write the authoritative learning record. A batch
- * "Confirm all" appears when 2+ are still pending. Nothing here writes — taps
- * call back into `useShellyChatActions`. Mobile-first: large tap targets.
+ * snapshot" label) since they write the authoritative learning record, and the
+ * `proposePlanAdjustment` HANDOFF (chunk 2A/2) framed distinctly (info accent +
+ * a "Review in Plan My Week" CTA) since confirming it opens the planner rather
+ * than writing a child's record. A batch "Confirm all" appears when 2+ are
+ * still pending. Nothing here writes — taps call back into
+ * `useShellyChatActions`. Mobile-first: large tap targets.
  */
 export default function ActionConfirmCard({
   pending,
@@ -155,6 +194,7 @@ export default function ActionConfirmCard({
           const { action } = item
           const isProfileEdit = action.kind === 'editProfileField'
           const isSnapshotEdit = isSnapshotAction(action)
+          const isPlanAdjustment = action.kind === 'proposePlanAdjustment'
           const icon =
             action.kind === 'addSightWord' ? (
               <AddCircleOutlineIcon fontSize="small" color="action" />
@@ -162,6 +202,8 @@ export default function ActionConfirmCard({
               <RemoveCircleOutlineIcon fontSize="small" color="action" />
             ) : isSnapshotEdit ? (
               <SchoolOutlinedIcon fontSize="small" color="warning" />
+            ) : isPlanAdjustment ? (
+              <EventNoteOutlinedIcon fontSize="small" color="info" />
             ) : (
               <EditOutlinedIcon fontSize="small" color="action" />
             )
@@ -173,21 +215,27 @@ export default function ActionConfirmCard({
                 p: 1.25,
                 borderRadius: 2,
                 display: 'flex',
-                alignItems: isProfileEdit || isSnapshotEdit ? 'flex-start' : 'center',
+                alignItems:
+                  isProfileEdit || isSnapshotEdit || isPlanAdjustment ? 'flex-start' : 'center',
                 gap: 1,
                 opacity: item.status === 'dismissed' ? 0.5 : 1,
                 // Higher-stakes framing for snapshot edits: a left accent + a
                 // slightly stronger border so they read weightier than a
-                // sight-word card.
+                // sight-word card. The plan-adjustment handoff gets its own
+                // (info) accent so it reads as "opens the planner", not a write.
                 ...(isSnapshotEdit
                   ? { borderColor: 'warning.main', borderLeftWidth: 3 }
-                  : {}),
+                  : isPlanAdjustment
+                    ? { borderColor: 'info.main', borderLeftWidth: 3 }
+                    : {}),
               }}
             >
               {icon}
               <Box sx={{ flex: 1 }}>
                 {isSnapshotEdit ? (
                   <SnapshotEditPreview action={action} childName={childName(action.childId)} />
+                ) : isPlanAdjustment ? (
+                  <PlanAdjustmentPreview action={action} childName={childName(action.childId)} />
                 ) : isProfileEdit ? (
                   <ProfileEditPreview
                     action={action}
@@ -208,10 +256,11 @@ export default function ActionConfirmCard({
                   <Button
                     size="small"
                     variant="contained"
+                    color={isPlanAdjustment ? 'info' : 'primary'}
                     onClick={() => onConfirm(item.action)}
                     sx={{ textTransform: 'none', minWidth: 0, py: 0.5 }}
                   >
-                    Confirm
+                    {isPlanAdjustment ? 'Review in Plan My Week' : 'Confirm'}
                   </Button>
                   <Button
                     size="small"
