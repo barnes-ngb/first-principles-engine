@@ -23,6 +23,7 @@ const navItems = [
   { label: 'Progress', to: '/progress', parentOnly: true },
   { label: 'Records', to: '/records', parentOnly: true },
   { label: 'Books', to: '/books' },
+  { label: 'Barnes Bros', to: '/business' },
   { label: 'Game Workshop', to: '/workshop' },
   { label: 'Dad Lab', to: '/dad-lab' },
   { label: 'Settings', to: '/settings', parentOnly: true },
