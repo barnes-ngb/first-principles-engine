@@ -54,6 +54,7 @@ import type {
   DraftPlanItem,
   DraftWeeklyPlan,
   LessonCard,
+  PendingPlanAdjustment,
   PlannerConversation,
   PhotoLabel,
   PhotoContentExtraction,
@@ -109,6 +110,7 @@ import PlannerChatDrawer from './PlannerChatDrawer'
 import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
 import { clonePlanWithAdvancedLessons } from './repeatWeek.logic'
+import { consumePlanAdjustment } from '../shelly-chat/stagePlanAdjustment'
 
 
 /** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
@@ -279,6 +281,14 @@ export default function PlannerChatPage() {
   const [readAloudBook, setReadAloudBook] = useState('')
   const [readAloudChapters, setReadAloudChapters] = useState('')
   const [weekNotes, setWeekNotes] = useState('')
+
+  // Pending plan adjustment handed off from Shelly chat (chunk 2A/2). Consumed
+  // once per child on load: preloaded into the generation context (weekNotes) +
+  // surfaced as a banner, then the inbox doc is cleared. The chat stages it; the
+  // planner still requires Shelly to review + lock in via the existing flow —
+  // nothing here auto-applies, and the planner never reads back a stale brief.
+  const [pendingAdjustment, setPendingAdjustment] = useState<PendingPlanAdjustment | null>(null)
+  const consumedAdjustmentChildIds = useRef<Set<string>>(new Set())
 
   // Chapter book library + selection
   const [chapterBooks, setChapterBooks] = useState<ChapterBook[]>([])
@@ -482,6 +492,31 @@ export default function PlannerChatPage() {
       } else {
         setSubjectTimeDefaults({})
       }
+    })
+  }, [familyId, activeChildId])
+
+  // Consume a pending plan-adjustment brief handed off from Shelly chat (chunk
+  // 2A/2). Apply-once per child: a ref guard makes the StrictMode double-invoke a
+  // no-op, and `consumePlanAdjustment` deletes the inbox doc so a refresh or
+  // child-switch can't replay it. The brief is folded into weekNotes (so it
+  // flows into the AI generation context) and surfaced as a banner + snack; the
+  // planner never writes the plan from this — Shelly reviews and locks in via
+  // the existing flow.
+  useEffect(() => {
+    if (!familyId || !activeChildId) return
+    if (consumedAdjustmentChildIds.current.has(activeChildId)) return
+    consumedAdjustmentChildIds.current.add(activeChildId)
+    const childId = activeChildId
+    void consumePlanAdjustment(familyId, childId).then((adj) => {
+      if (!adj) return
+      setPendingAdjustment(adj)
+      setWeekNotes((prev) => {
+        const line = `Proposed adjustment from Shelly chat: ${adj.summary}${
+          adj.rationale ? ` — because ${adj.rationale}` : ''
+        }`
+        return prev ? `${prev}\n${line}` : line
+      })
+      setSnack({ text: 'Loaded a proposed adjustment from your chat', severity: 'info' })
     })
   }, [familyId, activeChildId])
 
@@ -2342,6 +2377,31 @@ ${dayPrompts}`
 
       {activeChildId && (
         <>
+          {/* Proposed adjustment handed off from Shelly chat (chunk 2A/2).
+              Surfaced for review — it's already folded into the week notes /
+              generation context. Shelly still reviews + locks in below; this
+              banner never writes the plan. */}
+          {pendingAdjustment && pendingAdjustment.childId === activeChildId && (
+            <Alert
+              severity="info"
+              icon={<InfoOutlinedIcon fontSize="inherit" />}
+              onClose={() => setPendingAdjustment(null)}
+              sx={{ mb: 1 }}
+            >
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                Proposed adjustment from your chat: {pendingAdjustment.summary}
+              </Typography>
+              {pendingAdjustment.rationale && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  Why: {pendingAdjustment.rationale}
+                </Typography>
+              )}
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                It's added to your week notes below — review and generate or lock in your plan as usual.
+              </Typography>
+            </Alert>
+          )}
+
           {/* Plan Summary Panel (pinned above chat) */}
           <PlanSummaryPanel
             hoursPerDay={hoursPerDay}

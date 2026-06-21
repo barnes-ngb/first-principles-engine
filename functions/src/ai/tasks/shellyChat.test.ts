@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFrictionCaptureAddendum,
+  buildPlanAdjustmentActionAddendum,
   buildShellyChatRoleSection,
   buildSightWordActionAddendum,
   buildSnapshotActionAddendum,
@@ -377,6 +378,7 @@ describe("buildShellyChatRoleSection", () => {
     expect(out).toContain("EVALUATION HISTORY BY DOMAIN");
     expect(out).toContain("DISPOSITION PROFILE");
     expect(out).toContain("CURRICULUM MAP / COVERAGE");
+    expect(out).toContain("HOURS PROGRESS");
     expect(out).toContain("RECENT WEEKLY REVIEWS");
     expect(out).toContain("RECENT TEACH-BACKS");
     // Names the child throughout (no stray placeholder).
@@ -465,6 +467,45 @@ describe("buildSnapshotActionAddendum", () => {
 
   it("falls back to a generic noun when childName is absent but a childId exists", () => {
     const out = buildSnapshotActionAddendum("london456", undefined);
+    expect(out).toContain('"childId":"london456"');
+    expect(out).toContain("this child");
+  });
+});
+
+// ── 7b-bis. Plan-adjustment HANDOFF grammar addendum (chunk 2A/2) ──
+
+describe("buildPlanAdjustmentActionAddendum", () => {
+  it("returns empty string when childId is missing (general tab)", () => {
+    expect(buildPlanAdjustmentActionAddendum(undefined, "Lincoln")).toBe("");
+    expect(buildPlanAdjustmentActionAddendum("", "")).toBe("");
+  });
+
+  it("emits the proposePlanAdjustment grammar bound to the active childId", () => {
+    const out = buildPlanAdjustmentActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("PLAN-ADJUSTMENT HANDOFF");
+    expect(out).toContain('"kind":"proposePlanAdjustment"');
+    expect(out).toContain('"childId":"lincoln123"');
+    expect(out).toContain('"summary"');
+    expect(out).toContain('"rationale"');
+    // No stray template placeholder leaked.
+    expect(out).not.toContain("${");
+  });
+
+  it("frames it as a handoff that never writes the plan", () => {
+    const out = buildPlanAdjustmentActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("HANDOFF");
+    expect(out).toContain("do NOT write the plan");
+    expect(out).toContain("NEVER claim the plan is changed");
+  });
+
+  it("routes snapshot/friction elsewhere — only for next-week plan changes", () => {
+    const out = buildPlanAdjustmentActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("additive snapshot actions");
+    expect(out).toContain("silent friction capture");
+  });
+
+  it("falls back to a generic noun when childName is absent but a childId exists", () => {
+    const out = buildPlanAdjustmentActionAddendum("london456", undefined);
     expect(out).toContain('"childId":"london456"');
     expect(out).toContain("this child");
   });

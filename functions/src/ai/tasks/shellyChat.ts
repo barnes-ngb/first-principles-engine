@@ -206,7 +206,7 @@ SHELLY-SPECIFIC GUIDELINES:
 - If she asks you to generate an image, tell her to tap the image button.
 - For printable activities, format them clearly for screenshot or print.
 
-PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE rather than guessing. Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she has not linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.`;
+PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the year-to-date instructional-hours total against the reporting target (see HOURS PROGRESS), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE, and "are we on track for our hours" answers in HOURS PROGRESS, rather than guessing. Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she has not linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.`;
   }
   return `ROLE: You are Shelly's homeschool assistant. This is a general conversation — not focused on a specific child.
 
@@ -297,6 +297,41 @@ Rules:
 - For markSkillProgress: set "mastered":true only when she says the child has fully got it; omit "mastered" (or set it false) to mark a skill as progressing rather than mastered.
 - NEVER claim it's done. Say you've proposed it and she confirms with a tap; she sees a clearly-labeled "Updates the skill snapshot" card first.
 - One JSON object per <action> block. Be conservative: only propose when she clearly wants to change the snapshot. Discussion is not a write.`;
+}
+
+/**
+ * Build the `proposePlanAdjustment` HANDOFF grammar addendum (chunk 2A/2).
+ *
+ * When Shelly voices frustration that warrants a **next-week plan change** —
+ * drop/reduce/repace a subject, shift toward an MVD week, change the focus —
+ * the model proposes ONE `proposePlanAdjustment` action instead of a snapshot
+ * action. This is a HANDOFF, not a write: on Shelly's tap the chat stages a
+ * brief and opens Plan My Week, where she reviews and locks in via the existing
+ * flow. The chat never writes the plan. Snapshot-level tweaks (add a priority
+ * skill / support / stop rule, mark a skill) still use the additive `add*`
+ * actions; silent friction capture is untouched.
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like the other action
+ * grammars, since the brief binds to a specific child. Returns "" on the
+ * general (no-child) branch.
+ */
+export function buildPlanAdjustmentActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+PLAN-ADJUSTMENT HANDOFF (next-week plan change — NOT a snapshot edit, NOT a write): When Shelly voices frustration that warrants changing ${who}'s NEXT WEEK plan — drop or reduce a subject, repace it, shift toward a lighter / Minimum Viable week, or change the week's focus (e.g. "math is melting him down, let's pull way back next week", "reading isn't landing — can we do less and lean on read-alouds", "next week needs to be a survival week") — propose ONE plan-adjustment action. Ground it in the state you can see above (evaluation history, disposition signals, hours progress, coverage), not a guess.
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
+<action>{"kind":"proposePlanAdjustment","childId":"${childId}","summary":"Reduce math to 10 min/day and lead with a hands-on warm-up","rationale":"Frustration is spiking in math and his disposition signals show persistence dropping this week"}</action>
+
+Rules:
+- This is a HANDOFF. Confirming it opens Plan My Week with your brief preloaded — Shelly reviews and locks in the actual plan there. You do NOT write the plan, and you must NEVER claim the plan is changed or done.
+- "summary" is the one-line change she'll see in the planner; "rationale" is the grounded WHY (cite the signal). You may add "scope" or "targetWeek" as short optional hints, but they're not required.
+- Use this ONLY for next-week plan changes. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions instead. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when she clearly wants the plan to change.`;
 }
 
 /**
@@ -583,6 +618,7 @@ Example: If she says "Lincoln seems bored with reading" and the data shows posit
   const roleSection = buildShellyChatRoleSection(childId && childName ? childName : undefined);
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
+  const planAdjustmentActionAddendum = buildPlanAdjustmentActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
   const webSearchAddendum = buildWebSearchAddendum(childId && childName ? childName : undefined);
 
@@ -593,6 +629,7 @@ ${supplementalContext}
 ${roleSection}
 ${sightWordActionAddendum}
 ${snapshotActionAddendum}
+${planAdjustmentActionAddendum}
 ${frictionCaptureAddendum}
 ${webSearchAddendum}
 

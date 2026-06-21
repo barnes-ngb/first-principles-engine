@@ -69,7 +69,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "charter", "childProfile", "engagement", "gradeResults",
     "recentEval", "sightWords", "weekFocus", "wordMastery", "workbookPaces",
     "skillSnapshot", "childSkillMap", "recentHistoryByDomain", "recentScans",
-    "dayToday", "dadLabReports",
+    "hoursProgress", "dayToday", "dadLabReports",
   ],
   weeklyReview: [
     "charter", "childProfile", "skillSnapshot", "activityConfigs",

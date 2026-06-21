@@ -30,6 +30,15 @@ vi.mock('../evaluate/skillSnapshotWrites', () => ({
   writeSnapshotUpdate: (...args: unknown[]) => writeSnapshotUpdate(...args),
 }))
 
+// The plan-adjustment HANDOFF staging (chunk 2A/2). Mocked so the handoff
+// routing is testable without Firestore; its doc-write/path are covered in
+// stagePlanAdjustment.test.ts. The key contract here: confirming the handoff
+// stages a brief and navigates — it NEVER writes a plan or a child record.
+const stagePlanAdjustment = vi.fn()
+vi.mock('./stagePlanAdjustment', () => ({
+  stagePlanAdjustment: (...args: unknown[]) => stagePlanAdjustment(...args),
+}))
+
 const updateDoc = vi.fn()
 const arrayUnion = vi.fn((...v: unknown[]) => ({ __arrayUnion: v[0] }))
 const doc = vi.fn((...args: unknown[]) => ({ __doc: args.length }))
@@ -50,6 +59,8 @@ const CHILDREN: Child[] = [
   { id: 'london1', name: 'London' } as Child,
 ]
 
+const navigateToPlanner = vi.fn()
+
 function setup(activeChildId = 'lincoln1', activeThreadId: string | null = 'thread1') {
   return renderHook(() =>
     useShellyChatActions({
@@ -57,6 +68,7 @@ function setup(activeChildId = 'lincoln1', activeThreadId: string | null = 'thre
       children: CHILDREN,
       activeChildId,
       activeThreadId,
+      navigateToPlanner,
     }),
   )
 }
@@ -67,6 +79,7 @@ beforeEach(() => {
   removeSightWord.mockResolvedValue(undefined)
   updateChildSoftProfile.mockResolvedValue(undefined)
   writeSnapshotUpdate.mockResolvedValue({ changed: true })
+  stagePlanAdjustment.mockResolvedValue(undefined)
   updateDoc.mockResolvedValue(undefined)
 })
 
@@ -453,6 +466,64 @@ describe('useShellyChatActions', () => {
     expect(second).toBe(true)
     expect(writeSnapshotUpdate).toHaveBeenCalledTimes(2)
     expect(result.current.pending[0].status).toBe('applied')
+  })
+
+  // ── proposePlanAdjustment — HANDOFF, not a write (chunk 2A/2) ────
+
+  const PLAN_ADJ: ChatAction = {
+    kind: 'proposePlanAdjustment',
+    childId: 'lincoln1',
+    summary: 'Reduce math to 10 min/day next week',
+    rationale: 'Frustration is spiking in math',
+  }
+
+  it('does not stage or navigate when a plan adjustment is merely staged', () => {
+    const { result } = setup()
+
+    act(() => result.current.stagePendingActions('msg1', [PLAN_ADJ]))
+
+    expect(result.current.pending[0].status).toBe('pending')
+    expect(stagePlanAdjustment).not.toHaveBeenCalled()
+    expect(navigateToPlanner).not.toHaveBeenCalled()
+  })
+
+  it('stages the brief and navigates to the planner WITHOUT writing a plan or child record', async () => {
+    const { result } = setup()
+
+    act(() => result.current.stagePendingActions('msg1', [PLAN_ADJ]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(PLAN_ADJ)
+    })
+
+    expect(ok).toBe(true)
+    // Handoff staged through the dedicated helper, then navigated.
+    expect(stagePlanAdjustment).toHaveBeenCalledWith('fam1', PLAN_ADJ)
+    expect(navigateToPlanner).toHaveBeenCalledTimes(1)
+    // Crucially: NO plan write, and NO child-record write of any kind.
+    expect(addSightWord).not.toHaveBeenCalled()
+    expect(removeSightWord).not.toHaveBeenCalled()
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+    // Confirm audit still recorded inline on the source message.
+    expect(updateDoc).toHaveBeenCalledTimes(1)
+    expect(result.current.pending[0].status).toBe('applied')
+  })
+
+  it('rejects a plan adjustment targeting a child other than the active context', async () => {
+    const { result } = setup('lincoln1')
+    const action: ChatAction = { ...PLAN_ADJ, childId: 'london1' }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(action)
+    })
+
+    expect(ok).toBe(false)
+    expect(stagePlanAdjustment).not.toHaveBeenCalled()
+    expect(navigateToPlanner).not.toHaveBeenCalled()
+    expect(updateDoc).not.toHaveBeenCalled()
   })
 
   it('confirmAll applies every still-pending action', async () => {
