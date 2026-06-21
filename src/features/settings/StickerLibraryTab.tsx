@@ -17,6 +17,8 @@ import { EmptyState, LoadingState } from '../../components/states'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
 import type { Sticker, StickerTag } from '../../core/types'
+import { groupStickers } from '../books/stickerGrouping'
+import DrawingGroupCard from '../books/DrawingGroupCard'
 
 const STICKER_TAG_LABELS: Record<StickerTag, string> = {
   animal: 'Animal',
@@ -50,12 +52,23 @@ interface StickerLibraryTabProps {
   emptyDescription?: string
   /** When set, only show stickers for this child (or marked "both"). */
   childProfileFilter?: 'lincoln' | 'london'
+  /** When set, only show stickers whose tags include this tag. */
+  tagFilter?: StickerTag
+  /**
+   * When true, stickers sharing a `sourceDrawingId` collapse into one labeled
+   * "drawing" card (original + themed versions, with add-version + delete).
+   * Standalone stickers still render in the grid. Off by default so the
+   * Settings admin tab is unchanged. (FEAT-33 slice 3)
+   */
+  groupByDrawing?: boolean
 }
 
 export default function StickerLibraryTab({
   refreshSignal,
   emptyDescription = 'Generate some in the book editor!',
   childProfileFilter,
+  tagFilter,
+  groupByDrawing = false,
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
   const [stickers, setStickers] = useState<Sticker[]>([])
@@ -77,12 +90,24 @@ export default function StickerLibraryTab({
 
   useEffect(() => { void load() }, [load, refreshSignal])
 
-  const visibleStickers = childProfileFilter
-    ? stickers.filter((s) => {
-        const cp = s.childProfile ?? 'both'
-        return cp === 'both' || cp === childProfileFilter
-      })
-    : stickers
+  const visibleStickers = stickers.filter((s) => {
+    if (childProfileFilter) {
+      const cp = s.childProfile ?? 'both'
+      if (cp !== 'both' && cp !== childProfileFilter) return false
+    }
+    if (tagFilter) {
+      const tags = s.tags ?? ['other']
+      if (!tags.includes(tagFilter)) return false
+    }
+    return true
+  })
+
+  // When grouping is on, source-drawing versions render as labeled cards and
+  // only standalone stickers fill the flat grid below them.
+  const grouped = groupByDrawing
+    ? groupStickers(visibleStickers)
+    : { drawings: [], standalone: visibleStickers }
+  const gridStickers = grouped.standalone
 
   const handleOpenEdit = useCallback((sticker: Sticker) => {
     setEditTarget(sticker)
@@ -115,6 +140,16 @@ export default function StickerLibraryTab({
   }
 
   if (visibleStickers.length === 0) {
+    // When a tag filter hides everything, point the kid back at the filter
+    // rather than the generic "make your first one" copy.
+    if (tagFilter && stickers.length > 0) {
+      return (
+        <EmptyState
+          title={`No ${STICKER_TAG_LABELS[tagFilter]} stickers yet`}
+          description="Try another tag, or make one!"
+        />
+      )
+    }
     return (
       <EmptyState
         title="No stickers yet"
@@ -129,6 +164,20 @@ export default function StickerLibraryTab({
         {visibleStickers.length} sticker{visibleStickers.length !== 1 ? 's' : ''} in your library
       </Typography>
 
+      {/* Source-drawing groups (FEAT-33 slice 3) — only when grouping is enabled */}
+      {grouped.drawings.length > 0 && familyId && (
+        <Stack spacing={2} sx={{ mb: 3 }}>
+          {grouped.drawings.map((group) => (
+            <DrawingGroupCard
+              key={group.sourceDrawingId}
+              group={group}
+              familyId={familyId}
+              onChanged={() => { void load() }}
+            />
+          ))}
+        </Stack>
+      )}
+
       <Box
         sx={{
           display: 'grid',
@@ -136,7 +185,7 @@ export default function StickerLibraryTab({
           gap: 2,
         }}
       >
-        {visibleStickers.map((sticker) => (
+        {gridStickers.map((sticker) => (
           <Box
             key={sticker.id}
             sx={{

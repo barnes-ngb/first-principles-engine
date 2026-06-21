@@ -13,7 +13,10 @@ import BrushIcon from '@mui/icons-material/Brush'
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { STICKER_TAG_LABELS } from '../../core/types'
+import type { StickerTag } from '../../core/types'
 import StickerLibraryTab from '../settings/StickerLibraryTab'
+import { STICKER_TAGS_ORDERED } from './stickerTagging'
 import MakeStickerDialog from './MakeStickerDialog'
 import SketchScanner from './SketchScanner'
 
@@ -39,6 +42,8 @@ export default function StickersPage() {
   const [showMake, setShowMake] = useState(false)
   const [showDrawing, setShowDrawing] = useState(false)
   const [childFilter, setChildFilter] = useState(false)
+  // undefined = "All"; otherwise narrow the library to one tag.
+  const [tagFilter, setTagFilter] = useState<StickerTag | undefined>(undefined)
   // Bumped after a sticker is made so the library reloads.
   const [refreshSignal, setRefreshSignal] = useState(0)
 
@@ -114,10 +119,40 @@ export default function StickersPage() {
         </Stack>
       )}
 
+      {/* Tag filter row — single-select with an "All" default */}
+      <Stack
+        direction="row"
+        spacing={1}
+        sx={{ mb: 2 }}
+        alignItems="center"
+        flexWrap="wrap"
+        useFlexGap
+      >
+        <Chip
+          label="All"
+          size="small"
+          onClick={() => setTagFilter(undefined)}
+          color={!tagFilter ? 'primary' : 'default'}
+          variant={!tagFilter ? 'filled' : 'outlined'}
+        />
+        {STICKER_TAGS_ORDERED.map((tag) => (
+          <Chip
+            key={tag}
+            label={STICKER_TAG_LABELS[tag]}
+            size="small"
+            onClick={() => setTagFilter((prev) => (prev === tag ? undefined : tag))}
+            color={tagFilter === tag ? 'primary' : 'default'}
+            variant={tagFilter === tag ? 'filled' : 'outlined'}
+          />
+        ))}
+      </Stack>
+
       <StickerLibraryTab
         refreshSignal={refreshSignal}
         emptyDescription="No stickers yet — make your first one!"
         childProfileFilter={childFilter ? childProfile : undefined}
+        tagFilter={tagFilter}
+        groupByDrawing
       />
 
       {familyId && (
