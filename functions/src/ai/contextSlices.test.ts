@@ -95,6 +95,14 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.shellyChat).toContain("childSkillMap");
   });
 
+  it("shellyChat reads current state — skillSnapshot, childSkillMap coverage, and hoursProgress (FEAT state-awareness)", () => {
+    // Grounds Shelly's advice + confirmable actions in how the child is
+    // actually doing. hoursProgress lets her ask "are we on track for hours?".
+    expect(TASK_CONTEXT.shellyChat).toContain("skillSnapshot");
+    expect(TASK_CONTEXT.shellyChat).toContain("childSkillMap");
+    expect(TASK_CONTEXT.shellyChat).toContain("hoursProgress");
+  });
+
   it("childSkillMap is shellyChat-only — no other task reads coverage directly (FUNC-01 authority table)", () => {
     for (const [task, slices] of Object.entries(TASK_CONTEXT)) {
       if (task === "shellyChat") continue;

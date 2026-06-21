@@ -377,6 +377,7 @@ describe("buildShellyChatRoleSection", () => {
     expect(out).toContain("EVALUATION HISTORY BY DOMAIN");
     expect(out).toContain("DISPOSITION PROFILE");
     expect(out).toContain("CURRICULUM MAP / COVERAGE");
+    expect(out).toContain("HOURS PROGRESS");
     expect(out).toContain("RECENT WEEKLY REVIEWS");
     expect(out).toContain("RECENT TEACH-BACKS");
     // Names the child throughout (no stray placeholder).
