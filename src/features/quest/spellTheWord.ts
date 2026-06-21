@@ -152,11 +152,15 @@ function lengthBoundForLevel(level: number): number {
  * targets at `level`. Sight words come first (confidence — words he's met), then
  * frontier words (stretch). Deduped, length-bounded, capped at `count`. Returns
  * `[]` only when both sources are empty.
+ *
+ * `avoid` (optional) is the session avoid-set of already-asked target words —
+ * any word in it is skipped so the same word is never re-tested in one session.
  */
 export function blendSpellingTargets(
   source: SpellingSource,
   level: number,
   count = 4,
+  avoid?: Set<string>,
 ): SpellingTarget[] {
   const maxLen = lengthBoundForLevel(level)
   const seen = new Set<string>()
@@ -165,6 +169,8 @@ export function blendSpellingTargets(
   const push = (word: string, src: 'sightWord' | 'frontier') => {
     const w = (word || '').trim().toLowerCase()
     if (!w || seen.has(w)) return
+    // Skip anything already asked this session (anti-repetition avoid-set).
+    if (avoid?.has(w)) return
     // Only letters, and within the level's length bound.
     if (!/^[a-z]+$/.test(w)) return
     if (w.length < 2 || w.length > maxLen) return
@@ -231,13 +237,17 @@ export function buildSpellWordQuestion(
  * Convenience: pick the next spell-the-word question from a blended source at a
  * level. Picks one target (preferring sight words for confidence), builds it.
  * Returns `null` when no usable target exists.
+ *
+ * `avoid` (optional) is the session avoid-set of already-asked target words —
+ * any matching target is skipped so a word is never spelled twice in one session.
  */
 export function generateSpellWordQuestion(
   source: SpellingSource,
   level: number,
   rng: () => number = Math.random,
+  avoid?: Set<string>,
 ): SpellWordQuestion | null {
-  const targets = blendSpellingTargets(source, level)
+  const targets = blendSpellingTargets(source, level, 4, avoid)
   if (targets.length === 0) return null
   // Weighted toward the front (sight words first) but with some variety.
   const idx = Math.floor(rng() * targets.length) % targets.length

@@ -4,6 +4,7 @@ import {
   buildKnownBlockersSection,
   buildPageBeats,
   buildQuestPrompt,
+  buildQuestVarietyDirectiveSection,
   buildRecentCurriculumSection,
   buildRevisePagePrompt,
   buildReviseStoryPrompt,
@@ -111,6 +112,39 @@ describe("buildRecentCurriculumSection", () => {
     expect(section).toContain("RECENT WORKBOOK SCANS");
     expect(section).toContain("NOT mandatory");
     expect(section).toContain("targetedBlockerId");
+  });
+});
+
+describe("buildQuestVarietyDirectiveSection (anti-repetition)", () => {
+  it("instructs the model to vary format and avoid already-asked targets", () => {
+    const section = buildQuestVarietyDirectiveSection();
+    expect(section).toContain("## QUESTION VARIETY");
+    expect(section).toContain("recentQuestionTypes");
+    expect(section).toContain("askedTargets");
+    expect(section.toLowerCase()).toContain("same format twice in a row");
+    expect(section.toLowerCase()).toContain("never reuse");
+  });
+});
+
+describe("buildQuestPrompt — variety directive is always present", () => {
+  const extras = { activeBlockers: [], hasRecentScans: false };
+
+  it("includes the QUESTION VARIETY directive + askedTargets field for reading phonics", () => {
+    const prompt = buildQuestPrompt("reading", 4, "phonics", extras, "Lincoln");
+    expect(prompt).toContain("## QUESTION VARIETY");
+    expect(prompt).toContain("askedTargets");
+  });
+
+  it("includes the QUESTION VARIETY directive for math quests", () => {
+    const prompt = buildQuestPrompt("math", 3, "math", extras, "Lincoln");
+    expect(prompt).toContain("## QUESTION VARIETY");
+    expect(prompt).toContain("askedTargets");
+  });
+
+  it("includes the QUESTION VARIETY directive for comprehension quests", () => {
+    const prompt = buildQuestPrompt("reading", 4, "comprehension", extras, "London");
+    expect(prompt).toContain("## QUESTION VARIETY");
+    expect(prompt).toContain("askedTargets");
   });
 });
 
