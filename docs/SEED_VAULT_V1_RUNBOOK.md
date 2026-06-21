@@ -46,14 +46,22 @@ This becomes the source material for every piece below.
 
 ---
 
-## Phase 2 — The sticker sheet (Sticker pipeline) → *verifies sticker generation*
+## Phase 2 — The sticker sheet (made in Books, same session as the story) → *verifies sticker generation*
 
-1. Generate stickers of the plant defenders, silly zombies, and treasure icons (transparent).
-   Aim for ~12–20 on one sheet.
-2. Tag and save to the **Sticker Library** (verifies sticker generation for TEST-03).
-3. Print the sheet on **white sticker paper**.
-4. **Cut** (Lincoln/London — hand-cut for v1; a Cricut speeds kiss-cutting later if volume grows).
-   This is London's "place/sort stickers" job.
+Stickers are made inside the **Book Editor's sticker tool** — there's no standalone sticker surface
+yet (that's the July FEAT-33 Studio), so the sticker art comes from the *same session* as the story.
+While Lincoln's garden-defense book is open:
+
+1. **Generate the cast as stickers** — each plant defender, each invader, and the Seed Vault
+   treasure, using the names Lincoln invented. The book's scenes already show them, so the
+   descriptions are easy. Aim for ~12–20, in the same clean cartoon style as the book. Each saves to
+   the **Sticker Library** (Settings) — this also verifies sticker generation for TEST-03.
+2. **Lay them onto one sheet** (semi-manual for v1): either place all the cast stickers onto a single
+   book page and print that page as the sheet, or pull the transparent PNGs and arrange them in
+   Canva. (The FEAT-27 kit assembler auto-lays-out the sheet later.)
+3. **Print** on white sticker paper.
+4. **Cut** — Lincoln/London hand-cut for v1; a Cricut speeds kiss-cutting if volume grows. This is
+   the kids' "sort/place stickers" job.
 
 ---
 
