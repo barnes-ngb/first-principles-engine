@@ -58,6 +58,7 @@ import { generateSpellWordQuestion } from './spellTheWord'
 import type { SpellingSource } from './spellTheWord'
 import { generateBuildSentenceQuestion } from './buildTheSentence'
 import type { SentenceSource } from './buildTheSentence'
+import { askedTargetSet, collectAskedTargets, recentQuestionFormats } from './questVariety'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -1376,6 +1377,11 @@ export function useQuestSession() {
         bonusRoundUsedRef.current = true
       }
 
+      // Session avoid-set of already-asked target words/sentences — keeps the
+      // client template injections (and, below, the AI request) from re-testing a
+      // word already seen this session.
+      const askedTargets = askedTargetSet(updatedQuestions)
+
       // ── Spell-the-word injection (FEAT-11 Phase 1) ──────────────────
       // On the reading/phonics surface, rotate in a client-generated
       // spell-the-word question instead of the next AI question: 1–2 per session,
@@ -1396,7 +1402,7 @@ export function useQuestSession() {
           : Math.random() < 0.3) // a possible second, spaced out
       if (fireSpellWord) {
         const spellLevel = Math.min(newState.currentLevel, WRITING_LEVEL_CAP)
-        const spellQ = generateSpellWordQuestion(spellWordSourceRef.current, spellLevel)
+        const spellQ = generateSpellWordQuestion(spellWordSourceRef.current, spellLevel, Math.random, askedTargets)
         if (spellQ) {
           spellWordCountRef.current += 1
           lastWasSpellWordRef.current = true
@@ -1427,7 +1433,7 @@ export function useQuestSession() {
       const fireSentence = eligibleForSentence && Math.random() < 0.5
       if (fireSentence) {
         const sentenceLevel = Math.min(newState.currentLevel, SENTENCE_LEVEL_CAP)
-        const sentenceQ = generateBuildSentenceQuestion(sentenceSourceRef.current, sentenceLevel)
+        const sentenceQ = generateBuildSentenceQuestion(sentenceSourceRef.current, sentenceLevel, Math.random, askedTargets)
         if (sentenceQ) {
           buildSentenceCountRef.current += 1
           lastWasBuildSentenceRef.current = true
@@ -1439,10 +1445,10 @@ export function useQuestSession() {
         }
       }
 
-      // Send recent question types so AI can vary format
-      const recentQuestionTypes = updatedQuestions
-        .slice(-3)
-        .map((q) => q.prompt.slice(0, 50))
+      // Anti-repetition: tell the AI which formats it just used (vary the format)
+      // and which target words/sentences it has already asked (never reuse them).
+      const recentQuestionTypes = recentQuestionFormats(updatedQuestions)
+      const askedTargetList = collectAskedTargets(updatedQuestions)
 
       const bonusLevel = Math.max(1, newState.currentLevel - 2)
       const userMessage: AIChatMessage = {
@@ -1459,6 +1465,7 @@ export function useQuestSession() {
           questionsThisLevel: newState.questionsThisLevel,
           levelDownsInARow: newState.levelDownsInARow,
           recentQuestionTypes,
+          askedTargets: askedTargetList,
           ...(needsBonusRound ? { bonusRound: true } : {}),
         }),
       }
@@ -1608,9 +1615,8 @@ export function useQuestSession() {
       // Request replacement question at same level
       setScreen(QuestScreen.Loading)
 
-      const recentQuestionTypes = updatedQuestions
-        .slice(-3)
-        .map((q) => q.prompt.slice(0, 50))
+      const recentQuestionTypes = recentQuestionFormats(updatedQuestions)
+      const askedTargetList = collectAskedTargets(updatedQuestions)
 
       const userMessage: AIChatMessage = {
         role: 'user',
@@ -1632,6 +1638,7 @@ export function useQuestSession() {
           questionsThisLevel: questState.questionsThisLevel,
           levelDownsInARow: questState.levelDownsInARow,
           recentQuestionTypes,
+          askedTargets: askedTargetList,
         }),
       }
 

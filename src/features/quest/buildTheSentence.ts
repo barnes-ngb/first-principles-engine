@@ -273,19 +273,33 @@ export function buildSentenceQuestion(
   }
 }
 
+/** How many times to re-roll a sentence whose target is already in the avoid-set. */
+const SENTENCE_AVOID_ATTEMPTS = 4
+
 /**
  * Convenience: generate the next build-the-sentence question from a blended
  * source at a level. Returns `null` only if generation fails.
+ *
+ * `avoid` (optional) is the session avoid-set of already-asked targets — if the
+ * rolled sentence is one already asked this session, it re-rolls a few times and
+ * returns `null` if it can't find a fresh one (the caller then falls back to the
+ * AI question instead of repeating).
  */
 export function generateBuildSentenceQuestion(
   source: SentenceSource,
   level: number,
   rng: () => number = Math.random,
+  avoid?: Set<string>,
 ): BuildSentenceQuestion | null {
-  const words = pickSentenceWords(source, level, rng)
-  const q = buildSentenceQuestion(words, level, rng)
-  if (!q) return null
   const bank = new Set((source.bankWords ?? []).map((w) => String(w).trim().toLowerCase()))
-  q.source = words.some((w) => bank.has(w.toLowerCase())) ? 'wordBank' : 'generated'
-  return q
+  const attempts = avoid && avoid.size > 0 ? SENTENCE_AVOID_ATTEMPTS : 1
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const words = pickSentenceWords(source, level, rng)
+    const q = buildSentenceQuestion(words, level, rng)
+    if (!q) return null
+    if (avoid?.has(q.targetSentence.trim().toLowerCase())) continue
+    q.source = words.some((w) => bank.has(w.toLowerCase())) ? 'wordBank' : 'generated'
+    return q
+  }
+  return null
 }
