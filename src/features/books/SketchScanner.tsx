@@ -21,7 +21,10 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useAI } from '../../core/ai/useAI'
+import CropIcon from '@mui/icons-material/Crop'
 import { cleanSketchBackground } from './cleanSketch'
+import SketchCropStage from './SketchCropStage'
+import { cropImageToRegion, type CropFraction } from './cropImage'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
 import {
@@ -45,7 +48,11 @@ interface SketchScannerProps {
   onSaved?: () => void
 }
 
-type Stage = 'capture' | 'cleaning' | 'preview'
+type Stage = 'capture' | 'crop' | 'cleaning' | 'preview'
+
+/** Default crop box — slightly inset to nudge trimming paper edges, but the
+ *  whole image is one tap away ("Use whole image"). */
+const DEFAULT_CROP: CropFraction = { x: 0.06, y: 0.06, width: 0.88, height: 0.88 }
 type PreviewTab = 'original' | 'cleaned' | 'fancy'
 type SaveVersion = 'cleaned' | 'fancy'
 
@@ -87,6 +94,9 @@ export default function SketchScanner({
   const [cleanedFile, setCleanedFile] = useState<File | null>(null)
   const [cleanedUrl, setCleanedUrl] = useState<string | null>(null)
 
+  // Manual crop (between capture and cleaning) — fractions of the captured image.
+  const [cropFraction, setCropFraction] = useState<CropFraction>(DEFAULT_CROP)
+
   // Fancy (theme-transformed) version
   const [styleId, setStyleId] = useState<string>(DEFAULT_FANCY_STYLE_ID)
   const [fancyUrl, setFancyUrl] = useState<string | null>(null)
@@ -116,6 +126,7 @@ export default function SketchScanner({
     setOriginalStoragePath(null)
     setCleanedFile(null)
     setCleanedUrl(null)
+    setCropFraction(DEFAULT_CROP)
     setStyleId(DEFAULT_FANCY_STYLE_ID)
     setFancyUrl(null)
     setFancyStoragePath(null)
@@ -135,7 +146,7 @@ export default function SketchScanner({
   }, [reset, onClose])
 
   const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       // Allow re-selecting the same file later.
       e.target.value = ''
@@ -144,8 +155,18 @@ export default function SketchScanner({
       setError(null)
       setOriginalFile(file)
       setOriginalUrl(URL.createObjectURL(file))
-      setStage('cleaning')
+      // Pick a region first (skippable), then make it transparent.
+      setCropFraction(DEFAULT_CROP)
+      setStage('crop')
+    },
+    [],
+  )
 
+  // Transparent cleanup → preview. Shared by both crop paths (cropped + whole).
+  const runClean = useCallback(
+    async (file: File) => {
+      setStage('cleaning')
+      setError(null)
       try {
         const cleaned = await cleanSketchBackground(file)
         setCleanedFile(cleaned)
@@ -161,6 +182,28 @@ export default function SketchScanner({
     },
     [defaultLabel],
   )
+
+  // "Use whole image" — keeps today's behavior (clean the full capture).
+  const handleUseWholeImage = useCallback(() => {
+    if (originalFile) void runClean(originalFile)
+  }, [originalFile, runClean])
+
+  // "Use this" — crop to the selected box, then clean. The cropped image
+  // becomes the working original so the Original tab and "Make it fancy"
+  // transform both operate on the chosen region.
+  const handleConfirmCrop = useCallback(async () => {
+    if (!originalFile) return
+    try {
+      const cropped = await cropImageToRegion(originalFile, cropFraction)
+      setOriginalFile(cropped)
+      setOriginalUrl(URL.createObjectURL(cropped))
+      // Force a re-upload of the cropped original if a fancy transform is requested.
+      setOriginalStoragePath(null)
+      await runClean(cropped)
+    } catch {
+      setError('Failed to crop image. Please try again.')
+    }
+  }, [originalFile, cropFraction, runClean])
 
   // Upload original to storage (lazy — only when the transform is first requested).
   const ensureOriginalUploaded = useCallback(async (): Promise<string | null> => {
@@ -329,6 +372,20 @@ export default function SketchScanner({
             <Typography variant="body2" color="text.secondary" textAlign="center">
               Photograph or upload a drawing to turn it into a sticker
             </Typography>
+          </Stack>
+        )}
+
+        {/* Crop stage — pick the region before the transparent cleanup */}
+        {stage === 'crop' && originalUrl && (
+          <Stack alignItems="center" spacing={1.5} sx={{ py: 1 }}>
+            <Typography variant="body2" color="text.secondary" textAlign="center">
+              Drag the box to pick what becomes the sticker — or use the whole picture.
+            </Typography>
+            <SketchCropStage
+              imageUrl={originalUrl}
+              value={cropFraction}
+              onChange={setCropFraction}
+            />
           </Stack>
         )}
 
@@ -546,6 +603,24 @@ export default function SketchScanner({
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
         {stage === 'capture' && <Button onClick={handleClose}>Cancel</Button>}
+
+        {stage === 'crop' && (
+          <>
+            <Button onClick={reset}>Retake</Button>
+            <Box sx={{ flex: 1 }} />
+            <Button onClick={handleUseWholeImage} sx={{ textTransform: 'none' }}>
+              Use whole image
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<CropIcon />}
+              onClick={() => void handleConfirmCrop()}
+              sx={{ minHeight: 44, textTransform: 'none' }}
+            >
+              Use this
+            </Button>
+          </>
+        )}
 
         {stage === 'preview' && (
           <>
