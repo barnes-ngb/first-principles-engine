@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { addDoc, deleteDoc, doc } from 'firebase/firestore'
+import { deleteDoc, doc } from 'firebase/firestore'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -17,13 +17,9 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
-import { StickerCategory } from '../../core/types/enums'
 import type { Sticker } from '../../core/types'
-import {
-  FANCY_STYLE_OPTIONS,
-  DEFAULT_FANCY_STYLE_ID,
-  resolveFancyEnhanceParams,
-} from './drawingStickerStyles'
+import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from './drawingStickerStyles'
+import { generateStickerVersion } from './generateStickerVersion'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import type { DrawingGroup } from './stickerGrouping'
 
@@ -69,29 +65,19 @@ export default function DrawingGroupCard({ group, familyId, onChanged }: Drawing
     setBusy(true)
     setError(null)
     try {
-      const result = await enhanceSketch({
+      // Always adds a new version; repeating a theme keeps both.
+      const res = await generateStickerVersion({
         familyId,
-        sketchStoragePath: source.storagePath,
-        ...resolveFancyEnhanceParams(styleId),
+        source,
+        styleId,
+        sourceDrawingId: group.sourceDrawingId,
+        label,
+        enhanceSketch,
       })
-      if (!result?.url) {
-        setError('That didn\'t work — try again.')
+      if (!res.ok) {
+        setError(res.error)
         return
       }
-      // Always adds a new version; repeating a theme keeps both.
-      const newVersion: Omit<Sticker, 'id'> = {
-        url: result.url,
-        storagePath: result.storagePath,
-        label,
-        category: StickerCategory.Custom,
-        childId: source.childId ?? null,
-        createdAt: new Date().toISOString(),
-        tags: source.tags ?? ['object'],
-        childProfile: source.childProfile ?? 'both',
-        sourceDrawingId: group.sourceDrawingId,
-        theme: styleId,
-      }
-      await addDoc(stickerLibraryCollection(familyId), newVersion as Sticker)
       setPicking(false)
       onChanged()
     } catch (err) {
