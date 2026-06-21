@@ -22,6 +22,7 @@ import Typography from '@mui/material/Typography'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
 import AddIcon from '@mui/icons-material/Add'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import BarChartIcon from '@mui/icons-material/BarChart'
@@ -308,6 +309,16 @@ export default function BookshelfPage() {
           </ToggleButton>
         </ToggleButtonGroup>
         <Box sx={{ flex: 1 }} />
+        {/* Stickers entry — visible to kids and parents (FEAT-33 slice 1) */}
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<AutoAwesomeIcon />}
+          onClick={() => navigate('/stickers')}
+          sx={{ minHeight: 36, textTransform: 'none' }}
+        >
+          Stickers
+        </Button>
         {isParent && (
           <>
             <Button

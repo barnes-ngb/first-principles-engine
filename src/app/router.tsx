@@ -22,6 +22,7 @@ import BookReviewChat from '../features/books/BookReviewChat'
 import CreateSightWordBook from '../features/books/CreateSightWordBook'
 import SightWordDashboard from '../features/books/SightWordDashboard'
 import StoryGuidePage from '../features/books/StoryGuidePage'
+import StickersPage from '../features/books/StickersPage'
 import MyAvatarPage from '../features/avatar/MyAvatarPage'
 import WorkshopPage from '../features/workshop/WorkshopPage'
 import ShellyChatPage from '../features/shelly-chat/ShellyChatPage'
@@ -62,6 +63,7 @@ const routes = [
       { path: '/books/story-guide', element: <StoryGuidePage /> },
       { path: '/books/create-story', element: <CreateSightWordBook /> },
       { path: '/books/sight-words', element: <SightWordDashboard /> },
+      { path: '/stickers', element: <StickersPage /> },
       { path: '/books/:bookId', element: <BookEditorPage /> },
       { path: '/books/:bookId/read', element: <BookReaderPage /> },
       { path: '/books/:bookId/review', element: <BookReviewChat /> },
