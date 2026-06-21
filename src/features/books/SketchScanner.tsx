@@ -116,6 +116,9 @@ export default function SketchScanner({
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
+  // Group key shared by every version saved from one drawing (the cleaned
+  // original + any fancy versions). Minted when a new drawing is captured.
+  const sourceDrawingIdRef = useRef<string | null>(null)
   const { enhanceSketch } = useAI()
 
   const reset = useCallback(() => {
@@ -138,6 +141,7 @@ export default function SketchScanner({
     setSavingVersion(null)
     setSavedVersions(new Set())
     setError(null)
+    sourceDrawingIdRef.current = null
   }, [defaultLabel, childProfile])
 
   const handleClose = useCallback(() => {
@@ -155,6 +159,9 @@ export default function SketchScanner({
       setError(null)
       setOriginalFile(file)
       setOriginalUrl(URL.createObjectURL(file))
+      // Mint a fresh group key for this drawing — the cleaned original and any
+      // fancy versions saved from it all share it (FEAT-33 slice 3).
+      sourceDrawingIdRef.current = crypto.randomUUID()
       // Pick a region first (skippable), then make it transparent.
       setCropFraction(DEFAULT_CROP)
       setStage('crop')
@@ -289,6 +296,13 @@ export default function SketchScanner({
           createdAt: new Date().toISOString(),
           tags: tags.length ? tags : ['object'],
           childProfile: profile,
+          // Link this version to its source drawing (FEAT-33 slice 3). The
+          // cleaned version is the original group anchor; the fancy version
+          // records which theme/style it is.
+          ...(sourceDrawingIdRef.current
+            ? { sourceDrawingId: sourceDrawingIdRef.current }
+            : {}),
+          ...(version === 'cleaned' ? { isOriginal: true } : { theme: styleId }),
         }
         await addDoc(stickerLibraryCollection(familyId), newSticker as Sticker)
         setSavedVersions((prev) => new Set(prev).add(version))
@@ -311,6 +325,7 @@ export default function SketchScanner({
       defaultLabel,
       tags,
       profile,
+      styleId,
       onSaved,
     ],
   )

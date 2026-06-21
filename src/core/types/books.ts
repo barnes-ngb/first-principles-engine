@@ -367,6 +367,21 @@ export interface Sticker {
   tags?: StickerTag[]
   /** Which child this sticker is relevant for */
   childProfile?: 'lincoln' | 'london' | 'both'
+  /**
+   * Group key (FEAT-33 slice 3). When set, this sticker is one of several
+   * versions that share a single source drawing — the cleaned original plus any
+   * AI-imagined themed versions made from it. Absent → a standalone sticker
+   * (e.g. text→sticker, or any legacy sticker), which renders on its own.
+   */
+  sourceDrawingId?: string
+  /**
+   * Which "Make it fancy" theme/style this version is (a `FANCY_STYLE_OPTIONS`
+   * id, e.g. 'cartoon' | 'fantasy' | 'minecraft'). Absent → the cleaned
+   * original (the group anchor), not a themed version.
+   */
+  theme?: string
+  /** True for the cleaned original that anchors a source-drawing group. */
+  isOriginal?: boolean
 }
 
 // ── Sight Word Progress ──────────────────────────────────────
