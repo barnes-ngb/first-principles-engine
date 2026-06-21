@@ -8,12 +8,14 @@ import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import BrushIcon from '@mui/icons-material/Brush'
 
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import StickerLibraryTab from '../settings/StickerLibraryTab'
 import MakeStickerDialog from './MakeStickerDialog'
+import SketchScanner from './SketchScanner'
 
 /**
  * Stickers page in Books — accessible to kids and parents alike (no parent
@@ -35,6 +37,7 @@ export default function StickersPage() {
   const isLincoln = childProfile === 'lincoln'
 
   const [showMake, setShowMake] = useState(false)
+  const [showDrawing, setShowDrawing] = useState(false)
   const [childFilter, setChildFilter] = useState(false)
   // Bumped after a sticker is made so the library reloads.
   const [refreshSignal, setRefreshSignal] = useState(0)
@@ -73,6 +76,14 @@ export default function StickersPage() {
           Stickers
         </Typography>
         <Box sx={{ flex: 1 }} />
+        <Button
+          variant="outlined"
+          startIcon={<BrushIcon />}
+          onClick={() => setShowDrawing(true)}
+          sx={{ minHeight: 44, textTransform: 'none' }}
+        >
+          From a Drawing
+        </Button>
         <Button
           variant="contained"
           startIcon={<AutoAwesomeIcon />}
@@ -127,6 +138,15 @@ export default function StickersPage() {
         onClose={() => setShowMake(false)}
         familyId={familyId}
         childProfile={childProfile}
+        onSaved={() => setRefreshSignal((n) => n + 1)}
+      />
+
+      <SketchScanner
+        open={showDrawing}
+        onClose={() => setShowDrawing(false)}
+        familyId={familyId}
+        childProfile={childProfile}
+        childName={childName}
         onSaved={() => setRefreshSignal((n) => n + 1)}
       />
     </Page>
