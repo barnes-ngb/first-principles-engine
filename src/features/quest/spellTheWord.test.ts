@@ -125,6 +125,41 @@ describe('generateSpellWordQuestion', () => {
   it('returns null when no target is available', () => {
     expect(generateSpellWordQuestion({ sightWords: [], frontierWords: [] }, 3, fixedRng)).toBeNull()
   })
+
+  it('skips a target word already asked this session (avoid-set)', () => {
+    // Only "said" is available, but it is in the avoid-set → no fresh target.
+    const avoid = new Set(['said'])
+    expect(
+      generateSpellWordQuestion({ sightWords: ['said'], frontierWords: [] }, 3, fixedRng, avoid),
+    ).toBeNull()
+  })
+
+  it('picks a non-avoided target when one is available', () => {
+    const avoid = new Set(['said'])
+    const q = generateSpellWordQuestion(
+      { sightWords: ['said', 'play'], frontierWords: [] },
+      3,
+      fixedRng,
+      avoid,
+    )
+    expect(q).not.toBeNull()
+    expect(q!.targetWord).toBe('play')
+  })
+})
+
+describe('blendSpellingTargets — avoid-set', () => {
+  it('excludes already-asked words from the candidate targets', () => {
+    const targets = blendSpellingTargets(
+      { sightWords: ['said', 'play', 'the'] },
+      3,
+      6,
+      new Set(['said', 'the']),
+    )
+    const words = targets.map((t) => t.word)
+    expect(words).not.toContain('said')
+    expect(words).not.toContain('the')
+    expect(words).toContain('play')
+  })
 })
 
 describe('spellingSkillTag', () => {

@@ -972,7 +972,8 @@ function buildComprehensionQuestPrompt(startingLevel?: number, childName?: strin
 
 INTERACTION FORMAT:
 - You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
-- You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
+- You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT (never the same format twice in a row).
+- You may also receive "askedTargets" listing the words/sentences already tested this session — NEVER reuse any of them as the target, stimulus, or answer (see QUESTION VARIETY below).
 - If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
 ${startLevelBlock}
@@ -1363,6 +1364,31 @@ export function buildRecentCurriculumSection(hasRecentScans: boolean): string {
   ].join("\n");
 }
 
+/**
+ * Build the QUESTION VARIETY directive (anti-repetition). Always included for
+ * interactive quests. Tells the model to vary the FORMAT every turn (using the
+ * `recentQuestionTypes` hint) and to NEVER reuse a target word/sentence already
+ * asked this session (using the `askedTargets` avoid-list the client sends on
+ * every `answer` message). This is the fix for the "asks the exact same
+ * question" feel — each question must be distinct. Exported for tests.
+ */
+export function buildQuestVarietyDirectiveSection(): string {
+  return [
+    "## QUESTION VARIETY — EVERY QUESTION MUST BE DISTINCT (ANTI-REPETITION)",
+    "",
+    "Repeating questions is the #1 way to lose this child. Each `answer` message includes two avoidance hints — you MUST use them:",
+    "",
+    '- `recentQuestionTypes`: the last 2-3 question formats you already used (type + a snippet). Pick a DIFFERENT format this turn. NEVER use the same format twice in a row — rotate through the level-appropriate types so each question feels like a new kind of gem, not the same rock.',
+    '- `askedTargets`: the words / sentences you have ALREADY tested this session. NEVER reuse any of them as the target word, stimulus, correct answer, or build/spell target. If your natural pick is in this list, choose a DIFFERENT word at the same level.',
+    "",
+    "Hard rules:",
+    "- Never reuse a target word/sentence that appears in `askedTargets`.",
+    "- Never use the same question format twice in a row.",
+    "- Vary the word even within one level — two short-o questions back to back must use different words AND different formats.",
+    "- Every question this session should feel distinct from every other one.",
+  ].join("\n");
+}
+
 export function buildQuestPrompt(
   domain: string,
   startingLevel?: number,
@@ -1371,11 +1397,12 @@ export function buildQuestPrompt(
   childName?: string,
 ): string {
   const name = childName || "the child";
+  const varietyDirective = buildQuestVarietyDirectiveSection();
   const blockersSection = buildKnownBlockersSection(extras?.activeBlockers);
   const recentCurriculumSection = buildRecentCurriculumSection(
     extras?.hasRecentScans ?? false,
   );
-  const questExtras = [blockersSection, recentCurriculumSection]
+  const questExtras = [varietyDirective, blockersSection, recentCurriculumSection]
     .filter((s) => s.length > 0)
     .join("\n\n");
   const questExtrasBlock = questExtras ? `\n\n${questExtras}\n` : "";
@@ -1400,7 +1427,8 @@ export function buildQuestPrompt(
 
 INTERACTION FORMAT:
 - You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
-- You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
+- You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT (never the same format twice in a row).
+- You may also receive "askedTargets" listing the words/sentences already tested this session — NEVER reuse any of them as the target, stimulus, or answer (see QUESTION VARIETY below).
 - If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
 ${startLevelBlock}
@@ -1682,7 +1710,8 @@ IMPORTANT:
 
 INTERACTION FORMAT:
 - You receive JSON messages with "action": "start_quest" or "action": "answer" plus session state (currentLevel, consecutiveCorrect, consecutiveWrong, totalQuestions, totalCorrect).
-- You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT.
+- You may also receive "recentQuestionTypes" listing the last 2-3 question formats used — pick something DIFFERENT (never the same format twice in a row).
+- You may also receive "askedTargets" listing the words/sentences already tested this session — NEVER reuse any of them as the target, stimulus, or answer (see QUESTION VARIETY below).
 - If the message includes "bonusRound": true, generate an easy confidence-building question (see BONUS ROUND below).
 - You respond with ONLY a <quest> JSON block. No other text, no markdown, no explanation.
 ${mathStartLevelBlock}

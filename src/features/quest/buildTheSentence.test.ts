@@ -124,4 +124,27 @@ describe('generateBuildSentenceQuestion — client-gen from bank + function word
     }
     expect(used).toBe(true)
   })
+
+  it('re-rolls past a sentence already asked this session (avoid-set)', () => {
+    // Capture the sentence a fixed seed produces, avoid it, and confirm the
+    // generator re-rolls to a DIFFERENT, fresh sentence rather than repeating.
+    const first = generateBuildSentenceQuestion({ bankWords: [] }, 1, seeded(3))!
+    const avoid = new Set([first.targetSentence.trim().toLowerCase()])
+    const again = generateBuildSentenceQuestion({ bankWords: [] }, 1, seeded(3), avoid)
+    expect(again).not.toBeNull()
+    expect(again!.targetSentence.trim().toLowerCase()).not.toBe(
+      first.targetSentence.trim().toLowerCase(),
+    )
+    expect(avoid.has(again!.targetSentence.trim().toLowerCase())).toBe(false)
+  })
+
+  it('returns null when every re-roll collides with the avoid-set', () => {
+    // A constant rng makes generation fully deterministic — every attempt yields
+    // the same sentence, so avoiding it exhausts the re-rolls and returns null
+    // (the caller then falls back to the AI question instead of repeating).
+    const constRng = () => 0.5
+    const only = generateBuildSentenceQuestion({ bankWords: [] }, 1, constRng)!
+    const avoid = new Set([only.targetSentence.trim().toLowerCase()])
+    expect(generateBuildSentenceQuestion({ bankWords: [] }, 1, constRng, avoid)).toBeNull()
+  })
 })
