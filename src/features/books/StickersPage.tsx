@@ -152,6 +152,7 @@ export default function StickersPage() {
         emptyDescription="No stickers yet — make your first one!"
         childProfileFilter={childFilter ? childProfile : undefined}
         tagFilter={tagFilter}
+        groupByDrawing
       />
 
       {familyId && (
