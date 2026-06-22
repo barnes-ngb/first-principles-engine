@@ -24,6 +24,7 @@ import { groupStickers } from '../books/stickerGrouping'
 import DrawingGroupCard from '../books/DrawingGroupCard'
 import { generateStickerVersion } from '../books/generateStickerVersion'
 import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from '../books/drawingStickerStyles'
+import { CHECKERBOARD_BG } from '../books/DrawingChoiceDialog'
 
 const STICKER_TAG_LABELS: Record<StickerTag, string> = {
   animal: 'Animal',
@@ -82,6 +83,8 @@ export default function StickerLibraryTab({
   const [editTarget, setEditTarget] = useState<Sticker | null>(null)
   const [editTags, setEditTags] = useState<StickerTag[]>([])
   const [editProfile, setEditProfile] = useState<'lincoln' | 'london' | 'both'>('both')
+  // Big-preview dialog (FEAT-33): tapping a sticker opens it large with quick actions.
+  const [previewTarget, setPreviewTarget] = useState<Sticker | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Sticker | null>(null)
   const [saving, setSaving] = useState(false)
   // "Make more versions" flow (FEAT-33 slice 4): theme picker for the sticker
@@ -129,6 +132,21 @@ export default function StickerLibraryTab({
     setMakeStyleId(DEFAULT_FANCY_STYLE_ID)
     setMakeError(null)
   }, [])
+
+  // Preview → Edit: hand the sticker to the existing edit dialog.
+  const handlePreviewEdit = useCallback((sticker: Sticker) => {
+    setPreviewTarget(null)
+    handleOpenEdit(sticker)
+  }, [handleOpenEdit])
+
+  // Preview → Make more versions: open the edit dialog's theme picker directly.
+  // handleOpenEdit clears makeVersionsOpen, so re-open it after (last setState wins).
+  const handlePreviewMakeVersions = useCallback((sticker: Sticker) => {
+    setPreviewTarget(null)
+    handleOpenEdit(sticker)
+    setMakeError(null)
+    setMakeVersionsOpen(true)
+  }, [handleOpenEdit])
 
   const handleSaveEdit = useCallback(async () => {
     if (!editTarget?.id) return
@@ -254,7 +272,16 @@ export default function StickerLibraryTab({
               component="img"
               src={sticker.url}
               alt={sticker.label}
-              sx={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block' }}
+              role="button"
+              aria-label={`Preview ${sticker.label}`}
+              onClick={() => setPreviewTarget(sticker)}
+              sx={{
+                width: '100%',
+                aspectRatio: '1',
+                objectFit: 'cover',
+                display: 'block',
+                cursor: 'pointer',
+              }}
             />
             <Box sx={{ p: 0.75 }}>
               {/* Child profile badge */}
@@ -310,6 +337,91 @@ export default function StickerLibraryTab({
           </Box>
         ))}
       </Box>
+
+      {/* Big-preview dialog (FEAT-33): tap a sticker → see it large + quick actions */}
+      <Dialog
+        open={!!previewTarget}
+        onClose={() => setPreviewTarget(null)}
+        maxWidth="sm"
+        fullWidth
+      >
+        {previewTarget && (
+          <>
+            <DialogContent>
+              <Stack spacing={1.5} alignItems="center">
+                <Box
+                  sx={{
+                    width: '100%',
+                    maxWidth: 360,
+                    aspectRatio: '1',
+                    borderRadius: 2,
+                    background: CHECKERBOARD_BG,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <Box
+                    component="img"
+                    src={previewTarget.url}
+                    alt={previewTarget.label}
+                    sx={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      display: 'block',
+                    }}
+                  />
+                </Box>
+                <Typography variant="h6" sx={{ textAlign: 'center' }}>
+                  {previewTarget.label}
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'center' }}>
+                  {previewTarget.childProfile && previewTarget.childProfile !== 'both' && (
+                    <Chip
+                      label={
+                        previewTarget.childProfile.charAt(0).toUpperCase() +
+                        previewTarget.childProfile.slice(1)
+                      }
+                      size="small"
+                      color="primary"
+                    />
+                  )}
+                  {(previewTarget.tags ?? ['other']).map((tag) => (
+                    <Chip key={tag} label={STICKER_TAG_LABELS[tag]} size="small" variant="outlined" />
+                  ))}
+                </Box>
+              </Stack>
+            </DialogContent>
+            <DialogActions sx={{ flexWrap: 'wrap', justifyContent: 'center', gap: 0.5 }}>
+              <Button startIcon={<EditIcon />} onClick={() => handlePreviewEdit(previewTarget)}>
+                Edit
+              </Button>
+              <Button
+                startIcon={<AutoAwesomeIcon />}
+                onClick={() => handlePreviewMakeVersions(previewTarget)}
+              >
+                Make more versions
+              </Button>
+              <Button
+                color="error"
+                startIcon={<DeleteOutlineIcon />}
+                onClick={() => {
+                  const target = previewTarget
+                  setPreviewTarget(null)
+                  setDeleteTarget(target)
+                }}
+              >
+                Delete
+              </Button>
+              <Button variant="contained" onClick={() => setPreviewTarget(null)}>
+                Close
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
 
       {/* Edit dialog */}
       <Dialog open={!!editTarget} onClose={() => setEditTarget(null)} maxWidth="xs" fullWidth>
