@@ -1,8 +1,7 @@
-import { ref, getBlob } from 'firebase/storage'
 import { jsPDF } from 'jspdf'
 import type { Book, BookPage } from '../../core/types'
-import { storage } from '../../core/firebase/storage'
 import { startStep } from '../../core/utils/perf'
+import { fetchAsDataUri } from './imageDataUri'
 import type { PrintSettings } from './PrintSettingsDialog'
 
 /* ───────────────────── page size & color constants ───────────────────── */
@@ -48,43 +47,6 @@ export interface PrintBookOptions {
 }
 
 /* ───────────────────── image pre-fetch (Firebase SDK) ───────────────────── */
-
-function blobToDataUri(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onloadend = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
-}
-
-/**
- * Fetch an image as a base64 data URI using Firebase Storage SDK (no CORS needed).
- * Falls back to browser fetch, then to original URL.
- */
-async function fetchAsDataUri(url: string, storagePath?: string): Promise<string> {
-  if (storagePath) {
-    try {
-      const storageRef = ref(storage, storagePath)
-      const blob = await getBlob(storageRef)
-      return await blobToDataUri(blob)
-    } catch (err) {
-      console.warn('Firebase SDK getBlob failed, trying fetch:', storagePath, err)
-    }
-  }
-
-  try {
-    const response = await fetch(url, { mode: 'cors' })
-    if (response.ok) {
-      const blob = await response.blob()
-      return await blobToDataUri(blob)
-    }
-  } catch {
-    console.warn('Fetch CORS failed for:', url.slice(0, 80))
-  }
-
-  return url
-}
 
 /**
  * Pre-fetch all unique images in a book as base64 data URIs.

@@ -153,6 +153,7 @@ export default function StickersPage() {
         childProfileFilter={childFilter ? childProfile : undefined}
         tagFilter={tagFilter}
         groupByDrawing
+        enableSelectToPrint
       />
 
       {familyId && (
