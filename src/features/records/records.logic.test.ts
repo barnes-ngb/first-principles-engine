@@ -1551,4 +1551,26 @@ describe('generateComplianceReportHtml', () => {
     expect(html).toContain('2.0') // 120 minutes = 2.0 hours
     expect(html).toContain('1 school days logged')
   })
+
+  // DATA-12: the citation is now sourced from the state compliance config; MO
+  // (the default) must render the prior RSMo 167.031 paragraph byte-identically.
+  it('renders the MO RSMo 167.031 citation verbatim (byte-identical default)', () => {
+    const summary = computeHoursSummary([], [], [])
+
+    const html = generateComplianceReportHtml({
+      summary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [{ id: 'child-a', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    expect(html).toContain(
+      '<p class="muted">MO RSMo 167.031 requires 1,000 hours of instruction (600 in core subjects: Reading, Language Arts, Math, Science, Social Studies). At least 600 hours must occur at the regular place of instruction.</p>',
+    )
+  })
 })

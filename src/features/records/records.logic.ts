@@ -12,18 +12,23 @@ import type {
 import { LearningLocation, SubjectBucket } from '../../core/types/enums'
 import { formatDateForCsv, toCsvValue } from '../../core/utils/format'
 import { deriveChildIdFromDocId } from '../../core/utils/docId'
+import {
+  getStateConfig,
+  type HomeschoolState,
+} from '../../core/compliance/stateCompliance'
 
 export { deriveChildIdFromDocId }
 
 // ─── Hours Summary ───────────────────────────────────────────────────────────
 
-const coreBuckets = new Set<SubjectBucket>([
-  SubjectBucket.Reading,
-  SubjectBucket.LanguageArts,
-  SubjectBucket.Math,
-  SubjectBucket.Science,
-  SubjectBucket.SocialStudies,
-])
+// DATA-12: the core-subject set is sourced from the MO compliance config so the
+// required-subject list lives in one place. MO is the default and these are the
+// same five subjects as before — the counting path (computeHoursSummary) is
+// byte-identical. (The counting itself is intentionally NOT parametrized by
+// state; TX simply imposes no hours target — see ComplianceDashboard.)
+const coreBuckets = new Set<SubjectBucket>(
+  getStateConfig('MO').requiredCoreSubjects,
+)
 
 export type HoursSummaryRow = {
   subjectBucket: string
@@ -643,6 +648,8 @@ export type CompliancePackInput = {
   startDate: string
   endDate: string
   childName: string
+  /** State whose compliance citation to render. Defaults to MO (DATA-12). */
+  homeschoolState?: HomeschoolState
 }
 
 export async function buildComplianceZip(
@@ -709,6 +716,10 @@ export function generateComplianceReportHtml(
   input: CompliancePackInput,
 ): string {
   const { summary, evaluations, artifacts, children, startDate, endDate, childName } = input
+
+  // DATA-12: the legal citation is sourced from the state compliance config.
+  // Defaults to MO, whose citation string is reproduced verbatim — byte-identical.
+  const legalCitation = getStateConfig(input.homeschoolState).legalCitation
 
   const totalHours = (summary.totalMinutes / 60).toFixed(1)
   const coreHours = (summary.coreMinutes / 60).toFixed(1)
@@ -800,7 +811,7 @@ export function generateComplianceReportHtml(
 <body>
   <h1>Missouri Homeschool Compliance Report</h1>
   <p><strong>Student:</strong> ${childName} &nbsp; | &nbsp; <strong>Period:</strong> ${startDate} to ${endDate}</p>
-  <p class="muted">MO RSMo 167.031 requires 1,000 hours of instruction (600 in core subjects: Reading, Language Arts, Math, Science, Social Studies). At least 600 hours must occur at the regular place of instruction.</p>
+  <p class="muted">${legalCitation}</p>
 
   <h2>Hours Summary</h2>
   <div class="summary-grid">

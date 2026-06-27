@@ -58,6 +58,10 @@ import type {
 import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
+import {
+  getStateConfig,
+  type HomeschoolState,
+} from '../../core/compliance/stateCompliance'
 import { parseDateFromDocId } from '../today/daylog.model'
 import ComplianceDashboard from './ComplianceDashboard'
 import MonthlyTrend from './MonthlyTrend'
@@ -133,6 +137,16 @@ export default function RecordsPage() {
 
 function HoursComplianceTab() {
   const familyId = useFamilyId()
+  // DATA-12: state-configurable compliance. No family-doc plumbing for
+  // `homeschoolState` yet, so this resolves to MO (the default) — TX is defined
+  // but not activated, and there is no switch UI. When a family doc carries
+  // `settings.homeschoolState`, thread it in here.
+  const homeschoolState: HomeschoolState | undefined = undefined
+  const stateConfig = getStateConfig(homeschoolState)
+  const stateLabel = homeschoolState ?? 'MO'
+  const coreAtHomeLabel = stateConfig.hoursRequirement
+    ? `Core at home (${stateLabel} ≥${stateConfig.hoursRequirement.coreAtHome})`
+    : `Core at home (${stateLabel})`
   const { start, end } = useMemo(() => getSchoolYearRange(), [])
   const [startDate, setStartDate] = useState(start)
   const [endDate, setEndDate] = useState(end)
@@ -775,6 +789,7 @@ function HoursComplianceTab() {
           summary={summary}
           startDate={startDate}
           endDate={endDate}
+          homeschoolState={homeschoolState}
         />
       )}
 
@@ -839,7 +854,7 @@ function HoursComplianceTab() {
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell>Core at home (MO ≥600)</TableCell>
+                <TableCell>{coreAtHomeLabel}</TableCell>
                 <TableCell align="right">
                   {formatHours(summary.coreMinutes)}
                 </TableCell>
