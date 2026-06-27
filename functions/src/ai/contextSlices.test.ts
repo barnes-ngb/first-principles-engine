@@ -61,8 +61,18 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.quest).toContain("recentHistoryByDomain");
     expect(TASK_CONTEXT.quest).toContain("workbookPaces");
     expect(TASK_CONTEXT.quest).not.toContain("recentEval");
-    expect(TASK_CONTEXT.quest).not.toContain("charter");
     expect(TASK_CONTEXT.quest).not.toContain("engagement");
+  });
+
+  // ── ETHOS-01: charter guardrail on child-facing AI slices ──
+  // quest (Knowledge Mine), generateStory/reviseStory/revisePage (Lincoln's
+  // stories), and scan (worksheet feedback) generate child-facing content and
+  // must run values-aligned like every other task. buildContextForTask injects
+  // the charter preamble whenever "charter" is the first slice.
+  it("child-facing generation slices all carry the charter guardrail (ETHOS-01)", () => {
+    for (const task of ["quest", "generateStory", "reviseStory", "revisePage", "scan"]) {
+      expect(TASK_CONTEXT[task]).toContain("charter");
+    }
   });
 
   it("plan adds recentHistoryByDomain while keeping recentEval (G50: additive migration)", () => {
@@ -113,6 +123,7 @@ describe("TASK_CONTEXT", () => {
   // ── Story Generation V2 Phase 1: generateStory slice list ──
 
   it("generateStory wires childProfile, sightWords, wordMastery, and skillSnapshot", () => {
+    expect(TASK_CONTEXT.generateStory).toContain("charter");
     expect(TASK_CONTEXT.generateStory).toContain("childProfile");
     expect(TASK_CONTEXT.generateStory).toContain("sightWords");
     expect(TASK_CONTEXT.generateStory).toContain("wordMastery");
@@ -136,6 +147,7 @@ describe("TASK_CONTEXT", () => {
 
   it("reviseStory wires childProfile, sightWords, wordMastery, and skillSnapshot", () => {
     // Matches generateStory — same per-child calibration needs.
+    expect(TASK_CONTEXT.reviseStory).toContain("charter");
     expect(TASK_CONTEXT.reviseStory).toContain("childProfile");
     expect(TASK_CONTEXT.reviseStory).toContain("sightWords");
     expect(TASK_CONTEXT.reviseStory).toContain("wordMastery");
@@ -155,6 +167,7 @@ describe("TASK_CONTEXT", () => {
 
   it("revisePage wires childProfile, sightWords, wordMastery, and skillSnapshot", () => {
     // Matches generateStory + reviseStory — same per-child calibration needs.
+    expect(TASK_CONTEXT.revisePage).toContain("charter");
     expect(TASK_CONTEXT.revisePage).toContain("childProfile");
     expect(TASK_CONTEXT.revisePage).toContain("sightWords");
     expect(TASK_CONTEXT.revisePage).toContain("wordMastery");
