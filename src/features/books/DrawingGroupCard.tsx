@@ -13,6 +13,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
@@ -28,6 +29,17 @@ interface DrawingGroupCardProps {
   familyId: string
   /** Reload the library after a version is added or deleted. */
   onChanged: () => void
+  /**
+   * Open the big preview for a tapped version (FEAT-33 fix). When omitted,
+   * version tiles are not preview-tappable (e.g. Settings admin tab).
+   */
+  onPreview?: (sticker: Sticker) => void
+  /** Select-to-print mode is active — tiles toggle selection instead of preview. */
+  selectMode?: boolean
+  /** Ids of currently-selected stickers (for the check overlay). */
+  selectedIds?: Set<string>
+  /** Toggle a version's selection in select mode. */
+  onToggleSelect?: (sticker: Sticker) => void
 }
 
 /** Friendly label for a version chip — "Original", or the theme's emoji + name. */
@@ -44,7 +56,15 @@ function versionLabel(sticker: Sticker): string {
  * a single version or the whole drawing. All generations are kept unless a kid
  * explicitly deletes them.
  */
-export default function DrawingGroupCard({ group, familyId, onChanged }: DrawingGroupCardProps) {
+export default function DrawingGroupCard({
+  group,
+  familyId,
+  onChanged,
+  onPreview,
+  selectMode = false,
+  selectedIds,
+  onToggleSelect,
+}: DrawingGroupCardProps) {
   const { enhanceSketch } = useAI()
   const [picking, setPicking] = useState(false)
   const [styleId, setStyleId] = useState(DEFAULT_FANCY_STYLE_ID)
@@ -126,9 +146,11 @@ export default function DrawingGroupCard({ group, familyId, onChanged }: Drawing
           variant="outlined"
           sx={{ fontSize: '0.65rem', height: 18 }}
         />
-        <IconButton size="small" aria-label="Delete drawing" onClick={() => setDeleteTarget('group')}>
-          <DeleteOutlineIcon sx={{ fontSize: 18 }} />
-        </IconButton>
+        {!selectMode && (
+          <IconButton size="small" aria-label="Delete drawing" onClick={() => setDeleteTarget('group')}>
+            <DeleteOutlineIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        )}
       </Stack>
 
       {/* Version strip */}
@@ -139,13 +161,16 @@ export default function DrawingGroupCard({ group, familyId, onChanged }: Drawing
           gap: 1,
         }}
       >
-        {group.versions.map((version) => (
+        {group.versions.map((version) => {
+          const isSelected = !!version.id && !!selectedIds?.has(version.id)
+          const tappable = selectMode || !!onPreview
+          return (
           <Box
             key={version.id}
             sx={{
               borderRadius: 2,
-              border: '1px solid',
-              borderColor: 'divider',
+              border: '2px solid',
+              borderColor: isSelected ? 'primary.main' : 'divider',
               overflow: 'hidden',
               position: 'relative',
             }}
@@ -154,14 +179,44 @@ export default function DrawingGroupCard({ group, familyId, onChanged }: Drawing
               component="img"
               src={version.url}
               alt={versionLabel(version)}
+              role={tappable ? 'button' : undefined}
+              aria-label={
+                selectMode
+                  ? `${isSelected ? 'Deselect' : 'Select'} ${label} ${versionLabel(version)}`
+                  : onPreview
+                    ? `Preview ${label} ${versionLabel(version)}`
+                    : undefined
+              }
+              aria-pressed={selectMode ? isSelected : undefined}
+              onClick={
+                selectMode
+                  ? () => onToggleSelect?.(version)
+                  : onPreview
+                    ? () => onPreview(version)
+                    : undefined
+              }
               sx={{
                 width: '100%',
                 aspectRatio: '1',
                 objectFit: 'contain',
                 display: 'block',
                 background: CHECKERBOARD_BG,
+                cursor: tappable ? 'pointer' : 'default',
               }}
             />
+            {/* Selection check overlay (select-to-print mode) */}
+            {selectMode && isSelected && (
+              <CheckCircleIcon
+                color="primary"
+                sx={{
+                  position: 'absolute',
+                  top: 4,
+                  left: 4,
+                  bgcolor: 'background.paper',
+                  borderRadius: '50%',
+                }}
+              />
+            )}
             <Typography
               variant="caption"
               sx={{ display: 'block', textAlign: 'center', px: 0.5, py: 0.25, fontSize: '0.6rem' }}
@@ -169,40 +224,46 @@ export default function DrawingGroupCard({ group, familyId, onChanged }: Drawing
             >
               {versionLabel(version)}
             </Typography>
-            <IconButton
-              size="small"
-              aria-label={`Delete ${versionLabel(version)}`}
-              onClick={() => setDeleteTarget(version)}
-              sx={{
-                position: 'absolute',
-                top: 2,
-                right: 2,
-                p: 0.25,
-                bgcolor: 'rgba(255,255,255,0.85)',
-              }}
-            >
-              <DeleteOutlineIcon sx={{ fontSize: 14 }} />
-            </IconButton>
+            {/* Delete hidden in select mode so taps only toggle selection. */}
+            {!selectMode && (
+              <IconButton
+                size="small"
+                aria-label={`Delete ${versionLabel(version)}`}
+                onClick={() => setDeleteTarget(version)}
+                sx={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  p: 0.25,
+                  bgcolor: 'rgba(255,255,255,0.85)',
+                }}
+              >
+                <DeleteOutlineIcon sx={{ fontSize: 14 }} />
+              </IconButton>
+            )}
           </Box>
-        ))}
+          )
+        })}
 
-        {/* Add-version tile */}
-        <Button
-          variant="outlined"
-          onClick={() => { setError(null); setPicking(true) }}
-          sx={{
-            aspectRatio: '1',
-            minWidth: 0,
-            flexDirection: 'column',
-            textTransform: 'none',
-            borderStyle: 'dashed',
-          }}
-        >
-          <AddIcon />
-          <Typography variant="caption" sx={{ fontSize: '0.6rem' }}>
-            Add version
-          </Typography>
-        </Button>
+        {/* Add-version tile — hidden in select mode so taps only toggle selection. */}
+        {!selectMode && (
+          <Button
+            variant="outlined"
+            onClick={() => { setError(null); setPicking(true) }}
+            sx={{
+              aspectRatio: '1',
+              minWidth: 0,
+              flexDirection: 'column',
+              textTransform: 'none',
+              borderStyle: 'dashed',
+            }}
+          >
+            <AddIcon />
+            <Typography variant="caption" sx={{ fontSize: '0.6rem' }}>
+              Add version
+            </Typography>
+          </Button>
+        )}
       </Box>
 
       {/* Theme picker dialog */}

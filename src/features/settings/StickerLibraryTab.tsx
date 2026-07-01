@@ -148,6 +148,12 @@ export default function StickerLibraryTab({
     ? groupStickers(visibleStickers)
     : { drawings: [], standalone: visibleStickers }
   const gridStickers = grouped.standalone
+  // Everything that can be selected for a print sheet: grouped versions + the
+  // flat-grid standalone stickers. Used to resolve the current selection.
+  const selectableStickers = [
+    ...grouped.drawings.flatMap((g) => g.versions),
+    ...gridStickers,
+  ]
 
   const handleOpenEdit = useCallback((sticker: Sticker) => {
     setEditTarget(sticker)
@@ -299,7 +305,7 @@ export default function StickerLibraryTab({
           {visibleStickers.length} sticker{visibleStickers.length !== 1 ? 's' : ''} in your library
         </Typography>
         <Box sx={{ flex: 1 }} />
-        {enableSelectToPrint && gridStickers.length > 0 && (
+        {enableSelectToPrint && selectableStickers.length > 0 && (
           <Button
             size="small"
             variant={selectMode ? 'contained' : 'outlined'}
@@ -321,6 +327,10 @@ export default function StickerLibraryTab({
               group={group}
               familyId={familyId}
               onChanged={() => { void load() }}
+              onPreview={setPreviewTarget}
+              selectMode={enableSelectToPrint && selectMode}
+              selectedIds={selectedIds}
+              onToggleSelect={(sticker) => { if (sticker.id) toggleSelected(sticker.id) }}
             />
           ))}
         </Stack>
@@ -445,7 +455,7 @@ export default function StickerLibraryTab({
 
       {/* Sticky "Print N stickers" action (select-to-print mode) */}
       {enableSelectToPrint && selectMode && (() => {
-        const selected = gridStickers.filter((s) => s.id && selectedIds.has(s.id))
+        const selected = selectableStickers.filter((s) => s.id && selectedIds.has(s.id))
         return (
           <Box
             sx={{
@@ -590,6 +600,10 @@ export default function StickerLibraryTab({
                   {previewTarget.label}
                 </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'center' }}>
+                  {/* Mark the group's original so it's obvious when opened (FEAT-33). */}
+                  {previewTarget.isOriginal && (
+                    <Chip label="Original" size="small" color="secondary" />
+                  )}
                   {previewTarget.childProfile && previewTarget.childProfile !== 'both' && (
                     <Chip
                       label={

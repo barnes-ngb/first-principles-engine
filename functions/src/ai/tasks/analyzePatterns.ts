@@ -57,19 +57,32 @@ interface AnalyzePatternsResponse {
 
 // ── Prompt ───────────────────────────────────────────────────────
 
+/**
+ * Summarize a child's confirmed learning supports into a short, joined label
+ * string for support-need-aware prompt framing. Gates on capability (the
+ * presence of confirmed supports), never on the child's name (ARCH-38).
+ */
+function summarizeSupports(
+  supports: Array<{ label?: string; description?: string }> | undefined,
+): string {
+  return (supports ?? [])
+    .map((s) => (s.label ?? "").trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
 function buildPatternAnalysisPrompt(
-  _childName: string,
   childAge: number | null,
-  neurodivergentDesc: string,
+  supportDesc: string,
 ): string {
   const ageStr = childAge ? `${childAge} years old` : "school age";
-  const ndStr = neurodivergentDesc
-    ? ` The child has: ${neurodivergentDesc}.`
+  const supportStr = supportDesc
+    ? ` This child has confirmed learning supports in place: ${supportDesc}. Keep these supports and needs in mind when identifying patterns and suggesting strategies.`
     : "";
 
   return `You are an educational diagnostician helping a homeschool parent understand patterns in their child's learning.
 
-The child is ${ageStr}.${ndStr}
+The child is ${ageStr}.${supportStr}
 
 You have been given:
 - Findings from today's evaluation
@@ -177,7 +190,6 @@ export const analyzeEvaluationPatterns = onCall(
       ? (childSnap.data() as { name?: string; birthdate?: string; grade?: string })
       : {};
 
-    const childName = childData.name ?? "the child";
     let childAge: number | null = null;
     if (childData.birthdate) {
       const birth = new Date(childData.birthdate);
@@ -186,10 +198,18 @@ export const analyzeEvaluationPatterns = onCall(
       );
     }
 
-    // Build neurodivergent description from known child profiles
-    const neurodivergentDesc = childName.toLowerCase() === "lincoln"
-      ? "speech challenges, neurodivergent, benefits from short routines and frequent wins"
-      : "";
+    // Derive support-need-aware framing from the child's confirmed supports
+    // (skillSnapshots/{childId}.supports). Gate on capability, never on name:
+    // any child with confirmed supports gets support-aware framing (ARCH-38).
+    const snapshotSnap = await db
+      .doc(`families/${familyId}/skillSnapshots/${childId}`)
+      .get();
+    const snapshotData = snapshotSnap.exists
+      ? (snapshotSnap.data() as {
+          supports?: Array<{ label?: string; description?: string }>;
+        })
+      : undefined;
+    const supportDesc = summarizeSupports(snapshotData?.supports);
 
     // Assemble context for the AI
     const historicalContext = historicalSessions
@@ -216,7 +236,7 @@ ${historicalContext}
 
 Please identify any conceptual blocks in the pattern above.`;
 
-    const systemPrompt = buildPatternAnalysisPrompt(childName, childAge, neurodivergentDesc);
+    const systemPrompt = buildPatternAnalysisPrompt(childAge, supportDesc);
     const model = modelForTask("analyzePatterns");
 
     const apiKey = claudeApiKey.value();
@@ -316,3 +336,7 @@ Please identify any conceptual blocks in the pattern above.`;
     return parsed;
   },
 );
+
+// ── Exported for testing ─────────────────────────────────────────
+
+export { buildPatternAnalysisPrompt, summarizeSupports };

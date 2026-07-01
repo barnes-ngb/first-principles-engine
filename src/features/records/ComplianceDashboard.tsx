@@ -6,27 +6,11 @@ import LinearProgress from '@mui/material/LinearProgress'
 
 import SectionCard from '../../components/SectionCard'
 import type { HoursSummary } from './records.logic'
-
-// ─── MO Compliance Constants ────────────────────────────────────────────────
-
-const TOTAL_HOURS_TARGET = 1000
-const CORE_HOURS_TARGET = 600
-
-const MO_REQUIRED_SUBJECTS = [
-  'Reading',
-  'LanguageArts',
-  'Math',
-  'Science',
-  'SocialStudies',
-] as const
-
-const SUBJECT_LABELS: Record<string, string> = {
-  Reading: 'Reading',
-  LanguageArts: 'Language Arts',
-  Math: 'Math',
-  Science: 'Science',
-  SocialStudies: 'Social Studies',
-}
+import { SubjectBucketLabel } from '../../core/types/enums'
+import {
+  getStateConfig,
+  type HomeschoolState,
+} from '../../core/compliance/stateCompliance'
 
 // ─── Status helpers ─────────────────────────────────────────────────────────
 
@@ -79,9 +63,9 @@ function getHoursStatus(
 function getSubjectStatus(
   subjectMinutes: number,
   yearProgress: number,
+  perSubjectTarget: number,
 ): Status {
-  // Each of 5 core subjects should contribute roughly equal share of 600 core hours
-  const perSubjectTarget = CORE_HOURS_TARGET / MO_REQUIRED_SUBJECTS.length
+  // Each core subject should contribute roughly an equal share of core hours.
   const expectedHours = perSubjectTarget * yearProgress
   const currentHours = subjectMinutes / 60
   const ratio = expectedHours > 0 ? currentHours / expectedHours : 1
@@ -96,17 +80,66 @@ interface ComplianceDashboardProps {
   summary: HoursSummary
   startDate: string
   endDate: string
+  /** State whose compliance rules apply. Defaults to MO (DATA-12). */
+  homeschoolState?: HomeschoolState
 }
 
 export default function ComplianceDashboard({
   summary,
   startDate,
   endDate,
+  homeschoolState,
 }: ComplianceDashboardProps) {
+  const config = getStateConfig(homeschoolState)
+
+  // ── No-hours-requirement states (TX) — defined-but-unexercised path ──
+  // MO is the default, so this branch is not reached today (DATA-12). It gives
+  // a safe evidence-based render for a future state with no hours target.
+  if (!config.hoursRequirement) {
+    return <NoHoursRequirementCard config={config} state={homeschoolState} />
+  }
+
+  return (
+    <HoursComplianceCard
+      summary={summary}
+      startDate={startDate}
+      endDate={endDate}
+      homeschoolState={homeschoolState}
+      hoursRequirement={config.hoursRequirement}
+      requiredSubjects={config.requiredCoreSubjects}
+    />
+  )
+}
+
+/** The standard hours-target dashboard (MO and any future hours-required
+ *  state). Receives a non-null `hoursRequirement`, so all hooks run
+ *  unconditionally. */
+function HoursComplianceCard({
+  summary,
+  startDate,
+  endDate,
+  homeschoolState,
+  hoursRequirement,
+  requiredSubjects,
+}: {
+  summary: HoursSummary
+  startDate: string
+  endDate: string
+  homeschoolState?: HomeschoolState
+  hoursRequirement: NonNullable<
+    ReturnType<typeof getStateConfig>['hoursRequirement']
+  >
+  requiredSubjects: ReturnType<typeof getStateConfig>['requiredCoreSubjects']
+}) {
   const yearProgress = useMemo(
     () => getSchoolYearProgress(startDate, endDate),
     [startDate, endDate],
   )
+
+  const TOTAL_HOURS_TARGET = hoursRequirement.total
+  const CORE_HOURS_TARGET = hoursRequirement.core
+  const perSubjectTarget = CORE_HOURS_TARGET / requiredSubjects.length
+  const stateLabel = homeschoolState ?? 'MO'
 
   const totalHours = summary.totalMinutes / 60
   const coreHours = summary.coreMinutes / 60
@@ -132,21 +165,32 @@ export default function ComplianceDashboard({
     if (coreStatus === Status.Red)
       // no-judge v1: was "Core hours (${coreHours.toFixed(0)}h) are significantly behind the ${CORE_HOURS_TARGET}h target"
       items.push(`Core hours (${coreHours.toFixed(0)}h) are tracking under the ${CORE_HOURS_TARGET}h target`)
-    for (const subject of MO_REQUIRED_SUBJECTS) {
+    for (const subject of requiredSubjects) {
       const minutes = subjectByBucket.get(subject) ?? 0
-      const status = getSubjectStatus(minutes, yearProgress)
+      const status = getSubjectStatus(minutes, yearProgress, perSubjectTarget)
       if (status === Status.Red) {
         // no-judge v1: was "${SUBJECT_LABELS[subject]} (${(minutes / 60).toFixed(0)}h) is falling behind"
-        items.push(`${SUBJECT_LABELS[subject]} (${(minutes / 60).toFixed(0)}h) is tracking under target`)
+        items.push(`${SubjectBucketLabel[subject]} (${(minutes / 60).toFixed(0)}h) is tracking under target`)
       }
     }
     return items
-  }, [totalHours, coreHours, totalStatus, coreStatus, subjectByBucket, yearProgress])
+  }, [
+    totalHours,
+    coreHours,
+    totalStatus,
+    coreStatus,
+    subjectByBucket,
+    yearProgress,
+    requiredSubjects,
+    perSubjectTarget,
+    TOTAL_HOURS_TARGET,
+    CORE_HOURS_TARGET,
+  ])
 
   const yearProgressPct = Math.round(yearProgress * 100)
 
   return (
-    <SectionCard title="MO Compliance">
+    <SectionCard title={`${stateLabel} Compliance`}>
       <Stack spacing={2}>
         <Typography variant="body2" color="text.secondary">
           School year {yearProgressPct}% complete ({startDate} to {endDate})
@@ -174,14 +218,14 @@ export default function ComplianceDashboard({
         <Typography variant="subtitle2" sx={{ mt: 1 }}>
           Required Subjects
         </Typography>
-        {MO_REQUIRED_SUBJECTS.map((subject) => {
+        {requiredSubjects.map((subject) => {
           const minutes = subjectByBucket.get(subject) ?? 0
           const hours = minutes / 60
-          const status = getSubjectStatus(minutes, yearProgress)
+          const status = getSubjectStatus(minutes, yearProgress, perSubjectTarget)
           return (
             <SubjectRow
               key={subject}
-              label={SUBJECT_LABELS[subject]}
+              label={SubjectBucketLabel[subject]}
               hours={hours}
               status={status}
             />
@@ -219,10 +263,44 @@ export default function ComplianceDashboard({
             }}
           >
             <Typography variant="body2" color="success.dark">
-              On track for MO compliance. Keep it up!
+              On track for {stateLabel} compliance. Keep it up!
             </Typography>
           </Box>
         )}
+      </Stack>
+    </SectionCard>
+  )
+}
+
+/** Evidence-based render for a state with no hours requirement (TX). Defined
+ *  but not exercised — MO is the active default (DATA-12). */
+function NoHoursRequirementCard({
+  config,
+  state,
+}: {
+  config: ReturnType<typeof getStateConfig>
+  state?: HomeschoolState
+}) {
+  const stateLabel = state ?? 'MO'
+  return (
+    <SectionCard title={`${stateLabel} Compliance`}>
+      <Stack spacing={2}>
+        <Typography variant="body2" color="text.secondary">
+          No state hours requirement — this state tracks compliance through
+          evidence, not an hours target. Keep covering the required subjects and
+          capturing artifacts.
+        </Typography>
+        <Typography variant="subtitle2" sx={{ mt: 1 }}>
+          Required Subjects
+        </Typography>
+        {config.requiredCoreSubjects.map((subject) => (
+          <Typography key={subject} variant="body2" color="text.secondary">
+            • {SubjectBucketLabel[subject]}
+          </Typography>
+        ))}
+        <Typography variant="caption" color="text.secondary">
+          {config.legalCitation}
+        </Typography>
       </Stack>
     </SectionCard>
   )

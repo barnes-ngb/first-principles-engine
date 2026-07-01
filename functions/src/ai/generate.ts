@@ -44,21 +44,6 @@ interface SkillSnapshotData {
   stopRules?: Array<{ label: string; trigger: string; action: string }>;
 }
 
-interface LadderDoc {
-  title: string;
-  domain?: string;
-  rungs: Array<{
-    id?: string;
-    title: string;
-    description?: string;
-    order: number;
-  }>;
-}
-
-interface LadderProgressDoc {
-  currentRungId: string;
-}
-
 // ── Prompt assembly ─────────────────────────────────────────────
 
 const ACTIVITY_OUTPUT_SCHEMA = `{
@@ -75,8 +60,6 @@ interface PromptContext {
   skillTag: string;
   estimatedMinutes: number;
   snapshot: SkillSnapshotData | undefined;
-  currentRung: { title: string; description?: string } | undefined;
-  ladderTitle: string | undefined;
   weekTheme: string | undefined;
   weekVirtue: string | undefined;
   weekStoryTitle: string | undefined;
@@ -96,20 +79,6 @@ function buildGenerateSystemPrompt(ctx: PromptContext): string {
 
   if (ctx.child.grade) {
     lines.push(`Grade level: ${ctx.child.grade}`);
-  }
-
-  // Ladder context
-  if (ctx.ladderTitle && ctx.currentRung) {
-    lines.push(
-      "",
-      "## Current Skill Ladder Position",
-      "",
-      `Ladder: ${ctx.ladderTitle}`,
-      `Current rung: ${ctx.currentRung.title}`,
-    );
-    if (ctx.currentRung.description) {
-      lines.push(`Rung description: ${ctx.currentRung.description}`);
-    }
   }
 
   // Skill snapshot
@@ -412,48 +381,6 @@ export const generateActivity = onCall(
       ? (snapshotSnap.data() as SkillSnapshotData)
       : undefined;
 
-    // ── Load ladder + current rung (optional) ──────────────────
-    // Try to find a ladder matching the skill tag domain
-    const domain = skillTag.split(".")[0];
-    let currentRung: { title: string; description?: string } | undefined;
-    let ladderTitle: string | undefined;
-
-    const ladderQuery = await db
-      .collection(`families/${familyId}/ladders`)
-      .where("domain", "==", domain)
-      .limit(1)
-      .get();
-
-    if (!ladderQuery.empty) {
-      const ladderDoc = ladderQuery.docs[0];
-      const ladder = ladderDoc.data() as LadderDoc;
-      ladderTitle = ladder.title;
-
-      // Check ladder progress for this child
-      const progressSnap = await db
-        .doc(
-          `families/${familyId}/ladderProgress/${childId}_${ladderDoc.id}`,
-        )
-        .get();
-
-      if (progressSnap.exists) {
-        const progress = progressSnap.data() as LadderProgressDoc;
-        const rung = ladder.rungs.find((r) => r.id === progress.currentRungId);
-        if (rung) {
-          currentRung = { title: rung.title, description: rung.description };
-        }
-      }
-
-      // Fallback: use first rung if no progress exists
-      if (!currentRung && ladder.rungs.length > 0) {
-        const sorted = [...ladder.rungs].sort((a, b) => a.order - b.order);
-        currentRung = {
-          title: sorted[0].title,
-          description: sorted[0].description,
-        };
-      }
-    }
-
     // ── Load current week context (optional) ────────────────────
     let weekTheme: string | undefined;
     let weekVirtue: string | undefined;
@@ -484,8 +411,6 @@ export const generateActivity = onCall(
       skillTag,
       estimatedMinutes,
       snapshot: snapshotData,
-      currentRung,
-      ladderTitle,
       weekTheme,
       weekVirtue,
       weekStoryTitle,

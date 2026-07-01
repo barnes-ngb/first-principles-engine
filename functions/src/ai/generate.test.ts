@@ -28,11 +28,6 @@ const lincolnCtx: PromptContext = {
       },
     ],
   },
-  currentRung: {
-    title: "CVC Blending",
-    description: "Blend consonant-vowel-consonant words",
-  },
-  ladderTitle: "Phonics Ladder",
   weekTheme: "Ocean Explorers",
   weekVirtue: undefined,
   weekStoryTitle: undefined,
@@ -45,8 +40,6 @@ const londonCtx: PromptContext = {
   skillTag: "writing.creative.narrative",
   estimatedMinutes: 20,
   snapshot: undefined,
-  currentRung: undefined,
-  ladderTitle: undefined,
   weekTheme: undefined,
   weekVirtue: undefined,
   weekStoryTitle: undefined,
@@ -59,8 +52,6 @@ const minimalCtx: PromptContext = {
   skillTag: "science.observation",
   estimatedMinutes: 10,
   snapshot: undefined,
-  currentRung: undefined,
-  ladderTitle: undefined,
   weekTheme: undefined,
   weekVirtue: undefined,
   weekStoryTitle: undefined,
@@ -92,20 +83,6 @@ describe("buildGenerateSystemPrompt", () => {
   it("omits grade level when not provided", () => {
     const prompt = buildGenerateSystemPrompt(minimalCtx);
     expect(prompt).not.toContain("Grade level:");
-  });
-
-  it("includes ladder context when available", () => {
-    const prompt = buildGenerateSystemPrompt(lincolnCtx);
-    expect(prompt).toContain("Phonics Ladder");
-    expect(prompt).toContain("CVC Blending");
-    expect(prompt).toContain(
-      "Blend consonant-vowel-consonant words",
-    );
-  });
-
-  it("omits ladder context when not available", () => {
-    const prompt = buildGenerateSystemPrompt(londonCtx);
-    expect(prompt).not.toContain("Current Skill Ladder Position");
   });
 
   it("includes matching priority skills from snapshot", () => {

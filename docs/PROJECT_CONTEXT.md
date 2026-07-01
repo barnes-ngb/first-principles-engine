@@ -62,6 +62,14 @@ The system must add kids (Lincoln, London, and future siblings) **cleanly on one
 The family is **moving to Texas.** TX homeschool rules differ from MO (TX = private-school model: five subjects, *no* hours/testing/reporting; MO = 1,000 hrs/yr, ≥600 core, July 1–June 30). In practice **TX is stricter in some respects to honor and MO-only exports won't transfer** — so state tracking must become **MO + TX-aware** rather than MO-hardcoded.
 - **Today:** exports and the compliance module are **MO-only** (hours/core-subject math, MO year-end window). See Compliance.
 - **Direction:** a **MO ⇄ TX state toggle** — same underlying data collection, MO actively tracks hours/subjects, TX relaxes to portfolio-only. Building the TX *feature* is a later topic; **new work should at minimum not bake MO assumptions in deeper.**
+- **Scaffold landed (DATA-12):** the MO rules now live in a per-state config — `src/core/compliance/stateCompliance.ts` (`getStateConfig`, defaults MO, byte-identical). TX + the TEFA overlay are **defined-not-activated** (no switch UI). Full three-mode model + the testing-rule caveat live in `docs/review/STATE_COMPLIANCE_DESIGN.md`.
+
+**TEFA / Texas note (parked).** Texas's **Education Freedom Account (EFA, "TEFA")** is a per-student grant; the relevant figure for our planning is the **~$2,000/student** cap on a homeschool/non-accredited EFA (distinct from the ~$10,000 ESA path for accredited private school). It frames a **three-mode** compliance picture:
+1. **MO** — 1,000 hrs / ≥600 core / ≥600 at home, RSMo 167.031 (active today).
+2. **TX-baseline** — private-school model (Leeper / Tex. Educ. Code §25.086): **no** hours, testing, or reporting; cover five subjects in good faith.
+3. **TX-TEFA** — TX-baseline **plus** the EFA grant toggled on: adds annual norm-referenced testing (grades **3–12**), the **$2,000/student** spending cap, and audit-ready expense evidence.
+- **Testing-rule caveat:** sources disagree on whether the homeschool EFA requires testing — **THSC** reads it as no testing; **EdChoice / myschoolchoice** describe norm-referenced testing for grades 3–12. The **Comptroller's final rules are authoritative** — verify before activating TEFA.
+- **Timing:** EFA enrollment runs on the **2027–28** cycle; nothing here is built now. Activation work (the no-hours dashboard mode, a parent-only TEFA test record, expense-cap awareness) is captured in the design doc, not implemented.
 
 ## Navigation (from `src/app/AppShell.tsx`)
 **Parent:** Today · Plan My Week · Weekly Review · Progress · Records · Books · Game Workshop · Dad Lab · Settings · Ask AI
