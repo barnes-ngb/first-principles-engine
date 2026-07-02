@@ -6,9 +6,9 @@
 |--------|-------|--------------------------------------|
 | **Total lines** | **179,214** | +221 |
 | **Commits (main)** | **119** | −6 (prior report counted branch commits; 119 is correct origin/main baseline) |
-| **Test files** | **181** | +4 |
-| **Tests passing** | **2,744** | +62 |
-| **Tests total** | **2,744** | 0 skipped, 0 failing |
+| **Test files** | **202** | +21 since 2026-06-13 |
+| **Tests passing** | **3,005** | +261 since 2026-06-13 |
+| **Tests total** | **3,005** | 0 skipped, 0 failing |
 | **Firestore collections** | **37** | +0 |
 | **Cloud Functions** | **25** | +0 |
 | **Chat task types** | **19** | +0 |
@@ -23,7 +23,7 @@
 |-------|--------|-------|
 | **Build** | ✅ PASS | `tsc -b && vite build` clean in 12.73s |
 | **Lint** | ⚠️ 3 WARNINGS | 0 errors; 3 `react-hooks/exhaustive-deps` warnings (unchanged since 2026-05-29) |
-| **Tests** | ✅ PASS | 2,744 passing, 0 skipped, 0 failing (181 test files) |
+| **Tests** | ✅ PASS | 3,005 passing, 0 skipped, 0 failing (202 test files) |
 | **TypeScript** | ✅ PASS | Implied by clean build |
 | **npm audit (prod)** | ✅ CLEAN | 0 production vulnerabilities after fix (see Auto-Fixed below) |
 
@@ -155,8 +155,8 @@ All 19 task types verified to reference `buildContextForTask`, `CHARTER_PREAMBLE
 | 14 | avatar |
 | 9 | shelly-chat |
 | 6 | settings |
-| 6 | evaluate |
-| 3 | records |
+| 8 | evaluate |
+| 4 | records |
 | 2 | workshop |
 | 2 | monthly-review |
 | 1 | weekly-review |

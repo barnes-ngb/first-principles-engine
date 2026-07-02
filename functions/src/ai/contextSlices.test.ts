@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildMasterySummary,
   compressEngagement,
   formatChildProfile,
   formatChildSkillMap,
   formatConceptualBlocks,
+  formatMasterySummary,
   formatMasteredSkills,
   TASK_CONTEXT,
   CHARTER_PREAMBLE,
 } from "./contextSlices.js";
+import type { MasterySummary } from "./contextSlices.js";
 
 // ── TASK_CONTEXT registry ──────────────────────────────────────
 
@@ -582,5 +585,234 @@ describe("formatMasteredSkills", () => {
     // …and keep pointing minutes at the frontier + the gaps.
     expect(joined).toMatch(/frontier/i);
     expect(joined).toContain("ADDRESS NOW");
+  });
+});
+
+// ── buildMasterySummary ──────────────────────────────────────────
+
+describe("buildMasterySummary", () => {
+  it("returns empty array for empty input", () => {
+    expect(buildMasterySummary([])).toEqual([]);
+  });
+
+  it("counts got-it, working, and stuck mastery chips", () => {
+    const logs = [
+      {
+        date: "2026-06-01",
+        checklist: [
+          { label: "Phonics (15m)", completed: true, mastery: "got-it", subjectBucket: "Reading" },
+          { label: "Phonics (15m)", completed: true, mastery: "got-it", subjectBucket: "Reading" },
+        ],
+      },
+      {
+        date: "2026-06-02",
+        checklist: [
+          { label: "Phonics (15m)", completed: true, mastery: "working", subjectBucket: "Reading" },
+        ],
+      },
+      {
+        date: "2026-06-03",
+        checklist: [
+          { label: "Phonics (15m)", completed: true, mastery: "stuck", subjectBucket: "Reading" },
+        ],
+      },
+    ];
+    const result = buildMasterySummary(logs);
+    expect(result).toHaveLength(1);
+    expect(result[0].activity).toBe("Phonics");
+    expect(result[0].gotIt).toBe(2);
+    expect(result[0].working).toBe(1);
+    expect(result[0].stuck).toBe(1);
+  });
+
+  it("strips time suffixes like (15m) from labels", () => {
+    const logs = [
+      {
+        date: "2026-06-01",
+        checklist: [
+          { label: "Reading Eggs (45m)", completed: true, mastery: "got-it" },
+        ],
+      },
+    ];
+    const result = buildMasterySummary(logs);
+    expect(result[0].activity).toBe("Reading Eggs");
+  });
+
+  it("skips items without mastery or not completed", () => {
+    const logs = [
+      {
+        date: "2026-06-01",
+        checklist: [
+          { label: "Math (20m)", completed: true }, // no mastery
+          { label: "Reading (15m)", completed: false, mastery: "got-it" }, // not completed
+          { label: "Art (30m)", completed: true, mastery: undefined },
+        ],
+      },
+    ];
+    expect(buildMasterySummary(logs)).toEqual([]);
+  });
+
+  it("tracks lastSeen as the most recent date for each activity", () => {
+    const logs = [
+      {
+        date: "2026-06-01",
+        checklist: [
+          { label: "Sight Words (10m)", completed: true, mastery: "got-it" },
+        ],
+      },
+      {
+        date: "2026-06-10",
+        checklist: [
+          { label: "Sight Words (10m)", completed: true, mastery: "working" },
+        ],
+      },
+    ];
+    const result = buildMasterySummary(logs);
+    expect(result[0].lastSeen).toBe("2026-06-10");
+  });
+
+  it("sorts by score descending (stuck*3 + working*2 + gotIt)", () => {
+    const logs = [
+      {
+        date: "2026-06-01",
+        checklist: [
+          { label: "Easy Skill", completed: true, mastery: "got-it" }, // score 1
+          { label: "Hard Skill", completed: true, mastery: "stuck" }, // score 3
+          { label: "Medium Skill", completed: true, mastery: "working" }, // score 2
+        ],
+      },
+    ];
+    const result = buildMasterySummary(logs);
+    expect(result[0].activity).toBe("Hard Skill");
+    expect(result[1].activity).toBe("Medium Skill");
+    expect(result[2].activity).toBe("Easy Skill");
+  });
+
+  it("uses subjectBucket from item, defaulting to Other", () => {
+    const logs = [
+      {
+        date: "2026-06-01",
+        checklist: [
+          { label: "Phonics", completed: true, mastery: "got-it", subjectBucket: "Reading" },
+          { label: "Other Thing", completed: true, mastery: "got-it" },
+        ],
+      },
+    ];
+    const result = buildMasterySummary(logs);
+    const phonics = result.find((s) => s.activity === "Phonics");
+    const other = result.find((s) => s.activity === "Other Thing");
+    expect(phonics?.subjectBucket).toBe("Reading");
+    expect(other?.subjectBucket).toBe("Other");
+  });
+
+  it("handles missing checklist gracefully", () => {
+    const logs = [{ date: "2026-06-01", checklist: [] }];
+    expect(buildMasterySummary(logs)).toEqual([]);
+  });
+
+  it("aggregates the same activity across multiple days", () => {
+    const logs = [
+      {
+        date: "2026-06-01",
+        checklist: [
+          { label: "Math (20m)", completed: true, mastery: "got-it" },
+        ],
+      },
+      {
+        date: "2026-06-02",
+        checklist: [
+          { label: "Math (20m)", completed: true, mastery: "got-it" },
+        ],
+      },
+      {
+        date: "2026-06-03",
+        checklist: [
+          { label: "Math (20m)", completed: true, mastery: "stuck" },
+        ],
+      },
+    ];
+    const result = buildMasterySummary(logs);
+    expect(result).toHaveLength(1);
+    expect(result[0].gotIt).toBe(2);
+    expect(result[0].stuck).toBe(1);
+  });
+});
+
+// ── formatMasterySummary ─────────────────────────────────────────
+
+describe("formatMasterySummary", () => {
+  it("returns empty string for empty input", () => {
+    expect(formatMasterySummary([])).toBe("");
+  });
+
+  it("includes CAN_SKIP for activities with 2+ got-it and no stuck/working", () => {
+    const summaries: MasterySummary[] = [
+      { activity: "Phonics", subjectBucket: "Reading", gotIt: 3, working: 0, stuck: 0, lastSeen: "2026-06-03" },
+    ];
+    const result = formatMasterySummary(summaries);
+    expect(result).toContain("CAN SKIP: Phonics");
+  });
+
+  it("includes CONTINUE for activities with working signals", () => {
+    const summaries: MasterySummary[] = [
+      { activity: "Spelling", subjectBucket: "Reading", gotIt: 1, working: 2, stuck: 0, lastSeen: "2026-06-03" },
+    ];
+    const result = formatMasterySummary(summaries);
+    expect(result).toContain("CONTINUE: Spelling");
+  });
+
+  it("includes CONTINUE for activities with mixed got-it and stuck", () => {
+    const summaries: MasterySummary[] = [
+      { activity: "Math", subjectBucket: "Math", gotIt: 1, working: 0, stuck: 1, lastSeen: "2026-06-03" },
+    ];
+    const result = formatMasterySummary(summaries);
+    expect(result).toContain("CONTINUE: Math");
+  });
+
+  it("includes FOCUS HERE for activities with 2+ stuck", () => {
+    const summaries: MasterySummary[] = [
+      { activity: "Division", subjectBucket: "Math", gotIt: 0, working: 0, stuck: 3, lastSeen: "2026-06-03" },
+    ];
+    const result = formatMasterySummary(summaries);
+    expect(result).toContain("FOCUS HERE: Division");
+  });
+
+  it("includes the header line", () => {
+    const summaries: MasterySummary[] = [
+      { activity: "Phonics", subjectBucket: "Reading", gotIt: 3, working: 0, stuck: 0, lastSeen: "2026-06-03" },
+    ];
+    const result = formatMasterySummary(summaries);
+    expect(result).toContain("MASTERY OBSERVATIONS");
+    expect(result).toContain("last 4 weeks");
+  });
+
+  it("categorizes multiple activities correctly", () => {
+    const summaries: MasterySummary[] = [
+      { activity: "Phonics", subjectBucket: "Reading", gotIt: 5, working: 0, stuck: 0, lastSeen: "2026-06-03" },
+      { activity: "Spelling", subjectBucket: "Reading", gotIt: 1, working: 3, stuck: 0, lastSeen: "2026-06-03" },
+      { activity: "Division", subjectBucket: "Math", gotIt: 0, working: 0, stuck: 4, lastSeen: "2026-06-03" },
+    ];
+    const result = formatMasterySummary(summaries);
+    expect(result).toContain("CAN SKIP: Phonics");
+    expect(result).toContain("CONTINUE: Spelling");
+    expect(result).toContain("FOCUS HERE: Division");
+  });
+
+  it("omits empty categories", () => {
+    const summaries: MasterySummary[] = [
+      { activity: "Phonics", subjectBucket: "Reading", gotIt: 5, working: 0, stuck: 0, lastSeen: "2026-06-03" },
+    ];
+    const result = formatMasterySummary(summaries);
+    expect(result).toContain("CAN SKIP");
+    expect(result).not.toContain("CONTINUE");
+    expect(result).not.toContain("FOCUS HERE");
+  });
+
+  it("does not include CAN_SKIP when got-it < 2", () => {
+    const summaries: MasterySummary[] = [
+      { activity: "Phonics", subjectBucket: "Reading", gotIt: 1, working: 0, stuck: 0, lastSeen: "2026-06-03" },
+    ];
+    const result = formatMasterySummary(summaries);
+    expect(result).not.toContain("CAN SKIP");
   });
 });
