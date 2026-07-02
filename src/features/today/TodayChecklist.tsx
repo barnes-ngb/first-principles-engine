@@ -51,6 +51,7 @@ import { calculateXp } from './xp'
 import { doc, getDoc, updateDoc } from 'firebase/firestore'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
+import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
 import { kidPalette } from '../../app/tokens'
 
@@ -386,13 +387,7 @@ export default function TodayChecklist({
     let updatedBlocks = dayLog.blocks ?? []
     if (newCompleted && minutes > 0) {
       updatedBlocks = (dayLog.blocks ?? []).map((block) => {
-        const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-        const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
-        const matchesTitle = block.title != null && (
-          block.title === titleClean ||
-          titleClean.toLowerCase().includes(block.title.toLowerCase())
-        )
-        if ((matchesLabel || matchesTitle) && (block.actualMinutes == null || block.actualMinutes === 0)) {
+        if (itemMatchesBlock(item, block) && (block.actualMinutes == null || block.actualMinutes === 0)) {
           return { ...block, actualMinutes: minutes }
         }
         return block
@@ -400,13 +395,7 @@ export default function TodayChecklist({
     } else if (!newCompleted) {
       // Clear auto-populated actualMinutes when unchecking
       updatedBlocks = (dayLog.blocks ?? []).map((block) => {
-        const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-        const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
-        const matchesTitle = block.title != null && (
-          block.title === titleClean ||
-          titleClean.toLowerCase().includes(block.title.toLowerCase())
-        )
-        if ((matchesLabel || matchesTitle) && block.actualMinutes === minutes) {
+        if (itemMatchesBlock(item, block) && block.actualMinutes === minutes) {
           return { ...block, actualMinutes: undefined }
         }
         return block
