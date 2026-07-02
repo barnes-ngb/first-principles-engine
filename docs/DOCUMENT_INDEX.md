@@ -24,6 +24,7 @@
 | `STICKER_CHARACTER_STUDIO.md` | **CURRENT** (v0.1, 2026-06-19) | Standalone Sticker/Character Studio design — pulls creation out of the book editor into an upstream surface (sketch→sticker, scene→extract-characters, organized library) that books, stories, and the business tab draw from. July build; tracked as FEAT-33. |
 | `ENGINE_V2.md` | **CURRENT** | Learning framework: family snapshot, curriculum mapping, energy modes, weekly rhythm |
 | `FIRST_PRINCIPLES_ALIGNMENT.md` | **NEW** | Ad Astra pedagogy alignment — disposition tracking, conundrums, teach-back philosophy |
+| `LEARNING_STRUCTURES_DESIGN.md` | **NEW** (design — strategic, 2026-07-02) | Projects & Play as first-class learning structures alongside Routine. Thesis (worksheets are one output format; app already built the pattern 4× ad hoc), three-structure definition layer, how a Project meets the planner (single-writer lane, elastic contributions, sparse-logging/artifact-as-progress), the Seed Vault pilot recommendation, what generalizes later, and the never-do constraints (no counting-rule changes). Design-only, no build assigned. Ledger anchor: **FEAT-40**. |
 | `ECONOMY_AUDIT_PART1.md` | **CURRENT** | Economy code inventory — earning/spending paths, collection audit, event types |
 | `ECONOMY_AUDIT_PART2.md` | **CURRENT** | Economy unified model — two-currency design, balance reconciliation, pacing math |
 | `STONEBRIDGE_BIBLE.md` | **CURRENT** | Canonical narrative world bible — 8 places, 10+ characters, values, tone, continuity rules |
