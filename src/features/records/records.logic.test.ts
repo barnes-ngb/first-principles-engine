@@ -19,6 +19,7 @@ import {
   collectHoursContributions,
   computeHoursSummary,
   computeMonthlyTrend,
+  dayLogMinuteContributions,
   deriveChildIdFromDocId,
   entryMinutes,
   generateComplianceReportHtml,
@@ -457,6 +458,159 @@ describe('computeHoursSummary', () => {
   })
 })
 
+// ─── DATA-14: unmatched completed checklist items in block-actuals mode ───────
+//
+// In block-actuals mode the day previously counted block actuals ONLY and
+// dropped every completed checklist item — including carried-over items with no
+// matching block. Option A: count block actuals PLUS completed items that don't
+// correspond (via the shared matcher) to any block-with-actuals, deduped so a
+// matched item is not double-counted.
+
+describe('dayLogMinuteContributions — DATA-14 unmatched checklist carry', () => {
+  it('(a) matched-only day is UNCHANGED — every completed item matches a block-with-actuals', () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-01-10',
+      blocks: [
+        {
+          type: DayBlockType.Reading,
+          title: 'Reading Eggs',
+          subjectBucket: SubjectBucket.Reading,
+          actualMinutes: 45,
+          location: 'Home',
+        },
+        {
+          type: DayBlockType.Math,
+          title: 'Math Practice',
+          subjectBucket: SubjectBucket.Math,
+          actualMinutes: 20,
+          location: 'Home',
+        },
+      ],
+      checklist: [
+        { label: 'Reading Eggs (45m)', completed: true, subjectBucket: SubjectBucket.Reading },
+        { label: 'Math Practice (20m)', completed: true, subjectBucket: SubjectBucket.Math },
+      ],
+    }
+
+    // Byte-identical to the pre-DATA-14 behavior: block actuals only, no
+    // checklist contributions (both items correspond to a block-with-actuals).
+    expect(dayLogMinuteContributions(log)).toEqual([
+      { subjectBucket: 'Reading', minutes: 45, location: 'Home' },
+      { subjectBucket: 'Math', minutes: 20, location: 'Home' },
+    ])
+  })
+
+  it('(b) matched block + unmatched completed carried item → counts BOTH, matched item NOT double-counted', () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-01-10',
+      blocks: [
+        {
+          type: DayBlockType.Reading,
+          title: 'Reading Eggs',
+          subjectBucket: SubjectBucket.Reading,
+          actualMinutes: 45,
+          location: 'Home',
+        },
+      ],
+      checklist: [
+        // Matches the block by title — already represented by its actualMinutes.
+        { label: 'Reading Eggs (45m)', completed: true, subjectBucket: SubjectBucket.Reading },
+        // Carried over from Tuesday, no corresponding block → previously dropped.
+        {
+          label: 'Handwriting page (15m)',
+          completed: true,
+          subjectBucket: SubjectBucket.LanguageArts,
+          rolledOver: true,
+        },
+      ],
+    }
+
+    const contributions = dayLogMinuteContributions(log)
+    // Block actual (45) + carried unmatched item (15) = 60, no double-count.
+    expect(contributions).toEqual([
+      { subjectBucket: 'Reading', minutes: 45, location: 'Home' },
+      { subjectBucket: 'LanguageArts', minutes: 15, location: 'Home' },
+    ])
+    expect(contributions.reduce((s, c) => s + c.minutes, 0)).toBe(60)
+  })
+
+  it('(c) unmatched completed item contributes at Home (feeds core-at-home)', () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-01-10',
+      blocks: [
+        // Tracked block with a non-Home location.
+        {
+          type: DayBlockType.Reading,
+          title: 'Library reading',
+          subjectBucket: SubjectBucket.Reading,
+          actualMinutes: 30,
+          location: 'Library',
+        },
+      ],
+      checklist: [
+        {
+          label: 'Math worksheet (25m)',
+          completed: true,
+          subjectBucket: SubjectBucket.Math,
+        },
+      ],
+    }
+
+    const summary = computeHoursSummary([log], [], [])
+    expect(summary.totalMinutes).toBe(55) // 30 block + 25 carried item
+    // The carried Math item lands at Home and is a core subject, so it repairs
+    // the core-at-home figure even though the block was at the library.
+    expect(summary.coreHomeMinutes).toBe(25)
+    expect(summary.homeMinutes).toBe(25)
+  })
+
+  it('does not carry INCOMPLETE checklist items in block-actuals mode', () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-01-10',
+      blocks: [
+        {
+          type: DayBlockType.Reading,
+          title: 'Reading Eggs',
+          subjectBucket: SubjectBucket.Reading,
+          actualMinutes: 45,
+          location: 'Home',
+        },
+      ],
+      checklist: [
+        { label: 'Reading Eggs (45m)', completed: true, subjectBucket: SubjectBucket.Reading },
+        { label: 'Unfinished art (30m)', completed: false, subjectBucket: SubjectBucket.Art },
+      ],
+    }
+
+    expect(dayLogMinuteContributions(log)).toEqual([
+      { subjectBucket: 'Reading', minutes: 45, location: 'Home' },
+    ])
+  })
+
+  it("(d) no-block-actuals day is UNCHANGED — full checklist fallback", () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-01-10',
+      blocks: [],
+      checklist: [
+        { label: 'Reading Eggs (45m)', completed: true, subjectBucket: SubjectBucket.Reading },
+        { label: 'Math Practice (20m)', completed: true, subjectBucket: SubjectBucket.Math },
+        { label: 'Art Project (30m)', completed: false, subjectBucket: SubjectBucket.Art },
+      ],
+    }
+
+    // Both completed items count via the checklist fallback (unchanged path).
+    expect(dayLogMinuteContributions(log)).toEqual([
+      { subjectBucket: 'Reading', minutes: 45, location: 'Home' },
+      { subjectBucket: 'Math', minutes: 20, location: 'Home' },
+    ])
+  })
+})
+
 // ─── DATA-05: per-kid hours-adjustment attribution ───────────────────────────
 
 describe('assertAttributed (DATA-05 write guard)', () => {
@@ -644,12 +798,15 @@ describe('computeMonthlyTrend', () => {
       childId: 'lincoln',
       date: '2026-01-10',
       blocks: [
-        { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 50, location: 'Home' },
-        { type: DayBlockType.Math, subjectBucket: SubjectBucket.Math, actualMinutes: 40, location: 'Home' },
+        { type: DayBlockType.Reading, title: 'Reading', subjectBucket: SubjectBucket.Reading, actualMinutes: 50, location: 'Home' },
+        { type: DayBlockType.Math, title: 'Math', subjectBucket: SubjectBucket.Math, actualMinutes: 40, location: 'Home' },
       ],
       checklist: [
-        // Inflated estimates — the old MonthlyTrend counted these (120) instead
-        // of the 90 actual minutes. Canonical (and now the trend) ignore them.
+        // Inflated estimates for the SAME work as the tracked blocks (they
+        // title-match via the shared matcher). The old MonthlyTrend counted
+        // these (120) instead of the 90 actual minutes; canonical (and now the
+        // trend) dedup them against the matched blocks-with-actuals (DATA-14),
+        // so only the 90 block actuals count — no double-count.
         { label: 'Reading (120m)', completed: true, subjectBucket: SubjectBucket.Reading, estimatedMinutes: 120 },
         { label: 'Math (120m)', completed: true, subjectBucket: SubjectBucket.Math, estimatedMinutes: 120 },
       ],
