@@ -12,7 +12,7 @@ import {
   QUEST_STRUGGLE_ACCURACY,
 } from './masteryRollup'
 import type { DayLogLike, QuestSessionLike, MasterySignal } from './masteryRollup'
-import type { SkillSnapshot, ConceptualBlock } from '../../core/types/evaluation'
+import type { SkillSnapshot } from '../../core/types/evaluation'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 
 // ── extractChecklistSignals ─────────────────────────────────────────────────
@@ -459,9 +459,12 @@ describe('pendingCheckoffs', () => {
         {
           name: 'Short Vowels',
           affectedSkills: ['short-vowels'],
+          recommendation: 'ADDRESS_NOW',
           status: 'ADDRESS_NOW',
           rationale: '',
-          source: 'eval',
+          source: 'evaluation',
+          evaluationSessionId: '',
+          detectedAt: '2026-01-01',
         },
       ],
     }
@@ -485,9 +488,12 @@ describe('pendingCheckoffs', () => {
         {
           name: 'Short Vowels',
           affectedSkills: ['short-vowels'],
+          recommendation: 'ADDRESS_NOW',
           status: 'RESOLVED',
           rationale: '',
-          source: 'eval',
+          source: 'evaluation',
+          evaluationSessionId: '',
+          detectedAt: '2026-01-01',
         },
       ],
     }

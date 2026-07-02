@@ -7,7 +7,7 @@ import {
   DURATION_OPTIONS,
   GROUPS,
 } from './QuickAddHours.logic'
-import type { QuickActivity, HomeAway } from './QuickAddHours.logic'
+import type { QuickActivity } from './QuickAddHours.logic'
 import { LearningLocation } from '../../core/types/enums'
 
 // ── locationFor ─────────────────────────────────────────────────────────────
