@@ -12,6 +12,7 @@ import type {
 import { LearningLocation, SubjectBucket } from '../../core/types/enums'
 import { formatDateForCsv, toCsvValue } from '../../core/utils/format'
 import { deriveChildIdFromDocId } from '../../core/utils/docId'
+import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 import {
   getStateConfig,
   type HomeschoolState,
@@ -132,14 +133,22 @@ const checklistItemCountedMinutes = (item: ChecklistItem): number => {
  * Partial-day rule (codified HERE, nowhere else): an item counts its ACTUAL
  * minutes if logged, else its PLANNED minutes if it is a completed checklist
  * item, else ZERO. Concretely: if ANY block has tracked `actualMinutes`, the
- * day counts block actuals only — untracked blocks count zero, and the
- * checklist is ignored even when completed (it is the plan for the same time,
- * not extra time). Only when NO block tracked time does the day fall back to
- * completed checklist items via `checklistItemCountedMinutes`.
+ * day is in block-actuals mode — untracked blocks count zero, and each block
+ * actual is emitted. DATA-14: in that mode we ALSO emit any COMPLETED checklist
+ * item that does NOT correspond (via the shared `itemMatchesBlock` matcher) to
+ * a block that already carries `actualMinutes`. A matched item is skipped — its
+ * time is already represented by the block it auto-stamped, so it is not
+ * double-counted — while an unmatched carried-over item (e.g. rolled over from
+ * a prior day, which has no block) is no longer silently dropped. Unmatched
+ * items count at Home (checklist work is assumed at the regular place of
+ * instruction; this also repairs the Core-at-home figure). Only when NO block
+ * tracked time does the day fall back entirely to completed checklist items via
+ * `checklistItemCountedMinutes`.
  */
 export const dayLogMinuteContributions = (log: DayLog): DayLogContribution[] => {
   const out: DayLogContribution[] = []
-  const hasActualBlockMinutes = log.blocks.some((b) => blockCountedMinutes(b) > 0)
+  const blocksWithActuals = log.blocks.filter((b) => blockCountedMinutes(b) > 0)
+  const hasActualBlockMinutes = blocksWithActuals.length > 0
 
   if (hasActualBlockMinutes) {
     for (const block of log.blocks) {
@@ -149,6 +158,21 @@ export const dayLogMinuteContributions = (log: DayLog): DayLogContribution[] => 
         subjectBucket: block.subjectBucket ?? 'Other',
         minutes,
         location: block.location,
+      })
+    }
+    // DATA-14: carry completed checklist items that have no counterpart among
+    // the blocks-with-actuals. Deduped via the SAME matcher TodayChecklist uses
+    // to auto-stamp block minutes, so matched items stay represented by their
+    // block (no double-count) and only genuinely-unmatched work is added.
+    for (const item of log.checklist ?? []) {
+      const minutes = checklistItemCountedMinutes(item)
+      if (minutes <= 0) continue
+      if (blocksWithActuals.some((block) => itemMatchesBlock(item, block))) continue
+      out.push({
+        subjectBucket: item.subjectBucket ?? 'Other',
+        minutes,
+        // Checklist completions are assumed at the regular place of instruction.
+        location: LearningLocation.Home,
       })
     }
   } else if (log.checklist) {

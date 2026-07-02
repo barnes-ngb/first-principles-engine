@@ -14,10 +14,12 @@ describe('MonthlyTrend (DATA-01 display reconciliation)', () => {
       childId: 'lincoln',
       date: '2026-01-10',
       blocks: [
-        { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 50, location: 'Home' },
-        { type: DayBlockType.Math, subjectBucket: SubjectBucket.Math, actualMinutes: 40, location: 'Home' },
+        { type: DayBlockType.Reading, title: 'Reading', subjectBucket: SubjectBucket.Reading, actualMinutes: 50, location: 'Home' },
+        { type: DayBlockType.Math, title: 'Math', subjectBucket: SubjectBucket.Math, actualMinutes: 40, location: 'Home' },
       ],
-      // Inflated checklist that the old chart wrongly counted (240 vs 90 actual).
+      // Inflated checklist for the SAME work as the tracked blocks (title-matched
+      // via the shared matcher), which the old chart wrongly counted (240 vs 90
+      // actual). Deduped against the matched blocks-with-actuals (DATA-14).
       checklist: [
         { label: 'Reading (120m)', completed: true, subjectBucket: SubjectBucket.Reading, estimatedMinutes: 120 },
         { label: 'Math (120m)', completed: true, subjectBucket: SubjectBucket.Math, estimatedMinutes: 120 },
