@@ -459,9 +459,12 @@ describe('pendingCheckoffs', () => {
         {
           name: 'Short Vowels',
           affectedSkills: ['short-vowels'],
+          recommendation: 'ADDRESS_NOW',
           status: 'ADDRESS_NOW',
           rationale: '',
-          source: 'eval',
+          source: 'evaluation',
+          evaluationSessionId: '',
+          detectedAt: '2026-01-01',
         },
       ],
     }
@@ -485,9 +488,12 @@ describe('pendingCheckoffs', () => {
         {
           name: 'Short Vowels',
           affectedSkills: ['short-vowels'],
+          recommendation: 'ADDRESS_NOW',
           status: 'RESOLVED',
           rationale: '',
-          source: 'eval',
+          source: 'evaluation',
+          evaluationSessionId: '',
+          detectedAt: '2026-01-01',
         },
       ],
     }

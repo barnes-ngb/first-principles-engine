@@ -25,7 +25,7 @@ const makeBlock = (
   recommendation: 'ADDRESS_NOW',
   status,
   rationale: 'test',
-  source: 'eval',
+  source: 'evaluation',
   evaluationSessionId: '',
   detectedAt: '2026-01-01',
 })
@@ -57,7 +57,7 @@ describe('applyToSnapshot — block advancement', () => {
     const { snapshot: result, changed, changedFields } = applyToSnapshot(snapshot, update)
     expect(changed).toBe(true)
     expect(changedFields.conceptualBlocks).toBe(true)
-    expect(result.conceptualBlocks[0].status).toBe('RESOLVING')
+    expect(result.conceptualBlocks![0].status).toBe('RESOLVING')
   })
 
   it('advances an ADDRESS_NOW block to RESOLVED when fullyMastered is true', () => {
@@ -71,8 +71,8 @@ describe('applyToSnapshot — block advancement', () => {
       at: NOW,
     }
     const { snapshot: result } = applyToSnapshot(snapshot, update)
-    expect(result.conceptualBlocks[0].status).toBe('RESOLVED')
-    expect(result.conceptualBlocks[0].resolvedAt).toBe(NOW)
+    expect(result.conceptualBlocks![0].status).toBe('RESOLVED')
+    expect(result.conceptualBlocks![0].resolvedAt).toBe(NOW)
   })
 
   it('advances a RESOLVING block to RESOLVED when fullyMastered is true', () => {
@@ -87,7 +87,7 @@ describe('applyToSnapshot — block advancement', () => {
     }
     const { snapshot: result, changed } = applyToSnapshot(snapshot, update)
     expect(changed).toBe(true)
-    expect(result.conceptualBlocks[0].status).toBe('RESOLVED')
+    expect(result.conceptualBlocks![0].status).toBe('RESOLVED')
   })
 
   it('never reopens a RESOLVED block', () => {
@@ -158,7 +158,7 @@ describe('applyToSnapshot — block advancement', () => {
     }
     const { snapshot: result, changed } = applyToSnapshot(snapshot, update)
     expect(changed).toBe(true)
-    expect(result.conceptualBlocks[0].status).toBe('RESOLVED')
+    expect(result.conceptualBlocks![0].status).toBe('RESOLVED')
   })
 
   it('appends evidence and increments sessionCount', () => {
@@ -173,9 +173,9 @@ describe('applyToSnapshot — block advancement', () => {
       at: NOW,
     }
     const { snapshot: result } = applyToSnapshot(snapshot, update)
-    expect(result.conceptualBlocks[0].evidence).toBe('prior scan | new scan result')
-    expect(result.conceptualBlocks[0].sessionCount).toBe(3)
-    expect(result.conceptualBlocks[0].lastReinforcedAt).toBe(NOW)
+    expect(result.conceptualBlocks![0].evidence).toBe('prior scan | new scan result')
+    expect(result.conceptualBlocks![0].sessionCount).toBe(3)
+    expect(result.conceptualBlocks![0].lastReinforcedAt).toBe(NOW)
   })
 
   it('deduplicates evidence (does not re-append same string)', () => {
@@ -189,7 +189,7 @@ describe('applyToSnapshot — block advancement', () => {
       at: NOW,
     }
     const { snapshot: result } = applyToSnapshot(snapshot, update)
-    expect(result.conceptualBlocks[0].evidence).toBe('scan mastered')
+    expect(result.conceptualBlocks![0].evidence).toBe('scan mastered')
   })
 })
 
@@ -360,34 +360,34 @@ describe('applyToSnapshot — quest activity marker', () => {
     const update: SnapshotApplyUpdate = {
       masteredSkills: [],
       recordQuestActivity: {
-        domain: 'reading',
-        marker: { lastQuestAt: NOW, questCount: 1, level: 3, domain: 'reading' },
+        domain: 'phonics',
+        marker: { lastQuestAt: NOW, outcome: 'rose', levelReached: 3 },
       },
       at: NOW,
     }
     const { snapshot: result, changedFields } = applyToSnapshot(baseSnapshot, update)
     expect(changedFields.questActivity).toBe(true)
-    expect(result.questActivity?.reading?.lastQuestAt).toBe(NOW)
+    expect(result.questActivity?.phonics?.lastQuestAt).toBe(NOW)
   })
 
   it('preserves other domain markers when writing one', () => {
     const snapshot = {
       ...baseSnapshot,
       questActivity: {
-        math: { lastQuestAt: '2026-06-01', questCount: 5, level: 2, domain: 'math' as const },
+        math: { lastQuestAt: '2026-06-01', outcome: 'held' as const, levelReached: 2 },
       },
     }
     const update: SnapshotApplyUpdate = {
       masteredSkills: [],
       recordQuestActivity: {
-        domain: 'reading',
-        marker: { lastQuestAt: NOW, questCount: 1, level: 1, domain: 'reading' },
+        domain: 'phonics',
+        marker: { lastQuestAt: NOW, outcome: 'rose', levelReached: 1 },
       },
       at: NOW,
     }
     const { snapshot: result } = applyToSnapshot(snapshot, update)
-    expect(result.questActivity?.math?.questCount).toBe(5)
-    expect(result.questActivity?.reading?.questCount).toBe(1)
+    expect(result.questActivity?.math?.levelReached).toBe(2)
+    expect(result.questActivity?.phonics?.levelReached).toBe(1)
   })
 })
 
@@ -469,7 +469,7 @@ describe('applyToSnapshot — edge cases', () => {
       stopRules: [{ label: 'Stop at 2', trigger: '', action: '' }],
       evidenceDefinitions: [{ label: 'ev', description: 'desc' }],
       conceptualBlocks: [],
-      workingLevels: { reading: 3 },
+      workingLevels: { phonics: { level: 3, updatedAt: '2026-01-01', source: 'quest' } },
       createdAt: '2026-01-01',
     }
     const { snapshot: result } = applyToSnapshot(snapshot, {
@@ -481,7 +481,7 @@ describe('applyToSnapshot — edge cases', () => {
     expect(result.supports).toHaveLength(1)
     expect(result.stopRules).toHaveLength(1)
     expect(result.evidenceDefinitions).toHaveLength(1)
-    expect(result.workingLevels).toEqual({ reading: 3 })
+    expect(result.workingLevels).toEqual({ phonics: { level: 3, updatedAt: '2026-01-01', source: 'quest' } })
     expect(result.createdAt).toBe('2026-01-01')
   })
 })

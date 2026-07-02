@@ -57,7 +57,12 @@ export interface DayLogLike {
 export interface QuestSessionLike {
   /** ISO timestamp (the day portion is the occasion). */
   evaluatedAt?: string
-  questions?: SessionQuestion[]
+  /**
+   * Per-question outcomes. Only the grading fields the rollup reads are
+   * required — a full {@link SessionQuestion} satisfies this too, so real quest
+   * sessions pass unchanged.
+   */
+  questions?: Array<Pick<SessionQuestion, 'skill' | 'correct' | 'skipped'>>
 }
 
 export interface MasterySkillRollup {
