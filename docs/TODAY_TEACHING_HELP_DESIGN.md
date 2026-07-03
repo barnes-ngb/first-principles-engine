@@ -248,15 +248,22 @@ Serialized, each independently revertable. First slice is the smallest thing She
 
 ## 9. Open decisions summary table
 
-| # | Decision | Options | Recommendation |
-|---|---|---|---|
-| **D1** | Generation & caching (§4) | A batch at lock-in · B lazy at first open · C hybrid (batch must-do + regen on level-change) | **C hybrid** |
-| **D2** | Model tier for the card body (§4) | Haiku (status quo lesson-card tier) · Sonnet + Haiku fallback | **Sonnet body + reuse Sonnet `lessonVideo`**; card is low-freq/high-value |
-| **D3** | Video trust/curation (§5) | A curated library · B curated channels + AI pick (needs YouTube API key) · C keep open AI web-search pick | **Phased C → A-on-top** (surface existing pick now; add labeled curated override next; B later if enforcement needed) |
-| **D4** | Help Card vs. existing modals (§7) | Subsume Teach Helper + fold in Lesson Video · Coexist (add card alongside modals) · Replace all at once | **Subsume Teach Helper; fold in Lesson Video; retire modals after the inline card ships** |
-| **D5** | Two-kid default framing (§2/§3) | "London plays too" variant · "Lincoln teaches London" (teach-back) · both, AI picks per skill | **Both — AI picks per skill;** teach-back preferred where the skill supports it |
-| **D6** | Eval `helpCardSeed` linkage (§7) | In this doc's scope · Named follow-up ledger item · Don't do it | **Named follow-up** (keep this doc scoped to Today) |
-| **D7** | Card default state on Today (§3) | Expanded · Collapsed (one tap to expand) · Auto-expand must-do only | **Collapsed** (protect the 60-second bar); revisit if Shelly wants must-do auto-expanded |
+| # | Decision | Options | Recommendation | Status |
+|---|---|---|---|---|
+| **D1** | Generation & caching (§4) | A batch at lock-in · B lazy at first open · C hybrid (batch must-do + regen on level-change) | **C hybrid** (long-term) | **RESOLVED (slice 1, owner-confirmed 2026-07-03): batch at lock-in ONLY** — no regeneration, no staleness machinery, no scheduled anything. Hybrid/regen (C) is a future slice. |
+| **D2** | Model tier for the card body (§4) | Haiku (status quo lesson-card tier) · Sonnet + Haiku fallback | **Sonnet body + reuse Sonnet `lessonVideo`** | **RESOLVED (owner-confirmed 2026-07-03): Sonnet** for the card body (via `modelForTask`); video reuses the shipped `lessonVideo` task unchanged. |
+| **D3** | Video trust/curation (§5) | A curated library · B curated channels + AI pick (needs YouTube API key) · C keep open AI web-search pick | **Phased C → A-on-top** | **RESOLVED (owner-confirmed 2026-07-03): keep the shipped AI pick (C)**, lazy-fetched on **first card expand** and cached on the card doc — never fetched at lock-in. Curated override (A) is a later slice. |
+| **D4** | Help Card vs. existing modals (§7) | Subsume Teach Helper + fold in Lesson Video · Coexist (add card alongside modals) · Replace all at once | — | **REVISED (owner-confirmed 2026-07-03): modals remain for now.** Both the ✨ TeachHelperDialog and ▶ LessonVideoDialog are untouched in slice 1; retirement is a later slice and is **NOT print-gated** — Shelly has never printed from the app, so "print the stack" (MASTER_OUTLINE Key Design Decision #6) is flagged for revision and a London-oriented print concept may replace it. No print code removed in slice 1. |
+| **D5** | Two-kid default framing (§2/§3) | "London plays too" variant · "Lincoln teaches London" (teach-back) · both, AI picks per skill | **Both — AI picks per skill** | **RESOLVED (owner-confirmed 2026-07-03): required card field** (`twoKid`), not optional — AI picks the framing per skill, teach-back preferred where the skill supports it. |
+| **D6** | Eval `helpCardSeed` linkage (§7) | In this doc's scope · Named follow-up ledger item · Don't do it | **Named follow-up** (keep this doc scoped to Today) | Open — future ledger item. |
+| **D7** | Card default state on Today (§3) | Expanded · Collapsed (one tap to expand) · Auto-expand must-do only | **Collapsed** | **RESOLVED (owner-confirmed 2026-07-03): collapsed by default** (protect the 60-second bar). |
+| **New** | Attention-rescue field | — | — | **REQUIRED (owner-confirmed 2026-07-03):** the card must include an `attentionRescue` field — a genuinely different approach for "this isn't landing / attention is gone" — generated up front with the card body. The owner's most explicit ask. |
+
+**Slice 1 build status (FEAT-43, 2026-07-03):** BUILT. New Sonnet `helpCard` CF task
+(passive-signal context, no-shame / no-scores rails, `attentionRescue` field);
+batch generation at plan lock-in for must-do Reading/Math items (non-blocking);
+inline collapsed `HelpCardStrip` on Today with lazy video on first expand. Modals
+untouched. Storage: `families/{familyId}/helpCards/{childId}__{subjectSlug}__{labelSlug}`.
 
 ---
 
