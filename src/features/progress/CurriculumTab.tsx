@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
+import CloseIcon from '@mui/icons-material/Close'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import LocationOnIcon from '@mui/icons-material/LocationOn'
@@ -32,7 +33,6 @@ import { limit, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import ChildSelector from '../../components/ChildSelector'
 import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanButton from '../../components/ScanButton'
-import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import { EmptyState, ErrorState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -44,11 +44,12 @@ import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
 import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
 import { useScan } from '../../core/hooks/useScan'
 import { isWorkbookMatch, useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
-import type { ActivityConfig, CertificateScanResult, CurriculumDetected, ScanRecord, ScanResult } from '../../core/types'
+import type { ActivityConfig, CertificateScanResult, ScanRecord, ScanResult } from '../../core/types'
 import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
 import AddActivityDialog from './AddActivityDialog'
 import EditRoutinesDialog from './EditRoutinesDialog'
+import { processScanBatch } from './multiPageScan'
 
 export default function CurriculumTab() {
   const familyId = useFamilyId()
@@ -161,7 +162,7 @@ export default function CurriculumTab() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   // Scan state
-  const { scan, scanResult, scanning, error: scanError, clearScan } = useScan()
+  const { scan, scanning, clearScan } = useScan()
   const { syncScanToConfig } = useScanToActivityConfig()
   const {
     buildPreview: buildCertPreview,
@@ -279,28 +280,67 @@ export default function CurriculumTab() {
     [familyId, activeChildId],
   )
 
-  const handleCapture = useCallback(
-    async (file: File) => {
-      if (!familyId || !activeChildId) return
-      const record = await scan(file, familyId, activeChildId)
+  // ── Multi-page staging (Curriculum tab, opt-in) ──
+  // Stage N workbook photos, then process them sequentially so same-workbook
+  // pages merge (DATA-15 matcher) and distinct workbooks each get a config.
+  const [stagedPages, setStagedPages] = useState<{ file: File; url: string }[]>([])
+  const [batchProcessing, setBatchProcessing] = useState(false)
 
-      if (record?.results && isWorksheetScan(record.results)) {
-        try {
-          const result = await syncScanToConfig(activeChildId, record.results)
-          if (result.action === 'created') {
-            setScanSnack(`New workbook added: ${result.configName}`)
-          } else if (result.action === 'updated' && result.position) {
-            setScanSnack(`Updated ${result.configName} to lesson ${result.position}`)
-          }
-        } catch (err) {
-          console.error('[CurriculumTab] Failed to sync config:', err)
-        }
-
-        await feedSkillMap(record.results)
-      }
+  // Revoke any pending object URLs on unmount.
+  const stagedRef = useRef(stagedPages)
+  useEffect(() => {
+    stagedRef.current = stagedPages
+  }, [stagedPages])
+  useEffect(
+    () => () => {
+      stagedRef.current.forEach((p) => URL.revokeObjectURL(p.url))
     },
-    [familyId, activeChildId, scan, syncScanToConfig, feedSkillMap],
+    [],
   )
+
+  const handleStagePages = useCallback((files: File[]) => {
+    setStagedPages((prev) => [
+      ...prev,
+      ...files.map((file) => ({ file, url: URL.createObjectURL(file) })),
+    ])
+  }, [])
+
+  const removeStagedPage = useCallback((index: number) => {
+    setStagedPages((prev) => {
+      const next = [...prev]
+      const [removed] = next.splice(index, 1)
+      if (removed) URL.revokeObjectURL(removed.url)
+      return next
+    })
+  }, [])
+
+  const handleScanPages = useCallback(async () => {
+    if (!familyId || !activeChildId || stagedPages.length === 0) return
+    const pages = stagedPages
+    setBatchProcessing(true)
+    try {
+      const summary = await processScanBatch(
+        pages.map((p) => p.file),
+        {
+          // Sequential: each scan + apply awaits before the next page (see
+          // processScanBatch). No Promise.all — that's the write-race fix.
+          scanOne: (file) => scan(file, familyId, activeChildId),
+          syncOne: (results) => syncScanToConfig(activeChildId, results),
+          onWorksheet: (results) => feedSkillMap(results),
+        },
+      )
+      setScanSnack(summary.message)
+    } catch (err) {
+      console.error('[CurriculumTab] Multi-page scan failed', err)
+      setScanSnack('Scan failed — please try again')
+    } finally {
+      pages.forEach((p) => URL.revokeObjectURL(p.url))
+      setStagedPages([])
+      setBatchProcessing(false)
+      // Discard the last single-page record left in useScan state.
+      clearScan()
+    }
+  }, [familyId, activeChildId, stagedPages, scan, syncScanToConfig, feedSkillMap, clearScan])
 
   /**
    * Apply a scan result to a specific card. Worksheet results write directly
@@ -391,60 +431,6 @@ export default function CurriculumTab() {
   const handleCancelMismatch = useCallback(() => {
     setMismatchPrompt(null)
   }, [])
-
-  const handleUpdatePosition = useCallback(
-    async (curriculum: CurriculumDetected) => {
-      if (!familyId || !activeChildId || !curriculum.lessonNumber) return
-      try {
-        const result = await syncScanToConfig(activeChildId, {
-          pageType: 'worksheet',
-          subject: curriculum.name || 'unknown',
-          specificTopic: '',
-          skillsTargeted: [],
-          estimatedDifficulty: 'appropriate',
-          recommendation: 'do',
-          recommendationReason: '',
-          estimatedMinutes: 30,
-          teacherNotes: '',
-          curriculumDetected: curriculum,
-        })
-        if (result.action === 'created') {
-          setScanSnack(`New workbook "${result.configName}" created at Lesson ${curriculum.lessonNumber}!`)
-        } else if (result.action === 'updated') {
-          setScanSnack(`Position updated to Lesson ${curriculum.lessonNumber}!`)
-        }
-      } catch (err) {
-        console.error('[CurriculumTab] Failed to update position', err)
-        setScanSnack('Failed to update position')
-      }
-    },
-    [familyId, activeChildId, syncScanToConfig, setScanSnack],
-  )
-
-  const handleSkipToNext = useCallback(
-    async (nextLesson: number) => {
-      if (!familyId || !activeChildId || !scanResult?.results) return
-      const results = scanResult.results
-      if (results.pageType === 'certificate') return
-      const curriculum = results.curriculumDetected
-      if (!curriculum) return
-      try {
-        await syncScanToConfig(activeChildId, {
-          ...results,
-          curriculumDetected: { ...curriculum, lessonNumber: nextLesson },
-        })
-        setScanSnack(`Skipping ahead — next lesson: ${nextLesson}`)
-      } catch (err) {
-        console.error('[CurriculumTab] Failed to skip to next', err)
-        setScanSnack('Failed to update position')
-      }
-    },
-    [familyId, activeChildId, scanResult, syncScanToConfig, setScanSnack],
-  )
-
-  const handleScanAnother = useCallback(() => {
-    clearScan()
-  }, [clearScan])
 
   const loading = isLoadingChildren || configsLoading
 
@@ -601,14 +587,68 @@ export default function CurriculumTab() {
           </SectionCard>
         )}
 
-        {/* Scan to Add New Workbook */}
+        {/* Scan to Add New Workbook — multi-page staging + sequential apply */}
         <Card sx={{ p: 2 }}>
           <Typography variant="subtitle2" gutterBottom>
             Add to Curriculum
           </Typography>
-          {!scanResult && !scanning && (
-            <Stack spacing={1}>
-              <ScanButton onCapture={handleCapture} variant="button" />
+          {batchProcessing ? (
+            <Box sx={{ mt: 1 }}>
+              <LoadingState
+                label={`Scanning ${stagedPages.length} page${stagedPages.length === 1 ? '' : 's'}…`}
+              />
+            </Box>
+          ) : (
+            <Stack spacing={1.5}>
+              <Typography variant="caption" color="text.secondary">
+                Scan one or more workbook pages. Pages from the same workbook merge into one
+                card; different workbooks each get their own.
+              </Typography>
+              <ScanButton multiple onCaptureFiles={handleStagePages} variant="button" />
+
+              {stagedPages.length > 0 && (
+                <>
+                  <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1}>
+                    {stagedPages.map((p, i) => (
+                      <Box key={p.url} sx={{ position: 'relative' }}>
+                        <Box
+                          component="img"
+                          src={p.url}
+                          alt={`Page ${i + 1}`}
+                          sx={{
+                            width: 84,
+                            height: 84,
+                            objectFit: 'cover',
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                          }}
+                        />
+                        <IconButton
+                          size="small"
+                          aria-label={`Remove page ${i + 1}`}
+                          onClick={() => removeStagedPage(i)}
+                          sx={{
+                            position: 'absolute',
+                            top: -8,
+                            right: -8,
+                            bgcolor: 'background.paper',
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            '&:hover': { bgcolor: 'background.paper' },
+                          }}
+                        >
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    ))}
+                  </Stack>
+                  <Button variant="contained" onClick={() => void handleScanPages()}>
+                    Scan {stagedPages.length} page{stagedPages.length === 1 ? '' : 's'}
+                  </Button>
+                </>
+              )}
+
               <Button
                 variant="outlined"
                 startIcon={<AddIcon />}
@@ -618,31 +658,6 @@ export default function CurriculumTab() {
                 Add Activity Manually
               </Button>
             </Stack>
-          )}
-
-          {scanning && (
-            <Box sx={{ mt: 1 }}>
-              <LoadingState label="Analyzing image..." />
-            </Box>
-          )}
-
-          {scanError && (
-            <Box sx={{ mt: 1 }}>
-              <ErrorState message={scanError} />
-            </Box>
-          )}
-
-          {scanResult?.results && (
-            <Box sx={{ mt: 1 }}>
-              <ScanResultsPanel
-                results={scanResult.results}
-                imageUrl={scanResult.imageUrl}
-                onUpdatePosition={handleUpdatePosition}
-                onSkipToNext={handleSkipToNext}
-                onScanAnother={handleScanAnother}
-                childName={childName}
-              />
-            </Box>
           )}
         </Card>
       </Stack>
