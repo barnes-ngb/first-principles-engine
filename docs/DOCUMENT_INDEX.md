@@ -98,6 +98,7 @@
 | `review/LONDON_EVAL_READINESS.md` | **CURRENT** | London evaluation readiness assessment — age-adjusted UX gap analysis |
 | `review/LEARNING_MAP_DIAGNOSIS.md` | **CURRENT** (2026-06-20) | Why the Learning Map under-credits learned skills + proposed fix (companion to the fix run). Working levels never reach the map; fix reuses the `workingLevels.ts` tag→level maps. Anchored by DOC-06. |
 | `review/HOURS_UNDERCOUNT_DIAGNOSIS.md` | **CURRENT** (2026-07-01) | Why completed checklist work is dropped from Records hours + fix options. Completed items with no matching tracked block count on Today but are dropped by Records once any block has actuals (carried-over items especially). Companion to the fix run; anchored by DATA-14. |
+| `review/SCAN_CURRICULUM_DIAGNOSIS.md` | **CURRENT** (2026-07-01) | Why multiple scanned workbooks collapse to one config + multi-page scan gap + fix plan. `isWorkbookMatch`'s bare same-subject fallback merges distinct workbooks; find-or-create updates the survivor instead of creating. Companion to the fix run; anchored by DATA-15. |
 | `review/prompts/` | **CURRENT** (2026-05-29) | Reusable audit prompts: `PROMPT_ARCH_AUDIT.md` (monthly), `PROMPT_AUTO_ARCH_FIX.md` (auto-fix runner), `PROMPT_BACKUP_CHECK.md`, `PROMPT_FIX.md` (issue runner) |
 | `design-pass-v1/copy-pass-audit.md` | **CURRENT** | Design pass copy audit — terminology, tone, label consistency across UI surfaces |
 | `archive/00_MASTER_SCOPE.md` | ARCHIVED | Original phased scope from Feb 2026. Phases 1-5 complete. |
