@@ -35,6 +35,7 @@ import type { DadLabType } from '../../core/types/enums'
 import { DadLabStatus, SubjectBucket, UserProfile } from '../../core/types/enums'
 import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
+import { normalizeChildRoles } from './childRoles'
 import ConceptArcsSection from './ConceptArcsSection'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
@@ -185,8 +186,10 @@ export default function DadLabPage() {
         description: data.description ?? '',
         status: DadLabStatus.Planned,
         materials: data.materials,
-        lincolnRole: data.lincolnRole,
-        londonRole: data.londonRole,
+        childRoles: normalizeChildRoles(
+          { lincolnRole: data.lincolnRole, londonRole: data.londonRole },
+          children,
+        ),
         childReports: {},
         subjectTags: [
           data.labType === 'science' || data.labType === 'engineering'
@@ -199,7 +202,7 @@ export default function DadLabPage() {
       }
       await saveReport(planned)
     },
-    [saveReport],
+    [saveReport, children],
   )
 
   const handleStartLab = useCallback(

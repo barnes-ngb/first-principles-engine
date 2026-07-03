@@ -26,6 +26,7 @@ import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
 import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
+import { normalizeChildRoles } from './childRoles'
 import { useConceptArcs } from './useConceptArcs'
 
 // ── Constants ──────────────────────────────────────────────────
@@ -60,6 +61,12 @@ const LONDON_FIELDS = [
   { key: 'creation', label: 'Creation', placeholder: 'What did he draw/build/make?' },
   { key: 'notes', label: 'Notes', placeholder: 'Your observations about London' },
 ] as const
+
+// Preserve the well-known Barnes role placeholders; other children get a generic hint.
+const ROLE_PLACEHOLDERS: Record<string, string> = {
+  lincoln: 'Makes prediction, runs the experiment, explains to London',
+  london: 'Watches, draws what he sees, helps pour',
+}
 
 // ── Props ──────────────────────────────────────────────────────
 
@@ -156,12 +163,22 @@ export default function LabReportForm({
   const [materials, setMaterials] = useState(
     (report?.materials ?? prefill?.materials ?? []).join(', '),
   )
-  const [lincolnRole, setLincolnRole] = useState(
-    report?.lincolnRole ?? prefill?.lincolnRole ?? '',
-  )
-  const [londonRole, setLondonRole] = useState(
-    report?.londonRole ?? prefill?.londonRole ?? '',
-  )
+  // Per-child role text keyed by childId (ARCH-40). Seeded from the report
+  // (via normalizeChildRoles, which maps legacy lincolnRole/londonRole forward)
+  // or from a prefill's legacy role fields.
+  const [roles, setRoles] = useState<Record<string, string>>(() => {
+    if (report) return normalizeChildRoles(report, children)
+    if (prefill) {
+      return normalizeChildRoles(
+        { lincolnRole: prefill.lincolnRole, londonRole: prefill.londonRole },
+        children,
+      )
+    }
+    return {}
+  })
+  const setChildRole = useCallback((childId: string, value: string) => {
+    setRoles((prev) => ({ ...prev, [childId]: value }))
+  }, [])
   const [childReports, setChildReports] = useState<Record<string, ChildLabReport>>(() => {
     if (report?.childReports) return report.childReports
     // Use lowercase name as key (matches KidLabView convention)
@@ -217,10 +234,13 @@ export default function LabReportForm({
       if (prefill.labType) setLabType(prefill.labType)
       if (prefill.description) setDescription(prefill.description)
       if (prefill.materials) setMaterials(prefill.materials.join(', '))
-      if (prefill.lincolnRole) setLincolnRole(prefill.lincolnRole)
-      if (prefill.londonRole) setLondonRole(prefill.londonRole)
+      const seeded = normalizeChildRoles(
+        { lincolnRole: prefill.lincolnRole, londonRole: prefill.londonRole },
+        children,
+      )
+      if (Object.keys(seeded).length > 0) setRoles(seeded)
     }
-  }, [prefill, report])
+  }, [prefill, report, children])
 
   // ── Child report field update ──
 
@@ -341,6 +361,14 @@ export default function LabReportForm({
       .map((m) => m.trim())
       .filter(Boolean)
 
+    // Trim role text and drop empties; keyed by childId (ARCH-40). Legacy
+    // lincolnRole/londonRole are no longer written on new/updated reports.
+    const trimmedRoles: Record<string, string> = {}
+    for (const [childId, value] of Object.entries(roles)) {
+      const trimmed = value.trim()
+      if (trimmed) trimmedRoles[childId] = trimmed
+    }
+
     // Determine status: completing → complete; editing active → stay active; editing existing → keep status; new → planned
     let status: DadLabReport['status']
     if (isCompleting) {
@@ -378,8 +406,7 @@ export default function LabReportForm({
       description: description.trim(),
       status,
       materials: parsedMaterials.length > 0 ? parsedMaterials : undefined,
-      lincolnRole: lincolnRole.trim() || undefined,
-      londonRole: londonRole.trim() || undefined,
+      childRoles: Object.keys(trimmedRoles).length > 0 ? trimmedRoles : undefined,
       childReports: normalizedChildReports,
       subjectTags: subjectTags as DadLabReport['subjectTags'],
       skillTags: skillTags.length > 0 ? skillTags : undefined,
@@ -408,7 +435,7 @@ export default function LabReportForm({
     await withSave(() => onSave(reportData))
   }, [
     date, title, labType, question, description, childReports, children, materials,
-    lincolnRole, londonRole, subjectTags, skillTags, virtueTag, dadReflection,
+    roles, subjectTags, skillTags, virtueTag, dadReflection,
     bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
     arcId, arcStepIndex, markArcStepDone, linkedArc, completeStep,
   ])
@@ -550,26 +577,21 @@ export default function LabReportForm({
           Roles
         </Typography>
         <Stack spacing={2}>
-          <TextField
-            label="Lincoln's role"
-            placeholder="Makes prediction, runs the experiment, explains to London"
-            value={lincolnRole}
-            onChange={(e) => setLincolnRole(e.target.value)}
-            disabled={disabled}
-            fullWidth
-            multiline
-            minRows={2}
-          />
-          <TextField
-            label="London's role"
-            placeholder="Watches, draws what he sees, helps pour"
-            value={londonRole}
-            onChange={(e) => setLondonRole(e.target.value)}
-            disabled={disabled}
-            fullWidth
-            multiline
-            minRows={2}
-          />
+          {children.map((child) => (
+            <TextField
+              key={child.id}
+              label={`${child.name}'s role`}
+              placeholder={
+                ROLE_PLACEHOLDERS[child.name.toLowerCase()] ?? `What does ${child.name} do?`
+              }
+              value={roles[child.id] ?? ''}
+              onChange={(e) => setChildRole(child.id, e.target.value)}
+              disabled={disabled}
+              fullWidth
+              multiline
+              minRows={2}
+            />
+          ))}
         </Stack>
       </Box>
 
