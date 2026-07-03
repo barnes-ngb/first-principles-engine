@@ -22,6 +22,7 @@ import type {
   ChapterBook,
   ChapterResponse,
   Child,
+  ConceptArc,
   DadLabReport,
   DailyArmorSession,
   DailyPlan,
@@ -186,6 +187,27 @@ export const dadLabReportsCollection = (
   collection(db, `families/${familyId}/dadLabReports`).withConverter(
     dadLabReportConverter,
   ) as CollectionReference<DadLabReport>
+
+// ── Concept Arcs (Dad Lab Concept Arcs — FEAT-44 / builds FEAT-41) ──
+// Additive planning layer above DadLabReport. Covered by the family catch-all
+// in firestore.rules (no dedicated rule needed). Write via addDoc /
+// updateDoc / setDoc(merge) only — never bare setDoc.
+
+export const conceptArcConverter: FirestoreDataConverter<ConceptArc> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as ConceptArc
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/** Concept arcs per family. Auto-ID documents. */
+export const conceptArcsCollection = (
+  familyId: string,
+): CollectionReference<ConceptArc> =>
+  collection(db, `families/${familyId}/conceptArcs`).withConverter(
+    conceptArcConverter,
+  ) as CollectionReference<ConceptArc>
 
 /** Ladder progress per child per ladderKey. Doc ID: {childId}_{ladderKey} */
 export const ladderProgressCollection = (

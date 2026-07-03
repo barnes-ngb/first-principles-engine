@@ -396,6 +396,26 @@ export const DadLabStatus = {
 } as const
 export type DadLabStatus = (typeof DadLabStatus)[keyof typeof DadLabStatus]
 
+// ── Concept Arcs (Dad Lab Concept Arcs — FEAT-44 / builds FEAT-41) ──
+
+/** Status of a single concept beat within an arc. */
+export const ArcStepStatus = {
+  Upcoming: 'upcoming',
+  Active: 'active',
+  Done: 'done',
+} as const
+export type ArcStepStatus = (typeof ArcStepStatus)[keyof typeof ArcStepStatus]
+
+/**
+ * How a ConceptArc was authored. Slice 1 only ever writes `OwnerAuthored`;
+ * `AiSuggested` is reserved for the later AI-generation slice (FEAT-41 §3).
+ */
+export const ArcOrigin = {
+  AiSuggested: 'ai-suggested',
+  OwnerAuthored: 'owner-authored',
+} as const
+export type ArcOrigin = (typeof ArcOrigin)[keyof typeof ArcOrigin]
+
 export const SkipReason = {
   TooHard: 'too-hard',
   NotRelevant: 'not-relevant',
