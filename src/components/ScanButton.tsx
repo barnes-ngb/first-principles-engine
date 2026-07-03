@@ -7,35 +7,60 @@ import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary'
 
 interface ScanButtonProps {
-  /** Called with the selected image file. */
-  onCapture: (file: File) => void
+  /** Called with a single selected image file (single-photo surfaces). */
+  onCapture?: (file: File) => void
+  /**
+   * Multiple mode only. Called with every selected file so the caller can
+   * append them to a staging list. The gallery can select N at once; the
+   * camera still returns one shot at a time (each call appends one).
+   */
+  onCaptureFiles?: (files: File[]) => void
   /** Show spinner while scanning. */
   loading?: boolean
   /** Render as a small icon button (for inline use in checklists). */
   variant?: 'icon' | 'button'
+  /**
+   * Opt-in multi-capture (Curriculum tab). The gallery input accepts multiple
+   * files; the camera stays one-at-a-time. Requires `onCaptureFiles`. The other
+   * scan surfaces omit this and keep the single `onCapture` behavior unchanged.
+   */
+  multiple?: boolean
 }
 
-export default function ScanButton({ onCapture, loading, variant = 'button' }: ScanButtonProps) {
+export default function ScanButton({
+  onCapture,
+  onCaptureFiles,
+  loading,
+  variant = 'button',
+  multiple = false,
+}: ScanButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      if (file) onCapture(file)
+      const list = e.target.files
+      if (list && list.length > 0) {
+        if (multiple && onCaptureFiles) {
+          onCaptureFiles(Array.from(list))
+        } else {
+          onCapture?.(list[0])
+        }
+      }
       // Reset so the same file can be re-selected
       e.target.value = ''
     },
-    [onCapture],
+    [multiple, onCapture, onCaptureFiles],
   )
 
   return (
     <>
-      {/* Gallery input (no capture attribute) */}
+      {/* Gallery input (no capture attribute). Accepts multiple in multi mode. */}
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
+        multiple={multiple}
         onChange={handleChange}
         style={{ display: 'none' }}
       />
@@ -70,7 +95,7 @@ export default function ScanButton({ onCapture, loading, variant = 'button' }: S
             disabled={loading}
             sx={{ height: 48 }}
           >
-            {loading ? 'Scanning...' : 'Take Photo'}
+            {loading ? 'Scanning...' : multiple ? 'Add Page' : 'Take Photo'}
           </Button>
           <Button
             variant="outlined"
@@ -79,7 +104,7 @@ export default function ScanButton({ onCapture, loading, variant = 'button' }: S
             disabled={loading}
             sx={{ height: 48 }}
           >
-            From Photos
+            {multiple ? 'Add Pages' : 'From Photos'}
           </Button>
         </Stack>
       )}

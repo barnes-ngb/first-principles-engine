@@ -580,6 +580,68 @@ export interface LessonCard {
   createdAt?: string
 }
 
+// ── Help Card (Today inline teaching help — FEAT-43) ──────────
+
+/** The "Play it" game half of a Help Card. */
+export interface HelpCardPlayIt {
+  /** Short name for the game/activity. */
+  title: string
+  /** 2-4 concrete steps Shelly can run. */
+  howTo: string[]
+  /** Estimated minutes (2-10). */
+  minutes: number
+  /** Materials — things already in the house. */
+  materials: string[]
+}
+
+/** AI-authored teaching-help body for one checklist item (FEAT-43). */
+export interface HelpCardBody {
+  playIt: HelpCardPlayIt
+  /** One-line two-kid variant: "London plays too" OR "Lincoln teaches London". */
+  twoKid: string
+  /** 3-5 line micro-script: open, a line for when the child stalls, what "good for today" looks like. */
+  sayThis: string[]
+  /** A genuinely different approach for when the first isn't landing (movement/game/modality swap). */
+  attentionRescue: string
+  /** A ≤5-minute degradation of playIt. */
+  mvdVersion: string
+  /** When to stop — surfaced from existing stopRules, never invented. */
+  skipSignal: string
+}
+
+/** The lazily-fetched video pick cached onto a Help Card (reuses the shipped lessonVideo pick). */
+export interface HelpCardVideo {
+  title: string
+  url: string
+  source?: string
+  why?: string
+  lengthNote?: string
+  themeTieIn?: string
+}
+
+/**
+ * Inline teaching Help Card for a Today checklist item (FEAT-43, slice 1 of
+ * FEAT-40). Generated at plan lock-in for must-do Reading/Math items; the video
+ * slot is lazy-filled on first expand. Doc ID: `{childId}__{subjectSlug}__{labelSlug}`.
+ * Read-only help — writes nothing to the child's record.
+ */
+export interface HelpCard {
+  id?: string
+  childId: string
+  /** The checklist item label the card was generated for (minutes suffix stripped). */
+  itemLabel: string
+  subjectBucket?: SubjectBucket
+  body: HelpCardBody
+  /** Cached video pick — absent until Shelly first expands the card (D3 lazy-fetch). */
+  video?: HelpCardVideo
+  /** ISO timestamp the video was fetched + cached. */
+  videoFetchedAt?: string
+  /** Model that authored the body. */
+  model?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
 // ── Workbook Config (Pace Gauge) ──────────────────────────────
 
 /** Curriculum-specific metadata for a workbook */

@@ -5,6 +5,7 @@ import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import FormControlLabel from '@mui/material/FormControlLabel'
+import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
@@ -22,9 +23,11 @@ import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload
 import { useSaveState } from '../../core/hooks/useSaveState'
 import type { Child, ChildLabReport, DadLabReport } from '../../core/types'
 import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
-import { DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
+import { normalizeChildRoles, resolveChildReport } from './childRoles'
+import { useConceptArcs } from './useConceptArcs'
 
 // ── Constants ──────────────────────────────────────────────────
 
@@ -59,6 +62,12 @@ const LONDON_FIELDS = [
   { key: 'notes', label: 'Notes', placeholder: 'Your observations about London' },
 ] as const
 
+// Preserve the well-known Barnes role placeholders; other children get a generic hint.
+const ROLE_PLACEHOLDERS: Record<string, string> = {
+  lincoln: 'Makes prediction, runs the experiment, explains to London',
+  london: 'Watches, draws what he sees, helps pour',
+}
+
 // ── Props ──────────────────────────────────────────────────────
 
 interface Prefill {
@@ -67,8 +76,8 @@ interface Prefill {
   labType?: DadLabType
   description?: string
   materials?: string[]
-  lincolnRole?: string
-  londonRole?: string
+  /** Per-child role text keyed by childId (ARCH-40). */
+  childRoles?: Record<string, string>
 }
 
 interface LabReportFormProps {
@@ -93,18 +102,6 @@ function getChildFields(childName: string) {
   if (lower === 'london') return LONDON_FIELDS
   // Fallback: show all fields
   return [...LINCOLN_FIELDS.filter((f) => f.key !== 'notes'), ...LONDON_FIELDS]
-}
-
-/** Find the child report regardless of whether the key is Firestore ID or lowercase name */
-function getChildReport(
-  childReports: Record<string, ChildLabReport>,
-  child: Child,
-): ChildLabReport {
-  if (childReports[child.id]) return childReports[child.id]
-  const nameKey = child.name.toLowerCase()
-  if (childReports[nameKey]) return childReports[nameKey]
-  if (childReports[child.name]) return childReports[child.name]
-  return emptyChildReport()
 }
 
 /** Return whichever key actually has data for this child */
@@ -132,6 +129,7 @@ export default function LabReportForm({
 }: LabReportFormProps) {
   const familyId = useFamilyId()
   const { saveState, withSave } = useSaveState()
+  const { arcs, completeStep } = useConceptArcs()
 
   // Determine form mode based on completing prop and report status
   const isCompleting = completing && report?.status === DadLabStatus.Active
@@ -153,12 +151,17 @@ export default function LabReportForm({
   const [materials, setMaterials] = useState(
     (report?.materials ?? prefill?.materials ?? []).join(', '),
   )
-  const [lincolnRole, setLincolnRole] = useState(
-    report?.lincolnRole ?? prefill?.lincolnRole ?? '',
-  )
-  const [londonRole, setLondonRole] = useState(
-    report?.londonRole ?? prefill?.londonRole ?? '',
-  )
+  // Per-child role text keyed by childId (ARCH-40). Seeded from the report
+  // (via normalizeChildRoles, which maps legacy lincolnRole/londonRole forward)
+  // or from a prefill's legacy role fields.
+  const [roles, setRoles] = useState<Record<string, string>>(() => {
+    if (report) return normalizeChildRoles(report, children)
+    if (prefill?.childRoles) return { ...prefill.childRoles }
+    return {}
+  })
+  const setChildRole = useCallback((childId: string, value: string) => {
+    setRoles((prev) => ({ ...prev, [childId]: value }))
+  }, [])
   const [childReports, setChildReports] = useState<Record<string, ChildLabReport>>(() => {
     if (report?.childReports) return report.childReports
     // Use lowercase name as key (matches KidLabView convention)
@@ -175,6 +178,33 @@ export default function LabReportForm({
   const [bestMoment, setBestMoment] = useState(report?.bestMoment ?? '')
   const [nextTime, setNextTime] = useState(report?.nextTime ?? '')
 
+  // ── Concept Arc linkage (FEAT-44) — optional ──
+  const [arcId, setArcId] = useState(report?.arcId ?? '')
+  const [arcStepIndex, setArcStepIndex] = useState<number | undefined>(report?.arcStepIndex)
+  // When completing a lab that's linked to an arc, mark its step done by default.
+  const [markArcStepDone, setMarkArcStepDone] = useState(true)
+
+  const handleArcChange = useCallback(
+    (id: string) => {
+      setArcId(id)
+      const arc = id ? arcs.find((a) => a.id === id) : undefined
+      if (!arc || arc.steps.length === 0) {
+        setArcStepIndex(undefined)
+        return
+      }
+      // Preselect the arc's active step (fallback: first upcoming, then first).
+      let idx = arc.steps.findIndex((s) => s.status === ArcStepStatus.Active)
+      if (idx === -1) idx = arc.steps.findIndex((s) => s.status === ArcStepStatus.Upcoming)
+      if (idx === -1) idx = 0
+      setArcStepIndex(idx)
+    },
+    [arcs],
+  )
+
+  const linkedArc = arcId ? arcs.find((a) => a.id === arcId) : undefined
+  const linkedStep =
+    linkedArc && typeof arcStepIndex === 'number' ? linkedArc.steps[arcStepIndex] : undefined
+
   // Photo upload state
   const [uploadingChildId, setUploadingChildId] = useState<string | null>(null)
   const [artifactRefreshKey, setArtifactRefreshKey] = useState(0)
@@ -187,8 +217,9 @@ export default function LabReportForm({
       if (prefill.labType) setLabType(prefill.labType)
       if (prefill.description) setDescription(prefill.description)
       if (prefill.materials) setMaterials(prefill.materials.join(', '))
-      if (prefill.lincolnRole) setLincolnRole(prefill.lincolnRole)
-      if (prefill.londonRole) setLondonRole(prefill.londonRole)
+      if (prefill.childRoles && Object.keys(prefill.childRoles).length > 0) {
+        setRoles({ ...prefill.childRoles })
+      }
     }
   }, [prefill, report])
 
@@ -311,6 +342,14 @@ export default function LabReportForm({
       .map((m) => m.trim())
       .filter(Boolean)
 
+    // Trim role text and drop empties; keyed by childId (ARCH-40). Legacy
+    // lincolnRole/londonRole are no longer written on new/updated reports.
+    const trimmedRoles: Record<string, string> = {}
+    for (const [childId, value] of Object.entries(roles)) {
+      const trimmed = value.trim()
+      if (trimmed) trimmedRoles[childId] = trimmed
+    }
+
     // Determine status: completing → complete; editing active → stay active; editing existing → keep status; new → planned
     let status: DadLabReport['status']
     if (isCompleting) {
@@ -348,8 +387,7 @@ export default function LabReportForm({
       description: description.trim(),
       status,
       materials: parsedMaterials.length > 0 ? parsedMaterials : undefined,
-      lincolnRole: lincolnRole.trim() || undefined,
-      londonRole: londonRole.trim() || undefined,
+      childRoles: Object.keys(trimmedRoles).length > 0 ? trimmedRoles : undefined,
       childReports: normalizedChildReports,
       subjectTags: subjectTags as DadLabReport['subjectTags'],
       skillTags: skillTags.length > 0 ? skillTags : undefined,
@@ -360,12 +398,27 @@ export default function LabReportForm({
       totalMinutes: totalMinutes > 0 ? totalMinutes : undefined,
       createdAt: report?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      arcId: arcId || undefined,
+      arcStepIndex: arcId ? arcStepIndex : undefined,
     }
+
+    // Completing a linked lab: mark the arc step done (records completedReportId /
+    // completedDateKey). Runs before onSave (which may navigate away) so the write
+    // is dispatched regardless. Arc writes are entirely separate from the report /
+    // credit path — no hours/XP/diamond code is touched here.
+    if (isCompleting && markArcStepDone && linkedArc?.id && typeof arcStepIndex === 'number') {
+      await completeStep(linkedArc, arcStepIndex, {
+        completedReportId: report?.id,
+        completedDateKey: date,
+      })
+    }
+
     await withSave(() => onSave(reportData))
   }, [
     date, title, labType, question, description, childReports, children, materials,
-    lincolnRole, londonRole, subjectTags, skillTags, virtueTag, dadReflection,
+    roles, subjectTags, skillTags, virtueTag, dadReflection,
     bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
+    arcId, arcStepIndex, markArcStepDone, linkedArc, completeStep,
   ])
 
   const disabled = readOnly === true
@@ -505,28 +558,91 @@ export default function LabReportForm({
           Roles
         </Typography>
         <Stack spacing={2}>
-          <TextField
-            label="Lincoln's role"
-            placeholder="Makes prediction, runs the experiment, explains to London"
-            value={lincolnRole}
-            onChange={(e) => setLincolnRole(e.target.value)}
-            disabled={disabled}
-            fullWidth
-            multiline
-            minRows={2}
-          />
-          <TextField
-            label="London's role"
-            placeholder="Watches, draws what he sees, helps pour"
-            value={londonRole}
-            onChange={(e) => setLondonRole(e.target.value)}
-            disabled={disabled}
-            fullWidth
-            multiline
-            minRows={2}
-          />
+          {children.map((child) => (
+            <TextField
+              key={child.id}
+              label={`${child.name}'s role`}
+              placeholder={
+                ROLE_PLACEHOLDERS[child.name.toLowerCase()] ?? `What does ${child.name} do?`
+              }
+              value={roles[child.id] ?? ''}
+              onChange={(e) => setChildRole(child.id, e.target.value)}
+              disabled={disabled}
+              fullWidth
+              multiline
+              minRows={2}
+            />
+          ))}
         </Stack>
       </Box>
+
+      {/* Concept Arc linkage (FEAT-44) — optional */}
+      {(arcs.length > 0 || arcId) && (
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600 }}>
+            Part of an arc?
+          </Typography>
+          {disabled ? (
+            <Typography variant="body2" color="text.secondary">
+              {linkedArc
+                ? `${linkedArc.title}${linkedStep ? ` — ${linkedStep.title}` : ''}`
+                : 'Not linked to an arc'}
+            </Typography>
+          ) : (
+            <Stack spacing={1}>
+              <TextField
+                select
+                value={arcId}
+                onChange={(e) => handleArcChange(e.target.value)}
+                fullWidth
+                size="small"
+              >
+                <MenuItem value="">
+                  <em>None — one-off lab</em>
+                </MenuItem>
+                {arcs.map((a) => (
+                  <MenuItem key={a.id} value={a.id ?? ''}>
+                    {a.title}
+                  </MenuItem>
+                ))}
+              </TextField>
+              {linkedArc && linkedArc.steps.length > 0 && (
+                <TextField
+                  select
+                  label="Step"
+                  value={typeof arcStepIndex === 'number' ? String(arcStepIndex) : ''}
+                  onChange={(e) => setArcStepIndex(Number(e.target.value))}
+                  fullWidth
+                  size="small"
+                >
+                  {linkedArc.steps.map((s, i) => (
+                    <MenuItem key={i} value={String(i)}>
+                      {i + 1}. {s.title}
+                      {s.status === ArcStepStatus.Done
+                        ? ' ✓'
+                        : s.status === ArcStepStatus.Active
+                          ? ' •'
+                          : ''}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
+              {isCompleting && linkedArc && typeof arcStepIndex === 'number' && (
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={markArcStepDone}
+                      onChange={(e) => setMarkArcStepDone(e.target.checked)}
+                      size="small"
+                    />
+                  }
+                  label={`Mark step done: "${linkedStep?.title ?? ''}"`}
+                />
+              )}
+            </Stack>
+          )}
+        </Box>
+      )}
 
       {/* Child contributions summary (shown when editing or completing an active lab) */}
       {(isCompleting || isEditingActive) && (
@@ -535,7 +651,7 @@ export default function LabReportForm({
             Kid Contributions
           </Typography>
           {children.map((child) => {
-            const cr = getChildReport(childReports, child)
+            const cr = resolveChildReport(childReports, child)
             const hasPrediction = !!cr?.prediction
             const hasExplanation = !!cr?.explanation
             const hasObservation = !!cr?.observation
@@ -594,7 +710,7 @@ export default function LabReportForm({
       {/* Per-Child Sections (shown for active/completing or complete labs) */}
       {(isCompleting || isEditingActive || isViewingComplete || (isEditing && report?.status !== DadLabStatus.Planned)) &&
         children.map((child) => {
-          const cr = getChildReport(childReports, child)
+          const cr = resolveChildReport(childReports, child)
           const fields = getChildFields(child.name)
           const isUploading = uploadingChildId === child.id
 

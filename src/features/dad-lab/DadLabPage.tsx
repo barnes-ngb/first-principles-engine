@@ -35,6 +35,10 @@ import type { DadLabType } from '../../core/types/enums'
 import { DadLabStatus, SubjectBucket, UserProfile } from '../../core/types/enums'
 import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
+import { parseChildRoles } from './childRoles'
+import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
+import { useCalibrationSources } from './useCalibrationSources'
+import ConceptArcsSection from './ConceptArcsSection'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
 import LabSuggestions from './LabSuggestions'
@@ -83,8 +87,8 @@ interface Prefill {
   labType?: DadLabType
   description?: string
   materials?: string[]
-  lincolnRole?: string
-  londonRole?: string
+  /** Per-child role text keyed by childId (ARCH-40). */
+  childRoles?: Record<string, string>
   duration?: number
 }
 
@@ -103,6 +107,7 @@ export default function DadLabPage() {
 
   const { reports, loading, saveReport, updateStatus, deleteReport } = useDadLabReports()
   const { children } = useChildren()
+  const { sources: calibrationSources } = useCalibrationSources(familyId, children)
   const { chat } = useAI()
   const [view, setView] = useState<'list' | 'form'>('list')
   const [editingReport, setEditingReport] = useState<DadLabReport | undefined>()
@@ -184,8 +189,7 @@ export default function DadLabPage() {
         description: data.description ?? '',
         status: DadLabStatus.Planned,
         materials: data.materials,
-        lincolnRole: data.lincolnRole,
-        londonRole: data.londonRole,
+        childRoles: data.childRoles ?? {},
         childReports: {},
         subjectTags: [
           data.labType === 'science' || data.labType === 'engineering'
@@ -246,27 +250,10 @@ export default function DadLabPage() {
         familyId,
         childId: children[0]?.id ?? '',
         taskType: TaskType.Chat,
+        model: DAD_LAB_SUGGESTION_MODEL,
         messages: [{
           role: 'user',
-          content: `I have an idea for a Dad Lab activity. Structure it into a complete lab plan.
-
-My idea: "${ideaText}"
-
-Context:
-- Lincoln (10, neurodivergent, loves Minecraft/building/art)
-- London (6, loves drawing and stories)
-- Both boys
-- Saturday morning lab, 45-90 minutes
-
-Respond in EXACTLY this format (no other text):
-Title: [a catchy name for the lab]
-Type: [science/engineering/adventure/heart]
-Question: [a driving question that frames the exploration]
-Description: [2-3 sentences about what we'll do and learn]
-Materials: [comma-separated list of what we need]
-Lincoln's role: [specific tasks — he leads, measures, explains]
-London's role: [specific tasks — he observes, draws, helps]
-Duration: [estimated minutes]`,
+          content: buildLabIdeaPrompt(ideaText, calibrationSources),
         }],
       })
 
@@ -282,8 +269,7 @@ Duration: [estimated minutes]`,
           question: get('Question'),
           description: get('Description'),
           materials: get('Materials').split(',').map(s => s.trim()).filter(Boolean),
-          lincolnRole: get("Lincoln's role") || get('Lincoln'),
-          londonRole: get("London's role") || get('London'),
+          childRoles: parseChildRoles(response.message, children),
         })
       } else {
         // Fallback: create a basic structure from the idea text
@@ -293,8 +279,7 @@ Duration: [estimated minutes]`,
           question: '',
           description: ideaText,
           materials: [],
-          lincolnRole: '',
-          londonRole: '',
+          childRoles: {},
         })
       }
     } catch (err) {
@@ -306,13 +291,12 @@ Duration: [estimated minutes]`,
         question: '',
         description: ideaText,
         materials: [],
-        lincolnRole: '',
-        londonRole: '',
+        childRoles: {},
       })
     } finally {
       setIdeaLoading(false)
     }
-  }, [ideaText, chat, familyId, children])
+  }, [ideaText, chat, familyId, children, calibrationSources])
 
   // Stats (completed labs only)
   const stats = useMemo(() => {
@@ -329,13 +313,21 @@ Duration: [estimated minutes]`,
     return { count: thisYear.length, totalHours: Math.round(totalMinutes / 60), byType }
   }, [completed])
 
-  if (isKid) {
+  // Resolve the signed-in kid's Child (stable identity) with a synthetic
+  // fallback that preserves today's lowercase-name keying if children haven't
+  // loaded or the name doesn't match a profile record.
+  const kidChild = useMemo(() => {
+    const kidName = profile === UserProfile.Lincoln ? 'Lincoln' : 'London'
     return (
-      <KidLabView
-        familyId={familyId}
-        childName={profile === UserProfile.Lincoln ? 'Lincoln' : 'London'}
-      />
+      children.find((c) => c.name.toLowerCase() === kidName.toLowerCase()) ?? {
+        id: kidName.toLowerCase(),
+        name: kidName,
+      }
     )
+  }, [profile, children])
+
+  if (isKid) {
+    return <KidLabView familyId={familyId} child={kidChild} children={children} />
   }
 
   if (view === 'form') {
@@ -384,6 +376,9 @@ Duration: [estimated minutes]`,
       </Stack>
 
       {loading && <LoadingState label="Loading..." />}
+
+      {/* ── Concept Arcs (designed lab sequences — FEAT-44) ── */}
+      <ConceptArcsSection />
 
       {/* ── Section 1: Planned Labs ── */}
       {planned.length > 0 && (
@@ -556,24 +551,23 @@ Duration: [estimated minutes]`,
                 })}
                 helperText="Comma-separated"
               />
-              <TextField
-                label="Lincoln's Role"
-                fullWidth
-                size="small"
-                multiline
-                minRows={1}
-                value={ideaResult.lincolnRole ?? ''}
-                onChange={e => setIdeaResult({ ...ideaResult, lincolnRole: e.target.value })}
-              />
-              <TextField
-                label="London's Role"
-                fullWidth
-                size="small"
-                multiline
-                minRows={1}
-                value={ideaResult.londonRole ?? ''}
-                onChange={e => setIdeaResult({ ...ideaResult, londonRole: e.target.value })}
-              />
+              {children.map((child) => (
+                <TextField
+                  key={child.id}
+                  label={`${child.name}'s Role`}
+                  fullWidth
+                  size="small"
+                  multiline
+                  minRows={1}
+                  value={ideaResult.childRoles?.[child.id] ?? ''}
+                  onChange={e =>
+                    setIdeaResult({
+                      ...ideaResult,
+                      childRoles: { ...ideaResult.childRoles, [child.id]: e.target.value },
+                    })
+                  }
+                />
+              ))}
 
               <Stack direction="row" spacing={1}>
                 <Button

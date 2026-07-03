@@ -38,6 +38,8 @@ import type {
   SkillSnapshot,
 } from '../../core/types'
 import LessonVideoDialog from './LessonVideoDialog'
+import HelpCardStrip from './HelpCardStrip'
+import { qualifiesForHelpCard } from '../../core/utils/helpCard'
 import {
   PlanType,
   RoutineItemKey,
@@ -703,6 +705,16 @@ export default function TodayChecklist({
                       {item.contentGuide}
                     </Typography>
                   </Box>
+                )}
+                {/* Inline Help Card (FEAT-43) — parent-only, collapsed by default.
+                    Self-hides when no card was generated for this item. */}
+                {!item.completed && selectedChildId && qualifiesForHelpCard(item) && (
+                  <HelpCardStrip
+                    familyId={familyId}
+                    childId={selectedChildId}
+                    item={item}
+                    isMvd={isMvd}
+                  />
                 )}
                 {/* Scan-based feedback (specific — from photographed page) */}
                 {!item.completed && getSparkleMode(item) === 'scan' && isScannableWorkbook(item) && (() => {

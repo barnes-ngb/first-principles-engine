@@ -1,4 +1,6 @@
 import type {
+  ArcOrigin,
+  ArcStepStatus,
   DadLabStatus,
   DadLabType,
   EngineStage,
@@ -46,6 +48,10 @@ export interface Project {
   archivedAt?: string
   /** Append-only log of completed sessions. */
   sessionLog?: SessionLogEntry[]
+  /** The ConceptArc this project belongs to. forward-compat, no consumers (see FEAT-41 design §2). */
+  arcId?: string
+  /** Which ArcStep this project realizes. forward-compat, no consumers (see FEAT-41 design §2). */
+  arcStepIndex?: number
 }
 
 export interface LabSession {
@@ -117,9 +123,15 @@ export interface DadLabReport {
   status: DadLabStatus
   /** Materials list (set during planning) */
   materials?: string[]
-  /** Lincoln's role description (set during planning) */
+  /**
+   * Per-child role description (set during planning), keyed by childId.
+   * The name-agnostic replacement for `lincolnRole`/`londonRole` (ARCH-40).
+   * Read via `normalizeChildRoles`, which also maps legacy docs forward.
+   */
+  childRoles?: Record<string, string>
+  /** @deprecated legacy read-only — normalized via normalizeChildRoles; do not write */
   lincolnRole?: string
-  /** London's role description (set during planning) */
+  /** @deprecated legacy read-only — normalized via normalizeChildRoles; do not write */
   londonRole?: string
   childReports: Record<string, ChildLabReport>
   subjectTags: SubjectBucket[]
@@ -131,4 +143,55 @@ export interface DadLabReport {
   totalMinutes?: number
   createdAt: string
   updatedAt: string
+  /** The ConceptArc this lab belongs to (absent = one-off lab, today's behavior). */
+  arcId?: string
+  /** Which ArcStep (by index into ConceptArc.steps) this lab realizes. */
+  arcStepIndex?: number
+}
+
+// ── Concept Arcs (FEAT-44 / builds FEAT-41 design) ──────────────
+// Additive planning/narrative layer above the live DadLabReport object. Introduces
+// no change to how a single lab is planned, run, credited, or reported. See
+// docs/DAD_LAB_CONCEPT_ARCS_DESIGN.md.
+
+/** One ordered concept beat within a ConceptArc. */
+export interface ArcStep {
+  /** Short beat name, e.g. "Make a bulb light up". */
+  title: string
+  /** The idea this step teaches, one line. */
+  conceptBeat: string
+  /** upcoming | active | done — the step's own coverage record (design D1 Option C). */
+  status: ArcStepStatus
+  /** Optional owner/AI sketch of the lab that realizes this beat (type + driving question). */
+  suggestedLabShape?: string
+  /** Set when a DadLabReport is completed for this step. */
+  completedReportId?: string
+  /** Date (YYYY-MM-DD) the step was marked done. */
+  completedDateKey?: string
+}
+
+/**
+ * A designed sequence of labs that builds a concept progression across Saturdays
+ * (e.g. electricity: static → circuit → switch → motor). An arc is a lightweight
+ * ordered container; an arc's `steps[].status` is its own coverage record (no
+ * concept map — design D1 Option C).
+ */
+export interface ConceptArc {
+  id?: string
+  /** Arc name, e.g. "The Electricity Arc". */
+  title: string
+  /** Free-text domain label (NOT a Learning-Map reference), e.g. "Electricity". */
+  domainLabel?: string
+  /** Children this arc is for. Defaults to both children (DATA-04). */
+  childIds: string[]
+  /** Ordered concept beats. */
+  steps: ArcStep[]
+  /** How the arc was authored. Slice 1 only writes `'owner-authored'`. */
+  createdFrom: ArcOrigin
+  /** Optional Stonebridge / narrative tie-in (design D5 — evaluate, don't force). */
+  narrativeHook?: string
+  createdAt: string
+  updatedAt: string
+  /** Soft-archive timestamp (ISO). Archived arcs are hidden from the active list. */
+  archivedAt?: string
 }

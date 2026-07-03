@@ -75,6 +75,13 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "charter", "childProfile", "skillSnapshot", "activityConfigs",
     "recentHistoryByDomain", "recentScans", "wordMastery", "dadLabReports",
   ],
+  // FEAT-43: inline Today Help Card body. Passive signals FIRST (working levels,
+  // word mastery, recent scan, per-domain history) so the card is confident even
+  // on a low-log week; week focus ties the game to the current theme.
+  helpCard: [
+    "charter", "childProfile", "skillSnapshot", "wordMastery",
+    "recentScans", "recentHistoryByDomain", "weekFocus",
+  ],
 };
 
 // ── Charter preamble (shared constant) ──────────────────────────

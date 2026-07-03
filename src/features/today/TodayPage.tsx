@@ -68,7 +68,9 @@ import {
 } from './applyChapterPoolForChild'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
+import MineRecapCard from './MineRecapCard'
 import TeachBackSection from './TeachBackSection'
+import { useLatestMineSession } from './useLatestMineSession'
 import TodayChecklist from './TodayChecklist'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useDailyPlan } from './useDailyPlan'
@@ -274,6 +276,13 @@ export default function TodayPage() {
   })
 
   const { chat: aiChat } = useAI()
+
+  // Parent recap of the child's latest Knowledge Mine session dated today (read-only).
+  const { session: latestMineSession } = useLatestMineSession(
+    familyId,
+    selectedChildId,
+    today,
+  )
 
   const handleRetryChapterGen = useCallback(async () => {
     if (!selectedBook || !selectedChildId || !familyId) return
@@ -956,6 +965,16 @@ export default function TodayPage() {
             familyId={familyId}
             selectedChildId={selectedChildId}
             onSnackMessage={handleSnackMessage}
+          />
+        </SectionErrorBoundary>
+      )}
+
+      {/* --- Knowledge Mine parent recap (no-shame, read-only, today only) --- */}
+      {latestMineSession && (
+        <SectionErrorBoundary section="mine recap">
+          <MineRecapCard
+            session={latestMineSession}
+            childName={selectedChild?.name ?? 'Your child'}
           />
         </SectionErrorBoundary>
       )}

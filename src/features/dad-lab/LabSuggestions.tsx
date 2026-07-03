@@ -16,9 +16,13 @@ import { ErrorState, LoadingState } from '../../components/states'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
+import type { Child } from '../../core/types'
 import type { DadLabType } from '../../core/types/enums'
 import { db } from '../../core/firebase/firestore'
 import { weekKeyFromDate } from '../../core/utils/dateKey'
+import { parseChildRoles } from './childRoles'
+import { buildLabSuggestionsPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
+import { useCalibrationSources } from './useCalibrationSources'
 
 interface Prefill {
   title: string
@@ -26,8 +30,8 @@ interface Prefill {
   labType: DadLabType
   description: string
   materials?: string[]
-  lincolnRole?: string
-  londonRole?: string
+  /** Per-child role text keyed by childId (ARCH-40). */
+  childRoles?: Record<string, string>
   duration?: number
 }
 
@@ -45,8 +49,8 @@ interface ParsedSuggestion {
   description: string
   phases: string
   materials: string
-  lincolnRole: string
-  londonRole: string
+  /** Per-child role text keyed by childId (ARCH-40). */
+  childRoles: Record<string, string>
   teachingMoment: string
   subjectConnection: string
   duration: string
@@ -71,7 +75,7 @@ function parseLabType(raw: string): DadLabType {
   return LAB_TYPE_MAP[lower] ?? 'science'
 }
 
-function parseSuggestions(text: string): ParsedSuggestion[] {
+function parseSuggestions(text: string, children: Child[]): ParsedSuggestion[] {
   const suggestions: ParsedSuggestion[] = []
   // Split by --- dividers
   const blocks = text.split(/---/).filter((b) => b.trim())
@@ -93,8 +97,7 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
       description: get('Description'),
       phases: get('Phases'),
       materials: get('Materials'),
-      lincolnRole: get("Lincoln's role") || get('Lincoln'),
-      londonRole: get("London's role") || get('London'),
+      childRoles: parseChildRoles(block, children),
       teachingMoment: get('Teaching moment'),
       subjectConnection: get('Subject connection'),
       duration: get('Duration'),
@@ -119,8 +122,7 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
         description: get('Description') || get('Brief') || get('Overview'),
         phases: get('Phases'),
         materials: get('Materials'),
-        lincolnRole: get("Lincoln's role") || get('Lincoln'),
-        londonRole: get("London's role") || get('London'),
+        childRoles: parseChildRoles(block, children),
         teachingMoment: get('Teaching moment'),
         subjectConnection: get('Subject connection'),
         duration: get('Duration'),
@@ -138,8 +140,7 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
       description: text.trim(),
       phases: '',
       materials: '',
-      lincolnRole: '',
-      londonRole: '',
+      childRoles: {},
       teachingMoment: '',
       subjectConnection: '',
       duration: '',
@@ -157,6 +158,7 @@ function parseDuration(raw: string): number | undefined {
 function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 'open'>) {
   const familyId = useFamilyId()
   const { children, isLoading: childrenLoading } = useChildren()
+  const { sources: calibrationSources, loaded: calibrationLoaded } = useCalibrationSources(familyId, children)
   const { chat, loading: aiLoading } = useAI()
   const [suggestions, setSuggestions] = useState<ParsedSuggestion[]>([])
   const [rawText, setRawText] = useState('')
@@ -195,88 +197,18 @@ function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 
         familyId,
         childId: children[0]?.id ?? '',
         taskType: TaskType.Chat,
+        model: DAD_LAB_SUGGESTION_MODEL,
         messages: [
           {
             role: 'user',
-            content: `Suggest 3 Dad Lab activities for this Saturday.
-
-Context:
-- Lincoln (10, neurodivergent, loves Minecraft/building/art)
-- London (6, loves drawing and stories)
-- Both boys
-- Keep to 45-90 minutes, household materials preferred
-- Lincoln should lead hard parts and teach London after
-- London assists, observes, and creates (drawing, decorating)
-
-DAD LAB TYPES AND FRAMEWORKS:
-
-TYPE 1: EXPERIMENT (science) — Scientific Method
-Framework: Question → Hypothesis → Test → Observe → Conclude
-- Prediction step: "Lincoln, what do you THINK will happen when we...?"
-- Testing step: Hands-on experiment with clear variables
-- Observation step: "What did we actually see? Was it what you expected?"
-- Conclusion step: "Why do you think it happened that way?"
-- Lincoln teaches London: Explain the result simply
-Example: "Does a heavy ball fall faster than a light ball?"
-
-TYPE 2: BUILD (engineering) — Engineering Design
-Framework: Problem → Design → Build → Test → Improve
-- Define the problem: "We need a bridge that holds this weight"
-- Design phase: Sketch on paper first
-- Build phase: Construct with available materials
-- Test phase: Does it work? How well?
-- Improve phase: What would you change? Build version 2.
-Example: "Build a catapult that launches a marshmallow into a cup"
-
-TYPE 3: EXPLORE (adventure) — Discovery/Nature
-Framework: Wonder → Observe → Document → Research → Share
-- Go outside or to a location
-- Observe and document (photos, sketches, notes)
-- Research what you found
-- Lincoln explains to London what they learned
-Example: "What lives in our backyard soil?"
-
-TYPE 4: CREATE (heart) — Making/Art/Character
-Framework: Inspiration → Plan → Make → Reflect → Display
-- Less rigid structure, process matters more than outcome
-- Focus on decisions and problem-solving during creation
-- Lincoln describes his creative choices
-- Connect to a virtue or character theme
-Example: "Build a Minecraft diorama with real materials"
-
-For each suggestion:
-1. STATE THE TYPE: e.g. "Type: science" (uses Scientific Method framework)
-2. LIST THE PHASES for that type with estimated time per phase
-3. INCLUDE both boys: Lincoln's role + London's role
-4. NOTE the teaching moment: "After the test, Lincoln explains to London why..."
-5. CONNECT to school: "This connects to [subject] because..."
-6. MATERIALS: List what Nathan needs, flag anything that needs advance purchase
-
-Respond in EXACTLY this format:
-
----
-Title: [name]
-Type: [science/engineering/adventure/heart]
-Framework: [e.g. "Question → Hypothesis → Test → Observe → Conclude"]
-Question: [the driving question to explore]
-Description: [what you'll do, 2-3 sentences]
-Phases: [Phase 1 (Xmin) → Phase 2 (Xmin) → Phase 3 (Xmin)]
-Materials: [comma-separated list of materials needed]
-Lincoln's role: [what he does — predict, build, measure, explain]
-London's role: [what he does — observe, draw, help, decorate]
-Teaching moment: [when/how Lincoln teaches London]
-Subject connection: [what subject this connects to and why]
-Duration: [estimated total minutes]
----
-
-Give exactly 3 suggestions separated by ---. Make them different types.`,
+            content: buildLabSuggestionsPrompt(calibrationSources),
           },
         ],
       })
 
       if (response?.message) {
         setRawText(response.message)
-        const parsed = parseSuggestions(response.message)
+        const parsed = parseSuggestions(response.message, children)
         setSuggestions(parsed)
       } else {
         setError('No response from AI. Check that AI features are enabled in Settings.')
@@ -285,14 +217,16 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
       console.error('Lab suggestions failed:', err)
       setError(`Failed to get suggestions: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
-  }, [familyId, children, chat])
+  }, [familyId, children, calibrationSources, chat])
 
   useEffect(() => {
-    if (!childrenLoading) {
+    // Wait for calibration data too, so the first (and usually only) generation carries
+    // per-child working levels/supports rather than degrading to the modality line alone.
+    if (!childrenLoading && calibrationLoaded) {
       fetchSuggestions()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [childrenLoading])
+  }, [childrenLoading, calibrationLoaded])
 
   const handleSelect = useCallback(
     (suggestion: ParsedSuggestion) => {
@@ -304,8 +238,7 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
         materials: suggestion.materials
           ? suggestion.materials.split(',').map((m) => m.trim()).filter(Boolean)
           : undefined,
-        lincolnRole: suggestion.lincolnRole || undefined,
-        londonRole: suggestion.londonRole || undefined,
+        childRoles: suggestion.childRoles,
         duration: parseDuration(suggestion.duration),
       })
     },
@@ -411,21 +344,15 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
                     </Box>
                   )}
                   <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-                    {s.lincolnRole && (
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption" color="primary">
-                          Lincoln:
-                        </Typography>
-                        <Typography variant="body2">{s.lincolnRole}</Typography>
-                      </Box>
-                    )}
-                    {s.londonRole && (
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption" color="primary">
-                          London:
-                        </Typography>
-                        <Typography variant="body2">{s.londonRole}</Typography>
-                      </Box>
+                    {children.map((child) =>
+                      s.childRoles[child.id] ? (
+                        <Box key={child.id} sx={{ flex: 1 }}>
+                          <Typography variant="caption" color="primary">
+                            {child.name}:
+                          </Typography>
+                          <Typography variant="body2">{s.childRoles[child.id]}</Typography>
+                        </Box>
+                      ) : null,
                     )}
                   </Stack>
                   {s.teachingMoment && (

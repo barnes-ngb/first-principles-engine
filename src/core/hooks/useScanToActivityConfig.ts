@@ -288,11 +288,12 @@ export function isWorkbookMatch(
     }
   }
 
-  // Fallback: same subject workbook (one primary workbook per subject)
-  if (configSubject && scanSubject) {
-    if (configSubject.toLowerCase() === scanSubject.toLowerCase()) return true
-  }
-
+  // NOTE (DATA-15): the former bare same-subject fallback ("one primary workbook
+  // per subject") was removed here. It over-matched — any two workbook configs
+  // sharing a detected subject were treated as the same workbook, so distinctly-
+  // named workbooks collapsed into one config on scan (the "4 → 1" bug). Generic/
+  // subject-only scans still update the right workbook via the generic-workbook
+  // rule above; distinctly-named workbooks now each get their own config.
   return false
 }
 

@@ -22,6 +22,7 @@ import type {
   ChapterBook,
   ChapterResponse,
   Child,
+  ConceptArc,
   DadLabReport,
   DailyArmorSession,
   DailyPlan,
@@ -29,9 +30,11 @@ import type {
   Evaluation,
   EvaluationSession,
   FeatureRequest,
+  HelpCard,
   HoursAdjustment,
   HoursEntry,
   LadderProgress,
+  LearnerModel,
   LessonCard,
   MonthlyReview,
   PlannerConversation,
@@ -186,6 +189,27 @@ export const dadLabReportsCollection = (
     dadLabReportConverter,
   ) as CollectionReference<DadLabReport>
 
+// ── Concept Arcs (Dad Lab Concept Arcs — FEAT-44 / builds FEAT-41) ──
+// Additive planning layer above DadLabReport. Covered by the family catch-all
+// in firestore.rules (no dedicated rule needed). Write via addDoc /
+// updateDoc / setDoc(merge) only — never bare setDoc.
+
+export const conceptArcConverter: FirestoreDataConverter<ConceptArc> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as ConceptArc
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/** Concept arcs per family. Auto-ID documents. */
+export const conceptArcsCollection = (
+  familyId: string,
+): CollectionReference<ConceptArc> =>
+  collection(db, `families/${familyId}/conceptArcs`).withConverter(
+    conceptArcConverter,
+  ) as CollectionReference<ConceptArc>
+
 /** Ladder progress per child per ladderKey. Doc ID: {childId}_{ladderKey} */
 export const ladderProgressCollection = (
   familyId: string,
@@ -222,6 +246,14 @@ export const lessonCardsCollection = (
   familyId: string,
 ): CollectionReference<LessonCard> =>
   collection(db, `families/${familyId}/lessonCards`) as CollectionReference<LessonCard>
+
+// ── Help Cards (Today inline teaching help — FEAT-43) ───────────
+// Doc ID: `{childId}__{subjectSlug}__{labelSlug}` (see core/utils/helpCard.ts).
+
+export const helpCardsCollection = (
+  familyId: string,
+): CollectionReference<HelpCard> =>
+  collection(db, `families/${familyId}/helpCards`) as CollectionReference<HelpCard>
 
 // ── Planner Conversations (Chat Planner) ──────────────────────
 
@@ -489,6 +521,24 @@ export const childSkillMapsCollection = (
   familyId: string,
 ): CollectionReference<ChildSkillMap> =>
   collection(db, `families/${familyId}/childSkillMaps`) as CollectionReference<ChildSkillMap>
+
+// ── Learner Models (Foundations synthesis — FEAT-48) ────────────
+
+const learnerModelConverter: FirestoreDataConverter<LearnerModel> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as LearnerModel
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/** Per-child learner model. Doc ID: {childId} (D1). */
+export const learnerModelsCollection = (
+  familyId: string,
+): CollectionReference<LearnerModel> =>
+  collection(db, `families/${familyId}/learnerModels`).withConverter(
+    learnerModelConverter,
+  ) as CollectionReference<LearnerModel>
 
 // ── Chapter Responses (Read-Aloud Discussion Evidence) ──────────
 
