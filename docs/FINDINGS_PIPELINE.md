@@ -123,6 +123,11 @@ Scans don't produce `EvaluationFinding` objects directly, but `CurriculumTab.tsx
 3. **Scan analysis** (`src/features/today/useUnifiedCapture.ts` → `detectBlockersFromScan` in `src/features/today/scanBlocker.ts`). Trigger: one block per `alignsWithSnapshot: 'behind'` skill on any `skip` / `modify` / `too-hard` / `challenging` scan; falls back to a topic-level block if no specific skills surface. `source: 'scan'`.
 4. **Shelly's mastery chips** (`src/features/today/TodayChecklist.tsx` → `buildStuckBlock` / `buildGotItReinforcement` in `src/features/today/masteryBlocker.ts`). "Stuck" writes ADDRESS_NOW; "Got it" writes a RESOLVING nudge but only against an existing block with the same id. `source: 'parent'`.
 
+### 8. Parent Today recap card — Knowledge Mine session summary/findings/recommendations (FEAT-45)
+
+- **Read:** `src/features/today/useLatestMineSession.ts` — the selected child's most recent **interactive** `EvaluationSession` dated today (`status` `complete`/`partial`), via the existing `evaluationSessions (childId, evaluatedAt)` index (read-only, no new index).
+- **Render:** `src/features/today/MineRecapCard.tsx` — a no-shame parent card on Today (parent view only) that surfaces the session's `summary` (unless it's the score-y client fallback, in which case a plain "explored" line), `findings` split into **Showing strength** (mastered) / **Working on** (emerging/not-yet), and `recommendations` as **Suggestions**. This closes the "the Mine's summary/findings/recommendations only lived in the Evaluation History tab Shelly never opens" gap — the value is now where she looks. Deliberately never renders correct/total, percentages, or a level number as a score (charter: diamonds-not-scores). Read-only + lightweight local dismiss; per-child clean (works for London once he mines).
+
 **Phase 2 (also Apr 21):** `buildKnownBlockersSection` + `buildRecentCurriculumSection` in `functions/src/ai/chat.ts` inject 2–3 deliberate blocker probes per ~10 quest questions. Response schemas carry `targetedBlockerId` so a targeted correct answer is weighted 2x toward RESOLVING/RESOLVED via `TARGETED_EVIDENCE_WEIGHT` in `updateBlockerLifecycle`.
 
 **AI context injection:** `formatConceptualBlocks` in `functions/src/ai/contextSlices.ts` emits three sections to the model — ADDRESS_NOW, RESOLVING ("trending better, keep probing gently"), and DEFER ("do NOT push on these"). RESOLVED blocks are kept in the array for history but omitted from prompts.
@@ -167,6 +172,7 @@ Scans don't produce `EvaluationFinding` objects directly, but `CurriculumTab.tsx
 - [x] ConceptualBlocks written by four sources (eval, quest, scan, parent) — Phase 1 shipped 2026-04-21
 - [x] ConceptualBlocks lifecycle: ADDRESS_NOW → RESOLVING → RESOLVED with merge-not-overwrite semantics
 - [x] Quest prompt deliberately targets known blockers (2–3 of ~10 questions) — Phase 2 shipped 2026-04-21
+- [x] Knowledge Mine session summary/findings/recommendations surfaced where Shelly looks — parent recap card on Today (FEAT-45, shipped 2026-07-03). Previously they only lived in the Evaluation History tab.
 
 ## What This Pipeline Does NOT Do (Checklist)
 
@@ -198,7 +204,9 @@ Scans don't produce `EvaluationFinding` objects directly, but `CurriculumTab.tsx
 - `functions/src/ai/tasks/analyzePatterns.ts` — Cross-session pattern analysis Cloud Function
 - `src/core/ai/prompts/plannerPrompts.ts` — Client-side planner prompts using prioritySkills
 - `src/core/firebase/firestore.ts` — Collection references (`evaluationSessionsCollection`, `skillSnapshotsCollection`, `childSkillMapsCollection`, `booksCollection`)
-- `src/features/today/TodayPage.tsx` — Scan capture → findings → Learning Map
+- `src/features/today/TodayPage.tsx` — Scan capture → findings → Learning Map; parent Knowledge Mine recap card mount
+- `src/features/today/useLatestMineSession.ts` — Read-only hook: latest interactive mine session dated today (FEAT-45)
+- `src/features/today/MineRecapCard.tsx` — No-shame parent recap of the mine session summary/findings/recommendations (FEAT-45)
 - `src/features/today/useUnifiedCapture.ts` — Unified capture pipeline → scan findings → Learning Map
 - `src/features/progress/CurriculumTab.tsx` — Curriculum tab scan → findings → Learning Map
 - `src/features/progress/CertificateScanSection.tsx` — Certificate scan → findings → Learning Map
