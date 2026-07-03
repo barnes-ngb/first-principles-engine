@@ -326,13 +326,21 @@ Duration: [estimated minutes]`,
     return { count: thisYear.length, totalHours: Math.round(totalMinutes / 60), byType }
   }, [completed])
 
-  if (isKid) {
+  // Resolve the signed-in kid's Child (stable identity) with a synthetic
+  // fallback that preserves today's lowercase-name keying if children haven't
+  // loaded or the name doesn't match a profile record.
+  const kidChild = useMemo(() => {
+    const kidName = profile === UserProfile.Lincoln ? 'Lincoln' : 'London'
     return (
-      <KidLabView
-        familyId={familyId}
-        childName={profile === UserProfile.Lincoln ? 'Lincoln' : 'London'}
-      />
+      children.find((c) => c.name.toLowerCase() === kidName.toLowerCase()) ?? {
+        id: kidName.toLowerCase(),
+        name: kidName,
+      }
     )
+  }, [profile, children])
+
+  if (isKid) {
+    return <KidLabView familyId={familyId} child={kidChild} children={children} />
   }
 
   if (view === 'form') {

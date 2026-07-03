@@ -26,7 +26,7 @@ import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
 import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
-import { normalizeChildRoles } from './childRoles'
+import { normalizeChildRoles, resolveChildReport } from './childRoles'
 import { useConceptArcs } from './useConceptArcs'
 
 // ── Constants ──────────────────────────────────────────────────
@@ -76,8 +76,8 @@ interface Prefill {
   labType?: DadLabType
   description?: string
   materials?: string[]
-  lincolnRole?: string
-  londonRole?: string
+  /** Per-child role text keyed by childId (ARCH-40). */
+  childRoles?: Record<string, string>
 }
 
 interface LabReportFormProps {
@@ -102,18 +102,6 @@ function getChildFields(childName: string) {
   if (lower === 'london') return LONDON_FIELDS
   // Fallback: show all fields
   return [...LINCOLN_FIELDS.filter((f) => f.key !== 'notes'), ...LONDON_FIELDS]
-}
-
-/** Find the child report regardless of whether the key is Firestore ID or lowercase name */
-function getChildReport(
-  childReports: Record<string, ChildLabReport>,
-  child: Child,
-): ChildLabReport {
-  if (childReports[child.id]) return childReports[child.id]
-  const nameKey = child.name.toLowerCase()
-  if (childReports[nameKey]) return childReports[nameKey]
-  if (childReports[child.name]) return childReports[child.name]
-  return emptyChildReport()
 }
 
 /** Return whichever key actually has data for this child */
@@ -168,12 +156,7 @@ export default function LabReportForm({
   // or from a prefill's legacy role fields.
   const [roles, setRoles] = useState<Record<string, string>>(() => {
     if (report) return normalizeChildRoles(report, children)
-    if (prefill) {
-      return normalizeChildRoles(
-        { lincolnRole: prefill.lincolnRole, londonRole: prefill.londonRole },
-        children,
-      )
-    }
+    if (prefill?.childRoles) return { ...prefill.childRoles }
     return {}
   })
   const setChildRole = useCallback((childId: string, value: string) => {
@@ -234,13 +217,11 @@ export default function LabReportForm({
       if (prefill.labType) setLabType(prefill.labType)
       if (prefill.description) setDescription(prefill.description)
       if (prefill.materials) setMaterials(prefill.materials.join(', '))
-      const seeded = normalizeChildRoles(
-        { lincolnRole: prefill.lincolnRole, londonRole: prefill.londonRole },
-        children,
-      )
-      if (Object.keys(seeded).length > 0) setRoles(seeded)
+      if (prefill.childRoles && Object.keys(prefill.childRoles).length > 0) {
+        setRoles({ ...prefill.childRoles })
+      }
     }
-  }, [prefill, report, children])
+  }, [prefill, report])
 
   // ── Child report field update ──
 
@@ -670,7 +651,7 @@ export default function LabReportForm({
             Kid Contributions
           </Typography>
           {children.map((child) => {
-            const cr = getChildReport(childReports, child)
+            const cr = resolveChildReport(childReports, child)
             const hasPrediction = !!cr?.prediction
             const hasExplanation = !!cr?.explanation
             const hasObservation = !!cr?.observation
@@ -729,7 +710,7 @@ export default function LabReportForm({
       {/* Per-Child Sections (shown for active/completing or complete labs) */}
       {(isCompleting || isEditingActive || isViewingComplete || (isEditing && report?.status !== DadLabStatus.Planned)) &&
         children.map((child) => {
-          const cr = getChildReport(childReports, child)
+          const cr = resolveChildReport(childReports, child)
           const fields = getChildFields(child.name)
           const isUploading = uploadingChildId === child.id
 
