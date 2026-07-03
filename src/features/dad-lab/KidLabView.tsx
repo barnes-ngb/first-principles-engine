@@ -14,11 +14,12 @@ import AudioRecorder from '../../components/AudioRecorder'
 import SectionCard from '../../components/SectionCard'
 import { artifactsCollection, dadLabReportsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
-import type { DadLabReport } from '../../core/types'
+import type { Child, DadLabReport } from '../../core/types'
 import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
 import { DadLabStatus, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { DadLabType } from '../../core/types/enums'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
+import { normalizeChildRoles, resolveChildReport } from './childRoles'
 
 const LAB_TYPE_ICONS: Record<DadLabType, string> = {
   science: '\u{1F9EA}',
@@ -29,10 +30,13 @@ const LAB_TYPE_ICONS: Record<DadLabType, string> = {
 
 interface KidLabViewProps {
   familyId: string
-  childName: string
+  /** The child whose kid-view this is. */
+  child: Child
+  /** Family children — used to normalize legacy role fields onto childIds. */
+  children: Child[]
 }
 
-export default function KidLabView({ familyId, childName }: KidLabViewProps) {
+export default function KidLabView({ familyId, child, children }: KidLabViewProps) {
   const [activeLab, setActiveLab] = useState<DadLabReport | null>(null)
   const [plannedLabs, setPlannedLabs] = useState<DadLabReport[]>([])
   const [pastLabs, setPastLabs] = useState<DadLabReport[]>([])
@@ -46,8 +50,14 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
   // Scientific method step tracking (for experiment-type labs)
   const [activeStep, setActiveStep] = useState(0)
 
+  const childName = child.name
   const isLincoln = childName === 'Lincoln'
+  // Kid writes still key childReports/artifacts by lowercase name (unchanged
+  // storage shape); reads go through resolveChildReport so any keying resolves.
   const childKey = childName.toLowerCase()
+  // Ensure the current child is always available for legacy role mapping,
+  // even before the family children list finishes loading.
+  const roleChildren = children.length > 0 ? children : [child]
 
   useEffect(() => {
     const load = async () => {
@@ -80,22 +90,22 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
 
       // Initialize child's fields from active lab
       if (activeLabs[0]) {
-        const cr = activeLabs[0].childReports[childKey]
-        if (cr?.prediction) setPrediction(cr.prediction)
-        if (cr?.explanation) setExplanation(cr.explanation)
-        if (cr?.observation) setObservation(cr.observation)
+        const cr = resolveChildReport(activeLabs[0].childReports, child)
+        if (cr.prediction) setPrediction(cr.prediction)
+        if (cr.explanation) setExplanation(cr.explanation)
+        if (cr.observation) setObservation(cr.observation)
       }
 
       setLoading(false)
     }
     void load()
-  }, [familyId, childKey])
+  }, [familyId, childKey, child])
 
   const handleSaveField = useCallback(
     async (field: string, value: string) => {
       if (!activeLab?.id) return
       const ref = doc(dadLabReportsCollection(familyId), activeLab.id)
-      const cr = activeLab.childReports[childKey] ?? { artifacts: [] }
+      const cr = resolveChildReport(activeLab.childReports, child)
       await updateDoc(ref, {
         [`childReports.${childKey}.${field}`]: value,
         updatedAt: new Date().toISOString(),
@@ -108,7 +118,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
         },
       })
     },
-    [familyId, activeLab, childKey],
+    [familyId, activeLab, childKey, child],
   )
 
   const handlePhotoCapture = useCallback(
@@ -135,7 +145,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
         // Add artifact ID to child report
-        const cr = activeLab.childReports[childKey] ?? { artifacts: [] }
+        const cr = resolveChildReport(activeLab.childReports, child)
         const updatedArtifacts = [...(cr.artifacts ?? []), docRef.id]
         const labRef = doc(dadLabReportsCollection(familyId), activeLab.id!)
         await updateDoc(labRef, {
@@ -154,7 +164,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
         setUploading(false)
       }
     },
-    [familyId, activeLab, childKey],
+    [familyId, activeLab, childKey, child],
   )
 
   const handleAudioCapture = useCallback(
@@ -180,7 +190,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
-        const cr = activeLab.childReports[childKey] ?? { artifacts: [] }
+        const cr = resolveChildReport(activeLab.childReports, child)
         const updatedArtifacts = [...(cr.artifacts ?? []), docRef.id]
         const labRef = doc(dadLabReportsCollection(familyId), activeLab.id!)
         await updateDoc(labRef, {
@@ -199,7 +209,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
         setUploading(false)
       }
     },
-    [familyId, activeLab, childKey],
+    [familyId, activeLab, childKey, child],
   )
 
   if (loading) {
@@ -209,6 +219,11 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
       </Page>
     )
   }
+
+  // This child's role for the active lab, mapped forward from legacy fields.
+  const myRole = activeLab ? normalizeChildRoles(activeLab, roleChildren)[child.id] : undefined
+  const myReport = activeLab ? resolveChildReport(activeLab.childReports, child) : undefined
+  const myArtifacts = myReport?.artifacts ?? []
 
   return (
     <Page>
@@ -264,10 +279,10 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
               activeLab.labType === 'science' ? (
                 /* Scientific Method Steps for Lincoln */
                 <Stack spacing={2}>
-                  {activeLab.lincolnRole && (
+                  {myRole && (
                     <Box>
                       <Typography variant="subtitle2" color="primary">Your Role</Typography>
-                      <Typography variant="body2">{activeLab.lincolnRole}</Typography>
+                      <Typography variant="body2">{myRole}</Typography>
                     </Box>
                   )}
 
@@ -366,12 +381,12 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
               ) : (
                 /* Default Lincoln view for non-science labs */
                 <Stack spacing={1.5}>
-                  {activeLab.lincolnRole && (
+                  {myRole && (
                     <Box>
                       <Typography variant="subtitle2" color="primary">
                         Your Role
                       </Typography>
-                      <Typography variant="body2">{activeLab.lincolnRole}</Typography>
+                      <Typography variant="body2">{myRole}</Typography>
                     </Box>
                   )}
                   <Box>
@@ -408,7 +423,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
               )
             ) : (
               <Stack spacing={2}>
-                {activeLab.londonRole && (
+                {myRole && (
                   <Box
                     sx={{
                       p: 1.5,
@@ -421,7 +436,7 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
                     <Typography variant="subtitle2" color="info.main">
                       Your Job
                     </Typography>
-                    <Typography variant="body1">{activeLab.londonRole}</Typography>
+                    <Typography variant="body1">{myRole}</Typography>
                   </Box>
                 )}
                 <Box>
@@ -470,8 +485,8 @@ export default function KidLabView({ familyId, childName }: KidLabViewProps) {
               <ArtifactGallery
                 key={artifactRefreshKey}
                 familyId={familyId}
-                artifactIds={activeLab.childReports?.[childKey]?.artifacts ?? []}
-                label={`${(activeLab.childReports?.[childKey]?.artifacts ?? []).length} item${(activeLab.childReports?.[childKey]?.artifacts ?? []).length !== 1 ? 's' : ''} captured`}
+                artifactIds={myArtifacts}
+                label={`${myArtifacts.length} item${myArtifacts.length !== 1 ? 's' : ''} captured`}
               />
 
               {/* Capture buttons */}
