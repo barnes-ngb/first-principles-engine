@@ -35,7 +35,7 @@ import type { DadLabType } from '../../core/types/enums'
 import { DadLabStatus, SubjectBucket, UserProfile } from '../../core/types/enums'
 import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
-import { normalizeChildRoles } from './childRoles'
+import { buildRoleRequestLines, parseChildRoles } from './childRoles'
 import ConceptArcsSection from './ConceptArcsSection'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
@@ -85,8 +85,8 @@ interface Prefill {
   labType?: DadLabType
   description?: string
   materials?: string[]
-  lincolnRole?: string
-  londonRole?: string
+  /** Per-child role text keyed by childId (ARCH-40). */
+  childRoles?: Record<string, string>
   duration?: number
 }
 
@@ -186,10 +186,7 @@ export default function DadLabPage() {
         description: data.description ?? '',
         status: DadLabStatus.Planned,
         materials: data.materials,
-        childRoles: normalizeChildRoles(
-          { lincolnRole: data.lincolnRole, londonRole: data.londonRole },
-          children,
-        ),
+        childRoles: data.childRoles ?? {},
         childReports: {},
         subjectTags: [
           data.labType === 'science' || data.labType === 'engineering'
@@ -202,7 +199,7 @@ export default function DadLabPage() {
       }
       await saveReport(planned)
     },
-    [saveReport, children],
+    [saveReport],
   )
 
   const handleStartLab = useCallback(
@@ -268,8 +265,7 @@ Type: [science/engineering/adventure/heart]
 Question: [a driving question that frames the exploration]
 Description: [2-3 sentences about what we'll do and learn]
 Materials: [comma-separated list of what we need]
-Lincoln's role: [specific tasks — he leads, measures, explains]
-London's role: [specific tasks — he observes, draws, helps]
+${buildRoleRequestLines(children)}
 Duration: [estimated minutes]`,
         }],
       })
@@ -286,8 +282,7 @@ Duration: [estimated minutes]`,
           question: get('Question'),
           description: get('Description'),
           materials: get('Materials').split(',').map(s => s.trim()).filter(Boolean),
-          lincolnRole: get("Lincoln's role") || get('Lincoln'),
-          londonRole: get("London's role") || get('London'),
+          childRoles: parseChildRoles(response.message, children),
         })
       } else {
         // Fallback: create a basic structure from the idea text
@@ -297,8 +292,7 @@ Duration: [estimated minutes]`,
           question: '',
           description: ideaText,
           materials: [],
-          lincolnRole: '',
-          londonRole: '',
+          childRoles: {},
         })
       }
     } catch (err) {
@@ -310,8 +304,7 @@ Duration: [estimated minutes]`,
         question: '',
         description: ideaText,
         materials: [],
-        lincolnRole: '',
-        londonRole: '',
+        childRoles: {},
       })
     } finally {
       setIdeaLoading(false)
@@ -563,24 +556,23 @@ Duration: [estimated minutes]`,
                 })}
                 helperText="Comma-separated"
               />
-              <TextField
-                label="Lincoln's Role"
-                fullWidth
-                size="small"
-                multiline
-                minRows={1}
-                value={ideaResult.lincolnRole ?? ''}
-                onChange={e => setIdeaResult({ ...ideaResult, lincolnRole: e.target.value })}
-              />
-              <TextField
-                label="London's Role"
-                fullWidth
-                size="small"
-                multiline
-                minRows={1}
-                value={ideaResult.londonRole ?? ''}
-                onChange={e => setIdeaResult({ ...ideaResult, londonRole: e.target.value })}
-              />
+              {children.map((child) => (
+                <TextField
+                  key={child.id}
+                  label={`${child.name}'s Role`}
+                  fullWidth
+                  size="small"
+                  multiline
+                  minRows={1}
+                  value={ideaResult.childRoles?.[child.id] ?? ''}
+                  onChange={e =>
+                    setIdeaResult({
+                      ...ideaResult,
+                      childRoles: { ...ideaResult.childRoles, [child.id]: e.target.value },
+                    })
+                  }
+                />
+              ))}
 
               <Stack direction="row" spacing={1}>
                 <Button

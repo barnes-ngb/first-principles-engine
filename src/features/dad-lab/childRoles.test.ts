@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { Child, ChildLabReport, DadLabReport } from '../../core/types'
 
-import { normalizeChildRoles, resolveChildReport } from './childRoles'
+import {
+  buildRoleRequestLines,
+  normalizeChildRoles,
+  parseChildRoles,
+  resolveChildReport,
+} from './childRoles'
 
 const child = (id: string, name: string): Child => ({ id, name })
 
@@ -63,6 +68,70 @@ describe('normalizeChildRoles', () => {
 
   it('returns an empty map when nothing is set', () => {
     expect(normalizeChildRoles({}, [LINCOLN, LONDON])).toEqual({})
+  })
+})
+
+describe('parseChildRoles (characterization vs legacy inline parse)', () => {
+  // The exact role lines the AI emits today for the Barnes family.
+  const AI_BLOCK = [
+    'Title: Volcano Lab',
+    'Type: science',
+    'Question: Why does it erupt?',
+    "Lincoln's role: Predicts and runs the reaction, then explains to London",
+    "London's role: Watches, draws the eruption, helps pour",
+    'Duration: 60',
+  ].join('\n')
+
+  it('produces the same roles the old lincolnRole/londonRole fields would have held', () => {
+    // Legacy inline parse: get("Lincoln's role") / get("London's role").
+    const legacyLincoln = "Predicts and runs the reaction, then explains to London"
+    const legacyLondon = 'Watches, draws the eruption, helps pour'
+
+    const roles = parseChildRoles(AI_BLOCK, [LINCOLN, LONDON])
+    expect(roles).toEqual({
+      'c-lincoln': legacyLincoln,
+      'c-london': legacyLondon,
+    })
+  })
+
+  it('falls back to a bare "«name»:" line like the old get(name) fallback', () => {
+    const block = ['Lincoln: leads the build', 'London: decorates'].join('\n')
+    expect(parseChildRoles(block, [LINCOLN, LONDON])).toEqual({
+      'c-lincoln': 'leads the build',
+      'c-london': 'decorates',
+    })
+  })
+
+  it('emits a role for a third child by name — no longer name-coupled', () => {
+    const riley = child('c-riley', 'Riley')
+    const block = "Riley's role: keeps the log"
+    expect(parseChildRoles(block, [LINCOLN, riley])).toEqual({ 'c-riley': 'keeps the log' })
+  })
+
+  it('omits children with no role line', () => {
+    expect(parseChildRoles("Lincoln's role: leads", [LINCOLN, LONDON])).toEqual({
+      'c-lincoln': 'leads',
+    })
+  })
+})
+
+describe('buildRoleRequestLines', () => {
+  it('asks for one role line per child by name', () => {
+    expect(buildRoleRequestLines([LINCOLN, LONDON])).toBe(
+      "Lincoln's role: [what Lincoln does]\nLondon's role: [what London does]",
+    )
+  })
+
+  it('round-trips with parseChildRoles for the same children', () => {
+    // A prompt built for [Lincoln, London], answered in the same format, parses
+    // back to a role for each child (name-agnostic end to end).
+    const answered = buildRoleRequestLines([LINCOLN, LONDON])
+      .replace('[what Lincoln does]', 'predicts')
+      .replace('[what London does]', 'observes')
+    expect(parseChildRoles(answered, [LINCOLN, LONDON])).toEqual({
+      'c-lincoln': 'predicts',
+      'c-london': 'observes',
+    })
   })
 })
 

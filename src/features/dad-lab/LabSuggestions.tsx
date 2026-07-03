@@ -16,9 +16,11 @@ import { ErrorState, LoadingState } from '../../components/states'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
+import type { Child } from '../../core/types'
 import type { DadLabType } from '../../core/types/enums'
 import { db } from '../../core/firebase/firestore'
 import { weekKeyFromDate } from '../../core/utils/dateKey'
+import { buildRoleRequestLines, parseChildRoles } from './childRoles'
 
 interface Prefill {
   title: string
@@ -26,8 +28,8 @@ interface Prefill {
   labType: DadLabType
   description: string
   materials?: string[]
-  lincolnRole?: string
-  londonRole?: string
+  /** Per-child role text keyed by childId (ARCH-40). */
+  childRoles?: Record<string, string>
   duration?: number
 }
 
@@ -45,8 +47,8 @@ interface ParsedSuggestion {
   description: string
   phases: string
   materials: string
-  lincolnRole: string
-  londonRole: string
+  /** Per-child role text keyed by childId (ARCH-40). */
+  childRoles: Record<string, string>
   teachingMoment: string
   subjectConnection: string
   duration: string
@@ -71,7 +73,7 @@ function parseLabType(raw: string): DadLabType {
   return LAB_TYPE_MAP[lower] ?? 'science'
 }
 
-function parseSuggestions(text: string): ParsedSuggestion[] {
+function parseSuggestions(text: string, children: Child[]): ParsedSuggestion[] {
   const suggestions: ParsedSuggestion[] = []
   // Split by --- dividers
   const blocks = text.split(/---/).filter((b) => b.trim())
@@ -93,8 +95,7 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
       description: get('Description'),
       phases: get('Phases'),
       materials: get('Materials'),
-      lincolnRole: get("Lincoln's role") || get('Lincoln'),
-      londonRole: get("London's role") || get('London'),
+      childRoles: parseChildRoles(block, children),
       teachingMoment: get('Teaching moment'),
       subjectConnection: get('Subject connection'),
       duration: get('Duration'),
@@ -119,8 +120,7 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
         description: get('Description') || get('Brief') || get('Overview'),
         phases: get('Phases'),
         materials: get('Materials'),
-        lincolnRole: get("Lincoln's role") || get('Lincoln'),
-        londonRole: get("London's role") || get('London'),
+        childRoles: parseChildRoles(block, children),
         teachingMoment: get('Teaching moment'),
         subjectConnection: get('Subject connection'),
         duration: get('Duration'),
@@ -138,8 +138,7 @@ function parseSuggestions(text: string): ParsedSuggestion[] {
       description: text.trim(),
       phases: '',
       materials: '',
-      lincolnRole: '',
-      londonRole: '',
+      childRoles: {},
       teachingMoment: '',
       subjectConnection: '',
       duration: '',
@@ -262,8 +261,7 @@ Question: [the driving question to explore]
 Description: [what you'll do, 2-3 sentences]
 Phases: [Phase 1 (Xmin) → Phase 2 (Xmin) → Phase 3 (Xmin)]
 Materials: [comma-separated list of materials needed]
-Lincoln's role: [what he does — predict, build, measure, explain]
-London's role: [what he does — observe, draw, help, decorate]
+${buildRoleRequestLines(children)}
 Teaching moment: [when/how Lincoln teaches London]
 Subject connection: [what subject this connects to and why]
 Duration: [estimated total minutes]
@@ -276,7 +274,7 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
 
       if (response?.message) {
         setRawText(response.message)
-        const parsed = parseSuggestions(response.message)
+        const parsed = parseSuggestions(response.message, children)
         setSuggestions(parsed)
       } else {
         setError('No response from AI. Check that AI features are enabled in Settings.')
@@ -304,8 +302,7 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
         materials: suggestion.materials
           ? suggestion.materials.split(',').map((m) => m.trim()).filter(Boolean)
           : undefined,
-        lincolnRole: suggestion.lincolnRole || undefined,
-        londonRole: suggestion.londonRole || undefined,
+        childRoles: suggestion.childRoles,
         duration: parseDuration(suggestion.duration),
       })
     },
@@ -411,21 +408,15 @@ Give exactly 3 suggestions separated by ---. Make them different types.`,
                     </Box>
                   )}
                   <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-                    {s.lincolnRole && (
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption" color="primary">
-                          Lincoln:
-                        </Typography>
-                        <Typography variant="body2">{s.lincolnRole}</Typography>
-                      </Box>
-                    )}
-                    {s.londonRole && (
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption" color="primary">
-                          London:
-                        </Typography>
-                        <Typography variant="body2">{s.londonRole}</Typography>
-                      </Box>
+                    {children.map((child) =>
+                      s.childRoles[child.id] ? (
+                        <Box key={child.id} sx={{ flex: 1 }}>
+                          <Typography variant="caption" color="primary">
+                            {child.name}:
+                          </Typography>
+                          <Typography variant="body2">{s.childRoles[child.id]}</Typography>
+                        </Box>
+                      ) : null,
                     )}
                   </Stack>
                   {s.teachingMoment && (
