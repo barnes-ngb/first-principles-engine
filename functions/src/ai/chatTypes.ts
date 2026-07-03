@@ -52,6 +52,13 @@ export interface ChatTaskContext {
   messages: ChatTaskMessage[];
   domain: string | undefined;
   apiKey: string;
+  /**
+   * Optional per-request model override (validated + allowlisted in chat.ts).
+   * Honored by handleChat (chat/generate) to let a specific caller upgrade the
+   * default model; other handlers ignore it and pick their own model. Undefined
+   * for every call that doesn't opt in (ETHOS-03).
+   */
+  modelOverride?: string;
 }
 
 /** Result returned by a chat task handler. */

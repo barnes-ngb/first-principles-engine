@@ -36,7 +36,7 @@ import { DadLabStatus, SubjectBucket, UserProfile } from '../../core/types/enums
 import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { parseChildRoles } from './childRoles'
-import { buildLabIdeaPrompt } from './dadLabPrompts'
+import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
 import ConceptArcsSection from './ConceptArcsSection'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
@@ -248,6 +248,7 @@ export default function DadLabPage() {
         familyId,
         childId: children[0]?.id ?? '',
         taskType: TaskType.Chat,
+        model: DAD_LAB_SUGGESTION_MODEL,
         messages: [{
           role: 'user',
           content: buildLabIdeaPrompt(ideaText, children),

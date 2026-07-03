@@ -17,6 +17,15 @@ import { buildRoleRequestLines } from './childRoles'
  * concrete-first, oral-science pedagogy contract.
  */
 
+/**
+ * Model for Dad Lab suggestion generation (ETHOS-03). Bumped from the `chat`-task
+ * default (Haiku) to Sonnet: the cadence is weekly (cost trivial) and the quality
+ * complaint is real — Haiku's generated activities read too abstract and assume
+ * reading/writing a child may not have. Passed as the `chat` request's allowlisted
+ * `model` override so other `chat`-task callers stay on Haiku.
+ */
+export const DAD_LAB_SUGGESTION_MODEL = 'claude-sonnet-4-6'
+
 /** Prompt for the "Suggest a Lab" path (3 AI-suggested Saturday labs). */
 export function buildLabSuggestionsPrompt(children: Child[]): string {
   return `${CONCRETE_FIRST_ORAL_SCIENCE}

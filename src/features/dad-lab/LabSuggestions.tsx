@@ -21,7 +21,7 @@ import type { DadLabType } from '../../core/types/enums'
 import { db } from '../../core/firebase/firestore'
 import { weekKeyFromDate } from '../../core/utils/dateKey'
 import { parseChildRoles } from './childRoles'
-import { buildLabSuggestionsPrompt } from './dadLabPrompts'
+import { buildLabSuggestionsPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
 
 interface Prefill {
   title: string
@@ -195,6 +195,7 @@ function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 
         familyId,
         childId: children[0]?.id ?? '',
         taskType: TaskType.Chat,
+        model: DAD_LAB_SUGGESTION_MODEL,
         messages: [
           {
             role: 'user',
