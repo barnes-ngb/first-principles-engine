@@ -5,6 +5,7 @@ import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import FormControlLabel from '@mui/material/FormControlLabel'
+import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
@@ -22,9 +23,10 @@ import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload
 import { useSaveState } from '../../core/hooks/useSaveState'
 import type { Child, ChildLabReport, DadLabReport } from '../../core/types'
 import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
-import { DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
+import { useConceptArcs } from './useConceptArcs'
 
 // ── Constants ──────────────────────────────────────────────────
 
@@ -132,6 +134,7 @@ export default function LabReportForm({
 }: LabReportFormProps) {
   const familyId = useFamilyId()
   const { saveState, withSave } = useSaveState()
+  const { arcs, completeStep } = useConceptArcs()
 
   // Determine form mode based on completing prop and report status
   const isCompleting = completing && report?.status === DadLabStatus.Active
@@ -174,6 +177,33 @@ export default function LabReportForm({
   const [dadReflection, setDadReflection] = useState(report?.dadReflection ?? '')
   const [bestMoment, setBestMoment] = useState(report?.bestMoment ?? '')
   const [nextTime, setNextTime] = useState(report?.nextTime ?? '')
+
+  // ── Concept Arc linkage (FEAT-44) — optional ──
+  const [arcId, setArcId] = useState(report?.arcId ?? '')
+  const [arcStepIndex, setArcStepIndex] = useState<number | undefined>(report?.arcStepIndex)
+  // When completing a lab that's linked to an arc, mark its step done by default.
+  const [markArcStepDone, setMarkArcStepDone] = useState(true)
+
+  const handleArcChange = useCallback(
+    (id: string) => {
+      setArcId(id)
+      const arc = id ? arcs.find((a) => a.id === id) : undefined
+      if (!arc || arc.steps.length === 0) {
+        setArcStepIndex(undefined)
+        return
+      }
+      // Preselect the arc's active step (fallback: first upcoming, then first).
+      let idx = arc.steps.findIndex((s) => s.status === ArcStepStatus.Active)
+      if (idx === -1) idx = arc.steps.findIndex((s) => s.status === ArcStepStatus.Upcoming)
+      if (idx === -1) idx = 0
+      setArcStepIndex(idx)
+    },
+    [arcs],
+  )
+
+  const linkedArc = arcId ? arcs.find((a) => a.id === arcId) : undefined
+  const linkedStep =
+    linkedArc && typeof arcStepIndex === 'number' ? linkedArc.steps[arcStepIndex] : undefined
 
   // Photo upload state
   const [uploadingChildId, setUploadingChildId] = useState<string | null>(null)
@@ -360,12 +390,27 @@ export default function LabReportForm({
       totalMinutes: totalMinutes > 0 ? totalMinutes : undefined,
       createdAt: report?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      arcId: arcId || undefined,
+      arcStepIndex: arcId ? arcStepIndex : undefined,
     }
+
+    // Completing a linked lab: mark the arc step done (records completedReportId /
+    // completedDateKey). Runs before onSave (which may navigate away) so the write
+    // is dispatched regardless. Arc writes are entirely separate from the report /
+    // credit path — no hours/XP/diamond code is touched here.
+    if (isCompleting && markArcStepDone && linkedArc?.id && typeof arcStepIndex === 'number') {
+      await completeStep(linkedArc, arcStepIndex, {
+        completedReportId: report?.id,
+        completedDateKey: date,
+      })
+    }
+
     await withSave(() => onSave(reportData))
   }, [
     date, title, labType, question, description, childReports, children, materials,
     lincolnRole, londonRole, subjectTags, skillTags, virtueTag, dadReflection,
     bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
+    arcId, arcStepIndex, markArcStepDone, linkedArc, completeStep,
   ])
 
   const disabled = readOnly === true
@@ -527,6 +572,74 @@ export default function LabReportForm({
           />
         </Stack>
       </Box>
+
+      {/* Concept Arc linkage (FEAT-44) — optional */}
+      {(arcs.length > 0 || arcId) && (
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600 }}>
+            Part of an arc?
+          </Typography>
+          {disabled ? (
+            <Typography variant="body2" color="text.secondary">
+              {linkedArc
+                ? `${linkedArc.title}${linkedStep ? ` — ${linkedStep.title}` : ''}`
+                : 'Not linked to an arc'}
+            </Typography>
+          ) : (
+            <Stack spacing={1}>
+              <TextField
+                select
+                value={arcId}
+                onChange={(e) => handleArcChange(e.target.value)}
+                fullWidth
+                size="small"
+              >
+                <MenuItem value="">
+                  <em>None — one-off lab</em>
+                </MenuItem>
+                {arcs.map((a) => (
+                  <MenuItem key={a.id} value={a.id ?? ''}>
+                    {a.title}
+                  </MenuItem>
+                ))}
+              </TextField>
+              {linkedArc && linkedArc.steps.length > 0 && (
+                <TextField
+                  select
+                  label="Step"
+                  value={typeof arcStepIndex === 'number' ? String(arcStepIndex) : ''}
+                  onChange={(e) => setArcStepIndex(Number(e.target.value))}
+                  fullWidth
+                  size="small"
+                >
+                  {linkedArc.steps.map((s, i) => (
+                    <MenuItem key={i} value={String(i)}>
+                      {i + 1}. {s.title}
+                      {s.status === ArcStepStatus.Done
+                        ? ' ✓'
+                        : s.status === ArcStepStatus.Active
+                          ? ' •'
+                          : ''}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
+              {isCompleting && linkedArc && typeof arcStepIndex === 'number' && (
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={markArcStepDone}
+                      onChange={(e) => setMarkArcStepDone(e.target.checked)}
+                      size="small"
+                    />
+                  }
+                  label={`Mark step done: "${linkedStep?.title ?? ''}"`}
+                />
+              )}
+            </Stack>
+          )}
+        </Box>
+      )}
 
       {/* Child contributions summary (shown when editing or completing an active lab) */}
       {(isCompleting || isEditingActive) && (

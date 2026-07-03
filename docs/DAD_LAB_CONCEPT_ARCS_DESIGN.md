@@ -212,7 +212,13 @@ propose→confirm posture the rest of the app uses for AI-authored writes.
 
 ---
 
-## 4. Where concepts live — **Open Decision** (the big one)
+## 4. Where concepts live — ~~Open Decision~~ **RESOLVED (D1 = Option C)**
+
+> **RESOLVED 2026-07-03 (Option C, owner-confirmed via decision session).** No concept map.
+> An arc's `steps[].status` is its own coverage record — the arc *is* its own progress record.
+> Option A (own arc-adjacent map) remains the explicit growth path; Option B (extend the academic
+> Learning Map) is declined for v1 (FEAT-35/36 re-derivation coupling). Slice 1 (FEAT-44) ships no
+> map structure.
 
 Science/engineering concepts have **no coverage representation anywhere in the app** today — the
 academic Learning Map's domains are reading / math / speech / writing only. This doc must decide where
@@ -294,6 +300,19 @@ Serialized slices, each a reviewable PR (never merged by the run — human merge
    `conceptArcs` collection + converter, `useConceptArcs` writer/reader, and owner-authored arc
    creation/edit UI. Add `arcId?`/`arcStepIndex?` to `DadLabReport` (and mirror on `Project`).
    **No ARCH-40 dependency** (no role fields touched).
+   **✅ SHIPPED 2026-07-03 (FEAT-44).** Delivered scope: `ArcStepStatus`/`ArcOrigin` enums;
+   `ConceptArc`/`ArcStep` types (per the field shape in this run — `domainLabel?` free text,
+   `steps[].{title,conceptBeat,status,suggestedLabShape?,completedReportId?,completedDateKey?}`,
+   `createdFrom` typed as the `ArcOrigin` union but only ever `'owner-authored'` in this slice);
+   additive `arcId?`/`arcStepIndex?` on `DadLabReport`, mirrored inert on `Project`; `conceptArcs`
+   collection + converter; `useConceptArcs` (reader filtering archived + create/update/archive-soft
+   + pure `markStepDone`/`setActiveStep` transition helpers enforcing at-most-one-active with
+   auto-advance); parent-side **Concept Arcs** authoring section on `DadLabPage` (additive collected
+   step row — done filled / active highlighted / upcoming outlined, no percentages); and the report
+   linkage — a `LabReportForm` "Part of an arc?" picker (active step preselected) plus a
+   mark-step-done confirm on completion. **No AI, no suggestion, no kid-facing, no role-field, no
+   credit/compliance/Learning-Map changes.** Deferred to slices 2–4 (all ARCH-40-gated except the
+   arc-adjacent map growth path): carry-forward suggestion, AI arc generation, kid-view strip.
 2. **Arc-aware lab suggestion with carry-forward.** Wire the per-step suggestion to read the prior
    step's outcome fields (§2.4) and the arc's covered beats. **Depends on ARCH-40** — this slice emits
    per-step role guidance and must use the `childRoles` shape, not `lincolnRole`/`londonRole`.
@@ -312,7 +331,7 @@ name-coupling ARCH-40 removes. Slice 1 is independent and can proceed first.
 
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
-| D1 | Where do arc concepts live? | A: own arc-adjacent concept map · B: extend Learning Map w/ science domain · C: self-contained arc step statuses | **C for v1**, A as growth path; **avoid B** (Learning-Map re-derivation coupling, FEAT-35/36) |
+| D1 | Where do arc concepts live? | A: own arc-adjacent concept map · B: extend Learning Map w/ science domain · C: self-contained arc step statuses | **RESOLVED 2026-07-03 → C** (owner-confirmed): self-contained arc step statuses, no map; A is the growth path, B declined (FEAT-35/36 coupling). Shipped in FEAT-44 slice 1. |
 | D2 | Arc linkage target | `DadLabReport` (live object) · `Project` (unwired scaffold) | **`DadLabReport`** live; mirror inert `arcId?` on `Project` for forward-compat (§2.1) |
 | D3 | Carry-forward source fields | `DadLabReport` finish fields (`nextTime`/`bestMoment`/`dadReflection` + per-child `prediction`/`observation`) · `LabSession` `finishWhatChanged`/`finishNextStep` (unwired) | **`DadLabReport` fields** (what the live UI captures); contract stable if Project layer is later wired |
 | D4 | Arc generation runtime | reuse generic `chat`/Haiku (no context) · new dedicated `dadLabArc` task (Sonnet + `dadLabReports` slice) | **New dedicated task** — arc reasoning needs history + Sonnet |
