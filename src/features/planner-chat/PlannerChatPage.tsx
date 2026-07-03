@@ -38,6 +38,7 @@ import {
   db,
 } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
+import { generateHelpCardsForPlan } from './generateHelpCards'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useDebounce } from '../../core/hooks/useDebounce'
 import type {
@@ -1957,6 +1958,21 @@ Generate a plan for Monday through Friday.`.trim()
       })
 
       setSnack({ text: 'Plan applied! Check This Week and Today.', severity: 'success' })
+
+      // Non-blocking (FEAT-43): batch-generate inline Help Card bodies for the
+      // must-do Reading/Math items. Fire-and-forget — lock-in already succeeded;
+      // any generation failure just leaves a card slot absent. The video half is
+      // lazy-fetched later, on first card expand.
+      if (activeChildId) {
+        void generateHelpCardsForPlan({
+          familyId,
+          childId: activeChildId,
+          days: currentDraft.days,
+          aiChat,
+        }).catch((err) => {
+          console.warn('[HelpCards] Batch generation failed (non-blocking):', err)
+        })
+      }
 
       // Non-blocking: generate chapter question pool for selected library book
       if (selectedBook && activeChildId) {

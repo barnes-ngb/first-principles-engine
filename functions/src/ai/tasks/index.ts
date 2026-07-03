@@ -16,6 +16,7 @@ import { handleShellyChat } from "./shellyChat.js";
 import { handleChapterQuestions } from "./chapterQuestions.js";
 import { handleBookLookup } from "./bookLookup.js";
 import { handleLessonVideo } from "./lessonVideo.js";
+import { handleHelpCard } from "./helpCard.js";
 import { handleMonthlyReview } from "./monthlyReview.js";
 
 export { analyzeEvaluationPatterns } from "./analyzePatterns.js";
@@ -39,5 +40,6 @@ export const CHAT_TASKS: Record<string, ChatTaskHandler> = {
   chapterQuestions: handleChapterQuestions,
   bookLookup: handleBookLookup,
   lessonVideo: handleLessonVideo,
+  helpCard: handleHelpCard,
   monthlyReview: handleMonthlyReview,
 };

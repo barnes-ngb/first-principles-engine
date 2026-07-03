@@ -29,6 +29,7 @@ import type {
   Evaluation,
   EvaluationSession,
   FeatureRequest,
+  HelpCard,
   HoursAdjustment,
   HoursEntry,
   LadderProgress,
@@ -222,6 +223,14 @@ export const lessonCardsCollection = (
   familyId: string,
 ): CollectionReference<LessonCard> =>
   collection(db, `families/${familyId}/lessonCards`) as CollectionReference<LessonCard>
+
+// ── Help Cards (Today inline teaching help — FEAT-43) ───────────
+// Doc ID: `{childId}__{subjectSlug}__{labelSlug}` (see core/utils/helpCard.ts).
+
+export const helpCardsCollection = (
+  familyId: string,
+): CollectionReference<HelpCard> =>
+  collection(db, `families/${familyId}/helpCards`) as CollectionReference<HelpCard>
 
 // ── Planner Conversations (Chat Planner) ──────────────────────
 

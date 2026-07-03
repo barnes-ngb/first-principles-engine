@@ -38,6 +38,7 @@ export const TaskType = {
   ChapterQuestions: "chapterQuestions",
   BookLookup: "bookLookup",
   LessonVideo: "lessonVideo",
+  HelpCard: "helpCard",
   WeeklyReview: "weeklyReview",
   AnalyzePatterns: "analyzePatterns",
   MonthlyReview: "monthlyReview",
@@ -79,6 +80,7 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.ChapterQuestions:
     case TaskType.BookLookup:
     case TaskType.LessonVideo:
+    case TaskType.HelpCard:
     case TaskType.WeeklyReview:
     case TaskType.AnalyzePatterns:
     case TaskType.MonthlyReview:
