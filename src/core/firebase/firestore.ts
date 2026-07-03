@@ -34,6 +34,7 @@ import type {
   HoursAdjustment,
   HoursEntry,
   LadderProgress,
+  LearnerModel,
   LessonCard,
   MonthlyReview,
   PlannerConversation,
@@ -520,6 +521,24 @@ export const childSkillMapsCollection = (
   familyId: string,
 ): CollectionReference<ChildSkillMap> =>
   collection(db, `families/${familyId}/childSkillMaps`) as CollectionReference<ChildSkillMap>
+
+// ── Learner Models (Foundations synthesis — FEAT-48) ────────────
+
+const learnerModelConverter: FirestoreDataConverter<LearnerModel> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as LearnerModel
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/** Per-child learner model. Doc ID: {childId} (D1). */
+export const learnerModelsCollection = (
+  familyId: string,
+): CollectionReference<LearnerModel> =>
+  collection(db, `families/${familyId}/learnerModels`).withConverter(
+    learnerModelConverter,
+  ) as CollectionReference<LearnerModel>
 
 // ── Chapter Responses (Read-Aloud Discussion Evidence) ──────────
 
