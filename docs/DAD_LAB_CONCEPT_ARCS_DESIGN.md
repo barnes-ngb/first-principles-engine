@@ -325,6 +325,14 @@ Serialized slices, each a reviewable PR (never merged by the run — human merge
 emits or reads role fields (2, 3, 4) must land **after** ARCH-40 or it re-introduces the exact
 name-coupling ARCH-40 removes. Slice 1 is independent and can proceed first.
 
+> **✅ ARCH-40 gate CLEARED (2026-07-03).** ARCH-40 shipped the name-agnostic role shape:
+> `DadLabReport.childRoles: { [childId]: string }` (legacy `lincolnRole`/`londonRole` kept as
+> `@deprecated` read-only and mapped forward by `normalizeChildRoles`), plus shared
+> `parseChildRoles`/`buildRoleRequestLines`/`resolveChildReport` helpers in
+> `src/features/dad-lab/childRoles.ts`. **Slices 2–4 are unblocked** and **must** emit/read role
+> guidance through `childRoles` (keyed by childId) — never `lincolnRole`/`londonRole` or
+> name-keyed `childReports` lookups. See ledger `ARCH-40`.
+
 ---
 
 ## 8. Open decisions summary
