@@ -1,8 +1,14 @@
 import { describe, it, expect } from 'vitest'
 
-import type { Child } from '../../core/types'
+import type { Child, SkillSnapshot } from '../../core/types'
+import type { ChildSkillMap } from '../../core/curriculum'
 import { CONCRETE_FIRST_ORAL_SCIENCE } from '../../core/ai/prompts/concreteFirstOralScience'
-import { buildLabSuggestionsPrompt, buildLabIdeaPrompt } from './dadLabPrompts'
+import {
+  buildLabSuggestionsPrompt,
+  buildLabIdeaPrompt,
+  buildCalibrationParagraph,
+  type CalibrationSource,
+} from './dadLabPrompts'
 
 // Minimal two-child family matching the Barnes shape (id != name — ARCH-40 lens).
 const children = [
@@ -10,15 +16,54 @@ const children = [
   { id: 'child-london', name: 'London' },
 ] as unknown as Child[]
 
-describe('dadLabPrompts — ETHOS-03 concrete-first oral-science block', () => {
+// Bare sources (no snapshot/map) — the calibration block degrades to modality lines only.
+const bareSources: CalibrationSource[] = children.map((child) => ({
+  child,
+  snapshot: null,
+  skillMap: null,
+}))
+
+// Full-data snapshot + map for a single child, using real curriculum node ids/labels.
+const lincolnSnapshot = {
+  childId: 'child-lincoln',
+  prioritySkills: [
+    { tag: 'reading.phonics.blends', label: 'Blends', level: 'developing' },
+    { tag: 'reading.phonics.cvc', label: 'CVC words', level: 'secure' }, // secure → excluded from stretch
+  ],
+  supports: [
+    { label: 'Short routines', description: 'Keep each block under 10 minutes' },
+    { label: 'Visual checklist', description: 'Show the steps as pictures' },
+  ],
+  stopRules: [{ label: 'Frustration spike', trigger: 'sighs / pushes away', action: 'switch to a win' }],
+  evidenceDefinitions: [],
+  workingLevels: {
+    phonics: { level: 3, updatedAt: '2026-01-01', source: 'quest' },
+    writing: { level: 2, updatedAt: '2026-01-01', source: 'quest' },
+    math: { level: 5, updatedAt: '2026-01-01', source: 'quest' },
+  },
+} as unknown as SkillSnapshot
+
+const lincolnMap = {
+  childId: 'child-lincoln',
+  skills: {
+    'reading.phonics.blends': { nodeId: 'reading.phonics.blends', status: 'in-progress', source: 'evaluation', updatedAt: '2026-01-01' },
+    'math.operations.multDiv': { nodeId: 'math.operations.multDiv', status: 'in-progress', source: 'evaluation', updatedAt: '2026-01-01' },
+    'reading.phonics.cvc': { nodeId: 'reading.phonics.cvc', status: 'mastered', source: 'evaluation', updatedAt: '2026-01-01' },
+  },
+  updatedAt: '2026-01-01',
+} as unknown as ChildSkillMap
+
+const NO_SHAME_TERMS = ['no data', "hasn't", 'missing']
+
+describe('dadLabPrompts — ETHOS-03/04 concrete-first oral-science block', () => {
   it('prepends the ethos block to the "Suggest a Lab" prompt', () => {
-    const prompt = buildLabSuggestionsPrompt(children)
+    const prompt = buildLabSuggestionsPrompt(bareSources)
     expect(prompt).toContain(CONCRETE_FIRST_ORAL_SCIENCE)
     expect(prompt.startsWith(CONCRETE_FIRST_ORAL_SCIENCE)).toBe(true)
   })
 
   it('prepends the ethos block to the "I Have an Idea" prompt', () => {
-    const prompt = buildLabIdeaPrompt('build a volcano', children)
+    const prompt = buildLabIdeaPrompt('build a volcano', bareSources)
     expect(prompt).toContain(CONCRETE_FIRST_ORAL_SCIENCE)
     expect(prompt.startsWith(CONCRETE_FIRST_ORAL_SCIENCE)).toBe(true)
   })
@@ -51,10 +96,29 @@ describe('dadLabPrompts — ETHOS-03 concrete-first oral-science block', () => {
     expect(CONCRETE_FIRST_ORAL_SCIENCE).toContain('"Change one thing and try again" IS the experiment')
   })
 
-  it('leaves the rest of the "Suggest a Lab" prompt unchanged apart from the block (characterization)', () => {
-    const prompt = buildLabSuggestionsPrompt(children)
-    // Strip the leading ethos block + blank line; the remainder must match the pre-ETHOS-03 body.
-    const body = prompt.slice(CONCRETE_FIRST_ORAL_SCIENCE.length).replace(/^\n+/, '')
+  it('injects a per-child calibration paragraph after the ethos block (ETHOS-04)', () => {
+    const sources: CalibrationSource[] = [
+      { child: children[0], snapshot: lincolnSnapshot, skillMap: lincolnMap },
+      { child: children[1], snapshot: null, skillMap: null },
+    ]
+    const prompt = buildLabSuggestionsPrompt(sources)
+    for (const s of sources) {
+      const para = buildCalibrationParagraph(s.child, s.snapshot, s.skillMap)
+      expect(prompt).toContain(para)
+    }
+    // Calibration sits between the ethos block and the task body.
+    const ethosEnd = CONCRETE_FIRST_ORAL_SCIENCE.length
+    const bodyStart = prompt.indexOf('Suggest 3 Dad Lab activities')
+    const lincolnPara = buildCalibrationParagraph(children[0], lincolnSnapshot, lincolnMap)
+    const paraIdx = prompt.indexOf(lincolnPara)
+    expect(paraIdx).toBeGreaterThan(ethosEnd)
+    expect(paraIdx).toBeLessThan(bodyStart)
+  })
+
+  it('leaves the task body of "Suggest a Lab" unchanged from ETHOS-03 (characterization)', () => {
+    const prompt = buildLabSuggestionsPrompt(bareSources)
+    // The body from the task marker onward must be byte-identical to the pre-ETHOS-04 body.
+    const body = prompt.slice(prompt.indexOf('Suggest 3 Dad Lab activities'))
     expect(body).toMatchInlineSnapshot(`
       "Suggest 3 Dad Lab activities for this Saturday.
 
@@ -131,9 +195,9 @@ describe('dadLabPrompts — ETHOS-03 concrete-first oral-science block', () => {
     `)
   })
 
-  it('leaves the rest of the "I Have an Idea" prompt unchanged apart from the block (characterization)', () => {
-    const prompt = buildLabIdeaPrompt('build a volcano', children)
-    const body = prompt.slice(CONCRETE_FIRST_ORAL_SCIENCE.length).replace(/^\n+/, '')
+  it('leaves the task body of "I Have an Idea" unchanged from ETHOS-03 (characterization)', () => {
+    const prompt = buildLabIdeaPrompt('build a volcano', bareSources)
+    const body = prompt.slice(prompt.indexOf('I have an idea for a Dad Lab activity'))
     expect(body).toMatchInlineSnapshot(`
       "I have an idea for a Dad Lab activity. Structure it into a complete lab plan.
 
@@ -155,5 +219,70 @@ describe('dadLabPrompts — ETHOS-03 concrete-first oral-science block', () => {
       London's role: [what London does]
       Duration: [estimated minutes]"
     `)
+  })
+})
+
+describe('buildCalibrationParagraph — per-child calibration (ETHOS-04)', () => {
+  it('full data: working levels, stretch skills, supports, and the modality line', () => {
+    const para = buildCalibrationParagraph(children[0], lincolnSnapshot, lincolnMap)
+    // Working levels in plain terms, with in-progress skills folded in from the map.
+    expect(para).toContain('working level 3')
+    expect(para).toContain('Blends')
+    expect(para).toContain('working level 5')
+    expect(para).toContain('Multiplication & division')
+    // Stretch skills = priority skills not yet secure (CVC is secure → excluded).
+    expect(para).toContain('Stretch skills right now: Blends')
+    expect(para).not.toContain('CVC words')
+    // Supports summary + stop rule.
+    expect(para).toContain('Short routines')
+    expect(para).toContain('Frustration spike')
+    // Modality line — calibration, not avoidance.
+    expect(para).toContain('Meet Lincoln at this level and stretch one step')
+    expect(para).toContain('Never hide a skill')
+    // Roughly a paragraph, not a wall of text.
+    const words = para.split(/\s+/).length
+    expect(words).toBeGreaterThan(60)
+    expect(words).toBeLessThan(200)
+  })
+
+  it('snapshot-only: emits working levels + supports, no map-derived skills, no crash', () => {
+    const para = buildCalibrationParagraph(children[0], lincolnSnapshot, null)
+    expect(para).toContain('working level 3')
+    expect(para).toContain('Short routines')
+    expect(para).not.toContain('working on') // no map → no in-progress skill labels
+    expect(para).toContain('Meet Lincoln at this level')
+  })
+
+  it('map-only: emits in-progress skills + modality line, no supports sentence', () => {
+    const para = buildCalibrationParagraph(children[0], null, lincolnMap)
+    expect(para).toContain('working on Blends')
+    expect(para).toContain('Multiplication & division')
+    expect(para).not.toContain('working level') // no snapshot → no numeric levels
+    expect(para).not.toContain('Supports that help')
+    expect(para).toContain('Meet Lincoln at this level')
+  })
+
+  it('neither: emits only the name-framed modality line', () => {
+    const para = buildCalibrationParagraph(children[1], null, null)
+    expect(para).toContain('London')
+    expect(para).toContain('Meet London at this level and stretch one step')
+    expect(para).toContain('Never hide a skill')
+    expect(para).not.toContain('working level')
+    expect(para).not.toContain('Supports that help')
+  })
+
+  it('no-shame: output never complains about absent data (any input shape)', () => {
+    const shapes: CalibrationSource[] = [
+      { child: children[0], snapshot: lincolnSnapshot, skillMap: lincolnMap },
+      { child: children[0], snapshot: lincolnSnapshot, skillMap: null },
+      { child: children[0], snapshot: null, skillMap: lincolnMap },
+      { child: children[1], snapshot: null, skillMap: null },
+    ]
+    for (const s of shapes) {
+      const para = buildCalibrationParagraph(s.child, s.snapshot, s.skillMap).toLowerCase()
+      for (const term of NO_SHAME_TERMS) {
+        expect(para).not.toContain(term)
+      }
+    }
   })
 })
