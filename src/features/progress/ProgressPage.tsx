@@ -10,6 +10,7 @@ import SectionCard from '../../components/SectionCard'
 import CertificateScanSection from './CertificateScanSection'
 import CurriculumTab from './CurriculumTab'
 import DispositionProfile from './DispositionProfile'
+import FoundationsDiagPanel from './FoundationsDiagPanel'
 import LearningMap from './learning-map/LearningMap'
 import MonthlyBooksTab from '../monthly-review/MonthlyBooksTab'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
@@ -54,6 +55,10 @@ export default function ProgressPage() {
           </Typography>
           <CertificateScanSection />
         </SectionCard>
+      </Container>
+      {/* Flag-gated ( ?diag=1 ), parent-only — Learner Model seeder + preview (FEAT-48). */}
+      <Container maxWidth="lg" sx={{ py: 0 }}>
+        <FoundationsDiagPanel />
       </Container>
       {tab === 0 && <DispositionProfile />}
       {tab === 1 && <MonthlyBooksTab />}

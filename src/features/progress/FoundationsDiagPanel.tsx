@@ -1,0 +1,239 @@
+import { useCallback, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { doc, getDoc, getDocs, query, setDoc } from 'firebase/firestore'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
+import Divider from '@mui/material/Divider'
+import List from '@mui/material/List'
+import ListItem from '@mui/material/ListItem'
+import ListItemText from '@mui/material/ListItemText'
+import Typography from '@mui/material/Typography'
+
+import { useFamilyId } from '../../core/auth/useAuth'
+import { useChildren } from '../../core/hooks/useChildren'
+import {
+  childSkillMapsCollection,
+  learnerModelsCollection,
+  sightWordProgressCollection,
+  skillSnapshotsCollection,
+} from '../../core/firebase/firestore'
+import {
+  foundationGraphs,
+  FOUNDATION_NODE_MAP,
+} from '../../core/foundations'
+import {
+  mergeSeededModel,
+  seedLearnerModel,
+} from '../../core/foundations/seedLearnerModel'
+import type { ChildSkillMap } from '../../core/curriculum/skillStatus'
+import type {
+  ConceptStateEntry,
+  ConceptStateKind,
+  LearnerModel,
+} from '../../core/types/learnerModel'
+import type { SightWordProgress, SkillSnapshot } from '../../core/types'
+
+/** Display order + colors for the four state groups. */
+const STATE_GROUPS: Array<{ state: ConceptStateKind; label: string; color: string }> = [
+  { state: 'solid', label: 'Solid', color: 'success.main' },
+  { state: 'forming', label: 'Forming', color: 'info.main' },
+  { state: 'frontier', label: 'Frontier', color: 'warning.main' },
+  { state: 'not-yet', label: 'Not yet', color: 'text.disabled' },
+]
+
+interface ChildState {
+  loading: boolean
+  model: LearnerModel | null
+  error: string | null
+}
+
+/**
+ * Flag-gated ( `?diag=1` ) parent-only diagnostic for the Learner Model bootstrap
+ * seeder (FEAT-48, slice 1). It seeds/re-seeds a child's `learnerModels/{childId}`
+ * doc client-side and renders the stored states grouped solid/forming/frontier/
+ * not-yet so the owner can verify seeding truth from a phone. The real Foundations
+ * tab is slice 2; this exists only to prove the model.
+ *
+ * Reads `skillSnapshots` / `childSkillMaps` / `sightWordProgress`; writes **only**
+ * `learnerModels` (merge). No LLM, no other collection touched.
+ */
+export default function FoundationsDiagPanel() {
+  const [searchParams] = useSearchParams()
+  const familyId = useFamilyId()
+  const { children } = useChildren()
+  const [byChild, setByChild] = useState<Record<string, ChildState>>({})
+
+  const seedChild = useCallback(
+    async (childId: string) => {
+      setByChild((prev) => ({
+        ...prev,
+        [childId]: { loading: true, model: prev[childId]?.model ?? null, error: null },
+      }))
+      try {
+        // Reads only — snapshot, skill map, sight words, existing model.
+        const snapRef = doc(skillSnapshotsCollection(familyId), childId)
+        const mapRef = doc(childSkillMapsCollection(familyId), childId)
+        const modelRef = doc(learnerModelsCollection(familyId), childId)
+        const [snapDoc, mapDoc, existingDoc, swSnap] = await Promise.all([
+          getDoc(snapRef),
+          getDoc(mapRef),
+          getDoc(modelRef),
+          getDocs(query(sightWordProgressCollection(familyId))),
+        ])
+
+        const snapshot: SkillSnapshot | null = snapDoc.exists()
+          ? (snapDoc.data() as SkillSnapshot)
+          : null
+        const skillMap: ChildSkillMap | null = mapDoc.exists()
+          ? (mapDoc.data() as ChildSkillMap)
+          : null
+        const sightWords: SightWordProgress[] = swSnap.docs
+          .filter((d) => d.id.startsWith(`${childId}_`))
+          .map((d) => d.data() as SightWordProgress)
+
+        const fresh = seedLearnerModel(
+          foundationGraphs,
+          childId,
+          snapshot,
+          skillMap,
+          sightWords,
+        )
+        const merged = mergeSeededModel(
+          existingDoc.exists() ? (existingDoc.data() as LearnerModel) : null,
+          fresh,
+        )
+
+        // Writes ONLY learnerModels (merge).
+        await setDoc(modelRef, merged, { merge: true })
+        setByChild((prev) => ({
+          ...prev,
+          [childId]: { loading: false, model: merged, error: null },
+        }))
+      } catch (err) {
+        setByChild((prev) => ({
+          ...prev,
+          [childId]: {
+            loading: false,
+            model: prev[childId]?.model ?? null,
+            error: err instanceof Error ? err.message : 'Seeding failed',
+          },
+        }))
+      }
+    },
+    [familyId],
+  )
+
+  if (searchParams.get('diag') !== '1') return null
+
+  return (
+    <Box
+      sx={{
+        m: 2,
+        p: 2,
+        bgcolor: 'warning.50',
+        border: '1px dashed',
+        borderColor: 'warning.main',
+        borderRadius: 1,
+      }}
+    >
+      <Typography variant="overline" sx={{ fontWeight: 700 }}>
+        Diagnostic — Foundations model (seed &amp; preview)
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Deterministic bootstrap seeder (FEAT-48, slice 1). Reads skill snapshot,
+        skill map, and sight words; writes only <code>learnerModels</code>. No AI.
+      </Typography>
+
+      {children.map((child) => {
+        const state = byChild[child.id]
+        return (
+          <Box key={child.id} sx={{ mb: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                {child.name}
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={state?.loading}
+                onClick={() => seedChild(child.id)}
+              >
+                {state?.loading ? 'Seeding…' : 'Seed / re-seed Foundations model'}
+              </Button>
+              {state?.loading && <CircularProgress size={16} />}
+            </Box>
+            {state?.error && (
+              <Typography variant="body2" color="error.main">
+                {state.error}
+              </Typography>
+            )}
+            {state?.model && <ModelPreview model={state.model} />}
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
+function ModelPreview({ model }: { model: LearnerModel }) {
+  const grouped: Record<ConceptStateKind, Array<[string, ConceptStateEntry]>> = {
+    solid: [],
+    forming: [],
+    frontier: [],
+    'not-yet': [],
+  }
+  for (const entry of Object.entries(model.conceptStates)) {
+    grouped[entry[1].state].push(entry)
+  }
+
+  return (
+    <Box sx={{ pl: 1 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+        <Chip size="small" label={`status: ${model.status}`} />
+        <Chip size="small" label={`graph ${model.graphVersion}`} />
+        <Chip size="small" label={`seededAt ${model.seededAt.slice(0, 19)}`} />
+        {STATE_GROUPS.map((g) => (
+          <Chip
+            key={g.state}
+            size="small"
+            label={`${g.label}: ${grouped[g.state].length}`}
+            sx={{ color: g.color, fontWeight: 700 }}
+            variant="outlined"
+          />
+        ))}
+      </Box>
+      {STATE_GROUPS.map((g) =>
+        grouped[g.state].length === 0 ? null : (
+          <Box key={g.state} sx={{ mb: 1 }}>
+            <Typography variant="caption" sx={{ color: g.color, fontWeight: 700 }}>
+              {g.label} ({grouped[g.state].length})
+            </Typography>
+            <Divider />
+            <List dense disablePadding>
+              {grouped[g.state]
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .map(([nodeId, entry]) => {
+                  const node = FOUNDATION_NODE_MAP[nodeId]
+                  const evLine = entry.evidence.map((e) => e.note).join(' · ') || '—'
+                  return (
+                    <ListItem key={nodeId} disableGutters sx={{ py: 0.25 }}>
+                      <ListItemText
+                        primary={`${node?.kidName ?? nodeId} · band ${node?.band ?? '?'}`}
+                        secondary={evLine}
+                        slotProps={{
+                          primary: { variant: 'body2' },
+                          secondary: { variant: 'caption' },
+                        }}
+                      />
+                    </ListItem>
+                  )
+                })}
+            </List>
+          </Box>
+        ),
+      )}
+    </Box>
+  )
+}
