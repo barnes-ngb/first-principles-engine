@@ -1,6 +1,6 @@
-# Math Concept Graph — v0 DRAFT (pending owner curation)
+# Math Concept Graph — v1 — OWNER-CURATED (2026-07-03)
 
-> ⚠️ **v0 DRAFT — a content proposal for OWNER REVIEW, not shipped data.** This is the first pass at the math half of the Foundations spine described in [`../LEARNER_MODEL_DESIGN.md`](../LEARNER_MODEL_DESIGN.md) §2. The owner edits node names, descriptions, bands, and edges; the curated result ships as versioned data in a later build slice (Open Decision D2). **Nothing here is live.**
+> ✅ **v1 — OWNER-CURATED (2026-07-03).** Curated by the owner in the 2026-07-03 design session; this content is **authoritative for the FEAT-46 build**. It still ships as versioned data in a build slice (Open Decision D2 unchanged). This is the math half of the Foundations spine described in [`../LEARNER_MODEL_DESIGN.md`](../LEARNER_MODEL_DESIGN.md) §2.
 
 ## How to read this
 
@@ -21,7 +21,7 @@
 | **4** | L6 fractions (recognize/compare/simple ops), measurement & time/money · L8 times-table fluency |
 | **5** | fraction operations, decimals/percents, patterns/algebra, multi-step problem solving *(map "applying/extending" tiers)* |
 
-> **Note on the repo's L7/L8:** the ledger records that "division/fractions *depth* is deliberately out of scope beyond L6; L7–L8 are the two 'outgrew L6' frontiers only" (regrouping subtraction; times-table fluency). This draft places those two as band-3/band-4 concepts in the ordinary flow; the owner may prefer to keep them as explicit late frontiers instead — see open question 3.
+> **Note on the repo's L7/L8 (owner-resolved 2026-07-03):** the ledger records that "division/fractions *depth* is deliberately out of scope beyond L6; L7–L8 are the two 'outgrew L6' frontiers only" (regrouping subtraction; times-table fluency). These two stay in the **ordinary flow** as band-3 (`math.operations.regrouping`) and band-4 (`math.operations.multiTables`) concepts. **Seeding:** ladder evidence for L7/L8 maps **directly to those node ids, not by band** — the bands here are conceptual/teaching positions; L7/L8 are scope markers, not sequence claims. (Resolves open question 3.)
 
 ---
 
@@ -71,6 +71,8 @@
 
 ## Strand 6 — Measurement, Money & Time
 
+> **Note (money/time split, owner-resolved 2026-07-03):** kept split into `math.measurement.time` and `math.measurement.money`. The legacy combined `curriculumMap` "Time & money" node bridges to **both** of these nodes.
+
 | id | Band | Kid-word name | Parent description | `underlies` |
 |---|---|---|---|---|
 | `math.measurement.length` | 2 | Measure things | Measures length with rulers and units | `math.geometry.area` |
@@ -86,6 +88,8 @@
 
 ## Strand 8 — Data & Graphs
 
+> **Evidence-only strand (owner-resolved 2026-07-03):** no working-level ladder seeds these nodes; states move only via scans, evaluations, or attestation (scans-are-truth: workbook graph/pattern pages land here).
+
 | id | Band | Kid-word name | Parent description | `underlies` |
 |---|---|---|---|---|
 | `math.data.graphs` | 2 | Read charts | Reads and makes simple graphs and tables | `math.data.interpret` |
@@ -93,10 +97,15 @@
 
 ## Strand 9 — Patterns, Algebra & Problem Solving
 
+> **Evidence-only strand (owner-resolved 2026-07-03):** no working-level ladder seeds these nodes; states move only via scans, evaluations, or attestation (scans-are-truth: workbook graph/pattern pages land here).
+
 | id | Band | Kid-word name | Parent description | `underlies` |
 |---|---|---|---|---|
 | `math.algebra.patterns` | 4 | Find the pattern | Extends number and shape patterns, finds the rule | `math.problemSolving` |
+| `math.problemSolving.oneStep` | 1–2 | Solve story problems | Solves a one-step story problem — read to them or read themselves; heard-aloud counts fully | `math.problemSolving` |
 | `math.problemSolving` | 5 | Solve word problems | Chooses the right steps for multi-step problems | *(top)* |
+
+> **Rationale for `math.problemSolving.oneStep` (2026-07-03):** owner ADDED this node to separate "can't do the math" from "couldn't read the problem" — the reading×math intersection the model must be able to distinguish. Modality calibration is baked into the description (heard-aloud counts fully).
 
 ---
 
@@ -110,10 +119,17 @@ From the Step 0.5 mappability finding, initial math concept states come — with
 
 The two children on day one: **London** seeds at the counting / number-sense frontier, most of Strands 2–9 `not-yet`; **Lincoln** (≈3rd-grade math per the family profile) seeds `solid` through addition/subtraction and place value, with a frontier around multiplication facts / two-digit-with-regrouping and everything from fractions up `not-yet`.
 
-## Open questions for the owner (curation)
+## Curation resolutions (2026-07-03)
 
-1. Strand 8 (Data & Graphs) and Strand 9 (Patterns/Algebra) exist as `MATH_MAP` nodes but have **no working-level ladder entry** — they can't seed from working levels and start `not-yet`. Track them, or drop them from v1 math scope?
-2. Money and time are one node in `curriculumMap` (`math.measurement.time` = "Time & money"); this draft splits them. Keep split or merge back?
-3. Regrouping (repo L7) and times-table fluency (repo L8) — placed here in the ordinary band-3/band-4 flow. Keep as ordinary flow, or model them as explicit late "outgrew L6" frontiers per the ledger note?
-4. Is this the order the family actually teaches math (e.g. GATB Math lesson sequence), or should bands follow the specific workbook's scope-and-sequence?
-5. Any concept here that isn't a real foundation for how *this* family does math?
+The owner's answers to the draft's open questions. Questions kept for the record; answers appended.
+
+1. **Strand 8 (Data & Graphs) and Strand 9 (Patterns/Algebra) — track them, or drop them from v1 math scope?**
+   → **Kept**, each marked an **evidence-only strand**: no working-level ladder seeds these; states move only via scans, evaluations, or attestation (scans-are-truth: workbook graph/pattern pages land here).
+2. **Money and time are one `curriculumMap` node; this draft splits them. Keep split or merge back?**
+   → **Kept split** into `math.measurement.time` and `math.measurement.money`. The legacy combined `curriculumMap` "Time & money" node bridges to **both**.
+3. **Regrouping (repo L7) and times-table fluency (repo L8) — keep as ordinary flow, or model them as explicit late frontiers?**
+   → **Kept in ordinary flow** (band-3 `math.operations.regrouping`, band-4 `math.operations.multiTables`). Ladder evidence for L7/L8 maps **directly to those node ids, not by band** — bands are conceptual/teaching positions; L7/L8 are scope markers, not sequence claims.
+4. **Is this the order the family actually teaches math, or should bands follow the workbook's scope-and-sequence?**
+   → **Owner-confirmed 2026-07-03:** matches how the family teaches.
+5. **Any concept here that isn't a real foundation for how *this* family does math?**
+   → **Owner-confirmed 2026-07-03:** matches how the family teaches.
