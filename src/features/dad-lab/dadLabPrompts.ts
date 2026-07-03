@@ -1,9 +1,11 @@
-import type { Child } from '../../core/types'
+import type { Child, SkillSnapshot } from '../../core/types'
+import type { ChildSkillMap } from '../../core/curriculum'
+import { CURRICULUM_NODE_MAP } from '../../core/curriculum'
 import { CONCRETE_FIRST_ORAL_SCIENCE } from '../../core/ai/prompts/concreteFirstOralScience'
 import { buildRoleRequestLines } from './childRoles'
 
 /**
- * Dad Lab suggestion prompt builders (ETHOS-03).
+ * Dad Lab suggestion prompt builders (ETHOS-03 / ETHOS-04).
  *
  * The two prompts below were duplicated inline in `LabSuggestions.tsx` ("Suggest a
  * Lab") and `DadLabPage.tsx` ("I Have an Idea"). ARCH-40 shared only the role lines
@@ -13,9 +15,124 @@ import { buildRoleRequestLines } from './childRoles'
  * It is not a dedup refactor: the shared framework/context text is intentionally left
  * duplicated (do not merge — out of scope for this run).
  *
- * Both prompts open with `CONCRETE_FIRST_ORAL_SCIENCE` so every generated lab obeys the
- * concrete-first, oral-science pedagogy contract.
+ * Both prompts open with `CONCRETE_FIRST_ORAL_SCIENCE` (the child-agnostic pedagogy
+ * contract) followed by a `buildCalibrationParagraph` per child — the per-child
+ * enrichment ETHOS-03 deferred and ETHOS-04 ships.
  */
+
+/**
+ * Per-child inputs for the calibration paragraph. `snapshot` and `skillMap` are the two
+ * derived join points (FEAT-46 recon); either may be null when a child has no data yet.
+ */
+export interface CalibrationSource {
+  child: Child
+  snapshot: SkillSnapshot | null
+  skillMap: ChildSkillMap | null
+}
+
+/** Cap list clauses so a paragraph stays ~100-150 words. */
+const CALIBRATION_LIST_CAP = 3
+
+/** Working-level number for a domain, reading from the snapshot's workingLevels. */
+function readWorkingLevel(
+  snapshot: SkillSnapshot | null,
+  keys: Array<'phonics' | 'comprehension' | 'writing' | 'math' | 'sentence'>,
+): number | undefined {
+  const levels = snapshot?.workingLevels
+  if (!levels) return undefined
+  for (const key of keys) {
+    const level = levels[key]?.level
+    if (typeof level === 'number') return level
+  }
+  return undefined
+}
+
+/** In-progress skill labels for a curriculum domain, read from the skill map. */
+function inProgressLabels(
+  skillMap: ChildSkillMap | null,
+  domain: 'reading' | 'writing' | 'math',
+): string[] {
+  if (!skillMap?.skills) return []
+  const labels: string[] = []
+  for (const [nodeId, entry] of Object.entries(skillMap.skills)) {
+    if (entry.status !== 'in-progress') continue
+    const node = CURRICULUM_NODE_MAP[nodeId]
+    if (node?.domain === domain) labels.push(node.label)
+  }
+  return labels.slice(0, CALIBRATION_LIST_CAP)
+}
+
+/** One domain clause: "reads around working level 3 (working on Blends, Sight words)". */
+function domainClause(
+  verb: string,
+  level: number | undefined,
+  labels: string[],
+): string | null {
+  const working = labels.length ? `working on ${labels.join(', ')}` : ''
+  if (level !== undefined && working) return `${verb} around working level ${level} (${working})`
+  if (level !== undefined) return `${verb} around working level ${level}`
+  if (working) return `${verb} — ${working}`
+  return null
+}
+
+/**
+ * Per-child calibration paragraph — working levels for reading/writing/math in plain
+ * terms, a supports summary, and one modality line. Calibration, never avoidance: it
+ * says where the child works and how to meet him there, never routes a skill away.
+ *
+ * Degrades gracefully: with a partial or empty snapshot/map it emits whatever exists and
+ * always closes with the modality line (which needs no data). It NEVER emits a "no data"
+ * complaint — no-shame and sparse-native by design.
+ *
+ * Interim source — re-point to `LearnerModel.modalityCalibration` when FEAT-46 ships
+ * (design doc §3.3). Pure and side-effect-free so both Dad Lab builders can call it.
+ */
+export function buildCalibrationParagraph(
+  child: Child,
+  snapshot: SkillSnapshot | null,
+  skillMap: ChildSkillMap | null,
+): string {
+  const name = child.name
+  const sentences: string[] = []
+
+  // Working levels (reading / writing / math), folding in-progress skills where known.
+  const clauses = [
+    domainClause('reads', readWorkingLevel(snapshot, ['phonics', 'comprehension']), inProgressLabels(skillMap, 'reading')),
+    domainClause('writes', readWorkingLevel(snapshot, ['writing', 'sentence']), inProgressLabels(skillMap, 'writing')),
+    domainClause('does math', readWorkingLevel(snapshot, ['math']), inProgressLabels(skillMap, 'math')),
+  ].filter((c): c is string => c !== null)
+  if (clauses.length) sentences.push(`${name} ${clauses.join('; ')}.`)
+
+  // Stretch skills (priority skills that are not yet secure) — reinforce "stretch one step".
+  const priority = (snapshot?.prioritySkills ?? [])
+    .filter((s) => s.level !== 'secure')
+    .map((s) => s.label)
+    .slice(0, CALIBRATION_LIST_CAP)
+  if (priority.length) sentences.push(`Stretch skills right now: ${priority.join(', ')}.`)
+
+  // Supports + stop rules summary.
+  const supports = (snapshot?.supports ?? []).map((s) => s.label).slice(0, CALIBRATION_LIST_CAP)
+  const stopRules = (snapshot?.stopRules ?? []).map((r) => r.label).slice(0, CALIBRATION_LIST_CAP)
+  if (supports.length) sentences.push(`Supports that help ${name}: ${supports.join('; ')}.`)
+  if (stopRules.length) sentences.push(`Back off when: ${stopRules.join('; ')}.`)
+
+  // Modality line — always emitted; calibration-not-avoidance in one sentence. It also
+  // guarantees the paragraph always names the child, even when no snapshot/map exists.
+  sentences.push(
+    `Meet ${name} at this level and stretch one step: put short reading in activities at ${name}'s level ` +
+      `(a label or a one-line prediction card ${name} can read aloud), and let ${name} dictate while the adult ` +
+      `scribes unless ${name} wants to write. Never hide a skill.`,
+  )
+
+  return sentences.join(' ')
+}
+
+/** Join per-child calibration paragraphs into the block injected after the ethos rails. */
+function buildCalibrationBlock(sources: CalibrationSource[]): string {
+  return sources
+    .map((s) => buildCalibrationParagraph(s.child, s.snapshot, s.skillMap))
+    .join('\n\n')
+}
 
 /**
  * Model for Dad Lab suggestion generation (ETHOS-03). Bumped from the `chat`-task
@@ -26,9 +143,18 @@ import { buildRoleRequestLines } from './childRoles'
  */
 export const DAD_LAB_SUGGESTION_MODEL = 'claude-sonnet-4-6'
 
+/** Header introducing the per-child calibration block injected after the ethos rails. */
+export const CALIBRATION_BLOCK_HEADER =
+  'PER-CHILD CALIBRATION — meet each child at his working level (calibration, not avoidance):'
+
 /** Prompt for the "Suggest a Lab" path (3 AI-suggested Saturday labs). */
-export function buildLabSuggestionsPrompt(children: Child[]): string {
+export function buildLabSuggestionsPrompt(sources: CalibrationSource[]): string {
+  const children = sources.map((s) => s.child)
   return `${CONCRETE_FIRST_ORAL_SCIENCE}
+
+${CALIBRATION_BLOCK_HEADER}
+
+${buildCalibrationBlock(sources)}
 
 Suggest 3 Dad Lab activities for this Saturday.
 
@@ -104,8 +230,13 @@ Give exactly 3 suggestions separated by ---. Make them different types.`
 }
 
 /** Prompt for the "I Have an Idea" path (structure an owner-supplied idea into a plan). */
-export function buildLabIdeaPrompt(ideaText: string, children: Child[]): string {
+export function buildLabIdeaPrompt(ideaText: string, sources: CalibrationSource[]): string {
+  const children = sources.map((s) => s.child)
   return `${CONCRETE_FIRST_ORAL_SCIENCE}
+
+${CALIBRATION_BLOCK_HEADER}
+
+${buildCalibrationBlock(sources)}
 
 I have an idea for a Dad Lab activity. Structure it into a complete lab plan.
 

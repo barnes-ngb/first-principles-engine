@@ -22,6 +22,7 @@ import { db } from '../../core/firebase/firestore'
 import { weekKeyFromDate } from '../../core/utils/dateKey'
 import { parseChildRoles } from './childRoles'
 import { buildLabSuggestionsPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
+import { useCalibrationSources } from './useCalibrationSources'
 
 interface Prefill {
   title: string
@@ -157,6 +158,7 @@ function parseDuration(raw: string): number | undefined {
 function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 'open'>) {
   const familyId = useFamilyId()
   const { children, isLoading: childrenLoading } = useChildren()
+  const { sources: calibrationSources, loaded: calibrationLoaded } = useCalibrationSources(familyId, children)
   const { chat, loading: aiLoading } = useAI()
   const [suggestions, setSuggestions] = useState<ParsedSuggestion[]>([])
   const [rawText, setRawText] = useState('')
@@ -199,7 +201,7 @@ function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 
         messages: [
           {
             role: 'user',
-            content: buildLabSuggestionsPrompt(children),
+            content: buildLabSuggestionsPrompt(calibrationSources),
           },
         ],
       })
@@ -215,14 +217,16 @@ function LabSuggestionsContent({ onClose, onSelect }: Omit<LabSuggestionsProps, 
       console.error('Lab suggestions failed:', err)
       setError(`Failed to get suggestions: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
-  }, [familyId, children, chat])
+  }, [familyId, children, calibrationSources, chat])
 
   useEffect(() => {
-    if (!childrenLoading) {
+    // Wait for calibration data too, so the first (and usually only) generation carries
+    // per-child working levels/supports rather than degrading to the modality line alone.
+    if (!childrenLoading && calibrationLoaded) {
       fetchSuggestions()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [childrenLoading])
+  }, [childrenLoading, calibrationLoaded])
 
   const handleSelect = useCallback(
     (suggestion: ParsedSuggestion) => {

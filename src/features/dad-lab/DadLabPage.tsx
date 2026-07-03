@@ -37,6 +37,7 @@ import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { parseChildRoles } from './childRoles'
 import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
+import { useCalibrationSources } from './useCalibrationSources'
 import ConceptArcsSection from './ConceptArcsSection'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
@@ -106,6 +107,7 @@ export default function DadLabPage() {
 
   const { reports, loading, saveReport, updateStatus, deleteReport } = useDadLabReports()
   const { children } = useChildren()
+  const { sources: calibrationSources } = useCalibrationSources(familyId, children)
   const { chat } = useAI()
   const [view, setView] = useState<'list' | 'form'>('list')
   const [editingReport, setEditingReport] = useState<DadLabReport | undefined>()
@@ -251,7 +253,7 @@ export default function DadLabPage() {
         model: DAD_LAB_SUGGESTION_MODEL,
         messages: [{
           role: 'user',
-          content: buildLabIdeaPrompt(ideaText, children),
+          content: buildLabIdeaPrompt(ideaText, calibrationSources),
         }],
       })
 
@@ -294,7 +296,7 @@ export default function DadLabPage() {
     } finally {
       setIdeaLoading(false)
     }
-  }, [ideaText, chat, familyId, children])
+  }, [ideaText, chat, familyId, children, calibrationSources])
 
   // Stats (completed labs only)
   const stats = useMemo(() => {

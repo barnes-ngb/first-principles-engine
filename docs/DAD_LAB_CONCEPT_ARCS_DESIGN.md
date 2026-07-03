@@ -424,6 +424,51 @@ the constant.
 
 ---
 
-*This is a design doc. Sections 1–8 remain design-only; §9 records the shipped ETHOS-03 rails plus the
-slice-2/slice-3 sequencing decisions. Build slices are human-assigned per the operating model
-(`CLAUDE.md`).*
+## 10. Addendum (2026-07-03) — ETHOS-04: calibration-not-avoidance + minimal per-child calibration
+
+**Status: shipped this run.** ETHOS-04 corrects the ETHOS-03 block and ships the per-child enrichment
+§9.2 deferred. Two changes:
+
+### 10.1 The block correction (calibration, not avoidance)
+
+The owner explicitly corrected the block **before** the ETHOS-03 run, but the correction didn't reach
+the shipped rev-1 — which read **"Never require a child to read or write anything."** That over-corrected
+into **avoidance**. The child **reads better than he writes**; the goal is *understanding* — meet each
+child at his working level and stretch one step, and **never hide a skill**. Avoidance dressed as
+accommodation is its own failure. ETHOS-04 replaces the two offending lines (the oral-science rail and
+the leveling rule) with calibration-not-avoidance language: short, purposeful reading AT the child's
+level belongs in activities (a label, a one-line instruction, a prediction card); the adult scribes **by
+default**, a child who wants to write, writes, and dictation counts fully; leveling up reinforces the
+foundation concept the child is working on elsewhere. The block **stays child-agnostic** — "working
+level" is a system term, not a diagnosis (ARCH-40 preserved). The canonical text in §9.1 above is the
+**superseded rev-1**; the live constant is `CONCRETE_FIRST_ORAL_SCIENCE`.
+
+### 10.2 Minimal per-child calibration (fills the §9.2 hole)
+
+§9.2 deferred per-child data to "FEAT-41 slice 2," leaving "at the child's working level" **inert** — the
+generator couldn't see the level. ETHOS-04 ships a pure `buildCalibrationParagraph(child, snapshot,
+skillMap)` (`dadLabPrompts.ts`) injected per child after the ethos block in both Dad Lab builders. It
+reads the **two derived join points** — `skillSnapshots/{childId}` (priority skills, supports, stop
+rules, working levels) and `childSkillMaps/{childId}` (in-progress skills) — and emits ~100–150 words:
+working levels for reading/writing/math in plain terms, a supports summary, and one modality line
+("reading belongs in activities at his level; writing via adult scribe"). It **degrades gracefully**
+(partial/empty → whatever exists) and **never emits a "no data" complaint** (no-shame, sparse-native).
+The `useCalibrationSources` hook loads both docs per child in the two callers.
+
+The §9.2 table is now: **ethos-first shipped (ETHOS-03)**, **snapshot supports + working levels shipped
+(ETHOS-04, this addendum)**. Remaining slice-2 enrichment is **trajectory/disposition only**. The
+**canonical calibration source becomes the Learner Model** (FEAT-46): `buildCalibrationParagraph` is an
+interim seam that re-points to `LearnerModel.modalityCalibration` (design doc §3.3) when it ships —
+recorded in the function's and constant's doc comments.
+
+**Hardcoded per-child strings:** ETHOS-03's recon noted "hardcoded per-child strings in
+`dadLabPrompts.ts`." Those are the static Context lines ("Lincoln (10, neurodivergent, loves
+Minecraft/building/art)" / "London (6, loves drawing and stories)") — age/interest descriptors on a
+**different axis** than the calibration output (working levels / supports / modality). They do not
+overlap or contradict the paragraph, so nothing was replaced; the calibration block is additive.
+
+---
+
+*This is a design doc. Sections 1–8 remain design-only; §9 records the shipped ETHOS-03 rails, §10 the
+ETHOS-04 correction + minimal per-child calibration. Build slices are human-assigned per the operating
+model (`CLAUDE.md`).*
