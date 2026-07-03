@@ -164,12 +164,19 @@ which concept beats are covered, never a schedule the family is failing against.
 
 ## 3. AI arc generation
 
-Three entry points for "suggest an arc":
+Four entry points for "suggest an arc":
 
 1. **From an interest** — "Lincoln is into motors" → an arc that ends at building a small motor.
 2. **From a concept target** — "I want them to understand electricity" → static → circuit → switch → motor.
 3. **From an existing completed lab** — "what arc could this lab have started?" → seeds `steps[0]` from
    an existing `DadLabReport` and proposes the beats that follow.
+4. **Revisit / spiral** (added 2026-07-03, ETHOS-03) — the generator reads **completed arcs + their
+   linked reports** and proposes a **next-level arc on a previously covered concept**: the *same*
+   concept returned to with **a new modality or one more variable** (never more text / longer
+   explanation — the ethos's leveling rule, §9). This is spiral pedagogy: revisit to deepen, not to
+   re-teach. **Depends on slice-2 carry-forward** (it reads the prior arc's outcome fields to decide
+   what "one more variable" should be). Distinct from #3, which seeds an arc from a *single* lab;
+   revisit reasons across *whole completed arcs*.
 
 ### 3.1 Prompt design notes
 
@@ -349,5 +356,74 @@ name-coupling ARCH-40 removes. Slice 1 is independent and can proceed first.
 
 ---
 
-*This is a design doc only. No source code changes accompany it. Build slices are human-assigned per
-the operating model (`CLAUDE.md`).*
+*Sections 1–8 above are design only. The §9 addendum below ships code (ETHOS-03) — the shared ethos
+block + the Dad Lab model bump — while the arc build slices (2–4) remain design-only and
+human-assigned per the operating model (`CLAUDE.md`).*
+
+---
+
+## 9. Addendum (2026-07-03) — ETHOS-03: "concrete-first, oral science" ethos block
+
+**Status: shipped this run** (constant + Dad Lab application + model bump). This is the pedagogy
+contract every arc/lab generation obeys — **slices 2–4 must include it verbatim** (it is a shared
+constant, not copied text; import the single source).
+
+### 9.1 The ethos block (canonical — the pedagogy contract)
+
+Exported once from `src/core/ai/prompts/concreteFirstOralScience.ts` as `CONCRETE_FIRST_ORAL_SCIENCE`
+and prepended to both Dad Lab suggestion prompts (`buildLabSuggestionsPrompt` /
+`buildLabIdeaPrompt` in `src/features/dad-lab/dadLabPrompts.ts`):
+
+```
+CONCRETE-FIRST, ORAL SCIENCE — rules for all child activity generation:
+- Objects before words; do before explain. Every concept must arrive as something a child can hold, throw, stomp, drop, or feel.
+- The scientific method is oral and embodied: predict aloud (or point, or draw) -> try it -> observe aloud -> the adult scribes. Never require a child to read or write anything.
+- One concept per activity, sayable in one sentence of kid words. No technical vocabulary unless a child asks first.
+- "Change one thing and try again" IS the experiment — name it that way.
+- Failure is data: where it fits, include one make-it-fail-on-purpose beat and ask why aloud.
+- Leveling up = the same concept in a new modality or with one more variable — never more text, never longer explanations.
+- A child's answer may be short, pointed at, drawn, or demonstrated; restating it in fuller words is the adult's job, not the child's.
+```
+
+**Child-agnostic by design** — no child names, no diagnosis language. The name-coupling defect class
+was just closed in **ARCH-40**; the block deliberately does not reintroduce it. Per-child supports
+arrive later via context enrichment (§9.2), not by hardcoding into this block. When slice 3 moves arc
+generation server-side into the dedicated `dadLabArc` task, that task **reuses this same constant** —
+keep a single source; do not fork a server-side copy silently.
+
+### 9.2 Enrichment sequencing decision (owner, 2026-07-03)
+
+Context enrichment is **deferred to FEAT-41 slice 2** — this run adds **no per-child data** to any
+prompt. The block is static and child-agnostic. The ordered plan:
+
+| Stage | What | When |
+|---|---|---|
+| **Ethos-first** | Static `CONCRETE_FIRST_ORAL_SCIENCE` block | **Shipped (this run)** |
+| Snapshot supports + working levels | Injected via slice 2's context slice (per-child) | **Slice 2** |
+| Disposition | **Compressed-only, if token budget allows** | Slice 2 (conditional) |
+| Eval findings | **Excluded** — academic noise for concrete-lab generation | — |
+
+Rationale: the ethos is the invariant pedagogy rail (ship it now, cheaply, everywhere); per-child
+tuning is data-plumbing that belongs with the slice-2 context work and shouldn't block the rail.
+
+### 9.3 Third generation entry point — "revisit / spiral" (slice 3)
+
+Added to §3 as entry point **#4**: the generator reads completed arcs + their linked reports and
+proposes a next-level arc on a previously covered concept — same concept, **new modality or +1
+variable** (the ethos's leveling rule in §9.1). Spiral pedagogy: revisit to deepen. **Depends on
+slice-2 carry-forward** (reads prior outcome fields to choose the added variable). Design note only —
+no build this run.
+
+### 9.4 Future reuse (named, not built)
+
+The `CONCRETE_FIRST_ORAL_SCIENCE` block is intended for reuse by **other kid-activity generators** —
+the Help Card `playIt` generator and workshop challenge generation — as **separate, later runs**. Named
+here so the single-source intent is on record; not built now. Each reuse imports the one constant (no
+copy). Server-side consumers (the future `dadLabArc` task, §3.2) reuse it too — see the doc comment on
+the constant.
+
+---
+
+*This is a design doc. Sections 1–8 remain design-only; §9 records the shipped ETHOS-03 rails plus the
+slice-2/slice-3 sequencing decisions. Build slices are human-assigned per the operating model
+(`CLAUDE.md`).*
