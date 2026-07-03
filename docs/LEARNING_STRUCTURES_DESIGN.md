@@ -2,7 +2,7 @@
 
 **Version:** v0.1 — July 2, 2026 (design-first; **no build assigned**)
 **Status:** Strategic design. Concept + smallest honest pilot + open decisions. **No code.**
-**Ledger anchor:** FEAT-40 (DESIGN — doc only, no build assigned).
+**Ledger anchor:** FEAT-42 (DESIGN — doc only, no build assigned).
 **Builds on:** `docs/FIRST_PRINCIPLES_ALIGNMENT.md` (disposition-over-content, the learning loop,
 evidence-beats-narrative, the measurement-sensitivity rail) and `docs/ENGINE_V2.md` (energy modes,
 split-block rhythm, subject mapping). This doc extends those — it does not restate or fork them.
