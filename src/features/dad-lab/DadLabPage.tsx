@@ -35,6 +35,7 @@ import type { DadLabType } from '../../core/types/enums'
 import { DadLabStatus, SubjectBucket, UserProfile } from '../../core/types/enums'
 import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
+import ConceptArcsSection from './ConceptArcsSection'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
 import LabSuggestions from './LabSuggestions'
@@ -384,6 +385,9 @@ Duration: [estimated minutes]`,
       </Stack>
 
       {loading && <LoadingState label="Loading..." />}
+
+      {/* ── Concept Arcs (designed lab sequences — FEAT-44) ── */}
+      <ConceptArcsSection />
 
       {/* ── Section 1: Planned Labs ── */}
       {planned.length > 0 && (
