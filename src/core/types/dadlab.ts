@@ -123,9 +123,15 @@ export interface DadLabReport {
   status: DadLabStatus
   /** Materials list (set during planning) */
   materials?: string[]
-  /** Lincoln's role description (set during planning) */
+  /**
+   * Per-child role description (set during planning), keyed by childId.
+   * The name-agnostic replacement for `lincolnRole`/`londonRole` (ARCH-40).
+   * Read via `normalizeChildRoles`, which also maps legacy docs forward.
+   */
+  childRoles?: Record<string, string>
+  /** @deprecated legacy read-only — normalized via normalizeChildRoles; do not write */
   lincolnRole?: string
-  /** London's role description (set during planning) */
+  /** @deprecated legacy read-only — normalized via normalizeChildRoles; do not write */
   londonRole?: string
   childReports: Record<string, ChildLabReport>
   subjectTags: SubjectBucket[]
