@@ -52,7 +52,26 @@ interface ChatRequest {
   messages: ChatMessage[];
   /** Evaluation domain (only used when taskType === 'evaluate') */
   domain?: string;
+  /**
+   * Optional per-request model override, validated against ALLOWED_MODELS
+   * server-side. Lets a specific caller upgrade a generic task's default model
+   * (e.g. ETHOS-03 bumps Dad Lab suggestion generation from Haiku to Sonnet)
+   * without changing modelForTask() for every other consumer of that task.
+   * Only honored by handleChat (chat/generate); other handlers pick their own
+   * model. Ignored when absent — behavior is identical to before.
+   */
+  model?: string;
 }
+
+/**
+ * Models a client is permitted to request via the per-request override.
+ * Kept in lock-step with the model ids returned by modelForTask so an override
+ * can never point the chat path at an unknown/expensive model.
+ */
+const ALLOWED_MODELS: readonly string[] = [
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5-20251001",
+];
 
 interface ChatResponse {
   message: string;
@@ -2387,7 +2406,7 @@ export const chat = onCall(
     // ── Auth gate ──────────────────────────────────────────────
     const { uid } = requireEmailAuth(request);
 
-    const { familyId, childId, taskType, messages, domain } =
+    const { familyId, childId, taskType, messages, domain, model } =
       request.data as ChatRequest;
 
     // ── Input validation ───────────────────────────────────────
@@ -2415,6 +2434,13 @@ export const chat = onCall(
       throw new HttpsError(
         "invalid-argument",
         "messages must be a non-empty array.",
+      );
+    }
+    // Validate the optional per-request model override against the allowlist.
+    if (model !== undefined && !ALLOWED_MODELS.includes(model)) {
+      throw new HttpsError(
+        "invalid-argument",
+        `model must be one of: ${ALLOWED_MODELS.join(", ")}`,
       );
     }
 
@@ -2545,6 +2571,7 @@ export const chat = onCall(
         messages,
         domain,
         apiKey,
+        modelOverride: model,
       });
     } catch (err) {
       if (err instanceof HttpsError) throw err;

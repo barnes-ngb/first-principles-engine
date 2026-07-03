@@ -35,7 +35,8 @@ import type { DadLabType } from '../../core/types/enums'
 import { DadLabStatus, SubjectBucket, UserProfile } from '../../core/types/enums'
 import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
-import { buildRoleRequestLines, parseChildRoles } from './childRoles'
+import { parseChildRoles } from './childRoles'
+import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
 import ConceptArcsSection from './ConceptArcsSection'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
@@ -247,26 +248,10 @@ export default function DadLabPage() {
         familyId,
         childId: children[0]?.id ?? '',
         taskType: TaskType.Chat,
+        model: DAD_LAB_SUGGESTION_MODEL,
         messages: [{
           role: 'user',
-          content: `I have an idea for a Dad Lab activity. Structure it into a complete lab plan.
-
-My idea: "${ideaText}"
-
-Context:
-- Lincoln (10, neurodivergent, loves Minecraft/building/art)
-- London (6, loves drawing and stories)
-- Both boys
-- Saturday morning lab, 45-90 minutes
-
-Respond in EXACTLY this format (no other text):
-Title: [a catchy name for the lab]
-Type: [science/engineering/adventure/heart]
-Question: [a driving question that frames the exploration]
-Description: [2-3 sentences about what we'll do and learn]
-Materials: [comma-separated list of what we need]
-${buildRoleRequestLines(children)}
-Duration: [estimated minutes]`,
+          content: buildLabIdeaPrompt(ideaText, children),
         }],
       })
 

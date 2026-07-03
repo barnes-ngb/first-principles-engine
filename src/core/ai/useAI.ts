@@ -39,6 +39,13 @@ export interface ChatRequest {
   messages: ChatMessage[]
   /** Evaluation domain (only used when taskType === 'evaluate') */
   domain?: string
+  /**
+   * Optional per-request model override (allowlisted server-side). Lets a
+   * specific caller upgrade a generic task's default model without changing it
+   * for every other consumer — e.g. ETHOS-03 runs Dad Lab suggestion generation
+   * on Sonnet while other `chat`-task callers stay on Haiku.
+   */
+  model?: string
 }
 
 export interface ChatResponse {

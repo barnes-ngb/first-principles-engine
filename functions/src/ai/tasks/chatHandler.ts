@@ -6,19 +6,20 @@ import { buildContextForTask } from "../contextSlices.js";
 /**
  * Task: chat / generate
  * Context: charter + childProfile (via buildContextForTask)
- * Model: Haiku
+ * Model: Haiku by default; honors an allowlisted per-request `modelOverride`
+ *   (ETHOS-03 uses this to run Dad Lab suggestion generation on Sonnet).
  */
 export const handleChat = async (
   ctx: ChatTaskContext,
 ): Promise<ChatTaskResult> => {
-  const { db, familyId, childId, childData, snapshotData, messages, apiKey } = ctx;
+  const { db, familyId, childId, childData, snapshotData, messages, apiKey, modelOverride } = ctx;
 
   const sections = await buildContextForTask("chat", {
     db, familyId, childId, childData, snapshotData,
   });
 
   const systemPrompt = sections.join("\n\n");
-  const model = modelForTask("chat");
+  const model = modelOverride ?? modelForTask("chat");
 
   const result = await callClaude({
     apiKey,
