@@ -37,10 +37,17 @@ describe('dadLabPrompts — ETHOS-03 concrete-first oral-science block', () => {
     }
   })
 
-  it('carries the oral-science, never-read-or-write rail verbatim', () => {
-    expect(CONCRETE_FIRST_ORAL_SCIENCE).toContain(
+  it('carries the calibration-not-avoidance rail verbatim (ETHOS-04)', () => {
+    // ETHOS-04 corrected ETHOS-03's rev-1 "Never require a child to read or write
+    // anything." into calibration-not-avoidance. The old avoidance line must be gone.
+    expect(CONCRETE_FIRST_ORAL_SCIENCE).not.toContain(
       'Never require a child to read or write anything.',
     )
+    expect(CONCRETE_FIRST_ORAL_SCIENCE).toContain(
+      'Meet each child at their working level and stretch one step.',
+    )
+    expect(CONCRETE_FIRST_ORAL_SCIENCE).toContain('Never hide a skill from a child')
+    expect(CONCRETE_FIRST_ORAL_SCIENCE).toContain('The goal is understanding, not avoidance.')
     expect(CONCRETE_FIRST_ORAL_SCIENCE).toContain('"Change one thing and try again" IS the experiment')
   })
 
