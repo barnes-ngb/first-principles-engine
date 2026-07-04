@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
@@ -27,6 +28,7 @@ import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, SubjectBucket } 
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
 import { normalizeChildRoles, resolveChildReport } from './childRoles'
+import { subjectsForLabType } from './labTypeSubjects'
 import { useConceptArcs } from './useConceptArcs'
 
 // ── Constants ──────────────────────────────────────────────────
@@ -171,12 +173,27 @@ export default function LabReportForm({
     }
     return initial
   })
-  const [subjectTags, setSubjectTags] = useState<string[]>(report?.subjectTags ?? [])
+  // Type → subject routing (FEAT-55). A NEW lab seeds its subject tags from the
+  // lab-type mapping (never lands empty); an existing report keeps its stored
+  // tags. `subjectTagsEdited` is the manual-edit-wins guard: a NEW lab starts
+  // unedited so changing the type chip re-derives the defaults, while an
+  // existing report starts edited=true (its tags are already deliberate).
+  const [subjectTags, setSubjectTags] = useState<string[]>(
+    report?.subjectTags ?? subjectsForLabType(report?.labType ?? prefill?.labType ?? DadLabType.Science),
+  )
+  const [subjectTagsEdited, setSubjectTagsEdited] = useState<boolean>(!!report)
   const [skillTags, setSkillTags] = useState<string[]>(report?.skillTags ?? [])
   const [virtueTag, setVirtueTag] = useState(report?.virtueTag ?? '')
   const [dadReflection, setDadReflection] = useState(report?.dadReflection ?? '')
   const [bestMoment, setBestMoment] = useState(report?.bestMoment ?? '')
   const [nextTime, setNextTime] = useState(report?.nextTime ?? '')
+
+  // Empty-tags-at-save visibility (FEAT-55). Saving with zero subject tags no
+  // longer credits zero hours silently (useDadLabReports:61) — the first save
+  // attempt reveals an inline warning that requires an explicit acknowledgment
+  // before the save goes through. Adding any subject clears the block.
+  const [showEmptyTagsWarning, setShowEmptyTagsWarning] = useState(false)
+  const [ackEmptyTags, setAckEmptyTags] = useState(false)
 
   // ── Concept Arc linkage (FEAT-44) — optional ──
   const [arcId, setArcId] = useState(report?.arcId ?? '')
@@ -315,12 +332,35 @@ export default function LabReportForm({
     [familyId, title, children],
   )
 
+  // ── Lab type change (FEAT-55: re-derive subjects unless manually edited) ──
+
+  const handleLabTypeChange = useCallback(
+    (val: DadLabType) => {
+      setLabType(val)
+      // Manual edits always win — only re-derive when the user hasn't touched
+      // the subject checkboxes.
+      if (!subjectTagsEdited) {
+        const derived = subjectsForLabType(val)
+        setSubjectTags(derived)
+        if (derived.length > 0) setShowEmptyTagsWarning(false)
+      }
+    },
+    [subjectTagsEdited],
+  )
+
   // ── Subject tag toggle ──
 
   const toggleSubject = useCallback((subject: string) => {
-    setSubjectTags((prev) =>
-      prev.includes(subject) ? prev.filter((s) => s !== subject) : [...prev, subject],
-    )
+    // Any manual toggle marks the tags as owner-owned so a later type change
+    // won't clobber them.
+    setSubjectTagsEdited(true)
+    setSubjectTags((prev) => {
+      const next = prev.includes(subject)
+        ? prev.filter((s) => s !== subject)
+        : [...prev, subject]
+      if (next.length > 0) setShowEmptyTagsWarning(false)
+      return next
+    })
   }, [])
 
   // ── Skill tag ──
@@ -336,6 +376,13 @@ export default function LabReportForm({
   // ── Save ──
 
   const handleSave = useCallback(async () => {
+    // FEAT-55: no silent zero-hours save. Empty subject tags reveal an inline
+    // warning and require an explicit acknowledgment before the save proceeds.
+    if (subjectTags.length === 0 && !ackEmptyTags) {
+      setShowEmptyTagsWarning(true)
+      return
+    }
+
     const dateObj = new Date(date + 'T00:00:00')
     const parsedMaterials = materials
       .split(',')
@@ -418,7 +465,7 @@ export default function LabReportForm({
     date, title, labType, question, description, childReports, children, materials,
     roles, subjectTags, skillTags, virtueTag, dadReflection,
     bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
-    arcId, arcStepIndex, markArcStepDone, linkedArc, completeStep,
+    arcId, arcStepIndex, markArcStepDone, linkedArc, completeStep, ackEmptyTags,
   ])
 
   const disabled = readOnly === true
@@ -461,10 +508,13 @@ export default function LabReportForm({
         <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
           Lab Type
         </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+          Sets the default subjects below — edit anytime.
+        </Typography>
         <ToggleButtonGroup
           value={labType}
           exclusive
-          onChange={(_, val) => val && setLabType(val)}
+          onChange={(_, val) => val && handleLabTypeChange(val)}
           disabled={disabled}
           sx={{ flexWrap: 'wrap' }}
         >
@@ -786,6 +836,25 @@ export default function LabReportForm({
             />
           ))}
         </Stack>
+
+        {/* FEAT-55: empty-tags warning — no longer a silent zero-hours save. */}
+        {!disabled && showEmptyTagsWarning && subjectTags.length === 0 && (
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            No subjects selected — this lab won&apos;t count toward hours. Pick a subject
+            above, or acknowledge to save anyway.
+            <FormControlLabel
+              sx={{ display: 'flex', mt: 0.5 }}
+              control={
+                <Checkbox
+                  checked={ackEmptyTags}
+                  onChange={(e) => setAckEmptyTags(e.target.checked)}
+                  size="small"
+                />
+              }
+              label="Save anyway (no hours credited)"
+            />
+          </Alert>
+        )}
       </Box>
 
       {/* Skill Tags */}
