@@ -11,6 +11,7 @@ import CertificateScanSection from './CertificateScanSection'
 import CurriculumTab from './CurriculumTab'
 import DispositionProfile from './DispositionProfile'
 import FoundationsDiagPanel from './FoundationsDiagPanel'
+import FoundationsReviewLauncher from '../foundations-review/FoundationsReviewLauncher'
 import LearningMap from './learning-map/LearningMap'
 import MonthlyBooksTab from '../monthly-review/MonthlyBooksTab'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
@@ -55,6 +56,12 @@ export default function ProgressPage() {
           </Typography>
           <CertificateScanSection />
         </SectionCard>
+      </Container>
+      {/* Foundations Review Chat (FEAT-51, slice 2a) — parent-only (Progress is a
+          parentOnly route). The primary interface for feeding the Learner Model
+          until the full Foundations tab lands (slice 3). */}
+      <Container maxWidth="lg" sx={{ py: 1 }}>
+        <FoundationsReviewLauncher />
       </Container>
       {/* Flag-gated ( ?diag=1 ), parent-only — Learner Model seeder + preview (FEAT-48). */}
       <Container maxWidth="lg" sx={{ py: 0 }}>

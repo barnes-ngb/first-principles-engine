@@ -153,6 +153,30 @@ export interface OpenQuestion {
  * - `no-data` — nothing to seed from (empty snapshot + no sight words).
  * - `synthesized` — the LLM judgment layer has run (slice 3).
  */
+/**
+ * One persisted message in a Foundations Review Chat session (FEAT-51, slice 2a).
+ * `hidden` marks the priming turn that carries the review agenda — sent to the CF
+ * but never rendered. Persisting messages is how the session survives "end + come
+ * back": staged (unconfirmed) proposals are re-derived by re-parsing the latest
+ * assistant message, exactly as `shellyChat` re-derives its staging from the
+ * stored thread (the staging state itself is ephemeral React state in both).
+ */
+export interface ReviewSessionMessage {
+  role: 'user' | 'assistant'
+  content: string
+  hidden?: boolean
+  at: string
+}
+
+/** A persisted Review-Chat session. Doc ID: `{childId}_{domain}`. */
+export interface LearnerReviewSession {
+  id?: string
+  childId: string
+  domain: string
+  messages: ReviewSessionMessage[]
+  updatedAt: string
+}
+
 export interface LearnerModel {
   id?: string
   childId: string
