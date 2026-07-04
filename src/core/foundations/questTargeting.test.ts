@@ -159,3 +159,94 @@ describe('applyQuestResultsToModel — no-op on empty', () => {
     expect(applied.changedConceptIds).toEqual([])
   })
 })
+
+describe('applyQuestResultsToModel — worked examples', () => {
+  it('upgrades a queued forming concept to solid on 2/2, appends quest evidence, a change line, and resolves the ask', () => {
+    const conceptId = 'reading.phonics.blends'
+    const m = model({
+      conceptStates: {
+        [conceptId]: {
+          state: 'forming',
+          evidence: [
+            { kind: 'curriculumPosition', sourceId: 'fastPhonics', note: 'Covered in Fast Phonics Peak 13', observedAt: '2026-07-01T00:00:00.000Z' },
+          ],
+          seededAt: '2026-07-01T00:00:00.000Z',
+        },
+      },
+      openQuestions: [ask(conceptId, { reason: 'Covered in Fast Phonics; confirm with a check.' })],
+    })
+
+    const results = computeQuestConceptResults([
+      { targetConceptId: conceptId, correct: true },
+      { targetConceptId: conceptId, correct: true },
+    ])
+    const { model: next, changedConceptIds } = applyQuestResultsToModel(m, results, 'interactive_child-1_123', NOW)
+
+    // State moved up.
+    expect(next.conceptStates[conceptId].state).toBe('solid')
+    expect(changedConceptIds).toEqual([conceptId])
+    // Prior evidence kept; a quest ref appended.
+    const ev = next.conceptStates[conceptId].evidence
+    expect(ev).toHaveLength(2)
+    expect(ev[1].kind).toBe('quest')
+    expect(ev[1].sourceId).toBe('interactive_child-1_123')
+    expect(ev[1].note).toContain('2/2')
+    // A deterministic change-feed line, sourced quest.
+    expect(next.changeFeed.at(-1)).toMatchObject({ conceptId, from: 'forming', to: 'solid' })
+    expect(next.changeFeed.at(-1)?.cause).toContain('quest:')
+    // The consumed ask is resolved (kept, stamped) — non-blocking for future re-queue.
+    expect(next.openQuestions[0].resolvedAt).toBe(NOW)
+    expect(next.openQuestions[0].resolvedBySessionId).toBe('interactive_child-1_123')
+    expect(selectQuestTargets(next)).toEqual([]) // no longer waiting
+  })
+
+  it('on a struggle (1/2) leaves state unchanged but appends evidence and still resolves the ask (no-shame)', () => {
+    const conceptId = 'reading.phonics.longVowels'
+    const m = model({
+      conceptStates: {
+        [conceptId]: { state: 'frontier', evidence: [], seededAt: NOW },
+      },
+      openQuestions: [ask(conceptId)],
+    })
+    const results = computeQuestConceptResults([
+      { targetConceptId: conceptId, correct: true },
+      { targetConceptId: conceptId, correct: false },
+    ])
+    const { model: next, changedConceptIds } = applyQuestResultsToModel(m, results, 's2', NOW)
+
+    expect(next.conceptStates[conceptId].state).toBe('frontier') // unchanged
+    expect(changedConceptIds).toEqual([]) // no state change → no change-feed entry
+    expect(next.changeFeed).toHaveLength(0)
+    expect(next.conceptStates[conceptId].evidence.at(-1)?.kind).toBe('quest') // evidence still recorded
+    expect(next.openQuestions[0].resolvedAt).toBe(NOW) // the check happened — ask consumed
+  })
+
+  it('moves a queued not-yet concept at most to forming on 2/2', () => {
+    const conceptId = 'reading.phonics.digraphs'
+    const m = model({
+      conceptStates: { [conceptId]: { state: 'not-yet', evidence: [], seededAt: NOW } },
+      openQuestions: [ask(conceptId)],
+    })
+    const results = computeQuestConceptResults([
+      { targetConceptId: conceptId, correct: true },
+      { targetConceptId: conceptId, correct: true },
+    ])
+    const { model: next } = applyQuestResultsToModel(m, results, 's3', NOW)
+    expect(next.conceptStates[conceptId].state).toBe('forming')
+  })
+
+  it('records evidence + upgrade for a tagged concept even with no queued ask', () => {
+    const conceptId = 'reading.phonics.cvc'
+    const m = model({
+      conceptStates: { [conceptId]: { state: 'forming', evidence: [], seededAt: NOW } },
+      openQuestions: [],
+    })
+    const results = computeQuestConceptResults([
+      { targetConceptId: conceptId, correct: true },
+      { targetConceptId: conceptId, correct: true },
+    ])
+    const { model: next } = applyQuestResultsToModel(m, results, 's4', NOW)
+    expect(next.conceptStates[conceptId].state).toBe('solid')
+    expect(next.openQuestions).toEqual([]) // nothing to resolve
+  })
+})

@@ -11,6 +11,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, learnerModelsCollection, sightWordProgressCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { selectQuestTargets } from '../../core/foundations/questTargeting'
 import type { QuestTargetConcept } from '../../core/foundations/questTargeting'
+import { syncQuestResultsToModel } from './questModelSync'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ConceptualBlock, EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import {
@@ -986,6 +987,18 @@ export function useQuestSession() {
       } catch (err) {
         console.error('Failed to save quest session', err)
       }
+
+      // FEAT-54 — fold any queued preferred-concept results back into the learner
+      // model (quest evidence + conservative upgrade + resolve the consumed asks).
+      // Fire-and-forget + no-ops when the session tagged no concept — never blocks
+      // close, and leaves the snapshot/findings pipeline (below) untouched.
+      void syncQuestResultsToModel(
+        familyId,
+        activeChildId,
+        docId,
+        questions,
+        new Date().toISOString(),
+      )
 
       // Log instructional hours (idle-aware timer)
       if (!hoursLoggedRef.current) {
