@@ -16,12 +16,25 @@
  * client-only static data, so it is summarized per concept in the agenda, never
  * dumped wholesale.
  *
- * Model: Sonnet. No web search, no vision (mid-chat uploads are slice 2b).
+ * Model: Sonnet. No web search. Vision arrives with slice 2b (FEAT-53): a parent
+ * can attach photo(s) + a one-line context; the handler detects `[IMAGE_URL:…]`
+ * markers on the last user message and routes to the URL-vision helper.
  */
 import type { ChatTaskContext, ChatTaskResult, ChatTaskMessage } from "../chatTypes.js";
-import { callClaude, logAiUsage } from "../chatTypes.js";
+import { callClaude, callClaudeWithVisionUrls, logAiUsage } from "../chatTypes.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { modelForTask } from "../chat.js";
+
+/** Pull leading `[IMAGE_URL:…]` markers (one or more) off a message content. */
+const IMAGE_MARKER_RE = /\[IMAGE_URL:(https?:\/\/[^\]]+)\]/g;
+export function extractImageUrls(content: string): { urls: string[]; text: string } {
+  const urls: string[] = [];
+  let m: RegExpExecArray | null;
+  IMAGE_MARKER_RE.lastIndex = 0;
+  while ((m = IMAGE_MARKER_RE.exec(content)) !== null) urls.push(m[1]);
+  const text = content.replace(IMAGE_MARKER_RE, "").trim();
+  return { urls, text };
+}
 
 // ── The review agenda (client → CF) ─────────────────────────────
 
@@ -165,13 +178,37 @@ ${agendaSection}`;
   const model = modelForTask("foundationsReview" as never);
   const recentMessages = cleanMessages.slice(-20);
 
-  const result = await callClaude({
-    apiKey,
-    model,
-    maxTokens: 1500,
-    systemPrompt,
-    messages: recentMessages,
-  });
+  // Vision path: if the last user message carries image markers (a mid-chat
+  // upload, slice 2b), route to the URL-vision helper so the model can read the
+  // photo(s). Transport mirrors shellyChat; the extraction instructions live in
+  // the system prompt. Otherwise, the plain text path (unchanged from 2a).
+  const lastUserMsg = [...recentMessages].reverse().find((m) => m.role === "user");
+  const imaged = lastUserMsg ? extractImageUrls(lastUserMsg.content) : { urls: [], text: "" };
+
+  let result: { text: string; inputTokens: number; outputTokens: number };
+  if (lastUserMsg && imaged.urls.length > 0) {
+    console.log(`[foundationsReview] Vision path — ${imaged.urls.length} image(s)`);
+    const priorMessages = recentMessages
+      .filter((m) => m !== lastUserMsg)
+      .map((m) => ({ role: m.role, content: m.content }));
+    result = await callClaudeWithVisionUrls({
+      apiKey,
+      model,
+      maxTokens: 1500,
+      systemPrompt,
+      imageUrls: imaged.urls,
+      textPrompt: imaged.text || "Here is a photo — extract what you can and propose it.",
+      messages: priorMessages,
+    });
+  } else {
+    result = await callClaude({
+      apiKey,
+      model,
+      maxTokens: 1500,
+      systemPrompt,
+      messages: recentMessages,
+    });
+  }
 
   if (!result.text) {
     console.warn("Claude returned empty response", { model, taskType: "foundationsReview" });

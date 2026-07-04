@@ -3,7 +3,10 @@
 // Owns one subject-scoped review session end to end, mirroring the shellyChat
 // flow (send → parse actions → stage → confirm → write) but wired to the
 // foundationsReview task + the learnerModels write layer. It NEVER touches the
-// Shelly chat or its state.
+// shellyChat feature or its state.
+//
+// Slice 2b adds `uploadImages` — attach photo(s) + a one-line context to a turn.
+// The transport mirrors shellyChat (compress → Storage → `[IMAGE_URL:…]` markers).
 //
 // Persistence mirrors shellyChat's: the *messages* persist (to one
 // `learnerReviewSessions/{childId}_{domain}` doc) so a session survives "end +
@@ -13,12 +16,16 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
 import { TaskType, useAI } from '../../core/ai/useAI'
 import {
   learnerModelsCollection,
   learnerReviewSessionsCollection,
 } from '../../core/firebase/firestore'
+import { storage } from '../../core/firebase/storage'
+import { compressIfNeeded } from '../../core/utils/compressImage'
+import { buildUploadMessageContent } from './uploadImageMessage'
 import {
   FOUNDATION_NODE_MAP,
   foundationNodesForDomain,
@@ -93,6 +100,7 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
   const [pending, setPending] = useState<PendingReviewAction[]>([])
   const [applied, setApplied] = useState<FoundationsReviewAction[]>([])
   const [sending, setSending] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [ended, setEnded] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -140,7 +148,7 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
         messages: convo.map((m) => ({ role: m.role, content: m.content })),
       })
       if (!response?.message) {
-        setError('Shelly could not respond — try again.')
+        setError('The Learning Engine could not respond — try again.')
         return convo
       }
       const { cleanText } = parseFoundationsReviewActions(response.message)
@@ -225,6 +233,57 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
     [sending, runTurn],
   )
 
+  /**
+   * Attach photo(s) + a required one-line context to the review. Each image is
+   * compressed and uploaded to Storage; the download URLs ride as `[IMAGE_URL:…]`
+   * markers on a single user message (transport mirrors shellyChat). The CF runs
+   * the vision + extraction pass and returns a batch of `<action>` proposals, which
+   * `runTurn` → `restageFrom` grounds and stages as the usual confirm cards.
+   */
+  const uploadImages = useCallback(
+    async (files: File[], context: string) => {
+      const ctx = context.trim()
+      if (files.length === 0 || !ctx || sending || uploading) return
+      setUploading(true)
+      setError(null)
+      try {
+        const urls: string[] = []
+        for (const file of files) {
+          const compressed = await compressIfNeeded(file, 2 * 1024 * 1024, {
+            maxWidth: 1600,
+            maxHeight: 1600,
+          })
+          const stamp = now().replace(/[:.]/g, '-')
+          const path = `families/${familyId}/foundations-review-uploads/${childId}_${domain}/${stamp}_${urls.length}.jpg`
+          const sref = ref(storage, path)
+          await uploadBytes(sref, compressed)
+          urls.push(await getDownloadURL(sref))
+        }
+        const userMsg: ReviewSessionMessage = {
+          role: 'user',
+          content: buildUploadMessageContent(urls, ctx),
+          at: now(),
+        }
+        const convo = [...messagesRef.current, userMsg]
+        setMessages(convo)
+        messagesRef.current = convo
+        setPending([])
+        setSending(true)
+        try {
+          await runTurn(convo)
+        } finally {
+          setSending(false)
+        }
+      } catch (err) {
+        console.error('[foundationsReview] upload failed:', err)
+        setError('Could not read that photo — try again.')
+      } finally {
+        setUploading(false)
+      }
+    },
+    [sending, uploading, familyId, childId, domain, runTurn],
+  )
+
   /** Write one confirmed action to learnerModels (merge-only) + track for recap. */
   const applyAction = useCallback(
     async (action: FoundationsReviewAction) => {
@@ -306,10 +365,12 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
     applied,
     recap,
     sending,
+    uploading,
     ended,
     error,
     start,
     send,
+    uploadImages,
     applyAction,
     dismissAction,
     confirmAll,

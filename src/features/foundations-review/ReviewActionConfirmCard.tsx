@@ -63,7 +63,7 @@ function iconFor(kind: FoundationsReviewAction['kind']) {
 }
 
 /**
- * Inline confirm cards for proposed Review-Chat writes — mirrors the Shelly
+ * Inline confirm cards for proposed Review-Chat writes — mirrors the shellyChat
  * portal's `ActionConfirmCard` (propose → confirm → write) but for the three
  * foundations write paths. Nothing here writes; taps call back into
  * `useFoundationsReview`. Plain language only — no band numbers, no percentages.

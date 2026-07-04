@@ -232,6 +232,60 @@ export async function callClaudeWithVisionUrl(opts: {
   };
 }
 
+/**
+ * Call Claude with one OR MORE URL-based images (+ text) as the final user turn.
+ * Generalizes `callClaudeWithVisionUrl` for the foundations-review upload path,
+ * where a parent may attach a few pages at once. A single-URL call is identical
+ * to the singular helper.
+ */
+export async function callClaudeWithVisionUrls(opts: {
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  systemPrompt: string;
+  imageUrls: string[];
+  textPrompt: string;
+  messages?: Array<{ role: string; content: string }>;
+}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey: opts.apiKey });
+
+  const priorMessages = (opts.messages || []).map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
+
+  const imageBlocks = opts.imageUrls.map((url) => ({
+    type: "image" as const,
+    source: { type: "url" as const, url },
+  }));
+
+  const completion = await client.messages.create({
+    model: opts.model,
+    max_tokens: opts.maxTokens,
+    system: opts.systemPrompt,
+    messages: [
+      ...priorMessages,
+      {
+        role: "user",
+        content: [...imageBlocks, { type: "text" as const, text: opts.textPrompt }],
+      },
+    ],
+  });
+
+  // Concatenate every text block (mirrors callClaude) so nothing is dropped.
+  let text = "";
+  for (const block of completion.content) {
+    if (block.type === "text") text += (text ? "\n\n" : "") + block.text;
+  }
+
+  return {
+    text,
+    inputTokens: completion.usage.input_tokens,
+    outputTokens: completion.usage.output_tokens,
+  };
+}
+
 /** Log AI usage to Firestore (non-throwing). */
 export async function logAiUsage(
   db: Firestore,
