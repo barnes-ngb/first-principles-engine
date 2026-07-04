@@ -4,6 +4,7 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import Collapse from '@mui/material/Collapse'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -19,13 +20,22 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArchiveIcon from '@mui/icons-material/Archive'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import RouteIcon from '@mui/icons-material/Route'
 
 import { EmptyState } from '../../components/states'
-import type { ArcStep, ConceptArc } from '../../core/types'
-import { ArcStepStatus } from '../../core/types/enums'
+import type { ArcStep, ConceptArc, DadLabReport } from '../../core/types'
+import { ArcStepStatus, DadLabStatus } from '../../core/types/enums'
+import { formatDateShort } from '../../core/utils/dateKey'
 
 import { useConceptArcs } from './useConceptArcs'
+
+const REPORT_STATUS_LABELS: Record<DadLabStatus, string> = {
+  [DadLabStatus.Planned]: 'Backlog',
+  [DadLabStatus.Active]: 'Active',
+  [DadLabStatus.Complete]: 'Complete',
+}
 
 const STEP_SEED_PLACEHOLDER = 'e.g. Electricity: static → circuit → switch → motor'
 
@@ -49,21 +59,75 @@ function StepChip({ step }: { step: ArcStep }) {
   return <Chip label={step.title} size="small" variant="outlined" color="default" />
 }
 
+/** One nested lab line under an arc step (title · date · status). */
+function ArcLabRow({ lab }: { lab: DadLabReport }) {
+  return (
+    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+      <Typography variant="body2" noWrap sx={{ minWidth: 0 }}>
+        {lab.title}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+        {formatDateShort(lab.date)}
+      </Typography>
+      <Chip
+        label={REPORT_STATUS_LABELS[lab.status] ?? lab.status}
+        size="small"
+        variant="outlined"
+        color={
+          lab.status === DadLabStatus.Complete
+            ? 'success'
+            : lab.status === DadLabStatus.Active
+              ? 'info'
+              : 'warning'
+        }
+        sx={{ flexShrink: 0, height: 20 }}
+      />
+    </Stack>
+  )
+}
+
 function ArcCard({
   arc,
+  reports,
   onEdit,
   onArchive,
 }: {
   arc: ConceptArc
+  /** Every report linked to THIS arc (any step, any status). */
+  reports: DadLabReport[]
   onEdit: (arc: ConceptArc) => void
   onArchive: (arc: ConceptArc) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
+
+  // Labs linked to this arc but to no valid step index — surfaced so a linked
+  // lab is never hidden by a mismatched/absent step pointer.
+  const unassignedLabs = reports.filter(
+    (r) => typeof r.arcStepIndex !== 'number' || r.arcStepIndex < 0 || r.arcStepIndex >= arc.steps.length,
+  )
+
   return (
     <Card variant="outlined">
       <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
         <Stack direction="row" spacing={1} alignItems="flex-start">
+          <IconButton
+            size="small"
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? 'Hide steps' : 'Show steps + labs'}
+            sx={{ mt: -0.25 }}
+          >
+            {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+          </IconButton>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              flexWrap="wrap"
+              useFlexGap
+              onClick={() => setExpanded((v) => !v)}
+              sx={{ cursor: 'pointer' }}
+            >
               <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                 {arc.title}
               </Typography>
@@ -89,6 +153,52 @@ function ArcCard({
                 No steps yet
               </Typography>
             )}
+
+            {/* Expanded: each step with its linked labs nested beneath. */}
+            <Collapse in={expanded} unmountOnExit>
+              <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+                {arc.steps.map((step, i) => {
+                  const stepLabs = reports.filter((r) => r.arcStepIndex === i)
+                  return (
+                    <Box key={`${step.title}-${i}-detail`}>
+                      <Stack direction="row" spacing={0.75} alignItems="center">
+                        <Typography variant="caption" color="text.secondary" sx={{ minWidth: 16 }}>
+                          {i + 1}.
+                        </Typography>
+                        <StepChip step={step} />
+                      </Stack>
+                      {stepLabs.length > 0 ? (
+                        <Stack spacing={0.25} sx={{ pl: 3, mt: 0.5 }}>
+                          {stepLabs.map((lab) => (
+                            <ArcLabRow key={lab.id} lab={lab} />
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ pl: 3, display: 'block', mt: 0.25 }}
+                        >
+                          No labs yet
+                        </Typography>
+                      )}
+                    </Box>
+                  )
+                })}
+                {unassignedLabs.length > 0 && (
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                      Other labs in this arc
+                    </Typography>
+                    <Stack spacing={0.25} sx={{ pl: 3, mt: 0.5 }}>
+                      {unassignedLabs.map((lab) => (
+                        <ArcLabRow key={lab.id} lab={lab} />
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+              </Stack>
+            </Collapse>
           </Box>
           <Stack direction="row" spacing={0.5}>
             <IconButton size="small" onClick={() => onEdit(arc)} title="Edit arc">
@@ -287,11 +397,28 @@ function ArcEditorDialog({
 
 // ── Section ──
 
-export default function ConceptArcsSection() {
+export default function ConceptArcsSection({
+  reports = [],
+}: {
+  /** All Dad Lab reports; used to nest each arc's linked labs under its steps. */
+  reports?: DadLabReport[]
+}) {
   const { arcs, createArc, updateArc, archiveArc } = useConceptArcs()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editing, setEditing] = useState<ConceptArc | undefined>()
   const [archiveTarget, setArchiveTarget] = useState<ConceptArc | undefined>()
+
+  // Group linked reports by arcId once, so each card gets only its own labs.
+  const reportsByArc = useMemo(() => {
+    const map = new Map<string, DadLabReport[]>()
+    for (const r of reports) {
+      if (!r.arcId) continue
+      const list = map.get(r.arcId)
+      if (list) list.push(r)
+      else map.set(r.arcId, [r])
+    }
+    return map
+  }, [reports])
 
   const handleNew = useCallback(() => {
     setEditing(undefined)
@@ -345,7 +472,13 @@ export default function ConceptArcsSection() {
       {arcs.length > 0 ? (
         <Stack spacing={1.5}>
           {arcs.map((arc) => (
-            <ArcCard key={arc.id} arc={arc} onEdit={handleEdit} onArchive={setArchiveTarget} />
+            <ArcCard
+              key={arc.id}
+              arc={arc}
+              reports={(arc.id && reportsByArc.get(arc.id)) || []}
+              onEdit={handleEdit}
+              onArchive={setArchiveTarget}
+            />
           ))}
         </Stack>
       ) : (
