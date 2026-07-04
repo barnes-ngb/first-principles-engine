@@ -11,10 +11,11 @@
 | `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated May 26, 2026: Design Pass v1 implementation queue added, Faith Stats kid-layer + no-judge vocab guardrail recorded as Key Design Decisions. |
 | `design-pass-v1/` | **CURRENT** | 10 mobile + 6 tablet design mocks + handoff README for v1 refine pass (May 26, 2026) |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
+| `DOCS_ALIGNMENT.md` | **CURRENT** (new 2026-07-04) | Docs & data alignment routine (DOC-08) — the six drift checks run by `scripts/check-docs-alignment.mjs` on every PR (`npm run docs:check`), allowlist discipline, generated collection-count spans, PowerShell-friendly local usage. |
 | `PROCESS_OVERVIEW.md` | **CURRENT** (new 2026-06-20) | How the project is developed (dev loop, ledger discipline), the audit pipeline (daily health / weekly test builder / monthly ARCH_AUDIT / monthly human deep-audit + COLLISION rule), and the kid learning loop with its loose points. **Audits read this first** (linked from `PROMPT_ARCH_AUDIT.md` Step 0). |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative at 37 collections (35 family-scoped + 1 global + 1 settings) + 3 subcollections. |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative; `firestore.ts` defines <!-- gen:collection-count -->43<!-- /gen --> exported collection helpers (count generated + verified by `npm run docs:check`; see `DOCS_ALIGNMENT.md`). |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
@@ -181,6 +182,8 @@ These are family/values documents maintained outside the repo. They inform AI pr
 | `functions/src/ai/chat.ts` | Cloud Function: system prompt assembly, enriched context, quest prompt |
 | `src/features/quest/questTypes.ts` | Knowledge Mine types (QuestState, SessionQuestion, InteractiveSessionData) |
 | `src/features/quest/questAdaptive.ts` | Pure adaptive logic (level up/down, frustration limit, streak calculation) |
+| `scripts/check-docs-alignment.mjs` | Docs & data alignment checker (DOC-08) — 6 drift checks; `npm run docs:check` / `docs:fix`. See `DOCS_ALIGNMENT.md`. |
+| `scripts/docs-alignment.allow.json` | Checker config + allowlists (collection-count docs, EvidenceRef kinds, raw refs) — every entry carries a reason + owning ledger ID. |
 
 ---
 

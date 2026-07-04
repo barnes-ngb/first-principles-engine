@@ -1,4 +1,4 @@
-> **STALE** — does not reflect `chapterBooks` (global, top-level) and `bookProgress` (family-scoped) collections added Apr 10, 2026. Chapter Pool P3 (Apr 12, 2026) added real-time `bookProgress` subscription via `useBookProgress` hook and continued `chapterResponses` writes from the new `ChapterQuestionPool` component.
+> **STALE** — does not reflect `chapterBooks` (global, top-level) and `bookProgress` (family-scoped) collections added Apr 10, 2026. Chapter Pool P3 (Apr 12, 2026) added real-time `bookProgress` subscription via `useBookProgress` hook and continued `chapterResponses` writes from the new `ChapterQuestionPool` component. The enumerated table below is a **March 2026 snapshot**; the live collection count is the generated span in the Summary (verified by `npm run docs:check` — see `DOCS_ALIGNMENT.md`).
 
 # Firestore Audit — 2026-03-21
 
@@ -6,7 +6,7 @@
 
 | Metric | Count |
 |---|---|
-| Total collections defined in `firestore.ts` | 28 |
+| Exported collection helpers in `firestore.ts` (live) | <!-- gen:collection-count -->43<!-- /gen --> |
 | Total composite indexes | 6 |
 | Total field overrides | 7 |
 | Unused composite indexes | 0 |
