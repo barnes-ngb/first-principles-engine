@@ -187,6 +187,17 @@ interface QuestQuestionBase {
    * so `updateBlockerLifecycle` can weight targeted evidence.
    */
   targetedBlockerId?: string
+  /**
+   * FEAT-54 (Learner Model slice 2c) — when the AI weaves in a question for a
+   * **preferred concept** the Foundations Review Chat queued (`openQuestion
+   * { routedTo: 'quest' }`), it echoes that graph concept id here (the
+   * `targetedBlockerId` precedent). Absent on general-pool questions. The client
+   * passes it through to SessionQuestion so session-close can attribute
+   * correct/total per queued concept and fold `quest` evidence back into the
+   * learner model. Invisible to the child — it only tags which questions probed a
+   * queued concept.
+   */
+  targetConceptId?: string
 }
 
 /** Tap-one-option recognition/decoding question (the original quest type). */
@@ -298,6 +309,13 @@ export interface SessionQuestion {
    * incidental evidence when advancing ADDRESS_NOW → RESOLVING → RESOLVED.
    */
   targetedBlockerId?: string
+  /**
+   * FEAT-54 (slice 2c) — the graph concept id the AI stamped when this question
+   * probed a Review-Chat-queued preferred concept (see QuestQuestion.targetConceptId).
+   * Session-close groups answered questions by this id to attribute per-concept
+   * correct/total and write `quest` evidence back to the learner model.
+   */
+  targetConceptId?: string
 }
 
 // ── Extra fields on EvaluationSession for interactive sessions ─

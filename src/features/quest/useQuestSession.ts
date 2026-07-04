@@ -8,7 +8,9 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, sightWordProgressCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, learnerModelsCollection, sightWordProgressCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { selectQuestTargets } from '../../core/foundations/questTargeting'
+import type { QuestTargetConcept } from '../../core/foundations/questTargeting'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { ConceptualBlock, EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import {
@@ -104,6 +106,11 @@ function parseQuestBlock(text: string): QuestQuestion | null {
     const rawTargeted = typeof parsed.targetedBlockerId === 'string'
       ? parsed.targetedBlockerId.trim()
       : ''
+    // FEAT-54 — the AI echoes a queued preferred-concept graph id here (the
+    // targetedBlockerId precedent) so session-close can attribute per-concept results.
+    const rawTargetConcept = typeof parsed.targetConceptId === 'string'
+      ? parsed.targetConceptId.trim()
+      : ''
 
     // ── Build-word (encoding) question ──────────────────────────
     // FEAT-04: the AI emits "type": "build-word" with a target word + a tile
@@ -132,6 +139,7 @@ function parseQuestBlock(text: string): QuestQuestion | null {
         encouragement: parsed.encouragement,
         isBonusRound: parsed.bonusRound ?? undefined,
         targetedBlockerId: rawTargeted ? rawTargeted : undefined,
+        targetConceptId: rawTargetConcept ? rawTargetConcept : undefined,
       }
     }
 
@@ -156,6 +164,7 @@ function parseQuestBlock(text: string): QuestQuestion | null {
       isBonusRound: parsed.bonusRound ?? undefined,
       allowOpenResponse: parsed.allowOpenResponse ?? undefined,
       targetedBlockerId: rawTargeted ? rawTargeted : undefined,
+      targetConceptId: rawTargetConcept ? rawTargetConcept : undefined,
     }
   } catch (err) {
     console.error('[parseQuestBlock] JSON parse failed:', (err as Error).message)
@@ -388,6 +397,9 @@ export function useQuestSession() {
   const [previousSessions, setPreviousSessions] = useState<Array<{ evaluatedAt: string }>>([])
   const activeDomainRef = useRef<EvaluationDomain>('reading')
   const activeQuestModeRef = useRef<QuestMode | undefined>(undefined)
+  // FEAT-54 — preferred concepts the Foundations Review Chat queued for this
+  // session, pulled from the learner model at start (empty when nothing queued).
+  const targetConceptsRef = useRef<QuestTargetConcept[]>([])
 
   // Fluency-specific state
   const [fluencyPassages, setFluencyPassages] = useState<FluencyPassage[]>([])
@@ -492,6 +504,22 @@ export function useQuestSession() {
       } catch (err) {
         console.warn('[startQuest] Failed to load skill snapshot for starting level', err)
       }
+
+      // FEAT-54 — pull any concepts the Foundations Review Chat queued for testing
+      // (learner-model openQuestions, domain-scoped) as PREFERRED concepts. A
+      // seasoning, not the meal: capped, woven at the child's level, never forced.
+      // Read-only + best-effort — a missing/failed model just yields zero targets,
+      // so the session generates exactly as it does today.
+      let targetConcepts: QuestTargetConcept[] = []
+      try {
+        const modelSnap = await getDoc(doc(learnerModelsCollection(familyId), activeChildId))
+        if (modelSnap.exists()) {
+          targetConcepts = selectQuestTargets(modelSnap.data(), { domain })
+        }
+      } catch (err) {
+        console.warn('[startQuest] Failed to load learner model for quest targets', err)
+      }
+      targetConceptsRef.current = targetConcepts
 
       // Build curriculum hint from activity configs (reading domain only)
       if (domain === 'reading') {
@@ -711,6 +739,9 @@ export function useQuestSession() {
           consecutiveWrong: 0,
           totalQuestions: 0,
           totalCorrect: 0,
+          // FEAT-54 — preferred concepts (queued by the Review Chat) for the CF to
+          // weave in at the child's level. Omitted from the payload when empty.
+          ...(targetConcepts.length > 0 ? { targetConcepts } : {}),
         }),
       }
       conversationRef.current = [userMessage]
@@ -1317,6 +1348,7 @@ export function useQuestSession() {
         timestamp: new Date().toISOString(),
         inputMethod: inputMethod || (currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word' || currentQuestion.type === 'build-sentence' ? 'tile' : 'multiple-choice'),
         targetedBlockerId: currentQuestion.targetedBlockerId,
+        targetConceptId: currentQuestion.targetConceptId,
       }
 
       const updatedQuestions = [...answeredQuestions, sessionQ]
@@ -1604,6 +1636,7 @@ export function useQuestSession() {
         responseTimeMs,
         timestamp: new Date().toISOString(),
         targetedBlockerId: currentQuestion.targetedBlockerId,
+        targetConceptId: currentQuestion.targetConceptId,
       }
 
       const updatedQuestions = [...answeredQuestions, sessionQ]

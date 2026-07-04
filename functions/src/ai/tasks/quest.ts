@@ -12,7 +12,26 @@ import { buildContextForTask } from "../contextSlices.js";
 
 // Import quest-specific prompt builder from chat.ts
 import { buildQuestPrompt } from "../chat.js";
-import type { QuestBlockerContext } from "../chat.js";
+import type { QuestBlockerContext, QuestTargetConcept } from "../chat.js";
+
+/** Validate the client-supplied preferred concepts (FEAT-54) — drop malformed entries. */
+function parseTargetConcepts(raw: unknown): QuestTargetConcept[] {
+  if (!Array.isArray(raw)) return [];
+  const out: QuestTargetConcept[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const { conceptId, name, description } = item as Record<string, unknown>;
+    if (typeof conceptId !== "string" || conceptId.length === 0) continue;
+    if (typeof name !== "string" || name.length === 0) continue;
+    out.push({
+      conceptId,
+      name,
+      description: typeof description === "string" ? description : "",
+    });
+    if (out.length >= 3) break; // seasoning cap — mirrors the client selector
+  }
+  return out;
+}
 
 export const handleQuest = async (
   ctx: ChatTaskContext,
@@ -24,10 +43,13 @@ export const handleQuest = async (
 
   // Detect questMode early — needed for domain-filtered history and workingLevels lookup
   let questMode: string | undefined;
+  // FEAT-54 — preferred concepts the Review Chat queued, carried on the start message.
+  let targetConcepts: QuestTargetConcept[] = [];
   if (messages.length > 0) {
     try {
       const firstMsg = JSON.parse(messages[0].content);
       questMode = firstMsg.questMode;
+      targetConcepts = parseTargetConcepts(firstMsg.targetConcepts);
     } catch {
       // Not JSON or missing questMode — use default
     }
@@ -209,7 +231,7 @@ export const handleQuest = async (
       domain || "reading",
       suggestedStartLevel,
       questMode,
-      { activeBlockers, hasRecentScans },
+      { activeBlockers, hasRecentScans, targetConcepts },
       childData.name,
     ),
   );
@@ -217,7 +239,9 @@ export const handleQuest = async (
   console.log(
     `[quest] targeted blockers: ${activeBlockers.length} (${activeBlockers
       .map((b) => `${b.id}:${b.status}`)
-      .join(", ")}), hasRecentScans=${hasRecentScans}`,
+      .join(", ")}), hasRecentScans=${hasRecentScans}, preferredConcepts=${targetConcepts
+      .map((t) => t.conceptId)
+      .join(", ") || "none"}`,
   );
 
   const systemPrompt = sections.join("\n\n");

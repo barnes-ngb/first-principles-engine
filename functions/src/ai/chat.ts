@@ -1290,9 +1290,64 @@ export interface QuestBlockerContext {
   specificWords?: string[];
 }
 
+/**
+ * A concept the Foundations Review Chat queued for a kid-facing check (FEAT-54,
+ * Learner Model slice 2c). Carried plain-language only — kid-word name + one-line
+ * description — so the quest can weave it in without any parent-side vocabulary
+ * ever reaching the child.
+ */
+export interface QuestTargetConcept {
+  conceptId: string;
+  name: string;
+  description: string;
+}
+
 export interface QuestPromptExtras {
   activeBlockers?: QuestBlockerContext[];
   hasRecentScans?: boolean;
+  targetConcepts?: QuestTargetConcept[];
+}
+
+/**
+ * Build the PREFERRED CONCEPTS prompt section (FEAT-54). Returns empty string when
+ * no concepts are queued — so a session with zero targets generates exactly as it
+ * does today (characterized in the tests). Targets ride the adaptive engine as
+ * PREFERRED topics only: woven at the child's current level, never forced, and
+ * abandoned the moment adaptive safety (level-down, frustration, end-on-a-win)
+ * says otherwise. The AI echoes `targetConceptId` on any question that probes one
+ * (the `targetedBlockerId` precedent) so the result can be attributed per concept.
+ */
+export function buildPreferredConceptsSection(
+  targets: QuestTargetConcept[] | undefined,
+): string {
+  if (!targets || targets.length === 0) return "";
+
+  const lines: string[] = [];
+  lines.push("## PREFERRED CONCEPTS — WEAVE IN IF IT FITS");
+  lines.push("");
+  lines.push(
+    "A parent asked to check how the child is doing on these specific concepts. Weave in **up to one question per concept** across the session (at most 3 total — they are a seasoning, not the focus):",
+  );
+  lines.push("");
+  for (const t of targets) {
+    lines.push(`- id="${t.conceptId}" | ${t.name} — ${t.description}`);
+  }
+  lines.push("");
+  lines.push("Rules — these are PREFERENCES, never overrides of the adaptive engine:");
+  lines.push(
+    "- Ask each concept's question **at the child's current session level**. Do NOT jump the level up or down to fit a concept.",
+  );
+  lines.push(
+    "- If the adaptive state says level-down, the child is struggling, or it's time for the end-on-a-win bonus, **skip the preferred concepts entirely** this turn — the child's momentum wins.",
+  );
+  lines.push(
+    "- Distribute them across the session (not all at once), and obey QUESTION VARIETY like any other question.",
+  );
+  lines.push(
+    'For each question that addresses a preferred concept, include a `"targetConceptId"` field in your <quest> JSON matching that concept\'s `id` exactly. Omit it (or set null) on every other question. The child must NOT be able to tell which questions are the checked concepts.',
+  );
+
+  return lines.join("\n");
 }
 
 /**
@@ -1425,7 +1480,10 @@ export function buildQuestPrompt(
   const recentCurriculumSection = buildRecentCurriculumSection(
     extras?.hasRecentScans ?? false,
   );
-  const questExtras = [varietyDirective, blockersSection, recentCurriculumSection]
+  const preferredConceptsSection = buildPreferredConceptsSection(
+    extras?.targetConcepts,
+  );
+  const questExtras = [varietyDirective, blockersSection, recentCurriculumSection, preferredConceptsSection]
     .filter((s) => s.length > 0)
     .join("\n\n");
   const questExtrasBlock = questExtras ? `\n\n${questExtras}\n` : "";
