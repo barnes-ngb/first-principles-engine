@@ -32,10 +32,11 @@ import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
 import type { DadLabReport } from '../../core/types'
 import type { DadLabType } from '../../core/types/enums'
-import { DadLabStatus, SubjectBucket, UserProfile } from '../../core/types/enums'
+import { DadLabStatus, UserProfile } from '../../core/types/enums'
 import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { parseChildRoles } from './childRoles'
+import { subjectsForLabType } from './labTypeSubjects'
 import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
 import { useCalibrationSources } from './useCalibrationSources'
 import ConceptArcsSection from './ConceptArcsSection'
@@ -180,22 +181,22 @@ export default function DadLabPage() {
       const nextSat = getNextSaturday()
       const dateStr = formatDateYmd(nextSat)
 
+      const labType = data.labType ?? 'science'
       const planned: DadLabReport = {
         date: dateStr,
         weekKey: weekKeyFromDate(nextSat),
         title: data.title ?? 'Untitled Lab',
-        labType: data.labType ?? 'science',
+        labType,
         question: data.question ?? '',
         description: data.description ?? '',
         status: DadLabStatus.Planned,
         materials: data.materials,
         childRoles: data.childRoles ?? {},
         childReports: {},
-        subjectTags: [
-          data.labType === 'science' || data.labType === 'engineering'
-            ? SubjectBucket.Science
-            : SubjectBucket.Other,
-        ],
+        // Type → subject routing (FEAT-55): stamp the mapping's defaults at
+        // creation so a planned lab never lands with empty tags (the silent
+        // zero-hours path). Stays editable on LabReportForm.
+        subjectTags: subjectsForLabType(labType),
         totalMinutes: data.duration ?? 60,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
