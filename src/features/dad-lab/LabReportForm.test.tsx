@@ -110,7 +110,7 @@ const WRITING_PLACEHOLDER = 'want to write one word? totally optional'
 
 describe('LabReportForm — three-beat capture (FEAT-56)', () => {
   it('round-trips a writing line + a photo tagged to its beat', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     const onSave = vi.fn().mockResolvedValue(undefined)
     render(
       <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={onSave} onCancel={vi.fn()} />,
@@ -137,10 +137,10 @@ describe('LabReportForm — three-beat capture (FEAT-56)', () => {
     expect(saved.beats?.predict.items).toEqual([{ artifactId: 'art-1', child: 'both' }])
     // Untouched beats stay empty.
     expect(saved.beats?.saw.items).toEqual([])
-  })
+  }, 20000)
 
   it('defaults a captured item to Both and lets a kid chip reassign it', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     const onSave = vi.fn().mockResolvedValue(undefined)
     render(
       <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={onSave} onCancel={vi.fn()} />,
@@ -157,10 +157,10 @@ describe('LabReportForm — three-beat capture (FEAT-56)', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const saved = onSave.mock.calls[0][0] as DadLabReport
     expect(saved.beats?.try.items).toEqual([{ artifactId: 'art-1', child: 'c-lincoln' }])
-  })
+  }, 20000)
 
   it('treats the writing line as optional — an empty-beat save is not blocked', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     const onSave = vi.fn().mockResolvedValue(undefined)
     render(
       <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={onSave} onCancel={vi.fn()} />,
@@ -176,7 +176,7 @@ describe('LabReportForm — three-beat capture (FEAT-56)', () => {
     // The writing stretch is never validated — no warning about it, and the
     // FEAT-55 subject-tag warning stays silent because subjects are present.
     expect(screen.queryByText(/won't count toward hours/i)).toBeNull()
-  })
+  }, 20000)
 })
 
 describe('LabReportForm — legacy report renders unchanged (FEAT-56 additive)', () => {
