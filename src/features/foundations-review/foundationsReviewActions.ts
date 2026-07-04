@@ -1,8 +1,8 @@
 // ── Foundations Review Chat: write layer (FEAT-51, slice 2a) ─────────────
 //
-// This MIRRORS the Shelly portal's propose → confirm → write staging
+// This MIRRORS the shellyChat portal's propose → confirm → write staging
 // (`useShellyChatActions` / `parseChatActions`) but is a **separate, parallel**
-// path so the existing Shelly chat is left completely untouched (the run's HARD
+// path so the existing shellyChat feature is left completely untouched (the run's HARD
 // STOP): a distinct `FoundationsReviewAction` union, its own parser, and its own
 // writer that touches **only** `learnerModels/{childId}`.
 //

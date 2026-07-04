@@ -8,6 +8,14 @@
 export * from './types'
 export { readingGraph, READING_GRAPH_VERSION } from './readingGraph'
 export { mathGraph, MATH_GRAPH_VERSION } from './mathGraph'
+export {
+  fastPhonicsBridge,
+  fastPhonicsUnits,
+  FAST_PHONICS_BRIDGE_VERSION,
+  bridgeForSource,
+  bridgeEvidenceForPosition,
+} from './fastPhonicsBridge'
+export type { BridgeUnit, CurriculumBridge, BridgeEvidence } from './fastPhonicsBridge'
 
 import type { ConceptGraph, ConceptNode, FoundationDomain } from './types'
 import { readingGraph } from './readingGraph'
