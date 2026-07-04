@@ -27,6 +27,7 @@ import { storage } from '../../core/firebase/storage'
 import { compressIfNeeded } from '../../core/utils/compressImage'
 import { buildUploadMessageContent } from './uploadImageMessage'
 import {
+  fastPhonicsBridge,
   FOUNDATION_NODE_MAP,
   foundationNodesForDomain,
 } from '../../core/foundations'
@@ -41,6 +42,7 @@ import {
   parseFoundationsReviewActions,
 } from './foundationsReviewActions'
 import type { FoundationsReviewAction } from './foundationsReviewActions'
+import { groundCoveredProposals } from './uploadGrounding'
 
 /** How many concepts the agenda carries — enough for a ~10-min walk, bounded tokens. */
 const AGENDA_LIMIT = 18
@@ -72,6 +74,28 @@ interface Args {
 const sessionDocId = (childId: string, domain: string) => `${childId}_${domain}`
 const now = () => new Date().toISOString()
 
+/**
+ * The external-curriculum bridge(s) relevant to a domain, in a compact form the CF
+ * folds into the system prompt so the model can map an extracted position (e.g.
+ * "Peak 13") to reading-graph concepts. Single-sourced from the client bridge data
+ * (FEAT-53) and threaded through the persisted agenda marker — no server duplicate.
+ */
+function bridgesForDomain(domain: FoundationDomain) {
+  if (domain !== 'reading') return []
+  return [
+    {
+      source: fastPhonicsBridge.source,
+      version: fastPhonicsBridge.version,
+      units: fastPhonicsBridge.units.map((u) => ({
+        peak: u.peak,
+        phase: u.phase,
+        covers: u.covers,
+        depthOnly: u.depthOnly ?? false,
+      })),
+    },
+  ]
+}
+
 /** Build the review agenda (priority-ordered, plain-language) from a stored model. */
 function buildAgenda(model: LearnerModel | null, domain: FoundationDomain) {
   const nodes = foundationNodesForDomain(domain)
@@ -88,7 +112,7 @@ function buildAgenda(model: LearnerModel | null, domain: FoundationDomain) {
       evidence: (entry?.evidence ?? []).map((e) => e.note).slice(0, 3),
     }
   })
-  return { domain, subjectLabel: domain, concepts }
+  return { domain, subjectLabel: domain, concepts, bridges: bridgesForDomain(domain) }
 }
 
 export function useFoundationsReview({ familyId, childId, domain }: Args) {
@@ -130,11 +154,21 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
     [sessionDocRef, childId, domain],
   )
 
-  /** Re-derive staged proposals from the latest assistant message (like shellyChat). */
+  /** Re-derive staged proposals from the latest assistant message (like shellyChat).
+   *  Every batch is ground-filtered through the bridge: a `covered` proposal against
+   *  a bridged source whose conceptId the extracted peak doesn't cover is dropped
+   *  before staging (the LLM proposes the position; the bridge decides the mapping). */
   const restageFrom = useCallback((assistantContent: string, key: string) => {
     const { actions } = parseFoundationsReviewActions(assistantContent)
+    const { kept, dropped } = groundCoveredProposals(actions)
+    if (dropped.length > 0) {
+      console.info(
+        `[foundationsReview] bridge dropped ${dropped.length} ungrounded proposal(s):`,
+        dropped.map((d) => `${d.action.conceptId} (${d.reason})`),
+      )
+    }
     setPending(
-      actions.map((action, i) => ({ id: `${key}_${i}`, action, status: 'pending' as const })),
+      kept.map((action, i) => ({ id: `${key}_${i}`, action, status: 'pending' as const })),
     )
   }, [])
 
