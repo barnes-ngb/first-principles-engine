@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
+import Collapse from '@mui/material/Collapse'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
@@ -13,6 +15,8 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import SaveIcon from '@mui/icons-material/Save'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 
 import ArtifactGallery from '../../components/ArtifactGallery'
 import AudioRecorder from '../../components/AudioRecorder'
@@ -22,11 +26,19 @@ import { artifactsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useSaveState } from '../../core/hooks/useSaveState'
 import type { Child, ChildLabReport, DadLabReport } from '../../core/types'
-import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
-import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import type { LabBeats } from '../../core/types/dadlab'
+import {
+  BEAT_BOTH,
+  emptyLabBeats,
+  LAB_FRAMEWORKS,
+  labBeatsHaveContent,
+} from '../../core/types/dadlab'
+import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, LabBeatId, SubjectBucket } from '../../core/types/enums'
+import LabCaptureBeats from './LabCaptureBeats'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
 import { normalizeChildRoles, resolveChildReport } from './childRoles'
+import { subjectsForLabType } from './labTypeSubjects'
 import { useConceptArcs } from './useConceptArcs'
 
 // ── Constants ──────────────────────────────────────────────────
@@ -94,6 +106,14 @@ interface LabReportFormProps {
 
 function emptyChildReport(): ChildLabReport {
   return { artifacts: [] }
+}
+
+/** True when any child's legacy per-child fields carry content. Drives the
+ * auto-expand of the "full framework" section on legacy reports. */
+function hasLegacyChildContent(childReports: Record<string, ChildLabReport>): boolean {
+  return Object.values(childReports).some(
+    (cr) => !!(cr?.prediction || cr?.explanation || cr?.observation || cr?.creation || cr?.notes),
+  )
 }
 
 function getChildFields(childName: string) {
@@ -171,12 +191,38 @@ export default function LabReportForm({
     }
     return initial
   })
-  const [subjectTags, setSubjectTags] = useState<string[]>(report?.subjectTags ?? [])
+  // Three-beat capture (FEAT-56). One set of beats per lab — Predict / Try /
+  // What we saw — with per-item kid attribution. Seeded from the report or empty.
+  const [beats, setBeats] = useState<LabBeats>(() => report?.beats ?? emptyLabBeats())
+  const [uploadingBeat, setUploadingBeat] = useState<LabBeatId | null>(null)
+  // "Show full framework" expand — the five-chip framework + legacy per-child
+  // fields, preserved but no longer demanded. Collapsed by default on new labs;
+  // auto-expanded on legacy reports that carry legacy-field content and no beats.
+  const [showFramework, setShowFramework] = useState<boolean>(
+    () => !labBeatsHaveContent(report?.beats) && !!report && hasLegacyChildContent(report.childReports),
+  )
+
+  // Type → subject routing (FEAT-55). A NEW lab seeds its subject tags from the
+  // lab-type mapping (never lands empty); an existing report keeps its stored
+  // tags. `subjectTagsEdited` is the manual-edit-wins guard: a NEW lab starts
+  // unedited so changing the type chip re-derives the defaults, while an
+  // existing report starts edited=true (its tags are already deliberate).
+  const [subjectTags, setSubjectTags] = useState<string[]>(
+    report?.subjectTags ?? subjectsForLabType(report?.labType ?? prefill?.labType ?? DadLabType.Science),
+  )
+  const [subjectTagsEdited, setSubjectTagsEdited] = useState<boolean>(!!report)
   const [skillTags, setSkillTags] = useState<string[]>(report?.skillTags ?? [])
   const [virtueTag, setVirtueTag] = useState(report?.virtueTag ?? '')
   const [dadReflection, setDadReflection] = useState(report?.dadReflection ?? '')
   const [bestMoment, setBestMoment] = useState(report?.bestMoment ?? '')
   const [nextTime, setNextTime] = useState(report?.nextTime ?? '')
+
+  // Empty-tags-at-save visibility (FEAT-55). Saving with zero subject tags no
+  // longer credits zero hours silently (useDadLabReports:61) — the first save
+  // attempt reveals an inline warning that requires an explicit acknowledgment
+  // before the save goes through. Adding any subject clears the block.
+  const [showEmptyTagsWarning, setShowEmptyTagsWarning] = useState(false)
+  const [ackEmptyTags, setAckEmptyTags] = useState(false)
 
   // ── Concept Arc linkage (FEAT-44) — optional ──
   const [arcId, setArcId] = useState(report?.arcId ?? '')
@@ -315,12 +361,112 @@ export default function LabReportForm({
     [familyId, title, children],
   )
 
+  // ── Three-beat capture (FEAT-56) ──
+  // Writing line + per-item attribution are pure state edits; artifact capture
+  // uploads exactly like the legacy path but stamps the additive `labBeat` tag
+  // and appends a per-item beat entry (default attribution: Both).
+
+  const setBeatText = useCallback((beat: LabBeatId, text: string) => {
+    setBeats((prev) => ({ ...prev, [beat]: { ...prev[beat], text } }))
+  }, [])
+
+  const setBeatTextChild = useCallback((beat: LabBeatId, child: string) => {
+    setBeats((prev) => ({ ...prev, [beat]: { ...prev[beat], textChild: child } }))
+  }, [])
+
+  const setBeatItemChild = useCallback((beat: LabBeatId, artifactId: string, child: string) => {
+    setBeats((prev) => ({
+      ...prev,
+      [beat]: {
+        ...prev[beat],
+        items: prev[beat].items.map((it) => (it.artifactId === artifactId ? { ...it, child } : it)),
+      },
+    }))
+  }, [])
+
+  const captureBeatArtifact = useCallback(
+    async (beat: LabBeatId, type: EvidenceType, file: File, filename: string) => {
+      setUploadingBeat(beat)
+      try {
+        const artifact = {
+          // Whole-family lab by default (DATA-04); the real per-item attribution
+          // lives on the beat entry below. Reassigning the kid chip updates the
+          // beat item, not this doc.
+          childId: BEAT_BOTH,
+          title: `Dad Lab ${type === EvidenceType.Audio ? 'recording' : 'photo'} - ${title}`,
+          type,
+          createdAt: new Date().toISOString(),
+          labBeat: beat,
+          tags: {
+            engineStage: 'Build' as const,
+            domain: 'dad-lab',
+            subjectBucket: SubjectBucket.Science,
+            location: 'Home',
+          },
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        setBeats((prev) => ({
+          ...prev,
+          [beat]: {
+            ...prev[beat],
+            items: [...prev[beat].items, { artifactId: docRef.id, child: BEAT_BOTH }],
+          },
+        }))
+      } finally {
+        setUploadingBeat(null)
+      }
+    },
+    [familyId, title],
+  )
+
+  const handleBeatPhoto = useCallback(
+    (beat: LabBeatId, file: File) => {
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      return captureBeatArtifact(beat, EvidenceType.Photo, file, generateFilename(ext))
+    },
+    [captureBeatArtifact],
+  )
+
+  const handleBeatAudio = useCallback(
+    (beat: LabBeatId, blob: Blob) => {
+      const filename = generateFilename('webm')
+      const file = new File([blob], filename, { type: 'audio/webm' })
+      return captureBeatArtifact(beat, EvidenceType.Audio, file, filename)
+    },
+    [captureBeatArtifact],
+  )
+
+  // ── Lab type change (FEAT-55: re-derive subjects unless manually edited) ──
+
+  const handleLabTypeChange = useCallback(
+    (val: DadLabType) => {
+      setLabType(val)
+      // Manual edits always win — only re-derive when the user hasn't touched
+      // the subject checkboxes.
+      if (!subjectTagsEdited) {
+        const derived = subjectsForLabType(val)
+        setSubjectTags(derived)
+        if (derived.length > 0) setShowEmptyTagsWarning(false)
+      }
+    },
+    [subjectTagsEdited],
+  )
+
   // ── Subject tag toggle ──
 
   const toggleSubject = useCallback((subject: string) => {
-    setSubjectTags((prev) =>
-      prev.includes(subject) ? prev.filter((s) => s !== subject) : [...prev, subject],
-    )
+    // Any manual toggle marks the tags as owner-owned so a later type change
+    // won't clobber them.
+    setSubjectTagsEdited(true)
+    setSubjectTags((prev) => {
+      const next = prev.includes(subject)
+        ? prev.filter((s) => s !== subject)
+        : [...prev, subject]
+      if (next.length > 0) setShowEmptyTagsWarning(false)
+      return next
+    })
   }, [])
 
   // ── Skill tag ──
@@ -336,6 +482,13 @@ export default function LabReportForm({
   // ── Save ──
 
   const handleSave = useCallback(async () => {
+    // FEAT-55: no silent zero-hours save. Empty subject tags reveal an inline
+    // warning and require an explicit acknowledgment before the save proceeds.
+    if (subjectTags.length === 0 && !ackEmptyTags) {
+      setShowEmptyTagsWarning(true)
+      return
+    }
+
     const dateObj = new Date(date + 'T00:00:00')
     const parsedMaterials = materials
       .split(',')
@@ -389,6 +542,9 @@ export default function LabReportForm({
       materials: parsedMaterials.length > 0 ? parsedMaterials : undefined,
       childRoles: Object.keys(trimmedRoles).length > 0 ? trimmedRoles : undefined,
       childReports: normalizedChildReports,
+      // Three-beat capture (FEAT-56) — persisted only when it carries content, so
+      // legacy reports and unused beats never write an empty object.
+      beats: labBeatsHaveContent(beats) ? beats : undefined,
       subjectTags: subjectTags as DadLabReport['subjectTags'],
       skillTags: skillTags.length > 0 ? skillTags : undefined,
       virtueTag: virtueTag.trim() || undefined,
@@ -416,12 +572,23 @@ export default function LabReportForm({
     await withSave(() => onSave(reportData))
   }, [
     date, title, labType, question, description, childReports, children, materials,
-    roles, subjectTags, skillTags, virtueTag, dadReflection,
+    roles, subjectTags, skillTags, virtueTag, dadReflection, beats,
     bestMoment, nextTime, totalMinutes, report, isCompleting, onSave, withSave,
-    arcId, arcStepIndex, markArcStepDone, linkedArc, completeStep,
+    arcId, arcStepIndex, markArcStepDone, linkedArc, completeStep, ackEmptyTags,
   ])
 
   const disabled = readOnly === true
+
+  // The three-beat capture surface + the legacy per-child fields appear once a
+  // lab is underway (same gate the per-child fields always used).
+  const showCaptureSurface =
+    isCompleting ||
+    isEditingActive ||
+    isViewingComplete ||
+    (isEditing && report?.status !== DadLabStatus.Planned)
+  // In a read-only completed view, show beats only when they carry content — a
+  // legacy report (no beats) never renders three blank cards.
+  const showBeats = showCaptureSurface && (!disabled || labBeatsHaveContent(beats))
 
   // ── Render ──
 
@@ -461,10 +628,13 @@ export default function LabReportForm({
         <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
           Lab Type
         </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+          Sets the default subjects below — edit anytime.
+        </Typography>
         <ToggleButtonGroup
           value={labType}
           exclusive
-          onChange={(_, val) => val && setLabType(val)}
+          onChange={(_, val) => val && handleLabTypeChange(val)}
           disabled={disabled}
           sx={{ flexWrap: 'wrap' }}
         >
@@ -476,25 +646,8 @@ export default function LabReportForm({
         </ToggleButtonGroup>
       </Box>
 
-      {/* Framework guide for selected lab type */}
-      {LAB_FRAMEWORKS[labType] && (
-        <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider' }}>
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-            {LAB_FRAMEWORKS[labType].label} Framework
-          </Typography>
-          <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
-            {LAB_FRAMEWORKS[labType].steps.map((step, i) => (
-              <Chip
-                key={step}
-                label={`${i + 1}. ${step}`}
-                size="small"
-                variant="outlined"
-                color="primary"
-              />
-            ))}
-          </Stack>
-        </Box>
-      )}
+      {/* FEAT-56: the up-front five-step framework moved behind the "Show full
+          framework" control in the capture surface below — available, never demanded. */}
 
       <TextField
         label="Duration (minutes)"
@@ -644,6 +797,58 @@ export default function LabReportForm({
         </Box>
       )}
 
+      {/* FEAT-56: three-beat capture — the default surface (Predict / Try / What we saw). */}
+      {showBeats && (
+        <LabCaptureBeats
+          question={question}
+          beats={beats}
+          children={children}
+          familyId={familyId}
+          disabled={disabled}
+          uploadingBeat={uploadingBeat}
+          onTextChange={setBeatText}
+          onTextChildChange={setBeatTextChild}
+          onPhotoCapture={handleBeatPhoto}
+          onAudioCapture={handleBeatAudio}
+          onItemChildChange={setBeatItemChild}
+        />
+      )}
+
+      {/* "Show full framework" — the five-chip framework + legacy per-child fields,
+          preserved but no longer demanded. Auto-expanded on legacy reports. */}
+      {showCaptureSurface && (
+        <Box>
+          <Button
+            size="small"
+            onClick={() => setShowFramework((v) => !v)}
+            startIcon={showFramework ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            sx={{ textTransform: 'none' }}
+          >
+            {showFramework ? 'Hide full framework' : 'Show full framework'}
+          </Button>
+          <Collapse in={showFramework} unmountOnExit>
+            <Stack spacing={3} sx={{ mt: 1 }}>
+
+      {/* Framework guide for selected lab type */}
+      {LAB_FRAMEWORKS[labType] && (
+        <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+            {LAB_FRAMEWORKS[labType].label} Framework
+          </Typography>
+          <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
+            {LAB_FRAMEWORKS[labType].steps.map((step, i) => (
+              <Chip
+                key={step}
+                label={`${i + 1}. ${step}`}
+                size="small"
+                variant="outlined"
+                color="primary"
+              />
+            ))}
+          </Stack>
+        </Box>
+      )}
+
       {/* Child contributions summary (shown when editing or completing an active lab) */}
       {(isCompleting || isEditingActive) && (
         <Box>
@@ -764,6 +969,11 @@ export default function LabReportForm({
           )
         })}
 
+            </Stack>
+          </Collapse>
+        </Box>
+      )}
+
       {/* Tags */}
       <Box>
         <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600 }}>
@@ -786,6 +996,25 @@ export default function LabReportForm({
             />
           ))}
         </Stack>
+
+        {/* FEAT-55: empty-tags warning — no longer a silent zero-hours save. */}
+        {!disabled && showEmptyTagsWarning && subjectTags.length === 0 && (
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            No subjects selected — this lab won&apos;t count toward hours. Pick a subject
+            above, or acknowledge to save anyway.
+            <FormControlLabel
+              sx={{ display: 'flex', mt: 0.5 }}
+              control={
+                <Checkbox
+                  checked={ackEmptyTags}
+                  onChange={(e) => setAckEmptyTags(e.target.checked)}
+                  size="small"
+                />
+              }
+              label="Save anyway (no hours credited)"
+            />
+          </Alert>
+        )}
       </Box>
 
       {/* Skill Tags */}

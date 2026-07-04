@@ -396,6 +396,18 @@ export const DadLabStatus = {
 } as const
 export type DadLabStatus = (typeof DadLabStatus)[keyof typeof DadLabStatus]
 
+/**
+ * Three-beat lab capture (FEAT-56) — kid-words replacement for the up-front
+ * five-step Scientific Method framework: Predict / Try / What we saw. Additive:
+ * absent on pre-FEAT-56 reports, which render via the legacy per-child fields.
+ */
+export const LabBeatId = {
+  Predict: 'predict',
+  Try: 'try',
+  Saw: 'saw',
+} as const
+export type LabBeatId = (typeof LabBeatId)[keyof typeof LabBeatId]
+
 // ── Concept Arcs (Dad Lab Concept Arcs — FEAT-44 / builds FEAT-41) ──
 
 /** Status of a single concept beat within an arc. */

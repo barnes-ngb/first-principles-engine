@@ -1,6 +1,7 @@
 import type {
   EngineStage,
   EvidenceType,
+  LabBeatId,
   SessionSymbol,
   StreamKey,
   SubjectBucket,
@@ -41,6 +42,12 @@ export interface Artifact {
   labSessionId?: string
   /** Lab stage when this artifact was captured */
   labStage?: EngineStage
+  /**
+   * Dad Lab capture beat this artifact belongs to (FEAT-56) — Predict / Try /
+   * What we saw. Additive tag; shared Artifact consumers ignore it. Substrate for
+   * the future "audio transcription of beat recordings as model evidence" follow-up.
+   */
+  labBeat?: LabBeatId
   /** Optional link to a project */
   projectId?: string
   /** Week key (YYYY-MM-DD) for the week this artifact belongs to */
