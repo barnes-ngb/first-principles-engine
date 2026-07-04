@@ -997,6 +997,7 @@ export function useQuestSession() {
         activeChildId,
         docId,
         questions,
+        targetConceptsRef.current.map((t) => t.conceptId),
         new Date().toISOString(),
       )
 

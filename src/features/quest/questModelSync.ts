@@ -28,19 +28,27 @@ import type { LearnerModel } from '../../core/types/learnerModel'
  * model. No-ops (no read, no write) when the session tagged no concepts — the
  * overwhelming common case, so an untargeted quest never touches the model.
  *
- * @param questions the session's answered questions (each may carry `targetConceptId`)
- * @param nowIso     the session-close timestamp (caller supplies the clock)
+ * Attribution is restricted to `allowedConceptIds` — the concepts this session was
+ * actually seeded to test (`targetConceptsRef`). A `targetConceptId` the AI stamped
+ * outside that set is dropped before any evidence write, upgrade, or ask-resolution,
+ * so a wandering stamp can never move a concept the parent did not queue.
+ *
+ * @param questions         the session's answered questions (each may carry `targetConceptId`)
+ * @param allowedConceptIds this session's selected target concept ids
+ * @param nowIso            the session-close timestamp (caller supplies the clock)
  */
 export async function syncQuestResultsToModel(
   familyId: string,
   childId: string,
   sessionId: string,
   questions: readonly AnsweredConceptQuestion[],
+  allowedConceptIds: readonly string[],
   nowIso: string,
 ): Promise<void> {
   try {
-    const results = computeQuestConceptResults(questions)
-    if (results.length === 0) return // no queued concept was probed — nothing to write
+    if (allowedConceptIds.length === 0) return // no selected targets — nothing to attribute
+    const results = computeQuestConceptResults(questions, allowedConceptIds)
+    if (results.length === 0) return // no selected concept was probed — nothing to write
 
     const modelRef = doc(learnerModelsCollection(familyId), childId)
     const modelSnap = await getDoc(modelRef)

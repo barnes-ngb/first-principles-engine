@@ -107,14 +107,23 @@ export function selectQuestTargets(
  * stamped on them (the `targetedBlockerId` echo precedent), tallying correct/total
  * per concept. Only questions carrying a real target concept id count; skips are
  * excluded from both correct and total.
+ *
+ * `allowedConceptIds`, when supplied, restricts attribution to **this session's
+ * selected targets** — a stamped id outside that set (the model asked for A, the
+ * AI wandered to B) is dropped, so it never writes evidence, upgrades a state, or
+ * resolves an ask for a concept the session was not actually testing. Omit it to
+ * tally every stamped concept (used by the pure unit tests).
  */
 export function computeQuestConceptResults(
   questions: readonly AnsweredConceptQuestion[],
+  allowedConceptIds?: Iterable<string>,
 ): QuestConceptResult[] {
+  const allow = allowedConceptIds ? new Set(allowedConceptIds) : null
   const byConcept = new Map<string, { correct: number; total: number }>()
   for (const q of questions) {
     const id = q.targetConceptId
     if (!id || !FOUNDATION_NODE_MAP[id] || q.skipped) continue
+    if (allow && !allow.has(id)) continue // outside this session's selected targets — drop
     const tally = byConcept.get(id) ?? { correct: 0, total: 0 }
     tally.total += 1
     if (q.correct) tally.correct += 1

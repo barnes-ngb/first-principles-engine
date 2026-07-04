@@ -128,6 +128,40 @@ describe('computeQuestConceptResults', () => {
       computeQuestConceptResults([{ correct: true }, { correct: false }]),
     ).toEqual([])
   })
+
+  it('drops stamps outside the session selected-target allowlist → zero model writes', () => {
+    // The AI stamped a real graph node that was NOT among this session's targets.
+    const questions = [
+      { targetConceptId: 'reading.phonics.digraphs', correct: true },
+      { targetConceptId: 'reading.phonics.digraphs', correct: true },
+    ]
+    const allowed = ['reading.phonics.blends'] // digraphs is not selected
+    const results = computeQuestConceptResults(questions, allowed)
+    expect(results).toEqual([])
+
+    // …and an empty result set is a genuine no-op on the model (no evidence,
+    // no upgrade, no ask-resolution).
+    const m = model({
+      conceptStates: { 'reading.phonics.digraphs': { state: 'not-yet', evidence: [], seededAt: NOW } },
+      openQuestions: [ask('reading.phonics.digraphs')],
+    })
+    const applied = applyQuestResultsToModel(m, results, 's-wander', NOW)
+    expect(applied.model).toBe(m)
+    expect(applied.changedConceptIds).toEqual([])
+    expect(applied.model.conceptStates['reading.phonics.digraphs'].evidence).toEqual([])
+    expect(applied.model.openQuestions[0].resolvedAt).toBeUndefined()
+  })
+
+  it('keeps stamps that ARE in the allowlist', () => {
+    const results = computeQuestConceptResults(
+      [
+        { targetConceptId: 'reading.phonics.blends', correct: true },
+        { targetConceptId: 'reading.phonics.digraphs', correct: true },
+      ],
+      ['reading.phonics.blends'],
+    )
+    expect(results).toEqual([{ conceptId: 'reading.phonics.blends', correct: 1, total: 1 }])
+  })
 })
 
 describe('upgradedQuestState', () => {
