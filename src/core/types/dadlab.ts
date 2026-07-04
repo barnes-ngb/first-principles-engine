@@ -4,6 +4,7 @@ import type {
   DadLabStatus,
   DadLabType,
   EngineStage,
+  LabBeatId,
   LabSessionStatus,
   ProjectPhase,
   SubjectBucket,
@@ -91,6 +92,55 @@ export interface ChildLabReport {
   notes?: string
 }
 
+// ── Three-beat capture (FEAT-56) ────────────────────────────────
+// Additive layer over ChildLabReport. The default lab capture is three beats in
+// kid words — Predict / Try / What we saw — replacing the up-front five-step
+// framework (now behind an "expand full framework" control). One set of beats per
+// lab, with per-item kid attribution (not duplicated per child). Absent on
+// pre-FEAT-56 reports; those render via the legacy per-child fields untouched.
+
+/** Attribution for a beat item or its writing line: a childId, or 'both'. */
+export const BEAT_BOTH = 'both'
+
+/** One captured photo/audio artifact within a beat, with its own kid attribution. */
+export interface LabBeatItem {
+  /** Artifact doc ID (photo or audio) in the `artifacts` collection. */
+  artifactId: string
+  /** `'both'` (default) or a specific childId (ARCH-40 — no name logic). */
+  child: string
+}
+
+/** One beat's captured content: an optional writing line + captured items. */
+export interface LabBeat {
+  /** The optional single-line writing stretch — inviting, never required. */
+  text?: string
+  /** Attribution for the writing line (`'both'` | childId). */
+  textChild?: string
+  /** Captured photo/audio items, each with per-item attribution. */
+  items: LabBeatItem[]
+}
+
+/** The three beats of a lab capture. Keyed by {@link LabBeatId}. */
+export type LabBeats = Record<LabBeatId, LabBeat>
+
+/** An empty beat (no writing line, no items). */
+export function emptyLabBeat(): LabBeat {
+  return { items: [] }
+}
+
+/** An empty three-beat set. */
+export function emptyLabBeats(): LabBeats {
+  return { predict: emptyLabBeat(), try: emptyLabBeat(), saw: emptyLabBeat() }
+}
+
+/** True when any beat carries a writing line or a captured item. */
+export function labBeatsHaveContent(beats: LabBeats | undefined): boolean {
+  if (!beats) return false
+  return (Object.values(beats) as LabBeat[]).some(
+    (b) => (b.text?.trim().length ?? 0) > 0 || b.items.length > 0,
+  )
+}
+
 /** Framework steps for each lab type */
 export const LAB_FRAMEWORKS: Record<string, { label: string; steps: string[] }> = {
   science: {
@@ -134,6 +184,12 @@ export interface DadLabReport {
   /** @deprecated legacy read-only — normalized via normalizeChildRoles; do not write */
   londonRole?: string
   childReports: Record<string, ChildLabReport>
+  /**
+   * Three-beat capture (FEAT-56) — Predict / Try / What we saw. Additive and
+   * optional: absent on pre-FEAT-56 reports, which render via the legacy
+   * per-child fields in `childReports`. One set of beats, per-item attribution.
+   */
+  beats?: LabBeats
   subjectTags: SubjectBucket[]
   skillTags?: string[]
   virtueTag?: string
