@@ -234,6 +234,51 @@ function ModelPreview({ model }: { model: LearnerModel }) {
           </Box>
         ),
       )}
+      <QueuedForTesting model={model} />
+    </Box>
+  )
+}
+
+/**
+ * The quest queue (FEAT-54, slice 2c) surfaced on the diag preview: each concept
+ * the Review Chat routed to a kid-facing check, with its status — **waiting** or
+ * **tested ✓** with the date the Knowledge Mine resolved it. Extends what the diag
+ * preview already renders; no new page.
+ */
+function QueuedForTesting({ model }: { model: LearnerModel }) {
+  const questAsks = model.openQuestions.filter((q) => q.routedTo === 'quest')
+  if (questAsks.length === 0) return null
+
+  return (
+    <Box sx={{ mb: 1 }}>
+      <Typography variant="caption" sx={{ fontWeight: 700 }}>
+        Queued for testing ({questAsks.length})
+      </Typography>
+      <Divider />
+      <List dense disablePadding>
+        {questAsks.map((q, i) => {
+          const node = FOUNDATION_NODE_MAP[q.conceptId]
+          const tested = Boolean(q.resolvedAt)
+          return (
+            <ListItem key={`${q.conceptId}_${i}`} disableGutters sx={{ py: 0.25, gap: 1 }}>
+              <ListItemText
+                primary={node?.kidName ?? q.conceptId}
+                slotProps={{ primary: { variant: 'body2' } }}
+              />
+              <Chip
+                size="small"
+                variant="outlined"
+                color={tested ? 'success' : 'default'}
+                label={
+                  tested
+                    ? `tested ✓ ${q.resolvedAt?.slice(0, 10)}`
+                    : 'waiting'
+                }
+              />
+            </ListItem>
+          )
+        })}
+      </List>
     </Box>
   )
 }
