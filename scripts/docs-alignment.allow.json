@@ -1,0 +1,39 @@
+{
+  "_readme": "Config + allowlists for scripts/check-docs-alignment.mjs (DOC-08). Every allowlist entry carries a reason + owning ledger ID so the discipline stays reviewable. See docs/DOCS_ALIGNMENT.md.",
+
+  "collectionCountDocs": [
+    "docs/DOCUMENT_INDEX.md",
+    "docs/FIRESTORE_AUDIT.md",
+    "docs/PROJECT_CONTEXT.md"
+  ],
+
+  "evidenceUnions": [
+    { "file": "src/core/types/learnerModel.ts", "constName": "EvidenceKind" }
+  ],
+
+  "evidenceKindsAllow": {
+    "eval": {
+      "reason": "forward declaration; writer lands in Learner Model slice 3",
+      "ledger": "FEAT-46"
+    },
+    "scan": {
+      "reason": "forward declaration; writer lands in Learner Model slice 3",
+      "ledger": "FEAT-46"
+    }
+  },
+
+  "rawRefsAllow": [
+    {
+      "file": "src/features/quest/useQuestSession.ts",
+      "collection": "wordProgress",
+      "reason": "Knowledge Mine word-progress subcollection; no firestore.ts helper by design (FIRESTORE_AUDIT)",
+      "ledger": "FIRESTORE_AUDIT"
+    },
+    {
+      "file": "src/features/progress/useWordWall.ts",
+      "collection": "wordProgress",
+      "reason": "Word Wall reads the same Knowledge Mine word-progress subcollection; no helper by design",
+      "ledger": "FIRESTORE_AUDIT"
+    }
+  ]
+}

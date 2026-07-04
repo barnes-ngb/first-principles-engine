@@ -3,6 +3,7 @@ import {
   buildEvaluationPrompt,
   buildKnownBlockersSection,
   buildPageBeats,
+  buildPreferredConceptsSection,
   buildQuestPrompt,
   buildQuestVarietyDirectiveSection,
   buildRecentCurriculumSection,
@@ -112,6 +113,63 @@ describe("buildRecentCurriculumSection", () => {
     expect(section).toContain("RECENT WORKBOOK SCANS");
     expect(section).toContain("NOT mandatory");
     expect(section).toContain("targetedBlockerId");
+  });
+});
+
+describe("buildPreferredConceptsSection (FEAT-54, slice 2c)", () => {
+  it("returns empty string when there are no queued targets (zero-target characterization)", () => {
+    expect(buildPreferredConceptsSection(undefined)).toBe("");
+    expect(buildPreferredConceptsSection([])).toBe("");
+  });
+
+  it("emits the PREFERRED CONCEPTS framing with plain-language names + the echo instruction", () => {
+    const section = buildPreferredConceptsSection([
+      {
+        conceptId: "reading.phonics.blends",
+        name: "Blend two sounds together",
+        description: "Reads words with blends like stop, frog, jump",
+      },
+    ]);
+    expect(section).toContain("## PREFERRED CONCEPTS");
+    expect(section).toContain('id="reading.phonics.blends"');
+    expect(section).toContain("Blend two sounds together");
+    expect(section).toContain("targetConceptId");
+    // Adaptive safety: preferences never override the engine.
+    expect(section).toContain("current session level");
+    expect(section.toLowerCase()).toContain("skip the preferred concepts");
+    // No parent-side vocabulary leaks to the child.
+    expect(section).not.toContain("band");
+  });
+
+  it("is omitted from the built prompt when no targets are queued, present when they are", () => {
+    const without = buildQuestPrompt(
+      "reading",
+      4,
+      "phonics",
+      { activeBlockers: [], hasRecentScans: false },
+      "Lincoln",
+    );
+    expect(without).not.toContain("## PREFERRED CONCEPTS");
+
+    const withTargets = buildQuestPrompt(
+      "reading",
+      4,
+      "phonics",
+      {
+        activeBlockers: [],
+        hasRecentScans: false,
+        targetConcepts: [
+          {
+            conceptId: "reading.phonics.blends",
+            name: "Blend two sounds together",
+            description: "Reads words with blends",
+          },
+        ],
+      },
+      "Lincoln",
+    );
+    expect(withTargets).toContain("## PREFERRED CONCEPTS");
+    expect(withTargets).toContain("reading.phonics.blends");
   });
 });
 

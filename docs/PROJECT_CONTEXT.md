@@ -42,7 +42,7 @@ A phone-fast family learning notebook: expresses the Charter, runs daily school 
 - TypeScript lines: **~180,677** (src + functions/src)
 - Commits (main): **123**
 - Test files: **181** · Tests passing: **2,744** (per HEALTH_REPORT 2026-06-13 + FEAT-32 full-suite run 2026-06-20; full suite not re-run here)
-- Firestore collection/doc helpers in `firestore.ts`: **37**
+- Firestore collection helpers in `firestore.ts`: **<!-- gen:collection-count -->43<!-- /gen -->** (generated + verified by `npm run docs:check`)
 - Cloud Functions exported: **25**
 - Chat task types (`tasks/index.ts` registry): **19**
 - Routes (`router.tsx`): **35** (incl. new `/business` — Barnes Bros, FEAT-30)

@@ -16,12 +16,25 @@
  * client-only static data, so it is summarized per concept in the agenda, never
  * dumped wholesale.
  *
- * Model: Sonnet. No web search, no vision (mid-chat uploads are slice 2b).
+ * Model: Sonnet. No web search. Vision arrives with slice 2b (FEAT-53): a parent
+ * can attach photo(s) + a one-line context; the handler detects `[IMAGE_URL:…]`
+ * markers on the last user message and routes to the URL-vision helper.
  */
 import type { ChatTaskContext, ChatTaskResult, ChatTaskMessage } from "../chatTypes.js";
-import { callClaude, logAiUsage } from "../chatTypes.js";
+import { callClaude, callClaudeWithVisionUrls, logAiUsage } from "../chatTypes.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { modelForTask } from "../chat.js";
+
+/** Pull leading `[IMAGE_URL:…]` markers (one or more) off a message content. */
+const IMAGE_MARKER_RE = /\[IMAGE_URL:(https?:\/\/[^\]]+)\]/g;
+export function extractImageUrls(content: string): { urls: string[]; text: string } {
+  const urls: string[] = [];
+  let m: RegExpExecArray | null;
+  IMAGE_MARKER_RE.lastIndex = 0;
+  while ((m = IMAGE_MARKER_RE.exec(content)) !== null) urls.push(m[1]);
+  const text = content.replace(IMAGE_MARKER_RE, "").trim();
+  return { urls, text };
+}
 
 // ── The review agenda (client → CF) ─────────────────────────────
 
@@ -37,10 +50,19 @@ interface ReviewAgendaConcept {
   evidence?: string[];
 }
 
+/** A compact external-curriculum bridge, threaded from the client (FEAT-53). */
+interface ReviewAgendaBridge {
+  source: string;
+  version: number;
+  units: Array<{ peak: number; phase: number; covers: string[]; depthOnly?: boolean }>;
+}
+
 interface ReviewAgenda {
   domain: string;
   subjectLabel: string;
   concepts: ReviewAgendaConcept[];
+  /** Bridges for this domain — Fast Phonics for reading; empty for math. */
+  bridges?: ReviewAgendaBridge[];
 }
 
 const AGENDA_RE = /\[FOUNDATIONS_REVIEW\]([\s\S]*?)\[\/FOUNDATIONS_REVIEW\]/;
@@ -90,6 +112,25 @@ export function formatAgenda(agenda: ReviewAgenda | null): string {
 }
 
 /**
+ * Render the curriculum bridge table(s) as a peak → concept reference the model
+ * uses to map an extracted position to reading-graph conceptIds. The CLIENT
+ * re-grounds every proposal against this same table, so the model's mapping is a
+ * proposal, not the final word — but a well-formed proposal saves a round-trip.
+ */
+export function formatBridges(agenda: ReviewAgenda | null): string {
+  const bridges = agenda?.bridges ?? [];
+  if (bridges.length === 0) return "";
+  const blocks = bridges.map((b) => {
+    const rows = b.units.map((u) => {
+      const depth = u.depthOnly ? " (depth only — no new concept)" : "";
+      return `  Peak ${u.peak} (phase ${u.phase}): ${u.covers.join(", ")}${depth}`;
+    });
+    return `BRIDGE for source "${b.source}" (v${b.version}) — a completed peak covers Peaks 1..N cumulatively:\n${rows.join("\n")}`;
+  });
+  return blocks.join("\n\n");
+}
+
+/**
  * The role + rules section. Encodes §11.1–11.2 and the §14 locked display rules.
  * `childId` is threaded into the `<action>` grammar so the model addresses the
  * right child; the app performs the write only on a confirm tap.
@@ -100,7 +141,7 @@ export function buildFoundationsReviewRole(
   subjectLabel: string,
 ): string {
   const name = childName || "your child";
-  return `YOU ARE running a FOUNDATIONS REVIEW for ${name} — a warm, ~10-minute conversation to figure out where ${name} really is in ${subjectLabel}. You and the parent are figuring this out together.
+  return `You are the LEARNING ENGINE, the family's foundations review guide — not a person. You are running a FOUNDATIONS REVIEW for ${name}: a warm, ~10-minute conversation to figure out where ${name} really is in ${subjectLabel}. Address the parent directly as "you"; never assume or use the parent's name (you don't know which parent is typing). Be warm, but honest about being the engine. You and the parent are figuring this out together.
 
 HOW THE REVIEW WORKS:
 - Walk the concepts in THE REVIEW AGENDA in the given order, ONE concept per turn. Never batch several concepts into one message.
@@ -113,6 +154,13 @@ HOW THE REVIEW WORKS:
 - Skip any concept the agenda marks with strong recent evidence — don't re-litigate something already well established.
 - When the parent answers, THEN (and only then) emit the matching action block (see below). If they're just chatting or unsure, ask a gentle follow-up — discussion is NOT a write.
 - End whenever the parent wants. Ending early is not a failure.
+
+WHEN YOU ASK FOR DETAIL — ALWAYS OFFER THE OUTS IN THE SAME BREATH:
+- Fine-grained recall is hard and stressful. Any time you ask a detail question ("does he catch the beginning sound but lose the middle?"), offer these three outs in the SAME message so the parent never feels cornered:
+  1. "Or snap a photo of some recent work and I'll read it" (uploads are available — this is often the easiest path).
+  2. "Or we can just test it" (queues a short, kid-facing quest so ${name} shows it directly).
+  3. "Or 'not sure' is a perfectly good answer — we'll skip it and can come back later" (no shame, revisit anytime).
+- If the parent's answer signals uncertainty ("I think so", "not sure", "hard to say", "maybe"), do NOT press with a second recall-detail follow-up. Move straight to the outs — offer the photo, the test, or the skip — and go to the next concept.
 
 TONE — NO SHAME, EVER:
 - Gaps are normal and expected; "not yet" means "we haven't seen it," never "can't."
@@ -131,7 +179,21 @@ WHEN THE PARENT PICKS A PATH, append the matching action AFTER your prose, one J
 - Path 3 (test it): <action>{"kind":"queueTest","childId":"${childId}","conceptId":"<id>","reason":"<why, brief>"}</action>
 - Path 4 (not yet / skip): emit NOTHING. Just acknowledge kindly and move to the next concept.
 
-CRITICAL: NEVER say a change is saved or done. Say you've PROPOSED it and the parent confirms it with a tap. Be conservative — only emit an action when the parent has clearly indicated a path for THAT concept. One concept, one turn.`;
+IF THE PARENT UPLOADS A PHOTO (with a one-line context) — extract into a SINGLE batch of action blocks. There are TWO kinds of photo; the parent's context tells you which:
+
+A) A CURRICULUM-APP SCREENSHOT (e.g. "these are Fast Phonics" — a progress page, peak/lesson list, quiz results):
+   - Extract the structured POSITION you can actually see: the highest completed peak/lesson number, words-known counts, completion dates, quiz scores.
+   - Map that position through the BRIDGE for the named source (shown below in "CURRICULUM BRIDGES"). A completed peak covers Peaks 1..N cumulatively — propose one \`covered\` action PER concept the bridge lists for the completed position, each with "source":"<bridge source>" and "unit":"Peak N" (N = the highest completed peak, on EVERY covered action so the app can ground the batch). Do NOT invent concepts the bridge doesn't list for that position, and do NOT propose anything ahead of the completed peak.
+   - Words-known counts (e.g. "548 words known", "100% quizzes") are decodable-words-read milestones, NOT sight-word mastery. Attach them as the plain "detail" on the sightWords \`covered\` action ("548 words known · 100% end-of-peak quizzes") — NEVER as an \`attest\`/mastery claim.
+   - If the named source has NO bridge below, extract what you can and propose AT MOST a single generic \`covered\` with the source name and no invented position.
+   - (These \`covered\` proposals are all coverage, not proof — the app caps them and queues a quick check.)
+
+B) A PHOTO OF ${name}'s ACTUAL WORK (e.g. "a spelling page he did", a worksheet):
+   - This is a real observation of ${name}'s work — propose \`attest\` actions grounded ONLY in what is visibly demonstrated. Describe the evidence plainly in "note", dated: e.g. "work sample: spelled CVC and digraph words correctly, pattern words partial".
+   - Choose the state honestly from what the work shows: "solid" if clearly demonstrated well, "forming" if emerging, "frontier" if it's the working edge. A work sample is a parent-confirmed observation, so it MAY reach "solid" for what it clearly shows — unlike curriculum coverage.
+   - Only attest concepts the work actually evidences. If the work is ambiguous, prefer "forming" or ask.
+
+CRITICAL: NEVER say a change is saved or done. Say you've PROPOSED it and the parent confirms it with a tap. Be conservative — only emit an action when the parent has clearly indicated a path for THAT concept (a photo counts as indicating the concepts it shows). One concept, one turn in conversation; a photo may propose several at once.`;
 }
 
 export const handleFoundationsReview = async (
@@ -155,23 +217,48 @@ export const handleFoundationsReview = async (
   const childName = ctx.childData?.name || "";
   const roleSection = buildFoundationsReviewRole(childId, childName, subjectLabel);
   const agendaSection = formatAgenda(agenda);
+  const bridgeSection = formatBridges(agenda);
 
   const systemPrompt = `${sharedContext}
 
 ${roleSection}
 
-${agendaSection}`;
+${agendaSection}${bridgeSection ? `\n\nCURRICULUM BRIDGES (for reading positions from uploaded screenshots):\n${bridgeSection}` : ""}`;
 
   const model = modelForTask("foundationsReview" as never);
   const recentMessages = cleanMessages.slice(-20);
 
-  const result = await callClaude({
-    apiKey,
-    model,
-    maxTokens: 1500,
-    systemPrompt,
-    messages: recentMessages,
-  });
+  // Vision path: if the last user message carries image markers (a mid-chat
+  // upload, slice 2b), route to the URL-vision helper so the model can read the
+  // photo(s). Transport mirrors shellyChat; the extraction instructions live in
+  // the system prompt. Otherwise, the plain text path (unchanged from 2a).
+  const lastUserMsg = [...recentMessages].reverse().find((m) => m.role === "user");
+  const imaged = lastUserMsg ? extractImageUrls(lastUserMsg.content) : { urls: [], text: "" };
+
+  let result: { text: string; inputTokens: number; outputTokens: number };
+  if (lastUserMsg && imaged.urls.length > 0) {
+    console.log(`[foundationsReview] Vision path — ${imaged.urls.length} image(s)`);
+    const priorMessages = recentMessages
+      .filter((m) => m !== lastUserMsg)
+      .map((m) => ({ role: m.role, content: m.content }));
+    result = await callClaudeWithVisionUrls({
+      apiKey,
+      model,
+      maxTokens: 1500,
+      systemPrompt,
+      imageUrls: imaged.urls,
+      textPrompt: imaged.text || "Here is a photo — extract what you can and propose it.",
+      messages: priorMessages,
+    });
+  } else {
+    result = await callClaude({
+      apiKey,
+      model,
+      maxTokens: 1500,
+      systemPrompt,
+      messages: recentMessages,
+    });
+  }
 
   if (!result.text) {
     console.warn("Claude returned empty response", { model, taskType: "foundationsReview" });

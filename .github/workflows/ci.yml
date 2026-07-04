@@ -33,6 +33,21 @@ jobs:
       - name: Run tests
         run: npx vitest run
 
+  docs-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # No install needed — the checker is zero-dependency plain Node.
+      # HARD failures fail the job; SOFT warnings print but exit 0.
+      - name: Docs & data alignment
+        run: npm run docs:check
+
   test-functions:
     runs-on: ubuntu-latest
 

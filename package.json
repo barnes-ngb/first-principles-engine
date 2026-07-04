@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:watch": "vitest --watch",
+    "docs:check": "node scripts/check-docs-alignment.mjs",
+    "docs:fix": "node scripts/check-docs-alignment.mjs --fix",
     "deploy": "npm run build && firebase deploy --except extensions",
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
     "deploy:rules": "firebase deploy --only firestore:rules,storage",

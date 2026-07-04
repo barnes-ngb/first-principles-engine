@@ -1,8 +1,8 @@
 // ── Foundations Review Chat: write layer (FEAT-51, slice 2a) ─────────────
 //
-// This MIRRORS the Shelly portal's propose → confirm → write staging
+// This MIRRORS the shellyChat portal's propose → confirm → write staging
 // (`useShellyChatActions` / `parseChatActions`) but is a **separate, parallel**
-// path so the existing Shelly chat is left completely untouched (the run's HARD
+// path so the existing shellyChat feature is left completely untouched (the run's HARD
 // STOP): a distinct `FoundationsReviewAction` union, its own parser, and its own
 // writer that touches **only** `learnerModels/{childId}`.
 //
@@ -164,10 +164,15 @@ const STATE_RANK: Record<ConceptStateKind, number> = {
   solid: 3,
 }
 
-/** Append an `openQuestion`, deduped by (conceptId, routedTo). */
+/**
+ * Append an `openQuestion`, deduped by (conceptId, routedTo). A **resolved** entry
+ * (FEAT-54, slice 2c — the kid already played that targeted quest) is treated as
+ * non-blocking, so re-covering / re-queueing a concept after it was tested opens a
+ * fresh ask rather than being silently swallowed by the historical resolved one.
+ */
 function withOpenQuestion(existing: OpenQuestion[], q: OpenQuestion): OpenQuestion[] {
   const dup = existing.some(
-    (e) => e.conceptId === q.conceptId && e.routedTo === q.routedTo,
+    (e) => e.conceptId === q.conceptId && e.routedTo === q.routedTo && !e.resolvedAt,
   )
   return dup ? existing : [...existing, q]
 }

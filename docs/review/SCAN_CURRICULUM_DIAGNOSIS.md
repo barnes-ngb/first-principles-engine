@@ -33,7 +33,7 @@
 `ScanButton.tsx:~24` reads `files?.[0]`; the file/camera inputs lack `multiple`; `useScan.scan` takes one `File`.
 A multi-page worksheet can't be scanned as one unit, and pages can't be queued.
 
-**Addressed by FEAT-44 (2026-07-03).** `ScanButton` gains an opt-in `multiple` mode (gallery accepts N via
+**Addressed by FEAT-52 (2026-07-03).** `ScanButton` gains an opt-in `multiple` mode (gallery accepts N via
 `multiple`; camera stays one-at-a-time) exposing `onCaptureFiles: (files: File[]) => void`, used **only** on the
 Curriculum tab. The tab stages N photos (thumbnails + per-page remove) and a **"Scan N pages"** action processes
 them (see below). The other three scan surfaces keep single-photo `onCapture` unchanged.
@@ -43,7 +43,7 @@ Even with the matcher tightened, applying several scans **concurrently** would r
 the config set before the prior write commits, so parallel scans collide (create/update against stale state). The
 fix must apply a batch/multi-scan **sequentially (await + re-read) or transactionally**, not just fix the matcher.
 
-**Addressed by FEAT-44 (2026-07-03).** The multi-page batch is processed **strictly sequentially** —
+**Addressed by FEAT-52 (2026-07-03).** The multi-page batch is processed **strictly sequentially** —
 `processScanBatch` (`src/features/progress/multiPageScan.ts`) `await`s each page's `scan` **and**
 `syncScanToConfig` before the next page starts (no `Promise.all`). Because the generic find-or-create re-reads
 configs with a fresh `getDocs` on every call, a prior page's write is visible to the next: same-workbook pages
@@ -63,7 +63,7 @@ merge onto one config and distinct workbooks each create their own. This is the 
 - Add `multiple` to `ScanButton` inputs + handle `File[]`; `useScan` accepts multiple; scan pages **sequentially**
   (avoid rate limits + the race above) → apply to configs one at a time (re-reading between). Scope: multi-page
   capture + sequential apply.
-- **Done — FEAT-44 (2026-07-03).** `ScanButton` opt-in `multiple` + `onCaptureFiles`; Curriculum tab stages N
+- **Done — FEAT-52 (2026-07-03).** `ScanButton` opt-in `multiple` + `onCaptureFiles`; Curriculum tab stages N
   pages and calls `processScanBatch` (sequential `scan` → `syncScanToConfig` per page, combined summary; a failed
   page never aborts the rest). `useScan.scan` stays single-file — the loop calls it once per page rather than
   changing its signature. Matcher, hours, and leveling untouched. Review-before-apply and multi-photo on the other
