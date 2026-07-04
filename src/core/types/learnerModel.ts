@@ -143,6 +143,16 @@ export interface OpenQuestion {
   question: string
   routedTo: 'quest' | 'eval' | 'scan'
   reason: string
+  /**
+   * Slice 2c (FEAT-54) — set when a routed check has been consumed (the kid played
+   * the targeted quest). The entry is **kept** (additive history), but a resolved
+   * entry no longer blocks a future re-queue of the same concept (§11.5), and the
+   * parent-visibility queue renders it as "tested ✓" with its date rather than
+   * "waiting". Absent = still waiting.
+   */
+  resolvedAt?: string
+  /** The Knowledge Mine session that produced the evidence resolving this ask. */
+  resolvedBySessionId?: string
 }
 
 /**
