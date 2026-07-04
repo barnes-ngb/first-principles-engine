@@ -75,6 +75,14 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "charter", "childProfile", "skillSnapshot", "activityConfigs",
     "recentHistoryByDomain", "recentScans", "wordMastery", "dadLabReports",
   ],
+  // FEAT-51 (slice 2a): the Foundations Review Chat. Deliberately LEAN — the
+  // per-concept review agenda (plain-language names + current state + evidence,
+  // priority-ordered) is computed client-side and rides in the first message, so
+  // the server slices are only the charter (no-shame rails) + childProfile (name/
+  // age/motivators for tone). No skillSnapshot/childSkillMap here: that data is
+  // already synthesized into the agenda the client sends, so re-loading it would
+  // double-print and spend tokens for nothing.
+  foundationsReview: ["charter", "childProfile"],
   // FEAT-43: inline Today Help Card body. Passive signals FIRST (working levels,
   // word mastery, recent scan, per-domain history) so the card is confident even
   // on a low-log week; week focus ties the game to the current theme.

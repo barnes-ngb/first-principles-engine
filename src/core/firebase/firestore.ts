@@ -35,6 +35,7 @@ import type {
   HoursEntry,
   LadderProgress,
   LearnerModel,
+  LearnerReviewSession,
   LessonCard,
   MonthlyReview,
   PlannerConversation,
@@ -539,6 +540,22 @@ export const learnerModelsCollection = (
   collection(db, `families/${familyId}/learnerModels`).withConverter(
     learnerModelConverter,
   ) as CollectionReference<LearnerModel>
+
+const learnerReviewSessionConverter: FirestoreDataConverter<LearnerReviewSession> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as LearnerReviewSession
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/** Persisted Foundations Review Chat sessions. Doc ID: `{childId}_{domain}` (FEAT-51). */
+export const learnerReviewSessionsCollection = (
+  familyId: string,
+): CollectionReference<LearnerReviewSession> =>
+  collection(db, `families/${familyId}/learnerReviewSessions`).withConverter(
+    learnerReviewSessionConverter,
+  ) as CollectionReference<LearnerReviewSession>
 
 // ── Chapter Responses (Read-Aloud Discussion Evidence) ──────────
 
