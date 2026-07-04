@@ -20,9 +20,13 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import LightbulbIcon from '@mui/icons-material/Lightbulb'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import RouteIcon from '@mui/icons-material/Route'
 import VisibilityIcon from '@mui/icons-material/Visibility'
+import Collapse from '@mui/material/Collapse'
 
 import ArtifactGallery from '../../components/ArtifactGallery'
 import { EmptyState, LoadingState } from '../../components/states'
@@ -30,15 +34,17 @@ import { useAI, TaskType } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
-import type { DadLabReport } from '../../core/types'
+import type { ConceptArc, DadLabReport } from '../../core/types'
 import type { DadLabType } from '../../core/types/enums'
 import { DadLabStatus, UserProfile } from '../../core/types/enums'
-import { formatDateShort, weekKeyFromDate } from '../../core/utils/dateKey'
+import { formatDateShort, todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { parseChildRoles } from './childRoles'
+import { groupReportsByMonth } from './dadLabGrouping'
 import { subjectsForLabType } from './labTypeSubjects'
 import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
 import { useCalibrationSources } from './useCalibrationSources'
+import { useConceptArcs } from './useConceptArcs'
 import ConceptArcsSection from './ConceptArcsSection'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
@@ -107,6 +113,7 @@ export default function DadLabPage() {
   const isKid = profile === UserProfile.Lincoln || profile === UserProfile.London
 
   const { reports, loading, saveReport, updateStatus, deleteReport } = useDadLabReports()
+  const { arcs } = useConceptArcs()
   const { children } = useChildren()
   const { sources: calibrationSources } = useCalibrationSources(familyId, children)
   const { chat } = useAI()
@@ -134,6 +141,29 @@ export default function DadLabPage() {
     }
     return { planned: p, active: a, completed: c }
   }, [reports])
+
+  // Completed labs grouped by month/year, newest first (FEAT-55). The current
+  // month is expanded by default; older months collapse. Expansion overrides
+  // live in component state only (not persisted).
+  const monthGroups = useMemo(() => groupReportsByMonth(completed), [completed])
+  const currentMonthKey = todayKey().slice(0, 7)
+  const [monthOverride, setMonthOverride] = useState<Record<string, boolean>>({})
+  const isMonthOpen = useCallback(
+    (key: string) => monthOverride[key] ?? key === currentMonthKey,
+    [monthOverride, currentMonthKey],
+  )
+  const toggleMonth = useCallback(
+    (key: string) => {
+      setMonthOverride((prev) => ({ ...prev, [key]: !(prev[key] ?? key === currentMonthKey) }))
+    },
+    [currentMonthKey],
+  )
+
+  // Arc lookup for the small "part of an arc" chip on a date-grouped lab.
+  const arcById = useMemo(
+    () => new Map(arcs.map((a) => [a.id, a] as const)),
+    [arcs],
+  )
 
   const handleNew = useCallback(() => {
     setEditingReport(undefined)
@@ -379,13 +409,13 @@ export default function DadLabPage() {
       {loading && <LoadingState label="Loading..." />}
 
       {/* ── Concept Arcs (designed lab sequences — FEAT-44) ── */}
-      <ConceptArcsSection />
+      <ConceptArcsSection reports={reports} />
 
-      {/* ── Section 1: Planned Labs ── */}
+      {/* ── Section 1: Backlog ── */}
       {planned.length > 0 && (
         <Box sx={{ mb: 3 }}>
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-            Planned
+            Backlog
           </Typography>
           <Stack spacing={1.5}>
             {planned.map((report) => (
@@ -422,17 +452,54 @@ export default function DadLabPage() {
         </Box>
       )}
 
-      {/* ── Section 3: Completed Labs ── */}
+      {/* ── Section 3: Completed Labs (grouped by month, newest first) ── */}
       {completed.length > 0 && (
         <>
           <Divider sx={{ mb: 2 }} />
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
             Completed
           </Typography>
-          <Stack spacing={1.5} sx={{ mb: 3 }}>
-            {completed.map((report) => (
-              <ReportCard key={report.id} report={report} familyId={familyId} onView={handleView} onEdit={handleEdit} />
-            ))}
+          <Stack spacing={1} sx={{ mb: 3 }}>
+            {monthGroups.map((group) => {
+              const open = isMonthOpen(group.key)
+              return (
+                <Box key={group.key}>
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.5}
+                    onClick={() => toggleMonth(group.key)}
+                    sx={{ cursor: 'pointer', py: 0.5, userSelect: 'none' }}
+                  >
+                    {open ? (
+                      <ExpandLessIcon fontSize="small" color="action" />
+                    ) : (
+                      <ExpandMoreIcon fontSize="small" color="action" />
+                    )}
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                      {group.label}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      ({group.reports.length})
+                    </Typography>
+                  </Stack>
+                  <Collapse in={open} unmountOnExit>
+                    <Stack spacing={1.5} sx={{ mt: 0.5, mb: 1 }}>
+                      {group.reports.map((report) => (
+                        <ReportCard
+                          key={report.id}
+                          report={report}
+                          familyId={familyId}
+                          arc={report.arcId ? arcById.get(report.arcId) : undefined}
+                          onView={handleView}
+                          onEdit={handleEdit}
+                        />
+                      ))}
+                    </Stack>
+                  </Collapse>
+                </Box>
+              )
+            })}
           </Stack>
 
           <Divider sx={{ mb: 2 }} />
@@ -873,11 +940,14 @@ function ActiveLabCard({
 function ReportCard({
   report,
   familyId,
+  arc,
   onView,
   onEdit,
 }: {
   report: DadLabReport
   familyId: string
+  /** Set when this lab is linked to a concept arc — renders a small back-chip. */
+  arc?: ConceptArc
   onView: (report: DadLabReport) => void
   onEdit: (report: DadLabReport) => void
 }) {
@@ -894,9 +964,22 @@ function ReportCard({
             {LAB_TYPE_ICONS[report.labType] ?? ''}
           </Typography>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
-              {report.title}
-            </Typography>
+            <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
+                {report.title}
+              </Typography>
+              {arc && (
+                <Chip
+                  icon={<RouteIcon />}
+                  label={arc.title}
+                  size="small"
+                  variant="outlined"
+                  color="secondary"
+                  sx={{ flexShrink: 0, maxWidth: 160 }}
+                  title={`Part of the "${arc.title}" arc`}
+                />
+              )}
+            </Stack>
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
               <Typography variant="caption" color="text.secondary">
                 {LAB_TYPE_LABELS[report.labType]}
