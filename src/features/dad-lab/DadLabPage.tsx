@@ -46,6 +46,7 @@ import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
 import { useCalibrationSources } from './useCalibrationSources'
 import { useConceptArcs } from './useConceptArcs'
 import ConceptArcsSection from './ConceptArcsSection'
+import HoursRoutingAuditPanel from './HoursRoutingAuditPanel'
 import KidLabView from './KidLabView'
 import LabReportForm from './LabReportForm'
 import LabSuggestions from './LabSuggestions'
@@ -407,6 +408,9 @@ export default function DadLabPage() {
       </Stack>
 
       {loading && <LoadingState label="Loading..." />}
+
+      {/* ── DATA-16 hours routing audit (parent-only, ?diag=1) ── */}
+      <HoursRoutingAuditPanel familyId={familyId} reports={reports} children={children} />
 
       {/* ── Concept Arcs (designed lab sequences — FEAT-44) ── */}
       <ConceptArcsSection reports={reports} />
