@@ -13,6 +13,7 @@ import { handleConundrum } from "./conundrum.js";
 import { handleWeeklyFocus } from "./weeklyFocus.js";
 import { handleScan } from "./scan.js";
 import { handleShellyChat } from "./shellyChat.js";
+import { handleFoundationsReview } from "./foundationsReview.js";
 import { handleChapterQuestions } from "./chapterQuestions.js";
 import { handleBookLookup } from "./bookLookup.js";
 import { handleLessonVideo } from "./lessonVideo.js";
@@ -37,6 +38,7 @@ export const CHAT_TASKS: Record<string, ChatTaskHandler> = {
   weeklyFocus: handleWeeklyFocus,
   scan: handleScan,
   shellyChat: handleShellyChat,
+  foundationsReview: handleFoundationsReview,
   chapterQuestions: handleChapterQuestions,
   bookLookup: handleBookLookup,
   lessonVideo: handleLessonVideo,

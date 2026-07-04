@@ -355,10 +355,18 @@ export function seedLearnerModel(
 
 /**
  * Merge a freshly seeded model over an existing stored one, **preserving any
- * concept whose evidence carries an `attestation`** (a parent override, a future
- * slice-2 feature). Slice 1 never emits attestations, so today this is a no-op
- * guard — but writing it now means a re-seed can never clobber a slice-2 override.
- * Everything else is taken from the fresh seed (seeding is fully recomputable).
+ * concept the Review Chat wrote** — an entry carrying an `attestation` (parent
+ * "I've seen it") or a `curriculumPosition` ("covered in Fast Phonics"). Neither
+ * is recomputable from the deterministic signals the seeder reads, so a re-seed
+ * must never clobber them. **Slice 2a (FEAT-51) creates the first real ones** —
+ * before it, this guard was a no-op forward-declaration.
+ *
+ * Likewise the chat-only judgment arrays — `openQuestions` (queued kid-facing
+ * checks) and `changeFeed` (the "what moved" log) — are appended by the chat and
+ * emptied by the seeder; carry the existing ones forward so a re-seed does not
+ * erase a queued test or the change history. Concept *states* (the recomputable
+ * part) still come from the fresh seed except where a chat-written entry above
+ * pins them.
  */
 export function mergeSeededModel(
   existing: LearnerModel | null | undefined,
@@ -367,12 +375,18 @@ export function mergeSeededModel(
   if (!existing) return seeded
   const merged: Record<string, ConceptStateEntry> = { ...seeded.conceptStates }
   for (const [nodeId, entry] of Object.entries(existing.conceptStates ?? {})) {
-    const hasAttestation = entry.evidence?.some((e) => e.kind === 'attestation')
-    if (hasAttestation) merged[nodeId] = entry
+    const chatWritten = entry.evidence?.some(
+      (e) => e.kind === 'attestation' || e.kind === 'curriculumPosition',
+    )
+    if (chatWritten) merged[nodeId] = entry
   }
   return {
     ...seeded,
     conceptStates: merged,
+    // Carry forward chat-appended judgment arrays the seeder empties.
+    openQuestions:
+      existing.openQuestions?.length ? existing.openQuestions : seeded.openQuestions,
+    changeFeed: existing.changeFeed?.length ? existing.changeFeed : seeded.changeFeed,
     // Keep the original seededAt; this write is an update.
     seededAt: existing.seededAt ?? seeded.seededAt,
   }

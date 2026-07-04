@@ -35,6 +35,7 @@ export const TaskType = {
   WeeklyFocus: "weeklyFocus",
   Scan: "scan",
   ShellyChat: "shellyChat",
+  FoundationsReview: "foundationsReview",
   ChapterQuestions: "chapterQuestions",
   BookLookup: "bookLookup",
   LessonVideo: "lessonVideo",
@@ -96,6 +97,7 @@ export function modelForTask(taskType: TaskType): string {
     case TaskType.WeeklyFocus:
     case TaskType.Scan:
     case TaskType.ShellyChat:
+    case TaskType.FoundationsReview:
     case TaskType.ChapterQuestions:
     case TaskType.BookLookup:
     case TaskType.LessonVideo:

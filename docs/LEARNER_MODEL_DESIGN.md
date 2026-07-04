@@ -1,11 +1,15 @@
 # The Learner Model — Foundations Synthesis ("the central brain")
 
-> **Status:** NEW (design — strategic), v0.1, 2026-07-03. Docs-only. No build assigned.
-> **Ledger anchor:** `FEAT-46` (DESIGN).
-> **Companion drafts (owner curation pending):** [`docs/foundations/READING_GRAPH_V0.md`](./foundations/READING_GRAPH_V0.md), [`docs/foundations/MATH_GRAPH_V0.md`](./foundations/MATH_GRAPH_V0.md).
+> **Status:** AMENDED (design — strategic), v0.2, 2026-07-04. Docs-only. Slice 1 shipped (FEAT-48).
+> **Ledger anchor:** `FEAT-46` (DESIGN); amendment `FEAT-49`.
+> **Companion drafts (owner curation pending):** [`docs/foundations/READING_GRAPH_V0.md`](./foundations/READING_GRAPH_V0.md), [`docs/foundations/MATH_GRAPH_V0.md`](./foundations/MATH_GRAPH_V0.md), [`docs/foundations/FAST_PHONICS_BRIDGE_V0.md`](./foundations/FAST_PHONICS_BRIDGE_V0.md).
+>
+> **Amendment 2026-07-04 (FEAT-49) — driven by the owner's review of the FEAT-48 diag preview against reality.** The seeded model showed 3/350 sight words for a child whose Fast Phonics account shows 548 words known and Peak 13 complete; a 43-row `not-yet` list with "—" evidence proved unreviewable. Six changes, all docs-only: **(§11)** the Foundations *Review Chat* becomes the slice-2 primary interface — a subject-scoped AI conversation that establishes states by evidence or by testing, replacing the browsable list; **(§12)** a new `curriculumPosition` evidence type + an external-curriculum *bridge* (draft: `FAST_PHONICS_BRIDGE_V0.md`) so external programs feed the model; **(§13)** a *covered ≠ mastered* cap (`curriculumPosition` alone maxes at `forming`); **(§14)** parent-surface *display rules* (no band numbers, no percentages, always name the source); **(§15)** slice reorder — the tab is demoted to slice 3 behind the Review Chat, and the weekly-review-adoption finding is logged as a named backlog item. The core model (§§1–8) is unchanged.
 > **Cross-references:** FEAT-35 / FEAT-36 (re-derivation engine — semantics reused), FEAT-40 / FEAT-43 (Help Card — first downstream consumer), FEAT-41 / FEAT-44 (Dad Lab arcs — kept firewalled per D1), ETHOS-03 (concrete-first / modality calibration — the deferred per-child enrichment this fills), ETHOS-01 (charter injection), ETHOS-02 (measurement-sensitivity — the no-scores rail this obeys).
 
 **A note on two run-prompt references, corrected against the code (Step 0 recon):** the brief named "ETHOS-02" and a function `buildCalibrationParagraph` as the modality-calibration seam. Neither is accurate. **ETHOS-02** is the *measurement-sensitivity (mechanics) guardrail*; the modality/calibration ethos is **ETHOS-03** (`CONCRETE_FIRST_ORAL_SCIENCE`). There is **no `buildCalibrationParagraph`** in the repo — per-child calibration today is *hardcoded literal strings* inside `src/features/dad-lab/dadLabPrompts.ts`, and ETHOS-03 explicitly **defers per-child supports to "FEAT-41 slice 2 context enrichment."** That deferred hole is exactly what this model fills; §5 and §7 are written against ETHOS-03, not ETHOS-02.
+
+> **Correction 2026-07-04 (FEAT-51 Step 0.5 — doc drift, amendment convention: the note above is preserved as historical, this appends the current truth).** The paragraph above was accurate when written (FEAT-46/FEAT-49, before PR #1491). It is now **stale**: **ETHOS-04 (PR #1487) shipped a real `buildCalibrationParagraph`** — a pure fn `buildCalibrationParagraph(child, snapshot, skillMap)` in `src/features/dad-lab/dadLabPrompts.ts` (~line 90) plus a `useCalibrationSources.ts` hook — and it **merged before FEAT-49's PR #1491.** The function carries the re-point doc comment (`"Interim source — re-point to LearnerModel.modalityCalibration when FEAT-46 ships"`). **Consequence for §5:** the Dad Lab calibration re-point (Slice 6, §9 / §5.2) is a **function-source swap** — repointing `buildCalibrationParagraph`'s inputs to `LearnerModel.modalityCalibration` — **not** a hardcoded-string deletion. The remaining hardcoded literals in `dadLabPrompts.ts` are the static Context descriptors (age/interest), a different axis than the calibration output (working levels / supports / modality); ETHOS-04's ledger row records that these do not overlap. §5's intent (one synthesized per-child calibration source, not brittle literals) is unchanged; only the mechanism is now "swap the fn's source," already half-built by ETHOS-04.
 
 ---
 
@@ -52,7 +56,7 @@ export interface ConceptNode {
   id: string            // stable id; REUSE curriculumMap ids where one exists (e.g. 'reading.phonics.cvc')
   name: string          // kid-word name — "Sound out short words" (never "CVC decoding")
   description: string   // one-line parent-facing — "Reads simple 3-letter words like cat, run, sit"
-  domain: 'reading' | 'math'         // v1 scope; science/engineering out of scope (see §11)
+  domain: 'reading' | 'math'         // v1 scope; science/engineering out of scope (see §15)
   band: 'K' | '1' | '2' | '3' | '4' | '5'  // grade band, mapped from the repo's level ladders
   underlies: string[]   // edges: concept ids this concept is a prerequisite FOR (a DAG)
   tags?: string[]        // free-text skill-tag substrings the re-derivation engine keys on (§4.3)
@@ -120,13 +124,14 @@ Every concept state carries typed evidence refs. **Tapping a concept shows exact
 export interface EvidenceRef {
   kind: 'eval' | 'quest' | 'scan' | 'sightword' | 'workingLevel'
       | 'teachback' | 'attestation' | 'program' | 'block'
+      | 'curriculumPosition'   // ADDED (FEAT-49) — external-curriculum unit, §12
   sourceId: string       // sessionId / scanId / snapshot ref / word / etc.
   note: string           // human one-liner: "Read cat/run/sit unaided in the Mine, Jun 28"
   observedAt: string
 }
 ```
 
-The nine `kind`s map 1:1 to the Step 0.1 streams. `attestation` (a parent override, §6) is the **highest-quality** kind and is stamped like FEAT-36's manual-freeze. This is the single most important trust feature: the Foundations tab is only believable because every square of terrain is tappable back to the eval / quest session / scan / parent statement behind it.
+The nine `kind`s map 1:1 to the Step 0.1 streams; the tenth, `curriculumPosition` (FEAT-49, §12), is the evidence path for external programs the app never sees directly. `attestation` (a parent override, §6) is the **highest-quality** kind and is stamped like FEAT-36's manual-freeze. This is the single most important trust feature: the Foundations tab is only believable because every square of terrain is tappable back to the eval / quest session / scan / parent statement behind it.
 
 ### 3.3 Modality calibration — first-class, per child, per modality
 
@@ -195,7 +200,7 @@ The single most important mechanical decision: **most of the model is derived de
 
 ### 4.2 Inputs (Step 0.1, all read-only)
 
-`skillSnapshots` (priority skills + gates, supports, stop rules, working levels, completed programs, conceptual blocks), `childSkillMaps` (node states), recent `evaluationSessions` findings, `scans`, `sightWordProgress`, `dadLabReports` *(for calibration signal only — not academic concept states; §11 firewall)*, disposition profile, day-log teach-backs. The model is a **reader** of every one; it is a writer of none of them.
+`skillSnapshots` (priority skills + gates, supports, stop rules, working levels, completed programs, conceptual blocks), `childSkillMaps` (node states), recent `evaluationSessions` findings, `scans`, `sightWordProgress`, `dadLabReports` *(for calibration signal only — not academic concept states; §15 firewall)*, disposition profile, day-log teach-backs. The model is a **reader** of every one; it is a writer of none of them.
 
 ### 4.3 The tag bridge (reuse, don't reinvent)
 
@@ -290,12 +295,20 @@ Timely and specific ("Lincoln's solid on short-vowel words; London's working on 
 
 Ordered so the **first slice produces a real stored model** with zero LLM dependency, and value lands before complexity.
 
-- **Slice 1 — Graph as data + deterministic bootstrap + read-only diag preview. ✅ SHIPPED (FEAT-48).** Shipped: the OWNER-CURATED graphs transcribed to a versioned TS module (`src/core/foundations/` — `types.ts`, `readingGraph.ts` [31 nodes], `mathGraph.ts` [29 nodes], `index.ts`, validation tests); `LearnerModel` types + the `learnerModels/{childId}` collection helper/converter; a pure `seedLearnerModel(graphs, childId, snapshot, skillMap, sightWordData)` that implements the graphs' own seeding sections (band-below-working-level → `solid`, at-level → `frontier`, above → `not-yet`; L7/L8 by node id; sight-word share vs the imported `SIGHT_WORD_MASTERED_THRESHOLD`; gate-3 priority skills + completed programs → `solid`; evidence-only strands → `not-yet`; invariant: every non-`not-yet` state carries ≥1 EvidenceRef; degrades on sparse data), plus `mergeSeededModel` preserving attestation entries on re-seed; and a **parent-only `?diag=1` seed/preview panel** on the Progress page (writes ONLY `learnerModels`, merge). The full Foundations tab (absorbing Learning Profile) is **deferred to slice 2** — the diag preview is the smallest verifiable surface. **This is the smallest thing that produces a real stored model** — useful day one, no AI. *Revert: delete `src/core/foundations/` + the collection writer + the diag panel; nothing else depends on it.*
-- **Slice 2 — LLM synthesis beat.** The Sonnet judgment layer (`whatMattersNext`, `modalityCalibration`, `openQuestions`, `changeFeed`, confidence resolution) + the weekly `onSchedule` + on-demand regenerate. *Revert: fall back to deterministic-only model.*
-- **Slice 3 — `learnerModel` context slice + `plan`/`helpCard` adoption.** Add the slice + formatter; switch the two tasks' `TASK_CONTEXT` lists. *Revert: restore prior slice lists.*
-- **Slice 4 — Dad Lab calibration re-point (ETHOS-03 slice-2 payload).** New `dadLab` task carrying `learnerModel`; delete the hardcoded child strings. *Revert: restore literals.*
-- **Slice 5 — Overrides / attestation + evidence drawer.** Tap-a-concept evidence trail + override→attestation with revert & stale-notice. *Revert: drawer becomes read-only.*
-- **Slice 6 — Ambient line + teach-back suggestions.** The Plan My Week one-liner + cross-child teach-back computation. *Revert: remove the line.*
+> **Reordered 2026-07-04 (FEAT-49).** The owner's review of the slice-1 diag preview showed that a browsable tab over a *starved* model is 43 rows of "—" — unreviewable. **Reading the model beats browsing it, but only AFTER the model is fed.** So the **Review Chat** (which feeds the model by conversation + upload) is promoted to slice 2, and the **Foundations tab** is demoted to slice 3, where its override interaction becomes a thin shortcut to the same attestation write the chat already performs. The LLM synthesis beat and downstream slices renumber accordingly.
+
+- **Slice 1 — Graph as data + deterministic bootstrap + read-only diag preview. ✅ SHIPPED (FEAT-48).** Shipped: the OWNER-CURATED graphs transcribed to a versioned TS module (`src/core/foundations/` — `types.ts`, `readingGraph.ts` [31 nodes], `mathGraph.ts` [29 nodes], `index.ts`, validation tests); `LearnerModel` types + the `learnerModels/{childId}` collection helper/converter; a pure `seedLearnerModel(graphs, childId, snapshot, skillMap, sightWordData)` that implements the graphs' own seeding sections (band-below-working-level → `solid`, at-level → `frontier`, above → `not-yet`; L7/L8 by node id; sight-word share vs the imported `SIGHT_WORD_MASTERED_THRESHOLD`; gate-3 priority skills + completed programs → `solid`; evidence-only strands → `not-yet`; invariant: every non-`not-yet` state carries ≥1 EvidenceRef; degrades on sparse data), plus `mergeSeededModel` preserving attestation entries on re-seed; and a **parent-only `?diag=1` seed/preview panel** on the Progress page (writes ONLY `learnerModels`, merge). **This is the smallest thing that produces a real stored model** — useful day one, no AI. *Revert: delete `src/core/foundations/` + the collection writer + the diag panel; nothing else depends on it.*
+- **Slice 2 — The Foundations Review Chat (§11) — the primary interface. `NEW PRIMARY`.** Subject-scoped review sessions with propose→confirm→write staging; the four response paths (attest / covered-in-curriculum / test-it / not-yet); mid-chat image upload with human context → multi-position extraction; the `attestation` + `curriculumPosition` write path; the external-curriculum bridge data v1 (§12, Fast Phonics from `FAST_PHONICS_BRIDGE_V0.md`); the quest-queue handoff into the existing Knowledge Mine pipeline. Requires the deterministic model (slice 1) to walk; does **not** require the LLM synthesis beat. Split into sub-slices during the build:
+  - **Slice 2a — conversation core. ✅ SHIPPED (FEAT-51).** The `foundationsReview` Sonnet CF task (mirrors `shellyChat`, leaves it untouched — **D9 ADOPTED**); a deterministic client-side priority-order walk (`computeReviewPriority`: frontier → forming → not-yet by `underlies` fan-out; solid skipped) handed to the LLM in the request; the three write paths as a **parallel** `FoundationsReviewAction` staging layer (`attest` → `attestation` EvidenceRef, may reach `solid`; `covered` → `curriculumPosition` EvidenceRef **clamped in code** to at most `forming` per §13; `queueTest` → `openQuestion { routedTo: 'quest', conceptId }` deduped); propose→confirm→write confirm cards; merge-only `learnerModels` writes with a minimal `changeFeed` one-liner; session persistence + recap; §14 locked display rules (no band numbers, no percentages) asserted in a render test. The `curriculumPosition` EvidenceRef (§12.1) is added to the model; the re-seed guard now protects `attestation` **and** `curriculumPosition` entries.
+  - **Slice 2b — mid-chat uploads + the Fast Phonics bridge as a TS data module (§11.3, §12.2). `NEXT`.** Image upload with human context → multi-position extraction; `FAST_PHONICS_BRIDGE_V0.md` transcribed to versioned `src/core/foundations/` bridge data (like the graphs); `via: 'chatUpload'`. Explicitly out of 2a.
+  - **Slice 2c — quest-side intake of the queued checks (§11.5). `NEXT`.** 2a writes `openQuestion { routedTo: 'quest' }` onto the model and shows a "queued for testing" recap, but **no consumer reads `learnerModel.openQuestions` today** (recon: the Knowledge Mine's only targeted-content lever is `skillSnapshots.conceptualBlocks[]`, a different shape on an invariant-protected collection that steers the *next manually-started* quest's content — it does not read the learner model, and 2a must not modify the quest engine). 2c wires the learner-model queue into the Mine (likely: on quest start, translate matching `openQuestions` into the existing `conceptualBlocks` steering, then advance/clear on result). Until then the queue is a durable to-do list the recap surfaces.
+
+  *Revert (all of slice 2): disable the review-chat launch; the seeded model + diag preview stand.*
+- **Slice 3 — Foundations tab proper.** The tab absorbs Learning Profile, renders the richer (chat-fed) model as terrain, dispositions become a section (§6). Tap-a-concept → evidence drawer; **override becomes a thin shortcut to the same `attestation` write the Review Chat already performs** — not a second write path. Demoted from slice 2 because it only reads well once slice 2 has fed the model. *Revert: `/progress` keeps the current Learning Profile tab.*
+- **Slice 4 — LLM synthesis beat.** The Sonnet judgment layer (`whatMattersNext`, `modalityCalibration`, `openQuestions`, `changeFeed`, confidence resolution) + the weekly `onSchedule` + on-demand regenerate. *Revert: fall back to deterministic-only model.*
+- **Slice 5 — `learnerModel` context slice + `plan`/`helpCard` adoption.** Add the slice + formatter; switch the two tasks' `TASK_CONTEXT` lists. *Revert: restore prior slice lists.*
+- **Slice 6 — Dad Lab calibration re-point (ETHOS-03 slice-2 payload).** New `dadLab` task carrying `learnerModel`; delete the hardcoded child strings. *Revert: restore literals.*
+- **Slice 7 — Ambient line + teach-back suggestions.** The Plan My Week one-liner + cross-child teach-back computation. *Revert: remove the line.*
 
 Each slice is a branch + PR; none merged without human review.
 
@@ -313,6 +326,120 @@ Each slice is a branch + PR; none merged without human review.
 | **D6** | Cost ceiling | Per-child weekly + on-demand debounce window (e.g. ≥6h between on-demand regens) | **OPEN** — slice-3 concern; untouched by slice 1 |
 | **D7** ✅ RESOLVED (FEAT-48) | Sight-word / mastery thresholds | Reuse FEAT-36's `SIGHT_WORD_MASTERED_THRESHOLD = 0.8` and gate-3 rule verbatim, or set model-specific ones | **ADOPTED: reuse verbatim** — the seeder imports `SIGHT_WORD_MASTERED_THRESHOLD` and reuses the gate-3 rule; no forked tunable |
 | **D8** | Confidence → ask routing | What confidence level triggers an `openQuestion`, and the default routed surface (quest vs eval) | **OPEN** — slice-3 concern; untouched by slice 1 |
+| **D9** ✅ RESOLVED (FEAT-51) | Review-chat infrastructure to reuse | (a) the `shellyChat` task + `useShellyChatActions` staging; (b) the `evaluationSessions` interactive-eval session pattern | **ADOPTED a — reuse the *pattern*, mirrored not shared, split by role** (slice 2a): a new `foundationsReview` Sonnet task + a **parallel** `FoundationsReviewAction` staging layer (its own union / parser / writer) so the existing Shelly chat is left byte-for-byte untouched (the HARD-STOP the run required — `ChatAction`/`useShellyChatActions` are an allowlist boundary for the Shelly portal, so cramming foundations kinds in would modify its behavior). The **"Test it"** path writes an `openQuestion { routedTo: 'quest' }` for the Knowledge Mine; the kid-side consumer is slice 2c. |
+| **D10** (FEAT-49) | Band-number hint vocabulary | When a difficulty hint is needed on a parent surface, what plain phrase replaces the band number ("early skill" / "usually later" / none) | **OPEN** — §14; band numbers never render regardless (locked); this is only the optional plain-phrase hint |
+| **D11** (FEAT-49) | Starved-source display threshold | When an in-app source is so thin it would mislead (the 3/350 case), omit it vs. show it with a "just getting started in-app" caveat | **OPEN** — §14; lean *omit when a richer external source exists*, else show with caveat |
+
+---
+
+## 11. The Foundations Review Chat (SLICE 2 — the primary interface)
+
+**Amendment 2026-07-04 (FEAT-49).** The owner seeded both children via the FEAT-48 diag preview and reviewed it against reality. The verdict: **a list is the wrong review interface.** Forty-three `not-yet` nodes with "—" evidence is unreviewable — the parent doesn't carry those answers in his head, and the list *raises* questions instead of *resolving* them. The review must be a **conversation** that walks uncertain concepts one at a time and helps establish each state **by evidence or by testing.** This becomes the slice-2 primary interface; the browsable tab (§6) is demoted to slice 3 (§9), where it reads well *because* the chat has fed the model.
+
+### 11.1 Shape
+
+- **Subject-scoped sessions:** "Review reading" / "Review math," launched from the Foundations area.
+- **~10 minutes, endable anytime.** Partial progress is saved; ending early is not a failure (no-shame, MVD-compatible). The session never demands completion.
+- **The AI (Sonnet) walks concepts in priority order:** frontier/forming first, then the `not-yet`s that block the most downstream nodes (ranked by `underlies` fan-out), **skipping anything with fresh strong evidence.** It never re-litigates a `solid` node with recent proof.
+
+### 11.2 Per-concept turn
+
+For each concept the chat presents **plain language only** — the kid-word `name` + the parent description — and **never the band number** (§14). It then offers four response paths:
+
+1. **Attest — "I've seen him do this."** → writes an `attestation` EvidenceRef (+ optional note); state set per the parent's judgment. Highest-quality evidence (§3.2); can reach `solid`.
+2. **Covered in curriculum.** The parent names the source ("we did this in Fast Phonics"). → writes a `curriculumPosition` EvidenceRef (§12); state moves to **at most `forming`** (the covered≠mastered cap, §13) **plus an `openQuestion`** ("verify with a quick quest?").
+3. **Test it.** → queues a targeted **kid-facing** quest for that concept, routing into the **existing Knowledge Mine pipeline** — the *kid* produces the evidence, not the parent. This designs the *queue handoff*, not a new quest engine (§11.5).
+4. **Not yet / skip.** → no write, no judgment. The concept stays where it is.
+
+### 11.3 Uploads mid-chat, with human context (the multi-extraction path)
+
+The FEAT-48 scan flow recognised a Fast Phonics screenshot only as "Reading Eggs" — no positioning. The Review Chat fixes this by adding **human context at upload time:** the parent attaches images **and a line** ("these are Fast Phonics"). The chat then extracts **structured positions** — peak/lesson numbers, word counts, completion dates, quiz scores — and maps them through the bridge (§12) to **MULTIPLE node-evidence proposals in one pass.** One set of screenshots → many `curriculumPosition` proposals across the reading strand, not one vague tag.
+
+### 11.4 All writes are propose → confirm → write
+
+The chat **never writes silently.** It *stages* proposed state changes + their evidence; the parent confirms **per item or "confirm all"**; only then are the `attestation` / `curriculumPosition` entries written to `learnerModels`. This preserves the single-writer discipline the model has held since v1 and reuses the exact staging precedent already in the repo — FEAT-37/38's plan-adjustment staging and the `useShellyChatActions` propose→confirm→write loop (§11.6). **No proposal becomes a write without a confirm tap.**
+
+### 11.5 Session output + the quest-queue handoff
+
+The session ends with a **short recap:** what changed (states + evidence) and what got **queued for testing.** The quest-queue handoff is a thin write: each "Test it" concept emits an `openQuestion { routedTo: 'quest' }` (the existing §3.5 shape) that the Knowledge Mine reads as a targeted-concept request. **No new quest engine** — the handoff hands the concept id to the pipeline that already exists (`evaluationSessions` / `useQuestSession`), and the *kid's* play produces the `quest` EvidenceRef that can then reach `solid`.
+
+### 11.6 Which chat infrastructure to reuse (Open Decision D9 — recommendation)
+
+Two candidates exist in the repo, and the recommendation is to **reuse both, split by role** (not either/or):
+
+- **Parent-facing Review Chat → reuse the `shellyChat` task + `useShellyChatActions` staging.** It *already* implements propose→confirm→write (`stagePendingActions` → confirm cards → `applyChatAction` / `confirmAll`), `<action>`-block parsing, and mid-chat image upload (`useShellyChatFlows`). Scope it with a new `foundationsReview` task variant (subject filter + concept-walk system prompt) rather than a from-scratch chat. This is the lowest-new-code path and inherits the confirm-gating for free.
+- **The "Test it" path → route into the `evaluationSessions` / Knowledge Mine pipeline.** That pattern already produces the **kid** evidence (`useQuestSession`, `EvaluateChatPage`, the `evaluationSessions` store). The Review Chat hands it a concept id; it does the rest.
+
+So: `shellyChat` staging owns the *parent conversation and its confirmed writes*; the eval/quest pipeline owns the *kid-produced verification*. Recorded as D9's lean; final call is the slice-2 build's.
+
+---
+
+## 12. External-curriculum evidence — `curriculumPosition` + the bridge
+
+**Amendment 2026-07-04 (FEAT-49).** The model is **starved, not wrong.** The seeded model showed 3/350 sight words; the child's Fast Phonics account shows **548 words known, 45 sounds, 39 books, Peak 13 complete (June 2026), 100% average end-of-peak quizzes.** His real reading life happens substantially in external curricula and unphotographed workbook pages. The model needs a first-class evidence path for this.
+
+### 12.1 The `curriculumPosition` EvidenceRef
+
+```ts
+export interface CurriculumPositionEvidence extends EvidenceRef {
+  kind: 'curriculumPosition'
+  source: 'fastPhonics' | 'readingEggs' | 'workbook' | string  // the program
+  unit: string          // peak / lesson / page range — "Peak 13", "Unit 4 pp.20-28"
+  detail?: string        // counts / scores — "548 words known · 100% end-of-peak quizzes"
+  capturedAt: string
+  via: 'chatUpload' | 'scan' | 'manual'
+}
+```
+
+### 12.2 The bridge — external units → graph node ids (versioned data)
+
+A **bridge** maps external-curriculum units to graph node ids, **stored as versioned data like the graphs** (a PR-reviewed TS module, `version` bumped on curation). Semantics:
+
+- Completing unit X = **`covered` evidence** for the mapped nodes [...].
+- Internal-program thresholds (e.g. 100% end-of-peak quizzes) **may promote *within* `forming`** but **NEVER to `solid`** without independent verification (quest / eval / attestation). This is the §13 cap, applied to bridge data.
+- **Sight words are multi-source:** an external "words-known" count is evidence on `reading.phonics.sightWords` **alongside** the in-app `sightWordProgress` tracker — the model takes the **best-supported** source (548 external dominates 3 in-app), not a raw sum.
+
+### 12.3 Deliverable of this run
+
+**[`docs/foundations/FAST_PHONICS_BRIDGE_V0.md`](./foundations/FAST_PHONICS_BRIDGE_V0.md)** — a draft mapping of Fast Phonics **Peaks 1–20** to reading-graph node ids, reconstructed from the published Fast Phonics scope & sequence, **marked DRAFT PENDING OWNER CURATION** (same workflow as the graphs). It includes the bridge data shape, a worked "Peak 13 complete" example, the sight-word multi-source rule, and a **scope-&-sequence gaps** section flagging where per-peak grapheme boundaries are uncertain and need verification against the account.
+
+### 12.4 Scan-pipeline tie-in (LATER slice)
+
+Certificates / progress reports recognised by the **existing scan flow** route through the **same bridge** later. **Chat-upload is the v1 path** (§11.3); scan-ingest is the follow-on — both converge on one bridge, authored once.
+
+---
+
+## 13. Covered ≠ mastered (state-machine rule)
+
+**Amendment 2026-07-04 (FEAT-49).** The child has "gone over" many concepts in books without page-by-page photos. Coverage must be **representable without claiming mastery** — the owner explicitly does **not** want covered content marked `solid` on inference alone.
+
+**The rule, made explicit in the model:**
+
+- A `curriculumPosition` EvidenceRef **alone** caps a concept at **`forming`** and attaches an **`openQuestion`** ("verify with a quick quest?"). It can never, by itself, reach `solid`.
+- **`solid` requires at least one of:** a quest/eval finding, a parent `attestation`, or (future) sustained multi-source signal.
+- A program's own internal quiz (even 100%) raises **confidence within `forming`** but is not the app's independent verification — it does not cross to `solid` on its own.
+
+This keeps the terrain honest: "covered" reads as *forming with a route to verify*, never as a false `solid`.
+
+---
+
+## 14. Parent-surface display rules
+
+**Amendment 2026-07-04 (FEAT-49).** Jargon leaked into the diag screen: "band 4" meant nothing to the owner, and "3/350 (1%)" read as failure. These rules apply to **slice-2+ surfaces** (the Review Chat, the Foundations tab); the FEAT-48 diag panel may be grandfathered.
+
+1. **Band numbers never render on parent surfaces.** If a difficulty hint is genuinely needed, use a plain phrase ("early skill", "usually later") — exact vocabulary is Open Decision **D10**. The band is a seeding coordinate, not a parent-facing label.
+2. **No percentages anywhere on Foundations surfaces.** Counts render with source attribution — "3 of the 350 tracked in-app" style — **or are omitted** when a starved in-app source would mislead (the 1% lesson; Open Decision **D11**). A raw "1%" is never shown.
+3. **Evidence lines always name their source in plain words:** "from the June evaluation", "Fast Phonics Peak 13", "you confirmed this." Every state is traceable to a source a parent recognises.
+
+---
+
+## 15. Out of scope & backlog
+
+**V1 non-goals (named, not built):** kid-facing Foundations views; **science / engineering** as academic concept domains (Dad Lab arcs keep their own `steps[].status` coverage per FEAT-41 **D1**, firewalled from the academic model — the §15 firewall referenced in §1.1 and §4.2); replacing the snapshot / Learning Map / dispositions as writers; any counting-rule or stored-data change.
+
+### 15.1 Findings log
+
+- **Weekly review has failed adoption (owner-stated, 2026-07-03).** "It's just work to do for next week" — the owner does it instead of Shelly, and it doesn't engage or help her. **Design consequence:** the Review Chat's asks must **NOT** be bolted onto the weekly review; they route through the chat (§11). The **weekly-review rethink is a separate future item** — logged here as a named backlog entry, **not designed in this doc.** When it is picked up it gets its own ledger row and design pass; this amendment only records the finding and the routing decision that keeps asks off the weekly review.
 
 ---
 

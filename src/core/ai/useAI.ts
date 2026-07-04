@@ -20,6 +20,7 @@ export const TaskType = {
   WeeklyFocus: 'weeklyFocus',
   Scan: 'scan',
   ShellyChat: 'shellyChat',
+  FoundationsReview: 'foundationsReview',
   ChapterQuestions: 'chapterQuestions',
   BookLookup: 'bookLookup',
   LessonVideo: 'lessonVideo',
