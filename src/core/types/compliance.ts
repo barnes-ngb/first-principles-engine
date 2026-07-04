@@ -29,4 +29,12 @@ export interface HoursAdjustment {
   location?: string
   source?: string
   createdAt?: string
+  /**
+   * Provenance link to the `dadLabReports` doc a correction was written for
+   * (DATA-16 Dad Lab hours routing audit). Additive metadata only — it is the
+   * idempotence key (with `source`) so the audit never proposes the same report
+   * twice. The counting path (`collectHoursContributions`) does NOT read this
+   * field, so it cannot change any compliance total.
+   */
+  labReportId?: string
 }
