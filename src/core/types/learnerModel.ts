@@ -38,11 +38,17 @@ export const EvidenceKind = {
   SightWordShare: 'sightWordShare',
   PrioritySkill: 'prioritySkill',
   CompletedProgram: 'completedProgram',
-  // Reserved for later slices (not emitted by the deterministic seeder):
   Eval: 'eval',
   Quest: 'quest',
   Scan: 'scan',
+  // Slice 2a (FEAT-51) — the Foundations Review Chat writes these two:
+  //   `attestation`     — the parent confirmed the child can do this ("I've seen it").
+  //   `curriculumPosition` — an external-curriculum position ("covered in Fast Phonics"),
+  //                          which alone caps a concept at `forming` (§13, covered ≠ mastered).
+  // Slice 1 declared `attestation` (reserved) so the re-seed guard could protect it;
+  // `curriculumPosition` (§12.1) is added additively here — now that both are emitted.
   Attestation: 'attestation',
+  CurriculumPosition: 'curriculumPosition',
 } as const
 export type EvidenceKind = (typeof EvidenceKind)[keyof typeof EvidenceKind]
 
@@ -64,6 +70,17 @@ export interface EvidenceRef {
   level?: number
   /** Mastered share (0–1) behind a `sightWordShare` ref. */
   masteredShare?: number
+  // ── `curriculumPosition` structured fields (§12.1, FEAT-51) ──────────
+  /** The external program — "fastPhonics" / "readingEggs" / "workbook" / free-text. */
+  source?: string
+  /** Peak / lesson / page range — "Peak 13", "Unit 4 pp.20-28". */
+  unit?: string
+  /** Counts / scores in plain words — "548 words known · 100% end-of-peak quizzes". */
+  detail?: string
+  /** How the position was captured. `chatUpload` arrives with slice 2b. */
+  via?: 'chatUpload' | 'scan' | 'manual'
+  /** For an `attestation`: who overrode. Parent's word is durable (§6.3). */
+  overriddenBy?: 'parent'
 }
 
 /**
