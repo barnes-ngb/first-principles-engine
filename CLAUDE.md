@@ -314,10 +314,12 @@ All under `families/{familyId}/`:
 3. **Charter values are injected** into every system prompt. See `docs/SYSTEM_PROMPTS.md`.
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
-6. **Model selection by task:**
-   - Complex reasoning (plan, evaluate, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chapterQuestions, monthlyReview, weeklyReview, analyzePatterns): Claude Sonnet (`claude-sonnet-4-6`)
+6. **Model selection by task** (all model strings live in one table: `functions/src/ai/models.ts`):
+   - Complex reasoning (plan, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, foundationsReview, chapterQuestions, bookLookup, lessonVideo, helpCard, monthlyReview, weeklyReview, analyzePatterns): Claude Sonnet 5 (`claude-sonnet-5`)
+   - **Opus 4.8 pilot** (`claude-opus-4-8`): `evaluate` + `learnerSynthesis` only — one-line reversible via the table (owner review after 2 weeks). Fable 5 was considered and rejected (2x Opus cost + refusal/stop_reason fallback handling).
    - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
    - Image generation: gpt-image-1.5 (scenes, armor sheets, base character, starter avatar, transparent stickers, photo transform, armor pieces, sketch enhancement)
+   - Note: token counts on Sonnet-5 / Opus-4.8 tasks run ~30% higher than the retired Sonnet-4.6 tasks (new tokenizer) — expected, not a regression.
 
 ### Testing AI Logic
 - Co-locate tests with logic files (e.g., `skipAdvisor.logic.test.ts`, `pace.logic.test.ts`)
