@@ -182,6 +182,31 @@ No composite indexes are currently required (all queries filter on a single fiel
 
 ---
 
+## Cloud Function resource limits (AI + vision)
+
+The shared `chat` Cloud Function (`functions/src/ai/chat.ts`) fans out every AI
+chat task, including the vision-extraction path used by Shelly Chat uploads and
+the Foundations Review Chat photo upload (FEAT-53/61). It runs with explicit
+headroom:
+
+- `timeoutSeconds: 300` (5 min) and `memory: "1GiB"`.
+
+Client callers set their own, **shorter** ceilings so the client always gets the
+first honest word before the function is force-killed:
+
+- `useAI` callable timeout: `300_000` ms (matches the function; the backstop).
+- Foundations Review upload: a hard **120s** `withTimeout` on the extraction call
+  (`src/features/foundations-review/uploadTimeout.ts`) — well under 300s. On
+  expiry the user sees "That took too long — try fewer photos", not a silent spin.
+
+FEAT-61 verified this config already provides ample headroom (the earlier report
+of "defaults" was stale); no reduction was made — dropping memory below 1GiB
+would risk large multi-image vision requests. Client photos are downscaled to a
+1600px longest edge before upload (`downscaleImage`), and the upload dialog caps a
+message at 4 photos, so the request the function receives is bounded.
+
+---
+
 ## Troubleshooting
 
 | Issue | Fix |

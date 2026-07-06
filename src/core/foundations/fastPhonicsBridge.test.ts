@@ -6,6 +6,7 @@ import {
   fastPhonicsBridge,
   fastPhonicsUnits,
   FAST_PHONICS_BRIDGE_VERSION,
+  normalizeSourceName,
   READING_GRAPH_NODE_IDS,
 } from './fastPhonicsBridge'
 
@@ -74,12 +75,39 @@ describe('fastPhonicsBridge — versioned data integrity', () => {
   })
 })
 
+describe('normalizeSourceName', () => {
+  it('lowercases and strips every non-alphanumeric character', () => {
+    expect(normalizeSourceName('Fast Phonics')).toBe('fastphonics')
+    expect(normalizeSourceName('fast-phonics')).toBe('fastphonics')
+    expect(normalizeSourceName('Reading Eggs: Fast Phonics!')).toBe('readingeggsfastphonics')
+  })
+
+  it('does NOT correct misspellings (conservative by design)', () => {
+    expect(normalizeSourceName('Fast phony')).toBe('fastphony')
+    expect(normalizeSourceName('Fast phony')).not.toBe('fastphonics')
+  })
+})
+
 describe('bridgeForSource — tolerant lookup', () => {
-  it('resolves the canonical + free-text spellings', () => {
+  it('resolves the canonical + free-text spellings via aliases', () => {
     expect(bridgeForSource('fastPhonics')).toBe(fastPhonicsBridge)
     expect(bridgeForSource('Fast Phonics')).toBe(fastPhonicsBridge)
     expect(bridgeForSource('fast-phonics')).toBe(fastPhonicsBridge)
+    expect(bridgeForSource('fast_phonics')).toBe(fastPhonicsBridge)
+    expect(bridgeForSource('fast phonic')).toBe(fastPhonicsBridge) // singular alias
     expect(bridgeForSource('Reading Eggs Fast Phonics')).toBe(fastPhonicsBridge)
+  })
+
+  it('seeds the alias list on the bridge object', () => {
+    expect(fastPhonicsBridge.aliases).toContain('fast phonics')
+    expect(fastPhonicsBridge.aliases).toContain('fast phonic')
+  })
+
+  it('does NOT resolve a real typo — "Fast phony" falls back to generic (null)', () => {
+    // The conservative normalizer does not catch this; the correct shipped
+    // behavior is the generic-covered fallback PLUS the assistant asking
+    // "did you mean Fast Phonics?" (a CF prompt nudge, not a silent map).
+    expect(bridgeForSource('Fast phony')).toBeNull()
   })
 
   it('returns null for an unbridged / empty source', () => {

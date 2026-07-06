@@ -14,6 +14,7 @@ export {
   FAST_PHONICS_BRIDGE_VERSION,
   bridgeForSource,
   bridgeEvidenceForPosition,
+  normalizeSourceName,
 } from './fastPhonicsBridge'
 export type { BridgeUnit, CurriculumBridge, BridgeEvidence } from './fastPhonicsBridge'
 
