@@ -61,6 +61,12 @@ export interface StoredChangeEntry {
   cause: string;
   at: string;
 }
+export interface StoredSynthesis {
+  whatMattersNext?: Array<{ conceptId: string; kidName?: string; why: string; suggestedVehicle?: string }>;
+  narrative?: string;
+  openQuestionsSummary?: string[];
+  generatedAt?: string;
+}
 export interface StoredLearnerModel {
   childId?: string;
   status?: string;
@@ -72,6 +78,8 @@ export interface StoredLearnerModel {
   };
   changeFeed?: StoredChangeEntry[];
   openQuestions?: StoredOpenQuestion[];
+  synthesis?: StoredSynthesis;
+  synthesisStaleAt?: string | null;
 }
 
 // ── Deterministic candidate ordering (mirrors reviewPriority.ts) ──
