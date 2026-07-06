@@ -11,13 +11,13 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
 **Scale (current):**
-- TypeScript lines: **187,591** total
-- Commits: **138**
-- Tests: **223 test files**
-- Firestore collections/doc helpers: **37** in `firestore.ts`
+- TypeScript lines: **201,422** total
+- Commits: **161**
+- Tests: **231 test files**
+- Firestore collections/doc helpers: **43** in `firestore.ts`
 - Cloud Functions: **25**
-- Chat task types: **19**
-- Routes: **34**
+- Chat task types: **21**
+- Routes: **36**
 
 ## Navigation
 **Parent:** Today, Plan My Week, Weekly Review, Progress (Learning Profile · **Monthly Books** · Learning Map · Curriculum · Skill Snapshot · Word Wall), Records, Books, Ask AI, Game Workshop, Dad Lab, Settings  
