@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { doc, getDoc, getDocs, query, setDoc } from 'firebase/firestore'
+import { getFunctions, httpsCallable } from 'firebase/functions'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -12,6 +13,7 @@ import ListItemText from '@mui/material/ListItemText'
 import Typography from '@mui/material/Typography'
 
 import { useFamilyId } from '../../core/auth/useAuth'
+import { app } from '../../core/firebase/firebase'
 import { useChildren } from '../../core/hooks/useChildren'
 import {
   childSkillMapsCollection,
@@ -33,7 +35,14 @@ import type {
   ConceptStateKind,
   LearnerModel,
 } from '../../core/types/learnerModel'
+import type { LearnerSynthesis } from '../../core/types/learnerModel'
 import type { SightWordProgress, SkillSnapshot } from '../../core/types'
+
+const functions = getFunctions(app)
+const synthesizeFn = httpsCallable<
+  { familyId: string; childId: string },
+  { success: boolean; status: string; synthesis?: LearnerSynthesis }
+>(functions, 'generateLearnerSynthesisNow')
 
 /** Display order + colors for the four state groups. */
 const STATE_GROUPS: Array<{ state: ConceptStateKind; label: string; color: string }> = [
@@ -45,6 +54,7 @@ const STATE_GROUPS: Array<{ state: ConceptStateKind; label: string; color: strin
 
 interface ChildState {
   loading: boolean
+  synthesizing?: boolean
   model: LearnerModel | null
   error: string | null
 }
@@ -125,6 +135,47 @@ export default function FoundationsDiagPanel() {
     [familyId],
   )
 
+  // Run the Sonnet synthesis beat (FEAT-57) for one child and fold the returned
+  // judgment layer into the previewed model. Reads the stored model server-side;
+  // writes only `learnerModels`.
+  const synthesizeChild = useCallback(async (childId: string) => {
+    setByChild((prev) => ({
+      ...prev,
+      [childId]: {
+        loading: prev[childId]?.loading ?? false,
+        synthesizing: true,
+        model: prev[childId]?.model ?? null,
+        error: null,
+      },
+    }))
+    try {
+      const res = await synthesizeFn({ familyId, childId })
+      const synthesis = res.data.synthesis
+      setByChild((prev) => {
+        const model = prev[childId]?.model
+        return {
+          ...prev,
+          [childId]: {
+            loading: false,
+            synthesizing: false,
+            model: model && synthesis ? { ...model, synthesis, synthesisStaleAt: null } : model ?? null,
+            error: synthesis ? null : `Synthesis returned no result (status: ${res.data.status}).`,
+          },
+        }
+      })
+    } catch (err) {
+      setByChild((prev) => ({
+        ...prev,
+        [childId]: {
+          loading: false,
+          synthesizing: false,
+          model: prev[childId]?.model ?? null,
+          error: err instanceof Error ? err.message : 'Synthesis failed',
+        },
+      }))
+    }
+  }, [familyId])
+
   if (searchParams.get('diag') !== '1') return null
 
   return (
@@ -162,7 +213,16 @@ export default function FoundationsDiagPanel() {
               >
                 {state?.loading ? 'Seeding…' : 'Seed / re-seed Foundations model'}
               </Button>
-              {state?.loading && <CircularProgress size={16} />}
+              <Button
+                size="small"
+                variant="outlined"
+                color="secondary"
+                disabled={state?.synthesizing || !state?.model}
+                onClick={() => synthesizeChild(child.id)}
+              >
+                {state?.synthesizing ? 'Synthesizing…' : 'Generate synthesis (AI)'}
+              </Button>
+              {(state?.loading || state?.synthesizing) && <CircularProgress size={16} />}
             </Box>
             {state?.error && (
               <Typography variant="body2" color="error.main">
@@ -234,7 +294,84 @@ function ModelPreview({ model }: { model: LearnerModel }) {
           </Box>
         ),
       )}
+      <SynthesisPreview model={model} />
       <QueuedForTesting model={model} />
+    </Box>
+  )
+}
+
+/**
+ * The LLM judgment layer (FEAT-57, Phase 3a) surfaced on the diag preview: the
+ * synthesized `whatMattersNext` moves, the growth `narrative`, and the
+ * open-questions summary. This is 3a's only UI — the real Foundations tab is 3b.
+ * Renders nothing until a synthesis has been generated.
+ */
+function SynthesisPreview({ model }: { model: LearnerModel }) {
+  const synthesis = model.synthesis
+  const stale = Boolean(model.synthesisStaleAt)
+  if (!synthesis) {
+    return (
+      <Box sx={{ mb: 1 }}>
+        <Typography variant="caption" color="text.secondary">
+          No synthesis yet — tap “Generate synthesis (AI)”.
+        </Typography>
+      </Box>
+    )
+  }
+  return (
+    <Box sx={{ mb: 1, mt: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+        <Typography variant="caption" sx={{ fontWeight: 700 }}>
+          Synthesis
+        </Typography>
+        <Chip
+          size="small"
+          variant="outlined"
+          color={stale ? 'warning' : 'success'}
+          label={stale ? 'stale — regenerate' : `generated ${synthesis.generatedAt.slice(0, 10)}`}
+        />
+      </Box>
+      {synthesis.narrative && (
+        <Typography variant="body2" sx={{ mb: 1, fontStyle: 'italic' }}>
+          {synthesis.narrative}
+        </Typography>
+      )}
+      {synthesis.whatMattersNext.length > 0 && (
+        <>
+          <Typography variant="caption" sx={{ fontWeight: 700 }}>
+            What matters next
+          </Typography>
+          <Divider />
+          <List dense disablePadding>
+            {synthesis.whatMattersNext.map((m, i) => (
+              <ListItem key={`${m.conceptId}_${i}`} disableGutters sx={{ py: 0.25 }}>
+                <ListItemText
+                  primary={`${m.kidName} · ${m.suggestedVehicle}`}
+                  secondary={m.why}
+                  slotProps={{
+                    primary: { variant: 'body2' },
+                    secondary: { variant: 'caption' },
+                  }}
+                />
+              </ListItem>
+            ))}
+          </List>
+        </>
+      )}
+      {synthesis.openQuestionsSummary.length > 0 && (
+        <Box sx={{ mt: 0.5 }}>
+          <Typography variant="caption" sx={{ fontWeight: 700 }}>
+            Questions we're exploring
+          </Typography>
+          <List dense disablePadding>
+            {synthesis.openQuestionsSummary.map((q, i) => (
+              <ListItem key={i} disableGutters sx={{ py: 0.25 }}>
+                <ListItemText primary={q} slotProps={{ primary: { variant: 'caption' } }} />
+              </ListItem>
+            ))}
+          </List>
+        </Box>
+      )}
     </Box>
   )
 }
