@@ -1,0 +1,175 @@
+/**
+ * Learner Model synthesis — orchestrator + callable (FEAT-57, Phase 3a).
+ *
+ * The Firestore read/write + Claude call around the pure synthesis layer
+ * (`tasks/learnerSynthesis.ts`). Two entry points:
+ *   - {@link synthesizeLearnerModelForChild} — the worker. Loads the stored model,
+ *     runs one Sonnet call, and writes `synthesis` + clears `synthesisStaleAt`. On
+ *     any failure it writes NOTHING (the prior synthesis stands) — a synthesis
+ *     failure never breaks a consumer (D6 deterministic fallback).
+ *   - {@link generateLearnerSynthesisNow} — an on-demand callable (the diag panel's
+ *     manual trigger + the client regenerate-on-read path).
+ *
+ * The **weekly beat** calls the worker from `evaluate.ts`'s existing Sunday loop
+ * (no new scheduled function — D4). Consumers (shellyChat / plan slices) NEVER call
+ * the worker inline: they serve the stored synthesis and never block (see
+ * `contextSlices.ts` / the run's async-vs-blocking note).
+ */
+import { getFirestore } from "firebase-admin/firestore";
+import type { Firestore } from "firebase-admin/firestore";
+import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireEmailAuth } from "./authGuard.js";
+import { claudeApiKey } from "./aiConfig.js";
+import { callClaude, logAiUsage } from "./chatTypes.js";
+import { modelForTask } from "./chat.js";
+import {
+  buildSynthesisInput,
+  buildSynthesisPrompt,
+  parseSynthesisResponse,
+  type StoredLearnerModel,
+} from "./tasks/learnerSynthesis.js";
+
+/** A model needs synthesis when it has none yet OR a writer marked it stale. */
+export function isSynthesisStale(model: StoredLearnerModel & { synthesis?: unknown; synthesisStaleAt?: unknown }): boolean {
+  return !model.synthesis || Boolean(model.synthesisStaleAt);
+}
+
+export interface SynthesisRunResult {
+  status: "written" | "skipped-no-model" | "skipped-no-data" | "failed";
+  synthesis?: {
+    whatMattersNext: Array<{ conceptId: string; kidName: string; why: string; suggestedVehicle: string }>;
+    narrative: string;
+    openQuestionsSummary: string[];
+    generatedAt: string;
+  };
+}
+
+/**
+ * Synthesize one child's Learner Model. Reads `learnerModels/{childId}`, runs the
+ * Sonnet beat, writes `synthesis` (merge) and clears `synthesisStaleAt`. Returns a
+ * status; never throws for an ordinary miss (no model / no-data / parse failure).
+ */
+export async function synthesizeLearnerModelForChild(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  childName: string,
+  apiKey: string,
+): Promise<SynthesisRunResult> {
+  const ref = db.doc(`families/${familyId}/learnerModels/${childId}`);
+  const snap = await ref.get();
+  if (!snap.exists) return { status: "skipped-no-model" };
+  const model = snap.data() as StoredLearnerModel & { status?: string };
+  if (model.status === "no-data") return { status: "skipped-no-data" };
+
+  const input = buildSynthesisInput(model, childName);
+  const systemPrompt = buildSynthesisPrompt(input);
+  const modelId = modelForTask("learnerSynthesis" as never);
+
+  let result: { text: string; inputTokens: number; outputTokens: number };
+  try {
+    result = await callClaude({
+      apiKey,
+      model: modelId,
+      maxTokens: 1024,
+      systemPrompt,
+      messages: [{ role: "user", content: "Synthesize the judgment layer now. Return only the JSON." }],
+    });
+  } catch (err) {
+    console.error(`[learnerSynthesis] Claude call failed for ${familyId}/${childId}:`, err);
+    return { status: "failed" };
+  }
+
+  const parsed = parseSynthesisResponse(result.text);
+  if (!parsed) {
+    console.warn(`[learnerSynthesis] Unparseable synthesis for ${familyId}/${childId} — prior synthesis kept.`);
+    return { status: "failed" };
+  }
+
+  const generatedAt = new Date().toISOString();
+  const synthesis = {
+    whatMattersNext: parsed.whatMattersNext,
+    narrative: parsed.narrative,
+    openQuestionsSummary: parsed.openQuestionsSummary,
+    generatedAt,
+    model: modelId,
+    usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+  };
+
+  // Merge-only write; clear the stale mark so consumers read fresh.
+  await ref.set({ synthesis, synthesisStaleAt: null, updatedAt: generatedAt }, { merge: true });
+
+  await logAiUsage(db, familyId, {
+    childId,
+    taskType: "learnerSynthesis",
+    model: modelId,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  });
+
+  console.log(
+    `[AI] taskType=learnerSynthesis child=${childId} inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens} moves=${parsed.whatMattersNext.length}`,
+  );
+
+  return { status: "written", synthesis: { whatMattersNext: parsed.whatMattersNext, narrative: parsed.narrative, openQuestionsSummary: parsed.openQuestionsSummary, generatedAt } };
+}
+
+/**
+ * Regenerate synthesis for a child only if the model is stale (weekly beat guard).
+ * Reads the doc once to decide; skips silently when fresh or absent. Used by the
+ * `weeklyReview` Sunday loop so a stale model is refreshed without a new schedule.
+ */
+export async function synthesizeIfStale(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  childName: string,
+  apiKey: string,
+): Promise<SynthesisRunResult> {
+  const ref = db.doc(`families/${familyId}/learnerModels/${childId}`);
+  const snap = await ref.get();
+  if (!snap.exists) return { status: "skipped-no-model" };
+  const model = snap.data() as StoredLearnerModel & { status?: string; synthesis?: unknown; synthesisStaleAt?: unknown };
+  if (model.status === "no-data") return { status: "skipped-no-data" };
+  if (!isSynthesisStale(model)) return { status: "skipped-no-data" };
+  return synthesizeLearnerModelForChild(db, familyId, childId, childName, apiKey);
+}
+
+// ── On-demand callable (manual trigger + client regenerate-on-read) ──
+
+export const generateLearnerSynthesisNow = onCall(
+  { secrets: [claudeApiKey] },
+  async (request) => {
+    const { uid } = requireEmailAuth(request);
+    const { familyId, childId } = request.data as { familyId?: string; childId?: string };
+    if (!familyId || !childId) {
+      throw new HttpsError("invalid-argument", "familyId and childId are required.");
+    }
+    if (uid !== familyId) {
+      throw new HttpsError("permission-denied", "You do not have access to this family.");
+    }
+    const apiKey = claudeApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError("failed-precondition", "Missing CLAUDE_API_KEY secret.");
+    }
+
+    const db = getFirestore();
+    // Read the child's name for the prompt (best-effort; tone only).
+    let childName = "";
+    try {
+      const childSnap = await db.doc(`families/${familyId}/children/${childId}`).get();
+      childName = (childSnap.data()?.name as string) || "";
+    } catch {
+      /* name is tone-only; proceed without it */
+    }
+
+    try {
+      const result = await synthesizeLearnerModelForChild(db, familyId, childId, childName, apiKey);
+      return { success: result.status === "written", ...result };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      console.error("generateLearnerSynthesisNow failed:", { familyId, childId, error: errMsg });
+      throw new HttpsError("internal", `Learner synthesis failed: ${errMsg}`);
+    }
+  },
+);
