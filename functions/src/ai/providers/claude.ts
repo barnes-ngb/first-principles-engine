@@ -1,9 +1,10 @@
 import type { ChatMessage, ChatOptions, ChatResponse } from "../aiService.js";
+import { CLAUDE_HAIKU, CLAUDE_SONNET } from "../models.js";
 
-/** Map task-based model aliases to Anthropic model IDs. */
+/** Map task-based model aliases to Anthropic model IDs (sourced from models.ts). */
 const MODEL_MAP: Record<string, string> = {
-  haiku: "claude-haiku-4-5-20251001",
-  sonnet: "claude-sonnet-4-6",
+  haiku: CLAUDE_HAIKU,
+  sonnet: CLAUDE_SONNET,
 };
 
 /** Claude-specific chat provider. */

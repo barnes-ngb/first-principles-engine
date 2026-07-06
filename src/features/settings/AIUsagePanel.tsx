@@ -19,6 +19,8 @@ import type { AIUsageEntry } from '../../core/types'
 // ── Display helpers ──────────────────────────────────────────────
 
 const MODEL_LABELS: Record<string, string> = {
+  'claude-sonnet-5': 'Claude Sonnet 5',
+  'claude-opus-4-8': 'Claude Opus 4.8',
   'claude-sonnet-4-6': 'Claude Sonnet 4.6',
   'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
   'claude-sonnet-4-20250514': 'Claude Sonnet 4',
@@ -48,14 +50,20 @@ const IMAGE_COST_PER_CALL: Record<string, number> = {
   'dall-e-3': 0.04,
 }
 
-/** Approximate cost per 1M tokens (USD). */
+/** Approximate cost per 1M tokens (USD).
+ *  Note: token counts on Sonnet-5 / Opus-4.8 tasks run ~30% higher than the
+ *  retired Sonnet-4.6 tasks did (new tokenizer) — expected, not a regression. */
 const COST_PER_M_INPUT: Record<string, number> = {
+  'claude-sonnet-5': 3,
+  'claude-opus-4-8': 5,
   'claude-sonnet-4-6': 3,
   'claude-sonnet-4-5-20250929': 3,
   'claude-sonnet-4-20250514': 3,
   'claude-haiku-4-5-20251001': 0.8,
 }
 const COST_PER_M_OUTPUT: Record<string, number> = {
+  'claude-sonnet-5': 15,
+  'claude-opus-4-8': 25,
   'claude-sonnet-4-6': 15,
   'claude-sonnet-4-5-20250929': 15,
   'claude-sonnet-4-20250514': 15,
