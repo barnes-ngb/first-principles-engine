@@ -2,7 +2,7 @@
 
 > Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
-> Last updated: 2026-06-09 (health audit auto-fix: added bookLookup, lessonVideo to CHAT_TASKS registry diagram and model table; section 4 prose may lag current implementations)
+> Last updated: 2026-07-06 (health audit auto-fix: added foundationsReview, helpCard to CHAT_TASKS registry diagram and model table; added generateLearnerSynthesisNow + the 5 monthlyReview.ts standalone CFs + fileFeatureRequests to the Standalone Cloud Functions table; section 4 prose still lags — missing dedicated write-ups for reviseStory, chapterQuestions, bookLookup, lessonVideo, monthlyReview, foundationsReview, helpCard)
 
 ---
 
@@ -47,9 +47,11 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       weeklyFocus → handleWeeklyFocus
                                       scan       → handleScan
                                       shellyChat → handleShellyChat
+                                      foundationsReview → handleFoundationsReview
                                       chapterQuestions → handleChapterQuestions
                                       bookLookup → handleBookLookup
                                       lessonVideo → handleLessonVideo
+                                      helpCard   → handleHelpCard
                                       monthlyReview → handleMonthlyReview
                                            ↓
                                   tasks/<handler>.ts
@@ -82,6 +84,13 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `enhanceSketch` | imageTasks/enhanceSketch.ts | onCall |
 | `transcribeAudio` | tasks/transcribeAudio.ts | onCall — OpenAI Whisper transcription for the voice input module (no system prompt; verbatim audio→text). |
 | `healthCheck` | health.ts | onCall |
+| `generateLearnerSynthesisNow` | learnerSynthesis.ts | onCall — on-demand Learner Model synthesis (diag panel trigger + client regenerate-on-read) |
+| `generateMonthlyReview` | monthlyReview.ts | onSchedule — automated monthly review (1st of month) |
+| `generateMonthlyReviewNow` | monthlyReview.ts | onCall — manual monthly review trigger |
+| `publishMonthlyReview` | monthlyReview.ts | onCall — mark a monthly review book published (visible to kids) |
+| `unpublishMonthlyReview` | monthlyReview.ts | onCall — revert publish |
+| `auditMonthlyReviewSources` | monthlyReview.ts | onCall — diagnostic, inspect photo sources for a monthly review |
+| `fileFeatureRequests` | feedback/fileFeatureRequests.ts | onSchedule (daily 08:00 CT) — files Shelly-portal feedback as GitHub issues |
 
 ---
 
@@ -104,11 +113,13 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `weeklyFocus` | `claude-sonnet-5` | Unified weekly focus + conundrum |
 | `scan` | `claude-sonnet-5` | Curriculum photo analysis (vision) |
 | `shellyChat` | `claude-sonnet-5` | Parent AI assistant (family context) |
+| `foundationsReview` | `claude-sonnet-5` | Foundations Review Chat — subject-scoped concept-state review (FEAT-51) |
 | `chapterQuestions` | `claude-sonnet-5` | Chapter book discussion question generation |
 | `reviseStory` | `claude-sonnet-5` | Generate Chat AI story revision (full-story context) |
 | `monthlyReview` | `claude-sonnet-5` | Monthly review book generation (narrative + photo curation) |
 | `bookLookup` | `claude-sonnet-5` | Chapter book title/chapter metadata lookup for "Add a book" form |
 | `lessonVideo` | `claude-sonnet-5` | Kid-friendly lesson video finder (web search enabled) for Lesson Video dialog |
+| `helpCard` | `claude-sonnet-5` | Today inline teaching help card generation (FEAT-43) |
 | `generate` | `claude-haiku-4-5-20251001` | Activity/lesson generation |
 | `chat` | `claude-haiku-4-5-20251001` | General chat |
 
@@ -166,6 +177,10 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `analyzePatterns` | childProfile |
 | `scan` | childProfile, recentEval |
 | `chapterQuestions` | _(self-loading)_ chapter book content + child profile |
+| `bookLookup` | _(self-loading)_ CHARTER_PREAMBLE + raw title + optional child name/age |
+| `lessonVideo` | _(self-loading)_ CHARTER_PREAMBLE + child profile (age + motivators + interests) |
+| `foundationsReview` | charter, childProfile |
+| `helpCard` | charter, childProfile, skillSnapshot, wordMastery, recentScans, recentHistoryByDomain, weekFocus |
 | `monthlyReview` | _(self-loading)_ CHARTER_PREAMBLE + aggregated month data (day logs, photos, milestones) |
 | `disposition` | _(self-loading)_ charter preamble + 4 weeks day logs + 3 recent evals + 5 recent lab reports |
 | `conundrum` | _(self-loading)_ charter preamble + week focus + recent subjects + child profiles |

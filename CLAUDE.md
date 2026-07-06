@@ -142,7 +142,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
 - `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useChildSkillSnapshot, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useAudioRecording, useSpeechRecognition, useTranscription, useTTS, useActivityConfigs, useScanToActivityConfig, useCertificateProgress, useMonthlyReviews)
-- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `stonebridge.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
+- `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `stonebridge.ts`, `business.ts`, `learnerModel.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, domain mapping, blocker lifecycle, workbook matching, session timer, image compression, `sanitizeJson` (client port of the functions LLM-JSON parser — deliberate duplication, `// TODO: consolidate`)
 - `src/core/ai/` — AI service interface (useAI hook), feature flags, prompt templates (`prompts/plannerPrompts.ts`)
 - `src/core/profile/` — Profile context provider and hook (family + children), child identity/age helpers (`childIdentity.ts`, `childAge.ts`)
@@ -152,13 +152,17 @@ const items = snapshot.docs.map((doc) => ({
 - `src/core/family/` — Shared family writers (`updateChildSoftProfile` — motivators/interests/strengths, `updateChildIdentity` — birthdate/grade)
 - `src/core/observability/` — Client error reporting (ErrorReporterSync, scrubError, anonymize, errorSink, buildInfo)
 - `src/core/data/` — Database seed data
+- `src/core/compliance/` — MO state compliance mapping (`stateCompliance.ts`)
+- `src/core/foundations/` — Foundations concept graphs (reading/math), review priority ordering, quest targeting, learner-model seeding (`foundations.ts`, `readingGraph.ts`, `mathGraph.ts`, `reviewPriority.ts`, `questTargeting.ts`, `fastPhonicsBridge.ts`, `seedLearnerModel.ts`)
 - `src/features/auth/` — Auth guard route wrapper
 - `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), VoxelCharacter (Three.js character, armor, poses, materials, camera), `voxel/` sub-module (armor meshes, pose definitions), `stonebridge/` sub-module (Banner Rally missions, progress computation, location art, banner-raise celebrations)
 - `src/features/books/` — Bookshelf, book editor/reader, generate chat, review chat, sight word dashboard, story guide, print/PDF
+- `src/features/business/` — Barnes Bros business tab (FEAT-29/30): sales log, goal thermometer/builder, product curation over existing books/stickers (see `docs/BUSINESS_TAB_DESIGN.md`)
 - `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
 - `src/features/engine/` — Engine page and engine logic
 - `src/features/evaluate/` — Reading evaluation chat, findings extraction
 - `src/features/evaluation/` — Skill snapshot page, quick check panel
+- `src/features/foundations-review/` — Foundations Review Chat (FEAT-51): subject-scoped parent conversation that establishes concept states by evidence or testing, propose→confirm→write into `learnerModels`
 - `src/features/login/` — Profile selection
 - `src/features/not-found/` — 404 page
 - `src/features/planner/` — TeachHelperDialog (shared)
@@ -258,9 +262,11 @@ All under `families/{familyId}/`:
 | `ladderProgress` | Per-child ladder progression |
 | `dailyPlans` | Daily session plans |
 | `dadLabReports` | Dad Lab session reports |
+| `conceptArcs` | Dad Lab concept arcs per family (auto-ID documents) |
 | `skillSnapshots` | Per-child skill snapshots |
 | `plannerConversations` | Planner chat conversations |
 | `lessonCards` | Lesson card definitions |
+| `helpCards` | Today inline teaching help cards (FEAT-43). Doc ID: `{childId}__{subjectSlug}__{labelSlug}` |
 | `weeklyReviews` | AI-generated weekly adaptive reviews |
 | `monthlyReviews` | AI-generated monthly review books per child (doc ID: `{childId}_{YYYY-MM}`) |
 | `workbookConfigs` | Workbook pace/config per child (legacy — see activityConfigs) |
@@ -283,6 +289,10 @@ All under `families/{familyId}/`:
 | `featureRequests` | Silent friction / feature-request log from Shelly chat (feedback metadata, **not** a child's record — written fire-and-forget via `logFeatureRequest`, deduped by `dedupKey`, separate from the confirm-gated `applyChatAction` path; consumed by Step 5b's scheduled `fileFeatureRequests` CF → GitHub issue, which writes back `status: 'filed'` + `githubIssueUrl`) |
 | `errorLog` | Scrubbed client error records (path: `families/{familyId}/errorLog/{autoId}`) |
 | `stonebridgeProgress` | Per-child Banner Rally mission progress (doc ID: `{childId}`). Derived read-only from XP ledger reading events — never stores or mutates XP/diamonds. Tracks current mission, active mission counters, completed missions, raised banners, and per-mission reading-action baselines. Written by `useStonebridgeProgress`. |
+| `learnerModels` | Per-child learner model (Learner Model design, D1). Doc ID: `{childId}` |
+| `learnerReviewSessions` | Persisted Foundations Review Chat sessions (FEAT-51). Doc ID: `{childId}_{domain}` |
+| `businessLog` | Barnes Bros append-only sales/earnings event log (additive-only; `addDoc` only, entries never mutated) |
+| `businessGoals` | Barnes Bros goal config (milestone stack). One doc per child operator, doc ID: `{childId}` |
 
 **Global collections** (not under `families/`):
 
@@ -329,13 +339,14 @@ All under `families/{familyId}/`:
 
 ### Prompt Files
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
-- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, bookLookup, lessonVideo, monthlyReview)
+- `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, foundationsReview, chapterQuestions, bookLookup, lessonVideo, helpCard, monthlyReview)
 
-### Cloud Functions (25 exported)
-- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, chapterQuestions, bookLookup, lessonVideo, monthlyReview)
+### Cloud Functions (26 exported)
+- `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, foundationsReview, chapterQuestions, bookLookup, lessonVideo, helpCard, monthlyReview)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
 - `generateWeeklyReviewNow` — Manual review trigger
+- `generateLearnerSynthesisNow` — On-demand Learner Model synthesis callable (FEAT-57): diag panel manual trigger + client regenerate-on-read path; the weekly beat runs the same worker from `evaluate.ts`'s Sunday loop
 - `generateMonthlyReview` — Scheduled monthly review (1st of month)
 - `generateMonthlyReviewNow` — Manual monthly review trigger
 - `publishMonthlyReview` — Mark a monthly review book published (visible to kids)
@@ -356,8 +367,9 @@ All under `families/{familyId}/`:
 - `functions/src/ai/aiService.ts` — Core AI service orchestration
 - `functions/src/ai/sanitizeJson.ts` — JSON response sanitization
 - `functions/src/ai/health.ts` — Health check endpoint
-- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, chapterQuestions, bookLookup, lessonVideo, monthlyReview, transcribeAudio
-- `functions/src/ai/tasks/index.ts` — Chat task registry (CHAT_TASKS dispatch table, 19 task types)
+- `functions/src/ai/tasks/` — Task handlers: plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, foundationsReview, chapterQuestions, bookLookup, lessonVideo, helpCard, monthlyReview, transcribeAudio
+- `functions/src/ai/tasks/index.ts` — Chat task registry (CHAT_TASKS dispatch table, 21 task types)
+- `functions/src/ai/learnerSynthesis.ts` — Learner Model synthesis orchestrator + `generateLearnerSynthesisNow` callable (FEAT-57)
 - `functions/src/ai/generate.ts` — Activity/lesson card generation
 - `functions/src/ai/evaluate.ts` — Weekly review (scheduled + manual)
 - `functions/src/ai/monthlyReview.ts` — Monthly review callables (generate / publish / unpublish)
