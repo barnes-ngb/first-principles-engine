@@ -9,6 +9,7 @@ import type { SnapshotData } from "./chatTypes.js";
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
 import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
+import { synthesizeIfStale } from "./learnerSynthesis.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -1041,6 +1042,20 @@ export const weeklyReview = onSchedule(
         } catch (err) {
           console.error(
             `Failed to generate weekly review for family=${familyId} child=${childId}:`,
+            err,
+          );
+        }
+
+        // FEAT-57 (Phase 3a): piggyback the Learner Model synthesis beat on the
+        // Sunday loop (D4 — no new scheduled function). Guarded inside: skips
+        // children with no model, and regenerates only when the synthesis is stale
+        // (a writer marked it, or it has none yet). Failures never block the loop.
+        try {
+          const childName = (childDoc.data()?.name as string) || "";
+          await synthesizeIfStale(db, familyId, childId, childName, apiKey);
+        } catch (err) {
+          console.error(
+            `Failed to synthesize learner model for family=${familyId} child=${childId}:`,
             err,
           );
         }

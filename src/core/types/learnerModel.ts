@@ -128,6 +128,54 @@ export interface NextMove {
   suggestedSurface?: 'plan' | 'quest' | 'dadLab' | 'reading' | 'teachback'
 }
 
+/**
+ * The synthesis vehicle — how a `whatMattersNext` move would later feed the
+ * Learning Structures / planner surfaces. Frontier-first ordering is deterministic
+ * (§3.4 / FEAT-57); the LLM only explains and picks a vehicle, it never reorders.
+ */
+export const SynthesisVehicle = {
+  Routine: 'routine',
+  Play: 'play',
+  Project: 'project',
+  DadLab: 'dadLab',
+  Quest: 'quest',
+} as const
+export type SynthesisVehicle =
+  (typeof SynthesisVehicle)[keyof typeof SynthesisVehicle]
+
+/**
+ * A single synthesized next move (FEAT-57, Phase 3a — the `learnerSynthesis` LLM
+ * beat). `why` is 2-3 plain-language, evidence-citing sentences the parent can
+ * read and overrule; `kidName` is carried denormalized so a consumer never needs
+ * the graph to render it.
+ */
+export interface SynthesisMove {
+  conceptId: string
+  kidName: string
+  why: string
+  suggestedVehicle: SynthesisVehicle
+}
+
+/**
+ * The stored output of the `learnerSynthesis` beat (FEAT-57). Written under
+ * `LearnerModel.synthesis` (merge). Deterministic fallback: on a failed or
+ * unparseable synthesis call, this is left untouched so consumers keep serving the
+ * prior synthesis — a synthesis failure never breaks a reader.
+ */
+export interface LearnerSynthesis {
+  /** 1-3 frontier-first moves with plain-language, evidence-citing reasoning. */
+  whatMattersNext: SynthesisMove[]
+  /** 3-5 sentence growth story for the change-feed header (no-shame rails). */
+  narrative: string
+  /** One parent-language line per unresolved routed ask. */
+  openQuestionsSummary: string[]
+  /** ISO stamp of when this synthesis was generated. */
+  generatedAt: string
+  /** Model id + token usage for cost tracking (parallels weeklyReview). */
+  model?: string
+  usage?: { inputTokens: number; outputTokens: number }
+}
+
 /** A recent state delta (slice 3 — LLM narrative). Shape stubbed for stability. */
 export interface ChangeEntry {
   conceptId: string
@@ -201,6 +249,20 @@ export interface LearnerModel {
   changeFeed: ChangeEntry[]
   /** Slice 3 (LLM) — empty in slice 1. */
   openQuestions: OpenQuestion[]
+  /**
+   * The LLM judgment layer (FEAT-57, Phase 3a). Absent until the first
+   * `learnerSynthesis` beat runs; regenerated lazily when `synthesisStaleAt` is
+   * set (event-marked staleness, D4). Consumers read this; they never regenerate
+   * it inline (D6 — never synthesize on render if fresh).
+   */
+  synthesis?: LearnerSynthesis
+  /**
+   * Set by the three concept-state writer paths (review apply, quest write-back,
+   * re-seed) when they change the model, marking `synthesis` stale. Cleared to
+   * `null` by the synthesis beat. Truthy ⇒ the stored synthesis is behind the
+   * deterministic layer and a regeneration is due (weekly beat / on-demand).
+   */
+  synthesisStaleAt?: string | null
   seededAt: string
   updatedAt: string
 }

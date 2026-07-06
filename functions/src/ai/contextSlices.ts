@@ -13,6 +13,30 @@ import {
 import type { DraftBookInfo } from "./chat.js";
 import { loadRecentEvalContext, loadRecentEvalHistoryByDomain, formatEvalHistoryByDomain } from "./chatTypes.js";
 import { getGatbProgress } from "./data/gatbCurriculum.js";
+import { buildLearnerModelSlice } from "./tasks/learnerModelSlice.js";
+import type { StoredLearnerModel } from "./tasks/learnerSynthesis.js";
+
+/**
+ * Load + format the stored Learner Model into its prompt slice (FEAT-57). READS
+ * the stored `learnerModels/{childId}` doc — it never regenerates the synthesis
+ * (D6: consumers serve stored, never synthesize on a read path; a stale synthesis
+ * is healed by the weekly beat / on-demand callable, not here). Returns "" when
+ * there is no usable model, so the section is simply omitted.
+ */
+export async function loadLearnerModelContext(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+): Promise<string> {
+  try {
+    const snap = await db.doc(`families/${familyId}/learnerModels/${childId}`).get();
+    if (!snap.exists) return "";
+    return buildLearnerModelSlice(snap.data() as StoredLearnerModel);
+  } catch (err) {
+    console.warn("Failed to load learner model slice:", err);
+    return "";
+  }
+}
 
 // ── Slice definitions ───────────────────────────────────────────
 
@@ -33,6 +57,7 @@ export const ContextSlice = {
   Mastery: "mastery",
   SkillSnapshot: "skillSnapshot",
   ChildSkillMap: "childSkillMap",
+  LearnerModel: "learnerModel",
   RecentScans: "recentScans",
   ActivityConfigs: "activityConfigs",
   RecentHistoryByDomain: "recentHistoryByDomain",
@@ -45,7 +70,7 @@ export type ContextSlice = (typeof ContextSlice)[keyof typeof ContextSlice];
 
 export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   plan: [
-    "charter", "childProfile", "workbookPaces",
+    "charter", "childProfile", "learnerModel", "workbookPaces",
     "weekFocus", "hoursProgress", "engagement", "gradeResults",
     "bookStatus", "sightWords", "recentEval", "recentHistoryByDomain", "wordMastery", "generatedContent",
     "workshopGames", "mastery", "skillSnapshot", "recentScans", "activityConfigs",
@@ -66,7 +91,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   ],
   scan: ["charter", "childProfile", "recentEval", "recentHistoryByDomain", "skillSnapshot", "activityConfigs"],
   shellyChat: [
-    "charter", "childProfile", "engagement", "gradeResults",
+    "charter", "childProfile", "learnerModel", "engagement", "gradeResults",
     "recentEval", "sightWords", "weekFocus", "wordMastery", "workbookPaces",
     "skillSnapshot", "childSkillMap", "recentHistoryByDomain", "recentScans",
     "hoursProgress", "dayToday", "dadLabReports",
@@ -452,6 +477,9 @@ export async function buildContextForTask(
   if (slices.includes("childSkillMap")) {
     fetches.push({ slice: "childSkillMap", promise: loadChildSkillMapContext(db, familyId, childId) });
   }
+  if (slices.includes("learnerModel")) {
+    fetches.push({ slice: "learnerModel", promise: loadLearnerModelContext(db, familyId, childId) });
+  }
   if (slices.includes("recentScans")) {
     fetches.push({ slice: "recentScans", promise: loadRecentScansContext(db, familyId, childId) });
   }
@@ -483,6 +511,14 @@ export async function buildContextForTask(
 
   // Load completed programs from skill snapshot for filtering
   const completedPrograms: string[] = snapshotData?.completedPrograms ?? [];
+
+  // Learner Model — the synthesized "where is this child" section. Placed high
+  // (right after childProfile) so downstream instructions can reference it as the
+  // single grounding for level/curriculum questions (FEAT-57).
+  if (sliceData.has("learnerModel")) {
+    const learnerModelText = sliceData.get("learnerModel") as string;
+    if (learnerModelText) sections.push(learnerModelText);
+  }
 
   // Curriculum coverage (was "WORKBOOK PACE")
   if (sliceData.has("workbookPaces")) {
