@@ -48,7 +48,7 @@ function mockImageEnv(
   naturalHeight: number,
   opts: { blob?: Blob | null } = {},
 ): MockEnv {
-  const blob = 'blob' in opts ? opts.blob : new Blob(['x'], { type: 'image/jpeg' })
+  const blob: Blob | null = 'blob' in opts ? (opts.blob ?? null) : new Blob(['x'], { type: 'image/jpeg' })
   const drawImage = vi.fn()
   const canvas = {
     width: 0,
