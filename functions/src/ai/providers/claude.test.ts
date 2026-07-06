@@ -48,10 +48,10 @@ describe("createClaudeProvider", () => {
     );
   });
 
-  it("maps model alias 'sonnet' to claude-sonnet-4-6", async () => {
+  it("maps model alias 'sonnet' to claude-sonnet-5", async () => {
     mockCreate.mockResolvedValueOnce({
       content: [{ type: "text", text: "ok" }],
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       usage: { input_tokens: 1, output_tokens: 1 },
     });
 
@@ -61,7 +61,7 @@ describe("createClaudeProvider", () => {
     });
 
     expect(mockCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "claude-sonnet-4-6" }),
+      expect.objectContaining({ model: "claude-sonnet-5" }),
     );
   });
 

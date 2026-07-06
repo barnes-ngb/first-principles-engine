@@ -5,6 +5,8 @@
  * character/franchise names from prompts before sending to image models.
  */
 
+import { CLAUDE_HAIKU } from "../models.js";
+
 // ── Regex of known copyrighted names ───────────────────────────────
 
 export const COPYRIGHT_NAMES =
@@ -107,7 +109,7 @@ export async function rewriteForCopyright(
     const claude = new Anthropic({ apiKey });
 
     const result = await claude.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: CLAUDE_HAIKU,
       max_tokens: 300,
       system: SYSTEM_PROMPTS[mode],
       messages: [{ role: "user", content: prompt }],

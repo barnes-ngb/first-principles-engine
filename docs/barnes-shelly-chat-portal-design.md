@@ -384,3 +384,28 @@ snapshot. That is genuinely destructive (it lowers or strips the learning record
 hardening because every write is **additive + confirm-gated + shape-checked by the central writer** —
 the worst case is an extra deduped entry, never a lost or lowered one. Option 3's destructive surface is
 what makes the rules backstop a prerequisite, not a nicety.
+
+---
+
+## Chat UX additions (FEAT-59)
+
+Three parent-chat affordances, applied to the **shellyChat portal** and **Foundations Review** only
+(no kid surfaces). No prompt, model, or write-path changes.
+
+- **Copy as Markdown** — a per-assistant-message icon copies the message's raw Markdown verbatim (the
+  model text, not the rendered DOM), with a toast. Whole-message only; no per-block copy (would need a
+  block-boundary parser — out of scope).
+- **Download as .md** — a per-message icon triggers a client-side Blob + anchor download, filename
+  `{chat}-{date}-{slug}.md`, body = the message Markdown under a one-line header (child · date · source).
+  Zero server infra.
+- **Multi-file upload (shellyChat → parity with Foundations Review)** — the image input accepts multiple
+  files (cap 6). The **Attach** path batches them: one Storage upload per file → N `[IMAGE_URL:…]`
+  markers on one user turn → **one** shared context line (mirrors FEAT-53's "one context covers the
+  batch"). The CF parses the markers with a global `extractImageUrls` and routes to the existing plural
+  `callClaudeWithVisionUrls` (a single image is byte-identical to the prior path). Analyze and
+  reference-generate remain single-image (they are single-image operations; offered only when exactly one
+  file is chosen). Foundations Review was already multi-image (FEAT-53) — unchanged.
+
+Shared, reusable pieces: `src/core/utils/messageExport.ts` (pure filename/header/copy/download) and
+`src/components/MessageActions.tsx` (the two icon buttons), plus `src/features/shelly-chat/imageMarkers.ts`
+(pure N-marker builder). Each page owns one local MUI `Snackbar` (the repo has no shared toast provider).

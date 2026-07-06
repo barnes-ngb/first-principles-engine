@@ -337,6 +337,9 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
         openQuestions: nextModel.openQuestions,
         changeFeed: nextModel.changeFeed,
         updatedAt: nextModel.updatedAt,
+        // Mark the LLM synthesis stale — a confirmed review action changed concept
+        // state, so `whatMattersNext`/`narrative` are now behind (FEAT-57, D4).
+        synthesisStaleAt: nextModel.updatedAt,
       }
       if (changedConceptId) {
         merge.conceptStates = { [changedConceptId]: nextModel.conceptStates[changedConceptId] }

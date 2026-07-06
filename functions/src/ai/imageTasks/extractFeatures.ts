@@ -1,4 +1,5 @@
 import { getFirestore } from "firebase-admin/firestore";
+import { CLAUDE_SONNET } from "../models.js";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey } from "../aiConfig.js";
@@ -90,7 +91,7 @@ export const extractFeatures = onCall(
         : "image/jpeg";
 
       const result = await claude.messages.create({
-        model: "claude-sonnet-4-6",
+        model: CLAUDE_SONNET,
         max_tokens: 500,
         messages: [
           {
@@ -193,7 +194,7 @@ export const extractFeatures = onCall(
     // ── Log usage ─────────────────────────────────────────────────
     await db.collection(`families/${familyId}/aiUsage`).add({
       taskType: "feature-extraction",
-      model: "claude-sonnet-4-6",
+      model: CLAUDE_SONNET,
       inputTokens: 0,
       outputTokens: 0,
       childId,

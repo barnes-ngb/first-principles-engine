@@ -67,7 +67,7 @@ describe("createAiService", () => {
   it("can call chat with sonnet model", async () => {
     mockChat.mockResolvedValueOnce({
       content: "Deep analysis",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       usage: { inputTokens: 100, outputTokens: 500 },
     });
 

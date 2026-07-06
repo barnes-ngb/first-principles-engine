@@ -99,7 +99,7 @@ describe('HelpCardStrip', () => {
         why: 'Teaches short i.',
         lengthNote: 'about 3 minutes',
       }),
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5',
     })
 
     render(<HelpCardStrip familyId="f1" childId="c1" item={ITEM} isMvd={false} />)

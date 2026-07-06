@@ -65,9 +65,9 @@ describe("handleChat — per-request model override (ETHOS-03)", () => {
   });
 
   it("uses the override model when supplied (Sonnet for Dad Lab)", async () => {
-    const result = await handleChat(makeCtx({ modelOverride: "claude-sonnet-4-6" }));
+    const result = await handleChat(makeCtx({ modelOverride: "claude-sonnet-5" }));
     expect(callClaudeMock).toHaveBeenCalledOnce();
-    expect(callClaudeMock.mock.calls[0][0].model).toBe("claude-sonnet-4-6");
-    expect(result.model).toBe("claude-sonnet-4-6");
+    expect(callClaudeMock.mock.calls[0][0].model).toBe("claude-sonnet-5");
+    expect(result.model).toBe("claude-sonnet-5");
   });
 });

@@ -6,6 +6,7 @@ import { requireEmailAuth, checkRateLimit } from "./authGuard.js";
 import { STONEBRIDGE_BIBLE } from "./stonebridgeBible.js";
 import { ensureWorkbookActivityConfigsForChild } from "./workbookActivityConfigBackfill.js";
 import { MATH_CONCEPT_BANDS_TEXT } from "./levelDefinitions.js";
+import { ALLOWED_OVERRIDE_MODELS, resolveModelForTask } from "./models.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -43,6 +44,7 @@ export const TaskType = {
   WeeklyReview: "weeklyReview",
   AnalyzePatterns: "analyzePatterns",
   MonthlyReview: "monthlyReview",
+  LearnerSynthesis: "learnerSynthesis",
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -66,13 +68,11 @@ interface ChatRequest {
 
 /**
  * Models a client is permitted to request via the per-request override.
- * Kept in lock-step with the model ids returned by modelForTask so an override
- * can never point the chat path at an unknown/expensive model.
+ * Sourced from the central model table (models.ts) so it stays in lock-step
+ * with the ids modelForTask can return — an override can never point the chat
+ * path at an unknown/expensive model.
  */
-const ALLOWED_MODELS: readonly string[] = [
-  "claude-sonnet-4-6",
-  "claude-haiku-4-5-20251001",
-];
+const ALLOWED_MODELS: readonly string[] = ALLOWED_OVERRIDE_MODELS;
 
 interface ChatResponse {
   message: string;
@@ -83,34 +83,9 @@ interface ChatResponse {
 // ── Model mapping ───────────────────────────────────────────────
 
 export function modelForTask(taskType: TaskType): string {
-  switch (taskType) {
-    case TaskType.Plan:
-    case TaskType.Evaluate:
-    case TaskType.Quest:
-    case TaskType.GenerateStory:
-    case TaskType.ReviseStory:
-    case TaskType.RevisePage:
-    case TaskType.Workshop:
-    case TaskType.AnalyzeWorkbook:
-    case TaskType.Disposition:
-    case TaskType.Conundrum:
-    case TaskType.WeeklyFocus:
-    case TaskType.Scan:
-    case TaskType.ShellyChat:
-    case TaskType.FoundationsReview:
-    case TaskType.ChapterQuestions:
-    case TaskType.BookLookup:
-    case TaskType.LessonVideo:
-    case TaskType.HelpCard:
-    case TaskType.WeeklyReview:
-    case TaskType.AnalyzePatterns:
-    case TaskType.MonthlyReview:
-      return "claude-sonnet-4-6";
-    case TaskType.Generate:
-    case TaskType.Chat:
-    default:
-      return "claude-haiku-4-5-20251001";
-  }
+  // Model strings live in the central table (models.ts) — this is a thin
+  // adapter so the ~20 existing modelForTask() call sites are unchanged.
+  return resolveModelForTask(taskType);
 }
 
 // ── Enriched context types ──────────────────────────────────────

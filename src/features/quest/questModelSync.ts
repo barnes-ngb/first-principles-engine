@@ -55,7 +55,12 @@ export async function syncQuestResultsToModel(
     if (!modelSnap.exists()) return // no seeded model yet — the Review Chat feeds it first
 
     const model = modelSnap.data() as LearnerModel
-    const { model: next } = applyQuestResultsToModel(model, results, sessionId, nowIso)
+    const { model: next, changedConceptIds } = applyQuestResultsToModel(model, results, sessionId, nowIso)
+
+    // A quest write-back that moved concept state marks the LLM synthesis stale
+    // (FEAT-57, D4) so the next beat regenerates whatMattersNext/narrative. Only
+    // when something actually changed — evidence-only appends don't invalidate it.
+    if (changedConceptIds.length > 0) next.synthesisStaleAt = nowIso
 
     // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them),
     // exactly like the diag seeder and the other model writers.

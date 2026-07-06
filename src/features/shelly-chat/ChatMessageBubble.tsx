@@ -2,7 +2,8 @@ import type { Components } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import type { ShellyChatMessage } from '../../core/types'
+import type { ChatContext, ShellyChatMessage } from '../../core/types'
+import MessageActions from '../../components/MessageActions'
 
 function formatTimestamp(timestamp: string): string {
   const date = new Date(timestamp)
@@ -58,10 +59,16 @@ function renderImage(url: string, alt: string) {
 
 interface ChatMessageBubbleProps {
   message: ShellyChatMessage
+  /** Chat context (drives the export header source label). */
+  chatContext?: ChatContext
+  /** Toast callback for copy/download confirmations (host page owns the Snackbar). */
+  onNotify?: (message: string) => void
 }
 
-export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
+export default function ChatMessageBubble({ message, chatContext, onNotify }: ChatMessageBubbleProps) {
   const isUser = message.role === 'user'
+  // Copy/.md-download affordances on assistant messages only (FEAT-59).
+  const showActions = !isUser && Boolean(onNotify) && message.content.trim().length > 0
 
   return (
     <Box
@@ -89,19 +96,29 @@ export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
               🎨{' '}
             </Typography>
           )}
-          {/* Uploaded image with action badge */}
-          {message.uploadedImageUrl && isUser && (
-            <Box sx={{ mb: 1 }}>
-              <Typography variant="caption" sx={{ opacity: 0.8, display: 'block', mb: 0.5 }}>
-                {message.imageAction === 'analyze'
-                  ? '📷 Analyzing image'
-                  : message.imageAction === 'generate'
-                    ? '🎨 Using as reference'
-                    : '📎 Attached'}
-              </Typography>
-              {renderImage(message.uploadedImageUrl, 'Uploaded image')}
-            </Box>
-          )}
+          {/* Uploaded image(s) with action badge (FEAT-59: one OR more) */}
+          {(() => {
+            const uploaded = message.uploadedImageUrls?.length
+              ? message.uploadedImageUrls
+              : message.uploadedImageUrl
+                ? [message.uploadedImageUrl]
+                : []
+            if (!uploaded.length || !isUser) return null
+            return (
+              <Box sx={{ mb: 1 }}>
+                <Typography variant="caption" sx={{ opacity: 0.8, display: 'block', mb: 0.5 }}>
+                  {message.imageAction === 'analyze'
+                    ? '📷 Analyzing image'
+                    : message.imageAction === 'generate'
+                      ? '🎨 Using as reference'
+                      : uploaded.length > 1
+                        ? `📎 ${uploaded.length} attached`
+                        : '📎 Attached'}
+                </Typography>
+                {uploaded.map((url, i) => renderImage(url, `Uploaded image ${i + 1}`))}
+              </Box>
+            )
+          })()}
           {/* Generated/AI image */}
           {message.imageUrl && renderImage(message.imageUrl, 'Generated image')}
           {/* Message content */}
@@ -125,6 +142,13 @@ export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
         >
           {formatTimestamp(message.timestamp)}
         </Typography>
+        {showActions && onNotify && (
+          <MessageActions
+            markdown={message.content}
+            meta={{ chat: 'shelly', timestamp: message.timestamp, source: chatContext }}
+            onNotify={onNotify}
+          />
+        )}
       </Box>
     </Box>
   )

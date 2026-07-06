@@ -137,10 +137,12 @@ The family is **moving to Texas.** TX homeschool rules differ from MO (TX = priv
 ## AI Pipeline
 **Architecture:** client (`src/core/ai/`) assembles prompts; all API calls route through Firebase Cloud Functions (`functions/src/ai/`). No API keys in client code. Charter values injected into every system prompt (`CHARTER_PREAMBLE` in `contextSlices.ts`).
 
-**Model selection by task:**
-- Sonnet (`claude-sonnet-4-6`): plan, evaluate, quest, generateStory, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, revisePage, monthlyReview — complex reasoning.
+**Model selection by task** (one table: `functions/src/ai/models.ts` — the only place Claude model strings live in the functions AI layer):
+- Sonnet 5 (`claude-sonnet-5`): plan, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, foundationsReview, chapterQuestions, bookLookup, lessonVideo, helpCard, weeklyReview, analyzePatterns, monthlyReview — complex reasoning.
+- **Opus 4.8 pilot** (`claude-opus-4-8`): `evaluate` + `learnerSynthesis` only — reversible one-line edit in the table (owner review after 2 weeks). Fable 5 rejected (2x Opus cost + refusal-fallback handling).
 - Haiku (`claude-haiku-4-5-20251001`): generate, chat — routine generation (kid-facing utility; ≤1024 tokens).
 - Images: gpt-image-1.5 (OpenAI).
+- **aiUsage note:** token counts on Sonnet-5 / Opus-4.8 tasks run ~30% higher than the retired Sonnet-4.6 tasks did, due to the new tokenizer — expected, not a regression (Settings → AI Usage cost estimates reflect this).
 
 **25 Cloud Functions:** `chat` (task dispatch), `analyzeEvaluationPatterns`, `weeklyReview`, `generateWeeklyReviewNow`, `generateMonthlyReview`, `generateMonthlyReviewNow`, `publishMonthlyReview`, `unpublishMonthlyReview`, `auditMonthlyReviewSources`, `generateActivity`, `transcribeAudio`, `fileFeatureRequests` (scheduled daily 08:00 CT — the only code path that talks to GitHub; files `featureRequests` as issues via GitHub REST), `healthCheck`, + 12 image functions (`generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`).
 

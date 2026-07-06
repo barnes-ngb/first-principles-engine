@@ -12,7 +12,22 @@
  * Model: Sonnet
  */
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
-import { callClaude, callClaudeWithVisionUrl, logAiUsage } from "../chatTypes.js";
+import { callClaude, callClaudeWithVisionUrls, logAiUsage } from "../chatTypes.js";
+
+/**
+ * Pull leading `[IMAGE_URL:…]` markers (one OR MORE) off a message content
+ * (FEAT-59 — brings shellyChat to multi-image parity with foundationsReview).
+ * A single marker behaves exactly as the prior single-image path.
+ */
+const IMAGE_MARKER_RE = /\[IMAGE_URL:(https?:\/\/[^\]]+)\]/g;
+export function extractImageUrls(content: string): { urls: string[]; text: string } {
+  const urls: string[] = [];
+  let m: RegExpExecArray | null;
+  IMAGE_MARKER_RE.lastIndex = 0;
+  while ((m = IMAGE_MARKER_RE.exec(content)) !== null) urls.push(m[1]);
+  const text = content.replace(IMAGE_MARKER_RE, "").trim();
+  return { urls, text };
+}
 import { buildContextForTask } from "../contextSlices.js";
 import { modelForTask, getWeekMonday } from "../chat.js";
 import { summarizeTeachBacks } from "../evaluate.js";
@@ -206,7 +221,7 @@ SHELLY-SPECIFIC GUIDELINES:
 - If she asks you to generate an image, tell her to tap the image button.
 - For printable activities, format them clearly for screenshot or print.
 
-PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the year-to-date instructional-hours total against the reporting target (see HOURS PROGRESS), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE, and "are we on track for our hours" answers in HOURS PROGRESS, rather than guessing. Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she has not linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.`;
+PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the year-to-date instructional-hours total against the reporting target (see HOURS PROGRESS), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE, and "are we on track for our hours" answers in HOURS PROGRESS, rather than guessing. For any question about ${childName}'s LEVEL, what to WORK ON next, or what curriculum/materials to BUY, ground the answer in the LEARNER MODEL section and SAY which evidence supports the level claim ("two sources agree — Fast Phonics and his June check"); the Learner Model covers reading & math only, so for any other subject (science, handwriting, etc.) say plainly that the model doesn't cover it rather than guessing. Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she has not linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.`;
   }
   return `ROLE: You are Shelly's homeschool assistant. This is a general conversation — not focused on a specific child.
 
@@ -649,30 +664,31 @@ Example:
   const lastUserMsg = [...recentMessages]
     .reverse()
     .find((m) => m.role === "user");
-  const imageUrlMatch = lastUserMsg?.content.match(
-    /^\[IMAGE_URL:(https?:\/\/[^\]]+)\]\n?([\s\S]*)$/,
-  );
+  const imaged = lastUserMsg
+    ? extractImageUrls(lastUserMsg.content)
+    : { urls: [], text: "" };
 
   let result: { text: string; inputTokens: number; outputTokens: number };
 
-  if (imageUrlMatch) {
-    // Vision path: use shared helper for URL-based images
-    console.log("[shellyChat] Vision path — image URL detected:", imageUrlMatch[1]?.slice(0, 60));
-    const imageUrl = imageUrlMatch[1];
-    const textContent =
-      imageUrlMatch[2] || "What can you tell me about this image?";
+  if (imaged.urls.length > 0) {
+    // Vision path: one OR MORE URL-based images (FEAT-59 multi-image parity).
+    console.log(
+      `[shellyChat] Vision path — ${imaged.urls.length} image URL(s) detected:`,
+      imaged.urls[0]?.slice(0, 60),
+    );
+    const textContent = imaged.text || "What can you tell me about this image?";
 
     // Prior messages (everything except the last image message)
     const priorMessages = recentMessages
       .filter((m) => m !== lastUserMsg)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    result = await callClaudeWithVisionUrl({
+    result = await callClaudeWithVisionUrls({
       apiKey,
       model,
       maxTokens: 2000,
       systemPrompt,
-      imageUrl,
+      imageUrls: imaged.urls,
       textPrompt: textContent,
       messages: priorMessages,
     });

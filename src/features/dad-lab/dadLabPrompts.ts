@@ -141,7 +141,10 @@ function buildCalibrationBlock(sources: CalibrationSource[]): string {
  * reading/writing a child may not have. Passed as the `chat` request's allowlisted
  * `model` override so other `chat`-task callers stay on Haiku.
  */
-export const DAD_LAB_SUGGESTION_MODEL = 'claude-sonnet-4-6'
+// Sonnet 5 (FEAT-58). Client-side constant: must stay in the functions-side
+// override allowlist (models.ts → ALLOWED_OVERRIDE_MODELS). Cross-boundary
+// duplication of the model id — client cannot import from functions/.
+export const DAD_LAB_SUGGESTION_MODEL = 'claude-sonnet-5'
 
 /** Header introducing the per-child calibration block injected after the ethos rails. */
 export const CALIBRATION_BLOCK_HEADER =

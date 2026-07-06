@@ -387,6 +387,11 @@ export function mergeSeededModel(
     openQuestions:
       existing.openQuestions?.length ? existing.openQuestions : seeded.openQuestions,
     changeFeed: existing.changeFeed?.length ? existing.changeFeed : seeded.changeFeed,
+    // Preserve the LLM synthesis (the seeder never produces one) but mark it stale:
+    // a re-seed recomputed concept states, so whatMattersNext/narrative are behind
+    // and the next beat should regenerate them (FEAT-57, D4).
+    synthesis: existing.synthesis,
+    synthesisStaleAt: seeded.updatedAt,
     // Keep the original seededAt; this write is an update.
     seededAt: existing.seededAt ?? seeded.seededAt,
   }
