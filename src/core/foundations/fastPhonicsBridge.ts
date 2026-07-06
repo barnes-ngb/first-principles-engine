@@ -44,6 +44,15 @@ export interface CurriculumBridge {
   source: string
   version: number
   units: BridgeUnit[]
+  /**
+   * Free-text names a parent (or the LLM) might type for this source. Matched
+   * tolerantly by {@link normalizeSourceName} (lowercase + strip non-alphanumerics),
+   * so "Fast Phonics", "fast-phonics", "Reading Eggs Fast Phonics" all resolve.
+   * Deliberately conservative: a real typo like "Fast phony" does NOT match — the
+   * caller then keeps the generic-covered fallback and the assistant is prompted to
+   * ask "did you mean Fast Phonics?" rather than silently drop the mapping (FEAT-61).
+   */
+  aliases: string[]
 }
 
 /** Bump on curation, exactly like the graph versions. */
@@ -232,6 +241,20 @@ export const fastPhonicsBridge: CurriculumBridge = {
   source: 'fastPhonics',
   version: FAST_PHONICS_BRIDGE_VERSION,
   units: fastPhonicsUnits,
+  aliases: ['fast phonics', 'fastphonics', 'reading eggs fast phonics', 'fast phonic'],
+}
+
+/** Every bridge we know how to map. New sources add a module + an entry here. */
+const ALL_BRIDGES: CurriculumBridge[] = [fastPhonicsBridge]
+
+/**
+ * Normalize a free-text source name for tolerant matching: lowercase, then strip
+ * every non-alphanumeric character (spaces, hyphens, underscores, punctuation).
+ * Deliberately conservative — it collapses formatting differences but NOT
+ * misspellings, so "Fast phony" ≠ "fastphonics" (see {@link bridgeForSource}).
+ */
+export function normalizeSourceName(source: string): string {
+  return source.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
 /**
@@ -241,8 +264,17 @@ export const fastPhonicsBridge: CurriculumBridge = {
  */
 export function bridgeForSource(source: string | undefined | null): CurriculumBridge | null {
   if (!source) return null
-  const key = source.trim().toLowerCase().replace(/[\s_-]+/g, '')
-  if (key === 'fastphonics' || key === 'readingeggsfastphonics') return fastPhonicsBridge
+  const key = normalizeSourceName(source)
+  if (!key) return null
+  for (const bridge of ALL_BRIDGES) {
+    // The bridge's own `source` id is always a valid alias, plus its listed ones.
+    if (
+      normalizeSourceName(bridge.source) === key ||
+      bridge.aliases.some((a) => normalizeSourceName(a) === key)
+    ) {
+      return bridge
+    }
+  }
   return null
 }
 

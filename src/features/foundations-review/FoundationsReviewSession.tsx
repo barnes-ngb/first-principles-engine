@@ -24,7 +24,7 @@ import ReviewActionConfirmCard from './ReviewActionConfirmCard'
 import { parseFoundationsReviewActions } from './foundationsReviewActions'
 import { parseImageMarkers } from './uploadImageMessage'
 import { PERSONA_NAME, PLACEHOLDER_TEXT } from './persona'
-import { useFoundationsReview } from './useFoundationsReview'
+import { MAX_UPLOAD_PHOTOS, useFoundationsReview } from './useFoundationsReview'
 
 interface Props {
   familyId: string
@@ -62,6 +62,10 @@ export default function FoundationsReviewSession({
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploadContext, setUploadContext] = useState('')
+  // Shown when the parent picked more than the cap — honest, never a mystery error.
+  const [capNotice, setCapNotice] = useState<string | null>(null)
+  // The last attempted upload, kept so a failed send offers one-tap retry (FEAT-61).
+  const [lastUpload, setLastUpload] = useState<{ files: File[]; context: string } | null>(null)
   const startedRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -86,12 +90,39 @@ export default function FoundationsReviewSession({
     setUploadOpen(false)
     setUploadFiles([])
     setUploadContext('')
+    setCapNotice(null)
+  }
+
+  const handlePickFiles = (picked: File[]) => {
+    if (picked.length > MAX_UPLOAD_PHOTOS) {
+      setUploadFiles(picked.slice(0, MAX_UPLOAD_PHOTOS))
+      setCapNotice(
+        `Up to ${MAX_UPLOAD_PHOTOS} photos per message — keeping the first ${MAX_UPLOAD_PHOTOS}. Send the rest in your next message.`,
+      )
+    } else {
+      setUploadFiles(picked)
+      setCapNotice(null)
+    }
+  }
+
+  // Run an upload and remember it so a failure can be retried with one tap; clear
+  // the memory only when it actually lands.
+  const runUpload = async (files: File[], context: string) => {
+    setLastUpload({ files, context })
+    const ok = await review.uploadImages(files, context)
+    if (ok) setLastUpload(null)
   }
 
   const handleUploadSubmit = () => {
     if (uploadFiles.length === 0 || !uploadContext.trim()) return
-    void review.uploadImages(uploadFiles, uploadContext)
+    const files = uploadFiles.slice(0, MAX_UPLOAD_PHOTOS)
+    const context = uploadContext
     closeUpload()
+    void runUpload(files, context)
+  }
+
+  const handleRetryUpload = () => {
+    if (lastUpload) void runUpload(lastUpload.files, lastUpload.context)
   }
 
   const subject = SUBJECT_LABEL[domain]
@@ -197,7 +228,17 @@ export default function FoundationsReviewSession({
         )}
 
         {review.error && (
-          <Alert severity="warning" sx={{ mt: 1 }}>
+          <Alert
+            severity="warning"
+            sx={{ mt: 1 }}
+            action={
+              lastUpload && !review.uploading ? (
+                <Button color="inherit" size="small" onClick={handleRetryUpload} sx={{ textTransform: 'none' }}>
+                  Retry
+                </Button>
+              ) : undefined
+            }
+          >
             {review.error}
           </Alert>
         )}
@@ -294,7 +335,8 @@ export default function FoundationsReviewSession({
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
             A curriculum screenshot (e.g. a Fast Phonics progress page) or a photo of{' '}
-            {childName}’s actual work — a spelling page, a worksheet. Tell me in one line what it is.
+            {childName}’s actual work — a spelling page, a worksheet. Up to {MAX_UPLOAD_PHOTOS} photos
+            per message; send more as a follow-up. Tell me in one line what it is.
           </Typography>
           <Button
             component="label"
@@ -303,16 +345,21 @@ export default function FoundationsReviewSession({
             sx={{ textTransform: 'none', mb: 1 }}
           >
             {uploadFiles.length === 0
-              ? 'Choose photo(s)'
+              ? `Choose photos (up to ${MAX_UPLOAD_PHOTOS})`
               : `${uploadFiles.length} photo${uploadFiles.length === 1 ? '' : 's'} selected`}
             <input
               type="file"
               accept="image/*"
               multiple
               hidden
-              onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
+              onChange={(e) => handlePickFiles(Array.from(e.target.files ?? []))}
             />
           </Button>
+          {capNotice && (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              {capNotice}
+            </Alert>
+          )}
           <TextField
             fullWidth
             size="small"
