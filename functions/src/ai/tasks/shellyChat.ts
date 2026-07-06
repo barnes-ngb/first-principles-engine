@@ -8,7 +8,12 @@
  *            with overrides), recent weekly reviews (5-row strip), conundrum
  *            title, completion patterns, conundrum response count, chapter
  *            responses, recent teach-backs (14d, limit 10)
+ *          + general-branch only (no childId): every child's learnerModel slice
+ *            concatenated under per-child headers (FEAT-60) — read-only, for
+ *            grounded cross-child comparison; no actions are emitted here
  *          + child-scoped PLANNING-PARTNER MODE addendum in roleSection
+ * Voice: parent-neutral — the prompt addresses the user as "you" and never
+ *        asserts which parent is typing (FEAT-60; Learning Engine voice, FEAT-53).
  * Model: Sonnet
  */
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
@@ -28,7 +33,7 @@ export function extractImageUrls(content: string): { urls: string[]; text: strin
   const text = content.replace(IMAGE_MARKER_RE, "").trim();
   return { urls, text };
 }
-import { buildContextForTask } from "../contextSlices.js";
+import { buildContextForTask, loadLearnerModelContext } from "../contextSlices.js";
 import { modelForTask, getWeekMonday } from "../chat.js";
 import { summarizeTeachBacks } from "../evaluate.js";
 
@@ -208,30 +213,55 @@ export function formatRecentTeachBacks(rawArtifacts: TeachBackArtifactInput[]): 
  */
 export function buildShellyChatRoleSection(childName: string | undefined): string {
   if (childName) {
-    return `ROLE: You are Shelly's homeschool assistant. She selected ${childName}'s tab, so prioritize ${childName}'s data and needs in your responses.
+    return `ROLE: You are the family's homeschool assistant. The ${childName} tab is selected, so prioritize ${childName}'s data and needs in your responses. Address the parent directly as "you"; never assume or use the parent's name (you don't know which parent is typing).
 
-SHELLY-SPECIFIC GUIDELINES:
-- Be warm, practical, and specific. Shelly is busy — respect her time.
-- You DO have access to ${childName}'s records — the data above is current. Never say "I don't have access to records" or "I can't see evaluations." If data is missing, tell her specifically what's not there yet and how to populate it (e.g., "No evaluations yet — running one from the Progress tab would help me give more specific advice").
+GUIDELINES:
+- Be warm, practical, and specific. Respect the parent's time.
+- You DO have access to ${childName}'s records — the data above is current. Never say "I don't have access to records" or "I can't see evaluations." If data is missing, say specifically what's not there yet and how to populate it (e.g., "No evaluations yet — running one from the Progress tab would help me give more specific advice").
 - Connect suggestions to ${childName}'s skill snapshot and what's emerging vs. mastered.
 - Reference recent evaluation findings when discussing what to work on.
 - If engagement data shows frustration or low energy on certain subjects, acknowledge it and suggest alternatives.
-- She has chronic pain and does heroic work every day. If she's frustrated or tired, acknowledge it genuinely.
-- Keep responses concise unless she asks for detail.
-- If she asks you to generate an image, tell her to tap the image button.
+- Homeschooling is heroic, tiring work. If you sense the parent is frustrated or tired, acknowledge it genuinely.
+- Keep responses concise unless you're asked for detail.
+- If you're asked to generate an image, say to tap the image button.
 - For printable activities, format them clearly for screenshot or print.
 
-PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the year-to-date instructional-hours total against the reporting target (see HOURS PROGRESS), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE, and "are we on track for our hours" answers in HOURS PROGRESS, rather than guessing. For any question about ${childName}'s LEVEL, what to WORK ON next, or what curriculum/materials to BUY, ground the answer in the LEARNER MODEL section and SAY which evidence supports the level claim ("two sources agree — Fast Phonics and his June check"); the Learner Model covers reading & math only, so for any other subject (science, handwriting, etc.) say plainly that the model doesn't cover it rather than guessing. Use them to help Shelly see patterns over time — what is shifting, what is steady, what connects across signals she has not linked. When she shares an observation about ${childName} mid-conversation, treat it as evidence she has earned the right to add to the picture — don't argue with it, build on it.`;
+PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the year-to-date instructional-hours total against the reporting target (see HOURS PROGRESS), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE, and "are we on track for our hours" answers in HOURS PROGRESS, rather than guessing. For any question about ${childName}'s LEVEL, what to WORK ON next, or what curriculum/materials to BUY, ground the answer in the LEARNER MODEL section and SAY which evidence supports the level claim ("two sources agree — Fast Phonics and his June check"); the Learner Model covers reading & math only, so for any other subject (science, handwriting, etc.) say plainly that the model doesn't cover it rather than guessing. Use them to help the parent see patterns over time — what is shifting, what is steady, what connects across signals they have not linked. When the parent shares an observation about ${childName} mid-conversation, treat it as evidence they have earned the right to add to the picture — don't argue with it, build on it.`;
   }
-  return `ROLE: You are Shelly's homeschool assistant. This is a general conversation — not focused on a specific child.
+  return `ROLE: You are the family's homeschool assistant. This is a general conversation — not focused on a specific child. Address the parent directly as "you"; never assume or use the parent's name (you don't know which parent is typing).
 
-SHELLY-SPECIFIC GUIDELINES:
-- Be warm, practical, and specific. Shelly is busy — respect her time.
-- When she asks about teaching ideas, ask which child she's thinking about or suggest ideas for both.
-- She has chronic pain and does heroic work every day. If she's frustrated or tired, acknowledge it genuinely.
-- Keep responses concise unless she asks for detail.
-- If she asks you to generate an image, tell her to tap the image button.
+GUIDELINES:
+- Be warm, practical, and specific. Respect the parent's time.
+- When you're asked about teaching ideas, ask which child the parent is thinking about or suggest ideas for both.
+- Cross-child comparison is welcome here — this is exactly what the general view is for. When you compare the children or are asked whether something fits both, ground each child's level claim in that child's block under PER-CHILD LEARNER MODELS, name the evidence behind the claim, and say plainly when a domain has no data (same honesty rails as the child tabs — never guess a level). The Learner Model covers reading & math only; for any other subject say the model doesn't cover it rather than guessing.
+- Homeschooling is heroic, tiring work. If you sense the parent is frustrated or tired, acknowledge it genuinely.
+- Keep responses concise unless you're asked for detail.
+- If you're asked to generate an image, say to tap the image button.
 - For printable activities, format them clearly for screenshot or print.`;
+}
+
+/**
+ * Build the general-mode cross-child learner-model section (FEAT-60).
+ *
+ * The child-scoped context slices key on a single childId, so the general
+ * (no-child) branch loads none of them — a cross-child curriculum question
+ * ("does this cart cover both boys at their levels?") had no foundations to
+ * ground on. This concatenates every child's `learnerModel` slice under a
+ * clear per-child header so the assistant can compare children at their real
+ * levels. Read-only: general mode emits no actions (the action addenda stay
+ * child-tab-only), so this is grounding context, not a write surface.
+ *
+ * Takes pre-built slices (loaded by the caller) so it stays pure + testable.
+ * Returns "" when no child has a usable model — omit-on-empty, the same rail
+ * as the single-child slice.
+ */
+export function buildAllChildrenLearnerModels(
+  children: Array<{ name: string; slice: string }>,
+): string {
+  const populated = children.filter((c) => c.slice.trim() !== "");
+  if (populated.length === 0) return "";
+  const blocks = populated.map((c) => `── ${c.name || "Unknown"} ──\n${c.slice}`);
+  return `PER-CHILD LEARNER MODELS (each child's synthesized reading & math read — use these to compare children at their real levels; ground any level claim per child and name the evidence):\n\n${blocks.join("\n\n")}`;
 }
 
 /**
@@ -240,8 +270,8 @@ SHELLY-SPECIFIC GUIDELINES:
  *
  * Only emitted on a child-scoped tab (a real `childId`), since these actions
  * bind to a specific child. The model is told the active child's id so it can
- * address the action correctly; the app still performs the write only on
- * Shelly's confirm tap. Returns "" on the general (no-child) branch.
+ * address the action correctly; the app still performs the write only on the
+ * parent's confirm tap. Returns "" on the general (no-child) branch.
  */
 export function buildSightWordActionAddendum(
   childId: string | undefined,
@@ -251,7 +281,7 @@ export function buildSightWordActionAddendum(
   const who = childName || "this child";
   return `
 
-SIGHT-WORD ACTIONS: When Shelly clearly asks to ADD or REMOVE a sight word for ${who} (e.g. "add 'because' to ${who}'s sight words", "take 'the' off his list"), propose it with a structured action block. Otherwise, respond in normal prose — do NOT emit an action block when she is only discussing or asking about words.
+SIGHT-WORD ACTIONS: When the parent clearly asks to ADD or REMOVE a sight word for ${who} (e.g. "add 'because' to ${who}'s sight words", "take 'the' off his list"), propose it with a structured action block. Otherwise, respond in normal prose — do NOT emit an action block when the parent is only discussing or asking about words.
 
 Grammar — one trailing line per action, after your prose, using ${who}'s id exactly as given here ("${childId}") and a lowercase word:
 <action>{"kind":"addSightWord","childId":"${childId}","word":"because"}</action>
@@ -259,10 +289,10 @@ Grammar — one trailing line per action, after your prose, using ${who}'s id ex
 
 Rules:
 - One JSON object per <action> block; lowercase the word; always use childId "${childId}".
-- NEVER say the change is done. Say you've proposed it and Shelly can confirm with a tap — the app performs the write only when she confirms.
-- Be conservative: if you're unsure whether she wants a write versus just talking about words, do NOT emit an action — ask or stay in prose.
+- NEVER say the change is done. Say you've proposed it and it can be confirmed with a tap — the app performs the write only on confirm.
+- Be conservative: if you're unsure whether the parent wants a write versus just talking about words, do NOT emit an action — ask or stay in prose.
 
-PROFILE ACTIONS: When Shelly clearly wants to update ${who}'s profile — only the freeform fields motivators, interests, or strengths (e.g. "add Lego to ${who}'s motivators", "he's really into dinosaurs now") — propose an editProfileField action. These are the ONLY editable profile fields: never propose this for grade, supports, priority skills, or anything else.
+PROFILE ACTIONS: When the parent clearly wants to update ${who}'s profile — only the freeform fields motivators, interests, or strengths (e.g. "add Lego to ${who}'s motivators", "he's really into dinosaurs now") — propose an editProfileField action. These are the ONLY editable profile fields: never propose this for grade, supports, priority skills, or anything else.
 
 These are REPLACE writes, not appends: the app overwrites the whole field with your "value". You already have the current value in the CHILD PROFILE section above — compose the FULL intended new text (existing value plus the addition), not just the fragment, so the value is a clean replacement.
 
@@ -272,8 +302,8 @@ Grammar — one trailing line, after your prose, using ${who}'s id exactly ("${c
 Rules:
 - field must be exactly one of: motivators, interests, strengths.
 - value is the full new text for that field (merge in the change yourself).
-- NEVER say it's done. Say you've proposed it and Shelly confirms with a tap — she sees a before → after preview first.
-- Be conservative: discussion is not a write. Only propose when she clearly asks to change the profile.`;
+- NEVER say it's done. Say you've proposed it and it's confirmed with a tap — the parent sees a before → after preview first.
+- Be conservative: discussion is not a write. Only propose when the parent clearly asks to change the profile.`;
 }
 
 /**
@@ -281,9 +311,9 @@ Rules:
  * — Tier C Option 2).
  *
  * Teaches the model to propose ONLY additive snapshot edits — add a priority
- * skill / support / stop rule, or mark a skill Shelly says the child has — each
- * confirmed by her tap. Removals, downgrades, and level-lowering are impossible
- * in the app (the future Option 3), so the model must NEVER emit one; if she
+ * skill / support / stop rule, or mark a skill the parent says the child has —
+ * each confirmed by a tap. Removals, downgrades, and level-lowering are impossible
+ * in the app (the future Option 3), so the model must NEVER emit one; if the parent
  * asks to remove/lower something it says that's coming later and offers to note
  * it (which can become a friction-capture entry) rather than emitting an action.
  *
@@ -299,7 +329,7 @@ export function buildSnapshotActionAddendum(
   const who = childName || "this child";
   return `
 
-SKILL-SNAPSHOT ACTIONS (higher-stakes — this edits ${who}'s authoritative "what to teach next" record): When Shelly clearly wants to ADD a focus to the snapshot — a priority skill, a support, or a stop rule — or to mark a skill she says ${who} has, propose ONE additive action. Examples: "let's add inference to his list", "he needs a movement break every 10 minutes", "stop the lesson if he melts down", "he's solid on CVCe now".
+SKILL-SNAPSHOT ACTIONS (higher-stakes — this edits ${who}'s authoritative "what to teach next" record): When the parent clearly wants to ADD a focus to the snapshot — a priority skill, a support, or a stop rule — or to mark a skill they say ${who} has, propose ONE additive action. Examples: "let's add inference to his list", "he needs a movement break every 10 minutes", "stop the lesson if he melts down", "he's solid on CVCe now".
 
 Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
 <action>{"kind":"addPrioritySkill","childId":"${childId}","skill":"inference from passages"}</action>
@@ -308,20 +338,20 @@ Grammar — one JSON object per <action> block, after your prose, using ${who}'s
 <action>{"kind":"markSkillProgress","childId":"${childId}","skill":"CVCe long vowels","mastered":true}</action>
 
 Rules:
-- ADDITIVE ONLY. The app cannot remove, downgrade, or lower a level. If Shelly asks to REMOVE a skill, DELETE a support, or LOWER/DOWNGRADE a level, tell her that capability is coming later and offer to note it for later — do NOT emit any action.
-- For markSkillProgress: set "mastered":true only when she says the child has fully got it; omit "mastered" (or set it false) to mark a skill as progressing rather than mastered.
-- NEVER claim it's done. Say you've proposed it and she confirms with a tap; she sees a clearly-labeled "Updates the skill snapshot" card first.
-- One JSON object per <action> block. Be conservative: only propose when she clearly wants to change the snapshot. Discussion is not a write.`;
+- ADDITIVE ONLY. The app cannot remove, downgrade, or lower a level. If the parent asks to REMOVE a skill, DELETE a support, or LOWER/DOWNGRADE a level, say that capability is coming later and offer to note it for later — do NOT emit any action.
+- For markSkillProgress: set "mastered":true only when the parent says the child has fully got it; omit "mastered" (or set it false) to mark a skill as progressing rather than mastered.
+- NEVER claim it's done. Say you've proposed it and it's confirmed with a tap; the parent sees a clearly-labeled "Updates the skill snapshot" card first.
+- One JSON object per <action> block. Be conservative: only propose when the parent clearly wants to change the snapshot. Discussion is not a write.`;
 }
 
 /**
  * Build the `proposePlanAdjustment` HANDOFF grammar addendum (chunk 2A/2).
  *
- * When Shelly voices frustration that warrants a **next-week plan change** —
+ * When the parent voices frustration that warrants a **next-week plan change** —
  * drop/reduce/repace a subject, shift toward an MVD week, change the focus —
  * the model proposes ONE `proposePlanAdjustment` action instead of a snapshot
- * action. This is a HANDOFF, not a write: on Shelly's tap the chat stages a
- * brief and opens Plan My Week, where she reviews and locks in via the existing
+ * action. This is a HANDOFF, not a write: on the parent's tap the chat stages a
+ * brief and opens Plan My Week, where they review and lock in via the existing
  * flow. The chat never writes the plan. Snapshot-level tweaks (add a priority
  * skill / support / stop rule, mark a skill) still use the additive `add*`
  * actions; silent friction capture is untouched.
@@ -338,15 +368,15 @@ export function buildPlanAdjustmentActionAddendum(
   const who = childName || "this child";
   return `
 
-PLAN-ADJUSTMENT HANDOFF (next-week plan change — NOT a snapshot edit, NOT a write): When Shelly voices frustration that warrants changing ${who}'s NEXT WEEK plan — drop or reduce a subject, repace it, shift toward a lighter / Minimum Viable week, or change the week's focus (e.g. "math is melting him down, let's pull way back next week", "reading isn't landing — can we do less and lean on read-alouds", "next week needs to be a survival week") — propose ONE plan-adjustment action. Ground it in the state you can see above (evaluation history, disposition signals, hours progress, coverage), not a guess.
+PLAN-ADJUSTMENT HANDOFF (next-week plan change — NOT a snapshot edit, NOT a write): When the parent voices frustration that warrants changing ${who}'s NEXT WEEK plan — drop or reduce a subject, repace it, shift toward a lighter / Minimum Viable week, or change the week's focus (e.g. "math is melting him down, let's pull way back next week", "reading isn't landing — can we do less and lean on read-alouds", "next week needs to be a survival week") — propose ONE plan-adjustment action. Ground it in the state you can see above (evaluation history, disposition signals, hours progress, coverage), not a guess.
 
 Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
 <action>{"kind":"proposePlanAdjustment","childId":"${childId}","summary":"Reduce math to 10 min/day and lead with a hands-on warm-up","rationale":"Frustration is spiking in math and his disposition signals show persistence dropping this week"}</action>
 
 Rules:
-- This is a HANDOFF. Confirming it opens Plan My Week with your brief preloaded — Shelly reviews and locks in the actual plan there. You do NOT write the plan, and you must NEVER claim the plan is changed or done.
-- "summary" is the one-line change she'll see in the planner; "rationale" is the grounded WHY (cite the signal). You may add "scope" or "targetWeek" as short optional hints, but they're not required.
-- Use this ONLY for next-week plan changes. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions instead. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when she clearly wants the plan to change.`;
+- This is a HANDOFF. Confirming it opens Plan My Week with your brief preloaded — the parent reviews and locks in the actual plan there. You do NOT write the plan, and you must NEVER claim the plan is changed or done.
+- "summary" is the one-line change the parent will see in the planner; "rationale" is the grounded WHY (cite the signal). You may add "scope" or "targetWeek" as short optional hints, but they're not required.
+- Use this ONLY for next-week plan changes. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions instead. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when the parent clearly wants the plan to change.`;
 }
 
 /**
@@ -354,7 +384,7 @@ Rules:
  * (Build Step 5a — silent friction capture).
  *
  * Teaches the model to silently emit a single trailing `<friction>` block when
- * Shelly voices an unmet want or friction with a workflow. This is invisible
+ * the parent voices an unmet want or friction with a workflow. This is invisible
  * plumbing: the model must NOT mention it, ask permission, or change its prose.
  * The app strips the block (`parseFriction`) and logs it fire-and-forget to the
  * `featureRequests` collection — feedback metadata, never a child's record, and
@@ -363,11 +393,11 @@ Rules:
  */
 export function buildFrictionCaptureAddendum(): string {
   return `
-FRICTION CAPTURE (silent, invisible plumbing): When Shelly expresses she wants something the app does NOT do, or voices friction/frustration with a workflow — e.g. "I wish I could just see all his missed words in one place" or "it's annoying that I can't reorder the checklist" — emit ONE trailing block capturing it, after everything else in your response:
-<friction>{"quote":"<her words, verbatim>","interpretedWant":"<one-line summary of what she wanted>"}</friction>
+FRICTION CAPTURE (silent, invisible plumbing): When the parent expresses they want something the app does NOT do, or voices friction/frustration with a workflow — e.g. "I wish I could just see all his missed words in one place" or "it's annoying that I can't reorder the checklist" — emit ONE trailing block capturing it, after everything else in your response:
+<friction>{"quote":"<their words, verbatim>","interpretedWant":"<one-line summary of what they wanted>"}</friction>
 
 Rules:
-- DO NOT mention this to Shelly, DO NOT ask permission, DO NOT change your prose — keep helping her normally. The block is invisible; she never sees it.
+- DO NOT mention this to the parent, DO NOT ask permission, DO NOT change your prose — keep helping normally. The block is invisible; the parent never sees it.
 - One <friction> block per turn at most, and ONLY when there is genuine signal.
 - Be conservative: ordinary requests the app CAN already handle are not friction — only capture unmet wants or real workflow frustration.`;
 }
@@ -377,9 +407,9 @@ Rules:
  * (FEAT-12 Phase 1).
  *
  * Tells the assistant it may use Anthropic's server-side web search to look up
- * current/local information that helps Shelly plan — activities, events,
+ * current/local information that helps the parent plan — activities, events,
  * materials, videos, and facts — and to cite what it finds with markdown links.
- * Parent-scoped only (shellyChat is already Shelly-only; web search is never
+ * Parent-scoped only (shellyChat is already parent-only; web search is never
  * wired into any kid-facing task). Kept deliberately separate so it does not
  * disturb the role, `<action>`/`<friction>` grammars, or the `[FOLLOWUP]`
  * instruction.
@@ -393,7 +423,7 @@ Rules:
  */
 export function buildWebSearchAddendum(childName?: string): string {
   const base = `
-WEB SEARCH: You can search the web for current or local information when it would genuinely help Shelly plan — local activities and events, where to find materials or curricula, videos to watch or learn from together, and up-to-date facts. Use it when the answer depends on current, local, or specific information you don't already have; don't search for things you already know. When you draw on what you find, cite your sources as markdown links ([title](url)) so Shelly can tap through, and keep the answer practical and planning-oriented. Favor recent, reputable sources, and stay within Shelly's homeschool-planning context.`;
+WEB SEARCH: You can search the web for current or local information when it would genuinely help the parent plan — local activities and events, where to find materials or curricula, videos to watch or learn from together, and up-to-date facts. Use it when the answer depends on current, local, or specific information you don't already have; don't search for things you already know. When you draw on what you find, cite your sources as markdown links ([title](url)) so the parent can tap through, and keep the answer practical and planning-oriented. Favor recent, reputable sources, and stay within the homeschool-planning context.`;
   if (!childName) return base;
   return `${base}
 
@@ -512,6 +542,26 @@ export const handleShellyChat = async (
     }
   }
 
+  // Cross-child learner models — general (no-child) branch only (FEAT-60).
+  // Child-scoped tabs already get the single-child `learnerModel` slice via
+  // buildContextForTask; the general branch keys on no childId, so it loads
+  // none. Load every child's slice so cross-child curriculum questions have
+  // foundations to ground on. Read-only — no actions are emitted here.
+  if (!childId && allChildrenResult.status === "fulfilled" && allChildrenResult.value) {
+    const snap = allChildrenResult.value as { empty: boolean; docs: Array<{ id: string; data: () => Record<string, unknown> }> };
+    if (!snap.empty) {
+      const perChild = await Promise.all(
+        snap.docs.map(async (doc) => {
+          const c = doc.data() as { name?: string };
+          const slice = await loadLearnerModelContext(db, familyId, doc.id);
+          return { name: c.name || "", slice };
+        }),
+      );
+      const section = buildAllChildrenLearnerModels(perChild);
+      if (section) supplementalContext += `\n\n${section}`;
+    }
+  }
+
   // Disposition profile (Phase 1: uses dispositionCache + overrides — see formatter)
   if (dispositionResult.status === "fulfilled" && dispositionResult.value) {
     const snap = dispositionResult.value as { exists: boolean; data: () => Record<string, unknown> | undefined };
@@ -618,11 +668,11 @@ export const handleShellyChat = async (
   }
 
   if (reflectionLines.length > 0) {
-    supplementalContext += `\n\nTEACHING REFLECTION DATA (use this when Shelly asks how things are going):\n${reflectionLines.join("\n")}
+    supplementalContext += `\n\nTEACHING REFLECTION DATA (use this when the parent asks how things are going):\n${reflectionLines.join("\n")}
 
-When Shelly asks about engagement, frustration, or how things are going, use this data.
+When the parent asks about engagement, frustration, or how things are going, use this data.
 Don't give generic homeschool advice — give advice based on what's actually happening.
-Example: If she says "Lincoln seems bored with reading" and the data shows positive engagement but low quest completion, tell her: "His daily reading engagement looks positive — he might enjoy the workbook but find the quests too easy. Try increasing quest difficulty or switching to comprehension mode."`;
+Example: If the parent says "Lincoln seems bored with reading" and the data shows positive engagement but low quest completion, say: "His daily reading engagement looks positive — he might enjoy the workbook but find the quests too easy. Try increasing quest difficulty or switching to comprehension mode."`;
   }
 
   console.log(
@@ -648,7 +698,7 @@ ${planAdjustmentActionAddendum}
 ${frictionCaptureAddendum}
 ${webSearchAddendum}
 
-After your response, suggest 2-3 brief follow-up questions Shelly might want to ask. Format them on new lines at the very end of your response, each prefixed with "[FOLLOWUP] ". Keep each under 50 characters. These should be specific to what you just discussed, not generic.
+After your response, suggest 2-3 brief follow-up questions the parent might want to ask. Format them on new lines at the very end of your response, each prefixed with "[FOLLOWUP] ". Keep each under 50 characters. These should be specific to what you just discussed, not generic.
 
 Example:
 [FOLLOWUP] How do I adapt this for London?
