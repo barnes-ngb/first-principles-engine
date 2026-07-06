@@ -24,8 +24,9 @@ import {
   learnerReviewSessionsCollection,
 } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
-import { compressIfNeeded } from '../../core/utils/compressImage'
+import { downscaleImage } from '../../core/utils/downscaleImage'
 import { buildUploadMessageContent } from './uploadImageMessage'
+import { UploadTimeoutError, withTimeout } from './uploadTimeout'
 import {
   fastPhonicsBridge,
   FOUNDATION_NODE_MAP,
@@ -46,6 +47,28 @@ import { groundCoveredProposals } from './uploadGrounding'
 
 /** How many concepts the agenda carries — enough for a ~10-min walk, bounded tokens. */
 const AGENDA_LIMIT = 18
+
+/**
+ * Max photos per upload message. Chosen from recon: three full-size phone
+ * screenshots already strained the vision request (the reported 5+ min hang), and
+ * five fast-failed. Four downscaled-to-1600px JPEGs is a comfortable ceiling; more
+ * pages are simply the parent's next message (the dialog copy says so). (FEAT-61)
+ */
+export const MAX_UPLOAD_PHOTOS = 4
+
+/** Hard client ceiling on the vision extraction call — under the CF's 300s. */
+const UPLOAD_TIMEOUT_MS = 120_000
+
+/** How an upload turn ended — drives the specific, honest user-facing message. */
+export type UploadFailure = 'prepare' | 'timeout' | 'server'
+
+const UPLOAD_FAILURE_MESSAGE: Record<UploadFailure, string> = {
+  // Downscale / Storage upload threw before the CF was ever called.
+  prepare:
+    'Couldn’t prepare those photos — they may be too large, or not photos. Try fewer, or one at a time.',
+  timeout: 'That took too long — try fewer photos, or one at a time.',
+  server: 'The Learning Engine hit a problem reading that — please try again.',
+}
 
 export type ReviewActionStatus = 'pending' | 'applied' | 'dismissed'
 
@@ -172,20 +195,35 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
     )
   }, [])
 
-  /** Send the running conversation to the CF and append + stage the reply. */
+  /**
+   * Send the running conversation to the CF and append + stage the reply. Returns
+   * a status so callers can distinguish a server non-response from a timeout and
+   * word the error honestly; it no longer sets `error` itself. `timeoutMs` wraps
+   * the CF call in a hard client ceiling (the upload path passes it; plain chat
+   * doesn't need one).
+   */
   const runTurn = useCallback(
-    async (convo: ReviewSessionMessage[]) => {
-      const response = await chat({
-        familyId,
-        childId,
-        taskType: TaskType.FoundationsReview,
-        messages: convo.map((m) => ({ role: m.role, content: m.content })),
-      })
-      if (!response?.message) {
-        setError('The Learning Engine could not respond — try again.')
-        return convo
+    async (
+      convo: ReviewSessionMessage[],
+      opts?: { timeoutMs?: number },
+    ): Promise<'ok' | 'timeout' | 'server'> => {
+      const callChat = () =>
+        chat({
+          familyId,
+          childId,
+          taskType: TaskType.FoundationsReview,
+          messages: convo.map((m) => ({ role: m.role, content: m.content })),
+        })
+      let response: Awaited<ReturnType<typeof chat>>
+      try {
+        response = opts?.timeoutMs
+          ? await withTimeout(() => callChat(), opts.timeoutMs)
+          : await callChat()
+      } catch (err) {
+        if (err instanceof UploadTimeoutError) return 'timeout'
+        throw err
       }
-      const { cleanText } = parseFoundationsReviewActions(response.message)
+      if (!response?.message) return 'server'
       const assistantMsg: ReviewSessionMessage = {
         role: 'assistant',
         // Keep the raw text (with <action> blocks) so a resume can re-derive
@@ -197,8 +235,7 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
       setMessages(next)
       restageFrom(response.message, assistantMsg.at)
       await persistSession(next)
-      void cleanText
-      return next
+      return 'ok'
     },
     [chat, familyId, childId, restageFrom, persistSession],
   )
@@ -236,7 +273,8 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
       }
       setStatus('active')
       setSending(true)
-      await runTurn([priming])
+      const status = await runTurn([priming])
+      if (status !== 'ok') setError('The Learning Engine could not respond — try again.')
     } catch (err) {
       console.error('[foundationsReview] start failed:', err)
       setError(err instanceof Error ? err.message : 'Could not start the review.')
@@ -259,7 +297,8 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
       setSending(true)
       setError(null)
       try {
-        await runTurn(convo)
+        const status = await runTurn(convo)
+        if (status !== 'ok') setError('The Learning Engine could not respond — try again.')
       } finally {
         setSending(false)
       }
@@ -275,43 +314,59 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
    * `runTurn` → `restageFrom` grounds and stages as the usual confirm cards.
    */
   const uploadImages = useCallback(
-    async (files: File[], context: string) => {
+    async (files: File[], context: string): Promise<boolean> => {
       const ctx = context.trim()
-      if (files.length === 0 || !ctx || sending || uploading) return
+      if (files.length === 0 || !ctx || sending || uploading) return false
+      // Defensive cap — the dialog already trims to MAX_UPLOAD_PHOTOS, but never
+      // let a programmatic caller push a giant batch past the vision request.
+      const capped = files.slice(0, MAX_UPLOAD_PHOTOS)
       setUploading(true)
       setError(null)
+
+      // Phase 1 — downscale + upload to Storage. A failure here is a "prepare"
+      // class (too large / not a photo / Storage rejected), never the CF.
+      const urls: string[] = []
       try {
-        const urls: string[] = []
-        for (const file of files) {
-          const compressed = await compressIfNeeded(file, 2 * 1024 * 1024, {
-            maxWidth: 1600,
-            maxHeight: 1600,
-          })
+        for (const file of capped) {
+          const shrunk = await downscaleImage(file, 1600, 0.85)
           const stamp = now().replace(/[:.]/g, '-')
           const path = `families/${familyId}/foundations-review-uploads/${childId}_${domain}/${stamp}_${urls.length}.jpg`
           const sref = ref(storage, path)
-          await uploadBytes(sref, compressed)
+          await uploadBytes(sref, shrunk)
           urls.push(await getDownloadURL(sref))
         }
-        const userMsg: ReviewSessionMessage = {
-          role: 'user',
-          content: buildUploadMessageContent(urls, ctx),
-          at: now(),
-        }
-        const convo = [...messagesRef.current, userMsg]
-        setMessages(convo)
-        messagesRef.current = convo
-        setPending([])
-        setSending(true)
-        try {
-          await runTurn(convo)
-        } finally {
-          setSending(false)
-        }
       } catch (err) {
-        console.error('[foundationsReview] upload failed:', err)
-        setError('Could not read that photo — try again.')
+        console.error('[foundationsReview] upload/prepare failed:', err)
+        setError(UPLOAD_FAILURE_MESSAGE.prepare)
+        setUploading(false)
+        return false
+      }
+
+      // Phase 2 — vision extraction with a hard 120s ceiling. On timeout/server
+      // error the message is specific and the spinner always clears (finally).
+      const userMsg: ReviewSessionMessage = {
+        role: 'user',
+        content: buildUploadMessageContent(urls, ctx),
+        at: now(),
+      }
+      const convo = [...messagesRef.current, userMsg]
+      setMessages(convo)
+      messagesRef.current = convo
+      setPending([])
+      setSending(true)
+      try {
+        const status = await runTurn(convo, { timeoutMs: UPLOAD_TIMEOUT_MS })
+        if (status !== 'ok') {
+          setError(UPLOAD_FAILURE_MESSAGE[status === 'timeout' ? 'timeout' : 'server'])
+          return false
+        }
+        return true
+      } catch (err) {
+        console.error('[foundationsReview] extraction failed:', err)
+        setError(UPLOAD_FAILURE_MESSAGE.server)
+        return false
       } finally {
+        setSending(false)
         setUploading(false)
       }
     },
