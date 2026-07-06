@@ -384,8 +384,8 @@ describe("buildShellyChatRoleSection", () => {
     expect(out).toContain("RECENT WEEKLY REVIEWS");
     expect(out).toContain("RECENT TEACH-BACKS");
     // Names the child throughout (no stray placeholder).
-    expect(out).toContain("She selected Lincoln's tab");
-    expect(out).toContain("Use them to help Shelly see patterns over time");
+    expect(out).toContain("The Lincoln tab is selected");
+    expect(out).toContain("Use them to help the parent see patterns over time");
     // Nathan's preserved framing.
     expect(out).toContain("don't argue with it, build on it");
     expect(out).not.toContain("${childName}");
@@ -412,6 +412,20 @@ describe("buildShellyChatRoleSection", () => {
     const out = buildShellyChatRoleSection("");
     expect(out).not.toContain("PLANNING-PARTNER MODE");
     expect(out).toContain("This is a general conversation");
+  });
+
+  it("never assumes a parent's name and addresses the user as 'you' on both branches (FEAT-60)", () => {
+    const child = buildShellyChatRoleSection("Lincoln");
+    const general = buildShellyChatRoleSection(undefined);
+    // No parent name hardcoded (mirrors the FEAT-53 child-agnostic pattern).
+    expect(child).not.toContain("Shelly");
+    expect(general).not.toContain("Shelly");
+    // Addresses the user directly, refers to "the parent" in third person.
+    expect(child.toLowerCase()).toContain("never assume or use the parent's name");
+    expect(general.toLowerCase()).toContain("never assume or use the parent's name");
+    // Parent-neutral ROLE line.
+    expect(child).toContain("You are the family's homeschool assistant");
+    expect(general).toContain("You are the family's homeschool assistant");
   });
 });
 
