@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
@@ -21,7 +22,9 @@ import LinearProgress from '@mui/material/LinearProgress'
 import List from '@mui/material/List'
 import ListItemButton from '@mui/material/ListItemButton'
 import ListItemText from '@mui/material/ListItemText'
+import Alert from '@mui/material/Alert'
 import Paper from '@mui/material/Paper'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
@@ -78,6 +81,9 @@ export default function ShellyChatPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
 
+  // Copy/.md-download toast (FEAT-59). Local Snackbar per the repo pattern.
+  const [snack, setSnack] = useState<string | null>(null)
+
   // ── State + refs live in useShellyChatState; effects + handlers in
   //    useShellyChatFlows (ARCH-09). The page is a thin shell that composes
   //    both and wires the returned handlers into the JSX. No behavior or write
@@ -94,10 +100,11 @@ export default function ShellyChatPage() {
     sending,
     drawerOpen, setDrawerOpen,
     generatingImage,
-    uploadPreview,
+    uploadPreviews,
+    uploadFiles,
     uploading,
     uploadDialogOpen,
-    pendingAttachment, setPendingAttachment,
+    pendingAttachments, setPendingAttachments,
     pendingReferenceImage,
     imageFlowOpen,
     imageFlowStep,
@@ -315,7 +322,12 @@ export default function ShellyChatPage() {
         ) : (
           <>
             {messages.map((msg) => (
-              <ChatMessageBubble key={msg.id} message={msg} />
+              <ChatMessageBubble
+                key={msg.id}
+                message={msg}
+                chatContext={chatContext}
+                onNotify={setSnack}
+              />
             ))}
             {isBusy && (
               <Box sx={{ display: 'flex', mb: 1.5 }}>
@@ -509,23 +521,38 @@ export default function ShellyChatPage() {
       {/* Input area */}
       <Paper elevation={2} sx={{ p: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
         {uploading && <LinearProgress sx={{ mb: 1 }} />}
-        {pendingAttachment && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, px: 0.5 }}>
-            <Box
-              component="img"
-              src={pendingAttachment.previewUrl}
-              alt="Attached"
-              sx={{ width: 36, height: 36, borderRadius: 1, objectFit: 'cover' }}
-            />
-            <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-              Image attached — type your question
+        {pendingAttachments.length > 0 && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, px: 0.5, flexWrap: 'wrap' }}>
+            {pendingAttachments.map((att, i) => (
+              <Box key={att.url} sx={{ position: 'relative' }}>
+                <Box
+                  component="img"
+                  src={att.previewUrl}
+                  alt={`Attached ${i + 1}`}
+                  sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', display: 'block' }}
+                />
+                <IconButton
+                  size="small"
+                  onClick={() => {
+                    URL.revokeObjectURL(att.previewUrl)
+                    setPendingAttachments((prev) => prev.filter((a) => a.url !== att.url))
+                  }}
+                  aria-label={`Remove attachment ${i + 1}`}
+                  sx={{
+                    position: 'absolute', top: -6, right: -6, p: 0,
+                    bgcolor: 'background.paper', boxShadow: 1,
+                    '&:hover': { bgcolor: 'grey.200' },
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Box>
+            ))}
+            <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 120 }}>
+              {pendingAttachments.length === 1
+                ? 'Image attached — type your question'
+                : `${pendingAttachments.length} images attached — type one question`}
             </Typography>
-            <IconButton size="small" onClick={() => {
-              URL.revokeObjectURL(pendingAttachment.previewUrl)
-              setPendingAttachment(null)
-            }} aria-label="Remove attachment">
-              <CloseIcon fontSize="small" />
-            </IconButton>
           </Box>
         )}
         <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5 }}>
@@ -534,6 +561,7 @@ export default function ShellyChatPage() {
             ref={fileInputRef}
             type="file"
             accept="image/*"
+            multiple
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
@@ -586,46 +614,59 @@ export default function ShellyChatPage() {
         maxWidth="xs"
       >
         <DialogContent sx={{ pt: 3 }}>
-          {uploadPreview && (
-            <Box sx={{ textAlign: 'center', mb: 2.5 }}>
-              <Box
-                component="img"
-                src={uploadPreview}
-                alt="Selected"
-                sx={{ maxHeight: 180, maxWidth: '100%', borderRadius: 2, objectFit: 'contain' }}
-              />
+          {uploadPreviews.length > 0 && (
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center', mb: 2.5 }}>
+              {uploadPreviews.map((src, i) => (
+                <Box
+                  key={src}
+                  component="img"
+                  src={src}
+                  alt={`Selected ${i + 1}`}
+                  sx={{
+                    maxHeight: uploadPreviews.length === 1 ? 180 : 96,
+                    maxWidth: '100%',
+                    borderRadius: 2,
+                    objectFit: 'contain',
+                  }}
+                />
+              ))}
             </Box>
           )}
           <Typography variant="subtitle2" gutterBottom>What would you like to do?</Typography>
           <Stack spacing={1.5}>
-            <Button
-              fullWidth
-              variant="outlined"
-              startIcon={<VisibilityIcon />}
-              onClick={handleUploadAnalyze}
-              sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
-            >
-              <Box sx={{ textAlign: 'left' }}>
-                <Typography variant="body2" fontWeight="medium">Analyze this image</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Ask questions about what's in the image
-                </Typography>
-              </Box>
-            </Button>
-            <Button
-              fullWidth
-              variant="outlined"
-              startIcon={<AutoFixHighIcon />}
-              onClick={handleUploadGenerate}
-              sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
-            >
-              <Box sx={{ textAlign: 'left' }}>
-                <Typography variant="body2" fontWeight="medium">Use as reference for image creation</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Generate a new image inspired by this one
-                </Typography>
-              </Box>
-            </Button>
+            {/* Analyze + reference-generate are single-image; only when one file chosen. */}
+            {uploadFiles.length === 1 && (
+              <>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<VisibilityIcon />}
+                  onClick={handleUploadAnalyze}
+                  sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
+                >
+                  <Box sx={{ textAlign: 'left' }}>
+                    <Typography variant="body2" fontWeight="medium">Analyze this image</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Ask questions about what's in the image
+                    </Typography>
+                  </Box>
+                </Button>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<AutoFixHighIcon />}
+                  onClick={handleUploadGenerate}
+                  sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
+                >
+                  <Box sx={{ textAlign: 'left' }}>
+                    <Typography variant="body2" fontWeight="medium">Use as reference for image creation</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Generate a new image inspired by this one
+                    </Typography>
+                  </Box>
+                </Button>
+              </>
+            )}
             <Button
               fullWidth
               variant="outlined"
@@ -634,7 +675,9 @@ export default function ShellyChatPage() {
               sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
             >
               <Box sx={{ textAlign: 'left' }}>
-                <Typography variant="body2" fontWeight="medium">Attach to my message</Typography>
+                <Typography variant="body2" fontWeight="medium">
+                  {uploadFiles.length > 1 ? `Attach ${uploadFiles.length} images to my message` : 'Attach to my message'}
+                </Typography>
                 <Typography variant="caption" color="text.secondary">
                   Send with a question like "what should Lincoln work on next?"
                 </Typography>
@@ -646,6 +689,18 @@ export default function ShellyChatPage() {
           <Button onClick={handleUploadCancel}>Cancel</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Copy / .md-download confirmation toast (FEAT-59) */}
+      <Snackbar
+        open={Boolean(snack)}
+        autoHideDuration={2000}
+        onClose={() => setSnack(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSnack(null)} severity="success" variant="filled" sx={{ width: '100%' }}>
+          {snack}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  extractImageUrls,
   buildFrictionCaptureAddendum,
   buildPlanAdjustmentActionAddendum,
   buildShellyChatRoleSection,
@@ -606,5 +607,27 @@ describe("Phase 1 supplemental-block token-budget sanity", () => {
     expect(conundrum).not.toBe("");
     expect(teachBacks).not.toBe("");
     expect(roleSection).toContain("PLANNING-PARTNER MODE");
+  });
+});
+
+describe("extractImageUrls — multi-image vision parity (FEAT-59)", () => {
+  it("pulls a single leading marker (unchanged single-image behavior)", () => {
+    const r = extractImageUrls("[IMAGE_URL:https://x/a.jpg]\nwhat is this?");
+    expect(r.urls).toEqual(["https://x/a.jpg"]);
+    expect(r.text).toBe("what is this?");
+  });
+
+  it("pulls N leading markers and returns the shared context text once", () => {
+    const r = extractImageUrls(
+      "[IMAGE_URL:https://x/a.jpg][IMAGE_URL:https://x/b.jpg][IMAGE_URL:https://x/c.jpg]\nthese are Fast Phonics",
+    );
+    expect(r.urls).toEqual(["https://x/a.jpg", "https://x/b.jpg", "https://x/c.jpg"]);
+    expect(r.text).toBe("these are Fast Phonics");
+  });
+
+  it("returns no urls for a plain text message (text path)", () => {
+    const r = extractImageUrls("just a question, no image");
+    expect(r.urls).toEqual([]);
+    expect(r.text).toBe("just a question, no image");
   });
 });

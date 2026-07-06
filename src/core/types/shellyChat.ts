@@ -23,7 +23,10 @@ export interface ShellyChatMessage {
   timestamp: string
   imageUrl?: string
   imagePrompt?: string
+  /** Single uploaded image (analyze/attach-one). Legacy + single-file path. */
   uploadedImageUrl?: string
+  /** Batch of uploaded images on one turn (FEAT-59 multi-file attach). */
+  uploadedImageUrls?: string[]
   imageAction?: 'analyze' | 'generate' | 'attach'
   /**
    * Portal write audit (Build Step 3b): the `<action>` proposals Shelly

@@ -32,7 +32,8 @@ import { logFeatureRequest } from './logFeatureRequest'
 import { parseFollowUps } from './parseFollowups'
 import { computeReflectionSuggestions } from './reflectionSuggestions'
 import type { ReflectionDay } from './reflectionSuggestions'
-import type { RefinementQuestion, ShellyChatState } from './useShellyChatState'
+import type { ChatAttachment, RefinementQuestion, ShellyChatState } from './useShellyChatState'
+import { buildImageMessageContent, MAX_UPLOAD_FILES } from './imageMarkers'
 
 type AI = ReturnType<typeof useAI>
 
@@ -83,11 +84,11 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     sending, setSending,
     setDrawerOpen,
     setGeneratingImage,
-    uploadPreview, setUploadPreview,
-    uploadFile, setUploadFile,
+    uploadPreviews, setUploadPreviews,
+    uploadFiles, setUploadFiles,
     setUploading,
     setUploadDialogOpen,
-    pendingAttachment, setPendingAttachment,
+    pendingAttachments, setPendingAttachments,
     pendingReferenceImage, setPendingReferenceImage,
     setImageFlowOpen,
     setImageFlowStep,
@@ -383,8 +384,10 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         content: text,
         timestamp: new Date().toISOString(),
       }
-      if (pendingAttachment) {
-        userMsgData.uploadedImageUrl = pendingAttachment.url
+      if (pendingAttachments.length) {
+        userMsgData.uploadedImageUrls = pendingAttachments.map((a) => a.url)
+        // Keep the singular field populated (first image) for legacy readers.
+        userMsgData.uploadedImageUrl = pendingAttachments[0].url
         userMsgData.imageAction = 'attach'
       }
       await addDoc(shellyChatMessagesCollection(familyId, threadId), userMsgData)
@@ -397,13 +400,14 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         },
       )
 
-      // Get AI response — include image URL for vision if attached
-      const aiContent = pendingAttachment
-        ? `[IMAGE_URL:${pendingAttachment.url}]\n${text}`
-        : text
-      if (pendingAttachment) {
-        URL.revokeObjectURL(pendingAttachment.previewUrl)
-        setPendingAttachment(null)
+      // Get AI response — include N image URLs for vision if attached (FEAT-59)
+      const aiContent = buildImageMessageContent(
+        pendingAttachments.map((a) => a.url),
+        text,
+      )
+      if (pendingAttachments.length) {
+        pendingAttachments.forEach((a) => URL.revokeObjectURL(a.previewUrl))
+        setPendingAttachments([])
       }
 
       const currentMsgs = [...messages, { id: '', role: 'user' as const, content: aiContent, timestamp: new Date().toISOString() }]
@@ -489,7 +493,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     } finally {
       setSending(false)
     }
-  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachment, chatContext, setActiveThreadId, setFollowUps, setInput, setPendingAttachment, setSending, stagePendingActions])
+  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachments, chatContext, setActiveThreadId, setFollowUps, setInput, setPendingAttachments, setSending, stagePendingActions])
 
   // ── Image generation (refactored for Prompt 9) ─────────────────
   const handleGenerateImageDirect = useCallback(async (prompt: string) => {
@@ -791,32 +795,32 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
   // ── Image upload handlers (Prompt 8) ───────────────────────────
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    // Reset the input so the same file can be re-selected
+    // FEAT-59: accept multiple files (capped). Attach batches them; analyze /
+    // reference-generate are single-image and only shown when exactly one chosen.
+    const files = Array.from(e.target.files ?? []).slice(0, MAX_UPLOAD_FILES)
+    if (!files.length) return
+    // Reset the input so the same file(s) can be re-selected
     e.target.value = ''
 
-    setUploadFile(file)
-    setUploadPreview(URL.createObjectURL(file))
+    setUploadFiles(files)
+    setUploadPreviews(files.map((f) => URL.createObjectURL(f)))
     setUploadDialogOpen(true)
-  }, [setUploadFile, setUploadPreview, setUploadDialogOpen])
+  }, [setUploadFiles, setUploadPreviews, setUploadDialogOpen])
 
   const handleUploadCancel = useCallback(() => {
-    if (uploadPreview) URL.revokeObjectURL(uploadPreview)
+    uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
     setUploadDialogOpen(false)
-    setUploadFile(null)
-    setUploadPreview(null)
-  }, [uploadPreview, setUploadDialogOpen, setUploadFile, setUploadPreview])
+    setUploadFiles([])
+    setUploadPreviews([])
+  }, [uploadPreviews, setUploadDialogOpen, setUploadFiles, setUploadPreviews])
 
   const handleUploadContext = useCallback(async () => {
-    if (!uploadFile || !uploadPreview) return
+    if (!uploadFiles.length) return
 
     setUploadDialogOpen(false)
     setUploading(true)
 
     try {
-      const compressed = await compressIfNeeded(uploadFile, 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
-
       let threadId = activeThreadId
 
       if (!threadId) {
@@ -834,32 +838,38 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         setSearchParams({ thread: threadId })
       }
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-      const storagePath = `families/${familyId}/chat-uploads/${threadId}/${timestamp}.jpg`
-      const storageRef = ref(storage, storagePath)
-      await uploadBytes(storageRef, compressed)
-      const downloadUrl = await getDownloadURL(storageRef)
-
-      // Keep the preview URL alive for the attachment strip
-      setPendingAttachment({ url: downloadUrl, previewUrl: uploadPreview })
+      // Upload each file sequentially; collect one attachment per image (FEAT-59).
+      const attachments: ChatAttachment[] = []
+      for (let i = 0; i < uploadFiles.length; i++) {
+        const compressed = await compressIfNeeded(uploadFiles[i], 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+        const storagePath = `families/${familyId}/chat-uploads/${threadId}/${timestamp}_${i}.jpg`
+        const storageRef = ref(storage, storagePath)
+        await uploadBytes(storageRef, compressed)
+        const downloadUrl = await getDownloadURL(storageRef)
+        // Keep the preview URL alive for the attachment strip
+        attachments.push({ url: downloadUrl, previewUrl: uploadPreviews[i] })
+      }
+      setPendingAttachments(attachments)
     } catch (err) {
-      console.error('Failed to upload image for attachment:', err)
-      if (uploadPreview) URL.revokeObjectURL(uploadPreview)
+      console.error('Failed to upload image(s) for attachment:', err)
+      uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
     } finally {
-      setUploadFile(null)
-      setUploadPreview(null)
+      setUploadFiles([])
+      setUploadPreviews([])
       setUploading(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setPendingAttachment, setUploadDialogOpen, setUploadFile, setUploadPreview, setUploading])
+  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setPendingAttachments, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading])
 
   const handleUploadAnalyze = useCallback(async () => {
-    if (!uploadFile) return
+    // Single-image path — the dialog only offers Analyze when one file is chosen.
+    if (!uploadFiles.length) return
 
     setUploadDialogOpen(false)
     setUploading(true)
 
     try {
-      const compressed = await compressIfNeeded(uploadFile, 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
+      const compressed = await compressIfNeeded(uploadFiles[0], 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
 
       let threadId = activeThreadId
 
@@ -978,22 +988,23 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         }).catch(() => {})
       }
     } finally {
-      if (uploadPreview) URL.revokeObjectURL(uploadPreview)
-      setUploadFile(null)
-      setUploadPreview(null)
+      uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
+      setUploadFiles([])
+      setUploadPreviews([])
       setUploading(false)
       setSending(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFile, setUploadPreview, setUploading, stagePendingActions])
+  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, stagePendingActions])
 
   const handleUploadGenerate = useCallback(async () => {
-    if (!uploadFile || !uploadPreview) return
+    // Single-image path — reference generation uses exactly one image.
+    if (!uploadFiles.length || !uploadPreviews.length) return
 
     setUploadDialogOpen(false)
     setUploading(true)
 
     try {
-      const compressed = await compressIfNeeded(uploadFile, 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
+      const compressed = await compressIfNeeded(uploadFiles[0], 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
 
       let threadId = activeThreadId
 
@@ -1019,7 +1030,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       const downloadUrl = await getDownloadURL(storageRef)
 
       // Store as reference image and open the refinement flow
-      setPendingReferenceImage({ url: downloadUrl, previewUrl: uploadPreview })
+      setPendingReferenceImage({ url: downloadUrl, previewUrl: uploadPreviews[0] })
       setImageFlowOpen(true)
       setImageFlowStep('idea')
       setImageIdea('')
@@ -1027,13 +1038,13 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       setImageAnswers({})
     } catch (err) {
       console.error('Failed to upload reference image:', err)
-      if (uploadPreview) URL.revokeObjectURL(uploadPreview)
+      uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
     } finally {
-      setUploadFile(null)
-      setUploadPreview(null)
+      setUploadFiles([])
+      setUploadPreviews([])
       setUploading(false)
     }
-  }, [uploadFile, uploadPreview, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers, setPendingReferenceImage, setUploadDialogOpen, setUploadFile, setUploadPreview, setUploading])
+  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers, setPendingReferenceImage, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading])
 
   // ── New thread ─────────────────────────────────────────────────
   const handleNewThread = useCallback(() => {
