@@ -8,7 +8,12 @@
  *            with overrides), recent weekly reviews (5-row strip), conundrum
  *            title, completion patterns, conundrum response count, chapter
  *            responses, recent teach-backs (14d, limit 10)
+ *          + general-branch only (no childId): every child's learnerModel slice
+ *            concatenated under per-child headers (FEAT-60) — read-only, for
+ *            grounded cross-child comparison; no actions are emitted here
  *          + child-scoped PLANNING-PARTNER MODE addendum in roleSection
+ * Voice: parent-neutral — the prompt addresses the user as "you" and never
+ *        asserts which parent is typing (FEAT-60; Learning Engine voice, FEAT-53).
  * Model: Sonnet
  */
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
