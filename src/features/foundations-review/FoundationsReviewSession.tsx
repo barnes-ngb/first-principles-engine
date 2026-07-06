@@ -10,6 +10,7 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import Paper from '@mui/material/Paper'
+import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
@@ -18,6 +19,7 @@ import AddPhotoAlternateOutlinedIcon from '@mui/icons-material/AddPhotoAlternate
 import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
 
 import type { FoundationDomain } from '../../core/foundations/types'
+import MessageActions from '../../components/MessageActions'
 import ReviewActionConfirmCard from './ReviewActionConfirmCard'
 import { parseFoundationsReviewActions } from './foundationsReviewActions'
 import { parseImageMarkers } from './uploadImageMessage'
@@ -55,6 +57,8 @@ export default function FoundationsReviewSession({
 }: Props) {
   const review = useFoundationsReview({ familyId, childId, childName, domain })
   const [draft, setDraft] = useState('')
+  // Copy/.md-download toast (FEAT-59).
+  const [snack, setSnack] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploadContext, setUploadContext] = useState('')
@@ -126,7 +130,11 @@ export default function FoundationsReviewSession({
             return (
               <Box
                 key={`${m.at}_${i}`}
-                sx={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: m.role === 'user' ? 'flex-end' : 'flex-start',
+                }}
               >
                 <Paper
                   elevation={0}
@@ -150,6 +158,19 @@ export default function FoundationsReviewSession({
                   )}
                   {text && <Typography variant="body2">{text}</Typography>}
                 </Paper>
+                {/* Copy / .md-download on assistant messages (FEAT-59) */}
+                {m.role === 'assistant' && text && (
+                  <MessageActions
+                    markdown={text}
+                    meta={{
+                      chat: 'foundations-review',
+                      timestamp: m.at,
+                      child: childName,
+                      source: SUBJECT_LABEL[domain],
+                    }}
+                    onNotify={setSnack}
+                  />
+                )}
               </Box>
             )
           })}
@@ -317,6 +338,18 @@ export default function FoundationsReviewSession({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Copy / .md-download confirmation toast (FEAT-59) */}
+      <Snackbar
+        open={Boolean(snack)}
+        autoHideDuration={2000}
+        onClose={() => setSnack(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSnack(null)} severity="success" variant="filled" sx={{ width: '100%' }}>
+          {snack}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

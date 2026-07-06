@@ -12,7 +12,22 @@
  * Model: Sonnet
  */
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
-import { callClaude, callClaudeWithVisionUrl, logAiUsage } from "../chatTypes.js";
+import { callClaude, callClaudeWithVisionUrls, logAiUsage } from "../chatTypes.js";
+
+/**
+ * Pull leading `[IMAGE_URL:…]` markers (one OR MORE) off a message content
+ * (FEAT-59 — brings shellyChat to multi-image parity with foundationsReview).
+ * A single marker behaves exactly as the prior single-image path.
+ */
+const IMAGE_MARKER_RE = /\[IMAGE_URL:(https?:\/\/[^\]]+)\]/g;
+export function extractImageUrls(content: string): { urls: string[]; text: string } {
+  const urls: string[] = [];
+  let m: RegExpExecArray | null;
+  IMAGE_MARKER_RE.lastIndex = 0;
+  while ((m = IMAGE_MARKER_RE.exec(content)) !== null) urls.push(m[1]);
+  const text = content.replace(IMAGE_MARKER_RE, "").trim();
+  return { urls, text };
+}
 import { buildContextForTask } from "../contextSlices.js";
 import { modelForTask, getWeekMonday } from "../chat.js";
 import { summarizeTeachBacks } from "../evaluate.js";
@@ -649,30 +664,31 @@ Example:
   const lastUserMsg = [...recentMessages]
     .reverse()
     .find((m) => m.role === "user");
-  const imageUrlMatch = lastUserMsg?.content.match(
-    /^\[IMAGE_URL:(https?:\/\/[^\]]+)\]\n?([\s\S]*)$/,
-  );
+  const imaged = lastUserMsg
+    ? extractImageUrls(lastUserMsg.content)
+    : { urls: [], text: "" };
 
   let result: { text: string; inputTokens: number; outputTokens: number };
 
-  if (imageUrlMatch) {
-    // Vision path: use shared helper for URL-based images
-    console.log("[shellyChat] Vision path — image URL detected:", imageUrlMatch[1]?.slice(0, 60));
-    const imageUrl = imageUrlMatch[1];
-    const textContent =
-      imageUrlMatch[2] || "What can you tell me about this image?";
+  if (imaged.urls.length > 0) {
+    // Vision path: one OR MORE URL-based images (FEAT-59 multi-image parity).
+    console.log(
+      `[shellyChat] Vision path — ${imaged.urls.length} image URL(s) detected:`,
+      imaged.urls[0]?.slice(0, 60),
+    );
+    const textContent = imaged.text || "What can you tell me about this image?";
 
     // Prior messages (everything except the last image message)
     const priorMessages = recentMessages
       .filter((m) => m !== lastUserMsg)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    result = await callClaudeWithVisionUrl({
+    result = await callClaudeWithVisionUrls({
       apiKey,
       model,
       maxTokens: 2000,
       systemPrompt,
-      imageUrl,
+      imageUrls: imaged.urls,
       textPrompt: textContent,
       messages: priorMessages,
     });

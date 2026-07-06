@@ -64,16 +64,18 @@ export interface ShellyChatState {
   // ── Image generation + upload ────────────────────────────────
   generatingImage: boolean
   setGeneratingImage: Dispatch<SetStateAction<boolean>>
-  uploadPreview: string | null
-  setUploadPreview: Dispatch<SetStateAction<string | null>>
-  uploadFile: File | null
-  setUploadFile: Dispatch<SetStateAction<File | null>>
+  // Upload staging (FEAT-59: multiple files per turn — attach path batches;
+  // analyze/generate operate on the first when a single file is chosen).
+  uploadPreviews: string[]
+  setUploadPreviews: Dispatch<SetStateAction<string[]>>
+  uploadFiles: File[]
+  setUploadFiles: Dispatch<SetStateAction<File[]>>
   uploading: boolean
   setUploading: Dispatch<SetStateAction<boolean>>
   uploadDialogOpen: boolean
   setUploadDialogOpen: Dispatch<SetStateAction<boolean>>
-  pendingAttachment: ChatAttachment | null
-  setPendingAttachment: Dispatch<SetStateAction<ChatAttachment | null>>
+  pendingAttachments: ChatAttachment[]
+  setPendingAttachments: Dispatch<SetStateAction<ChatAttachment[]>>
   pendingReferenceImage: ChatAttachment | null
   setPendingReferenceImage: Dispatch<SetStateAction<ChatAttachment | null>>
 
@@ -129,11 +131,11 @@ export function useShellyChatState(initialThreadId: string | null): ShellyChatSt
 
   // ── Image generation + upload ────────────────────────────────
   const [generatingImage, setGeneratingImage] = useState(false)
-  const [uploadPreview, setUploadPreview] = useState<string | null>(null)
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadPreviews, setUploadPreviews] = useState<string[]>([])
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
-  const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null)
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([])
   const [pendingReferenceImage, setPendingReferenceImage] = useState<ChatAttachment | null>(null)
 
   // ── Image refinement flow ────────────────────────────────────
@@ -172,16 +174,16 @@ export function useShellyChatState(initialThreadId: string | null): ShellyChatSt
     setDrawerOpen,
     generatingImage,
     setGeneratingImage,
-    uploadPreview,
-    setUploadPreview,
-    uploadFile,
-    setUploadFile,
+    uploadPreviews,
+    setUploadPreviews,
+    uploadFiles,
+    setUploadFiles,
     uploading,
     setUploading,
     uploadDialogOpen,
     setUploadDialogOpen,
-    pendingAttachment,
-    setPendingAttachment,
+    pendingAttachments,
+    setPendingAttachments,
     pendingReferenceImage,
     setPendingReferenceImage,
     imageFlowOpen,
