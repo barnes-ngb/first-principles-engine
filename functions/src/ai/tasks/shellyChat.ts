@@ -28,7 +28,7 @@ export function extractImageUrls(content: string): { urls: string[]; text: strin
   const text = content.replace(IMAGE_MARKER_RE, "").trim();
   return { urls, text };
 }
-import { buildContextForTask } from "../contextSlices.js";
+import { buildContextForTask, loadLearnerModelContext } from "../contextSlices.js";
 import { modelForTask, getWeekMonday } from "../chat.js";
 import { summarizeTeachBacks } from "../evaluate.js";
 
@@ -228,10 +228,35 @@ PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across 
 SHELLY-SPECIFIC GUIDELINES:
 - Be warm, practical, and specific. Shelly is busy — respect her time.
 - When she asks about teaching ideas, ask which child she's thinking about or suggest ideas for both.
+- Cross-child comparison is welcome here — this is exactly what the general view is for. When she compares the children or asks whether something fits both, ground each child's level claim in that child's block under PER-CHILD LEARNER MODELS, name the evidence behind the claim, and say plainly when a domain has no data (same honesty rails as the child tabs — never guess a level). The Learner Model covers reading & math only; for any other subject say the model doesn't cover it rather than guessing.
 - She has chronic pain and does heroic work every day. If she's frustrated or tired, acknowledge it genuinely.
 - Keep responses concise unless she asks for detail.
 - If she asks you to generate an image, tell her to tap the image button.
 - For printable activities, format them clearly for screenshot or print.`;
+}
+
+/**
+ * Build the general-mode cross-child learner-model section (FEAT-60).
+ *
+ * The child-scoped context slices key on a single childId, so the general
+ * (no-child) branch loads none of them — a cross-child curriculum question
+ * ("does this cart cover both boys at their levels?") had no foundations to
+ * ground on. This concatenates every child's `learnerModel` slice under a
+ * clear per-child header so the assistant can compare children at their real
+ * levels. Read-only: general mode emits no actions (the action addenda stay
+ * child-tab-only), so this is grounding context, not a write surface.
+ *
+ * Takes pre-built slices (loaded by the caller) so it stays pure + testable.
+ * Returns "" when no child has a usable model — omit-on-empty, the same rail
+ * as the single-child slice.
+ */
+export function buildAllChildrenLearnerModels(
+  children: Array<{ name: string; slice: string }>,
+): string {
+  const populated = children.filter((c) => c.slice.trim() !== "");
+  if (populated.length === 0) return "";
+  const blocks = populated.map((c) => `── ${c.name || "Unknown"} ──\n${c.slice}`);
+  return `PER-CHILD LEARNER MODELS (each child's synthesized reading & math read — use these to compare children at their real levels; ground any level claim per child and name the evidence):\n\n${blocks.join("\n\n")}`;
 }
 
 /**
@@ -509,6 +534,26 @@ export const handleShellyChat = async (
         lines.push(`- ${parts.join(" ")}`);
       }
       supplementalContext += lines.join("\n");
+    }
+  }
+
+  // Cross-child learner models — general (no-child) branch only (FEAT-60).
+  // Child-scoped tabs already get the single-child `learnerModel` slice via
+  // buildContextForTask; the general branch keys on no childId, so it loads
+  // none. Load every child's slice so cross-child curriculum questions have
+  // foundations to ground on. Read-only — no actions are emitted here.
+  if (!childId && allChildrenResult.status === "fulfilled" && allChildrenResult.value) {
+    const snap = allChildrenResult.value as { empty: boolean; docs: Array<{ id: string; data: () => Record<string, unknown> }> };
+    if (!snap.empty) {
+      const perChild = await Promise.all(
+        snap.docs.map(async (doc) => {
+          const c = doc.data() as { name?: string };
+          const slice = await loadLearnerModelContext(db, familyId, doc.id);
+          return { name: c.name || "", slice };
+        }),
+      );
+      const section = buildAllChildrenLearnerModels(perChild);
+      if (section) supplementalContext += `\n\n${section}`;
     }
   }
 

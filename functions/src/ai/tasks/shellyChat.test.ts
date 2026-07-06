@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractImageUrls,
+  buildAllChildrenLearnerModels,
   buildFrictionCaptureAddendum,
   buildPlanAdjustmentActionAddendum,
   buildShellyChatRoleSection,
@@ -397,10 +398,83 @@ describe("buildShellyChatRoleSection", () => {
     expect(out).toContain("This is a general conversation");
   });
 
+  it("invites cross-child comparison grounded in PER-CHILD LEARNER MODELS on the general branch (FEAT-60)", () => {
+    const out = buildShellyChatRoleSection(undefined);
+    expect(out).toContain("Cross-child comparison is welcome here");
+    // Points at the section the general handler loads for every child.
+    expect(out).toContain("PER-CHILD LEARNER MODELS");
+    // Same honesty rails as the child tabs — never guess a missing level.
+    expect(out.toLowerCase()).toContain("no data");
+    expect(out).toContain("reading & math only");
+  });
+
   it("treats an empty-string childName as the no-child branch", () => {
     const out = buildShellyChatRoleSection("");
     expect(out).not.toContain("PLANNING-PARTNER MODE");
     expect(out).toContain("This is a general conversation");
+  });
+});
+
+// ── 7a-ii. Cross-child learner models on the general branch (FEAT-60) ──
+
+describe("buildAllChildrenLearnerModels", () => {
+  it("concatenates every child's slice under a per-child header (fixture with 2)", () => {
+    const out = buildAllChildrenLearnerModels([
+      { name: "Lincoln", slice: "LEARNER MODEL — Lincoln.\nWorking edge: multisyllable words." },
+      { name: "London", slice: "LEARNER MODEL — London.\nWorking edge: letter sounds." },
+    ]);
+    // Both children present, each under a clear header.
+    expect(out).toContain("PER-CHILD LEARNER MODELS");
+    expect(out).toContain("── Lincoln ──");
+    expect(out).toContain("── London ──");
+    expect(out).toContain("multisyllable words");
+    expect(out).toContain("letter sounds");
+    // Lincoln's block precedes London's (iteration order preserved).
+    expect(out.indexOf("── Lincoln ──")).toBeLessThan(out.indexOf("── London ──"));
+    // No hardcoded child count baked into the wording.
+    expect(out).not.toContain("${");
+  });
+
+  it("skips children with an empty slice (no usable model) but keeps the populated ones", () => {
+    const out = buildAllChildrenLearnerModels([
+      { name: "Lincoln", slice: "LEARNER MODEL — Lincoln." },
+      { name: "London", slice: "" },
+    ]);
+    expect(out).toContain("── Lincoln ──");
+    expect(out).not.toContain("── London ──");
+  });
+
+  it("scales past two children without hardcoding names or count (post-ARCH-40 discipline)", () => {
+    const out = buildAllChildrenLearnerModels([
+      { name: "A", slice: "model A" },
+      { name: "B", slice: "model B" },
+      { name: "C", slice: "model C" },
+    ]);
+    expect((out.match(/── \w ──/g) || []).length).toBe(3);
+  });
+
+  it("returns empty string when no child has a usable model (omit-on-empty)", () => {
+    expect(buildAllChildrenLearnerModels([])).toBe("");
+    expect(
+      buildAllChildrenLearnerModels([
+        { name: "Lincoln", slice: "" },
+        { name: "London", slice: "   " },
+      ]),
+    ).toBe("");
+  });
+});
+
+// ── 7a-iii. No writes from general mode — every action addendum stays child-only ──
+
+describe("no-writes-from-general guard (FEAT-60)", () => {
+  it("every <action>/handoff addendum returns '' on the general (no-child) branch", () => {
+    // Comparison is read-only in general mode: no action grammar is emitted.
+    expect(buildSightWordActionAddendum(undefined, undefined)).toBe("");
+    expect(buildSnapshotActionAddendum(undefined, undefined)).toBe("");
+    expect(buildPlanAdjustmentActionAddendum(undefined, undefined)).toBe("");
+    // The general role section teaches comparison but no write grammar.
+    const general = buildShellyChatRoleSection(undefined);
+    expect(general).not.toContain("<action>");
   });
 });
 
