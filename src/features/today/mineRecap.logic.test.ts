@@ -98,7 +98,7 @@ describe('uniqueSkills', () => {
       { skill: 'CVC blending', level: 'emerging' },
       { skill: 'Sight words', level: 'developing' },
       { skill: 'CVC blending', level: 'developing' },
-    ] as EvaluationFinding[]
+    ] as unknown as EvaluationFinding[]
     expect(uniqueSkills(findings)).toEqual(['CVC blending', 'Sight words'])
   })
 
@@ -109,7 +109,7 @@ describe('uniqueSkills', () => {
       { skill: undefined, level: 'emerging' },
       { skill: '  ', level: 'emerging' },
       { skill: 'Fluency', level: 'developing' },
-    ] as EvaluationFinding[]
+    ] as unknown as EvaluationFinding[]
     expect(uniqueSkills(findings)).toEqual(['Phonics', 'Fluency'])
   })
 
@@ -117,7 +117,7 @@ describe('uniqueSkills', () => {
     const findings = [
       { skill: '  Digraphs  ', level: 'emerging' },
       { skill: 'Digraphs', level: 'developing' },
-    ] as EvaluationFinding[]
+    ] as unknown as EvaluationFinding[]
     expect(uniqueSkills(findings)).toEqual(['Digraphs'])
   })
 
@@ -128,7 +128,7 @@ describe('uniqueSkills', () => {
       { skill: 'C', level: 'e' },
       { skill: 'A', level: 'e' },
       { skill: 'B', level: 'e' },
-    ] as EvaluationFinding[]
+    ] as unknown as EvaluationFinding[]
     expect(uniqueSkills(findings)).toEqual(['B', 'A', 'C'])
   })
 })
