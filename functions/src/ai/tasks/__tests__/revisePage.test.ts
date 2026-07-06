@@ -111,7 +111,7 @@ describe("handleRevisePage", () => {
     const result = await handleRevisePage(makeCtx(validInput()));
 
     expect(callClaudeMock).toHaveBeenCalledTimes(1);
-    expect(result.model).toBe("claude-sonnet-4-6");
+    expect(result.model).toBe("claude-sonnet-5");
     const parsed = JSON.parse(result.message) as RevisePageOutput;
     expect(parsed.newText).toBe(happyOutput.newText);
     expect(parsed.newSceneDescription).toBe(happyOutput.newSceneDescription);
@@ -125,7 +125,7 @@ describe("handleRevisePage", () => {
       model: string;
       maxTokens: number;
     };
-    expect(callArgs.model).toBe("claude-sonnet-4-6");
+    expect(callArgs.model).toBe("claude-sonnet-5");
     expect(callArgs.maxTokens).toBe(2048);
   });
 

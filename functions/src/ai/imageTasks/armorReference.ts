@@ -1,4 +1,5 @@
 import { getFirestore } from "firebase-admin/firestore";
+import { CLAUDE_HAIKU } from "../models.js";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireApprovedUser } from "../authGuard.js";
@@ -122,7 +123,7 @@ export const generateArmorReference = onCall(
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
       const claude = new Anthropic({ apiKey: claudeApiKey.value() });
       const rewriteResult = await claude.messages.create({
-        model: "claude-haiku-4-5-20251001",
+        model: CLAUDE_HAIKU,
         max_tokens: 500,
         system: `You rewrite children's image generation prompts to avoid copyright issues while preserving creative intent.
 RULES:
