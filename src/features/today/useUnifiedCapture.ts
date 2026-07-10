@@ -13,6 +13,11 @@ import type { ScanConfigResult } from '../../core/hooks/useScanToActivityConfig'
 import { autoCompleteBypassedItems } from './scanAdvance'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { detectBlockersFromScan } from './scanBlocker'
+import { downscaleImage } from '../../core/utils/downscaleImage'
+import { withTimeout, UploadTimeoutError } from '../foundations-review/uploadTimeout'
+
+/** Hard ceiling on the workbook-scan analysis so the spinner never hangs (FEAT-62, mirrors FEAT-61). */
+const WORKBOOK_SCAN_TIMEOUT_MS = 120_000
 
 export interface UseUnifiedCaptureOptions {
   familyId: string
@@ -69,11 +74,130 @@ export function useUnifiedCapture({
   const { syncScanToConfig } = useScanToActivityConfig()
   const [scanItemIndex, setScanItemIndex] = useState<number | null>(null)
 
+  /**
+   * FEAT-62: analyze a workbook page against a KNOWN config and advance its
+   * position — the deterministic route. Writes a `scans` doc (via runScan) and
+   * pins the position update with `targetConfigId` (no fuzzy match, no
+   * classification gate). Best-effort and timeout-guarded: never throws, returns
+   * the registration (name + lesson) on success or null on any failure so the
+   * caller's capture always succeeds. Mirrors the Progress per-card scan.
+   */
+  const analyzeWorkbookPage = useCallback(
+    async (
+      scanFile: File,
+      configId: string,
+    ): Promise<{ configName: string; position: number | null } | null> => {
+      try {
+        const shrunk = await downscaleImage(scanFile, 1600, 0.85)
+        const scanImage =
+          shrunk instanceof File
+            ? shrunk
+            : new File([shrunk], scanFile.name || 'scan.jpg', { type: 'image/jpeg' })
+        const record = await withTimeout(
+          () => runScan(scanImage, familyId, childId),
+          WORKBOOK_SCAN_TIMEOUT_MS,
+        )
+        if (!record?.results || !isWorksheetScan(record.results)) return null
+        const configResult = await syncScanToConfig(
+          childId,
+          record.results as WorksheetScanResult,
+          { targetConfigId: configId },
+        )
+        // action 'none' = the target config vanished — nothing registered.
+        if (configResult.action === 'none') return null
+        return {
+          configName: configResult.configName ?? 'workbook',
+          position: configResult.position ?? null,
+        }
+      } catch (err) {
+        if (err instanceof UploadTimeoutError) {
+          console.warn('[UnifiedCapture] Workbook scan timed out (non-blocking):', err)
+        } else {
+          console.warn('[UnifiedCapture] Workbook scan analysis failed (non-blocking):', err)
+        }
+        return null
+      } finally {
+        // Never surface the interactive add-to-plan panel for the routed capture;
+        // the quiet "registered to…" line stands in for it.
+        clearScan()
+      }
+    },
+    [runScan, syncScanToConfig, familyId, childId, clearScan],
+  )
+
   const handleUnifiedCapture = useCallback(
     async (file: File, index: number) => {
       if (!dayLog?.checklist) return
       const item = dayLog.checklist[index]
       setScanItemIndex(index)
+
+      // ── FEAT-62: workbook-linked items take the deterministic route ──
+      // The photo becomes an artifact (evidence, as today) AND registers as a
+      // scan against the stamped workbook. Capture succeeds even if analysis
+      // fails; a plain artifact remains. Non-workbook items fall through to the
+      // unchanged classification-based path below.
+      if (item.workbookConfigId) {
+        try {
+          // Analysis first (best-effort, timeout-guarded) so its lesson/name can
+          // stamp the visibility line in the same single checklist write.
+          const registration = await analyzeWorkbookPage(file, item.workbookConfigId)
+
+          // Artifact (evidence) — always, mirrors the plain artifacts path.
+          const artifact = {
+            childId,
+            title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${childName}'s work`,
+            type: EvidenceType.Photo,
+            dayLogId: today,
+            createdAt: new Date().toISOString(),
+            tags: {
+              engineStage: EngineStage.Build,
+              domain: '',
+              subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
+              location: 'Home',
+              planItem: item.label,
+            },
+          }
+          const docRef = await addDoc(artifactsCollection(familyId), artifact)
+          const ext = file.name.split('.').pop() ?? 'jpg'
+          const filename = generateFilename(ext)
+          const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+          await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+            i === index
+              ? {
+                  ...ci,
+                  evidenceArtifactId: docRef.id,
+                  evidenceCollection: 'artifacts' as const,
+                  ...(registration
+                    ? { workbookScanRegistration: registration, scanned: true }
+                    : {}),
+                }
+              : ci,
+          )
+          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+          onArtifactCreated?.({ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact)
+          onMessage?.(
+            registration
+              ? {
+                  text: `Registered to ${registration.configName}${registration.position != null ? ` · Lesson ${registration.position}` : ''}`,
+                  severity: 'success',
+                }
+              : { text: 'Work captured!', severity: 'success' },
+          )
+        } catch (err) {
+          console.error('[UnifiedCapture] Workbook capture failed:', {
+            childId,
+            itemLabel: item.label,
+            fileName: file.name,
+            error: err,
+          })
+          onMessage?.({ text: 'Photo capture failed. Try again.', severity: 'error' })
+        } finally {
+          setScanItemIndex(null)
+        }
+        return
+      }
 
       try {
         // 1. Try the scan pipeline (AI vision analysis)
@@ -213,7 +337,7 @@ export function useUnifiedCapture({
         setScanItemIndex(null)
       }
     },
-    [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated],
+    [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage],
   )
 
   return {
