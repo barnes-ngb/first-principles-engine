@@ -5,6 +5,7 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
+import DocumentScannerIcon from '@mui/icons-material/DocumentScanner'
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary'
 import CheckIcon from '@mui/icons-material/Check'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -31,6 +32,7 @@ import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
 import type {
+  Artifact,
   ChecklistItem as ChecklistItemType,
   ConceptualBlock,
   CurriculumDetected,
@@ -55,6 +57,7 @@ import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
+import { resolveDisplayPhotos } from './itemPhotos'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
 import { kidPalette } from '../../app/tokens'
@@ -151,8 +154,20 @@ interface TodayChecklistProps {
   persistDayLogImmediate: (updated: DayLog) => void
   onTeachHelperOpen: (item: ChecklistItemType) => void
   onUnifiedCapture: (file: File, index: number) => void
-  /** FEAT-62: register an already-captured photo on a workbook item as a scan. */
-  onBackfillWorkbookScan?: (index: number) => void
+  /**
+   * FEAT-62: register an already-captured photo on a workbook item as a scan.
+   * `photoUris` (FEAT-62 polish) are the display-resolved photo(s) to analyze —
+   * one for a single page, several for "analyze all". Omitted → the handler
+   * falls back to the item's own `evidenceArtifactId`.
+   */
+  onBackfillWorkbookScan?: (index: number, photoUris?: string[]) => void
+  /**
+   * FEAT-62 polish: the day's loaded artifacts (same list the Artifacts section
+   * shows). Lets the backfill button render — and analyze — whenever a photo the
+   * page can display exists for the item, not only when the checklist row still
+   * carries its `evidenceArtifactId` link.
+   */
+  todayArtifacts?: Artifact[]
   /**
    * FEAT-62 (legacy-item fallback): the child's scannable workbook configs, used
    * to resolve a `workbookConfigId` for legacy/unstamped items so the backfill
@@ -189,6 +204,7 @@ export default function TodayChecklist({
   onTeachHelperOpen,
   onUnifiedCapture,
   onBackfillWorkbookScan,
+  todayArtifacts = [],
   configs = [],
   onPreCompletionScan,
   captureLoading,
@@ -1009,25 +1025,79 @@ export default function TodayChecklist({
                     a plain artifact (captured before the routing fix, or analysis
                     failed) — one tap registers it as a curriculum scan. Legacy items
                     (no stamped workbookConfigId) resolve their config via the same
-                    name/subject fuzzy fallback so the button renders for them too. */}
-                {onBackfillWorkbookScan &&
-                  (item.workbookConfigId || findWorkbookConfigId(item, configs)) &&
-                  item.evidenceArtifactId &&
-                  item.evidenceCollection === 'artifacts' &&
-                  !item.workbookScanRegistration && (
+                    name/subject fuzzy fallback so the button renders for them too.
+                    Photo lookup is at display parity: the button shows whenever the
+                    page can already show a photo for the item (planItem/title join
+                    over the day's artifacts) — not only when the checklist row still
+                    carries its evidenceArtifactId link. */}
+                {(() => {
+                  if (
+                    !onBackfillWorkbookScan ||
+                    !(item.workbookConfigId || findWorkbookConfigId(item, configs)) ||
+                    item.workbookScanRegistration ||
+                    item.evidenceCollection === 'scans'
+                  ) {
+                    return null
+                  }
+                  const photos = resolveDisplayPhotos(item, todayArtifacts)
+                  // Fall back to the item's own link when no display photo is
+                  // resolvable but the row still carries an artifact id.
+                  const canBackfill = photos.length > 0 || !!item.evidenceArtifactId
+                  if (!canBackfill) return null
+                  const isBackfilling = captureLoading && captureItemIndex === index
+                  const scanIcon = isBackfilling
+                    ? <CircularProgress size={14} />
+                    : <DocumentScannerIcon sx={{ fontSize: 16 }} />
+                  if (photos.length > 1) {
+                    return (
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        flexWrap="wrap"
+                        useFlexGap
+                        sx={{ ml: 5, mt: 0.5 }}
+                      >
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={scanIcon}
+                          disabled={isBackfilling}
+                          onClick={() => onBackfillWorkbookScan(index, photos.map((p) => p.uri))}
+                          sx={{ textTransform: 'none' }}
+                        >
+                          Analyze all {photos.length} pages
+                        </Button>
+                        {photos.map((p, pi) => (
+                          <Button
+                            key={p.uri}
+                            size="small"
+                            variant="outlined"
+                            color="inherit"
+                            disabled={isBackfilling}
+                            onClick={() => onBackfillWorkbookScan(index, [p.uri])}
+                            sx={{ textTransform: 'none' }}
+                          >
+                            Page {pi + 1}
+                          </Button>
+                        ))}
+                      </Stack>
+                    )
+                  }
+                  return (
                     <Button
                       size="small"
-                      variant="text"
-                      startIcon={captureLoading && captureItemIndex === index
-                        ? <CircularProgress size={14} />
-                        : <AutoAwesomeIcon sx={{ fontSize: 16 }} />}
-                      disabled={captureLoading && captureItemIndex === index}
-                      onClick={() => onBackfillWorkbookScan(index)}
-                      sx={{ ml: 5, mt: 0.5, fontSize: '0.7rem', color: 'text.secondary', textTransform: 'none' }}
+                      variant="outlined"
+                      startIcon={scanIcon}
+                      disabled={isBackfilling}
+                      onClick={() =>
+                        onBackfillWorkbookScan(index, photos[0] ? [photos[0].uri] : undefined)
+                      }
+                      sx={{ ml: 5, mt: 0.5, textTransform: 'none' }}
                     >
                       Analyze as workbook scan
                     </Button>
-                  )}
+                  )
+                })()}
 
                 {/* Scan & Review: manual quick-check after capture */}
                 {item.evidenceArtifactId && !item.gradeResult && gradeNote?.index !== index && (
