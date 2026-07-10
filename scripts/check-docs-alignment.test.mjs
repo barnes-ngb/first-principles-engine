@@ -9,6 +9,10 @@ import {
   rewriteGenSpans,
   parseAsConstEntries,
   extractRawFamilyRefs,
+  analyzeRemoteResilience,
+  analyzeImageDownscale,
+  catchIsHandled,
+  findSilentCatches,
 } from './check-docs-alignment.mjs'
 
 describe('parseLedgerIds', () => {
@@ -152,5 +156,77 @@ describe('extractRawFamilyRefs', () => {
     ].join('\n')
     const refs = extractRawFamilyRefs(content)
     expect(refs.map((r) => r.collection)).toEqual(['xpLedger', 'wordProgress'])
+  })
+})
+
+// ── Resilience invariants (DOC-09) ──────────────────────────────────────────
+
+describe('analyzeRemoteResilience', () => {
+  it('flags a raw httpsCallable but not a bare import', () => {
+    const importOnly = "import { getFunctions, httpsCallable } from 'firebase/functions'"
+    expect(analyzeRemoteResilience(importOnly).hasRemoteCall).toBe(false)
+    const callSite = "const fn = httpsCallable<Req, Res>(functions, 'chat')"
+    expect(analyzeRemoteResilience(callSite).hasRemoteCall).toBe(true)
+  })
+
+  it('recognizes each timeout signal: option, withTimeout wrapper, AbortController', () => {
+    expect(analyzeRemoteResilience('httpsCallable(fns, "x", { timeout: 120_000 })').hasTimeout).toBe(true)
+    expect(analyzeRemoteResilience('httpsCallable(fns, "x"); await withTimeout(work, 5000)').hasTimeout).toBe(true)
+    expect(analyzeRemoteResilience('const c = new AbortController()').hasTimeout).toBe(true)
+    expect(analyzeRemoteResilience('httpsCallable(fns, "x")').hasTimeout).toBe(false)
+  })
+
+  it('detects a finally block', () => {
+    expect(analyzeRemoteResilience('try { a() } finally { setLoading(false) }').hasFinally).toBe(true)
+    expect(analyzeRemoteResilience('try { a() } catch (e) {}').hasFinally).toBe(false)
+  })
+})
+
+describe('analyzeImageDownscale', () => {
+  it('detects an image file-input only when both type=file and an image accept are present', () => {
+    const imageInput = '<input type="file" accept="image/*" onChange={h} />'
+    expect(analyzeImageDownscale(imageInput).hasImageInput).toBe(true)
+    const audioInput = '<input type="file" accept="audio/*" />'
+    expect(analyzeImageDownscale(audioInput).hasImageInput).toBe(false)
+    const noInput = 'const accept = "image/png"'
+    expect(analyzeImageDownscale(noInput).hasImageInput).toBe(false)
+  })
+
+  it('recognizes the downscale/compress family', () => {
+    expect(analyzeImageDownscale('await downscaleImage(file)').hasDownscale).toBe(true)
+    expect(analyzeImageDownscale('await compressPhotoToDataUrl(file)').hasDownscale).toBe(true)
+    expect(analyzeImageDownscale('await compressIfNeeded(file, 2e6)').hasDownscale).toBe(true)
+    expect(analyzeImageDownscale('await uploadBytes(ref, file)').hasDownscale).toBe(false)
+  })
+})
+
+describe('catchIsHandled / findSilentCatches', () => {
+  it('classifies a catch as handled when it rethrows, sets error state, or logs at warn+', () => {
+    expect(catchIsHandled(' throw err ')).toBe(true)
+    expect(catchIsHandled(' setError(new Error(msg)) ')).toBe(true)
+    expect(catchIsHandled(' setUploadError("nope") ')).toBe(true)
+    expect(catchIsHandled(' console.error(err) ')).toBe(true)
+    expect(catchIsHandled(' console.warn(err) ')).toBe(true)
+    expect(catchIsHandled(' /* ignore */ return null ')).toBe(false)
+    expect(catchIsHandled(' console.log(err) ')).toBe(false) // log() is not warn+
+  })
+
+  it('finds only the swallowed catch, with a line number, and brace-matches nested blocks', () => {
+    const content = [
+      'async function a() {', // 1
+      '  try { await x() } catch (e) {', // 2  ← silent
+      '    if (retry) { queue() }', // 3  (nested braces)
+      '    return null', // 4
+      '  }', // 5
+      '}', // 6
+      'async function b() {', // 7
+      '  try { await y() } catch (e) {', // 8  ← handled
+      '    setError(e)', // 9
+      '  }', // 10
+      '}', // 11
+    ].join('\n')
+    const silent = findSilentCatches(content)
+    expect(silent).toHaveLength(1)
+    expect(silent[0].line).toBe(2)
   })
 })
