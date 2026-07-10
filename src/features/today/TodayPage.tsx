@@ -36,6 +36,7 @@ import { LoadingState } from '../../components/states'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
@@ -156,6 +157,10 @@ export default function TodayPage() {
   } = useActiveChild()
   const artifactSectionRef = useRef<HTMLDivElement>(null)
 
+  // FEAT-62 (legacy-item fallback): scannable workbook configs let unstamped items
+  // resolve their workbook by name/subject match for routed capture + backfill.
+  const { configs: activityConfigs } = useActivityConfigs(selectedChildId)
+
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
@@ -274,6 +279,7 @@ export default function TodayPage() {
     persistDayLogImmediate,
     onMessage: setSnackMessage,
     onArtifactCreated: (artifact) => setTodayArtifacts((prev) => [artifact, ...prev]),
+    configs: activityConfigs,
   })
 
   const { chat: aiChat } = useAI()
@@ -1019,6 +1025,7 @@ export default function TodayPage() {
           }}
           onUnifiedCapture={handleUnifiedCapture}
           onBackfillWorkbookScan={handleBackfillWorkbookScan}
+          configs={activityConfigs}
           onPreCompletionScan={handlePreCompletionScan}
           captureLoading={scanLoading}
           captureItemIndex={scanItemIndex}

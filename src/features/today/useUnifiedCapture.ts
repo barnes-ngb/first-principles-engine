@@ -15,6 +15,8 @@ import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { detectBlockersFromScan } from './scanBlocker'
 import { downscaleImage } from '../../core/utils/downscaleImage'
 import { withTimeout, UploadTimeoutError } from '../foundations-review/uploadTimeout'
+import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
+import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 
 /** Hard ceiling on the workbook-scan analysis so the spinner never hangs (FEAT-62, mirrors FEAT-61). */
 const WORKBOOK_SCAN_TIMEOUT_MS = 120_000
@@ -30,6 +32,14 @@ export interface UseUnifiedCaptureOptions {
   onMessage?: (msg: { text: string; severity: 'success' | 'error' }) => void
   /** Callback when a new artifact is created (for updating local artifact lists). */
   onArtifactCreated?: (artifact: Artifact) => void
+  /**
+   * FEAT-62 (legacy-item fallback): the child's scannable workbook configs, used
+   * to resolve a `workbookConfigId` for legacy/unstamped items via the same
+   * name/subject fuzzy match as lock-in. When a photo capture or backfill resolves
+   * a config this way, the id is stamped onto the item so the resolution is
+   * permanent — exactly what lock-in would have done. Absent → no fallback.
+   */
+  configs?: WorkbookConfigLike[]
 }
 
 export interface UseUnifiedCaptureResult {
@@ -75,6 +85,7 @@ export function useUnifiedCapture({
   persistDayLogImmediate,
   onMessage,
   onArtifactCreated,
+  configs = [],
 }: UseUnifiedCaptureOptions): UseUnifiedCaptureResult {
   const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan()
   const { syncScanToConfig } = useScanToActivityConfig()
@@ -142,11 +153,18 @@ export function useUnifiedCapture({
       // scan against the stamped workbook. Capture succeeds even if analysis
       // fails; a plain artifact remains. Non-workbook items fall through to the
       // unchanged classification-based path below.
-      if (item.workbookConfigId) {
+      //
+      // Legacy-item fallback: an unstamped item (planned before lock-in) resolves
+      // its config via the same name/subject fuzzy match. When it resolves, we
+      // stamp `workbookConfigId` onto the item below so the resolution is
+      // permanent — exactly what lock-in would have done.
+      const resolvedConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
+      const stampConfigId = !item.workbookConfigId && resolvedConfigId ? { workbookConfigId: resolvedConfigId } : {}
+      if (resolvedConfigId) {
         try {
           // Analysis first (best-effort, timeout-guarded) so its lesson/name can
           // stamp the visibility line in the same single checklist write.
-          const registration = await analyzeWorkbookPage(file, item.workbookConfigId)
+          const registration = await analyzeWorkbookPage(file, resolvedConfigId)
 
           // Artifact (evidence) — always, mirrors the plain artifacts path.
           const artifact = {
@@ -173,6 +191,7 @@ export function useUnifiedCapture({
             i === index
               ? {
                   ...ci,
+                  ...stampConfigId,
                   evidenceArtifactId: docRef.id,
                   evidenceCollection: 'artifacts' as const,
                   ...(registration
@@ -343,7 +362,7 @@ export function useUnifiedCapture({
         setScanItemIndex(null)
       }
     },
-    [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage],
+    [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage, configs],
   )
 
   /**
@@ -358,7 +377,12 @@ export function useUnifiedCapture({
     async (index: number) => {
       if (!dayLog?.checklist) return
       const item = dayLog.checklist[index]
-      if (!item?.workbookConfigId || !item.evidenceArtifactId) return
+      if (!item?.evidenceArtifactId) return
+      // Legacy-item fallback: resolve an unstamped item's config via name/subject
+      // match, then stamp it below so the resolution is permanent.
+      const resolvedConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
+      if (!resolvedConfigId) return
+      const stampConfigId = !item.workbookConfigId ? { workbookConfigId: resolvedConfigId } : {}
       setScanItemIndex(index)
       try {
         const artifactSnap = await getDoc(doc(artifactsCollection(familyId), item.evidenceArtifactId))
@@ -374,13 +398,13 @@ export function useUnifiedCapture({
         const blob = await resp.blob()
         const scanFile = new File([blob], 'workbook-page.jpg', { type: blob.type || 'image/jpeg' })
 
-        const registration = await analyzeWorkbookPage(scanFile, item.workbookConfigId)
+        const registration = await analyzeWorkbookPage(scanFile, resolvedConfigId)
         if (!registration) {
           onMessage?.({ text: "Couldn't read the workbook page. The photo is still saved.", severity: 'error' })
           return
         }
         const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-          i === index ? { ...ci, workbookScanRegistration: registration, scanned: true } : ci,
+          i === index ? { ...ci, ...stampConfigId, workbookScanRegistration: registration, scanned: true } : ci,
         )
         persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
         onMessage?.({
@@ -394,7 +418,7 @@ export function useUnifiedCapture({
         setScanItemIndex(null)
       }
     },
-    [dayLog, familyId, analyzeWorkbookPage, persistDayLogImmediate, onMessage],
+    [dayLog, familyId, analyzeWorkbookPage, persistDayLogImmediate, onMessage, configs],
   )
 
   return {
