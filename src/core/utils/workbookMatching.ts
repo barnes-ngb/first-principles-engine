@@ -78,3 +78,43 @@ export function isSameWorkbook(a: WorkbookLike, b: WorkbookLike): boolean {
 
   return false
 }
+
+/**
+ * Minimal shape of an ActivityConfig for workbook matching. `id` is the
+ * `activityConfigs` doc id; `name`/`curriculum` are the workbook title fields.
+ */
+export interface WorkbookConfigLike {
+  id: string
+  name?: string
+  curriculum?: string
+  subjectBucket?: SubjectBucket
+  type?: string
+  /** `false` explicitly excludes; absent is treated as scannable. */
+  scannable?: boolean
+}
+
+/**
+ * Resolve the scannable workbook ActivityConfig a plan item was generated from
+ * (FEAT-62 join). Considers only workbook-type, non-`scannable:false` configs and
+ * matches by name/subject via {@link isSameWorkbook}. Returns the config doc id to
+ * stamp as `ChecklistItem.workbookConfigId`, or undefined when nothing matches.
+ *
+ * This is the deterministic replacement for the capture flow's fragile
+ * pageType-classification + fuzzy-name matching: stamped at lock-in when the
+ * config identity is still known, then used as the scan's `targetConfigId`.
+ */
+export function findWorkbookConfigId(
+  item: WorkbookLike,
+  configs: WorkbookConfigLike[],
+): string | undefined {
+  const candidates = configs.filter(
+    (c) => c.type === 'workbook' && c.scannable !== false,
+  )
+  const match = candidates.find((c) =>
+    isSameWorkbook(item, {
+      label: c.name ?? c.curriculum ?? '',
+      subjectBucket: c.subjectBucket,
+    }),
+  )
+  return match?.id
+}

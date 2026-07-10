@@ -255,6 +255,7 @@ export default function TodayPage() {
   // --- Unified capture hook (shared with kid views) ---
   const {
     handleUnifiedCapture,
+    handleBackfillWorkbookScan,
     scanItemIndex,
     setScanItemIndex,
     scanResult,
@@ -1017,6 +1018,7 @@ export default function TodayPage() {
             setTeachHelperOpen(true)
           }}
           onUnifiedCapture={handleUnifiedCapture}
+          onBackfillWorkbookScan={handleBackfillWorkbookScan}
           onPreCompletionScan={handlePreCompletionScan}
           captureLoading={scanLoading}
           captureItemIndex={scanItemIndex}

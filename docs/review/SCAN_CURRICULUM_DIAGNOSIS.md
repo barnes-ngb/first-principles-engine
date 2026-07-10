@@ -68,3 +68,43 @@ merge onto one config and distinct workbooks each create their own. This is the 
   page never aborts the rest). `useScan.scan` stays single-file — the loop calls it once per page rather than
   changing its signature. Matcher, hours, and leveling untouched. Review-before-apply and multi-photo on the other
   surfaces remain out of scope.
+
+## Issue 3 — Today captures silently bypassed the scan (FEAT-62)
+
+**Owner bug (2026-07-09, live use):** Shelly photographed completed workbook pages via Today's per-item Camera /
+Upload buttons; the photos saved but the workbook cards on Progress stayed stale (positions/recent-scans from Jul 2,
+Jun 5). "Scans are truth" (Key Decision) depended on Shelly using a door she doesn't live on.
+
+**Why the photos bypassed scanning (the recon answer).** The per-item capture (`useUnifiedCapture.handleUnifiedCapture`,
+merged Jun 20) *did* run a scan — but routing it to the curriculum was **doubly conditional and failed silently**:
+1. **pageType gate** (`isCurriculumScan`): the scan only counted as curriculum when the AI classified `pageType ∈
+   {worksheet, textbook, test}`. A real completed-page photo that read as a filled-in exercise / cover / ambiguous
+   image classified *outside* those and fell to the plain **artifacts** branch — no position advance, and (when the
+   CF errored) no `scans` doc at all → "recent-scans stale."
+2. **fuzzy-match gate** (`syncScanToConfig` with no `targetConfigId`): even reaching the scans branch, position
+   advanced only if the AI-detected curriculum name fuzzy-matched an existing config. Plan items carried **no link to
+   their workbook**, so the capture had to re-derive the workbook from the photo; generic labels / OCR variance
+   missed. The label-regex `scanPatterns` "sparkle" route is a *different* door (the pre-completion "Scan lesson to
+   check if you should skip" affordance, shown only when `skipGuidance` contains "check lesson") — **not** the one
+   Shelly used, so this was neither a `scanPatterns` pattern-miss nor a literal no-scan bypass. It was a silent
+   fallback to a plain artifact because the capture had no reliable join to the workbook config.
+
+**Fix (FEAT-62).** Give the item a deterministic join and route on it:
+- **Join at lock-in.** `PlannerChatPage` apply stamps `ChecklistItem.workbookConfigId` (an `activityConfigs` doc id)
+  by matching each generated item against the child's scannable workbook configs (`findWorkbookConfigId`, name/subject
+  via `isSameWorkbook`). This is the only point the item can know its workbook — the routine→item pipeline round-trips
+  through free text and drops the config id. Legacy/unstamped items simply lack the field and keep the label-regex /
+  fuzzy fallback (precedence: `workbookConfigId` when present, else the existing classification path).
+- **Route on it.** A per-item photo on a `workbookConfigId` item creates the artifact (evidence, as before) **and**
+  registers a scan against that exact workbook — position advances via `syncScanToConfig`'s `targetConfigId` (the same
+  pinned path the Progress per-card scan uses), skipping both the pageType gate and the fuzzy match. Analysis is
+  timeout-guarded (120s `withTimeout`) and best-effort: the capture always succeeds and leaves a plain artifact if
+  analysis fails (`reuse`s FEAT-61's `downscaleImage`).
+- **Backfill + visibility.** Workbook items whose photo was stranded as a plain artifact get a one-tap "Analyze as
+  workbook scan" action (no new artifact, no auto-sweep — owner taps). After registration a quiet "Registered to
+  {workbook} · Lesson {n}" line shows on Today so the count is visible without opening Progress.
+
+**Out of scope (named, not built).** No hours/counting changes; artifact semantics unchanged; the Progress scan
+buttons unchanged. **Scan → learner-model evidence** (feeding a routed workbook scan into `learnerModels`) stays the
+**named workbook-positions wiring follow-up** — this run only advances the `activityConfigs` position + writes the
+`scans` doc, exactly as the Progress scan button does.

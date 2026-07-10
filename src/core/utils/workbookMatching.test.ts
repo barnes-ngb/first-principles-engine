@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   extractLessonNumber,
+  findWorkbookConfigId,
   isSameWorkbook,
   normalizeWorkbookName,
+  type WorkbookConfigLike,
   type WorkbookLike,
 } from './workbookMatching'
+import { SubjectBucket } from '../types/enums'
 
 describe('extractLessonNumber', () => {
   it('pulls a number from "Lesson N"', () => {
@@ -99,5 +102,73 @@ describe('isSameWorkbook', () => {
         make({ label: 'Math Stations', subjectBucket: 'Math' }),
       ),
     ).toBe(false)
+  })
+})
+
+describe('findWorkbookConfigId (FEAT-62 lock-in join)', () => {
+  const cfg = (overrides: Partial<WorkbookConfigLike>): WorkbookConfigLike => ({
+    id: '',
+    type: 'workbook',
+    ...overrides,
+  })
+
+  const configs: WorkbookConfigLike[] = [
+    cfg({ id: 'wb-math', name: 'Good and the Beautiful Math', subjectBucket: SubjectBucket.Math }),
+    cfg({ id: 'wb-la', name: 'Good and the Beautiful Language Arts', subjectBucket: SubjectBucket.LanguageArts }),
+    cfg({ id: 'wb-eggs', name: 'Reading Eggs', subjectBucket: SubjectBucket.Reading }),
+  ]
+
+  it('matches a TGTB math plan item to its workbook config', () => {
+    expect(
+      findWorkbookConfigId(
+        { label: 'Good and the Beautiful Math (30m)', subjectBucket: SubjectBucket.Math },
+        configs,
+      ),
+    ).toBe('wb-math')
+  })
+
+  it('disambiguates two GATB workbooks by subject', () => {
+    expect(
+      findWorkbookConfigId(
+        { label: 'Good and the Beautiful Language Arts — Lesson 42', subjectBucket: SubjectBucket.LanguageArts },
+        configs,
+      ),
+    ).toBe('wb-la')
+  })
+
+  it('returns undefined when no workbook matches (non-workbook item)', () => {
+    expect(
+      findWorkbookConfigId(
+        { label: 'Prayer & Scripture', subjectBucket: SubjectBucket.Other },
+        configs,
+      ),
+    ).toBeUndefined()
+  })
+
+  it('ignores non-workbook-type configs', () => {
+    expect(
+      findWorkbookConfigId(
+        { label: 'Morning Routine', subjectBucket: SubjectBucket.Other },
+        [cfg({ id: 'routine-1', name: 'Morning Routine', type: 'routine', subjectBucket: SubjectBucket.Other })],
+      ),
+    ).toBeUndefined()
+  })
+
+  it('excludes configs explicitly marked scannable:false', () => {
+    expect(
+      findWorkbookConfigId(
+        { label: 'Reading Eggs', subjectBucket: SubjectBucket.Reading },
+        [cfg({ id: 'wb-eggs', name: 'Reading Eggs', subjectBucket: SubjectBucket.Reading, scannable: false })],
+      ),
+    ).toBeUndefined()
+  })
+
+  it('treats absent scannable as scannable (legacy configs)', () => {
+    expect(
+      findWorkbookConfigId(
+        { label: 'Reading Eggs (20m)', subjectBucket: SubjectBucket.Reading },
+        configs,
+      ),
+    ).toBe('wb-eggs')
   })
 })
