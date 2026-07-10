@@ -2098,7 +2098,7 @@ Generate a plan for Monday through Friday.`.trim()
       console.error('Failed to apply plan', err)
       setSnack({ text: 'Failed to apply plan.', severity: 'error' })
     }
-  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children])
+  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
