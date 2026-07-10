@@ -49,8 +49,15 @@ export interface UseUnifiedCaptureResult {
    * FEAT-62 backfill: re-analyze a workbook-linked item's already-captured photo
    * and register it as a curriculum scan (no new artifact). One-tap recovery for
    * photos stranded as plain artifacts.
+   *
+   * `photoUris` (FEAT-62 polish) lets the caller pass the exact photo(s) it can
+   * *display* — resolved the same way the Today Artifacts section resolves them
+   * (by `tags.planItem` / title over the day's artifacts), not just the item's
+   * single `evidenceArtifactId`. Pass one URI for a single page, several for
+   * "analyze all". When omitted, falls back to the item's linked evidence
+   * artifact (the original path).
    */
-  handleBackfillWorkbookScan: (index: number) => Promise<void>
+  handleBackfillWorkbookScan: (index: number, photoUris?: string[]) => Promise<void>
   /** Index of the checklist item currently being captured/scanned. */
   scanItemIndex: number | null
   setScanItemIndex: (index: number | null) => void
@@ -372,12 +379,21 @@ export function useUnifiedCapture({
    * the saved image back and run the same deterministic workbook analysis. No
    * new artifact is created; only the registration is stamped. Owner-initiated —
    * there is no auto-backfill sweep.
+   *
+   * FEAT-62 polish (display-parity lookup): the caller passes `photoUris` — the
+   * photo(s) the Today page can already *show* for this item, resolved by the
+   * same `tags.planItem`/title join the Artifacts section uses. This unblocks the
+   * owner's real cohort: legacy items whose photo lives in the day's artifacts
+   * but whose checklist row lost its `evidenceArtifactId` link. Multiple URIs =
+   * "analyze all"; each page is scanned in turn and the last registration (latest
+   * position) is stamped. When `photoUris` is omitted we fall back to the item's
+   * own `evidenceArtifactId` (the original single-photo path).
    */
   const handleBackfillWorkbookScan = useCallback(
-    async (index: number) => {
+    async (index: number, photoUris?: string[]) => {
       if (!dayLog?.checklist) return
       const item = dayLog.checklist[index]
-      if (!item?.evidenceArtifactId) return
+      if (!item) return
       // Legacy-item fallback: resolve an unstamped item's config via name/subject
       // match, then stamp it below so the resolution is permanent.
       const resolvedConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
@@ -385,30 +401,56 @@ export function useUnifiedCapture({
       const stampConfigId = !item.workbookConfigId ? { workbookConfigId: resolvedConfigId } : {}
       setScanItemIndex(index)
       try {
-        const artifactSnap = await getDoc(doc(artifactsCollection(familyId), item.evidenceArtifactId))
-        const data = artifactSnap.exists()
-          ? (artifactSnap.data() as { uri?: string; mediaUrls?: string[] })
-          : undefined
-        const uri = data?.uri ?? data?.mediaUrls?.[0]
-        if (!uri) {
-          onMessage?.({ text: "Couldn't find the photo to analyze.", severity: 'error' })
-          return
+        // Prefer the display-resolved URIs; fall back to the item's linked
+        // evidence artifact when the caller passed none (original path).
+        let uris = (photoUris ?? []).filter((u): u is string => !!u)
+        if (uris.length === 0) {
+          if (!item.evidenceArtifactId) {
+            onMessage?.({ text: "Couldn't find the photo to analyze.", severity: 'error' })
+            return
+          }
+          const artifactSnap = await getDoc(doc(artifactsCollection(familyId), item.evidenceArtifactId))
+          const data = artifactSnap.exists()
+            ? (artifactSnap.data() as { uri?: string; mediaUrls?: string[] })
+            : undefined
+          const uri = data?.uri ?? data?.mediaUrls?.[0]
+          if (!uri) {
+            onMessage?.({ text: "Couldn't find the photo to analyze.", severity: 'error' })
+            return
+          }
+          uris = [uri]
         }
-        const resp = await fetch(uri)
-        const blob = await resp.blob()
-        const scanFile = new File([blob], 'workbook-page.jpg', { type: blob.type || 'image/jpeg' })
 
-        const registration = await analyzeWorkbookPage(scanFile, resolvedConfigId)
-        if (!registration) {
+        // Analyze each page in turn (one workbook page per photo). Best-effort:
+        // a page that fails to read is skipped; the last success advances the
+        // position we stamp. No artifact is ever created or removed here.
+        let lastRegistration: { configName: string; position: number | null } | null = null
+        let registeredCount = 0
+        for (const uri of uris) {
+          const resp = await fetch(uri)
+          const blob = await resp.blob()
+          const scanFile = new File([blob], 'workbook-page.jpg', { type: blob.type || 'image/jpeg' })
+          const registration = await analyzeWorkbookPage(scanFile, resolvedConfigId)
+          if (registration) {
+            lastRegistration = registration
+            registeredCount += 1
+          }
+        }
+
+        if (!lastRegistration) {
           onMessage?.({ text: "Couldn't read the workbook page. The photo is still saved.", severity: 'error' })
           return
         }
         const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-          i === index ? { ...ci, ...stampConfigId, workbookScanRegistration: registration, scanned: true } : ci,
+          i === index ? { ...ci, ...stampConfigId, workbookScanRegistration: lastRegistration!, scanned: true } : ci,
         )
         persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        const lessonSuffix = lastRegistration.position != null ? ` · Lesson ${lastRegistration.position}` : ''
         onMessage?.({
-          text: `Registered to ${registration.configName}${registration.position != null ? ` · Lesson ${registration.position}` : ''}`,
+          text:
+            registeredCount > 1
+              ? `Registered ${registeredCount} pages to ${lastRegistration.configName}${lessonSuffix}`
+              : `Registered to ${lastRegistration.configName}${lessonSuffix}`,
           severity: 'success',
         })
       } catch (err) {
