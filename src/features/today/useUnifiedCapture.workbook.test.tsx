@@ -340,3 +340,81 @@ describe('useUnifiedCapture — FEAT-62 legacy-item fallback (unstamped items)',
     expect(persistDayLogImmediate).not.toHaveBeenCalled()
   })
 })
+
+describe('useUnifiedCapture — FEAT-62 polish: display-parity backfill (owner cohort)', () => {
+  it('backfills a display-resolved photo on a link-less legacy item (no evidenceArtifactId)', async () => {
+    // The owner's exact cohort: no evidenceArtifactId on the row; the caller
+    // passes the URI the page can already display (planItem/title join).
+    const getDocSpy = vi.mocked(getDoc)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ blob: () => Promise.resolve(new Blob(['img'], { type: 'image/jpeg' })) })
+    vi.stubGlobal('fetch', fetchMock)
+    runScanMock.mockResolvedValue({ id: 'scan-9', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({ action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12 })
+
+    // No evidenceArtifactId — resolution must come from the passed URI + config match.
+    const { result, persistDayLogImmediate, onMessage } = setup({}, [matchingConfig])
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/orphan.jpg'])
+    })
+
+    // No doc read (we were handed the URI) and no new artifact created.
+    expect(getDocSpy).not.toHaveBeenCalled()
+    expect(addDocCalls.some((c) => c.key === 'artifacts')).toBe(false)
+    expect(fetchMock).toHaveBeenCalledWith('https://x/orphan.jpg')
+    expect(syncScanToConfigMock).toHaveBeenCalledWith(
+      'child-1',
+      expect.objectContaining({ pageType: 'worksheet' }),
+      { targetConfigId: 'wb-math' },
+    )
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.workbookConfigId).toBe('wb-math')
+    expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: 12 })
+    expect(stamped.scanned).toBe(true)
+    expect(onMessage).toHaveBeenCalledWith({ text: 'Registered to GATB Math · Lesson 12', severity: 'success' })
+    vi.unstubAllGlobals()
+  })
+
+  it('"analyze all" scans every passed page and reports the count + last position', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob(['img'], { type: 'image/jpeg' })) }),
+    )
+    runScanMock.mockResolvedValue({ id: 'scan-10', results: worksheetResults })
+    syncScanToConfigMock
+      .mockResolvedValueOnce({ action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12 })
+      .mockResolvedValueOnce({ action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 13 })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/p1.jpg', 'https://x/p2.jpg'])
+    })
+
+    // Each page analyzed; the latest position is what gets stamped.
+    expect(syncScanToConfigMock).toHaveBeenCalledTimes(2)
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: 13 })
+    expect(onMessage).toHaveBeenCalledWith({ text: 'Registered 2 pages to GATB Math · Lesson 13', severity: 'success' })
+    vi.unstubAllGlobals()
+  })
+
+  it('leaves photos intact with an honest error when every passed page fails to read', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob(['img'])) }))
+    runScanMock.mockResolvedValue(null) // unreadable
+
+    const { result, persistDayLogImmediate, onMessage } = setup({}, [matchingConfig])
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/orphan.jpg'])
+    })
+
+    // Nothing registered → no stamp, honest error, photo untouched.
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    expect(addDocCalls.some((c) => c.key === 'artifacts')).toBe(false)
+    expect(onMessage).toHaveBeenCalledWith({
+      text: "Couldn't read the workbook page. The photo is still saved.",
+      severity: 'error',
+    })
+    vi.unstubAllGlobals()
+  })
+})

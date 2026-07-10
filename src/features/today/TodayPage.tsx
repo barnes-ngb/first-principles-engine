@@ -1025,6 +1025,7 @@ export default function TodayPage() {
           }}
           onUnifiedCapture={handleUnifiedCapture}
           onBackfillWorkbookScan={handleBackfillWorkbookScan}
+          todayArtifacts={todayArtifacts}
           configs={activityConfigs}
           onPreCompletionScan={handlePreCompletionScan}
           captureLoading={scanLoading}
