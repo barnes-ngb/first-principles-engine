@@ -76,6 +76,7 @@ import {
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
+import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import { getWeekRange } from '../engine/engine.logic'
 import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import {
@@ -1877,23 +1878,34 @@ Generate a plan for Monday through Friday.`.trim()
         const dayLogRef = doc(daysCollection(familyId), docId)
         const dayLogSnap = await getDoc(dayLogRef)
 
-        const checklist: ChecklistItem[] = dayItems.map((item) => ({
-          label: `${item.title} (${item.estimatedMinutes}m)`,
-          completed: false,
-          skillTags: item.skillTags,
-          ladderRef: item.ladderRef,
-          source: 'planner' as const,
-          mvdEssential: item.mvdEssential ?? item.category === 'must-do',
-          category: item.category ?? 'must-do',
-          estimatedMinutes: item.estimatedMinutes,
-          subjectBucket: item.subjectBucket,
-          ...(lessonCardMap.get(item.title) ? { lessonCardId: lessonCardMap.get(item.title) } : {}),
-          ...(item.skipGuidance ? { skipGuidance: item.skipGuidance } : {}),
-          ...(item.itemType ? { itemType: item.itemType } : {}),
-          ...(item.evaluationMode ? { evaluationMode: item.evaluationMode } : {}),
-          ...(item.link ? { link: item.link } : {}),
-          ...(item.bookId ? { bookId: item.bookId } : {}),
-        }))
+        const checklist: ChecklistItem[] = dayItems.map((item) => {
+          // FEAT-62 join: stamp the scannable workbook config id while the config
+          // identity is still recoverable (name/subject match). This is the only
+          // point the item can know its workbook — the routine→item pipeline
+          // round-trips through free text and drops the config id.
+          const workbookConfigId = findWorkbookConfigId(
+            { label: item.title, subjectBucket: item.subjectBucket },
+            activityConfigs,
+          )
+          return {
+            label: `${item.title} (${item.estimatedMinutes}m)`,
+            completed: false,
+            skillTags: item.skillTags,
+            ladderRef: item.ladderRef,
+            source: 'planner' as const,
+            mvdEssential: item.mvdEssential ?? item.category === 'must-do',
+            category: item.category ?? 'must-do',
+            estimatedMinutes: item.estimatedMinutes,
+            subjectBucket: item.subjectBucket,
+            ...(lessonCardMap.get(item.title) ? { lessonCardId: lessonCardMap.get(item.title) } : {}),
+            ...(item.skipGuidance ? { skipGuidance: item.skipGuidance } : {}),
+            ...(item.itemType ? { itemType: item.itemType } : {}),
+            ...(item.evaluationMode ? { evaluationMode: item.evaluationMode } : {}),
+            ...(item.link ? { link: item.link } : {}),
+            ...(item.bookId ? { bookId: item.bookId } : {}),
+            ...(workbookConfigId ? { workbookConfigId } : {}),
+          }
+        })
 
         const blocks: DayBlock[] = dayItems
           .filter((item) => !item.isAppBlock)
