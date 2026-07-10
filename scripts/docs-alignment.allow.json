@@ -35,5 +35,42 @@
       "reason": "Word Wall reads the same Knowledge Mine word-progress subcollection; no helper by design",
       "ledger": "FIRESTORE_AUDIT"
     }
+  ],
+
+  "_resilience_readme": "DOC-09 resilience invariants. remoteCallAllow = src/features files whose raw httpsCallable call is deliberately un-guarded (justified exceptions to check 7, SOFT→HARD). imageDownscaleAllow = image file-inputs that legitimately skip in-file downscale — either the downscale lives in an imported handler (pointer in the reason) or the flow genuinely needs the original (sketch/photo). Check 9 (silent-fallback census) has NO allowlist by design — it is report-only and never fails CI.",
+
+  "remoteCallAllow": [],
+
+  "imageDownscaleAllow": [
+    {
+      "file": "src/features/today/KidCaptureForm.tsx",
+      "reason": "capture routes through useUnifiedCapture.handleUnifiedCapture, which downscales before upload (Today capture pipeline)",
+      "ledger": "FEAT-62"
+    },
+    {
+      "file": "src/features/foundations-review/FoundationsReviewSession.tsx",
+      "reason": "upload routes through useFoundationsReview, which downscales before the vision call",
+      "ledger": "FEAT-61"
+    },
+    {
+      "file": "src/features/shelly-chat/ShellyChatPage.tsx",
+      "reason": "chat image upload routes through useShellyChatFlows (compressIfNeeded before uploadBytes)",
+      "ledger": "FEAT-61"
+    },
+    {
+      "file": "src/features/books/PageEditor.tsx",
+      "reason": "onAddImage routes through useBook.addImageToPage, which compresses via compressIfNeeded before upload",
+      "ledger": "DOC-09"
+    },
+    {
+      "file": "src/features/books/SketchScanner.tsx",
+      "reason": "genuine originals-needed: enhanceSketch reimagines the original scan; downscaling would degrade the source",
+      "ledger": "DOC-09"
+    },
+    {
+      "file": "src/features/avatar/AvatarPhotoUpload.tsx",
+      "reason": "genuine originals-needed: feature-extraction / photo-transform CF needs the original photo",
+      "ledger": "DOC-09"
+    }
   ]
 }
