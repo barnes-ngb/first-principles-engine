@@ -35,6 +35,12 @@ export interface UseUnifiedCaptureOptions {
 export interface UseUnifiedCaptureResult {
   /** Run the unified capture pipeline for a checklist item. */
   handleUnifiedCapture: (file: File, index: number) => Promise<void>
+  /**
+   * FEAT-62 backfill: re-analyze a workbook-linked item's already-captured photo
+   * and register it as a curriculum scan (no new artifact). One-tap recovery for
+   * photos stranded as plain artifacts.
+   */
+  handleBackfillWorkbookScan: (index: number) => Promise<void>
   /** Index of the checklist item currently being captured/scanned. */
   scanItemIndex: number | null
   setScanItemIndex: (index: number | null) => void
@@ -340,8 +346,60 @@ export function useUnifiedCapture({
     [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage],
   )
 
+  /**
+   * FEAT-62 backfill: recover a stranded photo. A workbook-linked item that
+   * already has an artifact photo but no scan registration (captured before the
+   * routing fix, or when analysis failed) can be registered with one tap — pull
+   * the saved image back and run the same deterministic workbook analysis. No
+   * new artifact is created; only the registration is stamped. Owner-initiated —
+   * there is no auto-backfill sweep.
+   */
+  const handleBackfillWorkbookScan = useCallback(
+    async (index: number) => {
+      if (!dayLog?.checklist) return
+      const item = dayLog.checklist[index]
+      if (!item?.workbookConfigId || !item.evidenceArtifactId) return
+      setScanItemIndex(index)
+      try {
+        const artifactSnap = await getDoc(doc(artifactsCollection(familyId), item.evidenceArtifactId))
+        const data = artifactSnap.exists()
+          ? (artifactSnap.data() as { uri?: string; mediaUrls?: string[] })
+          : undefined
+        const uri = data?.uri ?? data?.mediaUrls?.[0]
+        if (!uri) {
+          onMessage?.({ text: "Couldn't find the photo to analyze.", severity: 'error' })
+          return
+        }
+        const resp = await fetch(uri)
+        const blob = await resp.blob()
+        const scanFile = new File([blob], 'workbook-page.jpg', { type: blob.type || 'image/jpeg' })
+
+        const registration = await analyzeWorkbookPage(scanFile, item.workbookConfigId)
+        if (!registration) {
+          onMessage?.({ text: "Couldn't read the workbook page. The photo is still saved.", severity: 'error' })
+          return
+        }
+        const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
+          i === index ? { ...ci, workbookScanRegistration: registration, scanned: true } : ci,
+        )
+        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        onMessage?.({
+          text: `Registered to ${registration.configName}${registration.position != null ? ` · Lesson ${registration.position}` : ''}`,
+          severity: 'success',
+        })
+      } catch (err) {
+        console.error('[UnifiedCapture] Backfill workbook scan failed:', err)
+        onMessage?.({ text: 'Analysis failed. The photo is still saved.', severity: 'error' })
+      } finally {
+        setScanItemIndex(null)
+      }
+    },
+    [dayLog, familyId, analyzeWorkbookPage, persistDayLogImmediate, onMessage],
+  )
+
   return {
     handleUnifiedCapture,
+    handleBackfillWorkbookScan,
     scanItemIndex,
     setScanItemIndex,
     scanResult,

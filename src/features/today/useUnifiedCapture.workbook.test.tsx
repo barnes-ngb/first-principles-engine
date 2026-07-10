@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getDoc } from 'firebase/firestore'
 
 import { useUnifiedCapture } from './useUnifiedCapture'
 import type { ChecklistItem, DayLog } from '../../core/types'
@@ -191,5 +192,67 @@ describe('useUnifiedCapture — FEAT-62 workbook routing', () => {
     expect(stamped.evidenceCollection).toBe('artifacts')
     expect(stamped.workbookScanRegistration).toBeUndefined()
     expect(onMessage).toHaveBeenCalledWith({ text: 'Work captured!', severity: 'success' })
+  })
+
+  it('backfill re-analyzes a stranded artifact photo and registers it without creating a new artifact', async () => {
+    // The saved artifact is fetched back and re-scanned.
+    vi.mocked(getDoc).mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ uri: 'https://x/saved.jpg' }),
+    } as never)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ blob: () => Promise.resolve(new Blob(['img'], { type: 'image/jpeg' })) })
+    vi.stubGlobal('fetch', fetchMock)
+    runScanMock.mockResolvedValue({ id: 'scan-2', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({ action: 'updated', configName: 'GATB Math', position: 12 })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({
+      workbookConfigId: 'wb-math',
+      evidenceArtifactId: 'artifact-existing',
+      evidenceCollection: 'artifacts',
+    })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0)
+    })
+
+    // No NEW artifact — backfill only registers the scan.
+    expect(addDocCalls.some((c) => c.key === 'artifacts')).toBe(false)
+    expect(fetchMock).toHaveBeenCalledWith('https://x/saved.jpg')
+    expect(syncScanToConfigMock).toHaveBeenCalledWith(
+      'child-1',
+      expect.objectContaining({ pageType: 'worksheet' }),
+      { targetConfigId: 'wb-math' },
+    )
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: 12 })
+    expect(stamped.scanned).toBe(true)
+    expect(onMessage).toHaveBeenCalledWith({ text: 'Registered to GATB Math · Lesson 12', severity: 'success' })
+    vi.unstubAllGlobals()
+  })
+
+  it('backfill leaves the photo intact and reports honestly when analysis fails', async () => {
+    vi.mocked(getDoc).mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ uri: 'https://x/saved.jpg' }),
+    } as never)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob(['img'])) }))
+    runScanMock.mockResolvedValue(null) // unreadable
+
+    const { result, persistDayLogImmediate, onMessage } = setup({
+      workbookConfigId: 'wb-math',
+      evidenceArtifactId: 'artifact-existing',
+      evidenceCollection: 'artifacts',
+    })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0)
+    })
+
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    expect(onMessage).toHaveBeenCalledWith({
+      text: "Couldn't read the workbook page. The photo is still saved.",
+      severity: 'error',
+    })
+    vi.unstubAllGlobals()
   })
 })
