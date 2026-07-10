@@ -25,6 +25,22 @@ needed for the check itself. Phone-first: you never run this locally; CI does.
 | 5 | **Declared-but-unwritten data kinds** | SOFT | `EvidenceRef` union members (and any future unions in the config) declared in types with **zero non-test writers**, unless allowlisted with a reason + owning ledger ID. A kind that *gains* a writer is flagged to remove from the allowlist. |
 | 6 | **Known raw refs** | SOFT | New `collection(db, \`families/…\`)` template literals outside `firestore.ts`, or a stale allowlist entry whose ref disappeared. |
 
+### Resilience invariants (DOC-09)
+
+Three checks over `src/features/**`, each encoding a bug the family hit in July
+2026. All non-HARD (checks 7–8 SOFT, check 9 report-only), grouped under a
+**Resilience invariants** section in the output. They are **file-level grep
+heuristics** — coarse by design, honest about it in the report.
+
+| # | Check | Severity | What it catches | Lesson |
+|---|---|---|---|---|
+| 7 | **Remote call timeout + finally** | SOFT → HARD after one clean month | A `src/features` file with a raw `httpsCallable(…)` that isn't within reach of BOTH a timeout signal (`timeout:` option, the FEAT-61 `withTimeout` wrapper, or an AbortController) AND a `finally`. AI-request sites that route through the `useAI` hook are safe by construction (excluded). Allowlist: `remoteCallAllow`. | FEAT-61 (the 5-minute "Reading your photo…" spinner) |
+| 8 | **Image-input downscale** | SOFT | An image file-input (`type="file"` + an image `accept`) with no downscale/compress call in-file. Allowlist: `imageDownscaleAllow` — genuine originals-needed (sketch/photo) or a pointer to the handler that downscales. | FEAT-61 (full-res uploads) |
+| 9 | **Silent-fallback census** | report-only (never fails CI) | Every `catch` block in `src/features` that neither rethrows, sets a user-visible error, nor logs at warn+ — the swallowed-failure census, printed for the monthly ops window. **No allowlist.** | FEAT-62 (doubly-gated silent artifact-scan fallback) |
+
+The monthly ops window (`docs/OPS_WINDOW.md`) reviews these SOFT warnings and the
+census; a clean month is the bar for flipping check 7 HARD.
+
 HARD failures fail the CI job. SOFT warnings annotate and pass — they surface real
 drift for a human to file, without blocking merges.
 
@@ -45,6 +61,14 @@ paper trail is just a silenced check. Discipline:
   filing, not silencing.
 - **`collectionCountDocs`** — the docs required to carry a generated count span.
 - **`evidenceUnions`** — which `as const` unions check #5 scans.
+- **`remoteCallAllow`** (DOC-09 check 7) — `src/features` files whose raw
+  `httpsCallable` is deliberately un-guarded. Empty on day one: the SOFT month is
+  for fixing the census, not silencing it.
+- **`imageDownscaleAllow`** (DOC-09 check 8) — image inputs that legitimately
+  skip in-file downscale: genuine originals-needed (`SketchScanner`,
+  `AvatarPhotoUpload`) or a downscale that lives in an imported handler
+  (`KidCaptureForm`, `FoundationsReviewSession`, `ShellyChatPage`, `PageEditor`,
+  each with a pointer in its `reason`).
 
 ## When a check fires
 

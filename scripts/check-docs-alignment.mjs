@@ -229,6 +229,105 @@ export function extractRawFamilyRefs(content) {
   return out
 }
 
+// ── Resilience invariants (DOC-09, learned from July 2026 bugs) ─────────────
+
+/**
+ * A src/features file that makes a raw remote call (`httpsCallable(...)`) should
+ * keep that call within reach of BOTH a client-side timeout ceiling — an
+ * explicit `timeout:` option, the FEAT-61 `withTimeout` wrapper, or an
+ * AbortController/Signal — AND a `finally` (so the loading spinner always
+ * clears). This is a deliberately coarse *file-level* heuristic: it proves the
+ * file has both in reach, not that they guard the specific call, so the check
+ * runs SOFT and the report says so. AI-request call sites that go through the
+ * `useAI` hook are covered by construction (the hook wraps every call in
+ * finally + the callable's own timeout) and are not raw `httpsCallable` sites.
+ * Lesson: FEAT-61's 5-minute "Reading your photo…" spinner.
+ *
+ * @returns {{ hasRemoteCall: boolean, hasTimeout: boolean, hasFinally: boolean }}
+ */
+export function analyzeRemoteResilience(content) {
+  return {
+    // `httpsCallable<...>(` or `httpsCallable(` — the bare import (followed by
+    // `}` or `,`) is not a call site and does not match.
+    hasRemoteCall: /\bhttpsCallable\s*[<(]/.test(content),
+    hasTimeout:
+      /timeout:\s*\d/.test(content) ||
+      /\bwithTimeout\b/.test(content) ||
+      /\bAbortController\b/.test(content) ||
+      /\bAbortSignal\b/.test(content),
+    hasFinally: /\bfinally\s*\{/.test(content),
+  }
+}
+
+/**
+ * A src/features file with an image file-input (`<input type="file"
+ * accept="…image…">`) should route the picked file through a downscale/compress
+ * util before upload. Detection is a grep-adjacency heuristic on the file
+ * itself; genuine originals-needed inputs (sketch capture) and inputs whose
+ * downscale lives in an imported handler are allowlisted with a reason.
+ * Lesson: FEAT-61 (full-res photos uploaded without a ceiling).
+ *
+ * @returns {{ hasImageInput: boolean, hasDownscale: boolean }}
+ */
+export function analyzeImageDownscale(content) {
+  const hasFileInput = /type=["']file["']/.test(content)
+  const acceptsImage = /accept=["'][^"']*image/.test(content)
+  return {
+    hasImageInput: hasFileInput && acceptsImage,
+    hasDownscale:
+      /\bdownscaleImage\b/.test(content) ||
+      /\bcompressImage\b/.test(content) ||
+      /\bcompressPhotoToDataUrl\b/.test(content) ||
+      /\bcompressIfNeeded\b/.test(content),
+  }
+}
+
+/** True when a catch body rethrows, surfaces a user-visible error, or logs at warn+. */
+export function catchIsHandled(body) {
+  return (
+    /\bthrow\b/.test(body) || // rethrow
+    /set\w*[Ee]rror\s*\(/.test(body) || // setError / setUploadError / setSaveError…
+    /\bshowError\b|\benqueueSnackbar\b|\btoast\b|\balert\s*\(/.test(body) || // user-visible
+    /console\.(warn|error)\b/.test(body) || // log at warn+
+    /\blogger?\.(warn|error)\b/.test(body) ||
+    /reportError|captureException|ErrorReporter|logError|scrubError/.test(body)
+  )
+}
+
+/**
+ * The silent-fallback census (FEAT-62): every `catch` block that neither
+ * rethrows, sets a user-visible error, nor logs at warn+ — a swallowed failure.
+ * Report-only, no allowlist. Each block is brace-matched from its `catch (…) {`;
+ * string/comment braces are not stripped, so treat the count as a census, not a
+ * proof. Lesson: FEAT-62's doubly-gated silent artifact-scan fallback.
+ *
+ * @returns {{ line: number, snippet: string }[]}
+ */
+export function findSilentCatches(content) {
+  const out = []
+  const re = /catch\s*(\([^)]*\))?\s*\{/g
+  let m
+  while ((m = re.exec(content)) !== null) {
+    const braceStart = m.index + m[0].length - 1 // index of the opening `{`
+    let depth = 0
+    let i = braceStart
+    for (; i < content.length; i++) {
+      const ch = content[i]
+      if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) break
+      }
+    }
+    const body = content.slice(braceStart + 1, i)
+    if (!catchIsHandled(body)) {
+      const line = content.slice(0, m.index).split(/\r?\n/).length
+      out.push({ line, snippet: body.trim().replace(/\s+/g, ' ').slice(0, 80) })
+    }
+  }
+  return out
+}
+
 // ── Filesystem helpers (CLI only) ───────────────────────────────────────────
 
 function walkFiles(dir, filter, out = []) {
@@ -483,6 +582,101 @@ export function runChecks({ fix = false } = {}) {
   }
   log('')
 
+  // ── Resilience invariants (DOC-09) ────────────────────────────────────────
+  // Three learned checks, each encoding a July 2026 bug. All non-HARD: checks 7
+  // and 8 warn (SOFT), check 9 is a report-only census. Scoped to src/features.
+  const featureContents = srcContents.filter((c) => c.file.startsWith('src/features/'))
+  log(paint(DIM, `── Resilience invariants (DOC-09) ──`))
+  log('')
+
+  // ── Check 7: remote-call timeout + finally (SOFT → HARD after one clean month)
+  const remoteAllow = new Set((config.remoteCallAllow || []).map((r) => r.file))
+  const remoteSeen = new Set()
+  const remoteWarns = []
+  let remoteCallFiles = 0
+  for (const { file, body } of featureContents) {
+    const r = analyzeRemoteResilience(body)
+    if (!r.hasRemoteCall) continue
+    remoteCallFiles++
+    if (remoteAllow.has(file)) {
+      if (!(r.hasTimeout && r.hasFinally)) remoteSeen.add(file) // still needs the exception
+      continue
+    }
+    if (r.hasTimeout && r.hasFinally) continue
+    const missing = []
+    if (!r.hasTimeout) missing.push('timeout/AbortController')
+    if (!r.hasFinally) missing.push('finally')
+    remoteWarns.push(`${file}: httpsCallable without ${missing.join(' + ')} in reach`)
+  }
+  for (const r of config.remoteCallAllow || []) {
+    if (!remoteSeen.has(r.file)) {
+      remoteWarns.push(`stale allowlist entry: ${r.file} no longer needs a remote-call exception`)
+    }
+  }
+  if (remoteWarns.length === 0) {
+    log(paint(GREEN, `PASS  [remote-timeout-finally] ${remoteCallFiles} httpsCallable file(s), all guarded or allowlisted`))
+  } else {
+    log(paint(YELLOW, `WARN  [remote-timeout-finally] (SOFT — flips HARD after one clean month; file-level heuristic, false negatives possible):`))
+    for (const m of remoteWarns) {
+      log(`        ${m}`)
+      soft.push({ check: 'remote-timeout-finally', message: m })
+    }
+  }
+  log('')
+
+  // ── Check 8: image inputs route through a downscale (SOFT) ─────────────────
+  const imageAllow = new Set((config.imageDownscaleAllow || []).map((r) => r.file))
+  const imageSeen = new Set()
+  const imageWarns = []
+  let imageInputFiles = 0
+  for (const { file, body } of featureContents) {
+    const r = analyzeImageDownscale(body)
+    if (!r.hasImageInput) continue
+    imageInputFiles++
+    if (imageAllow.has(file)) {
+      if (!r.hasDownscale) imageSeen.add(file) // still needs the exception
+      continue
+    }
+    if (r.hasDownscale) continue
+    imageWarns.push(`${file}: image file-input with no downscale/compress call in-file`)
+  }
+  for (const r of config.imageDownscaleAllow || []) {
+    if (!imageSeen.has(r.file)) {
+      imageWarns.push(`stale allowlist entry: ${r.file} no longer needs an image-downscale exception`)
+    }
+  }
+  if (imageWarns.length === 0) {
+    log(paint(GREEN, `PASS  [image-downscale] ${imageInputFiles} image-input file(s), all downscale or allowlisted`))
+  } else {
+    log(paint(YELLOW, `WARN  [image-downscale] (SOFT; grep-adjacency heuristic):`))
+    for (const m of imageWarns) {
+      log(`        ${m}`)
+      soft.push({ check: 'image-downscale', message: m })
+    }
+  }
+  log('')
+
+  // ── Check 9: silent-fallback census (report-only, never fails CI) ──────────
+  let silentCount = 0
+  const silentByFile = []
+  for (const { file, body } of featureContents) {
+    const silent = findSilentCatches(body)
+    if (silent.length) {
+      silentCount += silent.length
+      silentByFile.push({ file, count: silent.length, first: silent[0] })
+    }
+  }
+  silentByFile.sort((a, b) => b.count - a.count || a.file.localeCompare(b.file))
+  log(paint(YELLOW, `INFO  [silent-fallback-census] ${silentCount} swallowed catch(es) across ${silentByFile.length} file(s) in src/features (report-only — the monthly review triages these):`))
+  for (const s of silentByFile.slice(0, 15)) {
+    log(`        ${String(s.count).padStart(2)}  ${s.file}  (e.g. :${s.first.line})`)
+    info.push({ check: 'silent-fallback-census', message: `${s.file}: ${s.count} silent catch(es)` })
+  }
+  if (silentByFile.length > 15) {
+    log(paint(DIM, `        …and ${silentByFile.length - 15} more file(s)`))
+  }
+  log('')
+
   // ── Summary ───────────────────────────────────────────────────────────────
   const hardCount = hard.length
   const softCount = soft.length
@@ -491,8 +685,21 @@ export function runChecks({ fix = false } = {}) {
   } else {
     log(paint(RED, `✖ ${hardCount} HARD failure(s)`) + (softCount ? paint(YELLOW, ` · ${softCount} SOFT warning(s)`) : ''))
   }
+  log(
+    paint(
+      DIM,
+      `Resilience census (DOC-09): ${remoteWarns.length} remote-guard · ${imageWarns.length} image-downscale · ${silentCount} silent catch(es)`,
+    ),
+  )
 
-  return { hard, soft, info, output: lines.join('\n'), derivedCount }
+  const resilience = {
+    remoteWarns: remoteWarns.length,
+    imageWarns: imageWarns.length,
+    silentCount,
+    silentFiles: silentByFile.length,
+    silentByFile,
+  }
+  return { hard, soft, info, output: lines.join('\n'), derivedCount, resilience }
 }
 
 // ── CLI entry ───────────────────────────────────────────────────────────────
