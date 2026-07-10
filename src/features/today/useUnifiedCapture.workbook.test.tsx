@@ -4,6 +4,7 @@ import { getDoc } from 'firebase/firestore'
 
 import { useUnifiedCapture } from './useUnifiedCapture'
 import type { ChecklistItem, DayLog } from '../../core/types'
+import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 
 // ── Firestore / storage boundary mocks ──────────────────────────────────────
 const addDocCalls: { key: string; data: Record<string, unknown> }[] = []
@@ -86,7 +87,7 @@ function makeDayLog(item: Partial<ChecklistItem>): DayLog {
   return { checklist } as unknown as DayLog
 }
 
-function setup(item: Partial<ChecklistItem>) {
+function setup(item: Partial<ChecklistItem>, configs: WorkbookConfigLike[] = []) {
   const persistDayLogImmediate = vi.fn()
   const onMessage = vi.fn()
   const onArtifactCreated = vi.fn()
@@ -100,9 +101,18 @@ function setup(item: Partial<ChecklistItem>) {
       persistDayLogImmediate,
       onMessage,
       onArtifactCreated,
+      configs,
     }),
   )
   return { result, persistDayLogImmediate, onMessage, onArtifactCreated }
+}
+
+/** A scannable workbook config whose name matches the 'GATB Math (30m)' item. */
+const matchingConfig: WorkbookConfigLike = {
+  id: 'wb-math',
+  name: 'GATB Math',
+  type: 'workbook',
+  scannable: true,
 }
 
 const file = () => new File(['x'], 'page.jpg', { type: 'image/jpeg' })
@@ -254,5 +264,79 @@ describe('useUnifiedCapture — FEAT-62 workbook routing', () => {
       severity: 'error',
     })
     vi.unstubAllGlobals()
+  })
+})
+
+describe('useUnifiedCapture — FEAT-62 legacy-item fallback (unstamped items)', () => {
+  it('routed capture on an unstamped item resolves its config by label, scans it, and stamps workbookConfigId', async () => {
+    runScanMock.mockResolvedValue({ id: 'scan-1', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({ action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12 })
+
+    // No workbookConfigId on the item — it must resolve via the matching config.
+    const { result, persistDayLogImmediate, onMessage } = setup({}, [matchingConfig])
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    // Scan pinned to the resolved workbook, exactly like a stamped item.
+    expect(syncScanToConfigMock).toHaveBeenCalledWith(
+      'child-1',
+      expect.objectContaining({ pageType: 'worksheet' }),
+      { targetConfigId: 'wb-math' },
+    )
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    // Resolution is made permanent — the id is stamped onto the item.
+    expect(stamped.workbookConfigId).toBe('wb-math')
+    expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: 12 })
+    expect(stamped.scanned).toBe(true)
+    expect(onMessage).toHaveBeenCalledWith({ text: 'Registered to GATB Math · Lesson 12', severity: 'success' })
+  })
+
+  it('backfill on an unstamped item resolves its config by label, scans it, and stamps workbookConfigId', async () => {
+    vi.mocked(getDoc).mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ uri: 'https://x/saved.jpg' }),
+    } as never)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob(['img'], { type: 'image/jpeg' })) }))
+    runScanMock.mockResolvedValue({ id: 'scan-2', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({ action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12 })
+
+    // Unstamped legacy item with a stranded artifact photo.
+    const { result, persistDayLogImmediate, onMessage } = setup(
+      { evidenceArtifactId: 'artifact-existing', evidenceCollection: 'artifacts' },
+      [matchingConfig],
+    )
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0)
+    })
+
+    // No new artifact — backfill only registers the scan.
+    expect(addDocCalls.some((c) => c.key === 'artifacts')).toBe(false)
+    expect(syncScanToConfigMock).toHaveBeenCalledWith(
+      'child-1',
+      expect.objectContaining({ pageType: 'worksheet' }),
+      { targetConfigId: 'wb-math' },
+    )
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.workbookConfigId).toBe('wb-math')
+    expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: 12 })
+    expect(stamped.scanned).toBe(true)
+    expect(onMessage).toHaveBeenCalledWith({ text: 'Registered to GATB Math · Lesson 12', severity: 'success' })
+    vi.unstubAllGlobals()
+  })
+
+  it('backfill is a no-op when an unstamped item matches no config (nothing to resolve)', async () => {
+    const { result, persistDayLogImmediate } = setup(
+      { evidenceArtifactId: 'artifact-existing', evidenceCollection: 'artifacts' },
+      [], // no configs → no resolution
+    )
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0)
+    })
+
+    // Bails before fetching / scanning / persisting.
+    expect(runScanMock).not.toHaveBeenCalled()
+    expect(syncScanToConfigMock).not.toHaveBeenCalled()
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
   })
 })

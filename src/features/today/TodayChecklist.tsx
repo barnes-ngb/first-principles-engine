@@ -53,6 +53,8 @@ import { calculateXp } from './xp'
 import { doc, getDoc, updateDoc } from 'firebase/firestore'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
+import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
+import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
 import { kidPalette } from '../../app/tokens'
@@ -151,6 +153,12 @@ interface TodayChecklistProps {
   onUnifiedCapture: (file: File, index: number) => void
   /** FEAT-62: register an already-captured photo on a workbook item as a scan. */
   onBackfillWorkbookScan?: (index: number) => void
+  /**
+   * FEAT-62 (legacy-item fallback): the child's scannable workbook configs, used
+   * to resolve a `workbookConfigId` for legacy/unstamped items so the backfill
+   * button can render for them too.
+   */
+  configs?: WorkbookConfigLike[]
   onPreCompletionScan: (file: File, index: number) => void
   captureLoading: boolean
   captureItemIndex: number | null
@@ -181,6 +189,7 @@ export default function TodayChecklist({
   onTeachHelperOpen,
   onUnifiedCapture,
   onBackfillWorkbookScan,
+  configs = [],
   onPreCompletionScan,
   captureLoading,
   captureItemIndex,
@@ -998,9 +1007,11 @@ export default function TodayChecklist({
 
                 {/* FEAT-62 backfill: a workbook-linked item whose photo was saved as
                     a plain artifact (captured before the routing fix, or analysis
-                    failed) — one tap registers it as a curriculum scan. */}
+                    failed) — one tap registers it as a curriculum scan. Legacy items
+                    (no stamped workbookConfigId) resolve their config via the same
+                    name/subject fuzzy fallback so the button renders for them too. */}
                 {onBackfillWorkbookScan &&
-                  item.workbookConfigId &&
+                  (item.workbookConfigId || findWorkbookConfigId(item, configs)) &&
                   item.evidenceArtifactId &&
                   item.evidenceCollection === 'artifacts' &&
                   !item.workbookScanRegistration && (
