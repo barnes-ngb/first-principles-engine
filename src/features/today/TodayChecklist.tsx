@@ -149,6 +149,8 @@ interface TodayChecklistProps {
   persistDayLogImmediate: (updated: DayLog) => void
   onTeachHelperOpen: (item: ChecklistItemType) => void
   onUnifiedCapture: (file: File, index: number) => void
+  /** FEAT-62: register an already-captured photo on a workbook item as a scan. */
+  onBackfillWorkbookScan?: (index: number) => void
   onPreCompletionScan: (file: File, index: number) => void
   captureLoading: boolean
   captureItemIndex: number | null
@@ -178,6 +180,7 @@ export default function TodayChecklist({
   persistDayLogImmediate,
   onTeachHelperOpen,
   onUnifiedCapture,
+  onBackfillWorkbookScan,
   onPreCompletionScan,
   captureLoading,
   captureItemIndex,
@@ -980,6 +983,40 @@ export default function TodayChecklist({
                     </>
                   )
                 })()}
+
+                {/* FEAT-62: quiet confirmation that the capture registered to the
+                    curriculum — so a parent sees it counted without visiting Progress. */}
+                {item.workbookScanRegistration && (
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'success.main', display: 'block', ml: 5, mt: 0.5, fontSize: '0.7rem' }}
+                  >
+                    {'✓'} Registered to {item.workbookScanRegistration.configName}
+                    {item.workbookScanRegistration.position != null && ` · Lesson ${item.workbookScanRegistration.position}`}
+                  </Typography>
+                )}
+
+                {/* FEAT-62 backfill: a workbook-linked item whose photo was saved as
+                    a plain artifact (captured before the routing fix, or analysis
+                    failed) — one tap registers it as a curriculum scan. */}
+                {onBackfillWorkbookScan &&
+                  item.workbookConfigId &&
+                  item.evidenceArtifactId &&
+                  item.evidenceCollection === 'artifacts' &&
+                  !item.workbookScanRegistration && (
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={captureLoading && captureItemIndex === index
+                        ? <CircularProgress size={14} />
+                        : <AutoAwesomeIcon sx={{ fontSize: 16 }} />}
+                      disabled={captureLoading && captureItemIndex === index}
+                      onClick={() => onBackfillWorkbookScan(index)}
+                      sx={{ ml: 5, mt: 0.5, fontSize: '0.7rem', color: 'text.secondary', textTransform: 'none' }}
+                    >
+                      Analyze as workbook scan
+                    </Button>
+                  )}
 
                 {/* Scan & Review: manual quick-check after capture */}
                 {item.evidenceArtifactId && !item.gradeResult && gradeNote?.index !== index && (

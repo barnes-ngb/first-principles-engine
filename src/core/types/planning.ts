@@ -336,6 +336,21 @@ export interface ChecklistItem {
   skipReason?: SkipReason
   /** Links this checklist item to its originating ActivityConfig doc ID. */
   activityConfigId?: string
+  /**
+   * Links this checklist item to the scannable workbook ActivityConfig doc ID it
+   * was generated from (FEAT-62). Stamped at plan lock-in by name/subject match
+   * against the child's workbook configs. When present, a per-item photo capture
+   * routes deterministically to that workbook's scan (position advance via
+   * `targetConfigId`) instead of relying on the label-regex / fuzzy-name fallback.
+   * Holds an `activityConfigs` doc id — the live scannable entity.
+   */
+  workbookConfigId?: string
+  /**
+   * Set after a routed workbook capture registers the page to the curriculum
+   * (FEAT-62). Drives the quiet "registered to {name} · Lesson {n}" confirmation
+   * line on Today so a parent can see it counted without visiting Progress.
+   */
+  workbookScanRegistration?: { configName: string; position: number | null }
   /** True on items that were rolled over from a previous school day. */
   rolledOver?: boolean
   /** ISO date string (YYYY-MM-DD) of the original day this item was rolled from. */
