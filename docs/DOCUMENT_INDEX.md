@@ -93,7 +93,8 @@
 | `review/ARCHITECTURE_AUDIT_2026-06.md` | **HISTORICAL** (2026-06-01) | June 2026 primary monthly architecture audit |
 | `review/ARCHITECTURE_AUDIT_2026-06-21.md` | **HISTORICAL** (2026-06-21) | June 2026 mid-cycle supplement — ETHOS-01, ARCH-38/39, DATA-12 scoped findings |
 | `review/ARCHITECTURE_AUDIT_2026-06-28.md` | **HISTORICAL** (2026-06-28) | June 2026 end-of-month audit — ETHOS-01/38/39/DATA-12 confirmed fixed; ARCH-40, DATA-13, DOC-07 new |
-| `review/ARCHITECTURE_AUDIT_2026-07.md` | **CURRENT** (2026-07-05) | July 2026 monthly audit — ARCH-40/DOC-07/TEST-01(dad-lab) confirmed fixed; ARCH-41/42 new (name-gating regressions in KidTodayView/MyAvatarPage/KidLabView) |
+| `review/ARCHITECTURE_AUDIT_2026-07.md` | **HISTORICAL** (2026-07-05) | July 2026 primary monthly audit — ARCH-40/DOC-07/TEST-01(dad-lab) confirmed fixed; ARCH-41/42 new (name-gating regressions in KidTodayView/MyAvatarPage/KidLabView) |
+| `review/ARCHITECTURE_AUDIT_2026-07-12.md` | **CURRENT** (2026-07-12) | July 2026 mid-cycle re-verification — baseline green; ARCH-01 first decrease in cycles (FEAT-58); ARCH-06 trend reversed (35→43 refs, FEAT-62); ARCH-41/42 still open unfixed; 7 ledger rows (FEAT-57–62, DOC-09) corrected from stale "PR open" to MERGED |
 | `review/ALIGNMENT_AUDIT_2026-06-20.md` | **CURRENT** (2026-06-20) | Alignment audit — cross-feature consistency and operating-model alignment check |
 | `review/STATE_COMPLIANCE_DESIGN.md` | **CURRENT** (2026-06-27) | State-configurable compliance design (DATA-12) — MO active + byte-identical; TX + TEFA defined, not activated |
 | `review/DECISION_FUNC-01_source_of_truth.md` | **CURRENT** (2026-05-30) | "Where is Lincoln" source-of-truth decision — layered ownership with named write-through (Model 2 adopted) |
