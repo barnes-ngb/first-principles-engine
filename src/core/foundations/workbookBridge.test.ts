@@ -4,7 +4,9 @@ import {
   applyBridgeCoverageToModel,
   bridgeCoveredConcepts,
   isPositionAddressable,
+  maxWitnessedNativePosition,
   resolveNativePosition,
+  resolveSyncNativePosition,
   workbookBridgeForSource,
 } from './workbookBridge'
 import type { BridgeCoverage, WorkbookBridge } from './workbookBridge'
@@ -68,10 +70,21 @@ describe('workbookBridgeForSource', () => {
     )
   })
 
-  it('returns null for an UNBRIDGED source (Mathseeds / TGTB draft-only)', () => {
-    expect(workbookBridgeForSource('Mathseeds')).toBeNull()
+  it('resolves the Mathseeds bridge activated in FEAT-64', () => {
+    // Draft-only under FEAT-63; FEAT-64 ships it as data.
+    expect(workbookBridgeForSource('Mathseeds')?.sourceId).toBe('mathseeds')
+    expect(workbookBridgeForSource('math seeds')?.sourceId).toBe('mathseeds')
+  })
+
+  it('resolves the TGTB LA1 bridge activated in FEAT-64', () => {
+    expect(workbookBridgeForSource('TGTB Language Arts')?.sourceId).toBe(
+      'tgtbLanguageArts1',
+    )
+    expect(workbookBridgeForSource('tgtb la')?.sourceId).toBe('tgtbLanguageArts1')
+  })
+
+  it('returns null for a still-UNBRIDGED source (TGTB Math) and empties', () => {
     expect(workbookBridgeForSource('The Good and the Beautiful Math')).toBeNull()
-    expect(workbookBridgeForSource('TGTB Language Arts')).toBeNull()
     expect(workbookBridgeForSource('')).toBeNull()
     expect(workbookBridgeForSource(undefined)).toBeNull()
   })
@@ -120,10 +133,18 @@ describe('bridgeCoveredConcepts', () => {
 // ── resolveNativePosition — the lesson-vs-native gate (FEAT-63 §0.2) ───────
 
 describe('resolveNativePosition', () => {
-  it('Fast Phonics config position does NOT resolve — lessonToUnit is uncurated', () => {
-    // "Lesson 90" must NOT map to Peak 90 or all peaks; the source is gated.
-    expect(resolveNativePosition(fastPhonicsWorkbookBridge, 90)).toBeNull()
-    expect(resolveNativePosition(fastPhonicsWorkbookBridge, 1)).toBeNull()
+  it('Fast Phonics now resolves via the OWNER divisor (ceil(lesson / 5))', () => {
+    // FEAT-64: the lesson→peak question was answered — an FP-internal lesson counter.
+    expect(resolveNativePosition(fastPhonicsWorkbookBridge, 90)).toBe(18) // 90/5
+    expect(resolveNativePosition(fastPhonicsWorkbookBridge, 1)).toBe(1) // clamped ≥ 1
+    expect(resolveNativePosition(fastPhonicsWorkbookBridge, 65)).toBe(13) // 65/5
+    expect(resolveNativePosition(fastPhonicsWorkbookBridge, 500)).toBe(20) // clamped ≤ 20
+  })
+
+  it('a not-started Fast Phonics position (0 / negative) resolves to null', () => {
+    // `currentPosition: 0` is the not-started sentinel; must NOT write Peak-1 evidence.
+    expect(resolveNativePosition(fastPhonicsWorkbookBridge, 0)).toBeNull()
+    expect(resolveNativePosition(fastPhonicsWorkbookBridge, -3)).toBeNull()
   })
 
   it('a bridge with an identity lessonToUnit resolves config → native', () => {
@@ -133,6 +154,121 @@ describe('resolveNativePosition', () => {
   it('is position-addressable regardless (FP units carry peak boundaries)', () => {
     expect(isPositionAddressable(fastPhonicsWorkbookBridge)).toBe(true)
     expect(isPositionAddressable(TEST_BRIDGE)).toBe(true)
+  })
+})
+
+// ── The conflict rule — a divisor GUESS defers to a WITNESS (FEAT-64 §3) ───
+
+describe('resolveSyncNativePosition — Fast Phonics conflict rule', () => {
+  /** A model carrying a DIRECT Peak-13 witness from the Review-Chat upload path.
+   *  Uses the CANONICAL `fastPhonics` source (the review prompt emits the bridge id,
+   *  so a real witness shares source/sourceId with a sync write) — it is a witness
+   *  purely because it is NOT `positionSync`. This pins the P1 fix: source string is
+   *  NOT the discriminator, the `positionSync` marker is. */
+  function peak13WitnessModel(): LearnerModel {
+    return baseModel({
+      conceptStates: {
+        'reading.phonics.blends': {
+          state: 'forming',
+          evidence: [
+            {
+              kind: 'curriculumPosition',
+              sourceId: 'fastPhonics', // canonical — same as a self-sync would use
+              note: 'Covered in fastPhonics Peak 13',
+              observedAt: '2026-07-10T00:00:00.000Z',
+              source: 'fastPhonics',
+              unit: 'Peak 13',
+              via: 'manual',
+              // NO positionSync ⇒ a genuine witness, not the sync's own write.
+            },
+          ],
+        },
+      },
+    })
+  }
+
+  it('caps L90 (guess Peak 18) at the witnessed Peak 13 — guesses defer to witnesses', () => {
+    const model = peak13WitnessModel()
+    expect(resolveSyncNativePosition(fastPhonicsWorkbookBridge, 90, model)).toBe(13)
+  })
+
+  it('the capped position yields PEAK-13 coverage, never the guessed Peak-18 content', () => {
+    const model = peak13WitnessModel()
+    const capped = resolveSyncNativePosition(fastPhonicsWorkbookBridge, 90, model)!
+    const ids = new Set(
+      bridgeCoveredConcepts(fastPhonicsWorkbookBridge, capped).map((c) => c.conceptId),
+    )
+    expect(ids).toContain('reading.phonics.blends') // Peak 13
+    expect(ids).not.toContain('reading.phonics.longVowels') // Peak 18 (silent-e) — never
+  })
+
+  it('does NOT inflate when the guess is BELOW the witness (min of the two)', () => {
+    const model = peak13WitnessModel()
+    // L40 → guess Peak 8; witness is 13, so the lower guess stands.
+    expect(resolveSyncNativePosition(fastPhonicsWorkbookBridge, 40, model)).toBe(8)
+  })
+
+  it('with NO witness, the divisor guess passes through (grows with the lesson)', () => {
+    expect(resolveSyncNativePosition(fastPhonicsWorkbookBridge, 90, baseModel())).toBe(18)
+    expect(resolveSyncNativePosition(fastPhonicsWorkbookBridge, 90, null)).toBe(18)
+  })
+
+  it('a self-sync write (positionSync: true) is NOT a witness — guess grows freely', () => {
+    // The sync must not cap itself: a prior sync write (marked positionSync) at a
+    // LOWER peak must not freeze future growth as the lesson advances.
+    const selfOnly = baseModel({
+      conceptStates: {
+        'reading.phonics.blends': {
+          state: 'forming',
+          evidence: [
+            {
+              kind: 'curriculumPosition',
+              sourceId: 'fastPhonics',
+              note: 'Covered in fastPhonics Peak 10',
+              observedAt: '2026-07-10T00:00:00.000Z',
+              source: 'fastPhonics',
+              unit: 'Peak 10',
+              via: 'scan',
+              positionSync: true, // the sync's own write
+            },
+          ],
+        },
+      },
+    })
+    // No genuine witness → the L90 guess (18) is free to stand, uncapped by Peak 10.
+    expect(resolveSyncNativePosition(fastPhonicsWorkbookBridge, 90, selfOnly)).toBe(18)
+  })
+
+  it('deterministic band bridges (Mathseeds/TGTB) ignore the conflict rule', () => {
+    // TEST_BRIDGE is not provisional → passes straight through regardless of model.
+    const model = peak13WitnessModel()
+    expect(resolveSyncNativePosition(TEST_BRIDGE, 2, model)).toBe(2)
+  })
+})
+
+// ── maxWitnessedNativePosition — witness detection ─────────────────────────
+
+describe('maxWitnessedNativePosition', () => {
+  it('returns the highest witnessed peak, ignoring positionSync self-writes', () => {
+    const model = baseModel({
+      conceptStates: {
+        a: {
+          state: 'forming',
+          evidence: [
+            { kind: 'curriculumPosition', sourceId: 'fastPhonics', note: '', observedAt: NOW, source: 'fastPhonics', unit: 'Peak 8' },
+            { kind: 'curriculumPosition', sourceId: 'fastPhonics', note: '', observedAt: NOW, source: 'fastPhonics', unit: 'Peak 13' },
+            { kind: 'curriculumPosition', sourceId: 'fastPhonics', note: '', observedAt: NOW, source: 'fastPhonics', unit: 'Peak 17', positionSync: true }, // self-write, ignored
+          ],
+        },
+      },
+    })
+    // The Peak-17 self-write is ignored; the highest genuine witness (Peak 13) wins —
+    // even though ALL three share the canonical `fastPhonics` source (the P1 case).
+    expect(maxWitnessedNativePosition(model, fastPhonicsWorkbookBridge)).toBe(13)
+  })
+
+  it('returns null when there are no witnesses', () => {
+    expect(maxWitnessedNativePosition(baseModel(), fastPhonicsWorkbookBridge)).toBeNull()
   })
 })
 
@@ -194,6 +330,36 @@ describe('applyBridgeCoverageToModel', () => {
     const fromSource = evs.filter((e) => e.source === 'testMath')
     expect(fromSource).toHaveLength(1) // one ref per source
     expect(fromSource[0].unit).toBe('Unit 5') // the latest position
+  })
+
+  it('stamps its own writes positionSync:true and PRESERVES a canonical-source witness', () => {
+    // A Review-Chat witness on the SAME canonical source (the P1 case) must survive a
+    // sync write — the dedup removes only the sync's OWN prior refs, not the witness.
+    const withWitness = baseModel({
+      conceptStates: {
+        'math.number.counting': {
+          state: 'forming',
+          evidence: [
+            {
+              kind: 'curriculumPosition',
+              sourceId: 'testMath',
+              note: 'Covered in testMath Unit 9 (upload)',
+              observedAt: '2026-07-02T00:00:00.000Z',
+              source: 'testMath',
+              unit: 'Unit 9',
+              via: 'manual',
+              // NO positionSync ⇒ a witness
+            },
+          ],
+        },
+      },
+    })
+    const { model } = applyBridgeCoverageToModel(withWitness, coverage, 'testMath', NOW)
+    const evs = model.conceptStates['math.number.counting'].evidence
+    // The witness is preserved; the sync's own write is appended + marked.
+    expect(evs.some((e) => e.unit === 'Unit 9' && !e.positionSync)).toBe(true)
+    expect(evs.some((e) => e.unit === 'Unit 3' && e.positionSync === true)).toBe(true)
+    expect(evs).toHaveLength(2)
   })
 
   it('queues at most ONE verify-ask per concept, deduped against unresolved asks', () => {

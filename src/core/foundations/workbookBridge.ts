@@ -23,6 +23,8 @@
 import { readingGraph } from './readingGraph'
 import { mathGraph } from './mathGraph'
 import { normalizeSourceName, fastPhonicsWorkbookBridge } from './fastPhonicsBridge'
+import { mathseedsBridge } from './mathseedsBridge'
+import { tgtbLa1Bridge } from './tgtbLa1Bridge'
 import type { ConceptNode } from './types'
 import type {
   ConceptStateEntry,
@@ -57,6 +59,12 @@ export interface WorkbookBridgeUnit {
   upToLesson?: number
   /** Reading-/math-graph node ids this unit supplies `covered` evidence for. */
   covers: string[]
+  /**
+   * Curriculum content the SOURCE teaches but the curated graph has NO node for —
+   * recorded, never invented as a node (the FEAT-64 curation convention, e.g.
+   * Mathseeds "rounding"). Purely documentary: the apply layer ignores it.
+   */
+  notes?: string[]
 }
 
 /**
@@ -79,8 +87,23 @@ export interface WorkbookBridge {
    * so it is left UNSET rather than guessed, which gates config-position sync for
    * that source (reported as "lesson mapping pending curation", never silently
    * mapped). A source whose config position IS the native unit sets an identity fn.
+   *
+   * **FEAT-64 update:** Fast Phonics NOW sets a divisor `lessonToUnit`
+   * (`ceil(lesson / LESSONS_PER_PEAK)`, OWNER-CONFIRM) marked
+   * {@link WorkbookBridge.positionIsProvisional}; Mathseeds / TGTB LA1 set a
+   * band-ceiling `lessonToUnit` ({@link makeBandCeilingLessonToUnit}).
    */
   lessonToUnit?: (configLesson: number) => number | null
+  /**
+   * True when `lessonToUnit` produces a *provisional GUESS* rather than a witnessed
+   * position — the Fast Phonics case (`ceil(lesson / LESSONS_PER_PEAK)`, FEAT-64 §3).
+   * When set, the sync applies the **conflict rule**: a divisor-guessed native
+   * position is capped at the highest position DIRECTLY witnessed on the model
+   * (review-chat uploads carry a real peak), so a guess never overwrites or exceeds a
+   * witness (see {@link resolveSyncNativePosition}). Deterministic band bridges (whose
+   * `lessonToUnit` maps a real lesson to the band it falls in) leave it unset.
+   */
+  positionIsProvisional?: boolean
 }
 
 /** One deterministic coverage claim from a position: a concept + the unit label. */
@@ -90,7 +113,15 @@ export interface BridgeCoverage {
 }
 
 /** Every bridge a tracked position can resolve against. New sources add here. */
-const ALL_WORKBOOK_BRIDGES: WorkbookBridge[] = [fastPhonicsWorkbookBridge]
+const ALL_WORKBOOK_BRIDGES: WorkbookBridge[] = [
+  fastPhonicsWorkbookBridge,
+  mathseedsBridge,
+  tgtbLa1Bridge,
+]
+
+// Re-exported for the public barrel + tests; defined in its own dependency-free
+// module (`./bandCeiling`) so the bridge modules can use it without an import cycle.
+export { makeBandCeilingLessonToUnit } from './bandCeiling'
 
 /**
  * Tolerant bridge lookup by free-text workbook name (`ActivityConfig.name` /
@@ -160,6 +191,78 @@ export function bridgeCoveredConcepts(
     conceptId,
     unitLabel: unit.unitLabel,
   }))
+}
+
+// ── Conflict rule — a divisor GUESS defers to a WITNESS (FEAT-64 §3) ───────
+//
+// Fast Phonics' `lessonToUnit` is a divisor GUESS (`ceil(lesson / 5)`). The
+// Review-Chat upload path, by contrast, extracts a REAL peak from a screenshot and
+// writes it as `curriculumPosition` evidence. Where the two disagree — the family's
+// config reads "Lesson 90" (guess ⇒ Peak 18) but an upload witnessed Peak 13 — the
+// witness wins: the sync must never overwrite or exceed a directly-evidenced peak
+// with a guess. So the effective native position is the LOWER of (guess, witness).
+// Rationale: L90 ÷ 5 = 18 conflicts with the family's observed Peak 13 — guesses
+// defer to witnesses.
+
+/** Parse a native position (the trailing integer) from a unit label — "Peak 13" →
+ *  13, "up to Lesson 150" → 150. Null when no integer is present. */
+export function parseNativePositionFromUnit(unit: string | undefined): number | null {
+  if (!unit) return null
+  const matches = unit.match(/\d+/g)
+  if (!matches || matches.length === 0) return null
+  const n = Number.parseInt(matches[matches.length - 1], 10)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * The highest native position **directly witnessed** for a bridge's source on the
+ * model — i.e. from `curriculumPosition` evidence that a human/LLM covered-write
+ * produced (a Review-Chat upload extracts a real peak), NOT the position sync's own
+ * (possibly divisor-guessed) self-write.
+ *
+ * Self-writes are told apart by the `positionSync` marker, NOT by the `source`
+ * string: the Review-Chat prompt emits the CANONICAL bridge id as `source`, so a
+ * genuine witness commonly shares `source`/`sourceId` with the sync's own writes —
+ * only `positionSync` reliably separates them. This keeps the guess from being
+ * capped by its OWN prior writes (which would freeze growth), while a real witness
+ * still caps it.
+ */
+export function maxWitnessedNativePosition(
+  model: LearnerModel,
+  bridge: WorkbookBridge,
+): number | null {
+  const canonicalKey = normalizeSourceName(bridge.sourceId)
+  let max: number | null = null
+  for (const entry of Object.values(model.conceptStates)) {
+    for (const ev of entry.evidence) {
+      if (ev.kind !== 'curriculumPosition') continue
+      if (ev.positionSync) continue // the sync's own write — not a witness
+      if (normalizeSourceName(ev.source ?? '') !== canonicalKey) continue
+      const pos = parseNativePositionFromUnit(ev.unit)
+      if (pos == null) continue
+      if (max == null || pos > max) max = pos
+    }
+  }
+  return max
+}
+
+/**
+ * Resolve a config position to the bridge's native position FOR A SYNC — i.e.
+ * {@link resolveNativePosition} plus the conflict rule. For a provisional
+ * (divisor-guess) bridge, the guess is capped at the highest witnessed position on
+ * the model (`min(guess, witness)`); a deterministic band bridge passes straight
+ * through. `null` propagates the pending-curation / unfinite gate unchanged.
+ */
+export function resolveSyncNativePosition(
+  bridge: WorkbookBridge,
+  configPosition: number,
+  model: LearnerModel | null,
+): number | null {
+  const native = resolveNativePosition(bridge, configPosition)
+  if (native == null) return null
+  if (!bridge.positionIsProvisional || !model) return native
+  const witnessed = maxWitnessedNativePosition(model, bridge)
+  return witnessed == null ? native : Math.min(native, witnessed)
 }
 
 // ── Apply layer — mirrors `foundationsReviewActions.ts` covered path (§13) ──
@@ -236,10 +339,14 @@ export function applyBridgeCoverageToModel(
       source,
       unit: unitLabel,
       via,
+      positionSync: true, // marks this as the sync's OWN write, not a witness
     }
-    // Dedup by source: drop a prior ref from the same source (re-sync = update).
+    // Dedup by source, but ONLY our own prior sync writes (re-sync = update). A
+    // Review-Chat witness carries the same canonical `source` (the prompt emits the
+    // bridge id) yet is NOT `positionSync` — it must be preserved, never clobbered,
+    // so the conflict rule can still cap a divisor guess against it (FEAT-64).
     const priorEvidence = (prev?.evidence ?? []).filter(
-      (e) => !(e.kind === 'curriculumPosition' && e.source === source),
+      (e) => !(e.kind === 'curriculumPosition' && e.source === source && e.positionSync),
     )
     const nextEntry: ConceptStateEntry = {
       state: toState,

@@ -1,94 +1,98 @@
-# Mathseeds → Math-Graph Bridge — v0 — DRAFT, PENDING OWNER CURATION, not shipped as data
+# Mathseeds → Math-Graph Bridge — v1 — OWNER-CURATED (2026-07-15, official-source verified)
 
-> ⚠️ **DRAFT — PENDING OWNER CURATION. This file is NOT shipped as bridge data.**
-> The per-level content below is **reconstructed from general model knowledge** of the Mathseeds
-> program structure, **not** transcribed from an authoritative published scope & sequence. It is a
-> *structural draft* for the owner (and the owner's design partner) to curate against the official
-> Mathseeds scope & sequence before any of it becomes code. **Every row carries a confidence flag.**
-> A later curation-apply run (the FEAT-46 → FEAT-47 pattern) transcribes the CURATED version into
-> `src/core/foundations/` bridge data — nothing here is read by the app today.
+> ✅ **v1 — OWNER-CURATED and SHIPPED as bridge data.** The per-band content below was
+> **owner-adopted and verified against the official Mathseeds publisher pages on 2026-07-15**, then
+> transcribed into `src/core/foundations/mathseedsBridge.ts` (FEAT-64). This file is now the authority
+> the code mirrors — correcting the mapping is a data edit in the `.ts` module, re-synced here.
+>
+> **Official sources verified (2026-07-15):**
+> - Content overview — https://mathseeds.com/content-overview/
+> - Lesson overview — https://mathseeds.com/lesson-overview/
 >
 > **Companion to:** [`../LEARNER_MODEL_DESIGN.md`](../LEARNER_MODEL_DESIGN.md) §12 (external-curriculum
 > bridge) and [`MATH_GRAPH_V0.md`](./MATH_GRAPH_V0.md) (the math-graph node ids mapped to). Bridge
-> mechanism: FEAT-63 (`src/core/foundations/workbookBridge.ts`). Ledger anchor: **FEAT-63** (refs
-> FEAT-49 §12, FEAT-53 the Fast Phonics template, FEAT-62 the position-capture pipeline that feeds it).
+> mechanism: FEAT-63 (`src/core/foundations/workbookBridge.ts`). Activation: **FEAT-64** (refs FEAT-49
+> §12, FEAT-53 the Fast Phonics template, FEAT-47/50 the curation-apply pattern, FEAT-62 the
+> position-capture pipeline that feeds it).
 
 ## Why this file exists
 
 The learner model tracks curriculum *positions* (workbook configs) but, before FEAT-63, never read
 them — the model's **math** picture was blind to the child's primary math curriculum. The family's
 Mathseeds config reads **Level 122**; the model saw none of it. FEAT-63 shipped the *wiring* (a
-generalized `WorkbookBridge` + the position → evidence conversion + the two triggers + a diag sync
-action). This file is the **data half** for Mathseeds: a draft mapping of Mathseeds levels to
-math-graph node ids, so a curated version can turn "Level 122 reached" into `covered` evidence on the
-concepts those levels teach — exactly as the Fast Phonics bridge does for reading.
+generalized `WorkbookBridge` + position → evidence conversion + two triggers + a diag sync action).
+FEAT-64 ships the **data half** for Mathseeds: this curated mapping of Mathseeds lessons to math-graph
+node ids, turning "Level 122 reached" into `covered` evidence on the concepts those levels teach —
+exactly as the Fast Phonics bridge does for reading.
 
-## Semantics (the rules a curated version of this data will obey)
+## Structure fact (official)
 
-These are inherited unchanged from the Fast Phonics bridge (design §12 / §13) and enforced in code by
-`applyBridgeCoverageToModel`, so the curation only has to get the **mapping** right, not the rules:
+Mathseeds is **200 numbered lessons, 50 per grade band**:
 
-- **Reaching a level = `covered` evidence for its mapped nodes — nothing more.** `curriculumPosition`
+| Grade band | Lessons |
+|---|---|
+| Kindergarten | 1–50 |
+| Grade 1 | 51–100 |
+| Grade 2 | 101–150 |
+| Grade 3 | 151–200 |
+
+The family's config tracks a single Mathseeds lesson number (their child: **L122**, inside the Grade 2
+band).
+
+## Semantics (the rules this data obeys)
+
+Inherited unchanged from the Fast Phonics bridge (design §12 / §13) and enforced in code by
+`applyBridgeCoverageToModel`, so the curation only had to get the **mapping** right, not the rules:
+
+- **Reaching a band = `covered` evidence for its mapped nodes — nothing more.** `curriculumPosition`
   evidence alone caps a concept at **`forming`** and attaches a "verify with a quick quest?"
   openQuestion. It **never** reaches `solid` — that needs a quest/eval finding or a parent attestation.
-- **Positions are cumulative.** Reaching Level 122 implies coverage of every mapped level ≤ 122.
+- **Positions are cumulative.** Reaching a band implies coverage of every mapped band below it.
+- **In-band credit (round UP to the band ceiling).** Because a ~50-lesson band's content is
+  distributed across its whole range, a child *inside* a band (L122 is inside the 101–150 band) is
+  credited for that band's concepts — the config lesson is rounded UP to the band ceiling
+  (`makeBandCeilingLessonToUnit`), so L122 resolves to native band 150. The `covered → forming` cap +
+  the verify-quest openQuestion keep this an honest exposure claim, never mastery.
 - **Never downgrades.** A concept already `solid` (attested / quest-verified) only gains the evidence
   ref; its state is untouched.
-- **Dedup per concept.** A concept covered by several level-bands takes the highest band reached as its
-  evidence label.
+- **Dedup per concept.** A concept covered by several bands takes the highest band reached as its label.
 
-## Bridge data shape (the generalized interface a curated version fills in)
+## Per-band `covers[]` (v1 — OWNER-CURATED, maps onto CURATED math-graph nodes ONLY)
 
-```ts
-// src/core/foundations/mathseedsBridge.ts  (FUTURE — only after curation)
-import type { WorkbookBridge } from './workbookBridge'
-export const mathseedsBridge: WorkbookBridge = {
-  sourceId: 'mathseeds',
-  aliases: ['mathseeds', 'math seeds', 'reading eggs mathseeds'],
-  version: 1,
-  units: [ /* the level-bands below, once curated */ ],
-  // lessonToUnit: see the CURATION QUESTION on lesson numbering below.
-}
-```
+Every `covers[]` id is a real node in [`MATH_GRAPH_V0.md`](./MATH_GRAPH_V0.md) — pinned by a validation
+test (`mathseedsBridge.test.ts`). Concepts Mathseeds teaches for which the curated graph has **no
+node** are recorded in a **notes** column, **never invented** as a node.
 
-## Per-level-band `covers[]` (DRAFT — confidence-flagged, maps onto CURATED math-graph nodes ONLY)
-
-Mathseeds is organized as a long run of numbered **Lessons/Levels** (the app tracks a single number).
-The bands below are the DRAFT's best-guess grouping from general program knowledge; **the level
-boundaries are the uncertain layer** and the primary curation target. Every `covers[]` id is a real
-node in [`MATH_GRAPH_V0.md`](./MATH_GRAPH_V0.md).
-
-| Band (DRAFT) | Approx. focus | `covers[]` (math-graph node ids) | Confidence |
+| upToLesson | Cumulative content | `covers[]` (math-graph node ids) | notes |
 |---|---|---|---|
-| Levels ~1–25 | Counting, number recognition, comparing, basic shapes | `math.number.counting`, `math.number.digitRecognition`, `math.number.comparison`, `math.geometry.shapes` | 🟡 medium — content typical of early Mathseeds; **level cutoff uncertain** |
-| Levels ~26–50 | Skip counting, add/subtract within 20, simple story problems | `math.number.skipCount`, `math.operations.addWithin20`, `math.operations.subWithin20`, `math.problemSolving.oneStep` | 🟡 medium — mapping plausible; cutoff uncertain |
-| Levels ~51–80 | Fact families, place value (tens/ones), measurement (length/time), simple graphs | `math.operations.factFamilies`, `math.number.placeValue`, `math.measurement.length`, `math.measurement.time`, `math.data.graphs` | 🟠 low-medium — several distinct strands compressed; needs S&S check |
-| Levels ~81–110 | Two-digit add/subtract, money, patterns | `math.operations.twoDigit`, `math.measurement.money`, `math.algebra.patterns` | 🟠 low-medium — cutoff + strand order uncertain |
-| Levels ~111–140 | Regrouping (carry/borrow), arrays/early multiplication, fractions intro | `math.operations.regrouping`, `math.operations.arrays`, `math.fractions.concepts` | 🔴 low — **this band spans the child's current L122; verify carefully** |
-| Levels ~141–200 | Multiplication facts, division, fraction compare, area/perimeter, data | `math.operations.multFacts`, `math.operations.division`, `math.fractions.compare`, `math.geometry.area`, `math.data.interpret` | 🔴 low — beyond the child's position; drafted for completeness only |
+| 20 | counting 0–10, number knowledge/numerals, basic 2D shapes | `math.number.counting`, `math.number.digitRecognition`, `math.geometry.shapes` | — |
+| 50 | counting to 20, comparison, addition facts to 10, teen numbers as tens+ones (place value begins), patterns (evidence-only strand) | `math.number.counting`, `math.number.comparison`, `math.operations.addWithin20`, `math.number.placeValue`, `math.algebra.patterns` | — |
+| 100 | counting to 100, tens-and-ones place value, add/subtract within 100, skip counting 2s/5s/10s, money, time (half-hour), early fractions, one-step story problems, tally/picture charts (data strand) | `math.number.counting`, `math.number.placeValue`, `math.operations.subWithin20`, `math.operations.twoDigit`, `math.number.skipCount`, `math.measurement.money`, `math.measurement.time`, `math.fractions.concepts`, `math.problemSolving.oneStep`, `math.data.graphs` | — |
+| 150 | place value to 999, **regrouping** (vertical add/subtract), multiplication & division signs (tables forming), fractions of collections, measurement (length), time (quarter-hour), data | `math.number.placeValue`, `math.operations.multiDigit`, `math.operations.regrouping`, `math.operations.arrays`, `math.operations.multFacts`, `math.operations.division`, `math.fractions.concepts`, `math.measurement.length`, `math.measurement.time`, `math.data.interpret` | — |
+| 200 | multiplication/division fluency within 100, division word problems (multi-step problem solving), rounding, area | `math.operations.multiTables`, `math.operations.division`, `math.problemSolving`, `math.geometry.area` | **rounding** — no math-graph node (recorded, not invented) |
 
-**Worked example (DRAFT, illustrative — do not ship):** "Mathseeds Level 122 reached" would, under this
-draft, apply the cumulative union of every band up to ~111–140, i.e. `covered` (→ `forming`, capped)
-on counting → regrouping/arrays/fractions-intro. **This is exactly the kind of claim the curation must
-verify** before it writes anything.
+**Worked example (the owner's exact child, L122):** L122 is inside the 101–150 (G2) band, so it rounds
+UP to native band **150**. The cumulative union of bands ≤ 150 yields **22 concepts** — the Kindergarten
+and Grade 1 spine fully covered (counting → place value → two-digit add/subtract → early fractions →
+one-step story problems → charts) **plus** the Grade 2 band the child is inside: `math.operations.regrouping`
+("Carry and borrow") and `math.operations.multFacts` ("Times tables", *tables forming*) — all as
+`covered → forming`. It does **not** yet reach the Grade 3 band (fluent tables `multiTables`, multi-step
+`problemSolving`, `geometry.area`). This is the fixture `mathseedsBridge.test.ts` pins.
 
-## Curation questions (resolve before shipping)
+## Curation questions — RESOLVED (appended per convention)
 
-1. **What does the family's Mathseeds "Level" number mean?** (the `lessonToUnit` slot / §0.2 finding).
-   Mathseeds surfaces both a **Map/Lesson** number and internal **Level** groupings; the app stores one
-   integer (currently 122). Is 122 a Mathseeds *lesson* on the map, a *level*, or a Reading-Eggs-wide
-   position? The bridge's native unit and the `lessonToUnit` translation both depend on this. **Until
-   answered, config-position sync for Mathseeds is gated** (the diag action reports "no bridge yet"
-   because Mathseeds is unregistered; once registered without a curated `lessonToUnit`, it would report
-   "lesson mapping pending curation", the Fast Phonics state).
-2. **Level bands per concept.** The six bands above are guesses. What are the *actual* level ranges at
-   which Mathseeds introduces each math-graph concept? This is the core transcription task.
-3. **Does Mathseeds cover strands the graph splits differently?** e.g. the graph separates
-   `math.operations.multFacts` (band 3) from `math.operations.multiTables` (band 4, fluency through
-   12×12) — which Mathseeds levels, if any, reach the fluency node vs. only introduce facts?
-4. **Where does Level 122 actually sit?** The child's current position lands in the lowest-confidence
-   band (🔴). Getting *this* band right matters most for today's model.
+1. **What does the family's Mathseeds "Level" number mean?** → **RESOLVED.** It is a Mathseeds **lesson**
+   on the 200-lesson map (50 per grade band). The bridge's native unit is the **band ceiling** and
+   `lessonToUnit` = `makeBandCeilingLessonToUnit([20, 50, 100, 150, 200])` (round the lesson UP to the
+   band it is inside — in-band credit).
+2. **Level bands per concept.** → **RESOLVED** by the owner-adopted table above (verified against the
+   official content + lesson-overview pages).
+3. **Facts vs. fluency split.** → **RESOLVED.** Band 150 covers `math.operations.multFacts` (tables
+   *forming*); the fluency node `math.operations.multiTables` is reached only at band 200 (Grade 3).
+4. **Where does Level 122 sit?** → **RESOLVED** (worked example above): inside the 101–150 (G2) band.
 
-> **The owner's design partner will verify this draft against the official Mathseeds scope & sequence
-> during curation.** This file is *structure*, not authority — it exists to make the curation a
-> transcription task, not a blank page.
+## Named future (backlog, not built)
+
+Mathseeds surfaces per-lesson map "stops"; a finer **lesson→node** map (below the 50-lesson band
+granularity) could sharpen the boundary between adjacent bands, but the band-ceiling mapping is
+sufficient for the model's `covered → forming` (soft, verify-gated) claims today.
