@@ -79,6 +79,15 @@ export interface EvidenceRef {
   detail?: string
   /** How the position was captured. `chatUpload` arrives with slice 2b. */
   via?: 'chatUpload' | 'scan' | 'manual'
+  /**
+   * Set true ONLY by the workbook-position sync's own writes
+   * (`applyBridgeCoverageToModel`, FEAT-64). It marks a `curriculumPosition` ref as
+   * a **provisional position sync**, NOT a direct witness — so the Fast Phonics
+   * conflict rule can tell its own (possibly divisor-guessed) writes apart from a
+   * genuine Review-Chat witness (both carry the same canonical `source`), and the
+   * sync's dedup replaces only its OWN prior refs without clobbering a witness.
+   */
+  positionSync?: boolean
   /** For an `attestation`: who overrode. Parent's word is durable (§6.3). */
   overriddenBy?: 'parent'
 }
