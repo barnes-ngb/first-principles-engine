@@ -12,6 +12,7 @@ import {
 import { useFamilyId } from '../auth/useAuth'
 import { activityConfigsCollection, db } from '../firebase/firestore'
 import { ensureDefaultActivityConfigs, migrateToActivityConfigs } from '../firebase/migrateActivityConfigs'
+import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
 import type { ActivityConfig } from '../types'
 import type { ActivityFrequency, ActivityType, SubjectBucket } from '../types/enums'
 
@@ -121,6 +122,27 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
     return unsubscribe
   }, [familyId, childId, migrationDone])
 
+  /** Fire the FEAT-63 learner-model position sync for a manual config edit.
+   *  Resolves the workbook name + owning child from the merged config. No-ops for
+   *  a shared ('both') config — workbooks are per-child (DATA-08). */
+  const maybeSyncPosition = useCallback(
+    (existing: ActivityConfig | undefined, updates: Partial<ActivityConfig>, position: number) => {
+      if (!familyId) return
+      const childId = updates.childId ?? existing?.childId
+      if (!childId || childId === 'both') return
+      const workbookName =
+        updates.name ?? existing?.name ?? updates.curriculum ?? existing?.curriculum
+      if (!workbookName) return
+      void syncWorkbookPositionToModel(
+        familyId,
+        childId,
+        { workbookName, position, via: 'manual' },
+        new Date().toISOString(),
+      )
+    },
+    [familyId],
+  )
+
   const addConfig = useCallback(
     async (data: NewActivityConfig) => {
       if (!familyId) return
@@ -155,8 +177,13 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
         ...updates,
         updatedAt: new Date().toISOString(),
       })
+      // FEAT-63 trigger 1b: a manual position edit folds into the learner model
+      // when a bridge matches. Fire-and-forget, learnerModels-only.
+      if (updates.currentPosition != null) {
+        maybeSyncPosition(existing, updates, updates.currentPosition)
+      }
     },
-    [familyId],
+    [familyId, maybeSyncPosition],
   )
 
   const deleteConfig = useCallback(
@@ -190,8 +217,10 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
         currentPosition: position,
         updatedAt: new Date().toISOString(),
       })
+      // FEAT-63 trigger 1b: fold the manual position into the learner model.
+      maybeSyncPosition(configsRef.current.find((c) => c.id === id), {}, position)
     },
-    [familyId],
+    [familyId, maybeSyncPosition],
   )
 
   const reorder = useCallback(

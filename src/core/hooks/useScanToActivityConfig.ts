@@ -12,6 +12,7 @@ import {
   deriveReadingWorkingLevelFromScan,
   canOverwriteWorkingLevel,
 } from '../../features/quest/workingLevels'
+import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
 
 export interface ScanConfigResult {
   action: 'created' | 'updated' | 'none'
@@ -111,6 +112,18 @@ export function useScanToActivityConfig() {
         // Update working level from curriculum scan (fire-and-forget)
         void updateWorkingLevelFromScan(familyId, childId, lessonNumber, curriculumName, subject)
 
+        // FEAT-63 trigger 1a: fold the new position into the learner model when a
+        // bridge matches this workbook. Fire-and-forget, learnerModels-only; a no
+        // bridge / uncurated lesson mapping is a silent no-op (see the diag sync).
+        if (lessonNumber != null) {
+          void syncWorkbookPositionToModel(
+            familyId,
+            childId,
+            { workbookName: curriculumName, position: lessonNumber, via: 'scan' },
+            new Date().toISOString(),
+          )
+        }
+
         return {
           action: 'updated',
           configId: existing.id,
@@ -155,6 +168,16 @@ export function useScanToActivityConfig() {
 
       // Update working level from curriculum scan (fire-and-forget)
       void updateWorkingLevelFromScan(familyId, childId, lessonNumber, curriculumName, subject)
+
+      // FEAT-63 trigger 1a: same learner-model fold on a freshly-created config.
+      if (lessonNumber != null) {
+        void syncWorkbookPositionToModel(
+          familyId,
+          childId,
+          { workbookName: curriculumName, position: lessonNumber, via: 'scan' },
+          new Date().toISOString(),
+        )
+      }
 
       return {
         action: 'created',
