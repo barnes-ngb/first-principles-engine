@@ -154,8 +154,8 @@ describe('resolveDisplayPhotos', () => {
   })
 
   it('skips artifacts with no uri and no mediaUrls', () => {
+    // makeArtifact leaves `uri` unset by default, so this artifact has neither uri nor mediaUrls.
     const artifact = makeArtifact({ id: 'art-1' })
-    delete (artifact as Record<string, unknown>).uri
     const item = makeItem({ evidenceArtifactId: 'art-1' })
 
     const result = resolveDisplayPhotos(item, [artifact])
