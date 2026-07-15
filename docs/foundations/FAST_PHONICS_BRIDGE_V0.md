@@ -174,6 +174,33 @@ through **this same bridge** (same `covers[]` map), so a photographed end-of-pea
 same `curriculumPosition` evidence as a chat-upload. **Chat-upload is the v1 path** (design §A); scan-ingest
 is the follow-on. Both converge on this one bridge — the mapping is authored once.
 
+## Config-position lesson→peak — OWNER-CONFIRM divisor + conflict rule (FEAT-64)
+
+FEAT-63 left this bridge's `lessonToUnit` **unset**: the family's config tracks Fast Phonics as a
+**lesson** number ("Lesson 90") while the bridge speaks **peaks** (1–20), and the meaning of a lesson
+number was an open curation question — so config-position sync was gated ("lesson mapping pending
+curation"), while the chat-upload path (which extracts a *peak* directly) worked unaffected.
+
+**FEAT-64 resolves it.** The owner's answer: the family's number is Fast Phonics' **internal lesson
+counter** (~N lessons per peak). So the lesson→peak mapping is a **divisor**:
+
+```
+peak = ceil(lesson / LESSONS_PER_PEAK)      // LESSONS_PER_PEAK default 5 — OWNER-CONFIRM
+```
+
+`LESSONS_PER_PEAK` is a **GUESS flagged OWNER-CONFIRM** (default 5). One glance at the FP app's
+"Lesson Y of Z" counter inside a peak confirms the true per-peak count; correcting it is a one-line
+data edit in `fastPhonicsBridge.ts`. The result is clamped to `[1, 20]`.
+
+**Because the divisor is a guess, the bridge is marked `positionIsProvisional`, which turns on the
+CONFLICT RULE (encoded + tested):** where a divisor-guessed peak disagrees with a peak the Review-Chat
+upload path **directly witnessed** on the model, **the witness wins** — the position sync emits at most
+the **LOWER** of the two and never overwrites or exceeds a directly-evidenced peak with a guess. The
+family's anchor is the worked case: **L90 ÷ 5 = 18** conflicts with the observed **Peak 13**, so the
+sync caps at **Peak 13**. Guesses defer to witnesses. (Witnesses are distinguished from the sync's own
+writes by `sourceId`: a self-sync stamps the canonical `fastPhonics`; a Review-Chat covered write stamps
+the parent's free-text source. See `resolveSyncNativePosition` / `maxWitnessedNativePosition`.)
+
 ## Words-known counts — what the milestone numbers mean
 
 The cumulative words-read counts in the official scope & sequence — **~143 (Phase 2), 350+ (Phase 3), 400+
