@@ -10,6 +10,7 @@ export { readingGraph, READING_GRAPH_VERSION } from './readingGraph'
 export { mathGraph, MATH_GRAPH_VERSION } from './mathGraph'
 export {
   fastPhonicsBridge,
+  fastPhonicsWorkbookBridge,
   fastPhonicsUnits,
   FAST_PHONICS_BRIDGE_VERSION,
   bridgeForSource,
@@ -17,6 +18,19 @@ export {
   normalizeSourceName,
 } from './fastPhonicsBridge'
 export type { BridgeUnit, CurriculumBridge, BridgeEvidence } from './fastPhonicsBridge'
+export {
+  workbookBridgeForSource,
+  bridgeCoveredConcepts,
+  resolveNativePosition,
+  isPositionAddressable,
+  applyBridgeCoverageToModel,
+} from './workbookBridge'
+export type {
+  WorkbookBridge,
+  WorkbookBridgeUnit,
+  BridgeCoverage,
+  AppliedBridgeCoverage,
+} from './workbookBridge'
 
 import type { ConceptGraph, ConceptNode, FoundationDomain } from './types'
 import { readingGraph } from './readingGraph'
