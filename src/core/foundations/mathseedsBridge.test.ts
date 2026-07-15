@@ -91,6 +91,12 @@ describe('mathseedsBridge — conversion fixture (owner child: Level 122)', () =
     expect(ids).not.toContain('math.geometry.area')
   })
 
+  it('a not-started position (0 / negative) resolves to null — never band-20 coverage', () => {
+    // `currentPosition: 0` is the not-started sentinel (band-ceiling helper guards it).
+    expect(resolveNativePosition(mathseedsBridge, 0)).toBeNull()
+    expect(resolveNativePosition(mathseedsBridge, -5)).toBeNull()
+  })
+
   it('is cumulative + monotonic — L200 ⊇ L122', () => {
     const at122 = new Set(idsOf(bridgeCoveredConcepts(mathseedsBridge, native!)))
     const at200 = new Set(idsOf(bridgeCoveredConcepts(mathseedsBridge, 200)))

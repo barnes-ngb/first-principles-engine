@@ -198,8 +198,10 @@ upload path **directly witnessed** on the model, **the witness wins** — the po
 the **LOWER** of the two and never overwrites or exceeds a directly-evidenced peak with a guess. The
 family's anchor is the worked case: **L90 ÷ 5 = 18** conflicts with the observed **Peak 13**, so the
 sync caps at **Peak 13**. Guesses defer to witnesses. (Witnesses are distinguished from the sync's own
-writes by `sourceId`: a self-sync stamps the canonical `fastPhonics`; a Review-Chat covered write stamps
-the parent's free-text source. See `resolveSyncNativePosition` / `maxWitnessedNativePosition`.)
+writes by the `positionSync` marker the sync stamps on its `curriculumPosition` evidence — **not** by
+the `source` string, because the Review-Chat prompt emits the canonical bridge id, so a genuine witness
+shares `source`/`sourceId` with a sync write. The same marker scopes the apply-layer dedup so a sync
+write never clobbers a witness. See `resolveSyncNativePosition` / `maxWitnessedNativePosition`.)
 
 ## Words-known counts — what the milestone numbers mean
 

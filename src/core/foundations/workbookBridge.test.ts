@@ -141,6 +141,12 @@ describe('resolveNativePosition', () => {
     expect(resolveNativePosition(fastPhonicsWorkbookBridge, 500)).toBe(20) // clamped ≤ 20
   })
 
+  it('a not-started Fast Phonics position (0 / negative) resolves to null', () => {
+    // `currentPosition: 0` is the not-started sentinel; must NOT write Peak-1 evidence.
+    expect(resolveNativePosition(fastPhonicsWorkbookBridge, 0)).toBeNull()
+    expect(resolveNativePosition(fastPhonicsWorkbookBridge, -3)).toBeNull()
+  })
+
   it('a bridge with an identity lessonToUnit resolves config → native', () => {
     expect(resolveNativePosition(TEST_BRIDGE, 2)).toBe(2)
   })
@@ -154,9 +160,11 @@ describe('resolveNativePosition', () => {
 // ── The conflict rule — a divisor GUESS defers to a WITNESS (FEAT-64 §3) ───
 
 describe('resolveSyncNativePosition — Fast Phonics conflict rule', () => {
-  /** A model carrying a DIRECT Peak-13 witness from the Review-Chat upload path:
-   *  `curriculumPosition` evidence whose `sourceId` is the parent's free-text
-   *  ("Fast Phonics"), NOT the canonical `fastPhonics` a self-sync stamps. */
+  /** A model carrying a DIRECT Peak-13 witness from the Review-Chat upload path.
+   *  Uses the CANONICAL `fastPhonics` source (the review prompt emits the bridge id,
+   *  so a real witness shares source/sourceId with a sync write) — it is a witness
+   *  purely because it is NOT `positionSync`. This pins the P1 fix: source string is
+   *  NOT the discriminator, the `positionSync` marker is. */
   function peak13WitnessModel(): LearnerModel {
     return baseModel({
       conceptStates: {
@@ -165,12 +173,13 @@ describe('resolveSyncNativePosition — Fast Phonics conflict rule', () => {
           evidence: [
             {
               kind: 'curriculumPosition',
-              sourceId: 'Fast Phonics', // human free-text ⇒ a witness, not a self-write
-              note: 'Covered in Fast Phonics Peak 13',
+              sourceId: 'fastPhonics', // canonical — same as a self-sync would use
+              note: 'Covered in fastPhonics Peak 13',
               observedAt: '2026-07-10T00:00:00.000Z',
-              source: 'Fast Phonics',
+              source: 'fastPhonics',
               unit: 'Peak 13',
               via: 'manual',
+              // NO positionSync ⇒ a genuine witness, not the sync's own write.
             },
           ],
         },
@@ -204,8 +213,9 @@ describe('resolveSyncNativePosition — Fast Phonics conflict rule', () => {
     expect(resolveSyncNativePosition(fastPhonicsWorkbookBridge, 90, null)).toBe(18)
   })
 
-  it('a self-sync write (canonical sourceId "fastPhonics") is NOT a witness', () => {
-    // Only the parent/LLM free-text source counts — the sync must not cap itself.
+  it('a self-sync write (positionSync: true) is NOT a witness — guess grows freely', () => {
+    // The sync must not cap itself: a prior sync write (marked positionSync) at a
+    // LOWER peak must not freeze future growth as the lesson advances.
     const selfOnly = baseModel({
       conceptStates: {
         'reading.phonics.blends': {
@@ -213,12 +223,13 @@ describe('resolveSyncNativePosition — Fast Phonics conflict rule', () => {
           evidence: [
             {
               kind: 'curriculumPosition',
-              sourceId: 'fastPhonics', // canonical ⇒ the sync's own write
+              sourceId: 'fastPhonics',
               note: 'Covered in fastPhonics Peak 10',
               observedAt: '2026-07-10T00:00:00.000Z',
               source: 'fastPhonics',
               unit: 'Peak 10',
               via: 'scan',
+              positionSync: true, // the sync's own write
             },
           ],
         },
@@ -238,19 +249,21 @@ describe('resolveSyncNativePosition — Fast Phonics conflict rule', () => {
 // ── maxWitnessedNativePosition — witness detection ─────────────────────────
 
 describe('maxWitnessedNativePosition', () => {
-  it('returns the highest witnessed peak, ignoring self-sync writes', () => {
+  it('returns the highest witnessed peak, ignoring positionSync self-writes', () => {
     const model = baseModel({
       conceptStates: {
         a: {
           state: 'forming',
           evidence: [
-            { kind: 'curriculumPosition', sourceId: 'Fast Phonics', note: '', observedAt: NOW, source: 'Fast Phonics', unit: 'Peak 8' },
-            { kind: 'curriculumPosition', sourceId: 'Fast Phonics', note: '', observedAt: NOW, source: 'Fast Phonics', unit: 'Peak 13' },
-            { kind: 'curriculumPosition', sourceId: 'fastPhonics', note: '', observedAt: NOW, source: 'fastPhonics', unit: 'Peak 17' }, // self-write, ignored
+            { kind: 'curriculumPosition', sourceId: 'fastPhonics', note: '', observedAt: NOW, source: 'fastPhonics', unit: 'Peak 8' },
+            { kind: 'curriculumPosition', sourceId: 'fastPhonics', note: '', observedAt: NOW, source: 'fastPhonics', unit: 'Peak 13' },
+            { kind: 'curriculumPosition', sourceId: 'fastPhonics', note: '', observedAt: NOW, source: 'fastPhonics', unit: 'Peak 17', positionSync: true }, // self-write, ignored
           ],
         },
       },
     })
+    // The Peak-17 self-write is ignored; the highest genuine witness (Peak 13) wins —
+    // even though ALL three share the canonical `fastPhonics` source (the P1 case).
     expect(maxWitnessedNativePosition(model, fastPhonicsWorkbookBridge)).toBe(13)
   })
 
@@ -317,6 +330,36 @@ describe('applyBridgeCoverageToModel', () => {
     const fromSource = evs.filter((e) => e.source === 'testMath')
     expect(fromSource).toHaveLength(1) // one ref per source
     expect(fromSource[0].unit).toBe('Unit 5') // the latest position
+  })
+
+  it('stamps its own writes positionSync:true and PRESERVES a canonical-source witness', () => {
+    // A Review-Chat witness on the SAME canonical source (the P1 case) must survive a
+    // sync write — the dedup removes only the sync's OWN prior refs, not the witness.
+    const withWitness = baseModel({
+      conceptStates: {
+        'math.number.counting': {
+          state: 'forming',
+          evidence: [
+            {
+              kind: 'curriculumPosition',
+              sourceId: 'testMath',
+              note: 'Covered in testMath Unit 9 (upload)',
+              observedAt: '2026-07-02T00:00:00.000Z',
+              source: 'testMath',
+              unit: 'Unit 9',
+              via: 'manual',
+              // NO positionSync ⇒ a witness
+            },
+          ],
+        },
+      },
+    })
+    const { model } = applyBridgeCoverageToModel(withWitness, coverage, 'testMath', NOW)
+    const evs = model.conceptStates['math.number.counting'].evidence
+    // The witness is preserved; the sync's own write is appended + marked.
+    expect(evs.some((e) => e.unit === 'Unit 9' && !e.positionSync)).toBe(true)
+    expect(evs.some((e) => e.unit === 'Unit 3' && e.positionSync === true)).toBe(true)
+    expect(evs).toHaveLength(2)
   })
 
   it('queues at most ONE verify-ask per concept, deduped against unresolved asks', () => {

@@ -366,7 +366,10 @@ export const fastPhonicsWorkbookBridge: WorkbookBridge = {
   })),
   // Divisor GUESS (OWNER-CONFIRM): family lesson → peak. Clamped to [1, 20].
   lessonToUnit: (lesson: number) => {
-    if (!Number.isFinite(lesson)) return null
+    // `lesson <= 0` is the not-started sentinel (config `currentPosition: 0`) — return
+    // null (no coverage) rather than clamping up to Peak 1 and writing CVC evidence
+    // before any Fast Phonics work has happened.
+    if (!Number.isFinite(lesson) || lesson <= 0) return null
     const peak = Math.ceil(lesson / LESSONS_PER_PEAK)
     return Math.min(FAST_PHONICS_PEAK_COUNT, Math.max(1, peak))
   },

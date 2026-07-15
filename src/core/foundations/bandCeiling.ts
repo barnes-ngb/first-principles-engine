@@ -19,7 +19,10 @@ export function makeBandCeilingLessonToUnit(
   ceilings: number[],
 ): (lesson: number) => number | null {
   return (lesson: number) => {
-    if (!Number.isFinite(lesson)) return null
+    // `lesson <= 0` is the not-started sentinel (config `currentPosition: 0`, and the
+    // backfill writes 0 when no legacy position exists) — resolve to null so a
+    // not-started workbook never writes band-1 coverage.
+    if (!Number.isFinite(lesson) || lesson <= 0) return null
     for (const ceiling of ceilings) {
       if (lesson <= ceiling) return ceiling
     }

@@ -217,14 +217,15 @@ export function parseNativePositionFromUnit(unit: string | undefined): number | 
 /**
  * The highest native position **directly witnessed** for a bridge's source on the
  * model — i.e. from `curriculumPosition` evidence that a human/LLM covered-write
- * produced, NOT the position sync's own self-write.
+ * produced (a Review-Chat upload extracts a real peak), NOT the position sync's own
+ * (possibly divisor-guessed) self-write.
  *
- * Distinguishing self-writes: the sync stamps its evidence with `sourceId` set to the
- * canonical `bridge.sourceId` (e.g. `"fastPhonics"`); a Review-Chat `covered` write
- * stamps `sourceId` to the parent's free-text source (e.g. `"Fast Phonics"`). So a
- * ref counts as a WITNESS when its `source` normalizes to the bridge's source but its
- * `sourceId` is NOT the canonical id. This keeps the guess from being capped by its
- * OWN prior (already-capped) writes — only genuine witnesses cap it.
+ * Self-writes are told apart by the `positionSync` marker, NOT by the `source`
+ * string: the Review-Chat prompt emits the CANONICAL bridge id as `source`, so a
+ * genuine witness commonly shares `source`/`sourceId` with the sync's own writes —
+ * only `positionSync` reliably separates them. This keeps the guess from being
+ * capped by its OWN prior writes (which would freeze growth), while a real witness
+ * still caps it.
  */
 export function maxWitnessedNativePosition(
   model: LearnerModel,
@@ -235,8 +236,8 @@ export function maxWitnessedNativePosition(
   for (const entry of Object.values(model.conceptStates)) {
     for (const ev of entry.evidence) {
       if (ev.kind !== 'curriculumPosition') continue
+      if (ev.positionSync) continue // the sync's own write — not a witness
       if (normalizeSourceName(ev.source ?? '') !== canonicalKey) continue
-      if (ev.sourceId === bridge.sourceId) continue // the sync's own self-write
       const pos = parseNativePositionFromUnit(ev.unit)
       if (pos == null) continue
       if (max == null || pos > max) max = pos
@@ -338,10 +339,14 @@ export function applyBridgeCoverageToModel(
       source,
       unit: unitLabel,
       via,
+      positionSync: true, // marks this as the sync's OWN write, not a witness
     }
-    // Dedup by source: drop a prior ref from the same source (re-sync = update).
+    // Dedup by source, but ONLY our own prior sync writes (re-sync = update). A
+    // Review-Chat witness carries the same canonical `source` (the prompt emits the
+    // bridge id) yet is NOT `positionSync` — it must be preserved, never clobbered,
+    // so the conflict rule can still cap a divisor guess against it (FEAT-64).
     const priorEvidence = (prev?.evidence ?? []).filter(
-      (e) => !(e.kind === 'curriculumPosition' && e.source === source),
+      (e) => !(e.kind === 'curriculumPosition' && e.source === source && e.positionSync),
     )
     const nextEntry: ConceptStateEntry = {
       state: toState,
