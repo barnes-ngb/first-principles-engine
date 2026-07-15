@@ -115,11 +115,19 @@ export function useScanToActivityConfig() {
         // FEAT-63 trigger 1a: fold the new position into the learner model when a
         // bridge matches this workbook. Fire-and-forget, learnerModels-only; a no
         // bridge / uncurated lesson mapping is a silent no-op (see the diag sync).
-        if (lessonNumber != null) {
+        // Only sync when the position ACTUALLY ADVANCED (`updates.currentPosition`
+        // is set) — scanning an older page leaves the config at its higher position,
+        // so syncing the lower lesson would replace a source's evidence with an
+        // earlier unit and log a misleading change (positions are advance-only here).
+        if (updates.currentPosition != null) {
           void syncWorkbookPositionToModel(
             familyId,
             childId,
-            { workbookName: curriculumName, position: lessonNumber, via: 'scan' },
+            {
+              workbookName: curriculumName,
+              position: updates.currentPosition as number,
+              via: 'scan',
+            },
             new Date().toISOString(),
           )
         }
