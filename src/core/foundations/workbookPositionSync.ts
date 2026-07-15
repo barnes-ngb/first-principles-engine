@@ -20,8 +20,10 @@ import {
   applyBridgeCoverageToModel,
   bridgeCoveredConcepts,
   resolveNativePosition,
+  resolveSyncNativePosition,
   workbookBridgeForSource,
 } from './workbookBridge'
+import type { WorkbookBridge } from './workbookBridge'
 import type { LearnerModel } from '../types/learnerModel'
 
 /** Why a sync produced no model write — surfaced by the diag sync action so the
@@ -44,28 +46,22 @@ export interface WorkbookSyncInput {
 }
 
 /**
- * Resolve + convert a position WITHOUT writing — the pure decision half, reused by
- * both the writer and the diag preview. Returns the outcome plus (when written-able)
- * the coverage to apply.
+ * Resolve the bridge + gate a position WITHOUT writing — the pure decision half.
+ * Returns a terminal outcome (no-bridge / pending-curation) OR the resolved bridge so
+ * the caller can apply the model-aware conflict rule and compute coverage. The
+ * coverage step moved AFTER the model load (FEAT-64) because the Fast Phonics conflict
+ * rule caps the divisor-guessed position against the model's witnessed peaks.
  */
 export function planWorkbookSync(input: WorkbookSyncInput):
   | { outcome: Extract<WorkbookSyncOutcome, { status: 'no-bridge' | 'pending-curation' }> }
-  | {
-      outcome: null
-      source: string
-      coverage: ReturnType<typeof bridgeCoveredConcepts>
-    } {
+  | { outcome: null; bridge: WorkbookBridge } {
   const bridge = workbookBridgeForSource(input.workbookName)
   if (!bridge) return { outcome: { status: 'no-bridge' } }
-  const native = resolveNativePosition(bridge, input.position)
-  if (native == null) {
+  // Gate on the raw lesson→native translation (unset `lessonToUnit` ⇒ pending).
+  if (resolveNativePosition(bridge, input.position) == null) {
     return { outcome: { status: 'pending-curation', source: bridge.sourceId } }
   }
-  return {
-    outcome: null,
-    source: bridge.sourceId,
-    coverage: bridgeCoveredConcepts(bridge, native),
-  }
+  return { outcome: null, bridge }
 }
 
 /**
@@ -83,14 +79,20 @@ export async function syncWorkbookPositionToModel(
   try {
     const planned = planWorkbookSync(input)
     if (planned.outcome) return planned.outcome
-    const { source, coverage } = planned
-    if (coverage.length === 0) return { status: 'no-coverage', source }
+    const { bridge } = planned
+    const source = bridge.sourceId
 
     const modelRef = doc(learnerModelsCollection(familyId), childId)
     const snap = await getDoc(modelRef)
     if (!snap.exists()) return { status: 'no-model' } // seed the model first (diag/review)
 
     const model = snap.data() as LearnerModel
+    // Resolve native position WITH the conflict rule (provisional divisor guesses cap
+    // against the model's directly-witnessed peaks). Deterministic bridges pass through.
+    const native = resolveSyncNativePosition(bridge, input.position, model)
+    if (native == null) return { status: 'pending-curation', source }
+    const coverage = bridgeCoveredConcepts(bridge, native)
+    if (coverage.length === 0) return { status: 'no-coverage', source }
     const { model: next, changedConceptIds } = applyBridgeCoverageToModel(
       model,
       coverage,

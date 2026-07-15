@@ -326,19 +326,33 @@ export const READING_GRAPH_NODE_IDS: ReadonlySet<string> = new Set(
 // upToLesson, covers }` unit shape. Its NATIVE position is the peak number, so
 // `upToLesson === peak`.
 //
-// ⚠️ CURATION QUESTION — `lessonToUnit` is deliberately UNSET (FEAT-63 §0.2).
-// The family tracks Fast Phonics as a LESSON number (their config reads "Lesson
-// 90"), but the bridge speaks PEAKS (1–20). What one of the family's lesson
-// numbers means is unresolved and MUST NOT be guessed:
-//   • Are these Reading Eggs Lessons (REL) that span multiple curricula?
-//   • Are they Fast Phonics internal lessons (~N lessons per peak — the S&S lists
-//     multiple map "stops"/lessons inside each peak)?
-// Until an owner curates the lesson→peak mapping, config-position sync for Fast
-// Phonics is GATED: `resolveNativePosition` returns null and the diag sync action
-// reports "lesson mapping pending curation" rather than mis-mapping "Lesson 90"
-// onto Peak 90 (which doesn't exist) or silently onto all 20 peaks. The peak-native
-// `covers[]` mapping itself is CURATED (v1) and drives the FEAT-53 Review-Chat
-// upload path, which extracts a *peak* directly.
+// ── lesson → peak: OWNER answer + divisor GUESS (FEAT-64 §3) ──────────────
+// FEAT-63 left `lessonToUnit` UNSET because the family tracks Fast Phonics as a
+// LESSON number ("Lesson 90") while the bridge speaks PEAKS (1–20), and the meaning
+// of a lesson number was unresolved. The owner's answer: these are Fast Phonics'
+// INTERNAL lesson counter (~N lessons per peak). So the lesson→peak mapping is a
+// divisor: `peak = ceil(lesson / LESSONS_PER_PEAK)`.
+//
+// `LESSONS_PER_PEAK` is a GUESS flagged OWNER-CONFIRM (default 5 — the FP app shows
+// "Lesson Y of Z" inside each peak; one glance confirms the true per-peak count).
+// Because it's a guess, this bridge is marked `positionIsProvisional`, which turns on
+// the sync's CONFLICT RULE: where a divisor-guessed peak disagrees with a peak the
+// Review-Chat upload path DIRECTLY witnessed on the model, the witness wins and the
+// sync emits at most the LOWER of the two (`resolveSyncNativePosition`). Rationale:
+// L90 ÷ 5 = 18 conflicts with the family's observed Peak 13 — guesses defer to
+// witnesses. The peak-native `covers[]` mapping itself is CURATED (v1) and drives the
+// FEAT-53 Review-Chat upload path, which extracts a *peak* directly.
+
+/**
+ * Fast Phonics internal lessons per peak. **OWNER-CONFIRM** — a GUESS (default 5).
+ * Confirm against the FP app's "Lesson Y of Z" counter inside a peak, then adjust
+ * this one constant (a one-line data edit; the conflict rule below protects the
+ * model from a wrong guess in the meantime).
+ */
+export const LESSONS_PER_PEAK = 5
+
+/** Peaks in the Fast Phonics climb (Phase 2–5). Clamp target for the divisor. */
+const FAST_PHONICS_PEAK_COUNT = 20
 
 export const fastPhonicsWorkbookBridge: WorkbookBridge = {
   sourceId: fastPhonicsBridge.source,
@@ -350,5 +364,12 @@ export const fastPhonicsWorkbookBridge: WorkbookBridge = {
     upToLesson: u.peak,
     covers: u.covers,
   })),
-  // lessonToUnit: intentionally absent — see the CURATION QUESTION above.
+  // Divisor GUESS (OWNER-CONFIRM): family lesson → peak. Clamped to [1, 20].
+  lessonToUnit: (lesson: number) => {
+    if (!Number.isFinite(lesson)) return null
+    const peak = Math.ceil(lesson / LESSONS_PER_PEAK)
+    return Math.min(FAST_PHONICS_PEAK_COUNT, Math.max(1, peak))
+  },
+  // The divisor is a guess → the sync caps it at any directly-witnessed peak.
+  positionIsProvisional: true,
 }

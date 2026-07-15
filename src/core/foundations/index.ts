@@ -22,6 +22,10 @@ export {
   workbookBridgeForSource,
   bridgeCoveredConcepts,
   resolveNativePosition,
+  resolveSyncNativePosition,
+  maxWitnessedNativePosition,
+  parseNativePositionFromUnit,
+  makeBandCeilingLessonToUnit,
   isPositionAddressable,
   applyBridgeCoverageToModel,
 } from './workbookBridge'
@@ -31,6 +35,9 @@ export type {
   BridgeCoverage,
   AppliedBridgeCoverage,
 } from './workbookBridge'
+export { mathseedsBridge, MATHSEEDS_BRIDGE_VERSION } from './mathseedsBridge'
+export { tgtbLa1Bridge, TGTB_LA1_BRIDGE_VERSION } from './tgtbLa1Bridge'
+export { LESSONS_PER_PEAK } from './fastPhonicsBridge'
 
 import type { ConceptGraph, ConceptNode, FoundationDomain } from './types'
 import { readingGraph } from './readingGraph'
