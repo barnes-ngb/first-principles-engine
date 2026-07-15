@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { doc, getDoc, getDocs, query, setDoc } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -16,6 +16,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { app } from '../../core/firebase/firebase'
 import { useChildren } from '../../core/hooks/useChildren'
 import {
+  activityConfigsCollection,
   childSkillMapsCollection,
   learnerModelsCollection,
   sightWordProgressCollection,
@@ -25,6 +26,9 @@ import {
   foundationGraphs,
   FOUNDATION_NODE_MAP,
 } from '../../core/foundations'
+import { syncWorkbookPositionToModel } from '../../core/foundations/workbookPositionSync'
+import type { WorkbookSyncOutcome } from '../../core/foundations/workbookPositionSync'
+import type { ActivityConfig } from '../../core/types'
 import {
   mergeSeededModel,
   seedLearnerModel,
@@ -55,8 +59,33 @@ const STATE_GROUPS: Array<{ state: ConceptStateKind; label: string; color: strin
 interface ChildState {
   loading: boolean
   synthesizing?: boolean
+  syncingPositions?: boolean
+  /** Per-workbook result lines from the last "Sync curriculum positions" run. */
+  positionSyncLines?: string[] | null
   model: LearnerModel | null
   error: string | null
+}
+
+/** Turn one workbook's sync outcome into a human result line for the diag panel. */
+function formatSyncOutcome(name: string, position: number, outcome: WorkbookSyncOutcome): string {
+  switch (outcome.status) {
+    case 'no-bridge':
+      return `${name} (L${position}) → no bridge yet`
+    case 'pending-curation':
+      return `${name} (L${position}) → bridge present, lesson→unit mapping pending curation`
+    case 'no-model':
+      return `${name} (L${position}) → seed the model first`
+    case 'no-coverage':
+      return `${name} (L${position}) → bridged, no new coverage at this position`
+    case 'written': {
+      const names = outcome.changedConceptIds
+        .map((id) => FOUNDATION_NODE_MAP[id]?.kidName ?? id)
+        .join(', ')
+      return `${name} (L${position}) → forming: ${names}`
+    }
+    case 'error':
+      return `${name} (L${position}) → error: ${outcome.message}`
+  }
 }
 
 /**
@@ -176,6 +205,75 @@ export default function FoundationsDiagPanel() {
     }
   }, [familyId])
 
+  // FEAT-63: run the workbook-position → learner-model conversion for ALL of a
+  // child's tracked workbooks at their current positions (the backfill for today's
+  // L107/L110/L122/L90). Writes only `learnerModels` (merge); each workbook gets a
+  // result line so bridged vs. no-bridge-yet vs. pending-curation is VISIBLE.
+  const syncPositions = useCallback(
+    async (childId: string) => {
+      setByChild((prev) => ({
+        ...prev,
+        [childId]: {
+          loading: prev[childId]?.loading ?? false,
+          syncingPositions: true,
+          positionSyncLines: prev[childId]?.positionSyncLines ?? null,
+          model: prev[childId]?.model ?? null,
+          error: null,
+        },
+      }))
+      try {
+        const snap = await getDocs(
+          query(
+            activityConfigsCollection(familyId),
+            where('childId', 'in', [childId, 'both']),
+          ),
+        )
+        const configs = snap.docs
+          .map((d) => d.data() as ActivityConfig)
+          .filter((c) => c.currentPosition != null && !c.completed)
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+
+        const now = new Date().toISOString()
+        const lines: string[] = []
+        for (const config of configs) {
+          const name = config.name || config.curriculum || 'workbook'
+          const position = config.currentPosition as number
+          const outcome = await syncWorkbookPositionToModel(
+            familyId,
+            childId,
+            { workbookName: name, position, via: 'manual' },
+            now,
+          )
+          lines.push(formatSyncOutcome(name, position, outcome))
+        }
+        if (lines.length === 0) lines.push('No tracked workbook positions for this child.')
+
+        setByChild((prev) => ({
+          ...prev,
+          [childId]: {
+            loading: prev[childId]?.loading ?? false,
+            syncingPositions: false,
+            positionSyncLines: lines,
+            model: prev[childId]?.model ?? null,
+            error: null,
+          },
+        }))
+      } catch (err) {
+        setByChild((prev) => ({
+          ...prev,
+          [childId]: {
+            loading: prev[childId]?.loading ?? false,
+            syncingPositions: false,
+            positionSyncLines: prev[childId]?.positionSyncLines ?? null,
+            model: prev[childId]?.model ?? null,
+            error: err instanceof Error ? err.message : 'Position sync failed',
+          },
+        }))
+      }
+    },
+    [familyId],
+  )
+
   if (searchParams.get('diag') !== '1') return null
 
   return (
@@ -222,12 +320,39 @@ export default function FoundationsDiagPanel() {
               >
                 {state?.synthesizing ? 'Synthesizing…' : 'Generate synthesis (AI)'}
               </Button>
-              {(state?.loading || state?.synthesizing) && <CircularProgress size={16} />}
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={state?.syncingPositions}
+                onClick={() => syncPositions(child.id)}
+              >
+                {state?.syncingPositions ? 'Syncing…' : 'Sync curriculum positions'}
+              </Button>
+              {(state?.loading || state?.synthesizing || state?.syncingPositions) && (
+                <CircularProgress size={16} />
+              )}
             </Box>
             {state?.error && (
               <Typography variant="body2" color="error.main">
                 {state.error}
               </Typography>
+            )}
+            {state?.positionSyncLines && (
+              <Box sx={{ mb: 1, pl: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                  Curriculum position sync
+                </Typography>
+                <List dense disablePadding>
+                  {state.positionSyncLines.map((line, i) => (
+                    <ListItem key={i} disableGutters sx={{ py: 0.1 }}>
+                      <ListItemText
+                        primary={line}
+                        slotProps={{ primary: { variant: 'caption' } }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
             )}
             {state?.model && <ModelPreview model={state.model} />}
           </Box>

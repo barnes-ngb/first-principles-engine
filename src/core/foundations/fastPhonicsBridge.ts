@@ -20,6 +20,7 @@
 //     spellings on graphemes already covered; they add NO new graph node.
 
 import { readingGraph } from './readingGraph'
+import type { WorkbookBridge } from './workbookBridge'
 
 /** One peak of the Fast Phonics climb, mapped to reading-graph node ids. */
 export interface BridgeUnit {
@@ -315,3 +316,39 @@ export function bridgeEvidenceForPosition(peakComplete: number): BridgeEvidence[
 export const READING_GRAPH_NODE_IDS: ReadonlySet<string> = new Set(
   readingGraph.nodes.map((n) => n.id),
 )
+
+// ── Generalized-interface adapter (FEAT-63) ──────────────────────────────
+//
+// The same Fast Phonics data, re-expressed as a generalized `WorkbookBridge` (the
+// shape any bridged workbook uses to turn a tracked position into evidence). This
+// is content-IDENTICAL to `fastPhonicsUnits` above — same `covers[]` per peak,
+// same cumulative semantics — just projected onto the generic `{ unitLabel,
+// upToLesson, covers }` unit shape. Its NATIVE position is the peak number, so
+// `upToLesson === peak`.
+//
+// ⚠️ CURATION QUESTION — `lessonToUnit` is deliberately UNSET (FEAT-63 §0.2).
+// The family tracks Fast Phonics as a LESSON number (their config reads "Lesson
+// 90"), but the bridge speaks PEAKS (1–20). What one of the family's lesson
+// numbers means is unresolved and MUST NOT be guessed:
+//   • Are these Reading Eggs Lessons (REL) that span multiple curricula?
+//   • Are they Fast Phonics internal lessons (~N lessons per peak — the S&S lists
+//     multiple map "stops"/lessons inside each peak)?
+// Until an owner curates the lesson→peak mapping, config-position sync for Fast
+// Phonics is GATED: `resolveNativePosition` returns null and the diag sync action
+// reports "lesson mapping pending curation" rather than mis-mapping "Lesson 90"
+// onto Peak 90 (which doesn't exist) or silently onto all 20 peaks. The peak-native
+// `covers[]` mapping itself is CURATED (v1) and drives the FEAT-53 Review-Chat
+// upload path, which extracts a *peak* directly.
+
+export const fastPhonicsWorkbookBridge: WorkbookBridge = {
+  sourceId: fastPhonicsBridge.source,
+  aliases: fastPhonicsBridge.aliases,
+  version: fastPhonicsBridge.version,
+  // Native position = peak, so `upToLesson` is the peak number. Cumulative.
+  units: fastPhonicsUnits.map((u) => ({
+    unitLabel: `Peak ${u.peak}`,
+    upToLesson: u.peak,
+    covers: u.covers,
+  })),
+  // lessonToUnit: intentionally absent — see the CURATION QUESTION above.
+}
