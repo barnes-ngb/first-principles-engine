@@ -257,6 +257,12 @@ export default function EvaluateChatPage() {
           setRecommendations(inProgress.recommendations || [])
           setSessionStatus('in-progress')
           setCompleteSummary(inProgress.summary || null)
+          // A resumed in-progress session has no <complete> block yet — clear any
+          // completeData/apply state carried over from a prior child/domain so a
+          // later in-progress save can't stamp the previous eval's frontier (and
+          // so the re-apply confirm doesn't fire on a different session).
+          setCompleteData(null)
+          setHasAppliedThisSession(false)
           setNextEvalDate(inProgress.nextEvalDate)
           // Resume timer for continued in-progress session
           hoursLoggedRef.current = false
@@ -268,6 +274,8 @@ export default function EvaluateChatPage() {
           setFindings([])
           setRecommendations([])
           setCompleteSummary(null)
+          setCompleteData(null)
+          setHasAppliedThisSession(false)
           setNextEvalDate(undefined)
           setSessionStatus('in-progress')
         }
@@ -629,10 +637,12 @@ export default function EvaluateChatPage() {
       // FEAT-76: project the guided eval onto the learner-model frontier — the
       // calibrated (up OR down) write, alongside the snapshot write above.
       // Fire-and-forget, guarded model-exists inside the writer; never blocks apply.
-      if (sessionDocId) {
-        void syncEvalFindingsToModel(familyId, activeChildId, sessionDocId, findings, now)
-          .catch((err) => console.warn('[eval] learner-model write-back failed', err))
-      }
+      // Fall back to the same deterministic session id persistSession assigns, so a
+      // first-turn/slow-network Apply (sessionDocId still pending) isn't skipped.
+      const evalSessionId =
+        sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
+      void syncEvalFindingsToModel(familyId, activeChildId, evalSessionId, findings, now)
+        .catch((err) => console.warn('[eval] learner-model write-back failed', err))
 
       // Award XP for completing an evaluation (once per evaluation session)
       if (sessionDocId) {
