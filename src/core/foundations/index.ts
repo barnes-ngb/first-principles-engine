@@ -37,6 +37,11 @@ export type {
 } from './workbookBridge'
 export { mathseedsBridge, MATHSEEDS_BRIDGE_VERSION } from './mathseedsBridge'
 export { tgtbLa1Bridge, TGTB_LA1_BRIDGE_VERSION } from './tgtbLa1Bridge'
+export {
+  conceptsForTags,
+  TAG_CONCEPT_BRIDGE,
+  TAG_CONCEPT_BRIDGE_VERSION,
+} from './tagConceptBridge'
 export { LESSONS_PER_PEAK } from './fastPhonicsBridge'
 
 import type { ConceptGraph, ConceptNode, FoundationDomain } from './types'
