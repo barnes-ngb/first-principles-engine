@@ -56,8 +56,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
-import type { ActivityConfig } from '../../core/types/planning'
-import { resolveStuckConcepts } from '../../core/foundations/dailySignalTargeting'
+import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 import { enqueueStuckRetests } from './stuckRetestQueue'
 import { resolveDisplayPhotos } from './itemPhotos'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
@@ -174,9 +173,11 @@ interface TodayChecklistProps {
    * FEAT-62 (legacy-item fallback): the child's scannable workbook configs, used
    * to resolve a `workbookConfigId` for legacy/unstamped items so the backfill
    * button can render for them too. Also the FEAT-68 source for resolving a
-   * "stuck" item's tracked workbook position into a re-test concept.
+   * "stuck" item's tracked workbook position into a re-test concept (reads the
+   * optional `currentPosition` — an `ActivityConfig` supplies it; the looser
+   * `WorkbookConfigLike` mocks that omit it just resolve to no re-test).
    */
-  configs?: ActivityConfig[]
+  configs?: Array<WorkbookConfigLike & { currentPosition?: number }>
   onPreCompletionScan: (file: File, index: number) => void
   captureLoading: boolean
   captureItemIndex: number | null
@@ -289,22 +290,20 @@ export default function TodayChecklist({
     // FEAT-68: a "stuck" signal on a BRIDGED workbook item also seeds the
     // learner-model re-test queue (parallel to the snapshot-block write above, which
     // stays untouched — the two targeting systems coexist). Deterministic only:
-    // `item.workbookConfigId → activityConfig position → frontier concept`. An item
-    // that can't resolve to a real graph node (unmapped / uncurated source) resolves
-    // to `[]` and writes nothing — no guess. Fire-and-forget: never blocks the tap.
+    // `item.workbookConfigId → activityConfig position → frontier concept`. The
+    // writer resolves + gates (unmapped / uncurated source ⇒ no write, no guess) and
+    // is fire-and-forget, so it never blocks the tap.
     if (value === 'stuck') {
       const config = current.workbookConfigId
         ? configs.find((c) => c.id === current.workbookConfigId)
         : undefined
-      const concepts = resolveStuckConcepts(current, config)
-      if (concepts.length > 0) {
-        void enqueueStuckRetests(
-          familyId,
-          selectedChildId,
-          concepts,
-          new Date().toISOString(),
-        )
-      }
+      void enqueueStuckRetests(
+        familyId,
+        selectedChildId,
+        current,
+        config,
+        new Date().toISOString(),
+      )
     }
   }
 

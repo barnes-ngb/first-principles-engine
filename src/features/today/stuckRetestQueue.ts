@@ -18,6 +18,11 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 import { learnerModelsCollection } from '../../core/firebase/firestore'
+import { resolveStuckConcepts } from '../../core/foundations/dailySignalTargeting'
+import type {
+  StuckSignalConfig,
+  StuckSignalItem,
+} from '../../core/foundations/dailySignalTargeting'
 import { applyReviewActionToModel } from '../foundations-review/foundationsReviewActions'
 import type { LearnerModel } from '../../core/types/learnerModel'
 
@@ -25,8 +30,12 @@ import type { LearnerModel } from '../../core/types/learnerModel'
 export const STUCK_RETEST_REASON = "Struggled during today's work"
 
 /**
- * Enqueue a `routedTo:'quest'` re-test ask per concept onto the child's learner
- * model, merge-only. No-op when `concepts` is empty or the model has not been seeded
+ * Enqueue a `routedTo:'quest'` re-test ask per resolved concept onto the child's
+ * learner model, merge-only. Resolution runs HERE — after the model load — so the
+ * provisional-position conflict cap (`resolveSyncNativePosition`) can defer a Fast
+ * Phonics divisor guess to any directly-witnessed peak; a cheap model-free
+ * pre-resolve bails before any read when there is obviously no path (no bridge / no
+ * position). No-op when nothing resolves or the model has not been seeded
  * (`no-model` — the diag/review seed path owns creation). Dedup (via
  * `withOpenQuestion`) means repeated struggles on the same concept don't pile up
  * asks. Fire-and-forget: any failure is swallowed with a warning so a struggle chip
@@ -35,16 +44,24 @@ export const STUCK_RETEST_REASON = "Struggled during today's work"
 export async function enqueueStuckRetests(
   familyId: string,
   childId: string,
-  concepts: string[],
+  item: StuckSignalItem,
+  config: StuckSignalConfig | null | undefined,
   nowIso: string,
 ): Promise<void> {
-  if (!familyId || !childId || concepts.length === 0) return
+  if (!familyId || !childId) return
+  // Cheap pure pre-resolve WITHOUT the model — bail before any Firestore read when
+  // there is no bridged path (non-workbook item, unmapped/uncurated source, no
+  // position). The cap can only narrow this, never turn [] into a write.
+  if (resolveStuckConcepts(item, config).length === 0) return
   try {
     const modelRef = doc(learnerModelsCollection(familyId), childId)
     const snap = await getDoc(modelRef)
     if (!snap.exists()) return // seed the model first (diag / review chat)
 
     let model = snap.data() as LearnerModel
+    // Re-resolve WITH the model so the provisional-position conflict cap applies.
+    const concepts = resolveStuckConcepts(item, config, model)
+    if (concepts.length === 0) return
     for (const conceptId of concepts) {
       // Reuse the Review-Chat queueTest semantics verbatim — same dedup, same
       // openQuestion shape. `changedConceptId` is undefined for queueTest (no state

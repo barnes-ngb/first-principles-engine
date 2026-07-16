@@ -5,6 +5,41 @@ import type { StuckSignalConfig, StuckSignalItem } from './dailySignalTargeting'
 import { FOUNDATION_NODE_MAP } from './index'
 import { bridgeCoveredConcepts, resolveNativePosition } from './workbookBridge'
 import { fastPhonicsWorkbookBridge, LESSONS_PER_PEAK } from './fastPhonicsBridge'
+import type { EvidenceRef, LearnerModel } from '../types/learnerModel'
+
+const NOW = '2026-07-16T12:00:00.000Z'
+
+/** A learner model that DIRECTLY witnessed a given Fast Phonics peak (a review-chat
+ *  upload — NOT a positionSync self-write), for the conflict-cap tests. */
+function modelWitnessingPeak(peak: number): LearnerModel {
+  const witness: EvidenceRef = {
+    kind: 'curriculumPosition',
+    sourceId: 'fastPhonics',
+    note: `Covered in Fast Phonics Peak ${peak}`,
+    observedAt: NOW,
+    source: 'fastPhonics',
+    unit: `Peak ${peak}`,
+    via: 'manual',
+  }
+  return {
+    childId: 'child-1',
+    graphVersion: 'reading@1+math@1',
+    status: 'seeded',
+    conceptStates: {
+      'reading.phonics.blends': { state: 'forming', evidence: [witness], seededAt: NOW },
+    },
+    modalityCalibration: {
+      reading: { note: '' },
+      writing: { note: '' },
+      math: { note: '' },
+    },
+    whatMattersNext: [],
+    changeFeed: [],
+    openQuestions: [],
+    seededAt: NOW,
+    updatedAt: NOW,
+  }
+}
 
 // A Fast Phonics config: the ONE bridge whose `lessonToUnit` is curated, so it is
 // the positive branch. Lesson 65 ÷ 5 = Peak 13, whose frontier is blends +
@@ -86,5 +121,36 @@ describe('resolveStuckConcepts — no-guess / curation-gated [] branch', () => {
 
   it('returns [] at the not-started sentinel position (0 ⇒ no coverage, no guess)', () => {
     expect(resolveStuckConcepts(fpItem, fpConfig({ currentPosition: 0 }))).toEqual([])
+  })
+})
+
+describe('resolveStuckConcepts — provisional-position conflict cap (guesses defer to witnesses)', () => {
+  it('caps a Fast Phonics divisor guess at the witnessed peak, never queuing ahead of it', () => {
+    // Lesson 90 ÷ 5 = Peak 18 (long vowels) as a GUESS. With a witnessed Peak 13,
+    // the cap defers to the witness → the frontier is Peak 13 (blends), NOT Peak 18.
+    const uncapped = resolveStuckConcepts(fpItem, fpConfig({ currentPosition: 90 }))
+    expect(uncapped).toEqual(['reading.phonics.longVowels'])
+
+    const capped = resolveStuckConcepts(
+      fpItem,
+      fpConfig({ currentPosition: 90 }),
+      modelWitnessingPeak(13),
+    )
+    expect(capped).not.toContain('reading.phonics.longVowels')
+    expect(capped.sort()).toEqual(
+      ['reading.decoding.multisyllable', 'reading.phonics.blends'].sort(),
+    )
+  })
+
+  it('a witness at or above the guess leaves the frontier unchanged', () => {
+    // Guess Peak 13; witness Peak 15 → min(13,15) = 13 (still the config frontier).
+    const capped = resolveStuckConcepts(
+      fpItem,
+      fpConfig({ currentPosition: 65 }),
+      modelWitnessingPeak(15),
+    )
+    expect(capped.sort()).toEqual(
+      ['reading.decoding.multisyllable', 'reading.phonics.blends'].sort(),
+    )
   })
 })

@@ -30,11 +30,12 @@ import { FOUNDATION_NODE_MAP } from './index'
 import {
   bridgeCoveredConcepts,
   parseNativePositionFromUnit,
-  resolveNativePosition,
+  resolveSyncNativePosition,
   workbookBridgeForSource,
 } from './workbookBridge'
 import type { BridgeCoverage } from './workbookBridge'
-import type { ActivityConfig, ChecklistItem } from '../types/planning'
+import type { ChecklistItem } from '../types/planning'
+import type { LearnerModel } from '../types/learnerModel'
 
 /** The minimal checklist-item shape this resolver reads — only the workbook link. */
 export type StuckSignalItem = Pick<ChecklistItem, 'workbookConfigId'>
@@ -42,11 +43,16 @@ export type StuckSignalItem = Pick<ChecklistItem, 'workbookConfigId'>
 /**
  * The minimal ActivityConfig shape the resolver reads: the doc id (to confirm it is
  * the item's linked config), the workbook name fields, and the tracked position.
+ * A standalone interface (not a `Pick<ActivityConfig>`) so the looser Today
+ * `configs` prop shape — `WorkbookConfigLike & { currentPosition? }`, whose `name`
+ * is optional — is assignable; the resolver already falls back to `curriculum`.
  */
-export type StuckSignalConfig = Pick<
-  ActivityConfig,
-  'id' | 'name' | 'curriculum' | 'currentPosition'
->
+export interface StuckSignalConfig {
+  id: string
+  name?: string | null
+  curriculum?: string | null
+  currentPosition?: number | null
+}
 
 /**
  * The FRONTIER of a coverage set: the concept(s) supplied by the HIGHEST unit at or
@@ -79,10 +85,19 @@ export function frontierConcepts(coverage: BridgeCoverage[]): string[] {
  * GUESS. `[]` is the honest curation gate (unmapped source, no curated lesson→native
  * translation, no tracked position), NOT an error. Coverage grows per-source as
  * bridge data is curated (FEAT-63/64 pattern).
+ *
+ * `model` (when supplied) applies the SAME provisional-position conflict cap the
+ * learner-model sync uses (`resolveSyncNativePosition`): for a divisor-guessed
+ * position (Fast Phonics), the guess is capped at the highest peak DIRECTLY
+ * witnessed on the model, so a re-test is never queued *ahead* of the witnessed
+ * position ("guesses defer to witnesses", FEAT-64 §3). Omit the model (or pass null)
+ * and a deterministic bridge is unaffected while a provisional guess passes through
+ * uncapped — so callers with the model loaded (the enqueue writer) get the cap.
  */
 export function resolveStuckConcepts(
   item: StuckSignalItem,
   activityConfig: StuckSignalConfig | null | undefined,
+  model?: LearnerModel | null,
 ): string[] {
   // No workbook link, or the config we were handed is not the linked one → no path.
   if (!item.workbookConfigId || !activityConfig) return []
@@ -91,17 +106,18 @@ export function resolveStuckConcepts(
   // Resolve a bridge by the workbook's free-text name (tolerant FEAT-61 normalizer).
   // Unmapped source ⇒ [] (the curation gate — coverage lights up as bridges land).
   const name = activityConfig.name ?? activityConfig.curriculum
-  const bridge = workbookBridgeForSource(name)
+  const bridge = workbookBridgeForSource(name ?? undefined)
   if (!bridge) return []
 
   // No tracked position ⇒ nothing to address.
   const position = activityConfig.currentPosition
   if (position == null) return []
 
-  // Translate the family's config position to the bridge's native unit. `null` when
-  // the source's lesson numbering is not yet curated (`lessonToUnit` unset) — the
-  // honest pending-curation gate, never a silent guess.
-  const native = resolveNativePosition(bridge, position)
+  // Translate the family's config position to the bridge's native unit, applying the
+  // provisional-position conflict cap when a model is supplied. `null` when the
+  // source's lesson numbering is not yet curated (`lessonToUnit` unset) — the honest
+  // pending-curation gate, never a silent guess.
+  const native = resolveSyncNativePosition(bridge, position, model ?? null)
   if (native == null) return []
 
   return frontierConcepts(bridgeCoveredConcepts(bridge, native))
