@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import type { AssignmentCandidate, SkillSnapshot } from '../../core/types'
+import type { AssignmentCandidate, DraftWeeklyPlan, SkillSnapshot } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, MasteryGate, SkillLevel, SubjectBucket } from '../../core/types/enums'
 import {
@@ -14,6 +14,7 @@ import {
   parseAIResponse,
   planTotalMinutes,
   resetIdCounter,
+  resolveSuggestedTags,
   WEEK_DAYS,
 } from './chatPlanner.logic'
 import type { PlanGeneratorInputs } from './chatPlanner.logic'
@@ -320,6 +321,123 @@ describe('generateDraftPlanFromInputs', () => {
         }
       }
     }
+  })
+})
+
+describe('generateDraftPlanFromInputs — FEAT-73 no-guess assignment tags', () => {
+  const keepAssignment = (
+    id: string,
+    subjectBucket: SubjectBucket,
+    workbookName: string,
+  ): AssignmentCandidate => ({
+    id,
+    subjectBucket,
+    workbookName,
+    lessonName: 'L1',
+    estimatedMinutes: 15,
+    difficultyCues: [],
+    action: AssignmentAction.Keep,
+  })
+  const assignmentItem = (plan: DraftWeeklyPlan, id: string) =>
+    plan.days.flatMap((d) => d.items).find((i) => i.assignmentId === id)
+
+  it('does not guess a reading tag for an untagged LanguageArts assignment (no priority match)', () => {
+    const plan = generateDraftPlanFromInputs({
+      ...baseInputs,
+      snapshot: null,
+      appBlocks: [],
+      assignments: [keepAssignment('la1', SubjectBucket.LanguageArts, 'Handwriting')],
+    })
+    const item = assignmentItem(plan, 'la1')
+    expect(item).toBeDefined()
+    // Before FEAT-73 this stamped ['reading.cvcBlend','reading.sightWords'] — a
+    // cross-domain guess that seeded false CVC re-tests for writing work.
+    expect(item!.skillTags).toEqual([])
+  })
+
+  it('keeps a priority-matched (witnessed) reading tag on a LanguageArts assignment', () => {
+    const snapshot: SkillSnapshot = {
+      ...baseSnapshot,
+      prioritySkills: [{ tag: 'reading.sightWords', label: 'Sight words', level: SkillLevel.Developing }],
+    }
+    const plan = generateDraftPlanFromInputs({
+      ...baseInputs,
+      snapshot,
+      appBlocks: [],
+      assignments: [keepAssignment('la1', SubjectBucket.LanguageArts, 'Handwriting')],
+    })
+    // Witnessed coverage preserved — proves this is NOT a blanket LA suppression.
+    expect(assignmentItem(plan, 'la1')!.skillTags).toEqual(['reading.sightWords'])
+  })
+
+  it('does not guess a tag for a non-core (Science) assignment', () => {
+    const plan = generateDraftPlanFromInputs({
+      ...baseInputs,
+      snapshot: null,
+      appBlocks: [],
+      assignments: [keepAssignment('s1', SubjectBucket.Science, 'Science')],
+    })
+    // Before FEAT-73 this stamped a stray reading tag (ALL_SKILL_TAGS.slice(0,2)).
+    expect(assignmentItem(plan, 's1')!.skillTags).toEqual([])
+  })
+
+  it('leaves reading/math assignment tags unchanged (same-domain subject default)', () => {
+    const plan = generateDraftPlanFromInputs({
+      ...baseInputs,
+      snapshot: null,
+      appBlocks: [],
+      assignments: [
+        keepAssignment('r1', SubjectBucket.Reading, 'Reading'),
+        keepAssignment('m1', SubjectBucket.Math, 'Math'),
+      ],
+    })
+    expect(assignmentItem(plan, 'r1')!.skillTags).toEqual(['reading.cvcBlend', 'reading.sightWords'])
+    expect(assignmentItem(plan, 'm1')!.skillTags).toEqual([
+      'math.subtraction.regroup',
+      'math.subtraction.noRegroup',
+    ])
+  })
+
+  it('leaves multi-tag skill-practice items untouched (witnessed priority skills)', () => {
+    const snapshot: SkillSnapshot = {
+      ...baseSnapshot,
+      prioritySkills: [
+        { tag: 'reading.cvcBlend', label: 'CVC', level: SkillLevel.Emerging },
+        { tag: 'math.subtraction.regroup', label: 'Regroup', level: SkillLevel.Emerging },
+      ],
+    }
+    const plan = generateDraftPlanFromInputs({ ...baseInputs, snapshot, assignments: [] })
+    const skillItem = plan.days[0].items.find((i) => i.title.includes('Skill practice'))
+    expect(skillItem).toBeDefined()
+    // Emerging skills stamp their full priority-tag set — FEAT-73 does not touch these.
+    expect(skillItem!.skillTags).toEqual(['reading.cvcBlend', 'math.subtraction.regroup'])
+  })
+})
+
+describe('resolveSuggestedTags — FEAT-73 shared no-guess resolver', () => {
+  it('keeps priority-matched tags for LanguageArts (witnessed)', () => {
+    expect(resolveSuggestedTags(SubjectBucket.LanguageArts, ['reading.sightWords'])).toEqual([
+      'reading.sightWords',
+    ])
+  })
+
+  it('suppresses the reading-first subject default for an unwitnessed LanguageArts item', () => {
+    expect(resolveSuggestedTags(SubjectBucket.LanguageArts, [])).toEqual([])
+  })
+
+  it('suppresses any tag for a non-core subject even when a priority tag matches the catalog', () => {
+    expect(resolveSuggestedTags(SubjectBucket.Science, ['reading.cvcBlend'])).toEqual([])
+  })
+
+  it('keeps the same-domain subject default for reading/math without a witness', () => {
+    expect(resolveSuggestedTags(SubjectBucket.Reading, [])).toEqual([
+      'reading.cvcBlend',
+      'reading.sightWords',
+    ])
+    expect(resolveSuggestedTags(SubjectBucket.Math, [])).toEqual([
+      'math.subtraction.regroup',
+      'math.subtraction.noRegroup',
+    ])
   })
 })
 

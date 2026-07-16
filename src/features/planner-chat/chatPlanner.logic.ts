@@ -10,7 +10,7 @@ import type {
 } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
-import { ALL_SKILL_TAGS, SKILL_TAG_MAP, autoSuggestTags, suggestTagsForSubject } from '../../core/types/skillTags'
+import { ALL_SKILL_TAGS, SKILL_TAG_MAP, suggestTagsForSubject } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
 import { getEffectiveMasteryGate } from './skipAdvisor.logic'
 
@@ -457,8 +457,10 @@ export function generateDraftPlanFromInputs(inputs: PlanGeneratorInputs): DraftW
       }
     }
 
-    // Auto-suggest skill tags based on subject + priority skills
-    const suggestedTags = autoSuggestTags(assignment.subjectBucket, prioritySkillTags)
+    // Resolve skill tags through the shared FEAT-73 no-guess decision: priority-matched
+    // (witnessed) tags win; an unwitnessed LanguageArts/non-core subject-default is a
+    // cross-domain guess and is suppressed; reading/math keep their subject default.
+    const suggestedTags = resolveSuggestedTags(assignment.subjectBucket, prioritySkillTags)
 
     const dayPlan = dayMap.get(bestDay)!
     dayPlan.items.push({
@@ -1050,6 +1052,46 @@ function forgivingJsonParse(text: string): Record<string, unknown> | null {
 }
 
 /**
+ * FEAT-73: the shared no-guess tag-resolution decision, routed through by BOTH
+ * planner paths (the deterministic `buildDeterministicPlan` assignment loop and
+ * the AI-parse `backfillCatalogTags`) so the two can never drift again. It
+ * encodes the FEAT-72 doctrine subject-neutrally:
+ *
+ *  - **Non-core** subjects (Science / SocialStudies / Other) fall through to the
+ *    whole catalog in `suggestTagsForSubject` — a fallback, not a targeted list,
+ *    and there is no foundations concept graph for them — so never guess a tag
+ *    (even if a priority tag happens to match). `[]`.
+ *  - **Priority-matched** tags are *witnessed*: the child's skill snapshot
+ *    explicitly lists the kid working them, so keep them — even for
+ *    `LanguageArts`. This is the witness the AI-parse path deliberately does NOT
+ *    honor for LA (see `backfillCatalogTags`): only the deterministic planner,
+ *    which stamps real workbook assignments against the snapshot, treats a
+ *    priority match on an LA subject as coverage worth keeping.
+ *  - **`LanguageArts`, no witness** → `[]`: LA spans reading + writing but its
+ *    subject-default is a **reading** tag (`reading.cvcBlend`), which the FEAT-69
+ *    bridge resolves to a CVC concept. Guessing that onto a writing/handwriting
+ *    item would enqueue a false reading-phonics re-test, so suppress it.
+ *  - **Core reading/math, no witness** → the current subject-default suggestion
+ *    (a same-domain guess is acceptable and pre-existing; there IS a foundations
+ *    graph). Left exactly as the prior `autoSuggestTags` fallback (2 tags).
+ */
+export function resolveSuggestedTags(
+  subjectBucket: SubjectBucket,
+  prioritySkillTags: string[],
+): string[] {
+  const subjectTags = suggestTagsForSubject(subjectBucket)
+  // Non-core: whole-catalog fallback (reference equality) → no targeted mapping, no guess.
+  if (subjectTags === ALL_SKILL_TAGS) return []
+  // Priority-matched tags are witnessed — keep them (works for LA and reading/math).
+  const prioritized = subjectTags.filter((t) => prioritySkillTags.includes(t))
+  if (prioritized.length > 0) return prioritized
+  // No witness: LA's reading-first subject-default is a cross-domain guess — suppress.
+  if (subjectBucket === SubjectBucket.LanguageArts) return []
+  // No witness, core reading/math: keep the pre-existing same-domain subject default.
+  return subjectTags.slice(0, 2)
+}
+
+/**
  * FEAT-72: deterministic catalog-tag backfill for a parsed AI-plan item.
  *
  * The AI-chat planner ships `"skillTags": []` in its prompt and the LLM usually
@@ -1063,20 +1105,17 @@ function forgivingJsonParse(text: string): Record<string, unknown> | null {
  *
  * Rules:
  *  - keep any catalog-valid tags the LLM did emit (SKILL_TAG_MAP membership),
- *  - if none survive, backfill `autoSuggestTags(subject, priorityTags)[0]`
- *    (single best tag, honoring the "max ~1 tag per item" convention — a pile
- *    just seeds noisier re-tests),
- *  - no guess for subjects without an *unambiguous, targeted* mapping:
- *      · non-core subjects (Science / SocialStudies / Other) fall through to the
- *        whole catalog in `suggestTagsForSubject`, and there is no foundations
- *        concept graph for them, so a backfilled reading/math tag is a false
- *        signal — stay `[]`.
- *      · `LanguageArts` is deliberately excluded too: it spans reading *and*
- *        writing, but its subject-default is a **reading** tag (`reading.cvcBlend`),
- *        which the FEAT-69 bridge resolves to a CVC concept. Guessing that onto a
- *        writing/handwriting/spelling LA item would enqueue a false reading-phonics
- *        re-test, so an LA item is tagged only when the LLM emitted a valid catalog
- *        tag (kept above). Reading / Math items still backfill.
+ *  - otherwise route through the shared `resolveSuggestedTags` no-guess decision
+ *    (FEAT-73) and cap to the single best tag, honoring the "max ~1 tag per item"
+ *    convention — a pile just seeds noisier re-tests.
+ *
+ * The AI-parse path is STRICTER than the deterministic planner on `LanguageArts`:
+ * it lacks the deterministic planner's workbook-assignment + snapshot witness, so
+ * a priority match does NOT rescue an ambiguous LA item here. LA is suppressed
+ * before consulting the shared resolver, so an LA item is tagged only when the LLM
+ * emitted a valid catalog tag (kept above). Non-core (`[]`) and reading/math
+ * (subject-default) decisions come from the shared resolver, keeping the two
+ * planner paths from drifting on everything except this one intentional axis.
  */
 function backfillCatalogTags(
   rawTags: unknown,
@@ -1088,13 +1127,12 @@ function backfillCatalogTags(
     : []
   const catalogTags = llmTags.filter((t) => t in SKILL_TAG_MAP)
   if (catalogTags.length > 0) return catalogTags
-  // Ambiguous subject: LanguageArts spans reading + writing, so its reading-first
-  // subject-default would create false CVC re-test evidence for writing items.
+  // AI-path-specific: no workbook/snapshot witness, so an ambiguous LanguageArts
+  // item is never rescued by a priority match — that would create false CVC re-test
+  // evidence for writing items (FEAT-72). Reading / Math / non-core defer to the
+  // shared resolver below.
   if (subjectBucket === SubjectBucket.LanguageArts) return []
-  // Non-core subjects return the whole catalog by reference — that is a fallback,
-  // not a targeted suggestion, so don't guess a tag for them.
-  if (suggestTagsForSubject(subjectBucket) === ALL_SKILL_TAGS) return []
-  const [best] = autoSuggestTags(subjectBucket, prioritySkillTags)
+  const [best] = resolveSuggestedTags(subjectBucket, prioritySkillTags)
   return best ? [best] : []
 }
 
