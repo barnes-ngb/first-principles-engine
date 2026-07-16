@@ -710,6 +710,14 @@ export default function PlannerChatPage() {
     return parts.join(' · ')
   }, [masterySummary])
 
+  // FEAT-72: snapshot priority tags target the parse-time catalog-tag backfill
+  // (parseAIResponse) so AI-plan items land on tags the FEAT-68/69 re-test bridge
+  // can map. Empty is fine — the backfill still stamps subject-default tags.
+  const prioritySkillTags = useMemo(
+    () => snapshot?.prioritySkills.map((s) => s.tag) ?? [],
+    [snapshot],
+  )
+
   // Load week plan (theme/virtue/scripture/heartQuestion)
   const weekPlanRef = useMemo(
     () => doc(weeksCollection(familyId), weekRange.start),
@@ -1106,7 +1114,7 @@ Return as JSON:
         messages: aiMessages,
       })
 
-      const rawAiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       if (rawAiDraft) {
         const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
         draft = ensureEvaluationItems(fillResult.plan)
@@ -1147,7 +1155,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
+  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -1195,7 +1203,7 @@ Return as JSON:
         })
       }
 
-      const rawAiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       if (rawAiDraft) {
         const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
         draft = ensureEvaluationItems(fillResult.plan)
@@ -1241,7 +1249,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
+  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -1313,7 +1321,7 @@ Return as JSON:
       })
 
       // Try to parse as structured DraftWeeklyPlan JSON
-      const rawAiDraft = response ? parseAIResponse(response) : null
+      const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       const aiDraft = rawAiDraft ? ensureEvaluationItems(rawAiDraft) : null
       let assistantMsg: ChatMessage
       if (aiDraft) {
@@ -1333,7 +1341,7 @@ Return as JSON:
           const stripped = msg.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '').trim()
           const directParse = JSON.parse(stripped)
           if (directParse.days && Array.isArray(directParse.days)) {
-            rawRecovered = parseAIResponse({ ...response, message: JSON.stringify(directParse) })
+            rawRecovered = parseAIResponse({ ...response, message: JSON.stringify(directParse) }, prioritySkillTags)
           }
         } catch { /* fall through to local planner */ }
 
@@ -1458,7 +1466,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults])
 
   const buildWeekFocusContext = useCallback(() => {
     const contextParts: string[] = []
@@ -1544,7 +1552,7 @@ Return as JSON:
           taskType: TaskType.Plan,
           messages: [{ role: 'user', content: fullPrompt }],
         })
-        const rawAiDraft = response ? parseAIResponse(response) : null
+        const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
         if (rawAiDraft) {
           const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
           draft = ensureEvaluationItems(fillResult.plan)
@@ -1586,7 +1594,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1781,6 +1789,9 @@ Generate a plan for Monday through Friday.`.trim()
               try {
                 console.log(`[LessonCards] Generating card for: "${item.title}" (${item.subjectBucket})`)
                 const activityType = subjectToActivityType(item.subjectBucket)
+                // Transient generation hint for the lesson-card CF only — NOT a persisted tag.
+                // Persisted item tags come from the FEAT-72 parse-time catalog backfill
+                // (parseAIResponse), so don't reintroduce `subject.general` onto skillTags.
                 const skillTag = item.skillTags[0] || `${item.subjectBucket.toLowerCase()}.general`
                 const response = await generateActivity({
                   familyId,
@@ -2167,6 +2178,8 @@ Generate a plan for Monday through Friday.`.trim()
     setLessonCardSaved(false)
 
     const activityType = subjectToActivityType(item.subjectBucket)
+    // Transient generation hint for the lesson-card CF only — NOT a persisted tag.
+    // Persisted item tags come from the FEAT-72 parse-time catalog backfill.
     const skillTag = item.skillTags[0] || `${item.subjectBucket.toLowerCase()}.general`
 
     try {
