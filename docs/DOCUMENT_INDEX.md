@@ -1,6 +1,6 @@
 # First Principles Engine — Document Index
 
-> Where everything lives. Updated 2026-06-20.
+> Where everything lives. Updated 2026-07-16.
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
-| `MASTER_OUTLINE.md` | **CURRENT** (v15) | Single source of truth: features, status, sprint history. Updated May 26, 2026: Design Pass v1 implementation queue added, Faith Stats kid-layer + no-judge vocab guardrail recorded as Key Design Decisions. |
+| `MASTER_OUTLINE.md` | **CURRENT** (v16) | Single source of truth: features, status, sprint history. Updated July 16, 2026 (v16): added the **Learner Model & adaptive loop-closing arc** section (FEAT-44→72) and known-open items; charter-alignment sweep filed. Prior feature sections current as of April 13, 2026. |
 | `design-pass-v1/` | **CURRENT** | 10 mobile + 6 tablet design mocks + handoff README for v1 refine pass (May 26, 2026) |
 | `DOCUMENT_INDEX.md` | **CURRENT** | This file — maps all docs in repo and Google Drive |
 | `DOCS_ALIGNMENT.md` | **CURRENT** (new 2026-07-04) | Docs & data alignment routine (DOC-08 + DOC-09) — the nine drift/resilience checks run by `scripts/check-docs-alignment.mjs` on every PR (`npm run docs:check`), allowlist discipline, generated collection-count spans, PowerShell-friendly local usage. |
@@ -99,6 +99,8 @@
 | `review/ARCHITECTURE_AUDIT_2026-07.md` | **HISTORICAL** (2026-07-05) | July 2026 primary monthly audit — ARCH-40/DOC-07/TEST-01(dad-lab) confirmed fixed; ARCH-41/42 new (name-gating regressions in KidTodayView/MyAvatarPage/KidLabView) |
 | `review/ARCHITECTURE_AUDIT_2026-07-12.md` | **CURRENT** (2026-07-12) | July 2026 mid-cycle re-verification — baseline green; ARCH-01 first decrease in cycles (FEAT-58); ARCH-06 trend reversed (35→43 refs, FEAT-62); ARCH-41/42 still open unfixed; 7 ledger rows (FEAT-57–62, DOC-09) corrected from stale "PR open" to MERGED |
 | `review/ALIGNMENT_AUDIT_2026-06-20.md` | **CURRENT** (2026-06-20) | Alignment audit — cross-feature consistency and operating-model alignment check |
+| `review/LOOP_CLOSING_REVIEW_2026-07-15.md` | **CURRENT** (2026-07-15) | Adaptive loop-closing code review — what's already closed (quest→model→plan, stuck-chip→snapshot, foundations-review→quest) vs open (whatMattersNext surface, daily-signal seeding); proposed FEAT-64/65/66 sequence |
+| `review/CHARTER_ALIGNMENT_SWEEP_2026-07-16.md` | **CURRENT** (2026-07-16) | Whole-system audit against **Barnes Family Learning Charter v2** — per-commitment ALIGNED/PARTIAL/DRIFT with file evidence (no-grades, no-shame, MVD, formation-first, dispositions-as-report-card, the loop, teach-back-as-evidence, whatMattersNext feedback, AI-assists-humans-decide, conundrums, weekly retro, London). Prioritized gap list → proposed FEAT-75→79 + one ARCH item. |
 | `review/STATE_COMPLIANCE_DESIGN.md` | **CURRENT** (2026-06-27) | State-configurable compliance design (DATA-12) — MO active + byte-identical; TX + TEFA defined, not activated |
 | `review/DECISION_FUNC-01_source_of_truth.md` | **CURRENT** (2026-05-30) | "Where is Lincoln" source-of-truth decision — layered ownership with named write-through (Model 2 adopted) |
 | `review/INTEGRATION_MAP.md` | **CURRENT** (2026-06-01) | Integration seams audit — cross-feature data flow, dead-ends, routing gaps. Referenced from FEAT-07/08/09/10. |

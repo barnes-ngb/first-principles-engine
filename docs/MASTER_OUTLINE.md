@@ -1,7 +1,9 @@
-# Barnes Family Homeschool — Master Project Outline v15
+# Barnes Family Homeschool — Master Project Outline v16
 
-**Version:** v15 — May 26, 2026  
-**Status:** Updated since v14 — Hero Hub reframe, two-currency economy hardening, Stonebridge narrative foundation, armor progression gating, capture pipeline unification, working levels, chapter book pool.
+**Version:** v16 — July 16, 2026  
+**Status:** Updated since v15 — **the Learner Model & adaptive loop-closing arc** (FEAT-44→72): per-child concept-frontier synthesis (`learnerModels/{childId}`), the Foundations tab (Phase 3b — `whatMattersNext` surfaced to Shelly + planner focus line + loop-confirmation), daily struggle-signal → re-test queue (stuck chip / skillTag→concept bridge), Foundations Review chat, Dad Lab three-beats + concept arcs, general-mode multi-child Ask-AI context, and the Sonnet-5 / Opus-4.8 model pilot. Prior sections current as of April 13, 2026; see the arc section below and the review ledger (`docs/review/REVIEW_HOME_BASE.md`) for anything newer.
+
+> v15→v16 was a docs-refresh + charter-alignment sweep (`docs/review/CHARTER_ALIGNMENT_SWEEP_2026-07-16.md`); it added this arc section and did not change app behavior.
 
 ## Project Summary
 Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), Nathan (dad, builder), Lincoln (10, neurodivergent, speech challenges), London (6, drawing/story-first).
@@ -375,6 +377,22 @@ Other chat-dispatched task types (21 total in `tasks/index.ts` registry) are ind
 
 ---
 
+## The Learner Model & Adaptive Loop Closing (May–July 2026)
+
+This is the arc that ran after v15 and is the app's current center of gravity — the charter's engine promise made literal: *synthesize where each child is, compute the next foundational move, feed it back to Shelly, and re-test what he struggled with.* Tracked as FEAT-44→72 in `docs/review/REVIEW_HOME_BASE.md`; designed in `docs/LEARNER_MODEL_DESIGN.md`.
+
+**The central brain — `learnerModels/{childId}`.** A strictly-additive synthesis layer over the nine existing evidence streams (skill snapshots, working levels, guided + interactive `evaluationSessions`, `scans`, `sightWordProgress`, teach-backs, `dadLabReports`, disposition profile, `conceptualBlocks`). Per-concept states are `solid` / `forming` / `frontier` / `not-yet` — a positive, spiky **terrain**, never a single level-per-domain, with the deficit vocabulary (behind/gap/critical) scrubbed at render (`foundationsView.ts` §14). Each concept carries a typed, tappable **evidence trail** ("a brain that can't show its work is an opinion"). Synthesis is a deterministic layer (reuses `deriveWorkingLevelMastery`, useful day one, no LLM) plus a weekly Sonnet judgment beat piggybacked on the `weeklyReview` Sunday cron; surfaces read the STORED model, never generate on load.
+
+**Feed back to Shelly — the Foundations tab (Phase 3b, FEAT-65).** Foundations is now **Progress tab index 0**, absorbing the former Learning Profile. It renders `whatMattersNext` (1–3 moves + reasoning) at the top, the concept terrain, modality calibration, the change-feed ("what moved"), and open questions; a one-line **planner focus line** ("This week's foundation focus: X, because Y") taps through from Plan My Week, and a **loop-confirmation** card shows "last week's focus → evidence it moved."
+
+**Accelerate Lincoln — daily struggle → re-test.** The "stuck" mastery chip and `engagement:'struggled'` signals now enqueue an `openQuestion{routedTo:'quest'}` (FEAT-68), resolved through the `skillTag → concept` bridge (FEAT-69) into Lincoln's next Knowledge Mine session as preferred concepts; results fold back upgrade-only and mark synthesis stale. FEAT-72 backfills real catalog `skillTags` onto AI-planned items (with a no-guess guard for ambiguous LanguageArts) so the bridge isn't starved; FEAT-73 (merged, PR #1533) extends the same no-guess doctrine to the deterministic planner. FEAT-74 (merged, PR #1535) points the Weekly Review at the learner-model frontier so its pacing agrees with `whatMattersNext`.
+
+**Also in this arc:** Foundations Review chat (parent-guided "what to re-test after teaching"); Dad Lab reorganization → three-beats + concept arcs (`DAD_LAB_CONCEPT_ARCS_DESIGN.md`); general-mode multi-child context for Ask AI + a de-named parent-neutral voice (FEAT-60); the Sonnet-5 / Opus-4.8 model pilot; per-child delineation audit (8/8 domains keyed per child) and London's own `londonDefaults` K-floor model.
+
+**Known-open at v16** (see `CHARTER_ALIGNMENT_SWEEP_2026-07-16.md`): teach-back is captured but not yet a learner-model `EvidenceKind` (feeds XP, not the model); the grade note doesn't yet seed re-tests; the family Weekly Retro ritual is unbuilt; two small kid-facing grade/shame leaks (`SightWordDashboard` `%`, `QuestSummary` red ❌); London's rails exist but are unwalked (no seeded `birthdate`/`grade`).
+
+---
+
 ## Business Track (Barnes Bros)
 
 The family business workstream is documented separately in
@@ -387,4 +405,4 @@ itself; build work lands via the FEAT-27 / FEAT-28 run-prompts under normal ledg
 
 ---
 
-Last updated: June 19, 2026 (Business Track section added; other sections current as of April 13, 2026)
+Last updated: July 16, 2026 (v16 — Learner Model & adaptive loop-closing arc section added; charter-alignment sweep filed at `docs/review/CHARTER_ALIGNMENT_SWEEP_2026-07-16.md`. Business Track + prior sections current as of their own dates above.)
