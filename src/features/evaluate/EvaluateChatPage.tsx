@@ -51,6 +51,7 @@ import type {
 import { DIAMOND_EVENTS } from '../../core/types'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import FoundationsSection from './FoundationsSection'
+import { syncEvalFindingsToModel } from './evalModelWriteback'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { deriveWorkingLevelFromEvaluation, canOverwriteWorkingLevel } from '../quest/workingLevels'
@@ -183,6 +184,8 @@ export default function EvaluateChatPage() {
   const [inputText, setInputText] = useState('')
   const [initializing, setInitializing] = useState(true)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const [reapplyDialogOpen, setReapplyDialogOpen] = useState(false)
+  const [hasAppliedThisSession, setHasAppliedThisSession] = useState(false)
   const [patternAnalysisState, setPatternAnalysisState] = useState<'idle' | 'loading' | 'done'>('idle')
   const [conceptualBlocks, setConceptualBlocks] = useState<ConceptualBlock[]>([])
   const [blocksSummary, setBlocksSummary] = useState<string | undefined>(undefined)
@@ -299,6 +302,9 @@ export default function EvaluateChatPage() {
         findings: fndgs,
         recommendations: complete?.recommendations || recommendations,
         summary: complete?.summary || completeSummary || undefined,
+        // FEAT-75: retain the completed eval's learning frontier on the record so
+        // the Evaluation History can surface it read-only after the fact.
+        frontier: complete?.frontier ?? completeData?.frontier,
         evaluatedAt: new Date().toISOString(),
         nextEvalDate: complete?.nextEvalDate || nextEvalDate,
       }
@@ -318,7 +324,7 @@ export default function EvaluateChatPage() {
         console.error('Failed to persist evaluation session', err)
       }
     },
-    [activeChildId, domain, familyId, sessionDocId, recommendations, completeSummary, nextEvalDate],
+    [activeChildId, domain, familyId, sessionDocId, recommendations, completeSummary, completeData, nextEvalDate],
   )
 
   // ── Trigger pattern analysis after <complete> ────────────────
@@ -614,10 +620,19 @@ export default function EvaluateChatPage() {
         })
       }
       setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
+      setHasAppliedThisSession(true)
 
       // Update Learning Map from findings (fire-and-forget)
       updateSkillMapFromFindings(familyId, activeChildId, findings)
         .catch((err) => console.warn('[LearningMap] Failed to update from evaluation findings', err))
+
+      // FEAT-76: project the guided eval onto the learner-model frontier — the
+      // calibrated (up OR down) write, alongside the snapshot write above.
+      // Fire-and-forget, guarded model-exists inside the writer; never blocks apply.
+      if (sessionDocId) {
+        void syncEvalFindingsToModel(familyId, activeChildId, sessionDocId, findings, now)
+          .catch((err) => console.warn('[eval] learner-model write-back failed', err))
+      }
 
       // Award XP for completing an evaluation (once per evaluation session)
       if (sessionDocId) {
@@ -643,6 +658,22 @@ export default function EvaluateChatPage() {
     }
   }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId, conceptualBlocks, domain])
 
+  // Apply is repeatable (FEAT-75). The first apply runs straight through; a
+  // re-apply in the same session confirms first so a double-tap can't silently
+  // re-write the snapshot + learner model.
+  const handleApplyClick = useCallback(() => {
+    if (hasAppliedThisSession) {
+      setReapplyDialogOpen(true)
+    } else {
+      void handleSaveAndApply()
+    }
+  }, [hasAppliedThisSession, handleSaveAndApply])
+
+  const handleConfirmReapply = useCallback(() => {
+    setReapplyDialogOpen(false)
+    void handleSaveAndApply()
+  }, [handleSaveAndApply])
+
   // ── Clear & Restart ───────────────────────────────────────
 
   const handleClear = useCallback(() => {
@@ -658,6 +689,7 @@ export default function EvaluateChatPage() {
     setSessionStatus('in-progress')
     setClearDialogOpen(false)
     setSnackText(null)
+    setHasAppliedThisSession(false)
     setPatternAnalysisState('idle')
     setConceptualBlocks([])
     setBlocksSummary(undefined)
@@ -787,14 +819,25 @@ export default function EvaluateChatPage() {
           <Typography variant="subtitle2" color="text.secondary">
             Previous evaluations:
           </Typography>
-          <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mt: 0.5 }}>
+          <Stack spacing={0.75} sx={{ mt: 0.5 }}>
             {previousSessions.map((session) => (
-              <Chip
-                key={session.id}
-                label={`${session.domain} — ${new Date(session.evaluatedAt).toLocaleDateString()}`}
-                variant="outlined"
-                size="small"
-              />
+              <Box key={session.id}>
+                <Chip
+                  label={`${session.domain} — ${new Date(session.evaluatedAt).toLocaleDateString()}`}
+                  variant="outlined"
+                  size="small"
+                />
+                {/* FEAT-75: retained learning frontier, surfaced read-only. */}
+                {session.frontier && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', mt: 0.25, ml: 0.5 }}
+                  >
+                    Learning frontier (from {new Date(session.evaluatedAt).toLocaleDateString()}): {session.frontier}
+                  </Typography>
+                )}
+              </Box>
             ))}
           </Stack>
         </Box>
@@ -1098,8 +1141,8 @@ export default function EvaluateChatPage() {
 
               {/* Action buttons */}
               <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
-                <Button variant="contained" onClick={handleSaveAndApply}>
-                  Apply to Skill Snapshot
+                <Button variant="contained" onClick={handleApplyClick}>
+                  {hasAppliedThisSession ? 'Re-apply to Skill Snapshot' : 'Apply to Skill Snapshot'}
                 </Button>
                 <Button
                   variant="outlined"
@@ -1154,6 +1197,24 @@ export default function EvaluateChatPage() {
           <Button onClick={() => setClearDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleClear} color="warning" variant="contained">
             Clear & Restart
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Re-apply confirmation dialog (FEAT-75) */}
+      <Dialog open={reapplyDialogOpen} onClose={() => setReapplyDialogOpen(false)}>
+        <DialogTitle>Re-apply this evaluation?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            You already applied this evaluation. Re-applying updates the skill snapshot
+            and learner-model frontier again from the same findings. This is safe — it
+            re-runs the same additive write.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReapplyDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleConfirmReapply} color="primary" variant="contained">
+            Re-apply
           </Button>
         </DialogActions>
       </Dialog>
