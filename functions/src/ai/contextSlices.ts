@@ -97,7 +97,7 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
     "hoursProgress", "dayToday", "dadLabReports",
   ],
   weeklyReview: [
-    "charter", "childProfile", "skillSnapshot", "activityConfigs",
+    "charter", "childProfile", "learnerModel", "skillSnapshot", "activityConfigs",
     "recentHistoryByDomain", "recentScans", "wordMastery", "dadLabReports",
   ],
   // FEAT-51 (slice 2a): the Foundations Review Chat. Deliberately LEAN — the
