@@ -17,6 +17,7 @@ import {
   WEEK_DAYS,
 } from './chatPlanner.logic'
 import type { PlanGeneratorInputs } from './chatPlanner.logic'
+import { ALL_SKILL_TAGS } from '../../core/types/skillTags'
 
 const baseSnapshot: SkillSnapshot = {
   childId: 'c1',
@@ -1152,5 +1153,112 @@ describe('dateKeyForDayPlan', () => {
     expect(() => dateKeyForDayPlan('2026-04-05', 'Saturday' as typeof WEEK_DAYS[number])).toThrow(
       /Invalid day/,
     )
+  })
+})
+
+describe('parseAIResponse — FEAT-72 catalog-tag backfill', () => {
+  const makeResponse = (message: string): ChatResponse => ({
+    message,
+    model: 'claude-sonnet-4-20250514',
+    usage: { inputTokens: 100, outputTokens: 200 },
+  })
+
+  const planWith = (items: Array<Record<string, unknown>>) =>
+    makeResponse(
+      JSON.stringify({
+        days: [{ day: 'Monday', timeBudgetMinutes: 150, items }],
+        skipSuggestions: [],
+        minimumWin: 'x',
+      }),
+    )
+
+  const catalog = new Set(ALL_SKILL_TAGS)
+
+  it('backfills empty/off-catalog tags and preserves valid catalog tags', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'Empty', subjectBucket: 'Reading', estimatedMinutes: 10, skillTags: [], accepted: true },
+        { title: 'Bogus', subjectBucket: 'Reading', estimatedMinutes: 10, skillTags: ['reading.general'], accepted: true },
+        { title: 'Valid', subjectBucket: 'Reading', estimatedMinutes: 10, skillTags: ['reading.cvcBlend'], accepted: true },
+      ]),
+    )
+    expect(result).not.toBeNull()
+    const items = result!.days[0].items
+    // Every tag on every item is a real catalog tag (no empties, no bogus, no `.general`).
+    for (const item of items) {
+      for (const tag of item.skillTags) expect(catalog.has(tag)).toBe(true)
+    }
+    // Empty + bogus were backfilled to a single catalog tag; valid one preserved.
+    expect(items[0].skillTags).toEqual(['reading.cvcBlend'])
+    expect(items[1].skillTags).toEqual(['reading.cvcBlend'])
+    expect(items[2].skillTags).toEqual(['reading.cvcBlend'])
+  })
+
+  it('targets a priority-matched catalog tag when snapshot priority tags are passed', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'Reading', subjectBucket: 'Reading', estimatedMinutes: 10, skillTags: [], accepted: true },
+      ]),
+      ['reading.sightWords'],
+    )
+    // Without priorities the Reading default is reading.cvcBlend; the priority tag steers it.
+    expect(result!.days[0].items[0].skillTags).toEqual(['reading.sightWords'])
+  })
+
+  it('backfills a math item with no priority tags to a math subject-default catalog tag', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'Math', subjectBucket: 'Math', estimatedMinutes: 20, skillTags: [], accepted: true },
+      ]),
+    )
+    const tags = result!.days[0].items[0].skillTags
+    expect(tags).toHaveLength(1)
+    expect(tags[0].startsWith('math.')).toBe(true)
+    expect(catalog.has(tags[0])).toBe(true)
+  })
+
+  it('leaves items empty (no guess) for subjects without a targeted suggestion', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'Science', subjectBucket: 'Science', estimatedMinutes: 15, skillTags: [], accepted: true },
+        { title: 'Other', subjectBucket: 'Other', estimatedMinutes: 15, skillTags: [], accepted: true },
+      ]),
+    )
+    expect(result!.days[0].items[0].skillTags).toEqual([])
+    expect(result!.days[0].items[1].skillTags).toEqual([])
+  })
+
+  it('does not guess a reading tag for an untagged LanguageArts item (ambiguous reading/writing)', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'Handwriting', subjectBucket: 'LanguageArts', estimatedMinutes: 15, skillTags: [], accepted: true },
+      ]),
+      ['reading.cvcBlend'],
+    )
+    // Even with a reading priority tag, an untagged LA item must NOT default to a
+    // reading tag — that would enqueue a false CVC re-test for writing work.
+    expect(result!.days[0].items[0].skillTags).toEqual([])
+  })
+
+  it('preserves a valid catalog tag the LLM emitted on a LanguageArts item', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'Phonics', subjectBucket: 'LanguageArts', estimatedMinutes: 15, skillTags: ['reading.cvcBlend'], accepted: true },
+      ]),
+    )
+    // No-guess applies only to the backfill; an explicit valid catalog tag is kept.
+    expect(result!.days[0].items[0].skillTags).toEqual(['reading.cvcBlend'])
+  })
+
+  it('never lets a persisted item carry a synthetic *.general tag', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'A', subjectBucket: 'Reading', estimatedMinutes: 10, skillTags: [], accepted: true },
+        { title: 'B', subjectBucket: 'Math', estimatedMinutes: 10, skillTags: ['math.general'], accepted: true },
+        { title: 'C', subjectBucket: 'Other', estimatedMinutes: 10, skillTags: ['other.general'], accepted: true },
+      ]),
+    )
+    const allTags = result!.days.flatMap((d) => d.items.flatMap((i) => i.skillTags))
+    expect(allTags.some((t) => t.endsWith('.general'))).toBe(false)
   })
 })

@@ -10,7 +10,7 @@ import type {
 } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
-import { autoSuggestTags } from '../../core/types/skillTags'
+import { ALL_SKILL_TAGS, SKILL_TAG_MAP, autoSuggestTags, suggestTagsForSubject } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
 import { getEffectiveMasteryGate } from './skipAdvisor.logic'
 
@@ -1049,8 +1049,63 @@ function forgivingJsonParse(text: string): Record<string, unknown> | null {
   return null
 }
 
-/** Parse and validate an AI response into a DraftWeeklyPlan. Returns null if malformed. */
-export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null {
+/**
+ * FEAT-72: deterministic catalog-tag backfill for a parsed AI-plan item.
+ *
+ * The AI-chat planner ships `"skillTags": []` in its prompt and the LLM usually
+ * emits nothing (or an off-catalog string), so most AI items would reach the
+ * persist paths untagged — which starves the FEAT-68/69 daily-signal → re-test
+ * bridge (it can only map a **catalog** skillTag to a foundations concept).
+ * This backfills the single best catalog tag at the parse chokepoint, reusing
+ * the same `autoSuggestTags` helper the deterministic planner already uses
+ * (`buildDeterministicPlan`, ~:461) — never trusting the model, never inventing
+ * a synthetic `subject.general` tag.
+ *
+ * Rules:
+ *  - keep any catalog-valid tags the LLM did emit (SKILL_TAG_MAP membership),
+ *  - if none survive, backfill `autoSuggestTags(subject, priorityTags)[0]`
+ *    (single best tag, honoring the "max ~1 tag per item" convention — a pile
+ *    just seeds noisier re-tests),
+ *  - no guess for subjects without an *unambiguous, targeted* mapping:
+ *      · non-core subjects (Science / SocialStudies / Other) fall through to the
+ *        whole catalog in `suggestTagsForSubject`, and there is no foundations
+ *        concept graph for them, so a backfilled reading/math tag is a false
+ *        signal — stay `[]`.
+ *      · `LanguageArts` is deliberately excluded too: it spans reading *and*
+ *        writing, but its subject-default is a **reading** tag (`reading.cvcBlend`),
+ *        which the FEAT-69 bridge resolves to a CVC concept. Guessing that onto a
+ *        writing/handwriting/spelling LA item would enqueue a false reading-phonics
+ *        re-test, so an LA item is tagged only when the LLM emitted a valid catalog
+ *        tag (kept above). Reading / Math items still backfill.
+ */
+function backfillCatalogTags(
+  rawTags: unknown,
+  subjectBucket: SubjectBucket,
+  prioritySkillTags: string[],
+): string[] {
+  const llmTags = Array.isArray(rawTags)
+    ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string' && t.length > 0)
+    : []
+  const catalogTags = llmTags.filter((t) => t in SKILL_TAG_MAP)
+  if (catalogTags.length > 0) return catalogTags
+  // Ambiguous subject: LanguageArts spans reading + writing, so its reading-first
+  // subject-default would create false CVC re-test evidence for writing items.
+  if (subjectBucket === SubjectBucket.LanguageArts) return []
+  // Non-core subjects return the whole catalog by reference — that is a fallback,
+  // not a targeted suggestion, so don't guess a tag for them.
+  if (suggestTagsForSubject(subjectBucket) === ALL_SKILL_TAGS) return []
+  const [best] = autoSuggestTags(subjectBucket, prioritySkillTags)
+  return best ? [best] : []
+}
+
+/**
+ * Parse and validate an AI response into a DraftWeeklyPlan. Returns null if malformed.
+ *
+ * `prioritySkillTags` (from the child's skill snapshot) targets the FEAT-72
+ * catalog-tag backfill; pass `[]` (the default) when unavailable — the backfill
+ * still stamps subject-default catalog tags.
+ */
+export function parseAIResponse(response: ChatResponse, prioritySkillTags: string[] = []): DraftWeeklyPlan | null {
   try {
     const jsonText = extractJsonObject(response.message)
     if (!jsonText) {
@@ -1172,7 +1227,7 @@ export function parseAIResponse(response: ChatResponse): DraftWeeklyPlan | null 
           title,
           subjectBucket,
           estimatedMinutes: finalMinutes,
-          skillTags: Array.isArray(rawItem.skillTags) ? (rawItem.skillTags as string[]).filter(Boolean) : [],
+          skillTags: backfillCatalogTags(rawItem.skillTags, subjectBucket, prioritySkillTags),
           isAppBlock: rawItem.isAppBlock === true,
           accepted: rawItem.accepted !== false,
           mvdEssential: rawItem.mvdEssential === true ? true : rawItem.category === 'must-do' ? true : undefined,
