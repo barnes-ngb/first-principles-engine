@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { frontierConcepts, resolveStuckConcepts } from './dailySignalTargeting'
+import {
+  frontierConcepts,
+  resolveStuckConcepts,
+  resolveTagConcepts,
+} from './dailySignalTargeting'
 import type { StuckSignalConfig, StuckSignalItem } from './dailySignalTargeting'
+import { MathTags, ReadingTags, WritingTags } from '../types/skillTags'
 import { FOUNDATION_NODE_MAP } from './index'
 import { bridgeCoveredConcepts, resolveNativePosition } from './workbookBridge'
 import { fastPhonicsWorkbookBridge, LESSONS_PER_PEAK } from './fastPhonicsBridge'
@@ -152,5 +157,57 @@ describe('resolveStuckConcepts — provisional-position conflict cap (guesses de
     expect(capped.sort()).toEqual(
       ['reading.decoding.multisyllable', 'reading.phonics.blends'].sort(),
     )
+  })
+})
+
+describe('resolveTagConcepts — FEAT-69 tag path', () => {
+  it('resolves an item\'s mapped skillTags to concept(s)', () => {
+    expect(resolveTagConcepts({ skillTags: [ReadingTags.CvcBlend] })).toEqual([
+      'reading.phonics.cvc',
+    ])
+  })
+
+  it('is [] for an item with no tags or only unmapped tags', () => {
+    expect(resolveTagConcepts({})).toEqual([])
+    expect(resolveTagConcepts({ skillTags: [] })).toEqual([])
+    expect(resolveTagConcepts({ skillTags: [WritingTags.LetterFormation] })).toEqual([])
+  })
+})
+
+describe('resolveStuckConcepts — FEAT-69 union of the workbook + tag paths', () => {
+  // Fast Phonics lesson 35 ÷ 5 = Peak 7, whose frontier is letterSounds + cvc.
+  const wbFrontier = ['reading.phonics.cvc', 'reading.phonics.letterSounds']
+
+  it('unions a bridged workbook position with a mapped skillTag, no dupes', () => {
+    // The workbook frontier already contains `reading.phonics.cvc`; tagging CvcBlend
+    // (→ the same concept) must NOT duplicate it, and PlaceValue adds a math concept.
+    const item: StuckSignalItem = {
+      workbookConfigId: 'cfg-fp',
+      skillTags: [ReadingTags.CvcBlend, MathTags.PlaceValue],
+    }
+    const concepts = resolveStuckConcepts(item, fpConfig({ currentPosition: 35 }))
+    expect(concepts.sort()).toEqual(
+      [...wbFrontier, 'math.number.placeValue'].sort(),
+    )
+    // No duplicate cvc despite both paths supplying it.
+    expect(concepts.filter((c) => c === 'reading.phonics.cvc')).toHaveLength(1)
+  })
+
+  it('resolves a NON-workbook item purely by its mapped tags', () => {
+    const item: StuckSignalItem = { skillTags: [MathTags.SubtractionRegroup] }
+    expect(resolveStuckConcepts(item, undefined)).toEqual([
+      'math.operations.regrouping',
+    ])
+  })
+
+  it('is [] for a non-workbook item whose tags are all unmapped (no guess)', () => {
+    const item: StuckSignalItem = {
+      skillTags: [WritingTags.SpellingPhonetic, ReadingTags.FluencyShort],
+    }
+    expect(resolveStuckConcepts(item, undefined)).toEqual([])
+  })
+
+  it('is [] for a non-workbook item with no tags at all', () => {
+    expect(resolveStuckConcepts({}, undefined)).toEqual([])
   })
 })

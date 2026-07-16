@@ -1,11 +1,15 @@
 // ── Daily "stuck" signal → learner-model re-test enqueue (FEAT-68) ────────
 //
-// The thin async writer the Today mastery chip calls. When a completed checklist
-// item is marked "stuck", `resolveStuckConcepts` (pure, core) turns the item's
-// bridged workbook position into the frontier concept(s) the child is working on;
-// this writer enqueues an `openQuestion{ routedTo:'quest' }` per concept onto
-// `learnerModels/{childId}` so the next Knowledge Mine session re-tests it
-// (`selectQuestTargets` → `applyQuestResultsToModel`, upgrade-only, no-shame).
+// The thin async writer the Today mastery chip AND engagement flag call. When a
+// completed checklist item signals a struggle (a "stuck" mastery chip or an
+// `engagement:'struggled'` flag), `resolveStuckConcepts` (pure, core) turns the item
+// into the frontier concept(s) the child is working on — via the bridged workbook
+// position (FEAT-68) UNIONED with the item's skillTags (FEAT-69), so a NON-workbook
+// item now resolves too. This writer enqueues an `openQuestion{ routedTo:'quest' }`
+// per concept onto `learnerModels/{childId}` so the next Knowledge Mine session
+// re-tests it (`selectQuestTargets` → `applyQuestResultsToModel`, upgrade-only,
+// no-shame). `reason` (default `STUCK_RETEST_REASON`) is the parent-facing ask text;
+// the engagement caller passes `ENGAGEMENT_RETEST_REASON` so it reads honestly.
 //
 // It REUSES the existing `applyReviewActionToModel` `queueTest` path (the same
 // `withOpenQuestion` dedup + `changeFeed` semantics the Foundations Review Chat
@@ -26,8 +30,16 @@ import type {
 import { applyReviewActionToModel } from '../foundations-review/foundationsReviewActions'
 import type { LearnerModel } from '../../core/types/learnerModel'
 
-/** The `openQuestion.reason` stamped on a daily-signal re-test (parent-facing). */
+/** The `openQuestion.reason` stamped on a "stuck" mastery-chip re-test (parent-facing). */
 export const STUCK_RETEST_REASON = "Struggled during today's work"
+
+/**
+ * The `openQuestion.reason` stamped on an `engagement:'struggled'` re-test (FEAT-69).
+ * A distinct constant so the parent-facing ask reads honestly about which daily
+ * signal seeded it. (`engagement:'refused'` is deliberately NOT wired — refusal is a
+ * regulation signal, not a concept miss.)
+ */
+export const ENGAGEMENT_RETEST_REASON = "Flagged as a struggle during today's work"
 
 /**
  * Enqueue a `routedTo:'quest'` re-test ask per resolved concept onto the child's
@@ -47,11 +59,12 @@ export async function enqueueStuckRetests(
   item: StuckSignalItem,
   config: StuckSignalConfig | null | undefined,
   nowIso: string,
+  reason: string = STUCK_RETEST_REASON,
 ): Promise<void> {
   if (!familyId || !childId) return
   // Cheap pure pre-resolve WITHOUT the model — bail before any Firestore read when
-  // there is no bridged path (non-workbook item, unmapped/uncurated source, no
-  // position). The cap can only narrow this, never turn [] into a write.
+  // neither path resolves (no bridged workbook position AND no mapped skillTag). The
+  // cap can only narrow the workbook result, never turn [] into a write.
   if (resolveStuckConcepts(item, config).length === 0) return
   try {
     const modelRef = doc(learnerModelsCollection(familyId), childId)
@@ -68,7 +81,7 @@ export async function enqueueStuckRetests(
       // change), so only openQuestions / changeFeed move.
       const { model: next } = applyReviewActionToModel(
         model,
-        { kind: 'queueTest', childId, conceptId, reason: STUCK_RETEST_REASON },
+        { kind: 'queueTest', childId, conceptId, reason },
         nowIso,
       )
       model = next

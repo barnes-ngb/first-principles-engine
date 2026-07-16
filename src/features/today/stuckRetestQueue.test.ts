@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { STUCK_RETEST_REASON } from './stuckRetestQueue'
+import { ENGAGEMENT_RETEST_REASON, STUCK_RETEST_REASON } from './stuckRetestQueue'
 import { buildStuckBlock } from './masteryBlocker'
+import { MathTags, WritingTags } from '../../core/types/skillTags'
 import { resolveStuckConcepts } from '../../core/foundations/dailySignalTargeting'
 import { applyReviewActionToModel } from '../foundations-review/foundationsReviewActions'
 import { selectQuestTargets } from '../../core/foundations/questTargeting'
@@ -60,12 +61,16 @@ const fpConfig: ActivityConfig = {
 }
 
 /** Mirror the writer's fold: apply one queueTest per resolved concept. */
-function enqueue(model: LearnerModel, concepts: string[]): LearnerModel {
+function enqueue(
+  model: LearnerModel,
+  concepts: string[],
+  reason: string = STUCK_RETEST_REASON,
+): LearnerModel {
   let m = model
   for (const conceptId of concepts) {
     m = applyReviewActionToModel(
       m,
-      { kind: 'queueTest', childId: 'child-1', conceptId, reason: STUCK_RETEST_REASON },
+      { kind: 'queueTest', childId: 'child-1', conceptId, reason },
       NOW,
     ).model
   }
@@ -122,5 +127,80 @@ describe('FEAT-68 loop — stuck chip seeds a re-test the Mine consumes', () => 
     const block = buildStuckBlock(stuckItem, NOW)
     expect(block?.status).toBe('ADDRESS_NOW')
     expect(block?.source).toBe('parent')
+  })
+})
+
+// ── FEAT-69: NON-workbook struggle signals seed the same loop via skillTags ──
+
+// A stuck item with NO workbook link — resolves purely by its mapped skillTag.
+const tagOnlyStuckItem: ChecklistItem = {
+  label: 'Regrouping practice',
+  completed: true,
+  mastery: 'stuck',
+  subjectBucket: 'Math' as ChecklistItem['subjectBucket'],
+  skillTags: [MathTags.SubtractionRegroup],
+}
+
+describe('FEAT-69 loop — a NON-workbook stuck chip seeds a re-test via its tag', () => {
+  it('resolves via the tag bridge (no config) and the Mine picks it up', () => {
+    const concepts = resolveStuckConcepts(tagOnlyStuckItem, undefined)
+    expect(concepts).toEqual(['math.operations.regrouping'])
+
+    const model = enqueue(seededModel(), concepts)
+    const ask = model.openQuestions.find(
+      (q) => q.conceptId === 'math.operations.regrouping',
+    )
+    expect(ask?.routedTo).toBe('quest')
+    expect(ask?.reason).toBe(STUCK_RETEST_REASON)
+
+    const targets = selectQuestTargets(model, { domain: 'math' })
+    expect(targets.map((t) => t.conceptId)).toContain('math.operations.regrouping')
+  })
+
+  it('an unmapped-tag non-workbook item resolves to [] → nothing queued (no guess)', () => {
+    const item: ChecklistItem = {
+      label: 'Handwriting',
+      completed: true,
+      mastery: 'stuck',
+      skillTags: [WritingTags.LetterFormation],
+    }
+    const concepts = resolveStuckConcepts(item, undefined)
+    expect(concepts).toEqual([])
+    expect(enqueue(seededModel(), concepts).openQuestions).toEqual([])
+  })
+
+  it('the parallel conceptualBlock path still fires for a tag-only item (no regression)', () => {
+    const block = buildStuckBlock(tagOnlyStuckItem, NOW)
+    expect(block?.status).toBe('ADDRESS_NOW')
+    expect(block?.source).toBe('parent')
+  })
+})
+
+describe("FEAT-69 loop — engagement:'struggled' seeds a re-test with its own reason", () => {
+  it('queues the tag concept with the engagement reason the Mine consumes', () => {
+    // The engagement flag rides the SAME item→concept bridge; the caller passes
+    // ENGAGEMENT_RETEST_REASON so the parent-facing ask reads honestly.
+    const concepts = resolveStuckConcepts(tagOnlyStuckItem, undefined)
+    const model = enqueue(seededModel(), concepts, ENGAGEMENT_RETEST_REASON)
+
+    const ask = model.openQuestions.find(
+      (q) => q.conceptId === 'math.operations.regrouping',
+    )
+    expect(ask?.routedTo).toBe('quest')
+    expect(ask?.reason).toBe(ENGAGEMENT_RETEST_REASON)
+    expect(ask?.reason).not.toBe(STUCK_RETEST_REASON)
+
+    const targets = selectQuestTargets(model, { domain: 'math' })
+    expect(targets.map((t) => t.conceptId)).toContain('math.operations.regrouping')
+  })
+
+  it('dedups a struggled-engagement ask against a prior stuck-chip ask on the same concept', () => {
+    const concepts = resolveStuckConcepts(tagOnlyStuckItem, undefined)
+    const afterStuck = enqueue(seededModel(), concepts, STUCK_RETEST_REASON)
+    const afterBoth = enqueue(afterStuck, concepts, ENGAGEMENT_RETEST_REASON)
+    const asks = afterBoth.openQuestions.filter(
+      (q) => q.conceptId === 'math.operations.regrouping' && !q.resolvedAt,
+    )
+    expect(asks).toHaveLength(1)
   })
 })

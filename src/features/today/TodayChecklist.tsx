@@ -57,7 +57,7 @@ import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
-import { enqueueStuckRetests } from './stuckRetestQueue'
+import { ENGAGEMENT_RETEST_REASON, enqueueStuckRetests } from './stuckRetestQueue'
 import { resolveDisplayPhotos } from './itemPhotos'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
@@ -287,12 +287,15 @@ export default function TodayChecklist({
       }
     })()
 
-    // FEAT-68: a "stuck" signal on a BRIDGED workbook item also seeds the
-    // learner-model re-test queue (parallel to the snapshot-block write above, which
-    // stays untouched — the two targeting systems coexist). Deterministic only:
-    // `item.workbookConfigId → activityConfig position → frontier concept`. The
-    // writer resolves + gates (unmapped / uncurated source ⇒ no write, no guess) and
-    // is fire-and-forget, so it never blocks the tap.
+    // FEAT-68 + FEAT-69: a "stuck" signal seeds the learner-model re-test queue
+    // (parallel to the snapshot-block write above, which stays untouched — the two
+    // targeting systems coexist). Deterministic only, via TWO unioned paths in the
+    // writer's resolver: `item.workbookConfigId → activityConfig position → frontier
+    // concept` (FEAT-68, workbook items) and `item.skillTags → concept` (FEAT-69, so
+    // NON-workbook items resolve too). The writer resolves + gates (unmapped /
+    // uncurated source, unmapped tag ⇒ no write, no guess) and is fire-and-forget, so
+    // it never blocks the tap. `config` is undefined for non-workbook items — the tag
+    // path fills in.
     if (value === 'stuck') {
       const config = current.workbookConfigId
         ? configs.find((c) => c.id === current.workbookConfigId)
@@ -427,6 +430,30 @@ export default function TodayChecklist({
       i === index ? { ...ci, engagement } : ci
     )
     persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+
+    // FEAT-69: `engagement:'struggled'` is a fourth, already-structured daily
+    // struggle flag — it rides the SAME item→concept bridge (workbook position ∪
+    // skillTags) as the stuck chip to seed the learner-model re-test queue. The
+    // writer resolves + gates (unmapped ⇒ no write, no guess) and is fire-and-forget.
+    // `'refused'` is intentionally NOT wired — refusal is a regulation signal, not a
+    // concept miss. (No parallel snapshot-block write here; engagement never wrote
+    // one, so nothing changes on that path.)
+    if (engagement === 'struggled' && familyId && selectedChildId) {
+      const current = rawChecklist[index]
+      const config = current?.workbookConfigId
+        ? configs.find((c) => c.id === current.workbookConfigId)
+        : undefined
+      if (current) {
+        void enqueueStuckRetests(
+          familyId,
+          selectedChildId,
+          current,
+          config,
+          new Date().toISOString(),
+          ENGAGEMENT_RETEST_REASON,
+        )
+      }
+    }
   }
 
   const handleToggleItem = (index: number) => {
