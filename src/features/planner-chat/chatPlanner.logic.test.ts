@@ -1228,6 +1228,28 @@ describe('parseAIResponse — FEAT-72 catalog-tag backfill', () => {
     expect(result!.days[0].items[1].skillTags).toEqual([])
   })
 
+  it('does not guess a reading tag for an untagged LanguageArts item (ambiguous reading/writing)', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'Handwriting', subjectBucket: 'LanguageArts', estimatedMinutes: 15, skillTags: [], accepted: true },
+      ]),
+      ['reading.cvcBlend'],
+    )
+    // Even with a reading priority tag, an untagged LA item must NOT default to a
+    // reading tag — that would enqueue a false CVC re-test for writing work.
+    expect(result!.days[0].items[0].skillTags).toEqual([])
+  })
+
+  it('preserves a valid catalog tag the LLM emitted on a LanguageArts item', () => {
+    const result = parseAIResponse(
+      planWith([
+        { title: 'Phonics', subjectBucket: 'LanguageArts', estimatedMinutes: 15, skillTags: ['reading.cvcBlend'], accepted: true },
+      ]),
+    )
+    // No-guess applies only to the backfill; an explicit valid catalog tag is kept.
+    expect(result!.days[0].items[0].skillTags).toEqual(['reading.cvcBlend'])
+  })
+
   it('never lets a persisted item carry a synthetic *.general tag', () => {
     const result = parseAIResponse(
       planWith([

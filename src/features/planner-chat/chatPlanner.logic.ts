@@ -1066,10 +1066,17 @@ function forgivingJsonParse(text: string): Record<string, unknown> | null {
  *  - if none survive, backfill `autoSuggestTags(subject, priorityTags)[0]`
  *    (single best tag, honoring the "max ~1 tag per item" convention — a pile
  *    just seeds noisier re-tests),
- *  - no guess for subjects without a *targeted* suggestion: non-core subjects
- *    (Science / SocialStudies / Other) fall through to the whole catalog in
- *    `suggestTagsForSubject`, and there is no foundations concept graph for
- *    them, so a backfilled reading/math tag would be a false signal — stay `[]`.
+ *  - no guess for subjects without an *unambiguous, targeted* mapping:
+ *      · non-core subjects (Science / SocialStudies / Other) fall through to the
+ *        whole catalog in `suggestTagsForSubject`, and there is no foundations
+ *        concept graph for them, so a backfilled reading/math tag is a false
+ *        signal — stay `[]`.
+ *      · `LanguageArts` is deliberately excluded too: it spans reading *and*
+ *        writing, but its subject-default is a **reading** tag (`reading.cvcBlend`),
+ *        which the FEAT-69 bridge resolves to a CVC concept. Guessing that onto a
+ *        writing/handwriting/spelling LA item would enqueue a false reading-phonics
+ *        re-test, so an LA item is tagged only when the LLM emitted a valid catalog
+ *        tag (kept above). Reading / Math items still backfill.
  */
 function backfillCatalogTags(
   rawTags: unknown,
@@ -1081,6 +1088,9 @@ function backfillCatalogTags(
     : []
   const catalogTags = llmTags.filter((t) => t in SKILL_TAG_MAP)
   if (catalogTags.length > 0) return catalogTags
+  // Ambiguous subject: LanguageArts spans reading + writing, so its reading-first
+  // subject-default would create false CVC re-test evidence for writing items.
+  if (subjectBucket === SubjectBucket.LanguageArts) return []
   // Non-core subjects return the whole catalog by reference — that is a fallback,
   // not a targeted suggestion, so don't guess a tag for them.
   if (suggestTagsForSubject(subjectBucket) === ALL_SKILL_TAGS) return []
