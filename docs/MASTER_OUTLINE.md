@@ -20,7 +20,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - Routes: **36**
 
 ## Navigation
-**Parent:** Today, Plan My Week, Weekly Review, Progress (Learning Profile · **Monthly Books** · Learning Map · Curriculum · Skill Snapshot · Word Wall), Records, Books, **Barnes Bros**, Game Workshop, Dad Lab, Settings, Ask AI  
+**Parent:** Today, Plan My Week, Weekly Review, Progress (**Foundations** · **Monthly Books** · Learning Map · Curriculum · Skill Snapshot · Word Wall — Foundations is index 0, absorbing the former Learning Profile tab with dispositions as a section, FEAT-65), Records, Books, **Barnes Bros**, Game Workshop, Dad Lab, Settings, Ask AI  
 **Kid:** Today, Knowledge Mine, My Books, **Books About Me**, **My Hero** (Hero Hub), My Stuff, **Barnes Bros**, Game Workshop, Dad Lab
 
 ---

@@ -141,7 +141,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/components/` — Shared UI components (SectionErrorBoundary, ErrorBoundary, ScanButton/ScanResultsPanel, XpDiamondBar, ChildSelector, PhotoCapture, `VoiceInput/` — reusable Whisper/Web-Speech voice input module, `avatar/` — TierUpCeremony)
 - `src/core/auth/` — Auth context and hooks
 - `src/core/firebase/` — Firebase/Firestore setup, collections, upload
-- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useChildSkillSnapshot, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useAudioRecording, useSpeechRecognition, useTranscription, useTTS, useActivityConfigs, useScanToActivityConfig, useCertificateProgress, useMonthlyReviews)
+- `src/core/hooks/` — Shared hooks (useActiveChild, useChildren, useChildSkillSnapshot, useCreativeTimer, useDebounce, useSaveState, useScan, useAudioRecorder, useAudioRecording, useSpeechRecognition, useTranscription, useTTS, useActivityConfigs, useScanToActivityConfig, useCertificateProgress, useMonthlyReviews, `useLearnerModel` — read-only `onSnapshot` subscribe of `learnerModels/{childId}`, shared by the Foundations tab + planner focus line)
 - `src/core/types/` — Domain types (`common.ts`, `family.ts`, `planning.ts`, `evaluation.ts`, `disposition.ts`, `books.ts`, `compliance.ts`, `dadlab.ts`, `workshop.ts`, `xp.ts`, `skillTags.ts`, `shellyChat.ts`, `monthlyReview.ts`, `feedback.ts`, `errorLog.ts`, `stonebridge.ts`, `business.ts`, `learnerModel.ts`, `zod.ts`) and enum-like constants (`enums.ts`)
 - `src/core/utils/` — Date/time utilities, formatting, doc ID parsing, compliance mapping, energy patterns, domain mapping, blocker lifecycle, workbook matching, session timer, image compression, `sanitizeJson` (client port of the functions LLM-JSON parser — deliberate duplication, `// TODO: consolidate`)
 - `src/core/ai/` — AI service interface (useAI hook), feature flags, prompt templates (`prompts/plannerPrompts.ts`)
@@ -166,8 +166,8 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/login/` — Profile selection
 - `src/features/not-found/` — 404 page
 - `src/features/planner/` — TeachHelperDialog (shared)
-- `src/features/planner-chat/` — Plan My Week (AI chat planner, decomposed: PlannerChatPage + PlannerSetupWizard, WeekFocusPanel, PlanDayCards, PlannerChatMessages)
-- `src/features/progress/` — Progress tabs (learning profile, engine, snapshot, milestones, word wall, armor, curriculum)
+- `src/features/planner-chat/` — Plan My Week (AI chat planner, decomposed: PlannerChatPage + PlannerSetupWizard, WeekFocusPanel, PlanDayCards, PlannerChatMessages; `FoundationsFocusLine` — the FEAT-65 one-line ambient learner-model focus surface, taps through to the Foundations tab, hidden when the model is empty)
+- `src/features/progress/` — Progress tabs. **Tab order (FEAT-65): Foundations (index 0) · Monthly Books · Learning Map · Curriculum · Skill Snapshot · Word Wall.** `FoundationsTab` (Learner Model Phase 3b) is the first-class **read-only** parent home for the Learner Model — graduates the `?diag=1` `FoundationsDiagPanel` render out from behind the flag: `synthesis.whatMattersNext` focus, the concept terrain (tap → read-only evidence drawer), modality calibration, the `changeFeed` "What moved" (with deterministic `→ solid` loop-confirmation cards, G3), routed open questions, and `DispositionProfile` embedded as the final section (the former standalone "Learning Profile" tab is absorbed). Pure presenters + the §14 scrub live in `foundationsView.ts`. `ProgressPage` uses a `{ label, render }[]` tab descriptor array (no index-based guards)
 - `src/features/progress/CurriculumTab.tsx` — Curriculum management tab (activity configs)
 - `src/features/progress/learning-map/` — Learning Map UI components (visual curriculum knowledge map)
 - `src/features/progress/DispositionProfile.tsx` — AI disposition narrative from day log data, with per-disposition parent overrides (inline edit, revert to AI)
