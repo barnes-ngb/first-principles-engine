@@ -57,6 +57,7 @@ import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
+import { enqueueStuckRetests } from './stuckRetestQueue'
 import { resolveDisplayPhotos } from './itemPhotos'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
@@ -171,9 +172,12 @@ interface TodayChecklistProps {
   /**
    * FEAT-62 (legacy-item fallback): the child's scannable workbook configs, used
    * to resolve a `workbookConfigId` for legacy/unstamped items so the backfill
-   * button can render for them too.
+   * button can render for them too. Also the FEAT-68 source for resolving a
+   * "stuck" item's tracked workbook position into a re-test concept (reads the
+   * optional `currentPosition` — an `ActivityConfig` supplies it; the looser
+   * `WorkbookConfigLike` mocks that omit it just resolve to no re-test).
    */
-  configs?: WorkbookConfigLike[]
+  configs?: Array<WorkbookConfigLike & { currentPosition?: number }>
   onPreCompletionScan: (file: File, index: number) => void
   captureLoading: boolean
   captureItemIndex: number | null
@@ -282,6 +286,25 @@ export default function TodayChecklist({
         console.warn('[TodayChecklist] Mastery chip blocker write failed:', err)
       }
     })()
+
+    // FEAT-68: a "stuck" signal on a BRIDGED workbook item also seeds the
+    // learner-model re-test queue (parallel to the snapshot-block write above, which
+    // stays untouched — the two targeting systems coexist). Deterministic only:
+    // `item.workbookConfigId → activityConfig position → frontier concept`. The
+    // writer resolves + gates (unmapped / uncurated source ⇒ no write, no guess) and
+    // is fire-and-forget, so it never blocks the tap.
+    if (value === 'stuck') {
+      const config = current.workbookConfigId
+        ? configs.find((c) => c.id === current.workbookConfigId)
+        : undefined
+      void enqueueStuckRetests(
+        familyId,
+        selectedChildId,
+        current,
+        config,
+        new Date().toISOString(),
+      )
+    }
   }
 
   const rawChecklist = dayLog.checklist ?? []
