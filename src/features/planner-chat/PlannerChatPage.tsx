@@ -100,6 +100,7 @@ import type { AdjustmentIntent } from './chatPlanner.logic'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
 import ContextDrawer from './ContextDrawer'
+import FoundationsFocusLine from './FoundationsFocusLine'
 import LessonCardPreview from './LessonCardPreview'
 import PlanSummaryPanel from './PlanSummaryPanel'
 import { useScan } from '../../core/hooks/useScan'
@@ -2405,6 +2406,11 @@ ${dayPrompts}`
 
       {activeChildId && (
         <>
+          {/* One-line ambient foundation focus (FEAT-65, §7.3) — sourced from the
+              learner model's synthesis; taps through to the Foundations tab.
+              Renders nothing when the model is empty / no-data. */}
+          <FoundationsFocusLine childId={activeChildId} />
+
           {/* Proposed adjustment handed off from Shelly chat (chunk 2A/2).
               Surfaced for review — it's already folded into the week notes /
               generation context. Shelly still reviews + locks in below; this
