@@ -522,7 +522,7 @@ function extractSubjectFromTitle(title?: string): string | null {
 
 // ── Prompt building ─────────────────────────────────────────────
 
-const WEEKLY_REVIEW_ADDENDUM = `
+export const WEEKLY_REVIEW_ADDENDUM = `
 WEEKLY REVIEW ROLE:
 You are generating a weekly review for the Barnes family homeschool. Analyze the week's data and provide actionable feedback.
 
@@ -535,7 +535,9 @@ REVIEW-SPECIFIC GUIDANCE:
 - Warm, encouraging, practical tone. Never clinical or condescending.
 - Speak as a knowledgeable partner, not an authority figure.
 - Include disposition observations in the weekly summary alongside completion data.
-- Use the Skill Snapshot, Evaluation History, and Recent Scans sections to ground wins, growth areas, and pace adjustments in concrete skill progression — not just completion counts.
+- Use the Skill Snapshot, Evaluation History, Recent Scans, and the LEARNER MODEL section (Working edge / What matters next) to ground wins, growth areas, and pace adjustments in concrete skill progression — not just completion counts.
+- When the LEARNER MODEL names a "What matters next" move, your recommendations and pace adjustments should point toward that frontier, not away from it. If you deliberately suggest something different, say why in the rationale. Treat "Working edge" concepts as this child's current focus.
+- Ground pace adjustments in skill progression (snapshot stop-rules/supports + the model's frontier), not completion counts.
 - If quest or evaluation sessions happened this week, cite them by domain (phonics / comprehension / math / fluency) and reference the working level.
 - If recent scans recommend skip or quick-review, surface that as a pace adjustment rationale.
 - If activity configs show a "daily" or "3x" frequency and this week's dayLogs didn't match, call it out gently as a growth area (not a failure).
@@ -994,6 +996,21 @@ export const generateWeeklyReviewNow = onCall(
 
     try {
       const ctx = await assembleWeekContext(familyId, childId, weekKey);
+
+      // FEAT-74 (G4): synthesize-if-stale BEFORE generating, mirroring the Sunday
+      // cron ordering, so the manual review also grounds on a fresh model frontier.
+      // Isolated in its own try/catch — a synthesis failure must never block the
+      // review (it falls back to whatever synthesis is stored).
+      try {
+        const db = getFirestore();
+        await synthesizeIfStale(db, familyId, childId, ctx.child.name, apiKey);
+      } catch (synthErr) {
+        console.error(
+          `generateWeeklyReviewNow: synthesizeIfStale failed for family=${familyId} child=${childId}:`,
+          synthErr,
+        );
+      }
+
       await generateReviewForChild(familyId, ctx, apiKey);
     } catch (err) {
       if (err instanceof HttpsError) throw err;
@@ -1010,6 +1027,53 @@ export const generateWeeklyReviewNow = onCall(
     return { success: true };
   },
 );
+
+// ── Per-child weekly cycle (synthesize → review) ────────────────
+
+/**
+ * Run one child's weekly cycle: FEAT-74 (G4) synthesize-if-stale FIRST so the
+ * review reads a fresh learner-model frontier, THEN generate the review. Each
+ * step is isolated in its own try/catch — a synthesis failure must NEVER block
+ * the review (the review then reads whatever synthesis is stored, served-stale),
+ * and a review failure never leaks out of the loop.
+ *
+ * Deps are injectable so the ordering + failure-isolation are unit-testable
+ * without a live Firestore (see evaluate.test.ts).
+ */
+export async function runWeeklyReviewCycleForChild(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  childName: string,
+  weekKey: string,
+  apiKey: string,
+  deps: {
+    synthesizeIfStale: typeof synthesizeIfStale;
+    assembleWeekContext: typeof assembleWeekContext;
+    generateReviewForChild: typeof generateReviewForChild;
+  } = { synthesizeIfStale, assembleWeekContext, generateReviewForChild },
+): Promise<void> {
+  // 1) Refresh the learner model FIRST (FEAT-57 beat, reordered for FEAT-74).
+  try {
+    await deps.synthesizeIfStale(db, familyId, childId, childName, apiKey);
+  } catch (err) {
+    console.error(
+      `Failed to synthesize learner model for family=${familyId} child=${childId}:`,
+      err,
+    );
+  }
+
+  // 2) Generate the review — now grounded on the fresh frontier.
+  try {
+    const ctx = await deps.assembleWeekContext(familyId, childId, weekKey);
+    await deps.generateReviewForChild(familyId, ctx, apiKey);
+  } catch (err) {
+    console.error(
+      `Failed to generate weekly review for family=${familyId} child=${childId}:`,
+      err,
+    );
+  }
+}
 
 // ── Scheduled Cloud Function ────────────────────────────────────
 
@@ -1035,30 +1099,13 @@ export const weeklyReview = onSchedule(
 
       for (const childDoc of childrenSnap.docs) {
         const childId = childDoc.id;
+        const childName = (childDoc.data()?.name as string) || "";
 
-        try {
-          const ctx = await assembleWeekContext(familyId, childId, weekKey);
-          await generateReviewForChild(familyId, ctx, apiKey);
-        } catch (err) {
-          console.error(
-            `Failed to generate weekly review for family=${familyId} child=${childId}:`,
-            err,
-          );
-        }
-
-        // FEAT-57 (Phase 3a): piggyback the Learner Model synthesis beat on the
-        // Sunday loop (D4 — no new scheduled function). Guarded inside: skips
-        // children with no model, and regenerates only when the synthesis is stale
-        // (a writer marked it, or it has none yet). Failures never block the loop.
-        try {
-          const childName = (childDoc.data()?.name as string) || "";
-          await synthesizeIfStale(db, familyId, childId, childName, apiKey);
-        } catch (err) {
-          console.error(
-            `Failed to synthesize learner model for family=${familyId} child=${childId}:`,
-            err,
-          );
-        }
+        // FEAT-57 / FEAT-74: synthesize-if-stale FIRST, then generate the review
+        // on the fresh frontier. Failure isolation lives inside the helper.
+        await runWeeklyReviewCycleForChild(
+          db, familyId, childId, childName, weekKey, apiKey,
+        );
       }
     }
   },
