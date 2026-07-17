@@ -79,15 +79,17 @@ export async function synthesizeLearnerModelForChild(
     result = await callClaude({
       apiKey,
       model: modelId,
-      // Output ceiling. FEAT-57/D6 set this at ~1k when a seeded model evidenced
-      // ~6 concepts; the position-sync work multiplied that (~42 concepts, ~29
-      // forming), so a full synthesis (up to 3 moves + a 3–5 sentence narrative +
-      // one line per open question) can exceed 1k and truncate mid-JSON, which
-      // reads as an unparseable reply. Doubled to 2000 (still one Sonnet call per
-      // child per regen). The INPUT is not the pressure: even a fully-evidenced
-      // model renders a ~4k-token prompt — well within Sonnet's budget — so the
+      // Output ceiling (FEAT-57/D6, twice amended). D6 first set ~1k (seeded ~6
+      // concepts); position-sync multiplied that (~42 concepts) and the first
+      // amendment doubled to 2000. Two consecutive truncation-class failures
+      // later, the second amendment raises it to 4000 — headroom for the JSON
+      // contract (up to 3 moves + a 3–5 sentence narrative + one line per open
+      // question) plus any residual reasoning overhead the low-effort setting
+      // still leaves. Still one Sonnet call per child per regen (~2x the prior
+      // ceiling). The INPUT is not the pressure: even a fully-evidenced model
+      // renders a ~4k-token prompt — well within Sonnet's budget — so the
       // synthesis context is left at its design summary shape, untrimmed.
-      maxTokens: 2000,
+      maxTokens: 4000,
       // Structured summarization against provided evidence — run at LOW effort so
       // Sonnet 5's default adaptive-thinking-at-HIGH can't burn the whole output
       // budget on reasoning and emit zero visible text (FEAT-77, second D6).
