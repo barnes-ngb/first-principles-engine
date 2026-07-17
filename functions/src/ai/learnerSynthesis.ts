@@ -105,6 +105,18 @@ export async function synthesizeLearnerModelForChild(
     return { status: "failed", detail };
   }
 
+  // Empty-reply guard (FEAT-77): the model call can succeed yet return zero
+  // visible text when reasoning consumes the whole output budget (Sonnet 5's
+  // default adaptive-thinking-at-HIGH). That is NOT a parse failure — fail with
+  // its own named message carrying the usage numbers, so an empty reply never
+  // masquerades as unparseable JSON (empty raw head) again. `outputTokens` counts
+  // thinking + visible text; with no visible text, all of it was reasoning.
+  if (!result.text.trim()) {
+    const detail = `Model returned no text (${result.outputTokens} output/thinking tokens consumed, 0 visible text) — likely reasoning consumed the budget; check effort/maxTokens.`;
+    console.warn(`[learnerSynthesis] Empty synthesis reply for ${familyId}/${childId} — prior synthesis kept. ${detail}`);
+    return { status: "failed", detail };
+  }
+
   const parsed = parseSynthesisResponse(result.text);
   if (!parsed) {
     // Include the first ~200 chars of the raw reply (whitespace collapsed) so a

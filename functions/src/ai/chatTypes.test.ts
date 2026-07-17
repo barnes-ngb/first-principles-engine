@@ -66,4 +66,27 @@ describe("callClaude reasoning-effort", () => {
     const body = mockCreate.mock.calls[0][0] as Record<string, unknown>;
     expect(body).not.toHaveProperty("output_config");
   });
+
+  it("extracts the text block from a [thinking, text] response (FEAT-77 — thinking is skipped, not returned)", async () => {
+    // With adaptive thinking on, the response can be [thinking, text]. Extraction
+    // must return the text block, never the thinking block or an empty string.
+    mockCreate.mockResolvedValueOnce({
+      content: [
+        { type: "thinking", thinking: "let me reason about this at length…" },
+        { type: "text", text: '{"narrative":"ok"}' },
+      ],
+      usage: { input_tokens: 5, output_tokens: 9 },
+      stop_reason: "end_turn",
+    });
+
+    const result = await callClaude({
+      apiKey: "k",
+      model: "claude-sonnet-5",
+      maxTokens: 4000,
+      systemPrompt: "SYS",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(result.text).toBe('{"narrative":"ok"}');
+  });
 });
