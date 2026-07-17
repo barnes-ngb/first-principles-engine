@@ -78,6 +78,33 @@ export function resolveModelForTask(taskType: string): string {
 }
 
 /**
+ * The `temperature` sampling param (and its siblings `top_p` / `top_k`) was
+ * **removed** on the Sonnet-5 / Opus-4.6+ generation. A request to one of those
+ * models that carries `temperature` fails with
+ * `400 invalid_request_error: "temperature is deprecated for this model."`, which
+ * the function layer wraps as a 503/UNAVAILABLE (FEAT-58 follow-up). Haiku 4.5
+ * (and older models) still accept `temperature`.
+ *
+ * The AI request builders (`callClaude` in chatTypes.ts, the provider adapter in
+ * providers/claude.ts) gate `temperature` through this predicate so a request to a
+ * rejecting model never carries it — a mixed-fleet-safe conditional, not a blanket
+ * removal (Haiku legitimately accepts it). This is an **allowlist, not a
+ * denylist**: an unknown/unlisted model defaults to *omitting* temperature (the
+ * param is optional, so omission is always safe), which means a newly added
+ * current-generation model can never silently regress into a 503 on it.
+ *
+ * Note on siblings: `top_p` / `top_k` are not sent anywhere in the AI layer, so
+ * there is nothing to gate for them today — this predicate covers the one param
+ * that is actually sent.
+ */
+const TEMPERATURE_ACCEPTING_MODELS: ReadonlySet<string> = new Set([CLAUDE_HAIKU]);
+
+/** True when `model` still accepts the legacy `temperature` sampling param. */
+export function modelAcceptsTemperature(model: string): boolean {
+  return TEMPERATURE_ACCEPTING_MODELS.has(model);
+}
+
+/**
  * Reasoning-effort levels the Messages API exposes for the Sonnet-5 / 4.6+
  * generation (`output_config.effort`, GA — no beta header). Lower effort ⇒ the
  * model spends fewer tokens on internal reasoning before it answers.

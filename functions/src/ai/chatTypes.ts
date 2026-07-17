@@ -1,5 +1,6 @@
 import type { Firestore } from "firebase-admin/firestore";
 import type { ReasoningEffort } from "./models.js";
+import { modelAcceptsTemperature } from "./models.js";
 
 // ── Task handler types ──────────────────────────────────────────
 
@@ -81,7 +82,13 @@ export async function callClaude(opts: {
   maxTokens: number;
   systemPrompt: string;
   messages: Array<{ role: string; content: string }>;
-  /** Optional temperature override; when omitted, Anthropic's default applies. */
+  /**
+   * Optional temperature override; when omitted, Anthropic's default applies.
+   * **Only sent to models that still accept it** (`modelAcceptsTemperature`) — the
+   * Sonnet-5 / Opus-4.6+ generation removed `temperature` and 400s on it, so it is
+   * gated out for those models even when a caller supplies a value (FEAT-58
+   * follow-up).
+   */
   temperature?: number;
   /**
    * When set, enables Anthropic's server-side web search tool on this call,
@@ -113,7 +120,9 @@ export async function callClaude(opts: {
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
-    ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+    ...(opts.temperature !== undefined && modelAcceptsTemperature(opts.model)
+      ? { temperature: opts.temperature }
+      : {}),
     ...(opts.webSearch
       ? {
           tools: [
