@@ -1,7 +1,7 @@
 # GDQ Kit Builder — roster capture for Barnes Bros kits
 
-**Status:** NEW (design) · v0.1 · 2026-07-17
-**Ledger anchor:** FEAT-78 (design-first; no build assigned)
+**Status:** IN BUILD · v0.2 · 2026-07-17 (slice 1 shipped)
+**Ledger anchor:** FEAT-78 (design) · **FEAT-80** (code — slice 1: roster type + collection + parent-entry form)
 **Reuse base:** the Story Guide capture surface (`src/features/books/StoryGuide*`) + the Barnes Bros business feature (`src/features/business/*`, `src/core/types/business.ts`)
 **Companion strategy docs:** `GARDEN_DEFENSE_QUEST_PLAN.md` (FEAT-29), `SEED_VAULT_V1_RUNBOOK.md`, `BUSINESS_TAB_DESIGN.md` (FEAT-30)
 
@@ -284,10 +284,15 @@ minimally:
 
 Serialized slices — each a reviewable PR, smallest-testable-thing first:
 
-1. **Roster type + collection + a manual/parent-entry roster form.** Ship the `KitRoster` types, the
-   `kitRostersCollection` helper + converter, and a plain parent-entry form (type in a roster and save
-   it). This lands the **data model, testable, before the kid flow** — the smallest thing that stores a
-   real roster. First slice.
+1. **Roster type + collection + a manual/parent-entry roster form.** ✅ **SHIPPED (FEAT-80, slice 1).**
+   Ship the `KitRoster` types, the `kitRostersCollection` helper + converter, and a plain parent-entry
+   form (type in a roster and save it). This lands the **data model, testable, before the kid flow** —
+   the smallest thing that stores a real roster. First slice. *As built:* `KitRoster` / `KitDefender` /
+   `KitInvader` / `KitRosterStatus` in `src/core/types/business.ts` (§2 shape, verbatim); the
+   `kitRostersCollection` auto-ID helper + `kitRosterConverter` in `firestore.ts` (mirrors `businessLog`);
+   `useKitRosters` (list/create/update/get); `KitBuilderForm` (plain MUI form, add/remove defender +
+   invader rows, verbatim words, target-hint not a cap, partial saves valid); `KitBuilderSection` entry
+   point on `BusinessPage` (roster list + status chip + "New kit" / empty state). No voice flow (slice 2).
 2. **The voice capture flow.** Extract the shared capture primitive from the Story Guide
    (presentational component + voice/TTS/confirm loop), then build the Kit Builder orchestration on top,
    **including the repeating defender/invader pattern** (§3a) with mid-list write-through + resume.
