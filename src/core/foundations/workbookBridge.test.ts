@@ -4,13 +4,14 @@ import {
   applyBridgeCoverageToModel,
   bridgeCoveredConcepts,
   isPositionAddressable,
+  matchWorkbookBridge,
   maxWitnessedNativePosition,
   resolveNativePosition,
   resolveSyncNativePosition,
   workbookBridgeForSource,
 } from './workbookBridge'
 import type { BridgeCoverage, WorkbookBridge } from './workbookBridge'
-import { fastPhonicsWorkbookBridge } from './fastPhonicsBridge'
+import { fastPhonicsWorkbookBridge, normalizeSourceName } from './fastPhonicsBridge'
 import type { LearnerModel, ModalityCalibration } from '../types/learnerModel'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
@@ -87,6 +88,143 @@ describe('workbookBridgeForSource', () => {
     expect(workbookBridgeForSource('The Good and the Beautiful Math')).toBeNull()
     expect(workbookBridgeForSource('')).toBeNull()
     expect(workbookBridgeForSource(undefined)).toBeNull()
+  })
+})
+
+// ── Normalized-contains matching against the FAMILY'S real display names ───
+//
+// After FEAT-64 merged, the diag "Sync curriculum positions" reported "no bridge
+// yet" for ALL six workbooks — including the three FEAT-64 bridged — because the
+// family's real display names carry extra words the alias list never had
+// ("Mathseeds Mental Minute", "Fast Phonics (Reading Eggs)", "…Language Arts Level
+// 1"), so exact-normalized equality could never hit. These are the SIX EXACT
+// display names from the owner's 2026-07-16 screenshot; exactly names 2, 3, and 5
+// resolve to a bridge, the other three are honestly unbridged.
+
+describe('workbookBridgeForSource — contains-matching the six family display names', () => {
+  it('(1) The Good and the Beautiful — My First Nature Reader → no bridge', () => {
+    // A TGTB reader, NOT the LA course — no "language arts" token, so no match.
+    expect(
+      workbookBridgeForSource('The Good and the Beautiful — My First Nature Reader'),
+    ).toBeNull()
+  })
+
+  it('(2) Fast Phonics (Reading Eggs) → fastPhonics (contains "fastphonics")', () => {
+    expect(workbookBridgeForSource('Fast Phonics (Reading Eggs)')?.sourceId).toBe(
+      'fastPhonics',
+    )
+  })
+
+  it('(3) Mathseeds Mental Minute → mathseeds (contains "mathseeds")', () => {
+    expect(workbookBridgeForSource('Mathseeds Mental Minute')?.sourceId).toBe(
+      'mathseeds',
+    )
+  })
+
+  it('(4) The Good and the Beautiful Math → no bridge (must NOT false-match TGTB LA)', () => {
+    // The negative assertion the run calls out: the TGTB LA aliases are specific to
+    // "…language arts", so TGTB MATH — a distinct, still-unbridged curriculum — does
+    // NOT resolve to the LA bridge.
+    expect(workbookBridgeForSource('The Good and the Beautiful Math')).toBeNull()
+    expect(matchWorkbookBridge('The Good and the Beautiful Math').status).toBe('none')
+  })
+
+  it('(5) The Good and the Beautiful Language Arts Level 1 → tgtbLanguageArts1', () => {
+    expect(
+      workbookBridgeForSource('The Good and the Beautiful Language Arts Level 1')
+        ?.sourceId,
+    ).toBe('tgtbLanguageArts1')
+  })
+
+  it('(6) Let’s Read with Alex & Steve — A Decodable Series… → no bridge', () => {
+    expect(
+      workbookBridgeForSource(
+        "Let's Read with Alex & Steve — A Decodable Series for Minecraft Readers",
+      ),
+    ).toBeNull()
+  })
+
+  it('resolves EXACTLY the three bridged names (2, 3, 5) and no others', () => {
+    const NAMES = [
+      'The Good and the Beautiful — My First Nature Reader',
+      'Fast Phonics (Reading Eggs)',
+      'Mathseeds Mental Minute',
+      'The Good and the Beautiful Math',
+      'The Good and the Beautiful Language Arts Level 1',
+      "Let's Read with Alex & Steve — A Decodable Series for Minecraft Readers",
+    ]
+    const resolved = NAMES.map((n) => workbookBridgeForSource(n)?.sourceId ?? null)
+    expect(resolved).toEqual([
+      null,
+      'fastPhonics',
+      'mathseeds',
+      null,
+      'tgtbLanguageArts1',
+      null,
+    ])
+  })
+})
+
+describe('matchWorkbookBridge — over-match guard, ties, and ambiguity', () => {
+  it('the boundary shipped alias (`tgtb la` → `tgtbla`, exactly 6 chars) participates in contains-matching', () => {
+    // The over-match guard admits aliases ≥ 6 normalized chars. `tgtbla` is exactly
+    // 6, so it is found INSIDE a longer name (not just by whole-name equality). This
+    // pins the reported fact: NO shipped alias is excluded by the guard today — the
+    // shortest sits right at the threshold. (A shorter FUTURE alias would be excluded.)
+    const m = matchWorkbookBridge('My TGTB LA workbook 2026')
+    expect(m.status).toBe('matched')
+    if (m.status === 'matched') expect(m.bridge.sourceId).toBe('tgtbLanguageArts1')
+  })
+
+  it('a ≥6-char alias participates in contains-matching', () => {
+    // `mathseeds` (9 chars) found inside a longer display name.
+    expect(matchWorkbookBridge('Mathseeds Mental Minute')).toEqual({
+      status: 'matched',
+      bridge: expect.objectContaining({ sourceId: 'mathseeds' }),
+      alias: expect.any(String),
+    })
+  })
+
+  it('prefers the LONGEST matching alias when several could match', () => {
+    // "…language arts level 1" contains BOTH "good and the beautiful language arts"
+    // and the longer "the good and the beautiful language arts"; the longest (most
+    // specific) one wins and the bridge is unambiguous.
+    const m = matchWorkbookBridge('The Good and the Beautiful Language Arts Level 1')
+    expect(m.status).toBe('matched')
+    if (m.status === 'matched') {
+      expect(m.bridge.sourceId).toBe('tgtbLanguageArts1')
+      expect(normalizeSourceName(m.alias).length).toBeGreaterThanOrEqual(6)
+    }
+  })
+
+  it('none of the six real family names is ambiguous (single bridge or none)', () => {
+    // Ambiguity (two bridges tied on the longest matching alias) is a curation guard
+    // that must NOT trip on today's data — the alias sets are specific enough.
+    const NAMES = [
+      'The Good and the Beautiful — My First Nature Reader',
+      'Fast Phonics (Reading Eggs)',
+      'Mathseeds Mental Minute',
+      'The Good and the Beautiful Math',
+      'The Good and the Beautiful Language Arts Level 1',
+      "Let's Read with Alex & Steve — A Decodable Series for Minecraft Readers",
+    ]
+    for (const n of NAMES) {
+      expect(matchWorkbookBridge(n).status).not.toBe('ambiguous')
+    }
+  })
+
+  it('exact-normalized names still resolve (no regression)', () => {
+    expect(workbookBridgeForSource('fastPhonics')).toBe(fastPhonicsWorkbookBridge)
+    expect(workbookBridgeForSource('Fast Phonics')).toBe(fastPhonicsWorkbookBridge)
+    expect(workbookBridgeForSource('tgtb la')?.sourceId).toBe('tgtbLanguageArts1')
+    expect(workbookBridgeForSource('math seeds')?.sourceId).toBe('mathseeds')
+  })
+
+  it('an unrecognized name is `none`, an empty/nullish name is `none`', () => {
+    expect(matchWorkbookBridge('totally unrelated curriculum').status).toBe('none')
+    expect(matchWorkbookBridge('').status).toBe('none')
+    expect(matchWorkbookBridge(undefined).status).toBe('none')
+    expect(matchWorkbookBridge(null).status).toBe('none')
   })
 })
 

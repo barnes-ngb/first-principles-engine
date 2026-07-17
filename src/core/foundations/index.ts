@@ -20,6 +20,8 @@ export {
 export type { BridgeUnit, CurriculumBridge, BridgeEvidence } from './fastPhonicsBridge'
 export {
   workbookBridgeForSource,
+  matchWorkbookBridge,
+  MIN_CONTAINS_ALIAS_LENGTH,
   bridgeCoveredConcepts,
   resolveNativePosition,
   resolveSyncNativePosition,
@@ -32,6 +34,7 @@ export {
 export type {
   WorkbookBridge,
   WorkbookBridgeUnit,
+  WorkbookBridgeMatch,
   BridgeCoverage,
   AppliedBridgeCoverage,
 } from './workbookBridge'
