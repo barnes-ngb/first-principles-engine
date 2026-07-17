@@ -230,6 +230,12 @@ export interface EvaluationSession {
   findings: EvaluationFinding[]
   recommendations: EvaluationRecommendation[]
   summary?: string
+  /**
+   * The one-line "learning frontier" the completed evaluation named (FEAT-75) —
+   * retained on the session record so the Evaluation History can surface it
+   * read-only after the fact. Display only; not wired into any generator.
+   */
+  frontier?: string
   evaluatedAt: string
   nextEvalDate?: string
 }

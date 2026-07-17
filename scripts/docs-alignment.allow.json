@@ -12,10 +12,6 @@
   ],
 
   "evidenceKindsAllow": {
-    "eval": {
-      "reason": "forward declaration; writer lands in Learner Model slice 3",
-      "ledger": "FEAT-46"
-    },
     "scan": {
       "reason": "forward declaration; writer lands in Learner Model slice 3",
       "ledger": "FEAT-46"

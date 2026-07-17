@@ -106,6 +106,15 @@ export interface ConceptStateEntry {
   evidence: EvidenceRef[]
   /** ISO stamp of when the seeder last wrote this entry. */
   seededAt?: string
+  /**
+   * Set true (FEAT-76) when a guided evaluation disagreed with a concept that
+   * carries a parent `attestation` EvidenceRef. The parent's deliberate word is
+   * never auto-flipped, so the state is left as attested and the eval evidence
+   * appended; this flag lets the Foundations tab surface a "the model has a new
+   * take — view & reconcile" affordance (FEAT-49 §6.3 precedent). Cleared back
+   * to false once a later eval agrees with the standing state.
+   */
+  needsReconcile?: boolean
 }
 
 /**
