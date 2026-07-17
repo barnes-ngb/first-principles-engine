@@ -36,12 +36,16 @@ describe("model table (FEAT-58)", () => {
     }
   });
 
-  it("Opus 4.8 pilot covers exactly evaluate + learnerSynthesis", () => {
+  it("Opus 4.8 pilot is suspended — evaluate + learnerSynthesis fall back to Sonnet, no task uses Opus", () => {
+    // Pilot suspended 2026-07-16 (first live call failed before quality could be
+    // assessed). The CLAUDE_OPUS constant is retained for the expected re-pilot,
+    // but no task resolves to it.
     const opusTasks = Object.entries(MODEL_BY_TASK)
       .filter(([, model]) => model === CLAUDE_OPUS)
-      .map(([task]) => task)
-      .sort();
-    expect(opusTasks).toEqual(["evaluate", "learnerSynthesis"]);
+      .map(([task]) => task);
+    expect(opusTasks).toEqual([]);
+    expect(resolveModelForTask("evaluate")).toBe(CLAUDE_SONNET);
+    expect(resolveModelForTask("learnerSynthesis")).toBe(CLAUDE_SONNET);
   });
 
   it("generate / chat stay on Haiku; unlisted tasks default to Haiku", () => {
