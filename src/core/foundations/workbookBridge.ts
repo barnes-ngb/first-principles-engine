@@ -95,6 +95,16 @@ export interface WorkbookBridge {
    */
   lessonToUnit?: (configLesson: number) => number | null
   /**
+   * The curriculum LEVEL this bridge represents, when it is one of a leveled series
+   * (TGTB Language Arts is Levels 1–5; this bridge is Level 1). Used ONLY as a
+   * contains-match conflict guard: a workbook name that explicitly declares a
+   * DIFFERENT level (e.g. "…Language Arts Level 2") must NOT resolve to this bridge
+   * via a generic, level-less alias — otherwise a Level-2 course would silently be
+   * written Level-1 evidence (the FEAT-64-amendment P1). Unleveled bridges leave it
+   * unset and the guard never fires.
+   */
+  level?: number
+  /**
    * True when `lessonToUnit` produces a *provisional GUESS* rather than a witnessed
    * position — the Fast Phonics case (`ceil(lesson / LESSONS_PER_PEAK)`, FEAT-64 §3).
    * When set, the sync applies the **conflict rule**: a divisor-guessed native
@@ -150,10 +160,30 @@ export type WorkbookBridgeMatch =
  *     ≥ {@link MIN_CONTAINS_ALIAS_LENGTH} chars.
  * "Longest" ⇒ the most specific alias, used to break cross-bridge ties.
  */
+/**
+ * Extract an explicit curriculum LEVEL from a normalized workbook key, if the name
+ * states one — `level<n>` / `lvl<n>`, or the language-arts abbreviations
+ * `languagearts<n>` / `la<n>`. Returns the number, or `null` when the name names no
+ * level. Only consulted for level-scoped bridges (the conflict guard below), where a
+ * false read fails SAFE — it suppresses a match (honest "no bridge yet") rather than
+ * writing evidence for the wrong level.
+ */
+export function levelInName(key: string): number | null {
+  const m = key.match(/(?:level|lvl|languagearts|la)(\d+)/)
+  return m ? Number.parseInt(m[1], 10) : null
+}
+
 function bestBridgeMatch(
   bridge: WorkbookBridge,
   key: string,
 ): { length: number; alias: string } | null {
+  // Level-conflict guard: a leveled bridge (e.g. TGTB LA1) must not match a name
+  // that explicitly declares a DIFFERENT level — else "…Language Arts Level 2" would
+  // resolve to Level 1 through a generic, level-less alias and corrupt the model.
+  if (bridge.level != null) {
+    const nameLevel = levelInName(key)
+    if (nameLevel != null && nameLevel !== bridge.level) return null
+  }
   let best: { length: number; alias: string } | null = null
   for (const candidate of [bridge.sourceId, ...bridge.aliases]) {
     const norm = normalizeSourceName(candidate)

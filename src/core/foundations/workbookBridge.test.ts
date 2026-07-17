@@ -4,6 +4,7 @@ import {
   applyBridgeCoverageToModel,
   bridgeCoveredConcepts,
   isPositionAddressable,
+  levelInName,
   matchWorkbookBridge,
   maxWitnessedNativePosition,
   resolveNativePosition,
@@ -218,6 +219,40 @@ describe('matchWorkbookBridge — over-match guard, ties, and ambiguity', () => 
     expect(workbookBridgeForSource('Fast Phonics')).toBe(fastPhonicsWorkbookBridge)
     expect(workbookBridgeForSource('tgtb la')?.sourceId).toBe('tgtbLanguageArts1')
     expect(workbookBridgeForSource('math seeds')?.sourceId).toBe('mathseeds')
+  })
+
+  it('does NOT match a DIFFERENT TGTB LA level to the Level-1 bridge (P1 guard)', () => {
+    // A generic, level-less alias ("…language arts") is contained in "…Level 2", but
+    // the level-conflict guard must reject it so a Level-2 course never gets written
+    // Level-1 evidence. Same for the "LA2" abbreviation.
+    expect(
+      workbookBridgeForSource('The Good and the Beautiful Language Arts Level 2'),
+    ).toBeNull()
+    expect(matchWorkbookBridge('The Good and the Beautiful Language Arts Level 2').status).toBe(
+      'none',
+    )
+    expect(workbookBridgeForSource('The Good and the Beautiful Language Arts Level 3')).toBeNull()
+    expect(workbookBridgeForSource('TGTB LA2')).toBeNull()
+  })
+
+  it('still matches Level 1 whether the level is stated, abbreviated, or omitted', () => {
+    expect(
+      workbookBridgeForSource('The Good and the Beautiful Language Arts Level 1')?.sourceId,
+    ).toBe('tgtbLanguageArts1')
+    expect(workbookBridgeForSource('TGTB LA1')?.sourceId).toBe('tgtbLanguageArts1')
+    // No level stated → the generic alias still resolves (the guard only fires on a
+    // DECLARED conflicting level).
+    expect(workbookBridgeForSource('The Good and the Beautiful Language Arts')?.sourceId).toBe(
+      'tgtbLanguageArts1',
+    )
+  })
+
+  it('levelInName reads a declared level, else null', () => {
+    expect(levelInName('thegoodandthebeautifullanguageartslevel2')).toBe(2)
+    expect(levelInName('tgtbla3')).toBe(3)
+    expect(levelInName('languagearts1')).toBe(1)
+    expect(levelInName('fastphonicsreadingeggs')).toBeNull()
+    expect(levelInName('mathseedsmentalminute')).toBeNull()
   })
 
   it('an unrecognized name is `none`, an empty/nullish name is `none`', () => {

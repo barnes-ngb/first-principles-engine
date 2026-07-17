@@ -21,6 +21,7 @@ export type { BridgeUnit, CurriculumBridge, BridgeEvidence } from './fastPhonics
 export {
   workbookBridgeForSource,
   matchWorkbookBridge,
+  levelInName,
   MIN_CONTAINS_ALIAS_LENGTH,
   bridgeCoveredConcepts,
   resolveNativePosition,
