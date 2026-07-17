@@ -408,3 +408,13 @@ export function parseSynthesisResponse(text: string): ParsedSynthesis | null {
 
 /** Total node count — a tiny export so tests can sanity-check the summary import. */
 export const SYNTHESIS_NODE_COUNT = FOUNDATION_SUMMARY_NODES.length;
+
+/**
+ * The first `max` characters of a raw LLM reply, with all whitespace collapsed to
+ * single spaces — for the parse-failure detail so an un-parseable response names
+ * itself (DOC-09). If a third failure mode ever appears (a refusal, a wrong
+ * shape), its head is now visible in the diag panel instead of a generic line.
+ */
+export function rawResponseHead(text: string, max = 200): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, max);
+}

@@ -5,6 +5,7 @@ import {
   computeFanOut,
   orderMoveCandidates,
   parseSynthesisResponse,
+  rawResponseHead,
   SYNTHESIS_DISPLAY_RULES,
   type StoredLearnerModel,
 } from "./learnerSynthesis.js";
@@ -142,8 +143,63 @@ describe("parseSynthesisResponse", () => {
     expect(parsed.whatMattersNext.length).toBeLessThanOrEqual(3);
   });
 
+  it("parses a reply wrapped in ```json fences", () => {
+    const body = JSON.stringify({
+      whatMattersNext: [
+        { conceptId: "reading.phonics.longVowels", why: "Blends are solid; long vowels are next.", suggestedVehicle: "quest" },
+      ],
+      narrative: "Reading with real momentum.",
+      openQuestionsSummary: [],
+    });
+    const parsed = parseSynthesisResponse("```json\n" + body + "\n```")!;
+    expect(parsed).not.toBeNull();
+    expect(parsed.narrative).toContain("momentum");
+    expect(parsed.whatMattersNext[0].conceptId).toBe("reading.phonics.longVowels");
+  });
+
+  it("parses a reply with a one-line preamble before the object", () => {
+    const body = JSON.stringify({
+      whatMattersNext: [
+        { conceptId: "reading.phonics.digraphs", why: "Two letters, one sound — worth confirming.", suggestedVehicle: "routine" },
+      ],
+      narrative: "Steady progress across the board.",
+      openQuestionsSummary: ["Worth a quick check on digraphs."],
+    });
+    const parsed = parseSynthesisResponse("Here is the synthesis JSON:\n" + body)!;
+    expect(parsed).not.toBeNull();
+    expect(parsed.narrative).toContain("Steady progress");
+    expect(parsed.whatMattersNext[0].conceptId).toBe("reading.phonics.digraphs");
+    expect(parsed.openQuestionsSummary).toEqual(["Worth a quick check on digraphs."]);
+  });
+
+  it("parses through a bracketed aside before the object", () => {
+    const body = JSON.stringify({
+      whatMattersNext: [],
+      narrative: "Holding steady while we gather more evidence.",
+      openQuestionsSummary: [],
+    });
+    const parsed = parseSynthesisResponse("Here is the JSON [per the schema]:\n" + body)!;
+    expect(parsed).not.toBeNull();
+    expect(parsed.narrative).toContain("Holding steady");
+  });
+
   it("returns null on unparseable or empty-narrative replies (deterministic fallback)", () => {
     expect(parseSynthesisResponse("not json at all {{{")).toBeNull();
     expect(parseSynthesisResponse(JSON.stringify({ whatMattersNext: [], narrative: "" }))).toBeNull();
+  });
+});
+
+describe("rawResponseHead", () => {
+  it("collapses whitespace and caps at ~200 chars", () => {
+    const garbage = "I'm sorry,\n\tbut I can't\n  do that." + "x".repeat(300);
+    const head = rawResponseHead(garbage);
+    expect(head.length).toBe(200);
+    expect(head).not.toContain("\n");
+    expect(head).not.toContain("\t");
+    expect(head.startsWith("I'm sorry, but I can't do that.")).toBe(true);
+  });
+
+  it("returns short strings intact", () => {
+    expect(rawResponseHead("  broke early  ")).toBe("broke early");
   });
 });
