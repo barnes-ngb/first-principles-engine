@@ -46,7 +46,7 @@ import type { SightWordProgress, SkillSnapshot } from '../../core/types'
 const functions = getFunctions(app)
 const synthesizeFn = httpsCallable<
   { familyId: string; childId: string },
-  { success: boolean; status: string; synthesis?: LearnerSynthesis }
+  { success: boolean; status: string; detail?: string; synthesis?: LearnerSynthesis }
 >(functions, 'generateLearnerSynthesisNow')
 
 /** Display order + colors for the four state groups. */
@@ -230,7 +230,11 @@ export default function FoundationsDiagPanel() {
             loading: false,
             synthesizing: false,
             model: model && synthesis ? { ...model, synthesis, synthesisStaleAt: null } : model ?? null,
-            error: synthesis ? null : `Synthesis returned no result (status: ${res.data.status}).`,
+            error: synthesis
+              ? null
+              : `Synthesis returned no result (status: ${res.data.status})${
+                  res.data.detail ? ` — ${res.data.detail}` : ''
+                }.`,
           },
         }
       })
@@ -290,13 +294,26 @@ export default function FoundationsDiagPanel() {
         }
         if (lines.length === 0) lines.push('No tracked workbook positions for this child.')
 
+        // Refetch the model the sync just wrote so the Solid/Forming/Frontier/
+        // Not-yet chips + state lists reflect the new evidence immediately — no
+        // page reload. Best-effort: keep the prior model on a read failure.
+        let freshModel: LearnerModel | null = null
+        try {
+          const modelRef = doc(learnerModelsCollection(familyId), childId)
+          const freshSnap = await getDoc(modelRef)
+          freshModel = freshSnap.exists() ? (freshSnap.data() as LearnerModel) : null
+        } catch (err) {
+          console.warn('[FoundationsDiagPanel] post-sync model refetch failed', err)
+          freshModel = null
+        }
+
         setByChild((prev) => ({
           ...prev,
           [childId]: {
             loading: prev[childId]?.loading ?? false,
             syncingPositions: false,
             positionSyncLines: lines,
-            model: prev[childId]?.model ?? null,
+            model: freshModel ?? prev[childId]?.model ?? null,
             error: null,
           },
         }))

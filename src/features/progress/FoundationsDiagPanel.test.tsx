@@ -52,6 +52,13 @@ vi.mock('firebase/functions', () => ({
 
 import FoundationsDiagPanel from './FoundationsDiagPanel'
 
+function modelWith(
+  childId: string,
+  conceptStates: LearnerModel['conceptStates'],
+): LearnerModel {
+  return { ...minimalModel(childId), conceptStates }
+}
+
 function minimalModel(childId: string): LearnerModel {
   return {
     childId,
@@ -113,5 +120,67 @@ describe('FoundationsDiagPanel — synthesis button gate', () => {
     // synthesizing:true → disabled + label flips.
     await waitFor(() => expect(synthBtn()).toBeDisabled())
     expect(synthBtn()).toHaveTextContent('Synthesizing…')
+  })
+
+  it('surfaces the callable failure detail in the panel error line (no opaque "failed")', async () => {
+    modelsByChild = { lincoln: minimalModel('lincoln') }
+    // A failed synthesis now carries the underlying error class + message.
+    mockSynthesize.mockResolvedValue({
+      data: {
+        success: false,
+        status: 'failed',
+        detail: 'NotFoundError: model: claude-opus-4-8 not found',
+      },
+    })
+    render(<FoundationsDiagPanel />)
+    await waitFor(() => expect(synthBtn()).toBeEnabled())
+
+    await userEvent.click(synthBtn())
+
+    // The detail is rendered alongside the failure line — end-to-end from the
+    // mocked model-call rejection to the panel's error state.
+    expect(
+      await screen.findByText(
+        'Synthesis returned no result (status: failed) — NotFoundError: model: claude-opus-4-8 not found.',
+      ),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('FoundationsDiagPanel — post-sync refetch', () => {
+  beforeEach(() => {
+    modelsByChild = {}
+    mockSynthesize.mockReset()
+    mockUseChildren.mockReturnValue({
+      children: [{ id: 'lincoln', name: 'Lincoln' }],
+    })
+  })
+
+  const syncBtn = () =>
+    screen.getByRole('button', {
+      name: /Sync curriculum positions|Syncing/i,
+    }) as HTMLButtonElement
+
+  it('updates the rendered state counts after a successful sync from the changed model', async () => {
+    // Mount loads a model with a single solid concept (Forming: 0).
+    modelsByChild = {
+      lincoln: modelWith('lincoln', {
+        'reading.print.x': { state: 'solid', evidence: [] },
+      }),
+    }
+    render(<FoundationsDiagPanel />)
+    await waitFor(() => expect(screen.getByText('Forming: 0')).toBeInTheDocument())
+
+    // The sync "writes" a forming concept; the refetch must reflect it without
+    // a reload. (No tracked workbooks → the loop is a no-op, then it refetches.)
+    modelsByChild = {
+      lincoln: modelWith('lincoln', {
+        'reading.print.x': { state: 'solid', evidence: [] },
+        'math.regrouping': { state: 'forming', evidence: [] },
+      }),
+    }
+    await userEvent.click(syncBtn())
+
+    await waitFor(() => expect(screen.getByText('Forming: 1')).toBeInTheDocument())
   })
 })
