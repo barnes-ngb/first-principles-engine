@@ -26,6 +26,7 @@ import {
   buildSynthesisInput,
   buildSynthesisPrompt,
   parseSynthesisResponse,
+  rawResponseHead,
   type StoredLearnerModel,
 } from "./tasks/learnerSynthesis.js";
 
@@ -76,7 +77,15 @@ export async function synthesizeLearnerModelForChild(
     result = await callClaude({
       apiKey,
       model: modelId,
-      maxTokens: 1024,
+      // Output ceiling. FEAT-57/D6 set this at ~1k when a seeded model evidenced
+      // ~6 concepts; the position-sync work multiplied that (~42 concepts, ~29
+      // forming), so a full synthesis (up to 3 moves + a 3–5 sentence narrative +
+      // one line per open question) can exceed 1k and truncate mid-JSON, which
+      // reads as an unparseable reply. Doubled to 2000 (still one Sonnet call per
+      // child per regen). The INPUT is not the pressure: even a fully-evidenced
+      // model renders a ~4k-token prompt — well within Sonnet's budget — so the
+      // synthesis context is left at its design summary shape, untrimmed.
+      maxTokens: 2000,
       systemPrompt,
       messages: [{ role: "user", content: "Synthesize the judgment layer now. Return only the JSON." }],
     });
@@ -90,7 +99,10 @@ export async function synthesizeLearnerModelForChild(
 
   const parsed = parseSynthesisResponse(result.text);
   if (!parsed) {
-    const detail = "Synthesis response could not be parsed as JSON.";
+    // Include the first ~200 chars of the raw reply (whitespace collapsed) so a
+    // third failure mode — a refusal, a truncation past 2000, a wrong shape —
+    // names itself in the diag panel on the next tap (DOC-09).
+    const detail = `Synthesis response could not be parsed as JSON. Raw head: ${rawResponseHead(result.text)}`;
     console.warn(`[learnerSynthesis] Unparseable synthesis for ${familyId}/${childId} — prior synthesis kept. ${detail}`);
     return { status: "failed", detail };
   }
