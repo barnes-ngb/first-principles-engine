@@ -90,3 +90,64 @@ describe("callClaude reasoning-effort", () => {
     expect(result.text).toBe('{"narrative":"ok"}');
   });
 });
+
+// ── callClaude — temperature gating (FEAT-58 follow-up) ───────
+// `temperature` is deprecated/rejected on the Sonnet-5 / Opus-4.6+ generation and
+// must never appear in a request to those models, even when a caller supplies it.
+// Haiku 4.5 still accepts it, so the gate is conditional (Option B), not a blanket
+// removal.
+
+describe("callClaude temperature gating", () => {
+  beforeEach(() => {
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+      stop_reason: "end_turn",
+    });
+  });
+
+  it("omits temperature for a book-generation request on Sonnet 5 even when provided (0.7)", async () => {
+    // The generateStory / reviseStory / revisePage book paths pass temperature: 0.7
+    // and run on Sonnet 5 — the exact request that was 503-ing in production.
+    await callClaude({
+      apiKey: "k",
+      model: "claude-sonnet-5",
+      maxTokens: 6144,
+      temperature: 0.7,
+      systemPrompt: "SYS",
+      messages: [{ role: "user", content: "Generate the story now." }],
+    });
+
+    const body = mockCreate.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("temperature");
+  });
+
+  it("omits temperature for chat / learnerSynthesis-shaped requests (none supplied)", async () => {
+    await callClaude({
+      apiKey: "k",
+      model: "claude-sonnet-5",
+      maxTokens: 2000,
+      systemPrompt: "SYS",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const body = mockCreate.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("temperature");
+  });
+
+  it("still sends temperature to Haiku 4.5, which accepts it (conditional gate, not blanket removal)", async () => {
+    await callClaude({
+      apiKey: "k",
+      model: "claude-haiku-4-5-20251001",
+      maxTokens: 1024,
+      temperature: 0.7,
+      systemPrompt: "SYS",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ temperature: 0.7 }),
+    );
+  });
+});
