@@ -32,14 +32,18 @@ export const CLAUDE_HAIKU = "claude-haiku-4-5-20251001";
 export const DEFAULT_MODEL = CLAUDE_HAIKU;
 
 /**
- * Per-task model assignment. Sonnet 5 for complex reasoning; Opus 4.8 pilot on
- * exactly two tasks; Haiku for routine generation.
+ * Per-task model assignment. Sonnet 5 for complex reasoning; Haiku for routine
+ * generation. The Opus 4.8 pilot (evaluate + learnerSynthesis) is **suspended**
+ * as of 2026-07-16 — the first live call failed before quality could be assessed
+ * (the model ID was documentation-verified but never live-called). The
+ * `CLAUDE_OPUS` constant is retained for the expected re-pilot; see the suspended
+ * rows below and models.test.ts.
  */
 export const MODEL_BY_TASK: Readonly<Record<string, string>> = {
-  // Opus 4.8 pilot — revert to sonnet if quality delta unjustified (owner review after 2 weeks)
-  evaluate: CLAUDE_OPUS,
-  // Opus 4.8 pilot — revert to sonnet if quality delta unjustified (owner review after 2 weeks)
-  learnerSynthesis: CLAUDE_OPUS,
+  // evaluate: CLAUDE_OPUS,          // pilot suspended 2026-07-16 — first live call failed before quality could be assessed; re-pilot only after verifying claude-opus-4-8 via a live GET /v1/models (or one successful live call) from the deployed environment
+  evaluate: CLAUDE_SONNET,
+  // learnerSynthesis: CLAUDE_OPUS,  // pilot suspended 2026-07-16 — first live call failed before quality could be assessed; re-pilot only after verifying claude-opus-4-8 via a live GET /v1/models (or one successful live call) from the deployed environment
+  learnerSynthesis: CLAUDE_SONNET,
 
   // Sonnet 5 — complex reasoning
   plan: CLAUDE_SONNET,
