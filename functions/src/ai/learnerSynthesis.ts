@@ -22,6 +22,7 @@ import { requireEmailAuth } from "./authGuard.js";
 import { claudeApiKey } from "./aiConfig.js";
 import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
+import { resolveEffortForTask } from "./models.js";
 import {
   buildSynthesisInput,
   buildSynthesisPrompt,
@@ -71,6 +72,7 @@ export async function synthesizeLearnerModelForChild(
   const input = buildSynthesisInput(model, childName);
   const systemPrompt = buildSynthesisPrompt(input);
   const modelId = modelForTask("learnerSynthesis" as never);
+  const effort = resolveEffortForTask("learnerSynthesis");
 
   let result: { text: string; inputTokens: number; outputTokens: number };
   try {
@@ -86,6 +88,10 @@ export async function synthesizeLearnerModelForChild(
       // model renders a ~4k-token prompt — well within Sonnet's budget — so the
       // synthesis context is left at its design summary shape, untrimmed.
       maxTokens: 2000,
+      // Structured summarization against provided evidence — run at LOW effort so
+      // Sonnet 5's default adaptive-thinking-at-HIGH can't burn the whole output
+      // budget on reasoning and emit zero visible text (FEAT-77, second D6).
+      effort,
       systemPrompt,
       messages: [{ role: "user", content: "Synthesize the judgment layer now. Return only the JSON." }],
     });

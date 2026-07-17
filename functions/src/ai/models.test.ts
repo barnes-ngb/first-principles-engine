@@ -9,7 +9,10 @@ import {
   CLAUDE_HAIKU,
   CLAUDE_OPUS,
   CLAUDE_SONNET,
+  EFFORT_BY_TASK,
   MODEL_BY_TASK,
+  ReasoningEffort,
+  resolveEffortForTask,
   resolveModelForTask,
 } from "./models.js";
 
@@ -46,6 +49,18 @@ describe("model table (FEAT-58)", () => {
     expect(opusTasks).toEqual([]);
     expect(resolveModelForTask("evaluate")).toBe(CLAUDE_SONNET);
     expect(resolveModelForTask("learnerSynthesis")).toBe(CLAUDE_SONNET);
+  });
+
+  it("learnerSynthesis runs at LOW reasoning effort; unlisted tasks inherit the API default (FEAT-77)", () => {
+    // Structured summarization — deep reasoning is waste and, at Sonnet 5's
+    // default HIGH adaptive thinking, can consume the whole output budget.
+    expect(resolveEffortForTask("learnerSynthesis")).toBe(ReasoningEffort.Low);
+    expect(EFFORT_BY_TASK.learnerSynthesis).toBe("low");
+    // Chat/other tasks are NOT downgraded — they resolve to undefined so the
+    // request omits output_config entirely and the API default (high) applies.
+    expect(resolveEffortForTask("shellyChat")).toBeUndefined();
+    expect(resolveEffortForTask("chat")).toBeUndefined();
+    expect(resolveEffortForTask("not-a-real-task")).toBeUndefined();
   });
 
   it("generate / chat stay on Haiku; unlisted tasks default to Haiku", () => {
