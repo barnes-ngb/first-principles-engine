@@ -38,23 +38,28 @@ function removeTrailingCommas(text: string): string {
 }
 
 /**
- * Extract the outermost JSON object/array span from text that carries a leading
- * or trailing preamble (e.g. `Here is the JSON:\n{ ... }` or `{ ... }\nHope that
- * helps!`). Picks whichever of `{` / `[` appears first and slices to the matching
- * last `}` / `]`. Returns `null` when no plausible span exists.
+ * Candidate JSON spans for text that carries a leading or trailing preamble
+ * (e.g. `Here is the JSON:\n{ ... }` or `{ ... }\nHope that helps!`). Returns an
+ * object span (first `{` → last `}`) AND an array span (first `[` → last `]`)
+ * when each exists, object first — the caller tries each until one parses.
  *
- * This is a FALLBACK only — `sanitizeAndParseJson` runs it after a direct parse
- * throws, so a response that already parses cleanly is never re-sliced.
+ * Trying BOTH rather than choosing by the first bracket avoids mis-slicing a
+ * bracketed aside: `Here is the JSON [per schema]:\n{ ... }` leads with `[`, but
+ * the real payload is the object; the object span parses and the aside span does
+ * not, so the object wins.
+ *
+ * FALLBACK only — `sanitizeAndParseJson` runs this after a direct parse throws,
+ * so a response that already parses cleanly is never re-sliced.
  */
-function extractJsonSpan(text: string): string | null {
-  const firstObj = text.indexOf("{");
-  const firstArr = text.indexOf("[");
-  if (firstObj === -1 && firstArr === -1) return null;
-  const useArray = firstObj === -1 || (firstArr !== -1 && firstArr < firstObj);
-  const start = useArray ? firstArr : firstObj;
-  const end = text.lastIndexOf(useArray ? "]" : "}");
-  if (end <= start) return null;
-  return text.slice(start, end + 1);
+function candidateJsonSpans(text: string): string[] {
+  const spans: string[] = [];
+  const objStart = text.indexOf("{");
+  const objEnd = text.lastIndexOf("}");
+  if (objStart !== -1 && objEnd > objStart) spans.push(text.slice(objStart, objEnd + 1));
+  const arrStart = text.indexOf("[");
+  const arrEnd = text.lastIndexOf("]");
+  if (arrStart !== -1 && arrEnd > arrStart) spans.push(text.slice(arrStart, arrEnd + 1));
+  return spans;
 }
 
 /**
@@ -130,12 +135,17 @@ export function sanitizeAndParseJson<T = unknown>(raw: string): T {
     return JSON.parse(text) as T;
   } catch (err) {
     // The fence remover doesn't strip conversational preamble/suffix text around
-    // the object. Extract the outermost JSON span and retry — the earlier passes
-    // (trailing commas, control chars) already ran over `text`, so the slice is
-    // clean. Only reached after a direct parse fails, so valid JSON is untouched.
-    const span = extractJsonSpan(text);
-    if (span !== null && span !== text) {
-      return JSON.parse(span) as T;
+    // the payload. Try each candidate JSON span (object, then array) and return
+    // the first that parses — the earlier passes (trailing commas, control chars)
+    // already ran over `text`, so the slice is clean. Only reached after a direct
+    // parse fails, so valid JSON is untouched.
+    for (const span of candidateJsonSpans(text)) {
+      if (span === text) continue;
+      try {
+        return JSON.parse(span) as T;
+      } catch {
+        /* try the next candidate span */
+      }
     }
     throw err;
   }

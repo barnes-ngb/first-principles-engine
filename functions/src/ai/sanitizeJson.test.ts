@@ -127,6 +127,22 @@ describe("sanitizeAndParseJson", () => {
     expect(result).toEqual([1, 2, 3]);
   });
 
+  it("skips a bracketed aside before the object (does not slice the aside)", () => {
+    // The `[per schema]` aside leads with `[`, but the real payload is the
+    // object — the object span must win over the array span.
+    const result = sanitizeAndParseJson<{ a: number }>(
+      'Here is the JSON [per schema]:\n{"a": 1}',
+    );
+    expect(result).toEqual({ a: 1 });
+  });
+
+  it("recovers an object with an array field behind a bracketed aside", () => {
+    const result = sanitizeAndParseJson<{ items: number[] }>(
+      'Result [see below]: {"items": [1, 2]}',
+    );
+    expect(result).toEqual({ items: [1, 2] });
+  });
+
   it("throws on completely invalid content", () => {
     expect(() => sanitizeAndParseJson("not json at all")).toThrow();
   });

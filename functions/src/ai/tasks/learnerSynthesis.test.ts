@@ -172,6 +172,17 @@ describe("parseSynthesisResponse", () => {
     expect(parsed.openQuestionsSummary).toEqual(["Worth a quick check on digraphs."]);
   });
 
+  it("parses through a bracketed aside before the object", () => {
+    const body = JSON.stringify({
+      whatMattersNext: [],
+      narrative: "Holding steady while we gather more evidence.",
+      openQuestionsSummary: [],
+    });
+    const parsed = parseSynthesisResponse("Here is the JSON [per the schema]:\n" + body)!;
+    expect(parsed).not.toBeNull();
+    expect(parsed.narrative).toContain("Holding steady");
+  });
+
   it("returns null on unparseable or empty-narrative replies (deterministic fallback)", () => {
     expect(parseSynthesisResponse("not json at all {{{")).toBeNull();
     expect(parseSynthesisResponse(JSON.stringify({ whatMattersNext: [], narrative: "" }))).toBeNull();
