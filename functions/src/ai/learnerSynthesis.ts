@@ -22,6 +22,7 @@ import { requireEmailAuth } from "./authGuard.js";
 import { claudeApiKey } from "./aiConfig.js";
 import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
+import { resolveEffortForTask } from "./models.js";
 import {
   buildSynthesisInput,
   buildSynthesisPrompt,
@@ -71,21 +72,28 @@ export async function synthesizeLearnerModelForChild(
   const input = buildSynthesisInput(model, childName);
   const systemPrompt = buildSynthesisPrompt(input);
   const modelId = modelForTask("learnerSynthesis" as never);
+  const effort = resolveEffortForTask("learnerSynthesis");
 
   let result: { text: string; inputTokens: number; outputTokens: number };
   try {
     result = await callClaude({
       apiKey,
       model: modelId,
-      // Output ceiling. FEAT-57/D6 set this at ~1k when a seeded model evidenced
-      // ~6 concepts; the position-sync work multiplied that (~42 concepts, ~29
-      // forming), so a full synthesis (up to 3 moves + a 3–5 sentence narrative +
-      // one line per open question) can exceed 1k and truncate mid-JSON, which
-      // reads as an unparseable reply. Doubled to 2000 (still one Sonnet call per
-      // child per regen). The INPUT is not the pressure: even a fully-evidenced
-      // model renders a ~4k-token prompt — well within Sonnet's budget — so the
+      // Output ceiling (FEAT-57/D6, twice amended). D6 first set ~1k (seeded ~6
+      // concepts); position-sync multiplied that (~42 concepts) and the first
+      // amendment doubled to 2000. Two consecutive truncation-class failures
+      // later, the second amendment raises it to 4000 — headroom for the JSON
+      // contract (up to 3 moves + a 3–5 sentence narrative + one line per open
+      // question) plus any residual reasoning overhead the low-effort setting
+      // still leaves. Still one Sonnet call per child per regen (~2x the prior
+      // ceiling). The INPUT is not the pressure: even a fully-evidenced model
+      // renders a ~4k-token prompt — well within Sonnet's budget — so the
       // synthesis context is left at its design summary shape, untrimmed.
-      maxTokens: 2000,
+      maxTokens: 4000,
+      // Structured summarization against provided evidence — run at LOW effort so
+      // Sonnet 5's default adaptive-thinking-at-HIGH can't burn the whole output
+      // budget on reasoning and emit zero visible text (FEAT-77, second D6).
+      effort,
       systemPrompt,
       messages: [{ role: "user", content: "Synthesize the judgment layer now. Return only the JSON." }],
     });
@@ -94,6 +102,18 @@ export async function synthesizeLearnerModelForChild(
     // it alongside the failure line — "failed" alone is never shown (DOC-09).
     const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     console.error(`[learnerSynthesis] Claude call failed for ${familyId}/${childId}: ${detail}`, err);
+    return { status: "failed", detail };
+  }
+
+  // Empty-reply guard (FEAT-77): the model call can succeed yet return zero
+  // visible text when reasoning consumes the whole output budget (Sonnet 5's
+  // default adaptive-thinking-at-HIGH). That is NOT a parse failure — fail with
+  // its own named message carrying the usage numbers, so an empty reply never
+  // masquerades as unparseable JSON (empty raw head) again. `outputTokens` counts
+  // thinking + visible text; with no visible text, all of it was reasoning.
+  if (!result.text.trim()) {
+    const detail = `Model returned no text (${result.outputTokens} output/thinking tokens consumed, 0 visible text) — likely reasoning consumed the budget; check effort/maxTokens.`;
+    console.warn(`[learnerSynthesis] Empty synthesis reply for ${familyId}/${childId} — prior synthesis kept. ${detail}`);
     return { status: "failed", detail };
   }
 

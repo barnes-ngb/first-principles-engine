@@ -78,6 +78,43 @@ export function resolveModelForTask(taskType: string): string {
 }
 
 /**
+ * Reasoning-effort levels the Messages API exposes for the Sonnet-5 / 4.6+
+ * generation (`output_config.effort`, GA — no beta header). Lower effort ⇒ the
+ * model spends fewer tokens on internal reasoning before it answers.
+ */
+export const ReasoningEffort = {
+  Low: "low",
+  Medium: "medium",
+  High: "high",
+  Xhigh: "xhigh",
+  Max: "max",
+} as const;
+export type ReasoningEffort = (typeof ReasoningEffort)[keyof typeof ReasoningEffort];
+
+/**
+ * Per-task reasoning-effort override (FEAT-77, second D6 amendment).
+ *
+ * Sonnet 5 runs **adaptive thinking at HIGH effort by default** (omitting the
+ * `thinking` param on Sonnet 5 enables adaptive thinking; effort defaults to
+ * high). On a structured-JSON task with a tight `maxTokens`, the model can burn
+ * the entire output budget on internal reasoning and emit **zero visible text**
+ * — which then reads as an empty/unparseable reply. `learnerSynthesis` is
+ * structured summarization against provided evidence (deep reasoning is waste),
+ * so it runs at **low**. Tasks not listed inherit the API default (high) — this
+ * table intentionally does **not** touch the global chat-task default.
+ *
+ * The chosen effort is sent as `output_config.effort`; see `callClaude`.
+ */
+export const EFFORT_BY_TASK: Readonly<Record<string, ReasoningEffort>> = {
+  learnerSynthesis: ReasoningEffort.Low,
+};
+
+/** Resolve a task type to its reasoning effort, or `undefined` (API default). */
+export function resolveEffortForTask(taskType: string): ReasoningEffort | undefined {
+  return EFFORT_BY_TASK[taskType];
+}
+
+/**
  * Models a client may request via the per-request override (chat / generate
  * only — see chat.ts). Kept in lock-step with the table: the distinct set of IDs
  * `resolveModelForTask` can return, so an override can never point the chat path

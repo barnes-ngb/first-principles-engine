@@ -1,4 +1,5 @@
 import type { Firestore } from "firebase-admin/firestore";
+import type { ReasoningEffort } from "./models.js";
 
 // ── Task handler types ──────────────────────────────────────────
 
@@ -91,6 +92,15 @@ export async function callClaude(opts: {
    * not pass tools). See FEAT-12.
    */
   webSearch?: { maxUses: number };
+  /**
+   * Reasoning-effort override for the Sonnet-5 / 4.6+ generation. When set, sent
+   * as `output_config.effort` — lower effort ⇒ the model spends fewer tokens on
+   * internal reasoning before it answers. **Off by default**: when omitted, no
+   * `output_config` is sent and the API's default (high) applies, so every other
+   * caller is unaffected. Structured-JSON tasks with a tight `maxTokens` set this
+   * to `low` so reasoning can't consume the whole output budget (FEAT-77).
+   */
+  effort?: ReasoningEffort;
 }): Promise<{ text: string; inputTokens: number; outputTokens: number; stopReason: string }> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey: opts.apiKey });
@@ -114,6 +124,12 @@ export async function callClaude(opts: {
             },
           ],
         }
+      : {}),
+    // `output_config.effort` is GA on the Messages API but not yet in the pinned
+    // SDK's types (0.78) — spread it as an extra body field (the SDK forwards
+    // unknown top-level keys verbatim in the request body).
+    ...(opts.effort
+      ? ({ output_config: { effort: opts.effort } } as Record<string, unknown>)
       : {}),
   });
 
