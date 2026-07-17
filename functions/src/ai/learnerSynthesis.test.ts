@@ -116,6 +116,31 @@ describe("synthesizeLearnerModelForChild — honest error propagation (DOC-09)",
     );
   });
 
+  it("emits a named empty-reply error with usage numbers, not a parse failure (FEAT-77)", async () => {
+    // The model call succeeded but reasoning consumed the whole budget: empty
+    // text, non-trivial output tokens. This must NOT read as unparseable JSON.
+    callClaudeMock.mockResolvedValue({
+      text: "   ",
+      inputTokens: 3200,
+      outputTokens: 4000,
+    });
+
+    const result = await synthesizeLearnerModelForChild(
+      makeDb(),
+      "fam-1",
+      "lincoln",
+      "Lincoln",
+      "key",
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.detail).toBe(
+      "Model returned no text (4000 output/thinking tokens consumed, 0 visible text) — likely reasoning consumed the budget; check effort/maxTokens.",
+    );
+    // It is the empty-reply message, never the JSON-parse message.
+    expect(result.detail).not.toContain("could not be parsed as JSON");
+  });
+
   it("surfaces the raw response head for a garbage (non-JSON) reply", async () => {
     callClaudeMock.mockResolvedValue({
       text: "I'm sorry, but I can't help with that request.\n\nLet me know if...",
