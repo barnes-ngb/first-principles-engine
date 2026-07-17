@@ -36,6 +36,11 @@ export function isSynthesisStale(model: StoredLearnerModel & { synthesis?: unkno
 
 export interface SynthesisRunResult {
   status: "written" | "skipped-no-model" | "skipped-no-data" | "failed";
+  /**
+   * On `failed`, the underlying error class + message (or parse-failure reason).
+   * Surfaced verbatim to the diag panel so a failure is never opaque (DOC-09).
+   */
+  detail?: string;
   synthesis?: {
     whatMattersNext: Array<{ conceptId: string; kidName: string; why: string; suggestedVehicle: string }>;
     narrative: string;
@@ -76,14 +81,18 @@ export async function synthesizeLearnerModelForChild(
       messages: [{ role: "user", content: "Synthesize the judgment layer now. Return only the JSON." }],
     });
   } catch (err) {
-    console.error(`[learnerSynthesis] Claude call failed for ${familyId}/${childId}:`, err);
-    return { status: "failed" };
+    // Surface the underlying error class + message so the diag panel can render
+    // it alongside the failure line — "failed" alone is never shown (DOC-09).
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error(`[learnerSynthesis] Claude call failed for ${familyId}/${childId}: ${detail}`, err);
+    return { status: "failed", detail };
   }
 
   const parsed = parseSynthesisResponse(result.text);
   if (!parsed) {
-    console.warn(`[learnerSynthesis] Unparseable synthesis for ${familyId}/${childId} — prior synthesis kept.`);
-    return { status: "failed" };
+    const detail = "Synthesis response could not be parsed as JSON.";
+    console.warn(`[learnerSynthesis] Unparseable synthesis for ${familyId}/${childId} — prior synthesis kept. ${detail}`);
+    return { status: "failed", detail };
   }
 
   const generatedAt = new Date().toISOString();
