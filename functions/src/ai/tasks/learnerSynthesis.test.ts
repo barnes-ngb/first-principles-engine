@@ -142,6 +142,35 @@ describe("parseSynthesisResponse", () => {
     expect(parsed.whatMattersNext.length).toBeLessThanOrEqual(3);
   });
 
+  it("parses a reply wrapped in ```json fences", () => {
+    const body = JSON.stringify({
+      whatMattersNext: [
+        { conceptId: "reading.phonics.longVowels", why: "Blends are solid; long vowels are next.", suggestedVehicle: "quest" },
+      ],
+      narrative: "Reading with real momentum.",
+      openQuestionsSummary: [],
+    });
+    const parsed = parseSynthesisResponse("```json\n" + body + "\n```")!;
+    expect(parsed).not.toBeNull();
+    expect(parsed.narrative).toContain("momentum");
+    expect(parsed.whatMattersNext[0].conceptId).toBe("reading.phonics.longVowels");
+  });
+
+  it("parses a reply with a one-line preamble before the object", () => {
+    const body = JSON.stringify({
+      whatMattersNext: [
+        { conceptId: "reading.phonics.digraphs", why: "Two letters, one sound — worth confirming.", suggestedVehicle: "routine" },
+      ],
+      narrative: "Steady progress across the board.",
+      openQuestionsSummary: ["Worth a quick check on digraphs."],
+    });
+    const parsed = parseSynthesisResponse("Here is the synthesis JSON:\n" + body)!;
+    expect(parsed).not.toBeNull();
+    expect(parsed.narrative).toContain("Steady progress");
+    expect(parsed.whatMattersNext[0].conceptId).toBe("reading.phonics.digraphs");
+    expect(parsed.openQuestionsSummary).toEqual(["Worth a quick check on digraphs."]);
+  });
+
   it("returns null on unparseable or empty-narrative replies (deterministic fallback)", () => {
     expect(parseSynthesisResponse("not json at all {{{")).toBeNull();
     expect(parseSynthesisResponse(JSON.stringify({ whatMattersNext: [], narrative: "" }))).toBeNull();

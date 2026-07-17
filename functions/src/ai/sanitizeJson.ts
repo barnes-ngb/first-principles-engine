@@ -38,6 +38,26 @@ function removeTrailingCommas(text: string): string {
 }
 
 /**
+ * Extract the outermost JSON object/array span from text that carries a leading
+ * or trailing preamble (e.g. `Here is the JSON:\n{ ... }` or `{ ... }\nHope that
+ * helps!`). Picks whichever of `{` / `[` appears first and slices to the matching
+ * last `}` / `]`. Returns `null` when no plausible span exists.
+ *
+ * This is a FALLBACK only — `sanitizeAndParseJson` runs it after a direct parse
+ * throws, so a response that already parses cleanly is never re-sliced.
+ */
+function extractJsonSpan(text: string): string | null {
+  const firstObj = text.indexOf("{");
+  const firstArr = text.indexOf("[");
+  if (firstObj === -1 && firstArr === -1) return null;
+  const useArray = firstObj === -1 || (firstArr !== -1 && firstArr < firstObj);
+  const start = useArray ? firstArr : firstObj;
+  const end = text.lastIndexOf(useArray ? "]" : "}");
+  if (end <= start) return null;
+  return text.slice(start, end + 1);
+}
+
+/**
  * Escape unescaped control characters (newlines, tabs) that appear inside
  * JSON string values. LLMs sometimes produce literal newlines within strings.
  */
@@ -99,10 +119,24 @@ function escapeControlCharsInStrings(text: string): string {
  * 2. Remove trailing commas in arrays/objects
  * 3. Escape unescaped control characters inside string values
  * 4. Parse with JSON.parse
+ * 5. On failure, strip a leading/trailing preamble by extracting the outermost
+ *    JSON span and retry once (fences don't cover `Here is the JSON: { ... }`).
  */
 export function sanitizeAndParseJson<T = unknown>(raw: string): T {
   let text = stripCodeFences(raw);
   text = removeTrailingCommas(text);
   text = escapeControlCharsInStrings(text);
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    // The fence remover doesn't strip conversational preamble/suffix text around
+    // the object. Extract the outermost JSON span and retry — the earlier passes
+    // (trailing commas, control chars) already ran over `text`, so the slice is
+    // clean. Only reached after a direct parse fails, so valid JSON is untouched.
+    const span = extractJsonSpan(text);
+    if (span !== null && span !== text) {
+      return JSON.parse(span) as T;
+    }
+    throw err;
+  }
 }
