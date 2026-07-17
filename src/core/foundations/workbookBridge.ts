@@ -95,6 +95,16 @@ export interface WorkbookBridge {
    */
   lessonToUnit?: (configLesson: number) => number | null
   /**
+   * The curriculum LEVEL this bridge represents, when it is one of a leveled series
+   * (TGTB Language Arts is Levels 1–5; this bridge is Level 1). Used ONLY as a
+   * contains-match conflict guard: a workbook name that explicitly declares a
+   * DIFFERENT level (e.g. "…Language Arts Level 2") must NOT resolve to this bridge
+   * via a generic, level-less alias — otherwise a Level-2 course would silently be
+   * written Level-1 evidence (the FEAT-64-amendment P1). Unleveled bridges leave it
+   * unset and the guard never fires.
+   */
+  level?: number
+  /**
    * True when `lessonToUnit` produces a *provisional GUESS* rather than a witnessed
    * position — the Fast Phonics case (`ceil(lesson / LESSONS_PER_PEAK)`, FEAT-64 §3).
    * When set, the sync applies the **conflict rule**: a divisor-guessed native
@@ -124,26 +134,118 @@ const ALL_WORKBOOK_BRIDGES: WorkbookBridge[] = [
 export { makeBandCeilingLessonToUnit } from './bandCeiling'
 
 /**
+ * Minimum NORMALIZED alias length to participate in *contains*-matching. Below
+ * this an alias must equal the whole normalized workbook name (an over-match
+ * guard, so a short token can't be found inside an unrelated long display name).
+ *
+ * Report (FEAT-64 amendment): NO shipped alias is affected today — the shortest
+ * shipped alias, `tgtb la` → `tgtbla`, is exactly 6 normalized chars, so it still
+ * participates in contains-matching. The guard only constrains any FUTURE alias
+ * shorter than this.
+ */
+export const MIN_CONTAINS_ALIAS_LENGTH = 6
+
+/** The result of resolving a free-text workbook name against the bridge set. */
+export type WorkbookBridgeMatch =
+  | { status: 'matched'; bridge: WorkbookBridge; alias: string }
+  | { status: 'ambiguous'; bridgeIds: string[] }
+  | { status: 'none' }
+
+/**
+ * The longest matching alias (or the bridge's own `sourceId`) for ONE bridge
+ * against a normalized workbook key, or `null` when the bridge does not match.
+ * An alias matches by either
+ *   • whole-name equality (`norm === key`) at ANY length, or
+ *   • normalized-contains (`key.includes(norm)`) when `norm` is
+ *     ≥ {@link MIN_CONTAINS_ALIAS_LENGTH} chars.
+ * "Longest" ⇒ the most specific alias, used to break cross-bridge ties.
+ */
+/**
+ * Extract an explicit curriculum LEVEL from a normalized workbook key, if the name
+ * states one — `level<n>` / `lvl<n>`, or the language-arts abbreviations
+ * `languagearts<n>` / `la<n>`. Returns the number, or `null` when the name names no
+ * level. Only consulted for level-scoped bridges (the conflict guard below), where a
+ * false read fails SAFE — it suppresses a match (honest "no bridge yet") rather than
+ * writing evidence for the wrong level.
+ */
+export function levelInName(key: string): number | null {
+  const m = key.match(/(?:level|lvl|languagearts|la)(\d+)/)
+  return m ? Number.parseInt(m[1], 10) : null
+}
+
+function bestBridgeMatch(
+  bridge: WorkbookBridge,
+  key: string,
+): { length: number; alias: string } | null {
+  // Level-conflict guard: a leveled bridge (e.g. TGTB LA1) must not match a name
+  // that explicitly declares a DIFFERENT level — else "…Language Arts Level 2" would
+  // resolve to Level 1 through a generic, level-less alias and corrupt the model.
+  if (bridge.level != null) {
+    const nameLevel = levelInName(key)
+    if (nameLevel != null && nameLevel !== bridge.level) return null
+  }
+  let best: { length: number; alias: string } | null = null
+  for (const candidate of [bridge.sourceId, ...bridge.aliases]) {
+    const norm = normalizeSourceName(candidate)
+    if (!norm) continue
+    const matched =
+      norm === key ||
+      (norm.length >= MIN_CONTAINS_ALIAS_LENGTH && key.includes(norm))
+    if (matched && (best == null || norm.length > best.length)) {
+      best = { length: norm.length, alias: candidate }
+    }
+  }
+  return best
+}
+
+/**
  * Tolerant bridge lookup by free-text workbook name (`ActivityConfig.name` /
- * `.curriculum`). Reuses the conservative FEAT-61 normalizer: formatting
- * differences collapse, real misspellings do not — an unrecognized name returns
- * null and the caller reports "no bridge yet" (never a silent map).
+ * `.curriculum`), tolerant of the extra words a family's REAL display name carries
+ * ("Mathseeds Mental Minute", "Fast Phonics (Reading Eggs)", "…Language Arts Level
+ * 1") that exact-normalized matching could never hit. Both sides are lowercased +
+ * stripped of non-alphanumerics (the conservative FEAT-61 normalizer); an alias
+ * matches when it EQUALS the name or (when ≥6 normalized chars) is CONTAINED in it.
+ *
+ * On a cross-bridge tie the longest matching alias wins; a genuine tie at the top
+ * length is `ambiguous` — matched to nothing and reported "needs alias curation"
+ * rather than guessed. An unrecognized name is `none`.
+ */
+export function matchWorkbookBridge(
+  name: string | undefined | null,
+): WorkbookBridgeMatch {
+  if (!name) return { status: 'none' }
+  const key = normalizeSourceName(name)
+  if (!key) return { status: 'none' }
+
+  const scored = ALL_WORKBOOK_BRIDGES.map((bridge) => ({
+    bridge,
+    match: bestBridgeMatch(bridge, key),
+  })).filter(
+    (s): s is { bridge: WorkbookBridge; match: { length: number; alias: string } } =>
+      s.match != null,
+  )
+  if (scored.length === 0) return { status: 'none' }
+
+  const maxLength = Math.max(...scored.map((s) => s.match.length))
+  const top = scored.filter((s) => s.match.length === maxLength)
+  if (top.length > 1) {
+    return { status: 'ambiguous', bridgeIds: top.map((s) => s.bridge.sourceId) }
+  }
+  return { status: 'matched', bridge: top[0].bridge, alias: top[0].match.alias }
+}
+
+/**
+ * Thin accessor over {@link matchWorkbookBridge}: returns the bridge on a single
+ * unambiguous match, else `null` — BOTH "no bridge" and "ambiguous" collapse to
+ * null here. Callers that must tell those apart (the position sync, to surface
+ * "needs alias curation") call {@link matchWorkbookBridge} directly. Reused by the
+ * no-guess daily-signal resolver, where null ⇒ `[]` (never a silent map).
  */
 export function workbookBridgeForSource(
   name: string | undefined | null,
 ): WorkbookBridge | null {
-  if (!name) return null
-  const key = normalizeSourceName(name)
-  if (!key) return null
-  for (const bridge of ALL_WORKBOOK_BRIDGES) {
-    if (
-      normalizeSourceName(bridge.sourceId) === key ||
-      bridge.aliases.some((a) => normalizeSourceName(a) === key)
-    ) {
-      return bridge
-    }
-  }
-  return null
+  const match = matchWorkbookBridge(name)
+  return match.status === 'matched' ? match.bridge : null
 }
 
 /** True when at least one unit carries an `upToLesson` boundary (i.e. the bridge

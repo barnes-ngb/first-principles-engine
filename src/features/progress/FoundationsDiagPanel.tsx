@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
@@ -10,6 +10,7 @@ import Divider from '@mui/material/Divider'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import ListItemText from '@mui/material/ListItemText'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -71,6 +72,8 @@ function formatSyncOutcome(name: string, position: number, outcome: WorkbookSync
   switch (outcome.status) {
     case 'no-bridge':
       return `${name} (L${position}) → no bridge yet`
+    case 'ambiguous':
+      return `${name} (L${position}) → ambiguous — needs alias curation (${outcome.bridgeIds.join(', ')})`
     case 'pending-curation':
       return `${name} (L${position}) → bridge present, lesson→unit mapping pending curation`
     case 'no-model':
@@ -103,6 +106,45 @@ export default function FoundationsDiagPanel() {
   const familyId = useFamilyId()
   const { children } = useChildren()
   const [byChild, setByChild] = useState<Record<string, ChildState>>({})
+
+  // Load each child's EXISTING learner model on mount so the preview and the
+  // "Generate synthesis (AI)" gate read the SAME `state.model` — they can't
+  // disagree. Without this the model was only in state after a manual re-seed, so
+  // the button stayed greyed even when a model document already existed. Reads
+  // only `learnerModels`; the idempotent `already-loaded` guard keeps a re-seed /
+  // sync from being clobbered by a late fetch.
+  useEffect(() => {
+    if (!familyId || children.length === 0) return
+    let cancelled = false
+    void (async () => {
+      const entries = await Promise.all(
+        children.map(async (child) => {
+          try {
+            const ref = doc(learnerModelsCollection(familyId), child.id)
+            const snap = await getDoc(ref)
+            return [child.id, snap.exists() ? (snap.data() as LearnerModel) : null] as const
+          } catch {
+            return [child.id, null] as const
+          }
+        }),
+      )
+      if (cancelled) return
+      setByChild((prev) => {
+        const next = { ...prev }
+        for (const [childId, model] of entries) {
+          if (!model || next[childId]?.model) continue
+          const existing = next[childId]
+          next[childId] = existing
+            ? { ...existing, model }
+            : { loading: false, error: null, model }
+        }
+        return next
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [familyId, children])
 
   const seedChild = useCallback(
     async (childId: string) => {
@@ -311,15 +353,23 @@ export default function FoundationsDiagPanel() {
               >
                 {state?.loading ? 'Seeding…' : 'Seed / re-seed Foundations model'}
               </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                color="secondary"
-                disabled={state?.synthesizing || !state?.model}
-                onClick={() => synthesizeChild(child.id)}
+              <Tooltip
+                title={!state?.model ? 'Seed the model first.' : ''}
+                disableHoverListener={Boolean(state?.model)}
               >
-                {state?.synthesizing ? 'Synthesizing…' : 'Generate synthesis (AI)'}
-              </Button>
+                {/* span so the tooltip still fires while the button is disabled */}
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="secondary"
+                    disabled={state?.synthesizing || !state?.model}
+                    onClick={() => synthesizeChild(child.id)}
+                  >
+                    {state?.synthesizing ? 'Synthesizing…' : 'Generate synthesis (AI)'}
+                  </Button>
+                </span>
+              </Tooltip>
               <Button
                 size="small"
                 variant="outlined"

@@ -19,9 +19,9 @@ import { learnerModelsCollection } from '../firebase/firestore'
 import {
   applyBridgeCoverageToModel,
   bridgeCoveredConcepts,
+  matchWorkbookBridge,
   resolveNativePosition,
   resolveSyncNativePosition,
-  workbookBridgeForSource,
 } from './workbookBridge'
 import type { WorkbookBridge } from './workbookBridge'
 import type { LearnerModel } from '../types/learnerModel'
@@ -30,6 +30,7 @@ import type { LearnerModel } from '../types/learnerModel'
  *  absence of a write is VISIBLE, never mysterious (the FEAT-62 lesson). */
 export type WorkbookSyncOutcome =
   | { status: 'no-bridge' }
+  | { status: 'ambiguous'; bridgeIds: string[] }
   | { status: 'pending-curation'; source: string }
   | { status: 'no-model' }
   | { status: 'no-coverage'; source: string }
@@ -53,10 +54,20 @@ export interface WorkbookSyncInput {
  * rule caps the divisor-guessed position against the model's witnessed peaks.
  */
 export function planWorkbookSync(input: WorkbookSyncInput):
-  | { outcome: Extract<WorkbookSyncOutcome, { status: 'no-bridge' | 'pending-curation' }> }
+  | {
+      outcome: Extract<
+        WorkbookSyncOutcome,
+        { status: 'no-bridge' | 'ambiguous' | 'pending-curation' }
+      >
+    }
   | { outcome: null; bridge: WorkbookBridge } {
-  const bridge = workbookBridgeForSource(input.workbookName)
-  if (!bridge) return { outcome: { status: 'no-bridge' } }
+  const match = matchWorkbookBridge(input.workbookName)
+  if (match.status === 'none') return { outcome: { status: 'no-bridge' } }
+  // Two bridges tied on the longest matching alias ⇒ surface, never guess.
+  if (match.status === 'ambiguous') {
+    return { outcome: { status: 'ambiguous', bridgeIds: match.bridgeIds } }
+  }
+  const bridge = match.bridge
   // Gate on the raw lesson→native translation (unset `lessonToUnit` ⇒ pending).
   if (resolveNativePosition(bridge, input.position) == null) {
     return { outcome: { status: 'pending-curation', source: bridge.sourceId } }
