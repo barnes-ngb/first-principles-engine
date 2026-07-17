@@ -148,6 +148,26 @@ describe("createClaudeProvider", () => {
     );
   });
 
+  it("omits temperature for Sonnet 5 even when provided (FEAT-58 follow-up gate)", async () => {
+    // Sonnet 5 removed `temperature` and 400s on it — the provider must gate it out
+    // even if a caller passes one, mirroring the callClaude builder.
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "ok" }],
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+
+    const provider = createClaudeProvider("test-key");
+    await provider.chat([{ role: "user", content: "Hi" }], {
+      model: "sonnet",
+      temperature: 0.7,
+    });
+
+    const body = mockCreate.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("temperature");
+    expect(body).toMatchObject({ model: "claude-sonnet-5" });
+  });
+
   it("returns empty content when response has no text block", async () => {
     mockCreate.mockResolvedValueOnce({
       content: [],

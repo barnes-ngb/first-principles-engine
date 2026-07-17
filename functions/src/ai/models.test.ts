@@ -11,6 +11,7 @@ import {
   CLAUDE_SONNET,
   EFFORT_BY_TASK,
   MODEL_BY_TASK,
+  modelAcceptsTemperature,
   ReasoningEffort,
   resolveEffortForTask,
   resolveModelForTask,
@@ -73,6 +74,15 @@ describe("model table (FEAT-58)", () => {
     expect([...ALLOWED_OVERRIDE_MODELS].sort()).toEqual(
       [...new Set(Object.values(MODEL_BY_TASK))].sort(),
     );
+  });
+
+  it("temperature is gated: rejected on Sonnet 5 / Opus 4.8, accepted on Haiku 4.5 (FEAT-58 follow-up)", () => {
+    // Sonnet-5 / Opus-4.6+ generation removed `temperature` (400s on it); Haiku 4.5
+    // still accepts it. Allowlist semantics — unknown models default to omitting.
+    expect(modelAcceptsTemperature(CLAUDE_HAIKU)).toBe(true);
+    expect(modelAcceptsTemperature(CLAUDE_SONNET)).toBe(false);
+    expect(modelAcceptsTemperature(CLAUDE_OPUS)).toBe(false);
+    expect(modelAcceptsTemperature("some-future-model")).toBe(false);
   });
 
   it("no orphan Claude model literals outside the table", () => {
