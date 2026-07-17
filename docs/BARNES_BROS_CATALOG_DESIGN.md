@@ -54,7 +54,23 @@ Two hard facts this doc commits to:
 
 Parent-confirmed sale is already a first-class concept: `BusinessLogEntry.confirmed` is the
 existing honest-money flag the thermometer climbs on (`useBusinessLog.confirmSale`). The sale
-gate reuses that signal — it is not a new mechanism.
+gate **builds on** that signal — but `confirmed` alone is **not** a sufficient gate predicate.
+A `BusinessLogEntry` is keyed by `amount`/`itemType`/`date`/`note` and carries **no link to a
+`CatalogProduct` or `KitRoster` source**, so "some confirmed sale exists" would also be satisfied
+by an earlier confirmed Book/Sticker/Other sale, or by a different kit — marking the storefront
+validated without proving that **kit #1 specifically sold**. The gate therefore needs a
+**sale-to-product link**, resolved before Option C is built (Open decision 7):
+
+- **Minimum (no schema change):** require a confirmed entry whose `itemType` is a kit type
+  (`StarterKit`/`PartyKit`/`CustomKit`) — a coarse proxy that at least excludes Book/Sticker sales,
+  but still can't distinguish kit #1 from a later kit.
+- **Correct (small additive change):** add an optional `sourceRef` (or `catalogProductId`) to
+  `BusinessLogEntry` so a confirmed sale points at the exact `CatalogProduct` it sold. Touching
+  `BusinessLogEntry` is a business-invariant-adjacent edit (the additive log shape) → propose →
+  confirm; this is why it is a decision, not a default.
+
+The gate is a human/parent judgment either way (a parent decides the storefront is worth standing
+up); the predicate above matters only if/when the gate is ever enforced in code.
 
 ---
 
@@ -306,3 +322,8 @@ something real to catalog; slice 5 is additionally gated on the sale.
 6. **Static snapshot vs public Firestore read** for Option C. Recommended: static snapshot (no
    rules change). Confirm we never open a public `catalogProducts` read unless a dynamic
    storefront is truly required.
+7. **Sale-gate predicate (kit #1 must be the thing that sold).** `BusinessLogEntry.confirmed`
+   alone can't prove it — the log has no product/source link (§1). Pick: coarse kit-`itemType`
+   proxy (no schema change) vs. an additive `sourceRef`/`catalogProductId` on `BusinessLogEntry`
+   linking a confirmed sale to its exact `CatalogProduct` (propose→confirm, since it touches the
+   additive log shape). Resolve before Option C is built.
