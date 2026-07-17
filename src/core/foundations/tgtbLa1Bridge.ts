@@ -58,6 +58,10 @@ export const tgtbLa1Bridge: WorkbookBridge = {
     'good and beautiful la1',
   ],
   version: TGTB_LA1_BRIDGE_VERSION,
+  // Level 1 of the TGTB Language Arts series. The contains-matcher's level-conflict
+  // guard uses this so a "…Language Arts Level 2/3/…" name does NOT resolve here
+  // through a generic, level-less alias (FEAT-64 amendment, P1).
+  level: 1,
   units: [
     // ── Unit-ish band, through lesson 40 ──
     {
