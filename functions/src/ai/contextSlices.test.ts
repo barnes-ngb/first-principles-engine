@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildContextForTask,
   buildMasterySummary,
   compressEngagement,
   formatChildProfile,
@@ -10,7 +11,8 @@ import {
   TASK_CONTEXT,
   CHARTER_PREAMBLE,
 } from "./contextSlices.js";
-import type { MasterySummary } from "./contextSlices.js";
+import type { MasterySummary, SliceContext } from "./contextSlices.js";
+import type { StoredLearnerModel } from "./tasks/learnerSynthesis.js";
 
 // ── TASK_CONTEXT registry ──────────────────────────────────────
 
@@ -90,6 +92,15 @@ describe("TASK_CONTEXT", () => {
 
   it("weeklyReview uses recentHistoryByDomain (G50 closure)", () => {
     expect(TASK_CONTEXT.weeklyReview).toContain("recentHistoryByDomain");
+  });
+
+  it("weeklyReview wires the learnerModel frontier slice (FEAT-74 / G4)", () => {
+    // The Weekly Review now grounds pace-adjustments/recommendations in the same
+    // synthesized frontier the planner + Shelly read.
+    expect(TASK_CONTEXT.weeklyReview).toContain("learnerModel");
+    // Complementary, NOT a replacement — the skill snapshot (stop-rules/supports)
+    // stays alongside the model (synthesized frontier).
+    expect(TASK_CONTEXT.weeklyReview).toContain("skillSnapshot");
   });
 
   it("shellyChat still uses recentEval (backward compat)", () => {
@@ -184,6 +195,102 @@ describe("TASK_CONTEXT", () => {
     expect(TASK_CONTEXT.revisePage).not.toContain("weekFocus");
     expect(TASK_CONTEXT.revisePage).not.toContain("workbookPaces");
     expect(TASK_CONTEXT.revisePage).not.toContain("recentEval");
+  });
+});
+
+// ── buildContextForTask("weeklyReview") — learnerModel frontier (FEAT-74) ──
+
+describe("buildContextForTask weeklyReview — learnerModel section (FEAT-74 / G4)", () => {
+  const MODEL: StoredLearnerModel = {
+    childId: "lincoln",
+    status: "seeded",
+    conceptStates: {
+      "reading.phonics.longVowels": {
+        state: "frontier",
+        evidence: [{ kind: "workingLevel", note: "At reading working level 4" }],
+      },
+    },
+    synthesis: {
+      whatMattersNext: [
+        {
+          conceptId: "reading.phonics.longVowels",
+          kidName: "Read long-vowel words",
+          why: "Blends are solid; long vowels are the next unlock.",
+          suggestedVehicle: "quest",
+        },
+      ],
+      narrative: "Reading with real momentum.",
+      openQuestionsSummary: [],
+      generatedAt: "2026-07-05T00:00:00Z",
+    },
+  };
+
+  // A generic empty-query stub: any chained method returns itself, `.get()`
+  // resolves to an empty snapshot. Non-learnerModel slices fail/return nothing
+  // and are isolated by buildContextForTask's Promise.allSettled — only the
+  // learnerModel path is exercised here.
+  function makeEmptyQuery(): unknown {
+    const q: unknown = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (typeof prop === "symbol") return undefined;
+          if (prop === "then") return undefined; // not a thenable
+          if (prop === "get") {
+            return async () => ({
+              docs: [],
+              forEach: () => {},
+              empty: true,
+              size: 0,
+              exists: false,
+              data: () => undefined,
+            });
+          }
+          return () => q;
+        },
+      },
+    );
+    return q;
+  }
+
+  function makeDb(model: StoredLearnerModel | null): SliceContext["db"] {
+    const emptyQuery = makeEmptyQuery();
+    return {
+      doc: (path: string) => {
+        if (path.includes("/learnerModels/")) {
+          return { get: async () => ({ exists: model != null, data: () => model }) };
+        }
+        return { get: async () => ({ exists: false, data: () => undefined }) };
+      },
+      collection: () => emptyQuery,
+    } as unknown as SliceContext["db"];
+  }
+
+  function ctxFor(model: StoredLearnerModel | null): SliceContext {
+    return {
+      db: makeDb(model),
+      familyId: "fam-1",
+      childId: "lincoln",
+      childData: { name: "Lincoln", grade: "3rd" },
+      snapshotData: undefined,
+    };
+  }
+
+  it("includes the LEARNER MODEL section when a synthesized model exists", async () => {
+    const sections = await buildContextForTask("weeklyReview", ctxFor(MODEL));
+    const joined = sections.join("\n\n");
+    expect(joined).toContain("LEARNER MODEL");
+    expect(joined).toContain("Working edge");
+    expect(joined).toContain("Read long-vowel words");
+    expect(joined).toContain("What matters next");
+  });
+
+  it("omits the LEARNER MODEL section cleanly when the model is absent (no empty header)", async () => {
+    const sections = await buildContextForTask("weeklyReview", ctxFor(null));
+    const joined = sections.join("\n\n");
+    expect(joined).not.toContain("LEARNER MODEL");
+    // The childProfile slice still renders — the section is dropped, not the whole prompt.
+    expect(joined).toContain("Name: Lincoln");
   });
 });
 

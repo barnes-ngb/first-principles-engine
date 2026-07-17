@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildEvaluationPrompt,
   formatBooksEvidence,
@@ -6,8 +6,10 @@ import {
   hasAnyEvidence,
   lastWeekKey,
   parseReviewResponse,
+  runWeeklyReviewCycleForChild,
   summarizeBooksWeek,
   summarizeTeachBacks,
+  WEEKLY_REVIEW_ADDENDUM,
 } from "./evaluate.js";
 import type { WeekContext } from "./evaluate.js";
 
@@ -642,5 +644,98 @@ describe("buildEvaluationPrompt — evidence sections", () => {
     expect(prompt).toContain("Teach-backs by Lincoln this week");
     expect(prompt).toContain("1 created (1 AI-generated, 0 hand-built)");
     expect(prompt).toContain("2 total teach-back moments");
+  });
+});
+
+// ── FEAT-74 (G4): synthesize-before-review ordering + isolation ─
+
+describe("runWeeklyReviewCycleForChild — FEAT-74 ordering + failure isolation", () => {
+  const db = {} as never;
+
+  it("synthesizes the learner model BEFORE generating the review", async () => {
+    const order: string[] = [];
+    const synthesizeIfStale = vi.fn(async () => {
+      order.push("synthesize");
+      return { status: "skipped-no-model" } as never;
+    });
+    const assembleWeekContext = vi.fn(async () => {
+      order.push("assemble");
+      return {} as never;
+    });
+    const generateReviewForChild = vi.fn(async () => {
+      order.push("generate");
+      return {} as never;
+    });
+
+    await runWeeklyReviewCycleForChild(db, "fam-1", "lincoln", "Lincoln", "2026-07-12", "key", {
+      synthesizeIfStale,
+      assembleWeekContext,
+      generateReviewForChild,
+    });
+
+    expect(synthesizeIfStale).toHaveBeenCalledTimes(1);
+    expect(generateReviewForChild).toHaveBeenCalledTimes(1);
+    // Synthesis must precede the review generation so the review reads a fresh model.
+    expect(order.indexOf("synthesize")).toBeLessThan(order.indexOf("generate"));
+  });
+
+  it("still generates the review when synthesizeIfStale throws (failure isolation)", async () => {
+    const synthesizeIfStale = vi.fn(async () => {
+      throw new Error("synthesis boom");
+    });
+    const assembleWeekContext = vi.fn(async () => ({}) as never);
+    const generateReviewForChild = vi.fn(async () => ({}) as never);
+
+    // Must not reject — the helper swallows the synthesis error.
+    await expect(
+      runWeeklyReviewCycleForChild(db, "fam-1", "lincoln", "Lincoln", "2026-07-12", "key", {
+        synthesizeIfStale,
+        assembleWeekContext,
+        generateReviewForChild,
+      }),
+    ).resolves.toBeUndefined();
+
+    // The review still ran despite the synthesis failure (served-stale fallback).
+    expect(generateReviewForChild).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not throw when review generation fails (loop isolation)", async () => {
+    const synthesizeIfStale = vi.fn(async () => undefined as never);
+    const assembleWeekContext = vi.fn(async () => {
+      throw new Error("assemble boom");
+    });
+    const generateReviewForChild = vi.fn(async () => ({}) as never);
+
+    await expect(
+      runWeeklyReviewCycleForChild(db, "fam-1", "lincoln", "Lincoln", "2026-07-12", "key", {
+        synthesizeIfStale,
+        assembleWeekContext,
+        generateReviewForChild,
+      }),
+    ).resolves.toBeUndefined();
+
+    // Synthesis still ran; review generation never reached (assemble threw).
+    expect(synthesizeIfStale).toHaveBeenCalledTimes(1);
+    expect(generateReviewForChild).not.toHaveBeenCalled();
+  });
+});
+
+// ── FEAT-74 (G4): weekly-review addendum frontier-grounding guidance ─
+
+describe("WEEKLY_REVIEW_ADDENDUM — learner-model frontier grounding (FEAT-74)", () => {
+  it("names the LEARNER MODEL section as a grounding source", () => {
+    expect(WEEKLY_REVIEW_ADDENDUM).toContain("LEARNER MODEL");
+    expect(WEEKLY_REVIEW_ADDENDUM).toContain("Working edge");
+    expect(WEEKLY_REVIEW_ADDENDUM).toContain("What matters next");
+  });
+
+  it("tells the AI to point recommendations/pace toward the frontier, not away", () => {
+    expect(WEEKLY_REVIEW_ADDENDUM).toMatch(/point toward that frontier/i);
+    // Deviations must be justified in the rationale.
+    expect(WEEKLY_REVIEW_ADDENDUM).toMatch(/say why in the rationale/i);
+  });
+
+  it("grounds pace adjustments in skill progression, not completion counts", () => {
+    expect(WEEKLY_REVIEW_ADDENDUM).toMatch(/Ground pace adjustments in skill progression/i);
   });
 });

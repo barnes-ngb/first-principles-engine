@@ -181,6 +181,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `lessonVideo` | _(self-loading)_ CHARTER_PREAMBLE + child profile (age + motivators + interests) |
 | `foundationsReview` | charter, childProfile |
 | `helpCard` | charter, childProfile, skillSnapshot, wordMastery, recentScans, recentHistoryByDomain, weekFocus |
+| `weeklyReview` | charter, childProfile, learnerModel, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports (+ week-scoped context from `assembleWeekContext`). FEAT-74: `learnerModel` grounds pace-adjustments/recommendations in the synthesized frontier; the Sunday cron synthesizes-if-stale **before** generating so the review reads a fresh model. |
 | `monthlyReview` | _(self-loading)_ CHARTER_PREAMBLE + aggregated month data (day logs, photos, milestones) |
 | `disposition` | _(self-loading)_ charter preamble + 4 weeks day logs + 3 recent evals + 5 recent lab reports |
 | `conundrum` | _(self-loading)_ charter preamble + week focus + recent subjects + child profiles |
