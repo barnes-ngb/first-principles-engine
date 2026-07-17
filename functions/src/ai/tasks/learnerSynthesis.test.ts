@@ -5,6 +5,7 @@ import {
   computeFanOut,
   orderMoveCandidates,
   parseSynthesisResponse,
+  rawResponseHead,
   SYNTHESIS_DISPLAY_RULES,
   type StoredLearnerModel,
 } from "./learnerSynthesis.js";
@@ -174,5 +175,20 @@ describe("parseSynthesisResponse", () => {
   it("returns null on unparseable or empty-narrative replies (deterministic fallback)", () => {
     expect(parseSynthesisResponse("not json at all {{{")).toBeNull();
     expect(parseSynthesisResponse(JSON.stringify({ whatMattersNext: [], narrative: "" }))).toBeNull();
+  });
+});
+
+describe("rawResponseHead", () => {
+  it("collapses whitespace and caps at ~200 chars", () => {
+    const garbage = "I'm sorry,\n\tbut I can't\n  do that." + "x".repeat(300);
+    const head = rawResponseHead(garbage);
+    expect(head.length).toBe(200);
+    expect(head).not.toContain("\n");
+    expect(head).not.toContain("\t");
+    expect(head.startsWith("I'm sorry, but I can't do that.")).toBe(true);
+  });
+
+  it("returns short strings intact", () => {
+    expect(rawResponseHead("  broke early  ")).toBe("broke early");
   });
 });

@@ -30,6 +30,7 @@ vi.mock("./tasks/learnerSynthesis.js", () => ({
       return null;
     }
   },
+  rawResponseHead: (text: string, max = 200) => text.replace(/\s+/g, " ").trim().slice(0, max),
 }));
 
 // Module-load-time dependencies of the callable registration.
@@ -108,6 +109,31 @@ describe("synthesizeLearnerModelForChild — honest error propagation (DOC-09)",
     );
 
     expect(result.status).toBe("failed");
-    expect(result.detail).toBe("Synthesis response could not be parsed as JSON.");
+    // The detail now carries the raw response head so a third failure mode
+    // (refusal / truncation / wrong shape) names itself on the next tap.
+    expect(result.detail).toBe(
+      "Synthesis response could not be parsed as JSON. Raw head: not json at all",
+    );
+  });
+
+  it("surfaces the raw response head for a garbage (non-JSON) reply", async () => {
+    callClaudeMock.mockResolvedValue({
+      text: "I'm sorry, but I can't help with that request.\n\nLet me know if...",
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    const result = await synthesizeLearnerModelForChild(
+      makeDb(),
+      "fam-1",
+      "lincoln",
+      "Lincoln",
+      "key",
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.detail).toContain("Raw head: I'm sorry, but I can't help");
+    // Newlines are collapsed to single spaces in the head.
+    expect(result.detail).not.toContain("\n");
   });
 });
