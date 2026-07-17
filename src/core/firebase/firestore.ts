@@ -33,6 +33,7 @@ import type {
   HelpCard,
   HoursAdjustment,
   HoursEntry,
+  KitRoster,
   LadderProgress,
   LearnerModel,
   LearnerReviewSession,
@@ -623,6 +624,29 @@ export const businessGoalsCollection = (
   collection(db, `families/${familyId}/businessGoals`).withConverter(
     businessGoalConverter,
   ) as CollectionReference<BusinessGoal>
+
+// ── GDQ Kit Builder (FEAT-80) ───────────────────────────────────
+
+export const kitRosterConverter: FirestoreDataConverter<KitRoster> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as KitRoster
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * Kit rosters — the reusable GDQ kit cast + rules (§4). A kid makes MANY kits,
+ * so this is an auto-ID collection (like `businessLog`), not a one-doc-per-child
+ * config. Use `addDoc` to create; `updateDoc` to edit. Filter by `childId`.
+ * Path: families/{familyId}/kitRosters/{autoId}
+ */
+export const kitRostersCollection = (
+  familyId: string,
+): CollectionReference<KitRoster> =>
+  collection(db, `families/${familyId}/kitRosters`).withConverter(
+    kitRosterConverter,
+  ) as CollectionReference<KitRoster>
 
 // ── Error Log (ARCH-11 client error reporting) ──────────────────
 
