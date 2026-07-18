@@ -42,6 +42,19 @@ export function useWatchLibrary(childId?: string | null): UseWatchLibraryResult 
   const [videos, setVideos] = useState<WatchVideo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [trackedChild, setTrackedChild] = useState(childId)
+
+  // Reset scoped results immediately when the child scope changes (render-phase
+  // — the React-recommended way to adjust state on a prop change; see
+  // useKitRosters). Without this, a child-scoped consumer keeps showing the
+  // prior child's videos as fully loaded until the new subscription's first
+  // snapshot arrives — a sibling's private entry could briefly be selectable.
+  if (trackedChild !== childId) {
+    setTrackedChild(childId)
+    setVideos([])
+    setLoading(Boolean(familyId))
+    setError(null)
+  }
 
   useEffect(() => {
     if (!familyId) return

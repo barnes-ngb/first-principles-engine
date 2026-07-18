@@ -37,6 +37,16 @@ describe('WatchVetInForm', () => {
     expect(save).toBeEnabled()
   })
 
+  it('rejects a fractional minutes value that would round to 0', () => {
+    render(<WatchVetInForm onSave={vi.fn()} />)
+    typeInto(/youtube link or video id/i, ID)
+    typeInto(/title/i, 'Castles')
+    typeInto(/planned minutes/i, '0.1')
+    expect(screen.getByRole('button', { name: /add to library/i })).toBeDisabled()
+    typeInto(/planned minutes/i, '12')
+    expect(screen.getByRole('button', { name: /add to library/i })).toBeEnabled()
+  })
+
   it('rejects a non-YouTube paste with an honest message and no valid id', () => {
     render(<WatchVetInForm onSave={vi.fn()} />)
     typeInto(/youtube link or video id/i, 'https://evil.com/watch?v=dQw4w9WgXcQ')

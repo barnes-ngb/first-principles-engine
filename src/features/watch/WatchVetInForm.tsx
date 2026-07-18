@@ -60,7 +60,10 @@ export default function WatchVetInForm({ onSave }: WatchVetInFormProps) {
   const youtubeId = useMemo(() => extractYouTubeId(urlOrId), [urlOrId])
   const pasteTouched = urlOrId.trim() !== ''
   const minutesNum = Number(minutes)
-  const minutesValid = Number.isFinite(minutesNum) && minutesNum > 0
+  // Require a positive integer. A fractional value (e.g. 0.1) would otherwise
+  // pass a `> 0` check yet round to 0 on save — and plannedMinutes flows into
+  // the checklist/hours path in later slices, so a 0 must never be storable.
+  const minutesValid = Number.isInteger(minutesNum) && minutesNum >= 1
 
   const canSave =
     youtubeId != null && title.trim() !== '' && minutesValid && !saving
