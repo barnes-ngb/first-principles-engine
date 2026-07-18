@@ -293,6 +293,7 @@ All under `families/{familyId}/`:
 | `learnerReviewSessions` | Persisted Foundations Review Chat sessions (FEAT-51). Doc ID: `{childId}_{domain}` |
 | `businessLog` | Barnes Bros append-only sales/earnings event log (additive-only; `addDoc` only, entries never mutated) |
 | `businessGoals` | Barnes Bros goal config (milestone stack). One doc per child operator, doc ID: `{childId}` |
+| `kitRosters` | GDQ Kit Builder rosters (FEAT-80). Reusable kit cast + rules (vault/hero/defenders/invaders/win) — business data, not a narrative. Additive; auto-ID (a kid makes many kits). Path: `families/{familyId}/kitRosters/{autoId}` |
 
 **Global collections** (not under `families/`):
 
