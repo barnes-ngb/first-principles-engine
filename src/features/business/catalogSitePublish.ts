@@ -33,6 +33,20 @@ export function publicCatalogPath(familyId: string): string {
 }
 
 /**
+ * The clean, human-sayable address (FEAT-85). A **thin one-time redirect** —
+ * `public/shop/index.html` in the app bundle, served at `/shop` on the app's
+ * Hosting site (static files win over the SPA catch-all rewrite), which
+ * `location.replace`s to the stable {@link publicCatalogUrl}. This is the
+ * address to text or say aloud; the long Storage URL stays the direct link.
+ *
+ * It never needs redeploying on republish: the redirect points at the
+ * token-less, **stable** Storage URL, so republish (a Storage upload) stays one
+ * tap. Single-family for now — the redirect bakes one target (see the file's
+ * header comment); a multi-family app would resolve `/shop` per user.
+ */
+export const PUBLIC_CATALOG_CLEAN_URL = 'https://first-principles-engine.web.app/shop'
+
+/**
  * The stable, **token-less** public URL for the published page. It resolves
  * without a download token because `storage.rules` world-reads `public/catalog/**`,
  * so it never changes across republishes (unlike a `getDownloadURL` token URL).

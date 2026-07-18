@@ -14,6 +14,7 @@ import { CatalogProductStatus } from '../../core/types/business'
 import CatalogProductCard from './CatalogProductCard'
 import CatalogProductForm from './CatalogProductForm'
 import { buildCatalogSheetHtml, selectListedProducts } from './catalogSheet'
+import { PUBLIC_CATALOG_CLEAN_URL } from './catalogSitePublish'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
 import { useCatalogSite } from './useCatalogSite'
@@ -95,11 +96,12 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
   const handleCopyUrl = async () => {
     if (!published) return
     try {
-      await navigator.clipboard.writeText(published.url)
+      // Copy the CLEAN address (FEAT-85) — the short one to text or say aloud.
+      await navigator.clipboard.writeText(PUBLIC_CATALOG_CLEAN_URL)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Clipboard blocked — the URL is still shown as a tappable link.
+      // Clipboard blocked — the address is still shown as a tappable link.
     }
   }
 
@@ -196,13 +198,20 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
           <Stack spacing={1}>
             <Typography variant="subtitle2">Your public catalog is live 🌱</Typography>
             <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+              <Link href={PUBLIC_CATALOG_CLEAN_URL} target="_blank" rel="noopener noreferrer">
+                {PUBLIC_CATALOG_CLEAN_URL}
+              </Link>
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
+              Direct link:{' '}
               <Link href={published.url} target="_blank" rel="noopener noreferrer">
                 {published.url}
               </Link>
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Last published {new Date(published.publishedAt).toLocaleString()} — text this link to a
-              family so they can pick their favorites. Republish any time the catalog changes.
+              Last published {new Date(published.publishedAt).toLocaleString()} — text the clean
+              address to a family so they can pick their favorites. Republish any time the catalog
+              changes.
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Barnes Bros — Catalog</title>
+  <!--
+    Clean, steady address for the Barnes Bros public catalog (FEAT-85, design §4).
+
+    This is a THIN, ONE-TIME redirect — NOT a migration. The catalog itself stays a
+    static page on Firebase Storage (public/catalog/{familyId}/index.html, FEAT-84),
+    republished with one tap from the phone. This page just gives that long Storage
+    URL a short, sayable address: first-principles-engine.web.app/shop
+
+    Because the published catalog URL is **token-less and stable** (it never changes
+    across republishes — that's the point of the FEAT-84 public path), the redirect
+    target is baked ONCE and never needs redeploying. Republish stays one tap.
+
+    SINGLE-FAMILY assumption (for now): the target is a single hardcoded constant
+    below. The familyId (the parent's UID) is a Firestore runtime value, not known at
+    build time, so it can't be derived here — the owner sets CATALOG_URL once by
+    copying the exact URL shown in the app's "Your public catalog is live" panel
+    (Barnes Bros → Catalog). A multi-family app would instead resolve this per-user.
+    Until it's set, this page shows a friendly note instead of a broken redirect.
+  -->
+  <script>
+    // The exact, stable published catalog URL (from the in-app "live" panel).
+    // Leave empty to show the setup note; paste the family's URL to go live.
+    var CATALOG_URL = ''
+    if (CATALOG_URL) {
+      // Instant redirect for JS clients — replace() so the clean address doesn't
+      // linger in history (Back returns to wherever the family came from).
+      window.location.replace(CATALOG_URL)
+    }
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+      color: #2a2a2a; background: #f6faf6; line-height: 1.5;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 24px; text-align: center;
+    }
+    .card {
+      max-width: 420px; background: #fff; border: 2px solid #cfe8cf;
+      border-radius: 16px; padding: 28px 22px; box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    }
+    h1 { font-size: 26px; color: #2e7d32; margin-bottom: 10px; }
+    p { font-size: 16px; color: #555; margin-bottom: 8px; }
+    a { color: #2e7d32; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <!--
+    Fallbacks. If CATALOG_URL is set, the inline script above has already navigated
+    away before any of this renders. If it's empty (not yet configured) OR JS is off,
+    the family sees a warm note. When configured, the <noscript> meta-refresh also
+    covers JS-disabled clients — but it's only meaningful once CATALOG_URL is baked
+    into the redirect script, so the static note below is the honest default.
+  -->
+  <div class="card">
+    <h1>Barnes Bros</h1>
+    <p>Our catalog is being set up — check back soon! 🌱</p>
+    <p><a href="/">Back to the app</a></p>
+  </div>
+</body>
+</html>
