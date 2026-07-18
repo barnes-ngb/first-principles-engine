@@ -7,9 +7,19 @@ import type { NewCatalogProduct } from './useCatalogProducts'
 const { useChildrenMock } = vi.hoisted(() => ({ useChildrenMock: vi.fn() }))
 vi.mock('../../core/hooks/useChildren', () => ({ useChildren: useChildrenMock }))
 
+// Spy on the download side-effect; keep the pure name-builders real (FEAT-93).
+const downloadArtFilesMock = vi.hoisted(() =>
+  vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+)
+vi.mock('./stickerArtExport', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./stickerArtExport')>()
+  return { ...actual, downloadArtFiles: downloadArtFilesMock }
+})
+
 import CatalogProductForm from './CatalogProductForm'
 
 beforeEach(() => {
+  downloadArtFilesMock.mockClear()
   useChildrenMock.mockReturnValue({
     children: [
       { id: 'lincoln', name: 'Lincoln' },
@@ -167,5 +177,79 @@ describe('CatalogProductForm', () => {
       />,
     )
     expect(screen.queryByLabelText(/peek inside/i)).toBeNull()
+  })
+
+  // ── Download image(s) (FEAT-93) ───────────────────────────────
+
+  it('downloads the product images named from the live title, zip-named, writing nothing', async () => {
+    const onSave = vi.fn<(b: NewCatalogProduct) => Promise<void>>(async () => undefined)
+    const user = userEvent.setup()
+    render(
+      <CatalogProductForm
+        initial={{
+          title: 'Steven the Sticker',
+          type: 'StickerSheet',
+          madeBy: ['Lincoln'],
+          images: [{ url: 'https://cdn/1.png' }, { url: 'https://cdn/2.png' }],
+          sourceRef: { kind: 'sticker', id: 's-1' },
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /download image/i }))
+
+    await waitFor(() => expect(downloadArtFilesMock).toHaveBeenCalledTimes(1))
+    const [files, zipName] = downloadArtFilesMock.mock.calls[0] as [
+      Array<{ url: string; filename: string }>,
+      string,
+    ]
+    expect(files).toEqual([
+      { url: 'https://cdn/1.png', filename: 'steven-the-sticker-1.png' },
+      { url: 'https://cdn/2.png', filename: 'steven-the-sticker-2.png' },
+    ])
+    expect(zipName).toBe('steven-the-sticker-stickers.zip')
+    // Downloading never saves the product.
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('names downloads from the edited (unsaved) title', async () => {
+    const user = userEvent.setup()
+    render(
+      <CatalogProductForm
+        initial={{
+          title: 'Old Name',
+          type: 'StickerSheet',
+          madeBy: [],
+          images: [{ url: 'https://cdn/1.png' }],
+          sourceRef: { kind: 'sticker', id: 's-1' },
+        }}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    typeInto(/title/i, 'New Name')
+    await user.click(screen.getByRole('button', { name: /download image/i }))
+
+    await waitFor(() => expect(downloadArtFilesMock).toHaveBeenCalledTimes(1))
+    const [files, zipName] = downloadArtFilesMock.mock.calls[0] as [
+      Array<{ filename: string }>,
+      string,
+    ]
+    expect(files[0].filename).toBe('new-name-1.png')
+    expect(zipName).toBe('new-name-stickers.zip')
+  })
+
+  it('hides Download image(s) when the product has no images', () => {
+    render(
+      <CatalogProductForm
+        initial={{ title: 'No Art', type: 'Other', madeBy: [], images: [] }}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /download image/i })).toBeNull()
   })
 })
