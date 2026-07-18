@@ -12,7 +12,7 @@ import { useChildren } from '../../core/hooks/useChildren'
 import type { CatalogProduct, KitArtRef, KitRoster } from '../../core/types/business'
 import { BusinessItemType, KitRosterStatus } from '../../core/types/business'
 import CatalogProductForm from './CatalogProductForm'
-import { artToProductImages, buildKitCharacterPrompt, hasAnyArt, mergeArt } from './kitArt'
+import { artToProductImages, buildKitCharacterPrompt, hasAnyArt } from './kitArt'
 import type { KitArtCharacter } from './KitBuilderForm'
 import KitBuilderForm from './KitBuilderForm'
 import type { NewCatalogProduct } from './useCatalogProducts'
@@ -47,7 +47,7 @@ interface KitBuilderSectionProps {
  * (`KitBuilderForm`) to create or edit one. The voice-capture flow is slice 2.
  */
 export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilderSectionProps) {
-  const { rosters, loading, createRoster, updateRoster, getRoster } = useKitRosters(activeChildId)
+  const { rosters, loading, createRoster, updateRoster, setRosterArt } = useKitRosters(activeChildId)
   const { products, createProduct, updateProduct } = useCatalogProducts()
   const { children } = useChildren()
   const { generateImage } = useAI()
@@ -76,9 +76,10 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
   /**
    * Generate + persist one character's sticker (FEAT-88). Reuses the existing
    * `generateImage` path (`book-sticker` ⇒ text-only prompt → transparent PNG →
-   * Storage URL — no backend change). The write is additive: we re-read the
-   * freshest roster and `mergeArt` so a second generation never clobbers the
-   * first. Returns the new ref, or `null` on failure (the form keeps prior art).
+   * Storage URL — no backend change). The write is additive AND atomic:
+   * `setRosterArt` sets only `art.<key>` via a nested field path, so two
+   * overlapping generations never clobber each other. Returns the new ref, or
+   * `null` on failure (the form keeps prior art).
    */
   const makeGenerateArt =
     (rosterId: string) =>
@@ -97,8 +98,7 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
         storagePath: result.storagePath,
         generatedAt: new Date().toISOString(),
       }
-      const fresh = await getRoster(rosterId)
-      await updateRoster(rosterId, { art: mergeArt(fresh?.art, characterKey, ref) })
+      await setRosterArt(rosterId, characterKey, ref)
       return ref
     }
 

@@ -13,7 +13,6 @@ import {
   invaderArtKey,
   KIT_STICKER_SCAFFOLD,
   MAX_PROMPT_FIELD,
-  mergeArt,
   rosterCharacters,
   sanitizeKidText,
 } from './kitArt'
@@ -134,26 +133,6 @@ describe('rosterCharacters', () => {
       }),
     )
     expect(chars).toEqual([])
-  })
-})
-
-describe('mergeArt', () => {
-  it('adds a new key without touching existing keys (additive)', () => {
-    const existing = { hero: ref('a') }
-    const merged = mergeArt(existing, 'defender:d1', ref('b'))
-    expect(merged).toEqual({ hero: ref('a'), 'defender:d1': ref('b') })
-    // did not mutate the input
-    expect(existing).toEqual({ hero: ref('a') })
-  })
-
-  it('replaces the ref for an existing key (regenerate)', () => {
-    const merged = mergeArt({ hero: ref('old') }, 'hero', ref('new'))
-    expect(merged.hero.url).toBe('new')
-    expect(Object.keys(merged)).toEqual(['hero'])
-  })
-
-  it('works from an undefined starting map', () => {
-    expect(mergeArt(undefined, 'hero', ref('a'))).toEqual({ hero: ref('a') })
   })
 })
 

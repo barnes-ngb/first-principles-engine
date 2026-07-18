@@ -70,14 +70,17 @@ function draftFromRoster(roster?: KitRoster): RosterDraft {
 
 /**
  * Per-character art affordance (FEAT-88): a thumbnail once art exists, plus a
- * `canEdit`-gated "Make sticker" / "Regenerate" button. Loading + honest-error
- * are per-character (FEAT-61): the spinner is scoped to this row, a failure
- * shows an inline message, and existing art is never lost on a failed retry.
+ * `canEdit`-gated "Make sticker" / "Regenerate" button. The thumbnail renders
+ * for EVERYONE with art (a kid/read-only viewer still sees his cast); the paid
+ * generate button renders only when `canGenerate`. Loading + honest-error are
+ * per-character (FEAT-61): the spinner is scoped to this row, a failure shows an
+ * inline message, and existing art is never lost on a failed retry.
  */
 function CharacterArtControl({
   characterKey,
   character,
   art,
+  canGenerate,
   busy,
   error,
   onGenerate,
@@ -85,6 +88,7 @@ function CharacterArtControl({
   characterKey: string
   character: KitArtCharacter
   art?: KitArtRef
+  canGenerate: boolean
   busy: boolean
   error: string | null
   onGenerate: (characterKey: string, character: KitArtCharacter) => void
@@ -109,22 +113,24 @@ function CharacterArtControl({
           }}
         />
       )}
-      <Box sx={{ minWidth: 0 }}>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={busy ? <CircularProgress size={14} /> : <AutoAwesomeIcon fontSize="small" />}
-          disabled={busy || !hasContent}
-          onClick={() => onGenerate(characterKey, character)}
-        >
-          {busy ? 'Making…' : art?.url ? 'Regenerate' : 'Make sticker'}
-        </Button>
-        {error && (
-          <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5 }}>
-            {error}
-          </Typography>
-        )}
-      </Box>
+      {canGenerate && (
+        <Box sx={{ minWidth: 0 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={busy ? <CircularProgress size={14} /> : <AutoAwesomeIcon fontSize="small" />}
+            disabled={busy || !hasContent}
+            onClick={() => onGenerate(characterKey, character)}
+          >
+            {busy ? 'Making…' : art?.url ? 'Regenerate' : 'Make sticker'}
+          </Button>
+          {error && (
+            <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5 }}>
+              {error}
+            </Typography>
+          )}
+        </Box>
+      )}
     </Stack>
   )
 }
@@ -182,7 +188,10 @@ export default function KitBuilderForm({
   const [artErrors, setArtErrors] = useState<Record<string, string>>({})
   const [confirmBatch, setConfirmBatch] = useState(false)
 
-  const showArt = canGenerateArt && Boolean(onGenerateArt)
+  // Generation is a paid, parent-only, persisted-roster affordance; thumbnails
+  // are shown to everyone with art (a read-only kid still sees his cast).
+  const canGenerate = canGenerateArt && Boolean(onGenerateArt)
+  const showControl = (characterKey: string) => canGenerate || Boolean(art[characterKey]?.url)
 
   const set = <K extends keyof RosterDraft>(key: K, value: RosterDraft[K]) =>
     setDraft((prev) => ({ ...prev, [key]: value }))
@@ -337,11 +346,12 @@ export default function KitBuilderForm({
             onChange={(e) => set('heroMove', e.target.value)}
             fullWidth
           />
-          {showArt && (
+          {showControl(HERO_ART_KEY) && (
             <CharacterArtControl
               characterKey={HERO_ART_KEY}
               character={{ name: draft.heroName, descriptor: heroDescriptor(draft) }}
               art={art[HERO_ART_KEY]}
+              canGenerate={canGenerate}
               busy={generatingKey === HERO_ART_KEY}
               error={artErrors[HERO_ART_KEY] ?? null}
               onGenerate={(k, c) => void generateOne(k, c)}
@@ -392,11 +402,12 @@ export default function KitBuilderForm({
                     <DeleteOutlineIcon fontSize="small" />
                   </IconButton>
                 </Stack>
-                {showArt && (
+                {showControl(defenderArtKey(d.id)) && (
                   <CharacterArtControl
                     characterKey={defenderArtKey(d.id)}
                     character={{ name: d.name, descriptor: d.power }}
                     art={art[defenderArtKey(d.id)]}
+                    canGenerate={canGenerate}
                     busy={generatingKey === defenderArtKey(d.id)}
                     error={artErrors[defenderArtKey(d.id)] ?? null}
                     onGenerate={(k, c) => void generateOne(k, c)}
@@ -453,11 +464,12 @@ export default function KitBuilderForm({
                     <DeleteOutlineIcon fontSize="small" />
                   </IconButton>
                 </Stack>
-                {showArt && (
+                {showControl(invaderArtKey(inv.id)) && (
                   <CharacterArtControl
                     characterKey={invaderArtKey(inv.id)}
                     character={{ name: inv.name, descriptor: inv.menace }}
                     art={art[invaderArtKey(inv.id)]}
+                    canGenerate={canGenerate}
                     busy={generatingKey === invaderArtKey(inv.id)}
                     error={artErrors[invaderArtKey(inv.id)] ?? null}
                     onGenerate={(k, c) => void generateOne(k, c)}
@@ -493,7 +505,7 @@ export default function KitBuilderForm({
         <MenuItem value={KitRosterStatus.Complete}>Ready</MenuItem>
       </TextField>
 
-      {showArt && remainingCount > 0 && (
+      {canGenerate && remainingCount > 0 && (
         <Box>
           <Button
             variant="text"

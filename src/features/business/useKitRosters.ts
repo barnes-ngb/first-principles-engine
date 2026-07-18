@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { addDoc, doc, getDoc, onSnapshot, query, updateDoc, where } from 'firebase/firestore'
+import { addDoc, doc, FieldPath, getDoc, onSnapshot, query, updateDoc, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { kitRostersCollection } from '../../core/firebase/firestore'
-import type { KitRoster } from '../../core/types/business'
+import type { KitArtRef, KitRoster } from '../../core/types/business'
 import { KitRosterStatus } from '../../core/types/business'
 
 /**
@@ -24,6 +24,13 @@ export interface UseKitRostersResult {
   createRoster: (roster: NewKitRoster) => Promise<string>
   /** Patch a roster in place (`updateDoc`). Re-stamps `updatedAt`. */
   updateRoster: (id: string, patch: Partial<Omit<KitRoster, 'id'>>) => Promise<void>
+  /**
+   * Atomically set ONE character's art ref (FEAT-88) via a nested field-path
+   * update (`art.<characterKey>`) — never a whole-map replacement. This keeps
+   * concurrent per-character generations additive: two overlapping writes to
+   * different keys both land without either clobbering the other's fresh ref.
+   */
+  setRosterArt: (id: string, characterKey: string, ref: KitArtRef) => Promise<void>
   /** One-off fetch of a single roster (e.g. deep-link / resume). */
   getRoster: (id: string) => Promise<KitRoster | null>
 }
@@ -116,6 +123,24 @@ export function useKitRosters(childId: string | null): UseKitRostersResult {
     [familyId],
   )
 
+  const setRosterArt = useCallback(
+    async (id: string, characterKey: string, ref: KitArtRef): Promise<void> => {
+      if (!familyId) return
+      // `FieldPath('art', characterKey)` targets ONLY that nested key — Firestore
+      // merges it without touching sibling art keys, so this is atomic and
+      // race-safe even for keys containing `.`/`:` (a defender key like
+      // `defender:def_x`). Re-stamp `updatedAt` in the same write.
+      await updateDoc(
+        doc(kitRostersCollection(familyId), id),
+        new FieldPath('art', characterKey),
+        ref,
+        'updatedAt',
+        new Date().toISOString(),
+      )
+    },
+    [familyId],
+  )
+
   const getRoster = useCallback(
     async (id: string): Promise<KitRoster | null> => {
       if (!familyId) return null
@@ -125,5 +150,5 @@ export function useKitRosters(childId: string | null): UseKitRostersResult {
     [familyId],
   )
 
-  return { rosters, loading, error, createRoster, updateRoster, getRoster }
+  return { rosters, loading, error, createRoster, updateRoster, setRosterArt, getRoster }
 }

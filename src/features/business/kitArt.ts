@@ -16,7 +16,7 @@
 //   3. Character keys are STABLE ids (`defender:${id}`), not indices, so art
 //      survives a reorder / mid-list edit.
 
-import type { CatalogImageRef, KitArtRef, KitRoster } from '../../core/types/business'
+import type { CatalogImageRef, KitRoster } from '../../core/types/business'
 
 // ── Stable character keys ─────────────────────────────────────────
 
@@ -126,20 +126,11 @@ export function charactersNeedingArt(roster: KitRoster): KitCharacter[] {
   return rosterCharacters(roster).filter((c) => !art[c.key]?.url)
 }
 
-// ── Art merge + product-image projection ──────────────────────────
-
-/**
- * Additively merge one generated ref into a roster's art map. A regenerate for
- * the same key REPLACES that key's ref; every other key is untouched. Returns a
- * new map (never mutates the input) — the caller passes it to `updateRoster`.
- */
-export function mergeArt(
-  existing: Record<string, KitArtRef> | undefined,
-  key: string,
-  ref: KitArtRef,
-): Record<string, KitArtRef> {
-  return { ...(existing ?? {}), [key]: ref }
-}
+// ── Product-image projection ──────────────────────────────────────
+//
+// (The additive per-key art WRITE is `useKitRosters.setRosterArt`, an atomic
+// `art.<key>` field-path update — no client-side read/merge, so concurrent
+// per-character generations never clobber each other.)
 
 /**
  * Project a roster's stored art onto ordered catalog image refs — hero first

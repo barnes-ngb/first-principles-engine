@@ -333,4 +333,22 @@ describe('KitBuilderForm', () => {
     expect(screen.getByRole('button', { name: /regenerate/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /make sticker$/i })).not.toBeInTheDocument()
   })
+
+  it('shows thumbnails to a read-only viewer but no generate buttons', () => {
+    // Kid/read-only path: canGenerateArt false, but the roster has art.
+    renderArtForm(
+      savedRoster({
+        defenders: [],
+        invaders: [],
+        art: { hero: artRef('https://img/hero.png') },
+      }),
+      { canGenerateArt: false },
+    )
+    // The thumbnail still renders (the kid sees his cast)…
+    expect(screen.getByAltText(/Zappy sticker/i)).toHaveAttribute('src', 'https://img/hero.png')
+    // …but no paid generate/regenerate button, and no batch button.
+    expect(screen.queryByRole('button', { name: /make sticker$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /regenerate/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /make stickers for the rest/i })).not.toBeInTheDocument()
+  })
 })

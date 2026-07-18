@@ -11,7 +11,7 @@ const {
   useChildrenMock,
   createRosterMock,
   updateRosterMock,
-  getRosterMock,
+  setRosterArtMock,
   useCatalogProductsMock,
   createProductMock,
   updateProductMock,
@@ -21,7 +21,7 @@ const {
   useChildrenMock: vi.fn(),
   createRosterMock: vi.fn<(...args: unknown[]) => Promise<string>>(async () => 'kit-new'),
   updateRosterMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
-  getRosterMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => null),
+  setRosterArtMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
   useCatalogProductsMock: vi.fn(),
   createProductMock: vi.fn<(...args: unknown[]) => Promise<string>>(async () => 'prod-new'),
   updateProductMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
@@ -156,7 +156,8 @@ function setRosters(rosters: KitRoster[], loading = false) {
     error: null,
     createRoster: createRosterMock,
     updateRoster: updateRosterMock,
-    getRoster: getRosterMock,
+    setRosterArt: setRosterArtMock,
+    getRoster: vi.fn(),
   })
 }
 
@@ -173,8 +174,7 @@ function setProducts(products: unknown[] = []) {
 beforeEach(() => {
   createRosterMock.mockClear()
   updateRosterMock.mockClear()
-  getRosterMock.mockClear()
-  getRosterMock.mockResolvedValue(null)
+  setRosterArtMock.mockClear()
   createProductMock.mockClear()
   updateProductMock.mockClear()
   generateImageMock.mockClear()
@@ -334,21 +334,8 @@ describe('KitBuilderSection', () => {
     expect(screen.getByTestId('form-canGenerateArt')).toHaveTextContent('false')
   })
 
-  it('generating writes the art ref additively via updateRoster (book-sticker, verbatim prompt)', async () => {
+  it('generating writes the art ref atomically per-key via setRosterArt (book-sticker, verbatim prompt)', async () => {
     const user = userEvent.setup()
-    // Roster already has a defender sticker; a hero generation must not clobber it.
-    getRosterMock.mockResolvedValue(
-      roster({
-        id: 'kit-7',
-        art: {
-          'defender:d1': {
-            url: 'https://img/def.png',
-            storagePath: 'p',
-            generatedAt: '2026-07-18T00:00:00.000Z',
-          },
-        },
-      }),
-    )
     setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
     render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
@@ -368,37 +355,19 @@ describe('KitBuilderSection', () => {
     // Kid's words drive the prompt, verbatim.
     expect(genArg.prompt).toContain('Zappy, green pea.')
 
-    await waitFor(() => expect(updateRosterMock).toHaveBeenCalledTimes(1))
-    const [id, patch] = updateRosterMock.mock.calls[0] as [
+    // Atomic per-key write: setRosterArt(id, key, ref) — never a whole-map
+    // replacement, so concurrent generations can't clobber each other.
+    await waitFor(() => expect(setRosterArtMock).toHaveBeenCalledTimes(1))
+    const [id, key, ref] = setRosterArtMock.mock.calls[0] as [
       string,
-      { art: Record<string, { url: string }> },
+      string,
+      { url: string; storagePath: string; generatedAt: string },
     ]
     expect(id).toBe('kit-7')
-    // Additive: existing defender art preserved, hero added.
-    expect(patch.art['defender:d1'].url).toBe('https://img/def.png')
-    expect(patch.art.hero.url).toBe('https://img/hero.png')
-  })
-
-  it('regenerating replaces the existing ref for that character', async () => {
-    const user = userEvent.setup()
-    getRosterMock.mockResolvedValue(
-      roster({
-        id: 'kit-7',
-        art: {
-          hero: { url: 'https://img/OLD.png', storagePath: 'p', generatedAt: '2026-07-01T00:00:00.000Z' },
-        },
-      }),
-    )
-    setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
-    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
-
-    await user.click(screen.getByText('Editable'))
-    await user.click(screen.getByRole('button', { name: 'gen-hero' }))
-
-    await waitFor(() => expect(updateRosterMock).toHaveBeenCalledTimes(1))
-    const patch = updateRosterMock.mock.calls[0][1] as { art: Record<string, { url: string }> }
-    expect(Object.keys(patch.art)).toEqual(['hero'])
-    expect(patch.art.hero.url).toBe('https://img/hero.png')
+    expect(key).toBe('hero')
+    expect(ref.url).toBe('https://img/hero.png')
+    // The whole-map updateRoster path is NOT used for art.
+    expect(updateRosterMock).not.toHaveBeenCalled()
   })
 
   it('"Use as product image" sets the product images and touches ONLY the catalog', async () => {
