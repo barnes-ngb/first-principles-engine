@@ -8,13 +8,23 @@ import Typography from '@mui/material/Typography'
 
 import { useChildren } from '../../core/hooks/useChildren'
 import type { KitRoster } from '../../core/types/business'
-import { KitRosterStatus } from '../../core/types/business'
+import { BusinessItemType, KitRosterStatus } from '../../core/types/business'
+import CatalogProductForm from './CatalogProductForm'
 import KitBuilderForm from './KitBuilderForm'
+import type { NewCatalogProduct } from './useCatalogProducts'
+import { useCatalogProducts } from './useCatalogProducts'
 import type { NewKitRoster } from './useKitRosters'
 import { useKitRosters } from './useKitRosters'
 
-/** Distinct view of a `KitRoster`: showing the list, or the form (new/edit). */
-type Mode = { kind: 'list' } | { kind: 'new' } | { kind: 'edit'; roster: KitRoster }
+/**
+ * Distinct view of a `KitRoster`: the list, the roster form (new/edit), or the
+ * catalog product form pre-filled from a roster being promoted.
+ */
+type Mode =
+  | { kind: 'list' }
+  | { kind: 'new' }
+  | { kind: 'edit'; roster: KitRoster }
+  | { kind: 'promote'; roster: KitRoster }
 
 interface KitBuilderSectionProps {
   /** Operator a new roster is authored under (the active child). */
@@ -28,6 +38,7 @@ interface KitBuilderSectionProps {
  */
 export default function KitBuilderSection({ activeChildId }: KitBuilderSectionProps) {
   const { rosters, loading, createRoster, updateRoster } = useKitRosters(activeChildId)
+  const { createProduct } = useCatalogProducts()
   const { children } = useChildren()
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
 
@@ -44,6 +55,39 @@ export default function KitBuilderSection({ activeChildId }: KitBuilderSectionPr
       await createRoster(body)
     }
     setMode({ kind: 'list' })
+  }
+
+  /**
+   * Pre-fill a catalog product from a roster (design §2/§5). Read-only of the
+   * roster — nothing here mutates it. Title from `vaultName`, type StarterKit
+   * default, `madeBy` from the author's name, `sourceRef` links the roster, and
+   * `images` stays empty (the roster has no art yet → placeholder card). The
+   * parent sets price + status before saving (§6: no kid self-pricing).
+   */
+  const promoteInitial = (r: KitRoster): Partial<NewCatalogProduct> => {
+    const maker = nameById[r.childId]
+    return {
+      title: r.vaultName.trim() || 'Untitled kit',
+      type: BusinessItemType.StarterKit,
+      madeBy: maker ? [maker] : [],
+      images: [],
+      sourceRef: { kind: 'kitRoster', id: r.id },
+    }
+  }
+
+  const handlePromoteSave = async (body: NewCatalogProduct) => {
+    await createProduct(body)
+    setMode({ kind: 'list' })
+  }
+
+  if (mode.kind === 'promote') {
+    return (
+      <CatalogProductForm
+        initial={promoteInitial(mode.roster)}
+        onSave={handlePromoteSave}
+        onCancel={() => setMode({ kind: 'list' })}
+      />
+    )
   }
 
   if (mode.kind === 'new' || mode.kind === 'edit') {
@@ -101,12 +145,25 @@ export default function KitBuilderSection({ activeChildId }: KitBuilderSectionPr
                       </Typography>
                     )}
                   </Box>
-                  <Chip
-                    size="small"
-                    label={ready ? 'Ready' : 'In progress'}
-                    color={ready ? 'success' : 'default'}
-                    variant={ready ? 'filled' : 'outlined'}
-                  />
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={(e) => {
+                        // Don't trigger the row's edit tap.
+                        e.stopPropagation()
+                        setMode({ kind: 'promote', roster: r })
+                      }}
+                    >
+                      Add to catalog
+                    </Button>
+                    <Chip
+                      size="small"
+                      label={ready ? 'Ready' : 'In progress'}
+                      color={ready ? 'success' : 'default'}
+                      variant={ready ? 'filled' : 'outlined'}
+                    />
+                  </Stack>
                 </Stack>
               </Box>
             )

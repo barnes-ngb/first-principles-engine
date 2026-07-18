@@ -6,19 +6,68 @@ import type { KitRoster } from '../../core/types/business'
 
 // ── Hoisted mocks ───────────────────────────────────────────────
 
-const { useKitRostersMock, useChildrenMock, createRosterMock, updateRosterMock } = vi.hoisted(() => ({
+const {
+  useKitRostersMock,
+  useChildrenMock,
+  createRosterMock,
+  updateRosterMock,
+  useCatalogProductsMock,
+  createProductMock,
+} = vi.hoisted(() => ({
   useKitRostersMock: vi.fn(),
   useChildrenMock: vi.fn(),
   createRosterMock: vi.fn<(...args: unknown[]) => Promise<string>>(async () => 'kit-new'),
   updateRosterMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+  useCatalogProductsMock: vi.fn(),
+  createProductMock: vi.fn<(...args: unknown[]) => Promise<string>>(async () => 'prod-new'),
 }))
 
 vi.mock('./useKitRosters', () => ({
   useKitRosters: useKitRostersMock,
 }))
 
+vi.mock('./useCatalogProducts', () => ({
+  useCatalogProducts: useCatalogProductsMock,
+}))
+
 vi.mock('../../core/hooks/useChildren', () => ({
   useChildren: useChildrenMock,
+}))
+
+// Stub the catalog form so the section test stays focused; echo the pre-fill.
+vi.mock('./CatalogProductForm', () => ({
+  default: ({
+    initial,
+    onSave,
+    onCancel,
+  }: {
+    initial?: { title?: string; sourceRef?: { kind: string; id: string }; madeBy?: string[] }
+    onSave: (body: unknown) => Promise<void>
+    onCancel: () => void
+  }) => (
+    <div data-testid="catalog-form">
+      <span data-testid="cf-title">{initial?.title ?? 'none'}</span>
+      <span data-testid="cf-source">{initial?.sourceRef?.id ?? 'none'}</span>
+      <span data-testid="cf-madeby">{(initial?.madeBy ?? []).join(',')}</span>
+      <button
+        onClick={() =>
+          onSave({
+            title: initial?.title,
+            type: 'StarterKit',
+            description: '',
+            priceCents: 0,
+            images: [],
+            sourceRef: initial?.sourceRef,
+            madeBy: initial?.madeBy ?? [],
+            status: 'draft',
+          })
+        }
+      >
+        cf-save
+      </button>
+      <button onClick={onCancel}>cf-cancel</button>
+    </div>
+  ),
 }))
 
 // Stub the form so the section test stays focused on list/mode behavior.
@@ -76,6 +125,8 @@ function setRosters(rosters: KitRoster[], loading = false) {
 beforeEach(() => {
   createRosterMock.mockClear()
   updateRosterMock.mockClear()
+  createProductMock.mockClear()
+  useCatalogProductsMock.mockReturnValue({ createProduct: createProductMock })
   useChildrenMock.mockReturnValue({ children: [{ id: 'lincoln', name: 'Lincoln' }] })
 })
 
@@ -150,5 +201,39 @@ describe('KitBuilderSection', () => {
 
     expect(screen.queryByTestId('form')).not.toBeInTheDocument()
     expect(createRosterMock).not.toHaveBeenCalled()
+  })
+
+  it('Add to catalog opens the pre-filled product form without editing the roster', async () => {
+    const user = userEvent.setup()
+    setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe', status: 'Complete' })])
+    render(<KitBuilderSection activeChildId="lincoln" />)
+
+    await user.click(screen.getByRole('button', { name: /add to catalog/i }))
+
+    // Catalog form (not the roster form) opens, pre-filled from the roster.
+    expect(screen.getByTestId('catalog-form')).toBeInTheDocument()
+    expect(screen.queryByTestId('form')).not.toBeInTheDocument()
+    expect(screen.getByTestId('cf-title')).toHaveTextContent('The Seed Safe')
+    expect(screen.getByTestId('cf-source')).toHaveTextContent('kit-9')
+    expect(screen.getByTestId('cf-madeby')).toHaveTextContent('Lincoln')
+    // Read-only of the roster — no roster write triggered by opening promote.
+    expect(updateRosterMock).not.toHaveBeenCalled()
+  })
+
+  it('saving a promoted product calls createProduct (roster untouched) and returns to the list', async () => {
+    const user = userEvent.setup()
+    setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe' })])
+    render(<KitBuilderSection activeChildId="lincoln" />)
+
+    await user.click(screen.getByRole('button', { name: /add to catalog/i }))
+    await user.click(screen.getByRole('button', { name: 'cf-save' }))
+
+    await waitFor(() => expect(createProductMock).toHaveBeenCalledTimes(1))
+    const body = createProductMock.mock.calls[0][0] as { sourceRef?: { kind: string; id: string } }
+    expect(body.sourceRef).toEqual({ kind: 'kitRoster', id: 'kit-9' })
+    // Promote never mutates the roster.
+    expect(createRosterMock).not.toHaveBeenCalled()
+    expect(updateRosterMock).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('catalog-form')).not.toBeInTheDocument()
   })
 })
