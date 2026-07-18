@@ -419,3 +419,26 @@ export interface CatalogOrder {
   /** ISO timestamp of the last status advance. */
   updatedAt: string
 }
+
+// ── Kid art-generation quota (FEAT-94) ────────────────────────────
+
+/**
+ * A per-child, per-day counter for kid-initiated art generation (FEAT-94). Each
+ * image generation is a paid call, so a kid profile gets a light, non-shaming
+ * daily cap (never a lock) — this doc just counts today's generations. Parent
+ * profiles are uncapped and never read/write it.
+ *
+ * Doc ID: `{childId}-{YYYY-MM-DD}`. Additive, client-written under the existing
+ * owner Firestore rule (kids share the family auth, so the cap is UX, not
+ * security). No schema churn — a tiny standalone counter, not a child record.
+ */
+export interface ArtQuota {
+  /** The operator this counter belongs to. */
+  childId: string
+  /** The local day this counter covers (`YYYY-MM-DD`). */
+  date: string
+  /** How many generations have been recorded today. */
+  count: number
+  /** ISO timestamp of the last increment. */
+  updatedAt: string
+}
