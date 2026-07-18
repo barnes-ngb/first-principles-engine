@@ -29,10 +29,13 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 vi.mock('../../core/firebase/storage', () => ({
-  storage: { app: { options: { storageBucket: 'test-bucket.appspot.com' } } },
+  storage: {
+    app: { options: { storageBucket: 'test-bucket.appspot.com', projectId: 'test-project' } },
+  },
 }))
 
 import {
+  catalogOrderEndpoint,
   getPublishedState,
   publicCatalogPath,
   publicCatalogUrl,
@@ -186,6 +189,25 @@ describe('publishCatalogSite', () => {
     const html = await uploadedHtml()
     expect(html).toContain('Ghost Book')
     expect(html).not.toContain('Peek inside')
+  })
+})
+
+describe('catalogOrderEndpoint (FEAT-89)', () => {
+  it('builds the deterministic us-central1 cloudfunctions URL for the project', () => {
+    expect(catalogOrderEndpoint('test-project')).toBe(
+      'https://us-central1-test-project.cloudfunctions.net/submitCatalogOrder',
+    )
+  })
+})
+
+describe('publishCatalogSite — order form baking (FEAT-89)', () => {
+  it('bakes the order endpoint + familyId into the published page', async () => {
+    await publishCatalogSite(FAMILY, [product({ title: 'Listed Kit', status: 'listed' })])
+    const html = await uploadedHtml()
+    expect(html).toContain('<form id="orderForm"')
+    expect(html).toContain(catalogOrderEndpoint('test-project'))
+    expect(html).toContain(`"familyId":"${FAMILY}"`)
+    expect(html).toContain('want-btn')
   })
 })
 

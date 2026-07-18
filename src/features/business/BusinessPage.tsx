@@ -10,6 +10,7 @@ import CatalogSection from './CatalogSection'
 import GoalBuilder from './GoalBuilder'
 import GoalThermometer from './GoalThermometer'
 import KitBuilderSection from './KitBuilderSection'
+import OrdersSection from './OrdersSection'
 import SaleEntryForm from './SaleEntryForm'
 import SalesLogList from './SalesLogList'
 import { useBusinessGoal } from './useBusinessGoal'
@@ -92,6 +93,12 @@ export default function BusinessPage() {
       <SectionErrorBoundary section="business catalog">
         <SectionCard title="Catalog">
           <CatalogSection canEdit={canEdit} />
+        </SectionCard>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="business orders">
+        <SectionCard title="Orders">
+          <OrdersSection />
         </SectionCard>
       </SectionErrorBoundary>
 

@@ -138,6 +138,21 @@ export interface KitInvader {
   menace: string
 }
 
+/**
+ * One generated character-art reference on a roster (FEAT-88 — the kit art
+ * pipeline). Points at an already-generated transparent sticker in Storage —
+ * the roster REFERENCES art, exactly as `CatalogImageRef` does for products; it
+ * never stores image bytes. Business art only — never a learner-model input.
+ */
+export interface KitArtRef {
+  /** Firebase Storage download URL of the generated transparent sticker. */
+  url: string
+  /** Storage object path (kept for future cleanup — not engineered this slice). */
+  storagePath: string
+  /** ISO timestamp when the image was generated. */
+  generatedAt: string
+}
+
 export const KitRosterStatus = {
   InProgress: 'InProgress',
   Complete: 'Complete',
@@ -172,6 +187,16 @@ export interface KitRoster {
    * NOT a numeric index — the defender/invader beats are variable-length.
    */
   resumeBeat?: string
+
+  /**
+   * Optional per-character generated sticker art (FEAT-88). Keyed by a **stable**
+   * character key: `hero`, `defender:${defender.id}`, `invader:${invader.id}`
+   * (see `kitArt.ts`). Additive + **partial** — some characters may have art
+   * while others don't; a regenerate replaces that key's ref (the prior Storage
+   * file may linger — cleanup is deliberately out of scope this slice). Business
+   * art only: never a learner-model / compliance / hours / XP input.
+   */
+  art?: Record<string, KitArtRef>
 
   createdAt: string // ISO
   updatedAt: string // ISO
@@ -280,5 +305,101 @@ export interface CatalogProduct {
   /** ISO timestamp. */
   createdAt: string
   /** ISO timestamp of last parent edit. */
+  updatedAt: string
+}
+
+// ── Barnes Bros Order Queue (FEAT-89) ─────────────────────────────
+//
+// The outreach loop closed: a family on the published catalog site
+// (barnesbro.web.app, FEAT-84/85/86) says WHAT they want and WHO they are, and
+// it lands in-app as an ORDER the kids fulfill and track. Design:
+// docs/BARNES_BROS_CATALOG_DESIGN.md §4 (order capture) / §6 (scope).
+//
+// Owner decision (2026-07-18): FEAT-84's "no customer data" rail is CONSCIOUSLY
+// lifted, MINIMALLY scoped — an order captures a first name + picked products +
+// an optional note + an optional contact line. NOTHING else: no address, no
+// payment, no required email, no accounts. The audience is people the family
+// already knows.
+//
+// Load-bearing invariants baked into these shapes:
+//   1. Status moves FORWARD ONLY through the fixed flow (new → making → ready →
+//      delivered). The stepper never regresses — `nextOrderStatus` is the only
+//      transition, and it returns `null` at the end. No timers, no due-dates, no
+//      overdue language: the mechanic carries the message.
+//   2. Business data, NOT a learner-model input — no concept states, no
+//      compliance / hours / XP writes (mirrors the catalog §5 rail).
+//   3. The making is the KIDS' work: advancing status is NOT parent-gated (any
+//      family member steps it). Only a future destructive op (delete/archive)
+//      would be parent-gated.
+
+/** One line-item on an order — a REFERENCE to a catalog product the family picked. */
+export interface CatalogOrderItem {
+  /** The `CatalogProduct` doc ID the family picked. */
+  productId: string
+  /** The product title at order time (snapshot — survives a later retitle). */
+  title: string
+}
+
+/** Fulfillment lifecycle of an order. Advances forward only (invariant 1). */
+export const CatalogOrderStatus = {
+  New: 'new',
+  Making: 'making',
+  Ready: 'ready',
+  Delivered: 'delivered',
+} as const
+export type CatalogOrderStatus = (typeof CatalogOrderStatus)[keyof typeof CatalogOrderStatus]
+
+/** Human-readable label for each order status. */
+export const CatalogOrderStatusLabel: Record<CatalogOrderStatus, string> = {
+  [CatalogOrderStatus.New]: 'New',
+  [CatalogOrderStatus.Making]: 'Making',
+  [CatalogOrderStatus.Ready]: 'Ready',
+  [CatalogOrderStatus.Delivered]: 'Delivered',
+}
+
+/**
+ * The fixed forward-only order flow. The stepper walks this array left→right and
+ * never back — the single source of truth for both the UI stepper and the
+ * `nextOrderStatus` transition helper.
+ */
+export const CATALOG_ORDER_STATUS_FLOW: readonly CatalogOrderStatus[] = [
+  CatalogOrderStatus.New,
+  CatalogOrderStatus.Making,
+  CatalogOrderStatus.Ready,
+  CatalogOrderStatus.Delivered,
+] as const
+
+/**
+ * The next status forward in the flow, or `null` at the end (`delivered`). This
+ * is the ONLY status transition — there is deliberately no "back" helper, which
+ * structurally enforces the forward-only invariant.
+ */
+export function nextOrderStatus(status: CatalogOrderStatus): CatalogOrderStatus | null {
+  const i = CATALOG_ORDER_STATUS_FLOW.indexOf(status)
+  if (i < 0 || i >= CATALOG_ORDER_STATUS_FLOW.length - 1) return null
+  return CATALOG_ORDER_STATUS_FLOW[i + 1]
+}
+
+/**
+ * A family's order — placed from the public catalog site, fulfilled in-app.
+ * Stored at `families/{familyId}/orders/{autoId}`. Family-scoped (a catalog is
+ * the family's storefront). Minimally scoped customer data (owner decision,
+ * invariant above): a first name + picks + optional note + optional contact.
+ */
+export interface CatalogOrder {
+  id: string
+  /** The customer's first name (required on the form). Stored verbatim. */
+  customerName: string
+  /** The catalog products they picked (≥ 1). Titles snapshotted at order time. */
+  items: CatalogOrderItem[]
+  /** Optional free-text note from the customer ("London's is blue please!"). */
+  note?: string
+  /** Optional contact line the customer chose to leave (phone / handle / "text me"). */
+  contact?: string
+  /** Fulfillment status — advances forward only. New orders start `new`. */
+  status: CatalogOrderStatus
+  /** ISO timestamp the order was placed (server-stamped by the endpoint). */
+  createdAt: string
+  /** ISO timestamp of the last status advance. */
   updatedAt: string
 }

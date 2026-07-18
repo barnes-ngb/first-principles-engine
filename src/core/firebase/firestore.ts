@@ -19,6 +19,7 @@ import type {
   BookThemeConfig,
   BusinessGoal,
   BusinessLogEntry,
+  CatalogOrder,
   CatalogProduct,
   ChapterBook,
   ChapterResponse,
@@ -672,6 +673,31 @@ export const catalogProductsCollection = (
   collection(db, `families/${familyId}/catalogProducts`).withConverter(
     catalogProductConverter,
   ) as CollectionReference<CatalogProduct>
+
+// ── Barnes Bros Order Queue (FEAT-89) ───────────────────────────
+
+export const catalogOrderConverter: FirestoreDataConverter<CatalogOrder> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as CatalogOrder
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * Orders placed from the public catalog site, fulfilled in-app (FEAT-89). The
+ * customer-facing write happens server-side via the `submitCatalogOrder` Cloud
+ * Function (admin SDK) — the public page has no auth — so `firestore.rules`
+ * stays owner-only + untouched. In-app this collection is read (newest first) +
+ * status-advanced. Additive, auto-ID, no deletes. Family-scoped — a catalog is
+ * the family's storefront, not per-child. Path: families/{familyId}/orders/{autoId}
+ */
+export const catalogOrdersCollection = (
+  familyId: string,
+): CollectionReference<CatalogOrder> =>
+  collection(db, `families/${familyId}/orders`).withConverter(
+    catalogOrderConverter,
+  ) as CollectionReference<CatalogOrder>
 
 // ── Error Log (ARCH-11 client error reporting) ──────────────────
 

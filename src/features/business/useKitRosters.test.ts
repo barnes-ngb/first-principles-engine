@@ -19,6 +19,14 @@ vi.mock('firebase/firestore', () => ({
   doc: vi.fn((_coll: unknown, id: string) => ({ __doc: id })),
   query: vi.fn((coll: unknown) => coll),
   where: whereMock,
+  // Minimal FieldPath stand-in: captures the segments so the test can assert the
+  // nested `art.<key>` target without pulling in the real firestore SDK.
+  FieldPath: class {
+    segments: string[]
+    constructor(...segments: string[]) {
+      this.segments = segments
+    }
+  },
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
@@ -149,6 +157,33 @@ describe('useKitRosters', () => {
     const patch = updateDocMock.mock.calls[0][1] as Record<string, unknown>
     expect(patch.vaultName).toBe('renamed')
     expect(patch.updatedAt).toBeTruthy()
+  })
+
+  it('sets one art key atomically via a nested field path (art.<key> + updatedAt)', async () => {
+    const { result } = renderHook(() => useKitRosters('lincoln'))
+    const ref = {
+      url: 'https://img/hero.png',
+      storagePath: 'families/family-1/generated-images/hero.png',
+      generatedAt: '2026-07-18T00:00:00.000Z',
+    }
+    await act(async () => {
+      await result.current.setRosterArt('kit-1', 'defender:def_x', ref)
+    })
+
+    expect(updateDocMock).toHaveBeenCalledTimes(1)
+    const [docRef, fieldPath, value, stampKey, stampVal] = updateDocMock.mock.calls[0] as [
+      unknown,
+      { segments: string[] },
+      unknown,
+      string,
+      string,
+    ]
+    expect(docRef).toEqual({ __doc: 'kit-1' })
+    // Nested field path targets ONLY this key — never a whole-map replacement.
+    expect(fieldPath.segments).toEqual(['art', 'defender:def_x'])
+    expect(value).toEqual(ref)
+    expect(stampKey).toBe('updatedAt')
+    expect(stampVal).toBeTruthy()
   })
 
   it('gets a single roster, returning null when it does not exist', async () => {

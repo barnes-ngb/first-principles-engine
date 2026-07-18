@@ -264,6 +264,42 @@ read-only lookbook generated from the catalog.
 > book; no write from the public page; **no rules change** (the preview lives inline under the same
 > `public/catalog/{familyId}/**` object).
 
+> **Order capture shipped by FEAT-89 (2026-07-18) — the outreach loop closes.**
+> C1 was a read-only lookbook; FEAT-89 lets a family on the published page say **what they want
+> and who they are**, landing it in-app as an **order the kids fulfill and track**.
+>
+> **Owner decision — the "no customer data" rail (§6) is consciously lifted, minimally scoped.**
+> An order captures a **first name + picked products + optional note + optional contact line.**
+> NOTHING else: no address, no payment, no required email, no accounts. The audience is people
+> the family already knows; the form says so warmly ("We know you — we'll be in touch! 💚").
+>
+> **Mechanism — W1 (unauthenticated HTTPS function), not W2 (public create-only Firestore rule).**
+> The published page has no auth and no backend, so an order needs a server write path. Recon
+> evaluated both:
+> - **W1 (shipped):** an unauthenticated `onRequest` function `submitCatalogOrder` (admin SDK
+>   write to `families/{familyId}/orders`) with **CORS locked** to the catalog's own origins, a
+>   **honeypot** field, a best-effort **per-IP rate limit**, strict **schema validation + caps**,
+>   and a **product-id allowlist** against the family's `listed` products. `firestore.rules` stays
+>   owner-only and **UNTOUCHED**.
+> - **W2 (rejected):** a public `allow create` rule on `orders`. No function, but it *is* a
+>   `firestore.rules` change (a propose-confirm invariant) and spam control is far weaker (no
+>   honeypot, no rate limit, no origin lock). Chosen against for exactly those reasons.
+>
+> **How the page learns the endpoint:** baked at publish time, the same pattern as the catalog
+> URL — `publishCatalogSite` reads the runtime firebase-app `projectId`, builds the deterministic
+> `us-central1` `cloudfunctions.net` endpoint, and embeds `{ endpoint, familyId }` into the page's
+> form script. No endpoint ⇒ the page is the read-only lookbook, byte-for-byte (script-free).
+>
+> **In-app:** an **Orders** SectionCard on the Business tab lists orders newest-first (customer,
+> picks, note, contact) with a **forward-only status stepper** (`new → making → ready →
+> delivered`) any family member advances — the making is the **kids' work**, so status is **not**
+> parent-gated (only a future destructive op would be). A "🎉 New order!" affordance shows while an
+> unstarted order waits. No timers, no due-dates, no overdue language.
+>
+> **Learning loop untouched (§5):** orders are business data — no learner-model / compliance /
+> hours / XP write. **Future linkage (noted, not built):** an order that later gets paid becomes a
+> confirmed `businessLog` sale; that bridge is deliberately left for a later slice.
+
 **What this actually requires** (from Step 0.4 recon — the current app is a single, fully-authed
 SPA, so *none of this exists today*):
 
@@ -325,8 +361,11 @@ FEAT-78 roster: creative/commercial output, not a calibrated assessment.)
   sticker images / kit art via their Storage URLs.
 - **Expose the authed app publicly.** Option C is a *separate static site*, never a public route
   into this SPA. The app stays fully behind auth.
-- **Collect customer PII in-app.** Same invariant as `businessLog` — the kid-visible surface
-  carries operational state only, never customer/order personal data.
+- **Collect customer PII beyond the FEAT-89 minimal scope.** The original "no customer data" rail
+  was consciously lifted by the owner (2026-07-18) to exactly **first name + picked products +
+  optional note + optional contact line** — the audience is people the family already knows.
+  Still **never**: address, payment, required email, or accounts. The `businessLog` earnings
+  surface remains PII-free.
 - **Let a kid publish or price without parent confirmation.** `status` transitions and pricing are
   `canEdit`-gated. Kids' made things are the source; a parent curates them into listed products.
 - **Change `firestore.rules` casually.** A public read path is an invariant change — propose →
