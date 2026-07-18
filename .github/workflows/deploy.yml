@@ -70,13 +70,30 @@ jobs:
         run: npm run build
 
       # ── Deploy hosting + rules (always) ──────────────────────────
-      - name: Deploy Hosting
+      # Two hosting targets (FEAT-86): `app` = the main SPA (first-principles-engine),
+      # `shop` = the dedicated barnesbro.web.app catalog redirect. The action's
+      # `target` input deploys ONE target per step, so the app deploy stays
+      # byte-equivalent in behavior — only the shop step is new.
+      - name: Deploy Hosting (app)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           channelId: live
           projectId: barneshome-3dfbb
+          target: app
+
+      # The shop site must already exist — created once via the "Create shop site"
+      # workflow (owner runs it from the Actions tab). If it doesn't exist yet,
+      # only THIS step fails; the app deploy above already succeeded.
+      - name: Deploy Hosting (shop)
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: barneshome-3dfbb
+          target: shop
 
       - name: Deploy Firestore rules + indexes
         run: npx firebase-tools@latest deploy --only firestore --project barneshome-3dfbb --non-interactive --force
