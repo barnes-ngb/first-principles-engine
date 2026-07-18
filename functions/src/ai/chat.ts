@@ -2127,7 +2127,7 @@ Write the story as if it takes place in this world with this tone. Scene descrip
 STORY IDEA: ${storyIdea || fallbackIdea}
 ${sightWordSection}${themeSection}
 RULES:
-- Write a ${pageCount}-page story. Each page has ${sentenceTarget}.
+- Write exactly ${pageCount} pages — no more, no fewer. Each page has ${sentenceTarget}.
 - Reading level (soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): ${level}
 - ${contentStakes}
 - For each page, write a short image description (1-2 sentences) describing what the SCENE looks like. Focus on environment/setting, not characters.

@@ -47,7 +47,7 @@ const baseOpts = {
   childId: 'child-1',
   childName: 'London',
   childAge: 6,
-  pageCount: 6,
+  initialPageCount: 6,
   defaultIllustrationStyle: 'storybook',
 }
 
@@ -520,5 +520,40 @@ describe('useBookGenerateChat clarification state machine', () => {
     expect(result.current.pendingRefinement).toBe('a dragon')
     expect(result.current.clarificationPhase).toBe('clarifying')
     expect(result.current.chatHistory.length).toBe(4)
+  })
+
+  it('starts a fresh draft at the initial target page count', () => {
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    expect(result.current.pageCount).toBe(6)
+  })
+
+  it('restores the saved target page count when resuming a draft (FEAT-97)', async () => {
+    const firestore = await import('firebase/firestore')
+    const getDoc = firestore.getDoc as ReturnType<typeof vi.fn>
+    getDoc.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({
+        title: '',
+        pages: [],
+        generationConfig: { storyIdea: 'a puppy', words: [], style: 'minecraft', pageCount: 14 },
+        reviewState: {
+          generateChatState: 'in-progress',
+          clarificationPhase: 'clarifying',
+          pendingIdea: 'a puppy',
+          pendingRefinement: null,
+          chatHistory: [{ role: 'kid', content: 'a puppy', ts: 1 }],
+          illustrationStyle: 'minecraft',
+        },
+      }),
+    })
+
+    const { result } = renderHook(() =>
+      useBookGenerateChat({ ...baseOpts, resumeBookId: 'book-existing' }),
+    )
+
+    // Hydrates to the saved 14, not the initial default of 6.
+    await waitFor(() => {
+      expect(result.current.pageCount).toBe(14)
+    })
   })
 })

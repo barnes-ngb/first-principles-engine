@@ -8,6 +8,7 @@ import type {
   ReviseStoryStoryPage,
 } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
+import { maxTokensForPageCount } from "../storyPageBudget.js";
 
 /**
  * Task: reviseStory
@@ -103,7 +104,9 @@ export const handleReviseStory = async (
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: 6144,
+    // A revise rewrites the whole story, so scale the budget with the book's
+    // page count the same way generation does (FEAT-97).
+    maxTokens: maxTokensForPageCount(normalizedInput.childCalibration.pageCount),
     temperature: 0.7,
     systemPrompt,
     messages: [{ role: "user", content: "Revise the story now." }],
