@@ -157,7 +157,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/auth/` — Auth guard route wrapper
 - `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), VoxelCharacter (Three.js character, armor, poses, materials, camera), `voxel/` sub-module (armor meshes, pose definitions), `stonebridge/` sub-module (Banner Rally missions, progress computation, location art, banner-raise celebrations)
 - `src/features/books/` — Bookshelf, book editor/reader, generate chat, review chat, sight word dashboard, story guide, print/PDF
-- `src/features/business/` — Barnes Bros business tab (FEAT-29/30): sales log, goal thermometer/builder, product curation over existing books/stickers (see `docs/BUSINESS_TAB_DESIGN.md`); GDQ Kit Builder (FEAT-80: `KitBuilderSection`/`KitBuilderForm` + `useKitRosters`); Product Catalog (FEAT-81: `CatalogSection`/`CatalogProductForm`/`CatalogProductCard` + `useCatalogProducts`, promote-from-roster — the "show" layer, see `docs/BARNES_BROS_CATALOG_DESIGN.md`)
+- `src/features/business/` — Barnes Bros business tab (FEAT-29/30): sales log, goal thermometer/builder, product curation over existing books/stickers (see `docs/BUSINESS_TAB_DESIGN.md`); GDQ Kit Builder (FEAT-80: `KitBuilderSection`/`KitBuilderForm` + `useKitRosters`); Product Catalog (FEAT-81: `CatalogSection`/`CatalogProductForm`/`CatalogProductCard` + `useCatalogProducts`, promote-from-roster — the "show" layer, see `docs/BARNES_BROS_CATALOG_DESIGN.md`); public catalog site + order queue (FEAT-84/85/86: `publicCatalogPage`/`catalogSitePublish`/`useCatalogSite`; FEAT-88: `OrdersSection` + `useCatalogOrders` — the outreach loop, orders placed on the public site via the `submitCatalogOrder` endpoint and fulfilled in-app with a forward-only status stepper)
 - `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
 - `src/features/engine/` — Engine page and engine logic
 - `src/features/evaluate/` — Reading evaluation chat, findings extraction. FEAT-75: the completed eval's `frontier` is retained on the `EvaluationSession` record + surfaced read-only in history; Apply is repeatable (re-apply confirms). FEAT-76: on Apply, `evalModelWriteback.ts` (thin, fire-and-forget, guarded model-exists, merge-only, sets `synthesisStaleAt`) projects findings onto `learnerModels` via the pure `evalModelSync` projector — **alongside** the unchanged `skillSnapshots` write, never blocking apply
@@ -295,6 +295,7 @@ All under `families/{familyId}/`:
 | `businessGoals` | Barnes Bros goal config (milestone stack). One doc per child operator, doc ID: `{childId}` |
 | `kitRosters` | GDQ Kit Builder rosters (FEAT-80). Reusable kit cast + rules (vault/hero/defenders/invaders/win) — business data, not a narrative. Additive; auto-ID (a kid makes many kits). Path: `families/{familyId}/kitRosters/{autoId}` |
 | `catalogProducts` | Barnes Bros product catalog (FEAT-81). Curated, parent-gated products the boys show (`CatalogProduct {title, type, description, priceCents, images[ref], sourceRef?, madeBy[], status:'draft'|'listed'|'retired'}`) — the "show" layer over Books/stickers/kit rosters. **Family-scoped** (a catalog is the family's storefront, not per-child), additive; auto-ID, no deletes (status `retired` retires). Images REFERENCE existing Storage URLs, never regenerated. Business data — never a learner-model input. Written by `useCatalogProducts`. Path: `families/{familyId}/catalogProducts/{autoId}` |
+| `orders` | Barnes Bros order queue (FEAT-88). Orders placed from the **public** catalog site (`CatalogOrder {customerName, items:[{productId,title}], note?, contact?, status:'new'|'making'|'ready'|'delivered'}`) — the outreach loop the kids fulfill. **Minimally-scoped** customer data (owner-lifted the "no PII" rail 2026-07-18: first name + picks + optional note/contact only, no address/payment/email/accounts). WRITTEN server-side by the unauthenticated `submitCatalogOrder` Cloud Function (admin SDK) — the public page has no auth, so `firestore.rules` stays owner-only + untouched. In-app: read newest-first + **forward-only** status stepper (not parent-gated — the making is the kids' work) via `useCatalogOrders`. **Family-scoped**, additive; auto-ID. Business data — never a learner-model input. Path: `families/{familyId}/orders/{autoId}` |
 
 **Global collections** (not under `families/`):
 
@@ -343,7 +344,7 @@ All under `families/{familyId}/`:
 - `src/core/ai/prompts/plannerPrompts.ts` — Weekly plan generation (client-side)
 - `functions/src/ai/tasks/` — All other prompt assembly lives in Cloud Function task handlers (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, analyzePatterns, foundationsReview, chapterQuestions, bookLookup, lessonVideo, helpCard, monthlyReview)
 
-### Cloud Functions (26 exported)
+### Cloud Functions (27 exported)
 - `chat` — Task dispatch (plan, evaluate, quest, workshop, generateStory, reviseStory, revisePage, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, chat, generate, foundationsReview, chapterQuestions, bookLookup, lessonVideo, helpCard, monthlyReview)
 - `analyzeEvaluationPatterns` — Pattern analysis from evaluation sessions
 - `weeklyReview` — Scheduled weekly review (Sunday 7pm CT)
@@ -357,6 +358,7 @@ All under `families/{familyId}/`:
 - `generateActivity` — Lesson card generation
 - `transcribeAudio` — OpenAI Whisper voice transcription for the voice input module (writes `aiUsage` + `transcriptionEvents`)
 - `fileFeatureRequests` — Scheduled (daily 08:00 CT) Shelly-portal feedback-loop closer (Build Step 5b): reads `featureRequests` where `status == 'new'`, opens one GitHub issue per distinct want (deduped by `dedupKey`, belt-and-suspenders), writes back `status: 'filed'` + `githubIssueUrl`. **The only code path in the repo that talks to the GitHub API** — direct `fetch` against GitHub REST (no Octokit dependency), authed with the `GITHUB_PAT` fine-grained-token secret (`functions/src/feedback/fileFeatureRequests.ts`). Degrades safely: if the secret is unset it logs a warning and writes nothing; per-entry HTTP failures leave that entry `new` for the next run. **Requires the one-time human secret step** in `docs/SHELLY_PORTAL_FEEDBACK_LOOP.md` to file anything.
+- `submitCatalogOrder` — **The public catalog order endpoint (FEAT-88).** The **only `onRequest` (unauthenticated HTTP) function in the repo.** Receives an order from the public catalog page's baked form and writes it to `families/{familyId}/orders` via the admin SDK, so `firestore.rules` stays owner-only + untouched (mechanism W1). Defense in depth: CORS origin lock (catalog origins only), honeypot field, best-effort per-IP rate limit, strict schema validation + caps, and a product-id allowlist against the family's `listed` products (`functions/src/business/{submitCatalogOrder.ts, orderValidation.ts}`). Writes ONLY an order — no learner-model / compliance / hours / XP write.
 - `healthCheck` — Diagnostic endpoint
 - 12 image functions: `generateImage`, `generateAvatarPiece`, `generateStarterAvatar`, `transformAvatarPhoto`, `generateArmorPiece`, `generateBaseCharacter`, `generateArmorSheet`, `generateArmorReference`, `extractFeatures`, `generateMinecraftSkin`, `generateMinecraftFace`, `enhanceSketch`
 
@@ -379,6 +381,7 @@ All under `families/{familyId}/`:
 - `functions/src/ai/imageTasks/` — 12 image task handlers (armorPiece, armorReference, armorSheet, avatarPiece, baseCharacter, enhanceSketch, extractFeatures, generateImage, minecraftFace, minecraftSkin, photoTransform, starterAvatar) + index
 - `functions/src/ai/providers/` — Claude + OpenAI provider adapters (with `__stubs__/` for test mocking)
 - `functions/src/feedback/` — Feature request filing (`fileFeatureRequests` — scheduled CF, GitHub issue creation)
+- `functions/src/business/` — Barnes Bros business endpoints (`submitCatalogOrder` — the public order `onRequest` endpoint + pure `orderValidation.ts`; FEAT-88)
 
 ## Family Context (for AI prompt reference)
 
