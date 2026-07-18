@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
+import PrintIcon from '@mui/icons-material/Print'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
@@ -9,6 +10,7 @@ import type { CatalogProduct } from '../../core/types/business'
 import { CatalogProductStatus } from '../../core/types/business'
 import CatalogProductCard from './CatalogProductCard'
 import CatalogProductForm from './CatalogProductForm'
+import { buildCatalogSheetHtml, selectListedProducts } from './catalogSheet'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
 
@@ -33,6 +35,7 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
 
   const shown = products.filter((p) => p.status !== CatalogProductStatus.Retired)
+  const listedCount = selectListedProducts(products).length
 
   const handleSave = async (body: NewCatalogProduct, id?: string) => {
     if (id) {
@@ -41,6 +44,23 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
       await createProduct(body)
     }
     setMode({ kind: 'list' })
+  }
+
+  /**
+   * Open a print-optimized sheet of the `listed` products in a new window (design
+   * §4 Option A). The parent prints / saves-to-PDF and hands it to a family — no
+   * hosting, no checkout, read-only. Mirrors the compliance-report print in
+   * `RecordsPage`.
+   */
+  const handleShareSheet = () => {
+    const html = buildCatalogSheetHtml(products)
+    const sheetWindow = window.open('', '_blank')
+    if (sheetWindow) {
+      sheetWindow.document.write(html)
+      sheetWindow.document.close()
+      sheetWindow.focus()
+      sheetWindow.print()
+    }
   }
 
   if (mode.kind === 'new' || mode.kind === 'edit') {
@@ -88,14 +108,25 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
       )}
 
       {canEdit && (
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => setMode({ kind: 'new' })}
-          sx={{ alignSelf: 'flex-start' }}
-        >
-          Add product
-        </Button>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ alignSelf: 'flex-start' }}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setMode({ kind: 'new' })}>
+            Add product
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<PrintIcon />}
+            onClick={handleShareSheet}
+            disabled={listedCount === 0}
+          >
+            Share / print sheet
+          </Button>
+        </Stack>
+      )}
+
+      {canEdit && listedCount === 0 && (
+        <Typography variant="caption" color="text.secondary">
+          Mark a product <strong>Listed</strong> to share a family sheet.
+        </Typography>
       )}
     </Stack>
   )
