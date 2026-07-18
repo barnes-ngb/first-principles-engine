@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { useFamilyId } from '../../core/auth/useAuth'
 import type { CatalogProduct } from '../../core/types/business'
 import type { PublishedState } from './catalogSitePublish'
 import {
@@ -30,14 +31,17 @@ export interface UseCatalogSiteResult {
  * work, not the gating.
  */
 export function useCatalogSite(): UseCatalogSiteResult {
+  const familyId = useFamilyId()
   const [published, setPublished] = useState<PublishedState | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!familyId) return
     let active = true
-    getPublishedState()
+    setLoading(true)
+    getPublishedState(familyId)
       .then((state) => {
         if (active) setPublished(state)
       })
@@ -50,27 +54,32 @@ export function useCatalogSite(): UseCatalogSiteResult {
     return () => {
       active = false
     }
-  }, [])
+  }, [familyId])
 
-  const publish = useCallback(async (products: CatalogProduct[]) => {
-    setBusy(true)
-    setError(null)
-    try {
-      const state = await publishCatalogSite(products)
-      setPublished(state)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Publish failed')
-      throw err
-    } finally {
-      setBusy(false)
-    }
-  }, [])
+  const publish = useCallback(
+    async (products: CatalogProduct[]) => {
+      if (!familyId) throw new Error('publish: no family')
+      setBusy(true)
+      setError(null)
+      try {
+        const state = await publishCatalogSite(familyId, products)
+        setPublished(state)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Publish failed')
+        throw err
+      } finally {
+        setBusy(false)
+      }
+    },
+    [familyId],
+  )
 
   const unpublish = useCallback(async () => {
+    if (!familyId) throw new Error('unpublish: no family')
     setBusy(true)
     setError(null)
     try {
-      await unpublishCatalogSite()
+      await unpublishCatalogSite(familyId)
       setPublished(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unpublish failed')
@@ -78,7 +87,7 @@ export function useCatalogSite(): UseCatalogSiteResult {
     } finally {
       setBusy(false)
     }
-  }, [])
+  }, [familyId])
 
   return { published, loading, busy, error, publish, unpublish }
 }

@@ -229,13 +229,14 @@ read-only lookbook generated from the catalog.
 > triggers the full CI deploy) — a poor fit for a phone-only owner who republishes whenever
 > the catalog changes. **C1** instead: the parent taps "Publish site" → the `listed` products
 > render to a self-contained static page (`publicCatalogPage.ts`, the mobile-first sibling of
-> FEAT-83's `catalogSheet.ts`) → it uploads to a **world-readable** Storage path
-> (`public/catalog/index.html`) → the parent shares the stable, token-less URL. Republish is
-> one tap, no deploy. Images **reference the products' existing Storage download URLs**
-> directly (those carry a download token, so they resolve for a not-logged-in viewer with no
-> rules change — the design's static-snapshot recommendation below). The only rules change is
-> the narrow, world-readable `public/catalog/**` **Storage** rule (create/update/delete gated
-> to authed household members); `firestore.rules` is **untouched**.
+> FEAT-83's `catalogSheet.ts`) → it uploads to a **world-readable, per-family** Storage path
+> (`public/catalog/{familyId}/index.html`) → the parent shares the stable, token-less URL.
+> Republish is one tap, no deploy. Images **reference the products' existing Storage download
+> URLs** directly (those carry a download token, so they resolve for a not-logged-in viewer
+> with no rules change — the design's static-snapshot recommendation below). The only rules
+> change is the narrow, world-readable `public/catalog/{familyId}/**` **Storage** rule —
+> **read public, but create/update/delete gated on `isOwner(familyId)`** so one family can
+> never clobber another's storefront (per Codex review); `firestore.rules` is **untouched**.
 
 **What this actually requires** (from Step 0.4 recon — the current app is a single, fully-authed
 SPA, so *none of this exists today*):

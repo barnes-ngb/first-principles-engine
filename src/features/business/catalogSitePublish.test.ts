@@ -22,11 +22,14 @@ vi.mock('../../core/firebase/storage', () => ({
 
 import {
   getPublishedState,
-  PUBLIC_CATALOG_PATH,
+  publicCatalogPath,
   publicCatalogUrl,
   publishCatalogSite,
   unpublishCatalogSite,
 } from './catalogSitePublish'
+
+const FAMILY = 'fam-1'
+const PATH = publicCatalogPath(FAMILY)
 
 const product = (over: Partial<CatalogProduct>): CatalogProduct => ({
   id: 'p1',
@@ -50,30 +53,31 @@ beforeEach(() => {
 })
 
 describe('publicCatalogUrl', () => {
-  it('is a stable, token-less URL at the public path', () => {
-    const url = publicCatalogUrl()
+  it('is a stable, token-less URL at the per-family public path', () => {
+    const url = publicCatalogUrl(FAMILY)
     expect(url).toContain('test-bucket.appspot.com')
-    expect(url).toContain(encodeURIComponent(PUBLIC_CATALOG_PATH))
+    expect(url).toContain(encodeURIComponent(PATH))
+    expect(PATH).toContain(FAMILY)
     expect(url).not.toContain('token')
   })
 })
 
 describe('publishCatalogSite', () => {
   it('uploads a text/html page to the public catalog path and returns the URL + time', async () => {
-    const state = await publishCatalogSite([product({ title: 'Listed Kit', status: 'listed' })])
+    const state = await publishCatalogSite(FAMILY, [product({ title: 'Listed Kit', status: 'listed' })])
 
-    expect(refMock).toHaveBeenCalledWith(expect.anything(), PUBLIC_CATALOG_PATH)
+    expect(refMock).toHaveBeenCalledWith(expect.anything(), PATH)
     expect(uploadBytesMock).toHaveBeenCalledTimes(1)
     const [, blob, meta] = uploadBytesMock.mock.calls[0] as unknown as [unknown, Blob, { contentType: string }]
     expect(blob).toBeInstanceOf(Blob)
     expect(blob.type).toContain('text/html')
     expect(meta.contentType).toContain('text/html')
-    expect(state.url).toBe(publicCatalogUrl())
+    expect(state.url).toBe(publicCatalogUrl(FAMILY))
     expect(state.publishedAt).toBe('2026-07-18T12:00:00.000Z')
   })
 
   it('renders the listed products into the uploaded HTML (drafts excluded)', async () => {
-    await publishCatalogSite([
+    await publishCatalogSite(FAMILY, [
       product({ id: 'a', title: 'Listed Kit', status: 'listed' }),
       product({ id: 'b', title: 'Draft Kit', status: 'draft' }),
     ])
@@ -90,20 +94,20 @@ describe('publishCatalogSite', () => {
 
 describe('getPublishedState', () => {
   it('returns the state when the page exists', async () => {
-    const state = await getPublishedState()
-    expect(state).toEqual({ url: publicCatalogUrl(), publishedAt: '2026-07-18T12:00:00.000Z' })
+    const state = await getPublishedState(FAMILY)
+    expect(state).toEqual({ url: publicCatalogUrl(FAMILY), publishedAt: '2026-07-18T12:00:00.000Z' })
   })
 
   it('returns null when the page was never published (object-not-found)', async () => {
     getMetadataMock.mockRejectedValueOnce(new Error('storage/object-not-found'))
-    expect(await getPublishedState()).toBeNull()
+    expect(await getPublishedState(FAMILY)).toBeNull()
   })
 })
 
 describe('unpublishCatalogSite', () => {
   it('deletes the published page', async () => {
-    await unpublishCatalogSite()
+    await unpublishCatalogSite(FAMILY)
     expect(deleteObjectMock).toHaveBeenCalledTimes(1)
-    expect(refMock).toHaveBeenCalledWith(expect.anything(), PUBLIC_CATALOG_PATH)
+    expect(refMock).toHaveBeenCalledWith(expect.anything(), PATH)
   })
 })
