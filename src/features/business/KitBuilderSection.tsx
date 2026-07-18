@@ -6,10 +6,14 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
+import { useAI } from '../../core/ai/useAI'
+import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
-import type { KitRoster } from '../../core/types/business'
+import type { CatalogProduct, KitArtRef, KitRoster } from '../../core/types/business'
 import { BusinessItemType, KitRosterStatus } from '../../core/types/business'
 import CatalogProductForm from './CatalogProductForm'
+import { artToProductImages, buildKitCharacterPrompt, hasAnyArt, mergeArt } from './kitArt'
+import type { KitArtCharacter } from './KitBuilderForm'
 import KitBuilderForm from './KitBuilderForm'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
@@ -43,9 +47,11 @@ interface KitBuilderSectionProps {
  * (`KitBuilderForm`) to create or edit one. The voice-capture flow is slice 2.
  */
 export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilderSectionProps) {
-  const { rosters, loading, createRoster, updateRoster } = useKitRosters(activeChildId)
-  const { createProduct } = useCatalogProducts()
+  const { rosters, loading, createRoster, updateRoster, getRoster } = useKitRosters(activeChildId)
+  const { products, createProduct, updateProduct } = useCatalogProducts()
   const { children } = useChildren()
+  const { generateImage } = useAI()
+  const familyId = useFamilyId()
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
 
   const nameById = useMemo(() => {
@@ -53,6 +59,10 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
     for (const c of children) m[c.id] = c.name
     return m
   }, [children])
+
+  /** The catalog product promoted from this roster, if one exists (FEAT-88). */
+  const productForRoster = (r: KitRoster): CatalogProduct | undefined =>
+    products.find((p) => p.sourceRef?.kind === 'kitRoster' && p.sourceRef.id === r.id)
 
   const handleSave = async (body: NewKitRoster, id?: string) => {
     if (id) {
@@ -64,11 +74,52 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
   }
 
   /**
+   * Generate + persist one character's sticker (FEAT-88). Reuses the existing
+   * `generateImage` path (`book-sticker` ⇒ text-only prompt → transparent PNG →
+   * Storage URL — no backend change). The write is additive: we re-read the
+   * freshest roster and `mergeArt` so a second generation never clobbers the
+   * first. Returns the new ref, or `null` on failure (the form keeps prior art).
+   */
+  const makeGenerateArt =
+    (rosterId: string) =>
+    async (characterKey: string, character: KitArtCharacter): Promise<KitArtRef | null> => {
+      if (!familyId) return null
+      const prompt = buildKitCharacterPrompt(character)
+      const result = await generateImage({
+        familyId,
+        prompt,
+        style: 'book-sticker',
+        size: '1024x1024',
+      })
+      if (!result) return null
+      const ref: KitArtRef = {
+        url: result.url,
+        storagePath: result.storagePath,
+        generatedAt: new Date().toISOString(),
+      }
+      const fresh = await getRoster(rosterId)
+      await updateRoster(rosterId, { art: mergeArt(fresh?.art, characterKey, ref) })
+      return ref
+    }
+
+  /**
+   * "Use as product image" (FEAT-88): set the promoted product's images from the
+   * roster's art (hero → `images[0]`). Touches ONLY the catalog product — no
+   * roster write, no learner-model / hours / XP. Republish stays the owner's tap.
+   */
+  const handleUseAsProductImage = async (r: KitRoster) => {
+    const product = productForRoster(r)
+    if (!product) return
+    await updateProduct(product.id, { images: artToProductImages(r) })
+  }
+
+  /**
    * Pre-fill a catalog product from a roster (design §2/§5). Read-only of the
    * roster — nothing here mutates it. Title from `vaultName`, type StarterKit
    * default, `madeBy` from the author's name, `sourceRef` links the roster, and
-   * `images` stays empty (the roster has no art yet → placeholder card). The
-   * parent sets price + status before saving (§6: no kid self-pricing).
+   * `images` pre-filled from any generated art (FEAT-88: hero → `images[0]`,
+   * else empty → placeholder card). The parent sets price + status before
+   * saving (§6: no kid self-pricing).
    */
   const promoteInitial = (r: KitRoster): Partial<NewCatalogProduct> => {
     const maker = nameById[r.childId]
@@ -76,7 +127,7 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
       title: r.vaultName.trim() || 'Untitled kit',
       type: BusinessItemType.StarterKit,
       madeBy: maker ? [maker] : [],
-      images: [],
+      images: artToProductImages(r),
       sourceRef: { kind: 'kitRoster', id: r.id },
     }
   }
@@ -97,12 +148,17 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
   }
 
   if (mode.kind === 'new' || mode.kind === 'edit') {
+    const editing = mode.kind === 'edit' ? mode.roster : undefined
     return (
       <KitBuilderForm
-        childId={mode.kind === 'edit' ? mode.roster.childId : activeChildId}
-        roster={mode.kind === 'edit' ? mode.roster : undefined}
+        childId={editing ? editing.childId : activeChildId}
+        roster={editing}
         onSave={handleSave}
         onCancel={() => setMode({ kind: 'list' })}
+        // Art generation is a paid, parent-only tap and needs a persisted target,
+        // so it's offered only on a saved roster in edit mode (FEAT-88).
+        canGenerateArt={canEdit && Boolean(editing)}
+        onGenerateArt={editing ? makeGenerateArt(editing.id) : undefined}
       />
     )
   }
@@ -152,6 +208,19 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
                     )}
                   </Box>
                   <Stack direction="row" spacing={1} alignItems="center">
+                    {canEdit && hasAnyArt(r) && productForRoster(r) && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={(e) => {
+                          // Don't trigger the row's edit tap.
+                          e.stopPropagation()
+                          void handleUseAsProductImage(r)
+                        }}
+                      >
+                        Use as product image
+                      </Button>
+                    )}
                     {canEdit && (
                       <Button
                         size="small"
