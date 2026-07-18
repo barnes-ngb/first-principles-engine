@@ -1,4 +1,4 @@
-// ── Public catalog order endpoint (FEAT-88) ────────────────────────
+// ── Public catalog order endpoint (FEAT-89) ────────────────────────
 //
 // The write path for the public catalog order form (`buildPublicCatalogHtml`'s
 // baked form). The published page has no auth and no backend, so this

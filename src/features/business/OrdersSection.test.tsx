@@ -36,7 +36,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('OrdersSection (FEAT-88)', () => {
+describe('OrdersSection (FEAT-89)', () => {
   it('renders an order with customer, items, note, and contact', () => {
     setOrders([
       order({ note: 'blue please', contact: 'text 555', items: [{ productId: 'p1', title: 'Seed Vault Kit' }] }),

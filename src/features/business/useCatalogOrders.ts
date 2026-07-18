@@ -24,7 +24,7 @@ export interface UseCatalogOrdersResult {
 
 /**
  * Subscribe to the Barnes Bros order queue for the family and expose the
- * forward-only status stepper (FEAT-88). Orders are WRITTEN by the public
+ * forward-only status stepper (FEAT-89). Orders are WRITTEN by the public
  * `submitCatalogOrder` endpoint (server-side, admin SDK) — this hook never
  * creates one; it reads the queue and advances fulfillment status.
  *

@@ -192,7 +192,7 @@ describe('publishCatalogSite', () => {
   })
 })
 
-describe('catalogOrderEndpoint (FEAT-88)', () => {
+describe('catalogOrderEndpoint (FEAT-89)', () => {
   it('builds the deterministic us-central1 cloudfunctions URL for the project', () => {
     expect(catalogOrderEndpoint('test-project')).toBe(
       'https://us-central1-test-project.cloudfunctions.net/submitCatalogOrder',
@@ -200,7 +200,7 @@ describe('catalogOrderEndpoint (FEAT-88)', () => {
   })
 })
 
-describe('publishCatalogSite — order form baking (FEAT-88)', () => {
+describe('publishCatalogSite — order form baking (FEAT-89)', () => {
   it('bakes the order endpoint + familyId into the published page', async () => {
     await publishCatalogSite(FAMILY, [product({ title: 'Listed Kit', status: 'listed' })])
     const html = await uploadedHtml()

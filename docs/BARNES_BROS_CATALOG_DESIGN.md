@@ -264,8 +264,8 @@ read-only lookbook generated from the catalog.
 > book; no write from the public page; **no rules change** (the preview lives inline under the same
 > `public/catalog/{familyId}/**` object).
 
-> **Order capture shipped by FEAT-88 (2026-07-18) — the outreach loop closes.**
-> C1 was a read-only lookbook; FEAT-88 lets a family on the published page say **what they want
+> **Order capture shipped by FEAT-89 (2026-07-18) — the outreach loop closes.**
+> C1 was a read-only lookbook; FEAT-89 lets a family on the published page say **what they want
 > and who they are**, landing it in-app as an **order the kids fulfill and track**.
 >
 > **Owner decision — the "no customer data" rail (§6) is consciously lifted, minimally scoped.**
@@ -361,7 +361,7 @@ FEAT-78 roster: creative/commercial output, not a calibrated assessment.)
   sticker images / kit art via their Storage URLs.
 - **Expose the authed app publicly.** Option C is a *separate static site*, never a public route
   into this SPA. The app stays fully behind auth.
-- **Collect customer PII beyond the FEAT-88 minimal scope.** The original "no customer data" rail
+- **Collect customer PII beyond the FEAT-89 minimal scope.** The original "no customer data" rail
   was consciously lifted by the owner (2026-07-18) to exactly **first name + picked products +
   optional note + optional contact line** — the audience is people the family already knows.
   Still **never**: address, payment, required email, or accounts. The `businessLog` earnings

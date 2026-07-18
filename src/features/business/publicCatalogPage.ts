@@ -88,7 +88,7 @@ function productCard(
   const peek =
     p.includePreview && preview && preview.pages.length > 0 ? previewBlock(p, preview) : ''
 
-  // FEAT-88: the "I want this!" toggle. Data attributes carry the pick to the
+  // FEAT-89: the "I want this!" toggle. Data attributes carry the pick to the
   // form script; escaped so a crafted title can't break out of the attribute.
   const want = interactive
     ? `<button type="button" class="want-btn" aria-pressed="false"
@@ -118,7 +118,7 @@ function productCard(
  * gates the action so this is rarely hit).
  */
 /**
- * Config for the FEAT-88 public order form, baked into the page at publish time.
+ * Config for the FEAT-89 public order form, baked into the page at publish time.
  * When present, product cards get an "I want this!" toggle and a sticky order
  * form posts the picks to {@link endpoint}. Absent ⇒ the page is the read-only
  * FEAT-84 lookbook, byte-for-byte (script-free), so a project without the
@@ -132,11 +132,11 @@ export interface OrderFormConfig {
 }
 
 /**
- * The FEAT-88 order-form CSS. Injected into the page `<style>` ONLY when the
+ * The FEAT-89 order-form CSS. Injected into the page `<style>` ONLY when the
  * form ships, so the read-only FEAT-84 lookbook stays byte-identical.
  */
 const ORDER_STYLES = `
-    /* ── Order form (FEAT-88) ── */
+    /* ── Order form (FEAT-89) ── */
     .want-btn { margin-top: 10px; width: 100%; border: 2px solid #2e7d32; background: #fff;
       color: #2e7d32; font-weight: bold; font-size: 15px; padding: 9px 12px; border-radius: 999px;
       cursor: pointer; font-family: inherit; }
@@ -162,7 +162,7 @@ const ORDER_STYLES = `
       padding: 12px 0; margin: 0; }`
 
 /**
- * The sticky order form + its client script (FEAT-88). Self-contained, no
+ * The sticky order form + its client script (FEAT-89). Self-contained, no
  * external refs. Only emitted when an {@link OrderFormConfig} is passed, so the
  * read-only page stays script-free. The endpoint + familyId are JSON-embedded
  * (they're controlled values — our URL + a UID — never user text).

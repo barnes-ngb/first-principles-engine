@@ -137,7 +137,7 @@ describe('buildPublicCatalogHtml', () => {
   })
 })
 
-describe('buildPublicCatalogHtml — order form (FEAT-88)', () => {
+describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
   const ORDER_CFG = {
     endpoint: 'https://us-central1-demo.cloudfunctions.net/submitCatalogOrder',
     familyId: 'fam-123',

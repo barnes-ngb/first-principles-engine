@@ -674,7 +674,7 @@ export const catalogProductsCollection = (
     catalogProductConverter,
   ) as CollectionReference<CatalogProduct>
 
-// ── Barnes Bros Order Queue (FEAT-88) ───────────────────────────
+// ── Barnes Bros Order Queue (FEAT-89) ───────────────────────────
 
 export const catalogOrderConverter: FirestoreDataConverter<CatalogOrder> = {
   toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
@@ -685,7 +685,7 @@ export const catalogOrderConverter: FirestoreDataConverter<CatalogOrder> = {
 }
 
 /**
- * Orders placed from the public catalog site, fulfilled in-app (FEAT-88). The
+ * Orders placed from the public catalog site, fulfilled in-app (FEAT-89). The
  * customer-facing write happens server-side via the `submitCatalogOrder` Cloud
  * Function (admin SDK) — the public page has no auth — so `firestore.rules`
  * stays owner-only + untouched. In-app this collection is read (newest first) +

@@ -7,7 +7,7 @@ import {
   nextOrderStatus,
 } from './business'
 
-describe('order status flow (FEAT-88)', () => {
+describe('order status flow (FEAT-89)', () => {
   it('advances forward through the whole flow, then stops', () => {
     expect(nextOrderStatus(CatalogOrderStatus.New)).toBe(CatalogOrderStatus.Making)
     expect(nextOrderStatus(CatalogOrderStatus.Making)).toBe(CatalogOrderStatus.Ready)

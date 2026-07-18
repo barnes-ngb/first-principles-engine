@@ -1,4 +1,4 @@
-// ── Public order submission validation (FEAT-88) ───────────────────
+// ── Public order submission validation (FEAT-89) ───────────────────
 //
 // Pure, admin-SDK-free validation for the public catalog order form. The public
 // catalog page (barnesbro.web.app / the Storage-hosted static page) has NO auth

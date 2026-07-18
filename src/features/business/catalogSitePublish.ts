@@ -80,7 +80,7 @@ export function publicCatalogUrl(familyId: string): string {
 }
 
 /**
- * The public order endpoint the baked form POSTs to (FEAT-88). The
+ * The public order endpoint the baked form POSTs to (FEAT-89). The
  * `submitCatalogOrder` v2 `onRequest` function has no region override, so it
  * lives at the default `us-central1` and is reachable at the deterministic
  * `cloudfunctions.net` alias. Baked into the published page at publish time —
@@ -144,7 +144,7 @@ export async function publishCatalogSite(
   products: CatalogProduct[],
 ): Promise<PublishedState> {
   const previews = await resolveBookPreviews(familyId, products)
-  // Bake the order endpoint + familyId so the published form can POST (FEAT-88).
+  // Bake the order endpoint + familyId so the published form can POST (FEAT-89).
   // projectId is a runtime firebase-app option, same source as the bucket above.
   const projectId = storage.app.options.projectId
   const orderConfig = projectId

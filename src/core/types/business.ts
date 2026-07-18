@@ -308,7 +308,7 @@ export interface CatalogProduct {
   updatedAt: string
 }
 
-// ── Barnes Bros Order Queue (FEAT-88) ─────────────────────────────
+// ── Barnes Bros Order Queue (FEAT-89) ─────────────────────────────
 //
 // The outreach loop closed: a family on the published catalog site
 // (barnesbro.web.app, FEAT-84/85/86) says WHAT they want and WHO they are, and

@@ -134,7 +134,7 @@ function OrderCard({
 }
 
 /**
- * The Barnes Bros order queue (FEAT-88) — a sibling region on `BusinessPage`. A
+ * The Barnes Bros order queue (FEAT-89) — a sibling region on `BusinessPage`. A
  * family picks products on the public catalog site and says who they are; each
  * order lands here for the kids to fulfill and track. Newest first; a "🎉 New
  * order!" affordance whenever an unstarted order is waiting. Advancing status is
