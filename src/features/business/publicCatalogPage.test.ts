@@ -229,6 +229,65 @@ describe('buildPublicCatalogHtml — book preview flipper (FEAT-91)', () => {
   })
 })
 
+describe('buildPublicCatalogHtml — type filter chips (FEAT-92)', () => {
+  it('renders "All" + one chip per bucket present, with All pressed by default', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', title: 'A Book', type: 'Book' }),
+      product({ id: 'b', title: 'A Sheet', type: 'StickerSheet' }),
+    ])
+    expect(html).toContain('class="filter-bar"')
+    expect(html).toContain('data-filter="all" aria-pressed="true"')
+    expect(html).toContain('>Books</button>')
+    expect(html).toContain('>Stickers</button>')
+    // A bucket with no product never gets a chip.
+    expect(html).not.toContain('>Kits</button>')
+  })
+
+  it('collapses the three kit types into one "Kits" chip', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', title: 'Starter', type: 'StarterKit' }),
+      product({ id: 'b', title: 'Party', type: 'PartyKit' }),
+      product({ id: 'c', title: 'Custom', type: 'CustomKit' }),
+      product({ id: 'd', title: 'A Book', type: 'Book' }),
+    ])
+    // Kits + Books = 2 buckets → a bar with a single "Kits" chip for all three.
+    expect(html.match(/>Kits<\/button>/g)).toHaveLength(1)
+    expect(html).toContain('data-filter="kits"')
+  })
+
+  it('shows no filter bar (or script) for a single-type catalog', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', type: 'Book' }),
+      product({ id: 'b', type: 'Book' }),
+    ])
+    expect(html).not.toContain('class="filter-bar"')
+    // The filter script only ships alongside the bar.
+    expect(html).not.toContain("querySelector('.filter-bar')")
+  })
+
+  it('stamps each card with its filter bucket and never bakes a hidden attribute (works without JS)', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', type: 'Book' }),
+      product({ id: 'b', type: 'StickerSheet' }),
+    ])
+    expect(html).toContain('class="card" data-filter="books"')
+    expect(html).toContain('class="card" data-filter="stickers"')
+    // No card ships hidden — JS-off means every card is visible.
+    expect(html).not.toContain('class="card" data-filter="stickers" hidden')
+    expect(html).not.toMatch(/<article class="card"[^>]*hidden/)
+  })
+
+  it('ships a CSP-safe filter script (no innerHTML) only when the bar renders', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', type: 'Book' }),
+      product({ id: 'b', type: 'StickerSheet' }),
+    ])
+    expect(html).toContain("querySelector('.filter-bar')")
+    expect(html).toContain("card.hidden = filter !== 'all'")
+    expect(html).not.toContain('.innerHTML')
+  })
+})
+
 describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
   const ORDER_CFG = {
     endpoint: 'https://us-central1-demo.cloudfunctions.net/submitCatalogOrder',

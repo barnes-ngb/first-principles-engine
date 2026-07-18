@@ -1,7 +1,35 @@
-import type { CatalogProduct } from '../../core/types/business'
-import { BusinessItemTypeLabel } from '../../core/types/business'
+import type { BusinessItemType, CatalogProduct } from '../../core/types/business'
+import { BusinessItemType as ItemType, BusinessItemTypeLabel } from '../../core/types/business'
 import type { CatalogPreview } from './catalogPreview'
 import { creditNames, escapeHtml, selectListedProducts } from './catalogSheet'
+
+/**
+ * Type-filter buckets for the public catalog chips (FEAT-92). The three kit
+ * types collapse into one "Kits" chip; Books / Stickers / Other each get their
+ * own. Order here is the chip render order. A product's bucket is stamped on its
+ * card as `data-filter` so a chip can show/hide cards with vanilla JS.
+ *
+ * FUTURE (deferred, FEAT-92): "theme" filtering (e.g. dinosaurs, space) would
+ * need a `tags?: string[]` on `CatalogProduct` — products carry none today, so
+ * this ships type-only. See docs/BARNES_BROS_CATALOG_DESIGN.md.
+ */
+const FILTER_GROUPS: { key: string; label: string; types: readonly BusinessItemType[] }[] = [
+  { key: 'books', label: 'Books', types: [ItemType.Book] },
+  { key: 'stickers', label: 'Stickers', types: [ItemType.StickerSheet] },
+  { key: 'kits', label: 'Kits', types: [ItemType.StarterKit, ItemType.PartyKit, ItemType.CustomKit] },
+  { key: 'other', label: 'Other', types: [ItemType.Other] },
+]
+
+/** The filter-bucket key for a product type (defaults to `other`). */
+function filterGroupKey(type: BusinessItemType): string {
+  return FILTER_GROUPS.find((g) => g.types.includes(type))?.key ?? 'other'
+}
+
+/** The distinct filter buckets present among the given products, in chip order. */
+function presentFilterGroups(products: CatalogProduct[]): { key: string; label: string }[] {
+  const keys = new Set(products.map((p) => filterGroupKey(p.type)))
+  return FILTER_GROUPS.filter((g) => keys.has(g.key)).map((g) => ({ key: g.key, label: g.label }))
+}
 
 /**
  * Public catalog page (FEAT-84, design §4 Option C — the public storefront,
@@ -160,6 +188,63 @@ function pagerScript(): string {
     </script>`
 }
 
+/**
+ * The type-filter chip bar (FEAT-92). "All" plus one chip per filter bucket
+ * actually present among the listed products (never a chip for an absent type).
+ * Returns '' when fewer than two buckets exist — a single-type catalog needs no
+ * filter. Vanilla JS ({@link filterScript}) drives it; with JS off the chips are
+ * inert and every card stays visible (the default), so nothing is ever hidden
+ * behind a control that doesn't work.
+ */
+function filterBar(groups: { key: string; label: string }[]): string {
+  if (groups.length < 2) return ''
+  const chips = [{ key: 'all', label: 'All' }, ...groups]
+    .map(
+      (g, i) =>
+        `<button type="button" class="filter-chip" data-filter="${escapeHtml(g.key)}" aria-pressed="${i === 0 ? 'true' : 'false'}">${escapeHtml(g.label)}</button>`,
+    )
+    .join('\n        ')
+  return `<div class="filter-bar" role="group" aria-label="Filter by type">
+        ${chips}
+      </div>`
+}
+
+/**
+ * The type-filter client script (FEAT-92). Self-contained, CSP-safe: it toggles
+ * `hidden` on cards and `aria-pressed` on chips — no `innerHTML`, no external
+ * refs. Emitted once and ONLY when the filter bar renders, so a single-type (or
+ * empty) catalog stays script-free for this feature.
+ */
+function filterScript(): string {
+  return `<script>
+    (function () {
+      var bar = document.querySelector('.filter-bar');
+      if (!bar) return;
+      var chips = bar.querySelectorAll('.filter-chip');
+      var cards = document.querySelectorAll('.grid .card');
+      function apply(filter) {
+        Array.prototype.forEach.call(cards, function (card) {
+          card.hidden = filter !== 'all' && card.getAttribute('data-filter') !== filter;
+        });
+        Array.prototype.forEach.call(chips, function (chip) {
+          chip.setAttribute('aria-pressed', chip.getAttribute('data-filter') === filter ? 'true' : 'false');
+        });
+      }
+      Array.prototype.forEach.call(chips, function (chip) {
+        chip.addEventListener('click', function () { apply(chip.getAttribute('data-filter')); });
+      });
+    })();
+    </script>`
+}
+
+/** Filter-chip CSS (FEAT-92). Appended only when the bar renders. */
+const FILTER_STYLES = `
+    /* ── Type filter chips (FEAT-92) ── */
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 16px; }
+    .filter-chip { border: 2px solid #2e7d32; background: #fff; color: #2e7d32; font-weight: bold;
+      font-size: 14px; padding: 6px 14px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+    .filter-chip[aria-pressed="true"] { background: #2e7d32; color: #fff; }`
+
 function productCard(
   p: CatalogProduct,
   preview?: CatalogPreview,
@@ -192,7 +277,7 @@ function productCard(
       </div>`
     : ''
 
-  return `<article class="card">
+  return `<article class="card" data-filter="${filterGroupKey(p.type)}">
       ${image}
       <div class="body">
         <h2 class="title">${escapeHtml(p.title)}</h2>
@@ -428,6 +513,12 @@ export function buildPublicCatalogHtml(
   // preview-less catalog (with or without the order form) stays this-block-free.
   const hasPreview = listed.some((p) => shouldRenderPeek(p, previews[p.id]))
   const pager = hasPreview ? pagerScript() : ''
+  // Type-filter chips (FEAT-92): only when ≥2 buckets are present. The bar, its
+  // script, and its styles all ride the same gate so a single-type catalog is
+  // byte-identical to before.
+  const filterGroups = presentFilterGroups(listed)
+  const filters = filterBar(filterGroups)
+  const filterCode = filters ? filterScript() : ''
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -490,7 +581,7 @@ export function buildPublicCatalogHtml(
     .peek-cta { margin-top: 6px; font-size: 14px; font-weight: bold; color: #2e7d32; }
     .empty { text-align: center; color: #777; font-size: 16px; padding: 40px 12px; }
     footer { margin-top: 32px; text-align: center; font-size: 14px; color: #666; }
-    footer .heart { color: #e57373; }${interactive ? ORDER_STYLES : ''}
+    footer .heart { color: #e57373; }${filters ? FILTER_STYLES : ''}${interactive ? ORDER_STYLES : ''}
   </style>
 </head>
 <body>
@@ -504,6 +595,7 @@ export function buildPublicCatalogHtml(
           : 'Want one? Tell us your favorites! 💚'
       }</div>
     </header>
+    ${filters}
     <div class="grid">
       ${cards}
     </div>
@@ -511,6 +603,7 @@ export function buildPublicCatalogHtml(
   </div>
   ${form}
   ${pager}
+  ${filterCode}
 </body>
 </html>`
 }
