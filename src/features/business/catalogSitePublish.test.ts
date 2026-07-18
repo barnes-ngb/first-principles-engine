@@ -207,7 +207,8 @@ describe('publishCatalogSite — order form baking (FEAT-89)', () => {
     expect(html).toContain('<form id="orderForm"')
     expect(html).toContain(catalogOrderEndpoint('test-project'))
     expect(html).toContain(`"familyId":"${FAMILY}"`)
-    expect(html).toContain('want-btn')
+    // FEAT-92: the interactive card now carries a qty stepper (not the old toggle).
+    expect(html).toContain('qty-row')
   })
 })
 

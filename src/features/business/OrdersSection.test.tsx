@@ -79,4 +79,19 @@ describe('OrdersSection (FEAT-89)', () => {
     expect(screen.getByText(/No orders yet/)).toBeInTheDocument()
     expect(screen.queryByText(/New order/)).not.toBeInTheDocument()
   })
+
+  it('shows ×N for a multi-quantity line-item (FEAT-92)', () => {
+    setOrders([order({ items: [{ productId: 'p1', title: 'Steven', qty: 2 }] })])
+    render(<OrdersSection />)
+    expect(screen.getByText('Steven')).toBeInTheDocument()
+    expect(screen.getByText('×2')).toBeInTheDocument()
+  })
+
+  it('renders a legacy order without qty as a single unit — no ×1 badge (FEAT-92)', () => {
+    // Pre-cart orders omit qty; orderItemQty floors to 1 and no badge shows.
+    setOrders([order({ items: [{ productId: 'p1', title: 'Seed Vault Kit' }] })])
+    render(<OrdersSection />)
+    expect(screen.getByText('Seed Vault Kit')).toBeInTheDocument()
+    expect(screen.queryByText('×1')).not.toBeInTheDocument()
+  })
 })

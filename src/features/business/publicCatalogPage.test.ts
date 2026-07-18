@@ -229,6 +229,65 @@ describe('buildPublicCatalogHtml — book preview flipper (FEAT-91)', () => {
   })
 })
 
+describe('buildPublicCatalogHtml — type filter chips (FEAT-92)', () => {
+  it('renders "All" + one chip per bucket present, with All pressed by default', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', title: 'A Book', type: 'Book' }),
+      product({ id: 'b', title: 'A Sheet', type: 'StickerSheet' }),
+    ])
+    expect(html).toContain('class="filter-bar"')
+    expect(html).toContain('data-filter="all" aria-pressed="true"')
+    expect(html).toContain('>Books</button>')
+    expect(html).toContain('>Stickers</button>')
+    // A bucket with no product never gets a chip.
+    expect(html).not.toContain('>Kits</button>')
+  })
+
+  it('collapses the three kit types into one "Kits" chip', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', title: 'Starter', type: 'StarterKit' }),
+      product({ id: 'b', title: 'Party', type: 'PartyKit' }),
+      product({ id: 'c', title: 'Custom', type: 'CustomKit' }),
+      product({ id: 'd', title: 'A Book', type: 'Book' }),
+    ])
+    // Kits + Books = 2 buckets → a bar with a single "Kits" chip for all three.
+    expect(html.match(/>Kits<\/button>/g)).toHaveLength(1)
+    expect(html).toContain('data-filter="kits"')
+  })
+
+  it('shows no filter bar (or script) for a single-type catalog', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', type: 'Book' }),
+      product({ id: 'b', type: 'Book' }),
+    ])
+    expect(html).not.toContain('class="filter-bar"')
+    // The filter script only ships alongside the bar.
+    expect(html).not.toContain("querySelector('.filter-bar')")
+  })
+
+  it('stamps each card with its filter bucket and never bakes a hidden attribute (works without JS)', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', type: 'Book' }),
+      product({ id: 'b', type: 'StickerSheet' }),
+    ])
+    expect(html).toContain('class="card" data-filter="books"')
+    expect(html).toContain('class="card" data-filter="stickers"')
+    // No card ships hidden — JS-off means every card is visible.
+    expect(html).not.toContain('class="card" data-filter="stickers" hidden')
+    expect(html).not.toMatch(/<article class="card"[^>]*hidden/)
+  })
+
+  it('ships a CSP-safe filter script (no innerHTML) only when the bar renders', () => {
+    const html = buildPublicCatalogHtml([
+      product({ id: 'a', type: 'Book' }),
+      product({ id: 'b', type: 'StickerSheet' }),
+    ])
+    expect(html).toContain("querySelector('.filter-bar')")
+    expect(html).toContain("card.hidden = filter !== 'all'")
+    expect(html).not.toContain('.innerHTML')
+  })
+})
+
 describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
   const ORDER_CFG = {
     endpoint: 'https://us-central1-demo.cloudfunctions.net/submitCatalogOrder',
@@ -239,18 +298,24 @@ describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
     const html = buildPublicCatalogHtml([product({})])
     expect(html).not.toContain('<form')
     expect(html).not.toContain('<script')
-    expect(html).not.toContain('class="want-btn"')
+    expect(html).not.toContain('class="qty-row"')
   })
 
-  it('emits the "I want this!" toggle on each product when interactive', () => {
+  it('emits a quantity stepper on each product when interactive (FEAT-92)', () => {
     const html = buildPublicCatalogHtml(
       [product({ id: 'a', title: 'Listed Kit' })],
       {},
       ORDER_CFG,
     )
-    expect(html).toContain('class="want-btn"')
+    expect(html).toContain('class="qty-row"')
     expect(html).toContain('data-product-id="a"')
     expect(html).toContain('data-title="Listed Kit"')
+    // The stepper controls: minus, a live value, plus.
+    expect(html).toContain('class="qty-btn qty-dec"')
+    expect(html).toContain('class="qty-val"')
+    expect(html).toContain('class="qty-btn qty-inc"')
+    // No trace of the old binary toggle.
+    expect(html).not.toContain('class="want-btn"')
   })
 
   it('bakes the endpoint + familyId into the form script', () => {
@@ -266,10 +331,10 @@ describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
   it('does not ship the form when nothing is listed (no picks possible)', () => {
     const html = buildPublicCatalogHtml([product({ status: 'draft' })], {}, ORDER_CFG)
     expect(html).not.toContain('<form id="orderForm"')
-    expect(html).not.toContain('class="want-btn"')
+    expect(html).not.toContain('class="qty-row"')
   })
 
-  it('escapes a crafted product title inside the toggle data attribute', () => {
+  it('escapes a crafted product title inside the stepper data attribute', () => {
     const html = buildPublicCatalogHtml(
       [product({ id: 'x', title: 'Kit "evil" <b>' })],
       {},
@@ -279,10 +344,20 @@ describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
     expect(html).not.toContain('data-title="Kit "evil"')
   })
 
-  it('builds order chips with textContent, never innerHTML (getAttribute decodes titles)', () => {
+  it('builds the order summary with textContent, never innerHTML (getAttribute decodes titles)', () => {
     const html = buildPublicCatalogHtml([product({ title: 'Kit' })], {}, ORDER_CFG)
     // The form script must not route a decoded title back through innerHTML.
     expect(html).not.toContain('.innerHTML')
-    expect(html).toContain('chip.textContent = picks[id]')
+    // The per-pick chip shows "title ×qty" via textContent.
+    expect(html).toContain("chip.textContent = p.title + ' ×' + p.qty")
+  })
+
+  it('sends qty in each payload line-item and caps client-side (FEAT-92)', () => {
+    const html = buildPublicCatalogHtml([product({ title: 'Kit' })], {}, ORDER_CFG)
+    // The payload carries qty per item…
+    expect(html).toContain('qty: picks[id].qty')
+    // …and the stepper mirrors the server caps for honest UX.
+    expect(html).toContain('QTY_MAX = 9')
+    expect(html).toContain('TOTAL_MAX = 20')
   })
 })

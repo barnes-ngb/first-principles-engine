@@ -4,70 +4,87 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex" />
-  <title>Barnes Bros ✨</title>
+  <title>Barnes Bros</title>
   <!--
-    Dedicated short address for the Barnes Bros public catalog (FEAT-86).
+    Dedicated short address for the Barnes Bros public catalog (FEAT-86, iframe
+    shell FEAT-92).
 
     This is the ONLY page on the `barnesbro.web.app` Firebase Hosting site (the
-    `shop` deploy target — see firebase.json / .firebaserc). It is a THIN, ONE-TIME
-    redirect to the real catalog, which stays a static page on Firebase Storage
-    (public/catalog/{familyId}/index.html, FEAT-84), republished with one tap.
+    `shop` deploy target — see firebase.json / .firebaserc). It EMBEDS the real
+    catalog (a static page on Firebase Storage — public/catalog/{familyId}/index.html,
+    FEAT-84) in a full-viewport iframe instead of redirecting to it.
 
-    It is the sibling of public/shop/index.html (FEAT-85's /shop redirect on the
-    main app site) — same mechanism, its own site so the address is `barnesbro.web.app`
-    instead of a path. Both work; this is the short, sayable one to text or say aloud.
+    Why an iframe shell, not a redirect (the change in FEAT-92):
+      - The address bar now STAYS `barnesbro.web.app` — the shortest, sayable
+        address the family texts — instead of flipping to the long Storage URL.
+      - Republish stays ZERO redeploys: the iframe `src` is the token-less,
+        STABLE Storage URL (it never changes across republishes — that's the
+        point of the FEAT-84 public path), so a republish (a Storage upload) is
+        instantly reflected here with no change to this file.
 
-    Because the published catalog URL is token-less and STABLE (it never changes
-    across republishes — that's the point of the FEAT-84 public path), the target
-    below is baked ONCE and never needs redeploying. Republish stays one tap.
+    Framing is safe: the embedded page (`buildPublicCatalogHtml`) has no
+    frame-busting script, and Firebase Storage serves no `X-Frame-Options` /
+    `Content-Security-Policy: frame-ancestors` header by default, so the iframe
+    renders. If a future header ever blocked framing, the fallback link below
+    (and `<noscript>`) still takes the family straight to the catalog.
 
     SINGLE-FAMILY assumption (for now): the target is a single hardcoded constant.
     The familyId (the parent's UID) is a Firestore runtime value, not known at build
     time, so the owner sets CATALOG_URL once by copying the exact URL shown in the
-    app's "Your public catalog is live" panel (Barnes Bros → Catalog). Until it's
-    set, this page shows a friendly note instead of a broken redirect.
+    app's "Your public catalog is live" panel (Barnes Bros → Catalog).
   -->
-  <script>
-    // The exact, stable published catalog URL (from the in-app "live" panel).
-    // Leave empty to show the setup note; paste the family's URL to go live.
-    var CATALOG_URL = 'https://firebasestorage.googleapis.com/v0/b/barneshome-3dfbb.appspot.com/o/public%2Fcatalog%2FrqQMDnF3ltTlUzdj6oNTcYlL1br2%2Findex.html?alt=media'
-    if (CATALOG_URL) {
-      // Instant redirect for JS clients — replace() so the clean address doesn't
-      // linger in history (Back returns to wherever the family came from).
-      window.location.replace(CATALOG_URL)
-    }
-  </script>
-  <noscript>
-    <!-- JS-off fallback. Meaningful only once CATALOG_URL above is baked. -->
-    <meta http-equiv="refresh" content="0; url=https://firebasestorage.googleapis.com/v0/b/barneshome-3dfbb.appspot.com/o/public%2Fcatalog%2FrqQMDnF3ltTlUzdj6oNTcYlL1br2%2Findex.html?alt=media" />
-  </noscript>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
-      color: #2a2a2a; background: #f6faf6; line-height: 1.5;
-      display: flex; align-items: center; justify-content: center;
-      min-height: 100vh; padding: 24px; text-align: center;
+    html, body { margin: 0; padding: 0; height: 100%; background: #f6faf6; }
+    /* Full-viewport embed. position:fixed + inset:0 fills the screen edge-to-edge
+       with no scrollbars or margins, on mobile and desktop alike. */
+    .shop-frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+    /* The fallback note sits BEHIND the iframe; it only shows through if the
+       iframe fails to paint (blocked framing / load error). */
+    .fallback {
+      position: fixed; inset: 0; z-index: -1;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+      text-align: center;
+      font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif; color: #2a2a2a;
     }
-    .card {
+    .fallback .card {
       max-width: 420px; background: #fff; border: 2px solid #cfe8cf;
       border-radius: 16px; padding: 28px 22px; box-shadow: 0 1px 6px rgba(0,0,0,0.08);
     }
-    h1 { font-size: 26px; color: #2e7d32; margin-bottom: 10px; }
-    p { font-size: 16px; color: #555; margin-bottom: 8px; }
-    a { color: #2e7d32; font-weight: bold; }
+    .fallback h1 { font-size: 26px; color: #2e7d32; margin: 0 0 10px; }
+    .fallback p { font-size: 16px; color: #555; margin: 0 0 8px; }
+    .fallback a { color: #2e7d32; font-weight: bold; }
   </style>
 </head>
 <body>
   <!--
-    Fallbacks. If CATALOG_URL is set, the inline script above (or the <noscript>
-    meta-refresh) has already navigated away before any of this renders. If it's
-    empty (not yet configured), the family sees a warm note instead.
+    The stable, token-less published catalog URL (from the in-app "live" panel).
+    It never changes across republishes, so it's baked ONCE and never needs
+    redeploying. Update it only if the family (UID) changes.
   -->
-  <div class="card">
-    <h1>Barnes Bros ✨</h1>
-    <p>Taking you to our catalog… 🌱</p>
-    <p><a href="https://firebasestorage.googleapis.com/v0/b/barneshome-3dfbb.appspot.com/o/public%2Fcatalog%2FrqQMDnF3ltTlUzdj6oNTcYlL1br2%2Findex.html?alt=media">Tap here if it doesn't load</a></p>
+  <iframe
+    class="shop-frame"
+    src="https://firebasestorage.googleapis.com/v0/b/barneshome-3dfbb.appspot.com/o/public%2Fcatalog%2FrqQMDnF3ltTlUzdj6oNTcYlL1br2%2Findex.html?alt=media"
+    title="Barnes Bros"
+    allow="fullscreen"
+    referrerpolicy="no-referrer"
+  ></iframe>
+
+  <!--
+    Fallback shown only if the iframe can't render (it sits behind, z-index:-1).
+    Also the JS-off safety net via <noscript> (an iframe needs no JS, but this
+    guarantees a working direct link no matter what).
+  -->
+  <div class="fallback">
+    <div class="card">
+      <h1>Barnes Bros ✨</h1>
+      <p>Loading our catalog… 🌱</p>
+      <p><a href="https://firebasestorage.googleapis.com/v0/b/barneshome-3dfbb.appspot.com/o/public%2Fcatalog%2FrqQMDnF3ltTlUzdj6oNTcYlL1br2%2Findex.html?alt=media">Tap here if it doesn't load</a></p>
+    </div>
   </div>
+  <noscript>
+    <p style="text-align:center;padding:24px;font-family:sans-serif;">
+      Open the <a href="https://firebasestorage.googleapis.com/v0/b/barneshome-3dfbb.appspot.com/o/public%2Fcatalog%2FrqQMDnF3ltTlUzdj6oNTcYlL1br2%2Findex.html?alt=media">Barnes Bros catalog</a>.
+    </p>
+  </noscript>
 </body>
 </html>

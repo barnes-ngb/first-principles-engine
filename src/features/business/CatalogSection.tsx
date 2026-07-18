@@ -210,8 +210,8 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
                   </Link>
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-                  Short, sayable address — this is the one to text or say aloud. Direct link (always
-                  works):{' '}
+                  This is THE address — text it or say it aloud. It opens the shop and the address
+                  stays put. Backup direct link:{' '}
                   <Link href={published.url} target="_blank" rel="noopener noreferrer">
                     {published.url}
                   </Link>
