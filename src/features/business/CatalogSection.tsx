@@ -14,6 +14,7 @@ import { CatalogProductStatus } from '../../core/types/business'
 import CatalogProductCard from './CatalogProductCard'
 import CatalogProductForm from './CatalogProductForm'
 import { buildCatalogSheetHtml, selectListedProducts } from './catalogSheet'
+import { PUBLIC_CATALOG_CLEAN_URL } from './catalogSitePublish'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
 import { useCatalogSite } from './useCatalogSite'
@@ -95,11 +96,15 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
   const handleCopyUrl = async () => {
     if (!published) return
     try {
+      // Copy the DIRECT Storage URL — the one guaranteed to resolve. The clean
+      // /shop address is only live once its one-time redirect target is baked
+      // (FEAT-85), so copying it here could hand a family a dead link (Codex P1).
+      // The clean address is shown below as the short link to share once wired.
       await navigator.clipboard.writeText(published.url)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Clipboard blocked — the URL is still shown as a tappable link.
+      // Clipboard blocked — the address is still shown as a tappable link.
     }
   }
 
@@ -199,6 +204,11 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
               <Link href={published.url} target="_blank" rel="noopener noreferrer">
                 {published.url}
               </Link>
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
+              Short address (one-time setup): <strong>{PUBLIC_CATALOG_CLEAN_URL}</strong> — paste the
+              link above into <code>public/shop/index.html</code> (<code>CATALOG_URL</code>) once, then
+              you can share the short one.
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Last published {new Date(published.publishedAt).toLocaleString()} — text this link to a

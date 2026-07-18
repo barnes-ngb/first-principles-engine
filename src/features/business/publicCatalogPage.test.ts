@@ -79,6 +79,51 @@ describe('buildPublicCatalogHtml', () => {
     expect(html).toMatch(/being set up/i)
   })
 
+  it('renders an opt-in book preview only when a resolved preview is passed for that product', () => {
+    const p = product({
+      id: 'book1',
+      title: 'Tom Tom',
+      priceCents: 800,
+      includePreview: true,
+      sourceRef: { kind: 'book', id: 'b1' },
+    })
+    const previews = {
+      book1: {
+        coverUrl: 'https://cdn/cover.png',
+        pages: [{ imageUrl: 'https://cdn/p1.png', text: 'Once upon a tide' }],
+      },
+    }
+    const html = buildPublicCatalogHtml([p], previews)
+    expect(html).toContain('Peek inside')
+    expect(html).toContain('https://cdn/p1.png')
+    expect(html).toContain('Once upon a tide')
+    expect(html).toContain('The real book is $8.00')
+
+    // No preview passed ⇒ no peek, even if the product opted in.
+    expect(buildPublicCatalogHtml([p])).not.toContain('Peek inside')
+    // Opted-in but empty resolved preview ⇒ no peek.
+    expect(
+      buildPublicCatalogHtml([p], { book1: { coverUrl: undefined, pages: [] } }),
+    ).not.toContain('Peek inside')
+  })
+
+  it('never renders a preview for a product that did not opt in', () => {
+    const p = product({ id: 'x', title: 'No Peek' })
+    const html = buildPublicCatalogHtml([p], {
+      x: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }] },
+    })
+    expect(html).not.toContain('Peek inside')
+  })
+
+  it('uses a warm generic CTA in the preview when the book is unpriced', () => {
+    const p = product({ id: 'b', title: 'Free', priceCents: 0, includePreview: true })
+    const html = buildPublicCatalogHtml([p], {
+      b: { coverUrl: undefined, pages: [{ text: 'hi' }] },
+    })
+    expect(html).toContain('Ask us about the real book')
+    expect(html).not.toContain('$0')
+  })
+
   it('is a self-contained, mobile-first page (doctype + viewport + inline CSS, no app chrome)', () => {
     const html = buildPublicCatalogHtml([product({})])
     expect(html.startsWith('<!DOCTYPE html>')).toBe(true)

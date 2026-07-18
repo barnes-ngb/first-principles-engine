@@ -1,7 +1,12 @@
+import { doc, getDoc } from 'firebase/firestore'
 import { deleteObject, getMetadata, ref, uploadBytes } from 'firebase/storage'
 
+import { booksCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
+import type { Book } from '../../core/types'
 import type { CatalogProduct } from '../../core/types/business'
+import type { CatalogPreview } from './catalogPreview'
+import { buildBookPreview, productWantsPreview } from './catalogPreview'
 import { buildPublicCatalogHtml } from './publicCatalogPage'
 
 /**
@@ -33,6 +38,20 @@ export function publicCatalogPath(familyId: string): string {
 }
 
 /**
+ * The clean, human-sayable address (FEAT-85). A **thin one-time redirect** —
+ * `public/shop/index.html` in the app bundle, served at `/shop` on the app's
+ * Hosting site (static files win over the SPA catch-all rewrite), which
+ * `location.replace`s to the stable {@link publicCatalogUrl}. This is the
+ * address to text or say aloud; the long Storage URL stays the direct link.
+ *
+ * It never needs redeploying on republish: the redirect points at the
+ * token-less, **stable** Storage URL, so republish (a Storage upload) stays one
+ * tap. Single-family for now — the redirect bakes one target (see the file's
+ * header comment); a multi-family app would resolve `/shop` per user.
+ */
+export const PUBLIC_CATALOG_CLEAN_URL = 'https://first-principles-engine.web.app/shop'
+
+/**
  * The stable, **token-less** public URL for the published page. It resolves
  * without a download token because `storage.rules` world-reads `public/catalog/**`,
  * so it never changes across republishes (unlike a `getDownloadURL` token URL).
@@ -51,15 +70,52 @@ export interface PublishedState {
 }
 
 /**
+ * Resolve the opt-in book previews (FEAT-85) for the LISTED products that asked
+ * for one. For each `status:'listed'` product with `includePreview` and a
+ * `sourceRef.kind === 'book'`, fetch the source Book and project its cover +
+ * first N pages via the pure `buildBookPreview`. Read-only + additive:
+ * per-product fetch failures (or an empty preview) are swallowed so a missing /
+ * deleted book never blocks publish — that product simply publishes without a
+ * peek. Products without the flag are never fetched.
+ */
+async function resolveBookPreviews(
+  familyId: string,
+  products: CatalogProduct[],
+): Promise<Record<string, CatalogPreview>> {
+  const wanted = products.filter(
+    (p) => p.status === 'listed' && productWantsPreview(p) && p.sourceRef?.id,
+  )
+  const entries = await Promise.all(
+    wanted.map(async (p): Promise<[string, CatalogPreview] | null> => {
+      try {
+        const snap = await getDoc(doc(booksCollection(familyId), p.sourceRef!.id))
+        if (!snap.exists()) return null
+        const book = { ...(snap.data() as Book), id: snap.id }
+        const preview = buildBookPreview(book, p.previewPageCount)
+        return preview.pages.length > 0 ? [p.id, preview] : null
+      } catch {
+        return null
+      }
+    }),
+  )
+  return Object.fromEntries(entries.filter((e): e is [string, CatalogPreview] => e !== null))
+}
+
+/**
  * Render the `listed` products and upload the page. Returns the shareable URL +
  * publish time. Content type is `text/html` so the URL renders inline in a
  * browser rather than downloading.
+ *
+ * Opt-in book previews (FEAT-85) are resolved first and baked inline into the
+ * page — the peek pages hotlink the same tokenized Storage URLs as the covers,
+ * so publish stays a single-file upload with no new Storage objects or rules.
  */
 export async function publishCatalogSite(
   familyId: string,
   products: CatalogProduct[],
 ): Promise<PublishedState> {
-  const html = buildPublicCatalogHtml(products)
+  const previews = await resolveBookPreviews(familyId, products)
+  const html = buildPublicCatalogHtml(products, previews)
   const blob = new Blob([html], { type: 'text/html; charset=utf-8' })
   const objectRef = ref(storage, publicCatalogPath(familyId))
   await uploadBytes(objectRef, blob, {
