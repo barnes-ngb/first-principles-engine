@@ -21,7 +21,11 @@ const artRef = (url: string): KitArtRef => ({
 
 function renderArtForm(
   roster: KitRoster,
-  opts: { canGenerateArt?: boolean; onGenerateArt?: ReturnType<typeof vi.fn> } = {},
+  opts: {
+    canGenerateArt?: boolean
+    onGenerateArt?: ReturnType<typeof vi.fn>
+    capReached?: boolean
+  } = {},
 ) {
   const onSave = vi.fn<(body: NewKitRoster, id?: string) => Promise<void>>(async () => undefined)
   const onCancel = vi.fn()
@@ -38,6 +42,7 @@ function renderArtForm(
       onCancel={onCancel}
       canGenerateArt={opts.canGenerateArt ?? true}
       onGenerateArt={onGenerateArt}
+      capReached={opts.capReached ?? false}
     />,
   )
   return { onSave, onCancel, onGenerateArt }
@@ -368,6 +373,40 @@ describe('KitBuilderForm', () => {
     )
     // Viewing is for everyone; the action stays gated — no Regenerate for a read-only viewer.
     expect(within(dialog).queryByRole('button', { name: /regenerate/i })).not.toBeInTheDocument()
+  })
+
+  // ── Daily art cap (FEAT-94) ───────────────────────────────────
+
+  it('at the daily cap: no generate buttons, a friendly non-shaming nudge instead', () => {
+    renderArtForm(savedRoster({ defenders: [], invaders: [] }), { capReached: true })
+    // The cap swaps the paid buttons for a warm message — never a hard error.
+    expect(screen.queryByRole('button', { name: /make sticker$/i })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /make stickers for the rest/i }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/that's a lot of art today! ask a grown-up if you need more/i),
+    ).toBeInTheDocument()
+  })
+
+  it('at the daily cap: existing art thumbnails still show (viewing is never capped)', () => {
+    renderArtForm(
+      savedRoster({ defenders: [], invaders: [], art: { hero: artRef('https://img/hero.png') } }),
+      { capReached: true },
+    )
+    expect(screen.getByAltText(/Zappy sticker/i)).toHaveAttribute('src', 'https://img/hero.png')
+    expect(screen.queryByRole('button', { name: /regenerate/i })).not.toBeInTheDocument()
+  })
+
+  it('does not show the cap nudge to a read-only viewer who never had generate access', () => {
+    // canGenerateArt false → capReached is moot; no nudge, no buttons.
+    renderArtForm(savedRoster({ defenders: [], invaders: [] }), {
+      canGenerateArt: false,
+      capReached: true,
+    })
+    expect(
+      screen.queryByText(/that's a lot of art today/i),
+    ).not.toBeInTheDocument()
   })
 
   it('the lightbox Regenerate button is gated on canGenerate and calls onGenerateArt', async () => {

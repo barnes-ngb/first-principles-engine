@@ -51,6 +51,27 @@ vi.mock('../../core/auth/useAuth', () => ({
   useFamilyId: () => 'fam-1',
 }))
 
+// Art quota (FEAT-94) — mock the hook so the section test never hits Firestore.
+const { useArtQuotaMock, recordGenerationMock } = vi.hoisted(() => ({
+  useArtQuotaMock: vi.fn(),
+  recordGenerationMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+}))
+vi.mock('./useArtQuota', () => ({
+  useArtQuota: useArtQuotaMock,
+  DEFAULT_DAILY_ART_QUOTA: 10,
+  ART_QUOTA_MESSAGE: "That's a lot of art today! Ask a grown-up if you need more. 🎨",
+}))
+
+function setQuota({ atLimit = false }: { atLimit?: boolean } = {}) {
+  useArtQuotaMock.mockReturnValue({
+    count: atLimit ? 10 : 0,
+    limit: 10,
+    remaining: atLimit ? 0 : 10,
+    atLimit,
+    recordGeneration: recordGenerationMock,
+  })
+}
+
 // Spy on the download side-effect; keep the pure name-builders real (FEAT-93).
 const downloadArtFilesMock = vi.hoisted(() =>
   vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
@@ -111,6 +132,7 @@ vi.mock('./KitBuilderForm', () => ({
     onCancel,
     canGenerateArt,
     onGenerateArt,
+    capReached,
   }: {
     childId: string
     roster?: KitRoster
@@ -121,11 +143,13 @@ vi.mock('./KitBuilderForm', () => ({
       key: string,
       character: { name: string; descriptor: string },
     ) => Promise<unknown>
+    capReached?: boolean
   }) => (
     <div data-testid="form">
       <span data-testid="form-childId">{childId}</span>
       <span data-testid="form-rosterId">{roster?.id ?? 'none'}</span>
       <span data-testid="form-canGenerateArt">{String(Boolean(canGenerateArt))}</span>
+      <span data-testid="form-capReached">{String(Boolean(capReached))}</span>
       <button onClick={() => onSave({ vaultName: 'X' }, roster?.id)}>stub-save</button>
       <button onClick={onCancel}>stub-cancel</button>
       {onGenerateArt && (
@@ -188,11 +212,13 @@ beforeEach(() => {
   updateProductMock.mockClear()
   generateImageMock.mockClear()
   downloadArtFilesMock.mockClear()
+  recordGenerationMock.mockClear()
   generateImageMock.mockResolvedValue({
     url: 'https://img/hero.png',
     storagePath: 'families/fam-1/generated-images/hero.png',
   })
   setProducts([])
+  setQuota()
   useChildrenMock.mockReturnValue({ children: [{ id: 'lincoln', name: 'Lincoln' }] })
 })
 
@@ -315,11 +341,11 @@ describe('KitBuilderSection', () => {
     openSpy.mockRestore()
   })
 
-  it('hides Print kit for a non-parent (canEdit-gated)', () => {
+  it('shows Print kit to a kid — printing your own kit is kid effort (FEAT-94)', () => {
     setRosters([roster({ id: 'kit-1', vaultName: 'The Seed Safe' })])
     render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
     expect(screen.getByText('The Seed Safe')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /print kit/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /print kit/i })).toBeInTheDocument()
   })
 
   it('hides the Add to catalog affordance for a non-parent (kids never price/publish — §6)', () => {
@@ -405,11 +431,11 @@ describe('KitBuilderSection', () => {
     expect(screen.queryByRole('button', { name: /download art/i })).not.toBeInTheDocument()
   })
 
-  it('hides Download art for a non-parent (canEdit-gated)', () => {
+  it('shows Download art to a kid — downloading your own art is allowed (FEAT-94)', () => {
     setRosters([rosterWithArt()])
     render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
     expect(screen.getByText('Neptune')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /download art/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /download art/i })).toBeInTheDocument()
   })
 
   // ── Art pipeline (FEAT-88) ────────────────────────────────────
@@ -436,12 +462,48 @@ describe('KitBuilderSection', () => {
     expect(screen.getByTestId('form-canGenerateArt')).toHaveTextContent('true')
   })
 
-  it('a kid (non-parent) is never offered art generation', async () => {
+  it('a kid IS offered art generation on a saved roster (owner ask — FEAT-94)', async () => {
     const user = userEvent.setup()
     setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
     render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
     await user.click(screen.getByText('Editable'))
-    expect(screen.getByTestId('form-canGenerateArt')).toHaveTextContent('false')
+    // The generate capability is offered to a kid too — no longer parent-gated.
+    expect(screen.getByTestId('form-canGenerateArt')).toHaveTextContent('true')
+    // And the kid's generation is metered by a quota (capped), not the parent's.
+    expect(useArtQuotaMock).toHaveBeenCalledWith('lincoln', { capped: true })
+  })
+
+  it('a parent is uncapped — art quota is not applied (FEAT-94)', async () => {
+    const user = userEvent.setup()
+    setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
+    await user.click(screen.getByText('Editable'))
+    expect(screen.getByTestId('form-canGenerateArt')).toHaveTextContent('true')
+    expect(useArtQuotaMock).toHaveBeenCalledWith('lincoln', { capped: false })
+    // Parent never sees the cap notice.
+    expect(screen.getByTestId('form-capReached')).toHaveTextContent('false')
+  })
+
+  it('passes capReached to the form when a kid hits the daily cap (FEAT-94)', async () => {
+    const user = userEvent.setup()
+    setQuota({ atLimit: true })
+    setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
+    await user.click(screen.getByText('Editable'))
+    expect(screen.getByTestId('form-capReached')).toHaveTextContent('true')
+  })
+
+  it('records the generation against the daily quota on success (FEAT-94)', async () => {
+    const user = userEvent.setup()
+    setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
+
+    await user.click(screen.getByText('Editable'))
+    await user.click(screen.getByRole('button', { name: 'gen-hero' }))
+
+    await waitFor(() => expect(setRosterArtMock).toHaveBeenCalledTimes(1))
+    // Each successful (paid) generation counts toward the cap.
+    expect(recordGenerationMock).toHaveBeenCalledTimes(1)
   })
 
   it('generating writes the art ref atomically per-key via setRosterArt (book-sticker, verbatim prompt)', async () => {
@@ -510,6 +572,22 @@ describe('KitBuilderSection', () => {
     expect(createRosterMock).not.toHaveBeenCalled()
     expect(createProductMock).not.toHaveBeenCalled()
     expect(generateImageMock).not.toHaveBeenCalled()
+  })
+
+  it('hides "Use as product image" from a kid — it writes the catalog product (FEAT-94)', () => {
+    const r = roster({
+      id: 'kit-9',
+      vaultName: 'The Seed Safe',
+      art: {
+        hero: { url: 'https://img/hero.png', storagePath: 'p', generatedAt: '2026-07-18T00:00:00.000Z' },
+      },
+    })
+    setRosters([r])
+    setProducts([
+      { id: 'prod-1', title: 'The Seed Safe', sourceRef: { kind: 'kitRoster', id: 'kit-9' }, images: [] },
+    ])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
+    expect(screen.queryByRole('button', { name: /use as product image/i })).not.toBeInTheDocument()
   })
 
   it('hides "Use as product image" when the roster has no promoted product', () => {
