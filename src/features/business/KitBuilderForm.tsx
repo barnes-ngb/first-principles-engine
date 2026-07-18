@@ -221,6 +221,13 @@ export interface KitBuilderFormProps {
    * ever true for a capped kid profile; a parent is uncapped.
    */
   capReached?: boolean
+  /**
+   * How many paid generations the actor may still make today (FEAT-94). The
+   * batch loop is bounded by this so a roster with more ungenerated characters
+   * than remaining quota can't exceed the daily cap in a single tap. `Infinity`
+   * for an uncapped parent (the default).
+   */
+  remainingArt?: number
 }
 
 /**
@@ -245,6 +252,7 @@ export default function KitBuilderForm({
   canGenerateArt = false,
   onGenerateArt,
   capReached = false,
+  remainingArt = Infinity,
 }: KitBuilderFormProps) {
   const [draft, setDraft] = useState<RosterDraft>(() => draftFromRoster(roster))
   const [saving, setSaving] = useState(false)
@@ -312,18 +320,30 @@ export default function KitBuilderForm({
     }
   }
 
-  /** Sequentially generate every remaining character (confirmed count first). */
+  /**
+   * Sequentially generate every remaining character (confirmed count first),
+   * but never more than the actor's remaining daily allowance (FEAT-94). The
+   * quota's snapshot count lags a synchronous loop, so we bound by the allowance
+   * captured at batch start rather than re-reading it mid-loop — a big roster
+   * with few slots left can't blow past the cap in one tap.
+   */
   const generateAllRemaining = async () => {
     setConfirmBatch(false)
+    let budget = remainingArt
     for (const c of draftCharacters()) {
       if (art[c.key]?.url) continue
+      if (budget <= 0) break // out of daily allowance — stop before another paid call
       // One paid call at a time — sequential so per-row state stays honest.
       const ok = await generateOne(c.key, { name: c.name, descriptor: c.descriptor })
       if (!ok) break // stop the batch on the first failure; nothing already made is lost
+      budget -= 1
     }
   }
 
   const remainingCount = draftCharacters().filter((c) => !art[c.key]?.url).length
+  // What the batch will actually make: never more than the daily allowance
+  // (equals remainingCount for an uncapped parent) — FEAT-94.
+  const batchCount = Math.min(remainingCount, remainingArt)
 
   const addDefender = () =>
     setDraft((prev) => ({
@@ -578,7 +598,7 @@ export default function KitBuilderForm({
         <MenuItem value={KitRosterStatus.Complete}>Ready</MenuItem>
       </TextField>
 
-      {canGenerateNow && remainingCount > 0 && (
+      {canGenerateNow && batchCount > 0 && (
         <Box>
           <Button
             variant="text"
@@ -586,7 +606,7 @@ export default function KitBuilderForm({
             disabled={generatingKey !== null}
             onClick={() => setConfirmBatch(true)}
           >
-            Make stickers for the rest ({remainingCount})
+            Make stickers for the rest ({batchCount})
           </Button>
           <Typography variant="caption" color="text.secondary" display="block">
             Each sticker is a real image — we'll ask before making them.
@@ -620,10 +640,10 @@ export default function KitBuilderForm({
 
       {/* Count-confirm before any batch generation — never auto-generate (FEAT-88). */}
       <Dialog open={confirmBatch} onClose={() => setConfirmBatch(false)}>
-        <DialogTitle>Make {remainingCount} images?</DialogTitle>
+        <DialogTitle>Make {batchCount} images?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This makes {remainingCount} sticker {remainingCount === 1 ? 'image' : 'images'} — one for
+            This makes {batchCount} sticker {batchCount === 1 ? 'image' : 'images'} — one for
             each character that doesn't have one yet. Making images costs money, so we only do it when
             you tap Make.
           </DialogContentText>
@@ -631,7 +651,7 @@ export default function KitBuilderForm({
         <DialogActions>
           <Button onClick={() => setConfirmBatch(false)}>Cancel</Button>
           <Button variant="contained" onClick={() => void generateAllRemaining()}>
-            Make {remainingCount}
+            Make {batchCount}
           </Button>
         </DialogActions>
       </Dialog>

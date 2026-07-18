@@ -47,6 +47,10 @@ export function useArtQuota(
 ): UseArtQuotaResult {
   const familyId = useFamilyId()
   const [count, setCount] = useState(0)
+  // Bumped at local midnight so a page left mounted rolls over to the new day's
+  // counter without needing an unrelated render (FEAT-94). `todayKey()` is
+  // recomputed on the tick render.
+  const [dayTick, setDayTick] = useState(0)
 
   const date = todayKey()
   const docId = childId ? `${childId}-${date}` : null
@@ -70,6 +74,20 @@ export function useArtQuota(
     )
     return unsubscribe
   }, [active, familyId, docId])
+
+  // Roll the subscription over to the new day's doc at local midnight even if
+  // nothing else re-renders (a capped kid at the cap has no live control to
+  // trigger one). Re-arms after each tick. Only capped actors need this.
+  useEffect(() => {
+    if (!capped) return
+    const now = new Date()
+    const nextMidnight = new Date(now)
+    nextMidnight.setHours(24, 0, 0, 0)
+    // +1s cushion so `todayKey()` is safely on the new local day when it fires.
+    const ms = nextMidnight.getTime() - now.getTime() + 1000
+    const timer = setTimeout(() => setDayTick((n) => n + 1), ms)
+    return () => clearTimeout(timer)
+  }, [capped, dayTick])
 
   const recordGeneration = useCallback(async () => {
     if (!capped || !familyId || !childId || !docId) return

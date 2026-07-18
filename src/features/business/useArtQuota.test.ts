@@ -25,9 +25,11 @@ vi.mock('../../core/auth/useAuth', () => ({
   useFamilyId: () => 'family-1',
 }))
 
-// Pin the day so the doc id is deterministic in the test.
+// Pin the day so the doc id is deterministic — mutable so the rollover test can
+// advance it across local midnight.
+const dayHolder = vi.hoisted(() => ({ value: '2026-07-18' }))
 vi.mock('../../core/utils/dateKey', () => ({
-  todayKey: () => '2026-07-18',
+  todayKey: () => dayHolder.value,
 }))
 
 import { ART_QUOTA_MESSAGE, DEFAULT_DAILY_ART_QUOTA, useArtQuota } from './useArtQuota'
@@ -44,6 +46,7 @@ beforeEach(() => {
   onSnapshotMock.mockReturnValue(() => undefined)
   incrementMock.mockClear()
   docMock.mockClear()
+  dayHolder.value = '2026-07-18'
 })
 
 describe('useArtQuota', () => {
@@ -110,5 +113,26 @@ describe('useArtQuota', () => {
     expect(result.current.limit).toBe(3)
     emitCount(3)
     await waitFor(() => expect(result.current.atLimit).toBe(true))
+  })
+
+  it('rolls the subscription over to the new day at local midnight while mounted', () => {
+    vi.useFakeTimers()
+    try {
+      // Just before local midnight on 2026-07-18.
+      vi.setSystemTime(new Date(2026, 6, 18, 23, 59, 0))
+      renderHook(() => useArtQuota('lincoln', { capped: true }))
+      expect(docMock).toHaveBeenLastCalledWith(expect.anything(), 'lincoln-2026-07-18')
+
+      // Cross midnight: the calendar day advances and the timer fires.
+      dayHolder.value = '2026-07-19'
+      act(() => {
+        vi.advanceTimersByTime(2 * 60 * 1000) // 2 min → past the +1s cushion
+      })
+
+      // The subscription re-targets the new day's counter doc, no refresh needed.
+      expect(docMock).toHaveBeenLastCalledWith(expect.anything(), 'lincoln-2026-07-19')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
