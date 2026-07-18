@@ -25,7 +25,8 @@ describe("validateOrderSubmission", () => {
     expect(result.ok).toBe(true);
     if (result.ok && !result.spam) {
       expect(result.order.customerName).toBe("Sam");
-      expect(result.order.items).toEqual([{ productId: "prod-1", title: "Seed Vault Kit" }]);
+      // qty defaults to 1 when the payload omits it (legacy / single pick).
+      expect(result.order.items).toEqual([{ productId: "prod-1", title: "Seed Vault Kit", qty: 1 }]);
       expect(result.order.note).toBe("blue please");
       expect(result.order.contact).toBe("text 555");
     }
@@ -102,7 +103,7 @@ describe("validateOrderSubmission", () => {
     );
     expect(mixed.ok).toBe(true);
     if (mixed.ok && !mixed.spam) {
-      expect(mixed.order.items).toEqual([{ productId: "prod-1", title: "Real Kit" }]);
+      expect(mixed.order.items).toEqual([{ productId: "prod-1", title: "Real Kit", qty: 1 }]);
     }
 
     const none = validateOrderSubmission(
@@ -121,7 +122,7 @@ describe("validateOrderSubmission", () => {
     expect(result.ok).toBe(true);
     if (result.ok && !result.spam) {
       // The browser's title snapshot is discarded — the server name wins.
-      expect(result.order.items).toEqual([{ productId: "prod-1", title: "Seed Vault Kit" }]);
+      expect(result.order.items).toEqual([{ productId: "prod-1", title: "Seed Vault Kit", qty: 1 }]);
     }
   });
 
@@ -131,6 +132,62 @@ describe("validateOrderSubmission", () => {
       undefined,
     );
     expect(result.ok).toBe(true);
+  });
+
+  it("keeps a valid per-item qty (FEAT-92)", () => {
+    const result = validateOrderSubmission({
+      ...goodBody,
+      items: [{ productId: "prod-1", title: "Kit", qty: 3 }],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok && !result.spam) {
+      expect(result.order.items).toEqual([{ productId: "prod-1", title: "Kit", qty: 3 }]);
+    }
+  });
+
+  it("rejects a non-integer, zero, negative, or over-max qty (FEAT-92)", () => {
+    for (const bad of [0, -1, 2.5, ORDER_LIMITS.qtyMax + 1, "2"]) {
+      expect(
+        validateOrderSubmission({
+          ...goodBody,
+          items: [{ productId: "prod-1", title: "Kit", qty: bad }],
+        }).ok,
+      ).toBe(false);
+    }
+  });
+
+  it("treats a null / omitted qty as a single unit (legacy-tolerant, FEAT-92)", () => {
+    for (const missing of [null, undefined]) {
+      const result = validateOrderSubmission({
+        ...goodBody,
+        items: [{ productId: "prod-1", title: "Kit", qty: missing }],
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok && !result.spam) {
+        expect(result.order.items[0].qty).toBe(1);
+      }
+    }
+  });
+
+  it("rejects an order whose quantities exceed the cart-wide total cap (FEAT-92)", () => {
+    // Two items each at qtyMax (9+9=18) is fine; three (27) blows the 20 cap.
+    const twoFull = validateOrderSubmission({
+      ...goodBody,
+      items: [
+        { productId: "a", title: "A", qty: ORDER_LIMITS.qtyMax },
+        { productId: "b", title: "B", qty: ORDER_LIMITS.qtyMax },
+      ],
+    });
+    expect(twoFull.ok).toBe(true);
+    const threeFull = validateOrderSubmission({
+      ...goodBody,
+      items: [
+        { productId: "a", title: "A", qty: ORDER_LIMITS.qtyMax },
+        { productId: "b", title: "B", qty: ORDER_LIMITS.qtyMax },
+        { productId: "c", title: "C", qty: ORDER_LIMITS.qtyMax },
+      ],
+    });
+    expect(threeFull.ok).toBe(false);
   });
 });
 
@@ -192,7 +249,7 @@ describe("writeOrder", () => {
 
     await writeOrder(db, "fam-abcdef", {
       customerName: "Sam",
-      items: [{ productId: "prod-1", title: "Seed Vault Kit" }],
+      items: [{ productId: "prod-1", title: "Seed Vault Kit", qty: 2 }],
       note: "blue please",
     });
 
@@ -200,7 +257,7 @@ describe("writeOrder", () => {
     const doc = added[0] as Record<string, unknown>;
     expect(doc.status).toBe("new");
     expect(doc.customerName).toBe("Sam");
-    expect(doc.items).toEqual([{ productId: "prod-1", title: "Seed Vault Kit" }]);
+    expect(doc.items).toEqual([{ productId: "prod-1", title: "Seed Vault Kit", qty: 2 }]);
     expect(doc.note).toBe("blue please");
     expect(doc.createdAt).toEqual(doc.updatedAt);
     expect(typeof doc.createdAt).toBe("string");

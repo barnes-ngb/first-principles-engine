@@ -12,6 +12,7 @@ import {
   CatalogOrderStatus,
   CatalogOrderStatusLabel,
   nextOrderStatus,
+  orderItemQty,
 } from '../../core/types/business'
 import { useCatalogOrders } from './useCatalogOrders'
 
@@ -108,11 +109,20 @@ function OrderCard({
         </Stack>
 
         <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
-          {order.items.map((item, i) => (
-            <Typography key={`${item.productId}-${i}`} component="li" variant="body2">
-              {item.title}
-            </Typography>
-          ))}
+          {order.items.map((item, i) => {
+            const qty = orderItemQty(item)
+            return (
+              <Typography key={`${item.productId}-${i}`} component="li" variant="body2">
+                {item.title}
+                {qty > 1 && (
+                  <Typography component="span" variant="body2" fontWeight="bold">
+                    {' '}
+                    ×{qty}
+                  </Typography>
+                )}
+              </Typography>
+            )
+          })}
         </Box>
 
         {order.note && (

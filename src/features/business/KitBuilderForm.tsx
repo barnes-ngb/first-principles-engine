@@ -75,6 +75,12 @@ function draftFromRoster(roster?: KitRoster): RosterDraft {
  * generate button renders only when `canGenerate`. Loading + honest-error are
  * per-character (FEAT-61): the spinner is scoped to this row, a failure shows an
  * inline message, and existing art is never lost on a failed retry.
+ *
+ * FEAT-92: the ~56px thumbnail is a button that opens a lightbox `Dialog` with
+ * the full-size image + the character's name. Viewing is kid-safe (everyone with
+ * art can tap it open); the Regenerate action inside the dialog rides the SAME
+ * `canGenerate` gate as the inline button — so a read-only viewer sees a bigger
+ * picture and nothing more.
  */
 function CharacterArtControl({
   characterKey,
@@ -94,24 +100,35 @@ function CharacterArtControl({
   onGenerate: (characterKey: string, character: KitArtCharacter) => void
 }) {
   const hasContent = character.name.trim() !== '' || character.descriptor.trim() !== ''
+  const [zoomOpen, setZoomOpen] = useState(false)
+  const displayName = character.name.trim() || 'Character'
   return (
     <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mt: 1 }}>
       {art?.url && (
         <Box
-          component="img"
-          src={art.url}
-          alt={`${character.name || 'character'} sticker`}
+          component="button"
+          type="button"
+          onClick={() => setZoomOpen(true)}
+          aria-label={`View ${displayName} sticker larger`}
           sx={{
-            width: 56,
-            height: 56,
-            objectFit: 'contain',
-            borderRadius: 1,
-            bgcolor: 'action.hover',
+            p: 0,
             border: '1px solid',
             borderColor: 'divider',
+            borderRadius: 1,
+            bgcolor: 'action.hover',
+            cursor: 'pointer',
             flexShrink: 0,
+            lineHeight: 0,
+            '&:hover': { borderColor: 'primary.main' },
           }}
-        />
+        >
+          <Box
+            component="img"
+            src={art.url}
+            alt={`${character.name || 'character'} sticker`}
+            sx={{ width: 56, height: 56, objectFit: 'contain', display: 'block' }}
+          />
+        </Box>
       )}
       {canGenerate && (
         <Box sx={{ minWidth: 0 }}>
@@ -130,6 +147,49 @@ function CharacterArtControl({
             </Typography>
           )}
         </Box>
+      )}
+
+      {/* Lightbox: full-size sticker + name. View is for everyone; Regenerate
+          inside is gated on the SAME canGenerate flag as the inline button. */}
+      {art?.url && (
+        <Dialog open={zoomOpen} onClose={() => setZoomOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>{displayName}</DialogTitle>
+          <DialogContent>
+            <Box
+              component="img"
+              src={art.url}
+              alt={`${character.name || 'character'} sticker`}
+              sx={{
+                width: '100%',
+                maxHeight: '70vh',
+                objectFit: 'contain',
+                borderRadius: 1,
+                bgcolor: 'action.hover',
+              }}
+            />
+            {canGenerate && error && (
+              <Typography variant="caption" color="error" display="block" sx={{ mt: 1 }}>
+                {error}
+              </Typography>
+            )}
+          </DialogContent>
+          <DialogActions>
+            {canGenerate && (
+              <Button
+                startIcon={
+                  busy ? <CircularProgress size={14} /> : <AutoAwesomeIcon fontSize="small" />
+                }
+                disabled={busy || !hasContent}
+                onClick={() => onGenerate(characterKey, character)}
+              >
+                {busy ? 'Making…' : 'Regenerate'}
+              </Button>
+            )}
+            <Button variant="contained" onClick={() => setZoomOpen(false)}>
+              Close
+            </Button>
+          </DialogActions>
+        </Dialog>
       )}
     </Stack>
   )

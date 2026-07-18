@@ -114,9 +114,84 @@ describe('buildBookPreview', () => {
     )
     expect(preview.pages).toEqual([{ imageUrl: undefined, text: 'real' }])
   })
+
+  it('dedups the cover image so it never repeats as page 1 (FEAT-91)', () => {
+    // No explicit cover → coverUrl falls back to page 1's image, which is ALSO
+    // page 1 in the pages list. The page image must be dropped as a duplicate.
+    const preview = buildBookPreview(
+      book({
+        pages: [
+          page({ pageNumber: 1, text: 'one', images: [{ ...img('shared') }] }),
+          page({ pageNumber: 2, text: 'two', images: [{ ...img('p2') }] }),
+        ],
+      }),
+      3,
+    )
+    expect(preview.coverUrl).toBe('https://cdn/shared.png')
+    // Page 1 keeps its text but drops the image that duplicates the cover.
+    expect(preview.pages).toEqual([
+      { imageUrl: undefined, text: 'one' },
+      { imageUrl: 'https://cdn/p2.png', text: 'two' },
+    ])
+    // The shared URL appears exactly once across cover + pages.
+    const all = [preview.coverUrl, ...preview.pages.map((p) => p.imageUrl)]
+    expect(all.filter((u) => u === 'https://cdn/shared.png')).toHaveLength(1)
+  })
+
+  it('caps at N real pages AFTER dedup', () => {
+    const preview = buildBookPreview(
+      book({
+        coverImageUrl: 'https://cdn/dup.png',
+        pages: [
+          page({ pageNumber: 1, text: 'one', images: [{ ...img('dup') }] }), // image deduped
+          page({ pageNumber: 2, text: 'two', images: [{ ...img('p2') }] }),
+          page({ pageNumber: 3, text: 'three', images: [{ ...img('p3') }] }),
+        ],
+      }),
+      2,
+    )
+    // Page 1 survives (has text), image deduped; cap of 2 still holds.
+    expect(preview.pages).toEqual([
+      { imageUrl: undefined, text: 'one' },
+      { imageUrl: 'https://cdn/p2.png', text: 'two' },
+    ])
+  })
+
+  it('collects distinct sticker URLs across pages (FEAT-91)', () => {
+    const preview = buildBookPreview(
+      book({
+        coverImageUrl: 'https://cdn/cover.png',
+        pages: [
+          page({
+            pageNumber: 1,
+            images: [{ ...img('scene1') }, { ...sticker('star') }, { ...sticker('heart') }],
+          }),
+          page({
+            pageNumber: 2,
+            images: [{ ...img('scene2') }, { ...sticker('star') }], // 'star' repeats → deduped
+          }),
+        ],
+      }),
+      5,
+    )
+    expect(preview.stickers).toEqual(['https://cdn/star.png', 'https://cdn/heart.png'])
+  })
+
+  it('omits stickers entirely when the book has none', () => {
+    const preview = buildBookPreview(
+      book({ pages: [page({ pageNumber: 1, images: [{ ...img('scene') }] })] }),
+      3,
+    )
+    expect(preview.stickers).toBeUndefined()
+  })
 })
 
 /** Minimal PageImage helper. */
 function img(name: string) {
   return { id: name, url: `https://cdn/${name}.png`, type: 'ai-generated' as const }
+}
+
+/** Minimal sticker PageImage helper. */
+function sticker(name: string) {
+  return { id: name, url: `https://cdn/${name}.png`, type: 'sticker' as const }
 }

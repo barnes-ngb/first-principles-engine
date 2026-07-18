@@ -351,4 +351,40 @@ describe('KitBuilderForm', () => {
     expect(screen.queryByRole('button', { name: /regenerate/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /make stickers for the rest/i })).not.toBeInTheDocument()
   })
+
+  it('opens a lightbox with the full-size sticker + name when the thumbnail is tapped (kid-safe)', async () => {
+    const user = userEvent.setup()
+    // Read-only viewer (canGenerateArt false) still gets to open the bigger view.
+    renderArtForm(
+      savedRoster({ defenders: [], invaders: [], art: { hero: artRef('https://img/hero.png') } }),
+      { canGenerateArt: false },
+    )
+    await user.click(screen.getByRole('button', { name: /view zappy sticker larger/i }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Zappy')).toBeInTheDocument()
+    expect(within(dialog).getByAltText(/Zappy sticker/i)).toHaveAttribute(
+      'src',
+      'https://img/hero.png',
+    )
+    // Viewing is for everyone; the action stays gated — no Regenerate for a read-only viewer.
+    expect(within(dialog).queryByRole('button', { name: /regenerate/i })).not.toBeInTheDocument()
+  })
+
+  it('the lightbox Regenerate button is gated on canGenerate and calls onGenerateArt', async () => {
+    const user = userEvent.setup()
+    const onGenerateArt = vi.fn(async () => artRef('https://img/new.png'))
+    renderArtForm(
+      savedRoster({ defenders: [], invaders: [], art: { hero: artRef('https://img/hero.png') } }),
+      { canGenerateArt: true, onGenerateArt },
+    )
+    await user.click(screen.getByRole('button', { name: /view zappy sticker larger/i }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: /regenerate/i }))
+    await waitFor(() =>
+      expect(onGenerateArt).toHaveBeenCalledWith(
+        'hero',
+        expect.objectContaining({ name: 'Zappy' }),
+      ),
+    )
+  })
 })

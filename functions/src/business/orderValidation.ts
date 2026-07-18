@@ -22,8 +22,12 @@ export const ORDER_LIMITS = {
   noteMax: 600,
   /** Max optional contact-line length. */
   contactMax: 120,
-  /** Max distinct items on one order. */
+  /** Max distinct items (line-items) on one order. */
   itemsMax: 40,
+  /** Max quantity per line-item (FEAT-92 stepper caps at 9). */
+  qtyMax: 9,
+  /** Max total units across all line-items on one order (FEAT-92 cart cap). */
+  totalQtyMax: 20,
   /** Max product-id length (Firestore auto-IDs are 20 chars; allow slack). */
   productIdMax: 128,
   /** Max product-title length. */
@@ -39,6 +43,8 @@ export const HONEYPOT_FIELD = 'website'
 export interface ValidatedOrderItem {
   productId: string
   title: string
+  /** How many of this product (FEAT-92). Always ≥ 1 after validation. */
+  qty: number
 }
 
 /** A clean, ready-to-write order (sans server-stamped id / timestamps / status). */
@@ -61,6 +67,18 @@ export type OrderValidationResult =
 
 function asString(v: unknown): string {
   return typeof v === 'string' ? v : ''
+}
+
+/**
+ * Parse a line-item quantity (FEAT-92). Absent (legacy / stepper-omitted) → 1.
+ * Present must be an integer in `1..qtyMax` — a float, non-number, or
+ * out-of-range value is rejected (`null`) so a crafted payload can't order 10⁶.
+ */
+function parseQty(v: unknown): number | null {
+  if (v === undefined || v === null) return 1
+  if (typeof v !== 'number' || !Number.isInteger(v)) return null
+  if (v < 1 || v > ORDER_LIMITS.qtyMax) return null
+  return v
 }
 
 /**
@@ -119,6 +137,10 @@ export function validateOrderSubmission(
     if (!productId || productId.length > ORDER_LIMITS.productIdMax) {
       return { ok: false, spam: false, reason: 'Malformed item id.' }
     }
+    const qty = parseQty(item.qty)
+    if (qty === null) {
+      return { ok: false, spam: false, reason: 'Bad item quantity.' }
+    }
     let title: string
     if (allowedProducts) {
       // Product-id allowlist available: drop unlisted picks and take the
@@ -134,10 +156,15 @@ export function validateOrderSubmission(
         return { ok: false, spam: false, reason: 'Malformed item title.' }
       }
     }
-    items.push({ productId, title })
+    items.push({ productId, title, qty })
   }
   if (items.length === 0) {
     return { ok: false, spam: false, reason: 'No valid items in this order.' }
+  }
+  // Total-units cap (FEAT-92): sum of quantities across surviving line-items.
+  const totalUnits = items.reduce((n, it) => n + it.qty, 0)
+  if (totalUnits > ORDER_LIMITS.totalQtyMax) {
+    return { ok: false, spam: false, reason: 'Too many items.' }
   }
 
   const order: ValidatedOrder = { customerName, items }

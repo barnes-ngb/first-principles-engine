@@ -83,15 +83,23 @@ describe('FEAT-86 two-target hosting config', () => {
     expect(hosting?.shop).toEqual(['barnesbro'])
   })
 
-  it('shop-site/index.html redirects to the baked catalog URL', () => {
+  it('shop-site/index.html embeds the baked catalog URL in a full-viewport iframe (FEAT-92)', () => {
     const html = read('shop-site/index.html')
     expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
-    // A JS redirect (location.replace) drives the hop for JS clients.
-    expect(html).toContain('location.replace')
-    // The owner-pasted, stable published catalog URL is baked in.
+    // FEAT-92: an iframe shell (keeps barnesbro.web.app in the address bar), not
+    // a redirect — so no location.replace / meta-refresh drives a hop away.
+    expect(html).not.toContain('location.replace')
+    expect(html).not.toContain('http-equiv="refresh"')
+    // The iframe embeds the owner-pasted, stable published catalog URL.
+    expect(html).toContain('<iframe')
     expect(html).toContain('public%2Fcatalog%2F')
     expect(html).toContain('firebasestorage.googleapis.com')
-    // Self-contained — no external bundle refs.
-    expect(html).not.toContain('src="http')
+    // Sensible framing attributes are set.
+    expect(html).toContain('allow="fullscreen"')
+    expect(html).toContain('referrerpolicy=')
+    // No external bundle/script refs — self-contained (the only src="http" is the
+    // iframe target itself).
+    expect(html).not.toContain('<script')
+    expect(html).not.toContain('.js"')
   })
 })

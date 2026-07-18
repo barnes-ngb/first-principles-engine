@@ -338,6 +338,22 @@ export interface CatalogOrderItem {
   productId: string
   /** The product title at order time (snapshot — survives a later retitle). */
   title: string
+  /**
+   * How many of this product the customer wants (FEAT-92). Additive + optional:
+   * orders placed before the qty cart omit it, and are read as a single unit —
+   * always resolve via {@link orderItemQty}, never `item.qty` directly.
+   */
+  qty?: number
+}
+
+/**
+ * The quantity for a line-item, tolerant of legacy orders (FEAT-92). Pre-cart
+ * orders have no `qty` → 1; a malformed / non-positive value also floors to 1.
+ * The single reader for order quantity so the "default 1" rule lives in one place.
+ */
+export function orderItemQty(item: CatalogOrderItem): number {
+  const q = item.qty
+  return typeof q === 'number' && Number.isInteger(q) && q > 0 ? q : 1
 }
 
 /** Fulfillment lifecycle of an order. Advances forward only (invariant 1). */

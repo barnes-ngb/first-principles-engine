@@ -23,6 +23,11 @@ import {
   CatalogProductStatusLabel,
 } from '../../core/types/business'
 import type { NewCatalogProduct } from './useCatalogProducts'
+import {
+  buildProductImageDownloads,
+  downloadArtFiles,
+  productImagesZipName,
+} from './stickerArtExport'
 
 const TYPE_ORDER: BusinessItemType[] = [
   ItemType.StarterKit,
@@ -78,6 +83,25 @@ export default function CatalogProductForm({ initial, onSave, onCancel }: Catalo
   }
 
   const canSave = title.trim() !== '' && !saving
+
+  // Downloadable art on this product (FEAT-93). The catalog only ever references
+  // existing images, so these are the product's own art — named from the live
+  // (possibly unsaved) title so the files match what the parent sees.
+  const images = initial?.images ?? []
+  const hasImages = images.some((img) => img.url)
+  const [downloading, setDownloading] = useState(false)
+
+  const handleDownloadImages = async () => {
+    setDownloading(true)
+    try {
+      await downloadArtFiles(
+        buildProductImageDownloads({ images }, title),
+        productImagesZipName(title),
+      )
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const handleSave = async () => {
     if (!canSave) return
@@ -227,6 +251,20 @@ export default function CatalogProductForm({ initial, onSave, onCancel }: Catalo
               sx={{ mt: 1, maxWidth: 180 }}
             />
           )}
+        </Box>
+      )}
+
+      {hasImages && (
+        <Box>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Art
+          </Typography>
+          <Button variant="outlined" onClick={handleDownloadImages} disabled={downloading}>
+            {downloading ? 'Downloading…' : 'Download image(s)'}
+          </Button>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+            Saves transparent PNGs — print on sticker paper, or upload to a sticker service.
+          </Typography>
         </Box>
       )}
 

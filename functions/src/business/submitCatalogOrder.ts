@@ -154,6 +154,7 @@ export async function writeOrder(
   const now = new Date().toISOString();
   await db.collection(`families/${familyId}/orders`).add({
     customerName: order.customerName,
+    // Items carry qty (FEAT-92); validation guarantees each is ≥ 1.
     items: order.items,
     ...(order.note ? { note: order.note } : {}),
     ...(order.contact ? { contact: order.contact } : {}),
