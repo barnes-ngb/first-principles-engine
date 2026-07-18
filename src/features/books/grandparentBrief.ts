@@ -1,6 +1,6 @@
 /**
  * Grandparent brief (FEAT-95 §4) — a warm, printable one-pager a parent hands (or
- * mails) to a far-away grandparent before the weekly Story Call. Pure HTML builder,
+ * mails) to Mimi & Papa before the weekly Story Call. Pure HTML builder,
  * opened + printed via the `window.open` → `print()` pattern the catalog sheet
  * (`catalogSheet.ts`) and printable kit (`printableKit.ts`) already use. No AI call,
  * no writes — a pure `childName` → HTML string.
@@ -8,7 +8,12 @@
  * The message is deliberately light on rules and heavy on reassurance: this is real
  * school, don't correct mid-read, never quiz for a score, and the only win that
  * matters is the child wanting to read to you again next week.
+ *
+ * Greeting is personalized to the Barnes household via {@link STORY_CALL_GRANDPARENTS_LABEL}
+ * (FEAT-98) — always correct here, since the brief is only ever handed to Mimi & Papa.
  */
+
+import { STORY_CALL_GRANDPARENTS_LABEL } from './storyCallLabels'
 
 /** Local, self-contained HTML escape (keeps this builder free of cross-feature imports). */
 function escapeHtml(text: string): string {
@@ -47,15 +52,15 @@ export function buildGrandparentBriefHtml(childName: string): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Reading with ${name} — Grandparent Guide</title>
+  <title>Reading with ${name} — a guide for ${STORY_CALL_GRANDPARENTS_LABEL}</title>
   <style>${BRIEF_STYLES}</style>
 </head>
 <body>
   <div class="page">
     <h1>Reading with ${name} 📖</h1>
-    <div class="sub">A little guide for our weekly Story Call</div>
+    <div class="sub">A little guide for ${STORY_CALL_GRANDPARENTS_LABEL}'s weekly Story Call</div>
 
-    <p>Thank you for reading with ${name}. When ${name} reads you a book over the
+    <p>Hi ${STORY_CALL_GRANDPARENTS_LABEL}! Thank you for reading with ${name}. When ${name} reads you a book over the
     call, that <strong>is real school</strong> — it's some of the best learning we do
     all week. You don't have to be a teacher. You just have to be their favorite audience.</p>
 

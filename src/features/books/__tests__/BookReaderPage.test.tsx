@@ -152,9 +152,12 @@ describe('BookReaderPage — Story Call mode', () => {
 
     expect(screen.getByText(/Your turn! Ask London/)).toBeInTheDocument()
     expect(screen.getByText('Who did you read to?')).toBeInTheDocument()
-    expect(screen.getByText('Grandma')).toBeInTheDocument()
-    expect(screen.getByText('Grandpa')).toBeInTheDocument()
+    // FEAT-98: Barnes-household names, not generic grandparent labels.
+    expect(screen.getByText('Mimi')).toBeInTheDocument()
+    expect(screen.getByText('Papa')).toBeInTheDocument()
     expect(screen.getByText('Someone else')).toBeInTheDocument()
+    expect(screen.queryByText('Grandma')).not.toBeInTheDocument()
+    expect(screen.queryByText('Grandpa')).not.toBeInTheDocument()
     expectNoScoreSignals()
   })
 
@@ -163,8 +166,8 @@ describe('BookReaderPage — Story Call mode', () => {
     render(<BookReaderPage />)
     goToBackCover()
 
-    fireEvent.click(screen.getByText('Grandma'))
-    expect(screen.getByText(/Read to Grandma/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Mimi'))
+    expect(screen.getByText(/Read to Mimi/)).toBeInTheDocument()
   })
 
   it('call-mode completion write is deferred and uses the FINAL (corrected) audience', () => {
@@ -175,15 +178,15 @@ describe('BookReaderPage — Story Call mode', () => {
     // No completion artifact yet — the write is deferred in call mode.
     expect(writtenContents().some((c) => c.includes('read'))).toBe(false)
 
-    fireEvent.click(screen.getByText('Grandma'))
-    fireEvent.click(screen.getByText('Grandpa')) // correction
-    expect(screen.getByText(/Read to Grandpa/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Mimi'))
+    fireEvent.click(screen.getByText('Papa')) // correction
+    expect(screen.getByText(/Read to Papa/)).toBeInTheDocument()
 
     unmount() // exit writes the deferred artifact with the final selection
 
     const contents = writtenContents()
-    expect(contents.some((c) => c.includes('Read aloud to Grandpa on a video call'))).toBe(true)
-    expect(contents.some((c) => c.includes('Grandma'))).toBe(false)
+    expect(contents.some((c) => c.includes('Read aloud to Papa on a video call'))).toBe(true)
+    expect(contents.some((c) => c.includes('Mimi'))).toBe(false)
   })
 
   it('default-mode back cover shows the comprehension check, not audience chips', () => {

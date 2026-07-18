@@ -53,8 +53,10 @@ fails, three static fallbacks render so the panel is **never blank on a live
 call**.
 
 ### 3.3 Audience stamp
-A skippable "Who did you read to?" chip row (Grandma / Grandpa / Someone else)
-sits beneath Ask-Me. One tap enriches the **existing** writes only: the Share
+A skippable "Who did you read to?" chip row (Mimi / Papa / Someone else — FEAT-98,
+the Barnes kids' one grandparent household) sits beneath Ask-Me. Labels are
+centralized in `storyCallLabels.ts` (`STORY_CALL_AUDIENCES`) so a future
+family-configurable list is a clean swap, not a scatter-hunt. One tap enriches the **existing** writes only: the Share
 artifact `content` gains "Read aloud to {audience} on a video call" and the hours
 `notes` gains "(Story Call — read to {audience})". Because completion normally
 fires on reaching the back cover — *before* the chip tap — call mode **defers the
@@ -66,7 +68,9 @@ content assembly is a pair of pure, unit-tested builders (`readingLog.logic.ts`)
 ### 3.4 Grandparent brief (printable one-pager)
 `grandparentBrief.ts` (`buildGrandparentBriefHtml(childName)`) is a pure
 `childName → HTML` builder opened via the `window.open`/`print()` pattern
-(`printableKit.ts` precedent, no AI call). Warm, one page: this is real school;
+(`printableKit.ts` precedent, no AI call). Greeting is personalized to Mimi & Papa
+(FEAT-98, via `STORY_CALL_GRANDPARENTS_LABEL` — always correct here, the brief is
+only ever handed to them). Warm, one page: this is real school;
 don't correct mid-read (wait, or say the word and move on); never ask "how many
 did you get right"; the last page gives you questions to ask; the win is that
 {child} wants to read to you again next week. Entry is a parent-only "Grandparent
@@ -90,6 +94,9 @@ book text and questions are never "improved" beyond ordering/phrasing.
 - `src/features/books/readingLog.logic.ts` — pure Share-artifact / hours-note
   builders (audience threading).
 - `src/features/books/grandparentBrief.ts` — printable brief builder.
+- `src/features/books/storyCallLabels.ts` — FEAT-98 audience labels
+  (`STORY_CALL_AUDIENCES` = Mimi / Papa / Someone else; `STORY_CALL_GRANDPARENTS_LABEL`
+  = "Mimi & Papa"). One source of truth for every chip / heading / brief string.
 - `src/features/books/BookshelfPage.tsx` — card-menu Story Call entry + parent
   "Grandparent guide" toolbar action.
 - Tests: `AskMePanel.test.tsx`, `readingLog.logic.test.ts`,
@@ -101,7 +108,8 @@ In call mode at tablet width the reader is the whole screen: a large cover/art
 column (up to 760px wide), oversized page text (~1.9rem), no Edit/Download/print
 chrome, and dot indicators for nav. The back cover reads as a warm close — the
 book's celebration line, then "Your turn! Ask {child}…" with 2–3 big questions,
-then the "Who did you read to?" chips. Nothing on screen looks like a test.
+then the "Who did you read to?" chips (Mimi / Papa / Someone else). Nothing on
+screen looks like a test.
 
 ## 7. Testing
 
@@ -112,13 +120,21 @@ then the "Who did you read to?" chips. Nothing on screen looks like a test.
 - `BookReaderPage` — call-mode chrome hiding vs unchanged default; back cover
   shows Ask-Me + audience chips and no comprehension check / scores; chip records
   the audience; default back cover keeps the comprehension check.
-- `grandparentBrief` — name substitution, escaping, self-contained document.
+- `grandparentBrief` — name substitution, escaping, self-contained document,
+  Mimi & Papa greeting with no generic grandparent label (FEAT-98).
 
 ## 8. Future (not built)
 
 Per-audience streaks or a call log; a "read to {audience} N times" surface;
 London-tuned call-mode typography once his reader is tuned (see
 `docs/LONDON_BACKLOG.md`). None are needed for v1.
+
+A **family-configurable** audience list (a Settings UI for "who they read to")
+was considered and **deliberately deferred** (FEAT-98): this is a single-family
+app with one grandparent household, so the audience names are hardcoded as named
+constants in `storyCallLabels.ts`. The centralization means the configurable
+version is a clean swap when a second family ever needs it — the naming question
+is otherwise closed.
 
 ## 9. Principles held
 
