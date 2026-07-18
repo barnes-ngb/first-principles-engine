@@ -13,6 +13,8 @@ import BrushIcon from '@mui/icons-material/Brush'
 import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useProfile } from '../../core/profile/useProfile'
+import { UserProfile } from '../../core/types/enums'
 import { STICKER_TAG_LABELS } from '../../core/types'
 import type { StickerTag } from '../../core/types'
 import StickerLibraryTab from '../settings/StickerLibraryTab'
@@ -30,6 +32,10 @@ export default function StickersPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
   const { activeChild } = useActiveChild()
+  const { profile } = useProfile()
+  // Pricing/publishing is parent-only (catalog design §6) — gates the FEAT-82
+  // "Add to catalog" affordance on stickers.
+  const isParent = profile === UserProfile.Parents
   const childName = activeChild?.name ?? ''
   const childProfile: 'lincoln' | 'london' | undefined =
     childName.toLowerCase() === 'lincoln'
@@ -154,6 +160,7 @@ export default function StickersPage() {
         tagFilter={tagFilter}
         groupByDrawing
         enableSelectToPrint
+        canEdit={isParent}
       />
 
       {familyId && (
