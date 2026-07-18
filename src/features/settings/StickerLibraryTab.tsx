@@ -22,6 +22,8 @@ import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker, StickerTag } from '../../core/types'
+import { canPromoteSticker } from '../business/catalogOnramps'
+import { StickerCatalogButton, StickerCatalogPromoteDialog } from './StickerCatalogPromote'
 import { groupStickers } from '../books/stickerGrouping'
 import DrawingGroupCard from '../books/DrawingGroupCard'
 import { generateStickerVersion } from '../books/generateStickerVersion'
@@ -82,6 +84,13 @@ interface StickerLibraryTabProps {
    * Settings admin tab is unaffected.
    */
   enableSelectToPrint?: boolean
+  /**
+   * Parent gate (FEAT-82). When true, the sticker preview shows an "Add to
+   * catalog" affordance that promotes the sticker into a `CatalogProduct`
+   * (pricing/publishing is parent-only — catalog design §6). Off by default so
+   * the Settings admin tab and any kid-facing render stay unchanged.
+   */
+  canEdit?: boolean
 }
 
 export default function StickerLibraryTab({
@@ -91,9 +100,15 @@ export default function StickerLibraryTab({
   tagFilter,
   groupByDrawing = false,
   enableSelectToPrint = false,
+  canEdit = false,
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
   const { enhanceSketch } = useAI()
+  // Catalog on-ramp (FEAT-82): promote a sticker into a CatalogProduct. The
+  // catalog hooks (useChildren/useCatalogProducts) live in the `canEdit`-gated
+  // child components below, never at this level — so the kid-facing / Settings
+  // renders (canEdit=false) never take that dependency.
+  const [promoteSticker, setPromoteSticker] = useState<Sticker | null>(null)
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [loading, setLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<Sticker | null>(null)
@@ -643,6 +658,18 @@ export default function StickerLibraryTab({
                   Print this
                 </Button>
               )}
+              {/* Add to catalog (FEAT-82) — parent-only (§6). Read-only of the
+                  sticker; opens the pre-filled catalog product form. Gated so the
+                  catalog hooks never run in the kid-facing / Settings render. */}
+              {canPromoteSticker(previewTarget, canEdit) && (
+                <StickerCatalogButton
+                  sticker={previewTarget}
+                  onPromote={(s) => {
+                    setPreviewTarget(null)
+                    setPromoteSticker(s)
+                  }}
+                />
+              )}
               <Button
                 color="error"
                 startIcon={<DeleteOutlineIcon />}
@@ -808,6 +835,16 @@ export default function StickerLibraryTab({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Promote-to-catalog dialog (FEAT-82) — read-only of the sticker; writes
+          only a CatalogProduct via useCatalogProducts.createProduct. Gated by
+          canEdit so its catalog hooks stay out of the Settings/kid render. */}
+      {canEdit && (
+        <StickerCatalogPromoteDialog
+          sticker={promoteSticker}
+          onClose={() => setPromoteSticker(null)}
+        />
+      )}
     </>
   )
 }

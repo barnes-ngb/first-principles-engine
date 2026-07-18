@@ -31,6 +31,7 @@ import EditIcon from '@mui/icons-material/Edit'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import DownloadIcon from '@mui/icons-material/Download'
+import StorefrontIcon from '@mui/icons-material/Storefront'
 
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
@@ -42,6 +43,9 @@ import { SubjectBucket, UserProfile } from '../../core/types/enums'
 import type { Book, BookTheme, StickerTag } from '../../core/types'
 import { BOOK_THEMES, STICKER_TAG_LABELS } from '../../core/types'
 import { COVER_STYLES } from './bookTypes'
+import CatalogPromoteDialog from '../business/CatalogPromoteDialog'
+import { useCatalogProducts } from '../business/useCatalogProducts'
+import { bookToCatalogInitial, canPromoteBook, isSourceInCatalog } from '../business/catalogOnramps'
 import { useBookshelf } from './useBook'
 import BookGenerateChat from './BookGenerateChat'
 import { printBook } from './printBook'
@@ -101,6 +105,12 @@ export default function BookshelfPage() {
   const [showPrintSettings, setShowPrintSettings] = useState(false)
   const [printTarget, setPrintTarget] = useState<Book | null>(null)
   const [printSkipNotice, setPrintSkipNotice] = useState<string | null>(null)
+
+  // Catalog on-ramp (FEAT-82): promote a finished book into a CatalogProduct.
+  // Parent-only (§6). Read-only of the book — the dialog writes via its own
+  // useCatalogProducts.createProduct; `products` here is only for the dedup label.
+  const { products: catalogProducts } = useCatalogProducts()
+  const [promoteBook, setPromoteBook] = useState<Book | null>(null)
 
   const handlePrintBook = useCallback(
     async (settings: PrintSettings) => {
@@ -833,6 +843,30 @@ export default function BookshelfPage() {
           </ListItemIcon>
           <ListItemText>Download PDF</ListItemText>
         </MenuItem>
+        {/* Add to catalog (FEAT-82) — parent-only, finished books only (§6). */}
+        {(() => {
+          const menuBook = sortedBooks.find((b) => b.id === menuBookId)
+          if (!menuBook || !canPromoteBook(menuBook, isParent)) return null
+          const inCatalog = isSourceInCatalog(catalogProducts, {
+            kind: 'book',
+            id: menuBook.id ?? '',
+          })
+          return (
+            <MenuItem
+              disabled={inCatalog}
+              onClick={() => {
+                setMenuAnchor(null)
+                setPromoteBook(menuBook)
+                setMenuBookId(null)
+              }}
+            >
+              <ListItemIcon>
+                <StorefrontIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>{inCatalog ? 'In catalog' : 'Add to catalog'}</ListItemText>
+            </MenuItem>
+          )
+        })()}
         <MenuItem
           onClick={() => {
             setMenuAnchor(null)
@@ -847,6 +881,13 @@ export default function BookshelfPage() {
           <ListItemText sx={{ color: 'error.main' }}>Delete</ListItemText>
         </MenuItem>
       </Menu>
+
+      {/* Promote-to-catalog dialog (FEAT-82) — read-only of the book; writes
+          only a CatalogProduct via useCatalogProducts.createProduct. */}
+      <CatalogPromoteDialog
+        initial={promoteBook ? bookToCatalogInitial(promoteBook, allChildren) : null}
+        onClose={() => setPromoteBook(null)}
+      />
 
       {/* Delete confirmation dialog */}
       <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
