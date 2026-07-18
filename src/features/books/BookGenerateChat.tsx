@@ -21,6 +21,8 @@ import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { ChatTurn } from '../../core/types'
 import { useBookGenerateChat } from './useBookGenerateChat'
+import StoryLengthSelector from './StoryLengthSelector'
+import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
 
 interface Props {
   /** Called after commitAndClose; parent dialog should close itself and navigate. */
@@ -69,7 +71,6 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const childAge = ageFromBirthdate(activeChild?.birthdate, isLincoln ? 10 : 6)
-  const pageCount = isLincoln ? 10 : 6
   const defaultStyle = isLincoln ? 'minecraft' : 'storybook'
 
   const attribution = isParent && childId
@@ -83,7 +84,9 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     childId,
     childName,
     childAge,
-    pageCount,
+    // Fresh drafts start at the priced product size (FEAT-97); the hook owns the
+    // live value from here and hydrates it when resuming a saved draft.
+    initialPageCount: DEFAULT_TARGET_PAGE_COUNT,
     defaultIllustrationStyle: defaultStyle,
     attribution,
     resumeBookId,
@@ -98,6 +101,8 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     clarificationPhase,
     pendingRefinement,
     canStartStory,
+    pageCount,
+    setPageCount,
     illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,
@@ -480,6 +485,15 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           showConfirmation={true}
           disabled={composerDisabled}
           onTranscript={(text) => void handleVoiceTranscript(text)}
+        />
+      )}
+
+      {/* Story length — choose before the story starts; locked once a draft exists */}
+      {!currentStory && (
+        <StoryLengthSelector
+          value={pageCount}
+          onChange={setPageCount}
+          disabled={isLoading || isIllustrating}
         />
       )}
 

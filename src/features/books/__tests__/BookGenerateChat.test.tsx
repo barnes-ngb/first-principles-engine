@@ -31,6 +31,7 @@ interface HookState {
   pendingIdea: string
   pendingRefinement: string | null
   canStartStory: boolean
+  pageCount: number
   illustrationProgress: {
     phase: 'idle' | 'illustrating' | 'done'
     currentPage: number
@@ -50,6 +51,7 @@ let hookState: HookState = {
   pendingIdea: '',
   pendingRefinement: null,
   canStartStory: false,
+  pageCount: 10,
   illustrationProgress: {
     phase: 'idle',
     currentPage: 0,
@@ -60,6 +62,7 @@ let hookState: HookState = {
 vi.mock('../useBookGenerateChat', () => ({
   useBookGenerateChat: () => ({
     ...hookState,
+    setPageCount: vi.fn(),
     sendKidMessage: sendKidMessageMock,
     setIllustrationStyle: setIllustrationStyleMock,
     commitAndClose: commitAndCloseMock,
@@ -154,6 +157,7 @@ beforeEach(() => {
     pendingIdea: '',
     pendingRefinement: null,
     canStartStory: false,
+    pageCount: 10,
     illustrationProgress: {
       phase: 'idle',
       currentPage: 0,

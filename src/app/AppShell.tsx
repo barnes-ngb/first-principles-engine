@@ -173,6 +173,21 @@ export function AppShell({ children }: AppShellProps) {
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 
+  // Story Call broadcast surface (FEAT-95): `?call=1` on the book reader escapes the
+  // shell entirely — no sidebar, mobile header, drawer, or debug chrome on the shared
+  // screen, and the reader fills the viewport (its own `minHeight:100dvh` isn't pushed
+  // down by a header). Scoped to the reader route so a stray param can't blank the app.
+  const isCallMode =
+    location.pathname.endsWith('/read') &&
+    new URLSearchParams(location.search).get('call') === '1'
+  if (isCallMode) {
+    return (
+      <div className="app-shell app-shell--call">
+        <main className="app-shell__content app-shell__content--call">{children}</main>
+      </div>
+    )
+  }
+
   // Find the current page label for the mobile header
   const allNavItems = [...navItems, ...kidNavItems]
   const currentLabel =
