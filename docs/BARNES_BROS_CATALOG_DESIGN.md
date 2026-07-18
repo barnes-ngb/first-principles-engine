@@ -1,7 +1,7 @@
 # Barnes Bros Product Catalog + Website Export Path
 
-**Status:** design + slices 1–3 + Option C shipped (PRs open) · v0.2 · 2026-07-17
-**Ledger anchor:** FEAT-79 (design); build rows FEAT-80/81/82/83/84
+**Status:** design + slices 1–3 + Option C shipped + Option C polish (clean address + book previews) (PRs open) · v0.3 · 2026-07-18
+**Ledger anchor:** FEAT-79 (design); build rows FEAT-80/81/82/83/84/85
 **Depends on:** FEAT-78 (GDQ Kit Builder — `docs/GDQ_KIT_BUILDER_DESIGN.md`)
 **Companion to:** `BUSINESS_TAB_DESIGN.md` (FEAT-30), `GARDEN_DEFENSE_QUEST_PLAN.md` (FEAT-29)
 
@@ -237,6 +237,30 @@ read-only lookbook generated from the catalog.
 > change is the narrow, world-readable `public/catalog/{familyId}/**` **Storage** rule —
 > **read public, but create/update/delete gated on `isOwner(familyId)`** so one family can
 > never clobber another's storefront (per Codex review); `firestore.rules` is **untouched**.
+
+> **Polished by FEAT-85 (2026-07-18) — clean address + opt-in book previews (no rules change).**
+> **(1) Clean, steady address.** The token-less Storage URL is stable but unreadably long, so a
+> **thin one-time redirect** gives it a short, sayable address. Recon chose **R1** (`/shop` on the
+> existing Hosting site) over R2 (a dedicated `barnes-bros` site): R2 needs a one-time
+> `firebase hosting:sites:create` + target the deploy workflow can't perform and a globally-unique
+> name — an owner console step, so a HARD STOP → R1 (noted as a follow-up). `public/shop/index.html`
+> is copied into `dist` and, because Firebase serves static files before the SPA catch-all rewrite,
+> `/shop` resolves ahead of the app router and `location.replace`s to the stable published URL. It
+> never redeploys on republish (the target is stable), so **republish stays one tap**. The redirect
+> bakes its target in a single `CATALOG_URL` constant (single-family — the familyId is a runtime
+> UID, so the owner sets it once from the "live" panel; until then `/shop` shows a friendly note).
+> The in-app "live" panel now shows `first-principles-engine.web.app/shop` as the primary
+> copy-link; the long Storage URL stays as a small "Direct link".
+> **(2) Opt-in book previews.** A listed **book** product can offer a **partial** peek — cover +
+> the first N pages (N=3 default, capped ≤ 5) — **per-product opt-in, default OFF, parent-set**
+> (`CatalogProduct.includePreview?` / `previewPageCount?`, additive; toggle shown only for
+> `sourceRef.kind==='book'` behind `canEdit`). At publish time the builder fetches the source Book
+> (read-only, fire-and-forget — a missing book just skips the peek, never blocks publish) and emits
+> an **inline pure-HTML `<details>` "Peek inside 📖"** on the same page: cover + first N page images
+> (hotlinked tokenized URLs, same mechanism as the covers), page text, and a warm priced CTA. Never
+> the whole book (that IS the product); never auto-enabled; never pages of a non-listed/non-opted
+> book; no write from the public page; **no rules change** (the preview lives inline under the same
+> `public/catalog/{familyId}/**` object).
 
 **What this actually requires** (from Step 0.4 recon — the current app is a single, fully-authed
 SPA, so *none of this exists today*):
