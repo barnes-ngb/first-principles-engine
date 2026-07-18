@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import PrintIcon from '@mui/icons-material/Print'
+import PublicIcon from '@mui/icons-material/Public'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Link from '@mui/material/Link'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
@@ -13,6 +16,7 @@ import CatalogProductForm from './CatalogProductForm'
 import { buildCatalogSheetHtml, selectListedProducts } from './catalogSheet'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
+import { useCatalogSite } from './useCatalogSite'
 
 /** List, or the form (new product / editing an existing one). */
 type Mode = { kind: 'list' } | { kind: 'new' } | { kind: 'edit'; product: CatalogProduct }
@@ -32,7 +36,9 @@ interface CatalogSectionProps {
  */
 export default function CatalogSection({ canEdit }: CatalogSectionProps) {
   const { products, loading, createProduct, updateProduct } = useCatalogProducts()
+  const { published, busy: siteBusy, error: siteError, publish, unpublish } = useCatalogSite()
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
+  const [copied, setCopied] = useState(false)
 
   const shown = products.filter((p) => p.status !== CatalogProductStatus.Retired)
   const listedCount = selectListedProducts(products).length
@@ -60,6 +66,40 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
       sheetWindow.document.close()
       sheetWindow.focus()
       sheetWindow.print()
+    }
+  }
+
+  /**
+   * Publish (or republish) the public catalog site (design §4 Option C / C1):
+   * render the `listed` products to a static page and upload it to a
+   * world-readable Storage URL a family opens on a phone — no login, no
+   * checkout. Republish = tap again; the URL is stable.
+   */
+  const handlePublishSite = async () => {
+    try {
+      await publish(products)
+    } catch {
+      // Error surfaced via `siteError` below.
+    }
+  }
+
+  /** Take the public site down — deletes the published page. */
+  const handleUnpublishSite = async () => {
+    try {
+      await unpublish()
+    } catch {
+      // Error surfaced via `siteError` below.
+    }
+  }
+
+  const handleCopyUrl = async () => {
+    if (!published) return
+    try {
+      await navigator.clipboard.writeText(published.url)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard blocked — the URL is still shown as a tappable link.
     }
   }
 
@@ -120,13 +160,65 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
           >
             Share / print sheet
           </Button>
+          <Button
+            variant="outlined"
+            startIcon={<PublicIcon />}
+            onClick={handlePublishSite}
+            disabled={listedCount === 0 || siteBusy}
+          >
+            {siteBusy ? 'Publishing…' : published ? 'Republish site' : 'Publish site'}
+          </Button>
         </Stack>
       )}
 
       {canEdit && listedCount === 0 && (
         <Typography variant="caption" color="text.secondary">
-          Mark a product <strong>Listed</strong> to share a family sheet.
+          Mark a product <strong>Listed</strong> to share a family sheet or publish the site.
         </Typography>
+      )}
+
+      {canEdit && siteError && (
+        <Typography variant="caption" color="error">
+          Couldn't publish the site: {siteError}
+        </Typography>
+      )}
+
+      {canEdit && published && (
+        <Box
+          sx={{
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 1,
+            p: 1.5,
+            bgcolor: 'action.hover',
+          }}
+        >
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">Your public catalog is live 🌱</Typography>
+            <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+              <Link href={published.url} target="_blank" rel="noopener noreferrer">
+                {published.url}
+              </Link>
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Last published {new Date(published.publishedAt).toLocaleString()} — text this link to a
+              family so they can pick their favorites. Republish any time the catalog changes.
+            </Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ContentCopyIcon />}
+                onClick={handleCopyUrl}
+              >
+                {copied ? 'Copied!' : 'Copy link'}
+              </Button>
+              <Button size="small" color="error" onClick={handleUnpublishSite} disabled={siteBusy}>
+                Unpublish
+              </Button>
+            </Stack>
+          </Stack>
+        </Box>
       )}
     </Stack>
   )
