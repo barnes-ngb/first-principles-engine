@@ -17,6 +17,7 @@ import type { KitArtCharacter } from './KitBuilderForm'
 import KitBuilderForm from './KitBuilderForm'
 import { buildPrintableKitHtml } from './printableKit'
 import { buildKitArtDownloads, downloadArtFiles, kitArtZipName } from './stickerArtExport'
+import { useArtQuota } from './useArtQuota'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
 import type { NewKitRoster } from './useKitRosters'
@@ -36,9 +37,15 @@ interface KitBuilderSectionProps {
   /** Operator a new roster is authored under (the active child). */
   activeChildId: string
   /**
-   * Parent gate. Kids build and edit rosters freely (FEAT-80), but **promoting**
-   * a roster into a catalog product sets price/status → that is parent-only
-   * (FEAT-81 design §6). Gates the "Add to catalog" affordance only.
+   * Parent gate (FEAT-94). This business is the kids' — gates here protect
+   * **money and public exposure, not kid effort**. So `canEdit` now gates ONLY
+   * the two affordances that write to the parent-curated catalog storefront:
+   * "Add to catalog" (promote → sets price/status) and "Use as product image"
+   * (mutates a catalog product). Everything the kid does with their OWN kit —
+   * build/edit the roster, generate/regenerate character art (the owner's
+   * explicit ask), view art full-size, download art, print the kit — is open to
+   * kids regardless of `canEdit`. Kid generation is metered by a light daily
+   * quota (see `useArtQuota`), never blocked outright.
    */
   canEdit: boolean
 }
@@ -55,6 +62,13 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
   const { generateImage } = useAI()
   const familyId = useFamilyId()
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
+
+  // Cost guard (FEAT-94): image generation is a paid call, so a KID profile
+  // (`!canEdit`) gets a light, non-shaming daily cap. A parent (`canEdit`) is
+  // uncapped and never touches the counter. `capped === !canEdit` because the
+  // only non-parent profiles are the kids.
+  const capped = !canEdit
+  const { atLimit, recordGeneration } = useArtQuota(activeChildId, { capped })
 
   const nameById = useMemo(() => {
     const m: Record<string, string> = {}
@@ -101,6 +115,9 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
         generatedAt: new Date().toISOString(),
       }
       await setRosterArt(rosterId, characterKey, ref)
+      // Count this paid generation against the kid's daily cap (no-op for a
+      // parent). Regenerate counts too — each is a real image call (FEAT-94).
+      await recordGeneration()
       return ref
     }
 
@@ -184,10 +201,16 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
         roster={editing}
         onSave={handleSave}
         onCancel={() => setMode({ kind: 'list' })}
-        // Art generation is a paid, parent-only tap and needs a persisted target,
-        // so it's offered only on a saved roster in edit mode (FEAT-88).
-        canGenerateArt={canEdit && Boolean(editing)}
+        // Art generation needs a persisted target, so it's offered only on a
+        // saved roster in edit mode (FEAT-88). It is NOT parent-gated (FEAT-94):
+        // making art on your own kit is kid effort, not money or public
+        // exposure — kids generate/regenerate freely, metered by a light daily
+        // quota rather than blocked.
+        canGenerateArt={Boolean(editing)}
         onGenerateArt={editing ? makeGenerateArt(editing.id) : undefined}
+        // The kid hit today's light generation cap — the form swaps the generate
+        // buttons for a friendly nudge instead of a hard error (FEAT-94).
+        capReached={atLimit}
       />
     )
   }
@@ -237,20 +260,21 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
                     )}
                   </Box>
                   <Stack direction="row" spacing={1} alignItems="center">
-                    {canEdit && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={(e) => {
-                          // Don't trigger the row's edit tap.
-                          e.stopPropagation()
-                          handlePrintKit(r)
-                        }}
-                      >
-                        Print kit
-                      </Button>
-                    )}
-                    {canEdit && hasAnyArt(r) && (
+                    {/* Print kit + Download art output the kids' OWN kit — kid
+                        effort, not money or public exposure — so both are open
+                        to everyone (FEAT-94). */}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={(e) => {
+                        // Don't trigger the row's edit tap.
+                        e.stopPropagation()
+                        handlePrintKit(r)
+                      }}
+                    >
+                      Print kit
+                    </Button>
+                    {hasAnyArt(r) && (
                       <Button
                         size="small"
                         variant="outlined"
@@ -263,6 +287,8 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
                         Download art
                       </Button>
                     )}
+                    {/* Writes to the parent-curated catalog product → money +
+                        public exposure, so it stays parent-only (FEAT-94). */}
                     {canEdit && hasAnyArt(r) && productForRoster(r) && (
                       <Button
                         size="small"
@@ -276,6 +302,7 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
                         Use as product image
                       </Button>
                     )}
+                    {/* Promote sets price/status → parent-only (FEAT-94/§6). */}
                     {canEdit && (
                       <Button
                         size="small"
@@ -303,7 +330,7 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
         </Stack>
       )}
 
-      {canEdit && rosters.some(hasAnyArt) && (
+      {rosters.some(hasAnyArt) && (
         <Typography variant="caption" color="text.secondary">
           <strong>Download art</strong> saves each character as a transparent PNG. Print on sticker
           paper, or upload to a sticker service.
