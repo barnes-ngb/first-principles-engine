@@ -48,7 +48,6 @@ export default function TeachBackSection({
   const totalCompleted = checklist.filter((i) => i.completed).length
   const halfMustDoDone = mustDoItems.length > 0 && mustDoCompleted >= Math.ceil(mustDoItems.length / 2)
   const enoughDone = totalCompleted >= 3 || halfMustDoDone
-  console.log('[TeachBack] guard:', { childName: selectedChild?.name, isLincolnChild, checklistLen: checklist.length, totalCompleted, mustDoCompleted, halfMustDoDone, enoughDone, teachBackDone: dayLog?.teachBackDone, teachBackSaved })
   if (!isLincolnChild || checklist.length === 0 || !enoughDone || teachBackSaved) return null
 
   return (

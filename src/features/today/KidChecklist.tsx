@@ -221,7 +221,7 @@ export default function KidChecklist({
                         '&:hover': { backgroundColor: '#388E3C' },
                       }}
                     >
-                      ⛏️ Start Mining
+                      ⛏️ Mine this!
                     </Button>
                   </Box>
                 )}
@@ -415,7 +415,7 @@ export default function KidChecklist({
                             '&:hover': { backgroundColor: '#388E3C' },
                           }}
                         >
-                          ⛏️ Start Mining
+                          ⛏️ Mine this!
                         </Button>
                       </Box>
                     )}
