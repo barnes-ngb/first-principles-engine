@@ -39,6 +39,30 @@ function previewCta(cents: number): string {
   return `<p class="peek-cta">${escapeHtml(copy)}</p>`
 }
 
+/**
+ * The "Stickers in this book ✨" strip (FEAT-91). A horizontally-scrollable row
+ * of the book's sticker thumbnails, hotlinked like every other preview image.
+ * Rendered ONLY when the resolved preview carries stickers — it rides the SAME
+ * `includePreview` opt-in as the flipper (no new toggle), so a parent who didn't
+ * open the peek shows nothing. Returns '' when the book has no stickers.
+ */
+function stickerStrip(p: CatalogProduct, preview: CatalogPreview): string {
+  const stickers = preview.stickers ?? []
+  if (stickers.length === 0) return ''
+  const thumbs = stickers
+    .map(
+      (url) =>
+        `<img class="peek-sticker" src="${escapeHtml(url)}" alt="A sticker from ${escapeHtml(p.title)}" loading="lazy" />`,
+    )
+    .join('\n            ')
+  return `<div class="peek-stickers">
+            <div class="peek-stickers-label">Stickers in this book ✨</div>
+            <div class="peek-sticker-strip">
+            ${thumbs}
+            </div>
+          </div>`
+}
+
 /** True when a product's peek should render: opted-in with a non-empty preview. */
 function shouldRenderPeek(
   p: CatalogProduct,
@@ -89,6 +113,7 @@ function previewBlock(p: CatalogProduct, preview: CatalogPreview): string {
             </div>
             ${nav}
           </div>
+          ${stickerStrip(p, preview)}
           ${previewCta(p.priceCents)}
         </div>
       </details>`
@@ -410,6 +435,12 @@ export function buildPublicCatalogHtml(
     .peek-btn:disabled { opacity: 0.4; cursor: default; }
     .peek-counter { flex: 1 1 auto; text-align: center; font-size: 13px; font-weight: bold;
       color: #555; }
+    .peek-stickers { margin-top: 10px; }
+    .peek-stickers-label { font-size: 13px; font-weight: bold; color: #33691e; margin-bottom: 6px; }
+    .peek-sticker-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch; }
+    .peek-sticker { flex: 0 0 auto; width: 64px; height: 64px; object-fit: contain;
+      background: #f3f7f3; border-radius: 10px; padding: 4px; }
     .peek-cta { margin-top: 6px; font-size: 14px; font-weight: bold; color: #2e7d32; }
     .empty { text-align: center; color: #777; font-size: 16px; padding: 40px 12px; }
     footer { margin-top: 32px; text-align: center; font-size: 14px; color: #666; }

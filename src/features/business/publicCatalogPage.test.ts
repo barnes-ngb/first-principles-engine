@@ -189,6 +189,37 @@ describe('buildPublicCatalogHtml — book preview flipper (FEAT-91)', () => {
     expect(html).toContain('counter.textContent =')
   })
 
+  it('renders a sticker strip only when the preview carries stickers', () => {
+    const withStickers = buildPublicCatalogHtml([peekProduct()], {
+      book1: {
+        coverUrl: 'https://cdn/c.png',
+        pages: [{ imageUrl: 'https://cdn/1.png' }],
+        stickers: ['https://cdn/star.png', 'https://cdn/heart.png'],
+      },
+    })
+    expect(withStickers).toContain('Stickers in this book')
+    expect(withStickers).toContain('class="peek-sticker-strip"')
+    expect(withStickers).toContain('src="https://cdn/star.png"')
+    expect(withStickers).toContain('src="https://cdn/heart.png"')
+
+    // No stickers on the preview ⇒ no strip.
+    const noStickers = buildPublicCatalogHtml([peekProduct()], {
+      book1: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }] },
+    })
+    expect(noStickers).not.toContain('Stickers in this book')
+    // The CSS selector is always present; the markup class attribute is not.
+    expect(noStickers).not.toContain('class="peek-sticker-strip"')
+  })
+
+  it('never shows a sticker strip for a product that did not opt in', () => {
+    // Stickers resolved but the product is not opted in ⇒ no peek at all.
+    const html = buildPublicCatalogHtml([product({ id: 'x', title: 'No Peek' })], {
+      x: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }], stickers: ['https://cdn/s.png'] },
+    })
+    expect(html).not.toContain('Stickers in this book')
+    expect(html).not.toContain('Peek inside')
+  })
+
   it('escapes page + cover image URLs in the slides', () => {
     const html = buildPublicCatalogHtml([peekProduct({ title: 'A "Book"' })], {
       book1: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }] },
