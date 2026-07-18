@@ -96,8 +96,11 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
   const handleCopyUrl = async () => {
     if (!published) return
     try {
-      // Copy the CLEAN address (FEAT-85) — the short one to text or say aloud.
-      await navigator.clipboard.writeText(PUBLIC_CATALOG_CLEAN_URL)
+      // Copy the DIRECT Storage URL — the one guaranteed to resolve. The clean
+      // /shop address is only live once its one-time redirect target is baked
+      // (FEAT-85), so copying it here could hand a family a dead link (Codex P1).
+      // The clean address is shown below as the short link to share once wired.
+      await navigator.clipboard.writeText(published.url)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
     } catch {
@@ -198,20 +201,18 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
           <Stack spacing={1}>
             <Typography variant="subtitle2">Your public catalog is live 🌱</Typography>
             <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
-              <Link href={PUBLIC_CATALOG_CLEAN_URL} target="_blank" rel="noopener noreferrer">
-                {PUBLIC_CATALOG_CLEAN_URL}
-              </Link>
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-              Direct link:{' '}
               <Link href={published.url} target="_blank" rel="noopener noreferrer">
                 {published.url}
               </Link>
             </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
+              Short address (one-time setup): <strong>{PUBLIC_CATALOG_CLEAN_URL}</strong> — paste the
+              link above into <code>public/shop/index.html</code> (<code>CATALOG_URL</code>) once, then
+              you can share the short one.
+            </Typography>
             <Typography variant="caption" color="text.secondary">
-              Last published {new Date(published.publishedAt).toLocaleString()} — text the clean
-              address to a family so they can pick their favorites. Republish any time the catalog
-              changes.
+              Last published {new Date(published.publishedAt).toLocaleString()} — text this link to a
+              family so they can pick their favorites. Republish any time the catalog changes.
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button

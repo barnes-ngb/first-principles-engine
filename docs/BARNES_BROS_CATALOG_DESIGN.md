@@ -249,8 +249,10 @@ read-only lookbook generated from the catalog.
 > never redeploys on republish (the target is stable), so **republish stays one tap**. The redirect
 > bakes its target in a single `CATALOG_URL` constant (single-family — the familyId is a runtime
 > UID, so the owner sets it once from the "live" panel; until then `/shop` shows a friendly note).
-> The in-app "live" panel now shows `first-principles-engine.web.app/shop` as the primary
-> copy-link; the long Storage URL stays as a small "Direct link".
+> The in-app "live" panel shows `first-principles-engine.web.app/shop` as a labeled "short address
+> (one-time setup)", but **Copy link copies the always-working direct Storage URL** — promoting the
+> clean link to the copy target before it's wired would hand families a dead page (Codex P1). The
+> owner pastes the direct link into `CATALOG_URL` once, then shares the short one.
 > **(2) Opt-in book previews.** A listed **book** product can offer a **partial** peek — cover +
 > the first N pages (N=3 default, capped ≤ 5) — **per-product opt-in, default OFF, parent-set**
 > (`CatalogProduct.includePreview?` / `previewPageCount?`, additive; toggle shown only for
