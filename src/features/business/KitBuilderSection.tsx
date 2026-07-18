@@ -15,6 +15,7 @@ import CatalogProductForm from './CatalogProductForm'
 import { artToProductImages, buildKitCharacterPrompt, hasAnyArt } from './kitArt'
 import type { KitArtCharacter } from './KitBuilderForm'
 import KitBuilderForm from './KitBuilderForm'
+import { buildPrintableKitHtml } from './printableKit'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
 import type { NewKitRoster } from './useKitRosters'
@@ -137,6 +138,23 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
     setMode({ kind: 'list' })
   }
 
+  /**
+   * "Print kit" (FEAT-90): render the whole roster into print-ready pages and open
+   * them in a new window for the parent to print / save-to-PDF — the physical
+   * product a customer buys. Pure read → print (`buildPrintableKitHtml` writes
+   * nothing); mirrors the catalog sheet's `window.open` + `print()` pattern.
+   */
+  const handlePrintKit = (r: KitRoster) => {
+    const html = buildPrintableKitHtml(r, nameById[r.childId] ?? '')
+    const kitWindow = window.open('', '_blank')
+    if (kitWindow) {
+      kitWindow.document.write(html)
+      kitWindow.document.close()
+      kitWindow.focus()
+      kitWindow.print()
+    }
+  }
+
   if (mode.kind === 'promote') {
     return (
       <CatalogProductForm
@@ -208,6 +226,19 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
                     )}
                   </Box>
                   <Stack direction="row" spacing={1} alignItems="center">
+                    {canEdit && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={(e) => {
+                          // Don't trigger the row's edit tap.
+                          e.stopPropagation()
+                          handlePrintKit(r)
+                        }}
+                      >
+                        Print kit
+                      </Button>
+                    )}
                     {canEdit && hasAnyArt(r) && productForRoster(r) && (
                       <Button
                         size="small"

@@ -259,6 +259,59 @@ describe('KitBuilderSection', () => {
     expect(createRosterMock).not.toHaveBeenCalled()
   })
 
+  // ── Print kit (FEAT-90) ───────────────────────────────────────
+
+  it('Print kit opens a print window with the whole kit, writing nothing', async () => {
+    const user = userEvent.setup()
+    const printMock = vi.fn()
+    const writeMock = vi.fn()
+    const kitWindow = {
+      document: { write: writeMock, close: vi.fn() },
+      focus: vi.fn(),
+      print: printMock,
+    }
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(kitWindow as unknown as Window)
+
+    setRosters([
+      roster({
+        id: 'kit-1',
+        vaultName: 'The Seed Safe',
+        heroName: 'Sunflower Sam',
+        winCondition: 'All the seeds are safe!',
+        status: 'Complete',
+      }),
+    ])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
+
+    await user.click(screen.getByRole('button', { name: /print kit/i }))
+
+    expect(openSpy).toHaveBeenCalledTimes(1)
+    expect(writeMock).toHaveBeenCalledTimes(1)
+    const html = writeMock.mock.calls[0][0] as string
+    // The whole kit is rendered — all seven sections + the author credit + verbatim win text.
+    for (const section of ['kit-cover', 'kit-booklet', 'kit-stickers', 'kit-map', 'kit-clues', 'kit-badge', 'kit-parent']) {
+      expect(html).toContain(section)
+    }
+    expect(html).toContain('A Garden Defense Quest by Lincoln')
+    expect(html).toContain('All the seeds are safe!')
+    expect(printMock).toHaveBeenCalledTimes(1)
+
+    // Pure read → print: no writes anywhere.
+    expect(updateRosterMock).not.toHaveBeenCalled()
+    expect(createRosterMock).not.toHaveBeenCalled()
+    expect(updateProductMock).not.toHaveBeenCalled()
+    expect(generateImageMock).not.toHaveBeenCalled()
+
+    openSpy.mockRestore()
+  })
+
+  it('hides Print kit for a non-parent (canEdit-gated)', () => {
+    setRosters([roster({ id: 'kit-1', vaultName: 'The Seed Safe' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
+    expect(screen.getByText('The Seed Safe')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /print kit/i })).not.toBeInTheDocument()
+  })
+
   it('hides the Add to catalog affordance for a non-parent (kids never price/publish — §6)', () => {
     setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe' })])
     render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
