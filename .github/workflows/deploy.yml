@@ -70,13 +70,36 @@ jobs:
         run: npm run build
 
       # ── Deploy hosting + rules (always) ──────────────────────────
-      - name: Deploy Hosting
+      # Two hosting targets (FEAT-86): `app` = the main SPA (first-principles-engine),
+      # `shop` = the dedicated barnesbro.web.app catalog redirect. The action's
+      # `target` input deploys ONE target per step, so the app deploy stays
+      # byte-equivalent in behavior — only the shop step is new.
+      #
+      # ORDER MATTERS (Codex P1): deploy `shop` FIRST. The app bundle promotes
+      # https://barnesbro.web.app as the primary "Copy link", so it must not go
+      # live until the shop site actually exists and serves. If the shop deploy
+      # fails (site not created yet, name fell back, permissions), this step
+      # fails and the workflow stops BEFORE the app deploy — so production keeps
+      # the previous app bundle (still on the working direct Storage link) rather
+      # than publishing a promoted-but-dead short link. Once shop succeeds, the
+      # short link is guaranteed live before the app that promotes it.
+      - name: Deploy Hosting (shop)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           channelId: live
           projectId: barneshome-3dfbb
+          target: shop
+
+      - name: Deploy Hosting (app)
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: barneshome-3dfbb
+          target: app
 
       - name: Deploy Firestore rules + indexes
         run: npx firebase-tools@latest deploy --only firestore --project barneshome-3dfbb --non-interactive --force

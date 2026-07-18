@@ -52,6 +52,23 @@ export function publicCatalogPath(familyId: string): string {
 export const PUBLIC_CATALOG_CLEAN_URL = 'https://first-principles-engine.web.app/shop'
 
 /**
+ * The dedicated **short** catalog address (FEAT-86): its own Firebase Hosting
+ * site (`shop` deploy target) whose single page (`shop-site/index.html`)
+ * `location.replace`s to the stable {@link publicCatalogUrl}. This is the
+ * shortest, most sayable address — the one to text or say aloud.
+ *
+ * Non-empty here means the redirect target is baked and the site is expected
+ * live, so the in-app "live" panel promotes THIS as the primary Copy-link
+ * address (Codex P1 rule from FEAT-85: only promote a link that will actually
+ * work) and keeps the long Storage URL as a labeled direct link. Empty string
+ * would fall back to FEAT-85's `/shop`-note behavior.
+ *
+ * If the create-shop-site workflow lands a **fallback** name (not `barnesbro`),
+ * update this constant AND `.firebaserc`'s `shop` target together.
+ */
+export const PUBLIC_CATALOG_SHORT_URL = 'https://barnesbro.web.app'
+
+/**
  * The stable, **token-less** public URL for the published page. It resolves
  * without a download token because `storage.rules` world-reads `public/catalog/**`,
  * so it never changes across republishes (unlike a `getDownloadURL` token URL).

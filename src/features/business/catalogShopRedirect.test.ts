@@ -35,18 +35,21 @@ describe('FEAT-85 clean /shop redirect', () => {
   })
 
   it('keeps the SPA catch-all rewrite and lets /shop win as a static file', () => {
+    // FEAT-86: hosting is now a two-target array (`app` + `shop`); the /shop
+    // redirect still ships on the main app site, so we assert against that entry.
     const firebase = JSON.parse(read('firebase.json')) as {
-      hosting: { public: string; rewrites: { source: string; destination: string }[] }
+      hosting: { target?: string; public: string; rewrites?: { source: string; destination: string }[] }[]
     }
-    const { hosting } = firebase
+    const app = firebase.hosting.find((h) => h.target === 'app')
+    expect(app).toBeDefined()
     // Static assets are served from `dist`, where public/shop/index.html lands.
-    expect(hosting.public).toBe('dist')
+    expect(app!.public).toBe('dist')
     // The SPA catch-all is still present (the app keeps routing).
-    const catchAll = hosting.rewrites.find((r) => r.source === '**')
+    const catchAll = app!.rewrites!.find((r) => r.source === '**')
     expect(catchAll?.destination).toBe('/index.html')
     // Nothing rewrites `/shop` explicitly — the static file takes precedence, so
     // no rewrite may shadow it. (Firebase serves static files before rewrites.)
-    expect(hosting.rewrites.some((r) => r.source.includes('/shop'))).toBe(false)
+    expect(app!.rewrites!.some((r) => r.source.includes('/shop'))).toBe(false)
   })
 
   it('the clean-address constant points at the /shop redirect path', () => {
