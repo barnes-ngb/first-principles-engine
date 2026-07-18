@@ -30,6 +30,8 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
+import CallIcon from '@mui/icons-material/Call'
+import Diversity1Icon from '@mui/icons-material/Diversity1'
 import DownloadIcon from '@mui/icons-material/Download'
 import StorefrontIcon from '@mui/icons-material/Storefront'
 
@@ -49,6 +51,7 @@ import { bookToCatalogInitial, canPromoteBook, isSourceInCatalog } from '../busi
 import { useBookshelf } from './useBook'
 import BookGenerateChat from './BookGenerateChat'
 import { printBook } from './printBook'
+import { buildGrandparentBriefHtml } from './grandparentBrief'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
 import EvaluationBookBanner from './EvaluationBookBanner'
@@ -168,6 +171,19 @@ export default function BookshelfPage() {
     setDialogTab(1)
     setShowNewDialog(true)
   }, [])
+
+  // Parent-only: open the printable grandparent brief (FEAT-95 §4). Pure read → print,
+  // same window.open pattern as the catalog sheet / printable kit. Not kid-visible.
+  const handleGrandparentGuide = useCallback(() => {
+    const html = buildGrandparentBriefHtml(childName)
+    const win = window.open('', '_blank')
+    if (win) {
+      win.document.write(html)
+      win.document.close()
+      win.focus()
+      win.print()
+    }
+  }, [childName])
 
   const formatRelativeTime = (iso: string) => {
     try {
@@ -348,6 +364,15 @@ export default function BookshelfPage() {
               sx={{ minHeight: 36, textTransform: 'none' }}
             >
               Sight Word Progress
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Diversity1Icon />}
+              onClick={handleGrandparentGuide}
+              sx={{ minHeight: 36, textTransform: 'none' }}
+            >
+              Grandparent guide
             </Button>
           </>
         )}
@@ -815,6 +840,22 @@ export default function BookshelfPage() {
           </ListItemIcon>
           <ListItemText>Read</ListItemText>
         </MenuItem>
+        {/* Story Call (FEAT-95) — screen-shared read-aloud to a grandparent. Finished
+            books only; kid-reachable by design (this is a kid surface). */}
+        {sortedBooks.find((b) => b.id === menuBookId)?.status === 'complete' && (
+          <MenuItem
+            onClick={() => {
+              setMenuAnchor(null)
+              if (menuBookId) navigate(`/books/${menuBookId}/read?call=1`)
+              setMenuBookId(null)
+            }}
+          >
+            <ListItemIcon>
+              <CallIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Story Call</ListItemText>
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             setMenuAnchor(null)

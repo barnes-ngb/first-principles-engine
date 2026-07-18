@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { addDoc } from 'firebase/firestore'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -37,6 +37,8 @@ import { renderInteractiveText } from './highlightSightWords'
 import { useSightWordProgress } from './useSightWordProgress'
 import { useComprehensionQuestions } from './useComprehensionQuestions'
 import ComprehensionQuestions from './ComprehensionQuestions'
+import AskMePanel from './AskMePanel'
+import { buildReadingCompletionContent, buildReadingHoursNotes } from './readingLog.logic'
 
 // ── Reading session helpers ──────────────────────────────────────
 
@@ -50,13 +52,19 @@ async function logReadingHours(
   pagesRead: number,
   totalPages: number,
   sightWordCount: number,
+  audience?: string,
 ): Promise<void> {
   if (minutes < 1) return
   const date = new Date().toISOString().slice(0, 10)
 
-  const notes = completed
-    ? `Read "${bookTitle}" (${totalPages} pages, completed)${sightWordCount > 0 ? ` — ${sightWordCount} sight words` : ''}`
-    : `Read "${bookTitle}" (${pagesRead}/${totalPages} pages)${sightWordCount > 0 ? ` — ${sightWordCount} sight words` : ''}`
+  const notes = buildReadingHoursNotes(
+    bookTitle,
+    completed,
+    pagesRead,
+    totalPages,
+    sightWordCount,
+    audience,
+  )
 
   await addDoc(hoursCollection(familyId), {
     childId,
@@ -72,19 +80,15 @@ async function logReadingCompletion(
   familyId: string,
   book: Book,
   childName: string,
+  audience?: string,
 ): Promise<void> {
-  const hasSightWords = (book.sightWords?.length ?? 0) > 0
   const coverUrl = book.coverImageUrl ?? book.pages.find(p => p.images.length > 0)?.images[0]?.url
 
   await addDoc(artifactsCollection(familyId), {
     childId: book.childId,
     title: `Read "${book.title}"`,
     type: coverUrl ? EvidenceType.Photo : EvidenceType.Note,
-    content: [
-      `${childName} read "${book.title}" — ${book.pages.length} pages`,
-      hasSightWords ? `Practiced ${book.sightWords!.length} sight words` : null,
-      `Completed reading on ${new Date().toLocaleDateString()}`,
-    ].filter(Boolean).join('. '),
+    content: buildReadingCompletionContent(book, childName, audience),
     createdAt: new Date().toISOString(),
     tags: {
       engineStage: EngineStage.Share,
@@ -98,6 +102,9 @@ async function logReadingCompletion(
 
 const SWIPE_THRESHOLD = 50
 
+/** Story Call audience chips — "Who did you read to?" (skippable). */
+const AUDIENCE_OPTIONS = ['Grandma', 'Grandpa', 'Someone else'] as const
+
 export default function BookReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const navigate = useNavigate()
@@ -106,6 +113,12 @@ export default function BookReaderPage() {
   const childName = activeChild?.name ?? ''
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
+
+  // Story Call mode (?call=1): a screen-shared read-aloud to a far-away grandparent.
+  // Presentation only — larger art/text, parent/utility chrome hidden, Ask-Me back
+  // cover instead of the comprehension check. Completion / hours / XP run unchanged.
+  const [searchParams] = useSearchParams()
+  const isCallMode = searchParams.get('call') === '1'
 
   const { book, loading } = useBook(familyId, bookId)
   const isSightWordBook = (book?.sightWords?.length ?? 0) > 0
@@ -139,6 +152,12 @@ export default function BookReaderPage() {
   const pagesViewedRef = useRef<Set<number>>(new Set())
   const completedRef = useRef(false)
   const hoursLoggedRef = useRef(false)
+  const callQuestionsRequestedRef = useRef(false)
+  const completionWrittenRef = useRef(false)
+  const audienceRef = useRef<string | undefined>(undefined)
+
+  // Story Call audience ("Who did you read to?") — one tap, skippable, never blocks nav.
+  const [selectedAudience, setSelectedAudience] = useState<string | null>(null)
 
   // Compute sight words for the "Words to Watch For" vocabulary page
   const sightWordsForPage = useMemo(() => {
@@ -216,13 +235,47 @@ export default function BookReaderPage() {
     pagesViewedRef.current.add(currentPage)
   }, [currentPage])
 
-  // Detect book completion — reaching the last page (back cover)
+  // Writes the Share artifact exactly once — optionally stamped with the Story Call
+  // audience. A ref mirror lets the unmount fallback call the latest writer.
+  const writeCompletion = useCallback(
+    (audience?: string) => {
+      if (completionWrittenRef.current || !book) return
+      completionWrittenRef.current = true
+      void logReadingCompletion(familyId, book, childName, audience)
+    },
+    [familyId, book, childName],
+  )
+  const writeCompletionRef = useRef(writeCompletion)
+  writeCompletionRef.current = writeCompletion
+
+  // Detect book completion — reaching the last page (back cover).
+  // Non-call mode writes the Share artifact immediately (unchanged behavior). Call mode
+  // DEFERS the write until reader exit so it carries the FINAL audience selection — a
+  // grandparent can correct a mis-tapped chip and both records (artifact + hours) agree.
   useEffect(() => {
     if (currentPage === totalPages - 1 && !completedRef.current && book) {
       completedRef.current = true
-      void logReadingCompletion(familyId, book, childName)
+      if (!isCallMode) writeCompletion()
     }
-  }, [currentPage, totalPages, book, familyId, childName])
+  }, [currentPage, totalPages, book, isCallMode, writeCompletion])
+
+  // Story Call audience chip → record the selection (mutable — re-tapping corrects it).
+  // The write is deferred to exit so the last tap wins in BOTH the artifact and hours.
+  const handleAudience = useCallback((audience: string) => {
+    audienceRef.current = audience
+    setSelectedAudience(audience)
+  }, [])
+
+  // Call mode: auto-generate the Ask-Me questions once the back cover is reached —
+  // a grandparent reads them aloud, so there's no tap-to-generate affordance. Fires
+  // once; on failure the panel falls back to static prompts (never blank on a call).
+  useEffect(() => {
+    if (!isCallMode || !book) return
+    if (currentPage !== totalPages - 1) return
+    if (callQuestionsRequestedRef.current) return
+    callQuestionsRequestedRef.current = true
+    void generateQuestions(book, childName, childAge)
+  }, [isCallMode, currentPage, totalPages, book, childName, childAge, generateQuestions])
 
   // Log reading hours and award XP when leaving the reader
   useEffect(() => {
@@ -231,6 +284,11 @@ export default function BookReaderPage() {
     return () => {
       if (hoursLoggedRef.current || !book) return
       hoursLoggedRef.current = true
+
+      // Story Call: in call mode the completion write is deferred to here so it carries
+      // the FINAL audience selection (un-stamped if no chip was tapped). Non-call already
+      // wrote on back-cover reach, so this is a no-op there (completionWrittenRef guard).
+      if (completedRef.current) writeCompletionRef.current(audienceRef.current)
 
       const elapsed = Math.round((Date.now() - sessionStart) / 60000)
       if (elapsed < 1) return
@@ -244,6 +302,7 @@ export default function BookReaderPage() {
         pagesViewed.size,
         totalPages,
         book.sightWords?.length ?? 0,
+        audienceRef.current,
       )
 
       // Award XP for reading session (once per book per day)
@@ -375,6 +434,9 @@ export default function BookReaderPage() {
     ? '"Press Start 2P", monospace'
     : '"Fredoka", cursive'
 
+  // Call mode enlarges the broadcast surface: bigger page text + wider content column.
+  const callTextSx = isCallMode ? { fontSize: '1.9rem', lineHeight: 1.6 } : {}
+
   return (
     <Box
       sx={{
@@ -435,7 +497,7 @@ export default function BookReaderPage() {
         <Box
           sx={{
             width: '100%',
-            maxWidth: 600,
+            maxWidth: isCallMode ? 760 : 600,
             transform: `translateX(${swipeOffset * 0.3}px)`,
             transition: swipeOffset === 0 ? 'transform 0.3s ease' : 'none',
           }}
@@ -448,8 +510,8 @@ export default function BookReaderPage() {
                   component="img"
                   src={book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url}
                   sx={{
-                    maxWidth: '80%',
-                    maxHeight: 300,
+                    maxWidth: isCallMode ? '92%' : '80%',
+                    maxHeight: isCallMode ? 420 : 300,
                     borderRadius: 3,
                     objectFit: 'contain',
                     boxShadow: 4,
@@ -461,7 +523,9 @@ export default function BookReaderPage() {
                 sx={{
                   fontWeight: 700,
                   fontFamily: titleFont,
-                  fontSize: isLincoln ? '0.9rem' : '1.8rem',
+                  fontSize: isLincoln
+                    ? (isCallMode ? '1.1rem' : '0.9rem')
+                    : (isCallMode ? '2.4rem' : '1.8rem'),
                 }}
               >
                 {book.title}
@@ -609,6 +673,7 @@ export default function BookReaderPage() {
                   sx={{
                     px: 1,
                     ...getTextStyles(contentPage),
+                    ...callTextSx,
                     color: textColor,
                   }}
                 >
@@ -700,23 +765,64 @@ export default function BookReaderPage() {
                 First Principles Engine
               </Typography>
 
-              {/* Comprehension questions */}
-              <ComprehensionQuestions
-                questions={comprehensionQuestions}
-                loading={comprehensionLoading}
-                error={comprehensionError}
-                onGenerate={() => {
-                  if (book) void generateQuestions(book, childName, childAge)
-                }}
-                isLincoln={isLincoln}
-              />
+              {/* Back-cover panel: Ask-Me (call mode) or the comprehension check (default).
+                  Call mode is a broadcast surface — questions only, no answers/scores. */}
+              {isCallMode ? (
+                <AskMePanel
+                  childName={childName}
+                  questions={comprehensionQuestions}
+                  loading={comprehensionLoading}
+                />
+              ) : (
+                <ComprehensionQuestions
+                  questions={comprehensionQuestions}
+                  loading={comprehensionLoading}
+                  error={comprehensionError}
+                  onGenerate={() => {
+                    if (book) void generateQuestions(book, childName, childAge)
+                  }}
+                  isLincoln={isLincoln}
+                />
+              )}
+
+              {/* Audience stamp (call mode) — one tap, skippable, never blocks nav. */}
+              {isCallMode && (
+                <Stack spacing={1.5} alignItems="center" sx={{ pt: 2, width: '100%' }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: '1.2rem' }}>
+                    Who did you read to?
+                  </Typography>
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    flexWrap="wrap"
+                    justifyContent="center"
+                    useFlexGap
+                  >
+                    {AUDIENCE_OPTIONS.map((opt) => (
+                      <Chip
+                        key={opt}
+                        label={opt}
+                        onClick={() => handleAudience(opt)}
+                        color={selectedAudience === opt ? 'success' : 'default'}
+                        variant={selectedAudience === opt ? 'filled' : 'outlined'}
+                        sx={{ fontSize: '1rem', height: 44, px: 1.5, borderRadius: 3 }}
+                      />
+                    ))}
+                  </Stack>
+                  {selectedAudience && (
+                    <Typography variant="body2" sx={{ color: 'success.main', fontWeight: 600 }}>
+                      Read to {selectedAudience} 💚
+                    </Typography>
+                  )}
+                </Stack>
+              )}
             </Stack>
           )}
         </Box>
       </Box>
 
-      {/* Sight word page count */}
-      {isSightWordBook && contentPage?.sightWordsOnPage && (
+      {/* Sight word page count — hidden in call mode (utility chrome off the broadcast) */}
+      {!isCallMode && isSightWordBook && contentPage?.sightWordsOnPage && (
         <Stack direction="row" justifyContent="center" sx={{ px: 2, pb: 0.5 }}>
           <Chip
             label={`${new Set(contentPage.sightWordsOnPage.map(w => w.toLowerCase())).size} sight words on this page`}
@@ -738,6 +844,8 @@ export default function BookReaderPage() {
           {Array.from({ length: totalPages }, (_, i) => (
             <Box
               key={i}
+              role="button"
+              aria-label={`Go to page ${i + 1}`}
               onClick={() => setCurrentPage(i)}
               sx={{
                 width: currentPage === i ? 10 : 7,
@@ -751,25 +859,30 @@ export default function BookReaderPage() {
           ))}
         </Stack>
 
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<EditIcon />}
-          onClick={() => navigate(`/books/${bookId}`)}
-          sx={{ minHeight: 36, color: textColor, borderColor: textColor }}
-        >
-          Edit
-        </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={printing ? <CircularProgress size={14} /> : <DownloadIcon />}
-          onClick={() => setShowPrintSettings(true)}
-          disabled={printing}
-          sx={{ minHeight: 36, color: textColor, borderColor: textColor }}
-        >
-          {printing ? 'Creating PDF...' : 'Download PDF'}
-        </Button>
+        {/* Edit + Download are parent/utility chrome — hidden in call mode. */}
+        {!isCallMode && (
+          <>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<EditIcon />}
+              onClick={() => navigate(`/books/${bookId}`)}
+              sx={{ minHeight: 36, color: textColor, borderColor: textColor }}
+            >
+              Edit
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={printing ? <CircularProgress size={14} /> : <DownloadIcon />}
+              onClick={() => setShowPrintSettings(true)}
+              disabled={printing}
+              sx={{ minHeight: 36, color: textColor, borderColor: textColor }}
+            >
+              {printing ? 'Creating PDF...' : 'Download PDF'}
+            </Button>
+          </>
+        )}
       </Stack>
 
       {/* Print settings dialog */}
