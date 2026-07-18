@@ -115,4 +115,40 @@ describe('CatalogSection', () => {
     expect(updateProductMock.mock.calls[0][0]).toBe('p7')
     expect(createProductMock).not.toHaveBeenCalled()
   })
+
+  it('hides the Share / print sheet action from a non-parent', () => {
+    setProducts([product({ id: 'p1', title: 'Kept', status: 'listed' })])
+    render(<CatalogSection canEdit={false} />)
+    expect(screen.queryByRole('button', { name: /share \/ print sheet/i })).not.toBeInTheDocument()
+  })
+
+  it('disables the sheet action and hints when no product is listed', () => {
+    setProducts([product({ id: 'p1', title: 'Draft only', status: 'draft' })])
+    render(<CatalogSection canEdit />)
+    expect(screen.getByRole('button', { name: /share \/ print sheet/i })).toBeDisabled()
+    expect(screen.getByText(/mark a product/i)).toBeInTheDocument()
+  })
+
+  it('opens a printable sheet window when a listed product exists', async () => {
+    const user = userEvent.setup()
+    const write = vi.fn()
+    const printWin = {
+      document: { write, close: vi.fn() },
+      focus: vi.fn(),
+      print: vi.fn(),
+    }
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(printWin as unknown as Window)
+    setProducts([product({ id: 'p1', title: 'Seed Vault Kit', status: 'listed' })])
+    render(<CatalogSection canEdit />)
+
+    await user.click(screen.getByRole('button', { name: /share \/ print sheet/i }))
+    expect(openSpy).toHaveBeenCalledTimes(1)
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(write.mock.calls[0][0]).toContain('Seed Vault Kit')
+    expect(printWin.print).toHaveBeenCalledTimes(1)
+    // Read-only — sharing must never write.
+    expect(createProductMock).not.toHaveBeenCalled()
+    expect(updateProductMock).not.toHaveBeenCalled()
+    openSpy.mockRestore()
+  })
 })
