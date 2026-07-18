@@ -29,6 +29,12 @@ type Mode =
 interface KitBuilderSectionProps {
   /** Operator a new roster is authored under (the active child). */
   activeChildId: string
+  /**
+   * Parent gate. Kids build and edit rosters freely (FEAT-80), but **promoting**
+   * a roster into a catalog product sets price/status → that is parent-only
+   * (FEAT-81 design §6). Gates the "Add to catalog" affordance only.
+   */
+  canEdit: boolean
 }
 
 /**
@@ -36,7 +42,7 @@ interface KitBuilderSectionProps {
  * Lists saved + in-progress rosters and opens the plain parent-entry form
  * (`KitBuilderForm`) to create or edit one. The voice-capture flow is slice 2.
  */
-export default function KitBuilderSection({ activeChildId }: KitBuilderSectionProps) {
+export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilderSectionProps) {
   const { rosters, loading, createRoster, updateRoster } = useKitRosters(activeChildId)
   const { createProduct } = useCatalogProducts()
   const { children } = useChildren()
@@ -146,17 +152,19 @@ export default function KitBuilderSection({ activeChildId }: KitBuilderSectionPr
                     )}
                   </Box>
                   <Stack direction="row" spacing={1} alignItems="center">
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={(e) => {
-                        // Don't trigger the row's edit tap.
-                        e.stopPropagation()
-                        setMode({ kind: 'promote', roster: r })
-                      }}
-                    >
-                      Add to catalog
-                    </Button>
+                    {canEdit && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={(e) => {
+                          // Don't trigger the row's edit tap.
+                          e.stopPropagation()
+                          setMode({ kind: 'promote', roster: r })
+                        }}
+                      >
+                        Add to catalog
+                      </Button>
+                    )}
                     <Chip
                       size="small"
                       label={ready ? 'Ready' : 'In progress'}

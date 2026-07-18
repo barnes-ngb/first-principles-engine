@@ -133,7 +133,7 @@ beforeEach(() => {
 describe('KitBuilderSection', () => {
   it('renders the empty state and a New kit button', () => {
     setRosters([])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
     expect(screen.getByText(/No kits yet — make your first one/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /new kit/i })).toBeInTheDocument()
   })
@@ -143,7 +143,7 @@ describe('KitBuilderSection', () => {
       roster({ id: 'kit-1', vaultName: 'The Seed Safe', status: 'Complete' }),
       roster({ id: 'kit-2', vaultName: '', status: 'InProgress' }),
     ])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     expect(screen.getByText('The Seed Safe')).toBeInTheDocument()
     expect(screen.getByText('Untitled kit')).toBeInTheDocument()
@@ -155,7 +155,7 @@ describe('KitBuilderSection', () => {
   it('opens the form on New kit, seeding the active child', async () => {
     const user = userEvent.setup()
     setRosters([])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByRole('button', { name: /new kit/i }))
     expect(screen.getByTestId('form')).toBeInTheDocument()
@@ -166,7 +166,7 @@ describe('KitBuilderSection', () => {
   it('saving a new kit calls createRoster then returns to the list', async () => {
     const user = userEvent.setup()
     setRosters([])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByRole('button', { name: /new kit/i }))
     await user.click(screen.getByRole('button', { name: 'stub-save' }))
@@ -180,7 +180,7 @@ describe('KitBuilderSection', () => {
   it('tapping a roster opens edit and saving calls updateRoster with its id', async () => {
     const user = userEvent.setup()
     setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByText('Editable'))
     expect(screen.getByTestId('form-rosterId')).toHaveTextContent('kit-7')
@@ -194,7 +194,7 @@ describe('KitBuilderSection', () => {
   it('cancel returns to the list without writing', async () => {
     const user = userEvent.setup()
     setRosters([])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByRole('button', { name: /new kit/i }))
     await user.click(screen.getByRole('button', { name: 'stub-cancel' }))
@@ -203,10 +203,19 @@ describe('KitBuilderSection', () => {
     expect(createRosterMock).not.toHaveBeenCalled()
   })
 
+  it('hides the Add to catalog affordance for a non-parent (kids never price/publish — §6)', () => {
+    setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
+    // Kids can still see and edit the roster itself…
+    expect(screen.getByText('The Seed Safe')).toBeInTheDocument()
+    // …but not promote it into a priced/published catalog product.
+    expect(screen.queryByRole('button', { name: /add to catalog/i })).not.toBeInTheDocument()
+  })
+
   it('Add to catalog opens the pre-filled product form without editing the roster', async () => {
     const user = userEvent.setup()
     setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe', status: 'Complete' })])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByRole('button', { name: /add to catalog/i }))
 
@@ -223,7 +232,7 @@ describe('KitBuilderSection', () => {
   it('saving a promoted product calls createProduct (roster untouched) and returns to the list', async () => {
     const user = userEvent.setup()
     setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe' })])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByRole('button', { name: /add to catalog/i }))
     await user.click(screen.getByRole('button', { name: 'cf-save' }))

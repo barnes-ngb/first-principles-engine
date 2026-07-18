@@ -80,7 +80,7 @@ export default function BusinessPage() {
       <SectionErrorBoundary section="kit builder">
         <SectionCard title="Kit Builder">
           {activeChildId ? (
-            <KitBuilderSection activeChildId={activeChildId} />
+            <KitBuilderSection activeChildId={activeChildId} canEdit={canEdit} />
           ) : (
             <Typography variant="body2" color="text.secondary">
               Loading…
