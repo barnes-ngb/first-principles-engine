@@ -1,5 +1,6 @@
 import type { CatalogProduct } from '../../core/types/business'
 import { BusinessItemTypeLabel } from '../../core/types/business'
+import type { CatalogPreview } from './catalogPreview'
 import { creditNames, escapeHtml, selectListedProducts } from './catalogSheet'
 
 /**
@@ -29,7 +30,47 @@ function priceLine(cents: number): string {
   return `<div class="price">$${(cents / 100).toFixed(2)}</div>`
 }
 
-function productCard(p: CatalogProduct): string {
+/** Warm "buy the real thing" nudge closing a preview — priced when the price is set. */
+function previewCta(cents: number): string {
+  const copy =
+    Number.isFinite(cents) && cents > 0
+      ? `Like it? The real book is $${(cents / 100).toFixed(2)}! 💚`
+      : `Like it? Ask us about the real book! 💚`
+  return `<p class="peek-cta">${escapeHtml(copy)}</p>`
+}
+
+/**
+ * The opt-in "Peek inside" block (FEAT-85). A pure-HTML `<details>` (no JS) so
+ * the page stays self-contained: cover + the first N inside pages (image + text),
+ * closed by a warm CTA. Rendered ONLY when the parent opted the product in and a
+ * resolved preview with at least one page was passed. Page images hotlink the
+ * SAME tokenized Storage URLs the cover uses — nothing new is uploaded.
+ */
+function previewBlock(p: CatalogProduct, preview: CatalogPreview): string {
+  const cover = preview.coverUrl
+    ? `<img class="peek-img" src="${escapeHtml(preview.coverUrl)}" alt="${escapeHtml(`${p.title} cover`)}" loading="lazy" />`
+    : ''
+  const pages = preview.pages
+    .map((pg) => {
+      const img = pg.imageUrl
+        ? `<img class="peek-img" src="${escapeHtml(pg.imageUrl)}" alt="A page from ${escapeHtml(p.title)}" loading="lazy" />`
+        : ''
+      const text = pg.text ? `<p class="peek-text">${escapeHtml(pg.text)}</p>` : ''
+      return `<div class="peek-page">${img}${text}</div>`
+    })
+    .join('\n')
+
+  return `<details class="peek">
+        <summary>Peek inside 📖</summary>
+        <div class="peek-body">
+          ${cover}
+          ${pages}
+          ${previewCta(p.priceCents)}
+        </div>
+      </details>`
+}
+
+function productCard(p: CatalogProduct, preview?: CatalogPreview): string {
   const cover = p.images[0]
   const image = cover
     ? `<img class="art" src="${escapeHtml(cover.url)}" alt="${escapeHtml(cover.alt ?? p.title)}" loading="lazy" />`
@@ -39,6 +80,9 @@ function productCard(p: CatalogProduct): string {
   const desc = p.description.trim()
     ? `<div class="desc">${escapeHtml(p.description.trim())}</div>`
     : ''
+  // Preview renders only when opted-in AND a resolved preview with pages exists.
+  const peek =
+    p.includePreview && preview && preview.pages.length > 0 ? previewBlock(p, preview) : ''
 
   return `<article class="card">
       ${image}
@@ -48,6 +92,7 @@ function productCard(p: CatalogProduct): string {
         ${desc}
         ${priceLine(p.priceCents)}
         ${made}
+        ${peek}
       </div>
     </article>`
 }
@@ -60,13 +105,16 @@ function productCard(p: CatalogProduct): string {
  * If nothing is listed, renders a friendly note (defensive — the publish surface
  * gates the action so this is rarely hit).
  */
-export function buildPublicCatalogHtml(products: CatalogProduct[]): string {
+export function buildPublicCatalogHtml(
+  products: CatalogProduct[],
+  previews: Record<string, CatalogPreview> = {},
+): string {
   const listed = selectListedProducts(products)
   const credit = creditNames(listed)
 
   const cards =
     listed.length > 0
-      ? listed.map(productCard).join('\n')
+      ? listed.map((p) => productCard(p, previews[p.id])).join('\n')
       : `<p class="empty">Our catalog is being set up — check back soon! 🌱</p>`
 
   return `<!DOCTYPE html>
@@ -103,6 +151,16 @@ export function buildPublicCatalogHtml(products: CatalogProduct[]): string {
     .desc { font-size: 14px; margin-bottom: 8px; }
     .price { font-size: 18px; font-weight: bold; color: #2e7d32; margin-bottom: 4px; }
     .made { font-size: 12px; color: #888; font-style: italic; }
+    .peek { margin-top: 10px; border-top: 1px dashed #cfe8cf; padding-top: 8px; }
+    .peek summary { cursor: pointer; font-size: 14px; font-weight: bold; color: #33691e;
+      list-style: none; }
+    .peek summary::-webkit-details-marker { display: none; }
+    .peek-body { margin-top: 8px; }
+    .peek-page { margin-bottom: 10px; }
+    .peek-img { display: block; width: 100%; border-radius: 8px; margin-bottom: 4px;
+      background: #f3f7f3; }
+    .peek-text { font-size: 13px; color: #444; }
+    .peek-cta { margin-top: 6px; font-size: 14px; font-weight: bold; color: #2e7d32; }
     .empty { text-align: center; color: #777; font-size: 16px; padding: 40px 12px; }
     footer { margin-top: 32px; text-align: center; font-size: 14px; color: #666; }
     footer .heart { color: #e57373; }
