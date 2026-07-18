@@ -188,9 +188,11 @@ export function buildBookletSection(roster: KitRoster): string {
       : `<p>The plant defenders rise up to protect ${vault}!</p>`
   const p4 = bookletPage('Page 4', 'The Defenders Rise', defenderList)
 
-  // Beat 5 — the battle.
-  const firstDefender = defenders[0] ? field(defenders[0].name, NAME_CAP) : 'the defenders'
-  const firstInvader = invaders[0] ? field(invaders[0].name, NAME_CAP) : 'the invaders'
+  // Beat 5 — the battle. A retained row may have a power/menace but no name
+  // (`namedDefenders` keeps either), so fall back on the *rendered* name being
+  // empty — never just on the row's absence — or Page 5 prints blank <strong> tags.
+  const firstDefender = field(defenders[0]?.name ?? '', NAME_CAP) || 'the defenders'
+  const firstInvader = field(invaders[0]?.name ?? '', NAME_CAP) || 'the invaders'
   const p5 = bookletPage(
     'Page 5',
     'The Battle',

@@ -112,6 +112,20 @@ describe('buildBookletSection', () => {
     expect(html).toContain('steals the seeds')
   })
 
+  it('never prints blank <strong> tags when the first cast row has a power/menace but no name', () => {
+    // namedDefenders/namedInvaders retain a row with only a power/menace, so the
+    // battle beat must fall back on the rendered name being empty (Codex P2).
+    const html = buildBookletSection(
+      roster({
+        defenders: [{ id: 'd1', name: '', power: 'shoots sap' }],
+        invaders: [{ id: 'i1', name: '', menace: 'digs holes' }],
+      }),
+    )
+    expect(html).not.toContain('<strong></strong>')
+    expect(html).toContain('the defenders')
+    expect(html).toContain('the invaders')
+  })
+
   it('degrades to warm generics on an empty roster (never blank, never crashes)', () => {
     const empty = roster({
       vaultName: '',
