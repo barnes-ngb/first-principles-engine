@@ -2,7 +2,8 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { CatalogProduct } from '../../core/types/business'
-import CatalogProductCard, { formatPriceCents } from './CatalogProductCard'
+import CatalogProductCard from './CatalogProductCard'
+import { formatPriceCents } from './catalogPrice'
 
 const product = (over: Partial<CatalogProduct>): CatalogProduct => ({
   id: 'p1',

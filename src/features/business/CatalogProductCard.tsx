@@ -6,12 +6,7 @@ import Typography from '@mui/material/Typography'
 
 import type { CatalogProduct } from '../../core/types/business'
 import { BusinessItemTypeLabel, CatalogProductStatus } from '../../core/types/business'
-
-/** Display price: `0` (or missing) reads as "No price yet"; else `$X.XX`. */
-export function formatPriceCents(cents: number): string {
-  if (!Number.isFinite(cents) || cents <= 0) return 'No price yet'
-  return `$${(cents / 100).toFixed(2)}`
-}
+import { formatPriceCents } from './catalogPrice'
 
 interface CatalogProductCardProps {
   product: CatalogProduct

@@ -157,7 +157,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/auth/` — Auth guard route wrapper
 - `src/features/avatar/` — Voxel avatar, armor, tier celebrations, pose system, icons, decomposed panels (ArmorPieceGallery, ArmorVerseCard, AvatarPhotoUpload, AvatarHeroBanner, AvatarCharacterDisplay, ArmorSuitUpPanel, AvatarCustomizer, speakVerse), VoxelCharacter (Three.js character, armor, poses, materials, camera), `voxel/` sub-module (armor meshes, pose definitions), `stonebridge/` sub-module (Banner Rally missions, progress computation, location art, banner-raise celebrations)
 - `src/features/books/` — Bookshelf, book editor/reader, generate chat, review chat, sight word dashboard, story guide, print/PDF
-- `src/features/business/` — Barnes Bros business tab (FEAT-29/30): sales log, goal thermometer/builder, product curation over existing books/stickers (see `docs/BUSINESS_TAB_DESIGN.md`)
+- `src/features/business/` — Barnes Bros business tab (FEAT-29/30): sales log, goal thermometer/builder, product curation over existing books/stickers (see `docs/BUSINESS_TAB_DESIGN.md`); GDQ Kit Builder (FEAT-80: `KitBuilderSection`/`KitBuilderForm` + `useKitRosters`); Product Catalog (FEAT-81: `CatalogSection`/`CatalogProductForm`/`CatalogProductCard` + `useCatalogProducts`, promote-from-roster — the "show" layer, see `docs/BARNES_BROS_CATALOG_DESIGN.md`)
 - `src/features/dad-lab/` — Dad Lab lifecycle (plan, start, contribute, complete)
 - `src/features/engine/` — Engine page and engine logic
 - `src/features/evaluate/` — Reading evaluation chat, findings extraction. FEAT-75: the completed eval's `frontier` is retained on the `EvaluationSession` record + surfaced read-only in history; Apply is repeatable (re-apply confirms). FEAT-76: on Apply, `evalModelWriteback.ts` (thin, fire-and-forget, guarded model-exists, merge-only, sets `synthesisStaleAt`) projects findings onto `learnerModels` via the pure `evalModelSync` projector — **alongside** the unchanged `skillSnapshots` write, never blocking apply
@@ -294,6 +294,7 @@ All under `families/{familyId}/`:
 | `businessLog` | Barnes Bros append-only sales/earnings event log (additive-only; `addDoc` only, entries never mutated) |
 | `businessGoals` | Barnes Bros goal config (milestone stack). One doc per child operator, doc ID: `{childId}` |
 | `kitRosters` | GDQ Kit Builder rosters (FEAT-80). Reusable kit cast + rules (vault/hero/defenders/invaders/win) — business data, not a narrative. Additive; auto-ID (a kid makes many kits). Path: `families/{familyId}/kitRosters/{autoId}` |
+| `catalogProducts` | Barnes Bros product catalog (FEAT-81). Curated, parent-gated products the boys show (`CatalogProduct {title, type, description, priceCents, images[ref], sourceRef?, madeBy[], status:'draft'|'listed'|'retired'}`) — the "show" layer over Books/stickers/kit rosters. **Family-scoped** (a catalog is the family's storefront, not per-child), additive; auto-ID, no deletes (status `retired` retires). Images REFERENCE existing Storage URLs, never regenerated. Business data — never a learner-model input. Written by `useCatalogProducts`. Path: `families/{familyId}/catalogProducts/{autoId}` |
 
 **Global collections** (not under `families/`):
 
