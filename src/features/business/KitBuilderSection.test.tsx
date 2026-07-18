@@ -6,19 +6,68 @@ import type { KitRoster } from '../../core/types/business'
 
 // ── Hoisted mocks ───────────────────────────────────────────────
 
-const { useKitRostersMock, useChildrenMock, createRosterMock, updateRosterMock } = vi.hoisted(() => ({
+const {
+  useKitRostersMock,
+  useChildrenMock,
+  createRosterMock,
+  updateRosterMock,
+  useCatalogProductsMock,
+  createProductMock,
+} = vi.hoisted(() => ({
   useKitRostersMock: vi.fn(),
   useChildrenMock: vi.fn(),
   createRosterMock: vi.fn<(...args: unknown[]) => Promise<string>>(async () => 'kit-new'),
   updateRosterMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+  useCatalogProductsMock: vi.fn(),
+  createProductMock: vi.fn<(...args: unknown[]) => Promise<string>>(async () => 'prod-new'),
 }))
 
 vi.mock('./useKitRosters', () => ({
   useKitRosters: useKitRostersMock,
 }))
 
+vi.mock('./useCatalogProducts', () => ({
+  useCatalogProducts: useCatalogProductsMock,
+}))
+
 vi.mock('../../core/hooks/useChildren', () => ({
   useChildren: useChildrenMock,
+}))
+
+// Stub the catalog form so the section test stays focused; echo the pre-fill.
+vi.mock('./CatalogProductForm', () => ({
+  default: ({
+    initial,
+    onSave,
+    onCancel,
+  }: {
+    initial?: { title?: string; sourceRef?: { kind: string; id: string }; madeBy?: string[] }
+    onSave: (body: unknown) => Promise<void>
+    onCancel: () => void
+  }) => (
+    <div data-testid="catalog-form">
+      <span data-testid="cf-title">{initial?.title ?? 'none'}</span>
+      <span data-testid="cf-source">{initial?.sourceRef?.id ?? 'none'}</span>
+      <span data-testid="cf-madeby">{(initial?.madeBy ?? []).join(',')}</span>
+      <button
+        onClick={() =>
+          onSave({
+            title: initial?.title,
+            type: 'StarterKit',
+            description: '',
+            priceCents: 0,
+            images: [],
+            sourceRef: initial?.sourceRef,
+            madeBy: initial?.madeBy ?? [],
+            status: 'draft',
+          })
+        }
+      >
+        cf-save
+      </button>
+      <button onClick={onCancel}>cf-cancel</button>
+    </div>
+  ),
 }))
 
 // Stub the form so the section test stays focused on list/mode behavior.
@@ -76,13 +125,15 @@ function setRosters(rosters: KitRoster[], loading = false) {
 beforeEach(() => {
   createRosterMock.mockClear()
   updateRosterMock.mockClear()
+  createProductMock.mockClear()
+  useCatalogProductsMock.mockReturnValue({ createProduct: createProductMock })
   useChildrenMock.mockReturnValue({ children: [{ id: 'lincoln', name: 'Lincoln' }] })
 })
 
 describe('KitBuilderSection', () => {
   it('renders the empty state and a New kit button', () => {
     setRosters([])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
     expect(screen.getByText(/No kits yet — make your first one/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /new kit/i })).toBeInTheDocument()
   })
@@ -92,7 +143,7 @@ describe('KitBuilderSection', () => {
       roster({ id: 'kit-1', vaultName: 'The Seed Safe', status: 'Complete' }),
       roster({ id: 'kit-2', vaultName: '', status: 'InProgress' }),
     ])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     expect(screen.getByText('The Seed Safe')).toBeInTheDocument()
     expect(screen.getByText('Untitled kit')).toBeInTheDocument()
@@ -104,7 +155,7 @@ describe('KitBuilderSection', () => {
   it('opens the form on New kit, seeding the active child', async () => {
     const user = userEvent.setup()
     setRosters([])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByRole('button', { name: /new kit/i }))
     expect(screen.getByTestId('form')).toBeInTheDocument()
@@ -115,7 +166,7 @@ describe('KitBuilderSection', () => {
   it('saving a new kit calls createRoster then returns to the list', async () => {
     const user = userEvent.setup()
     setRosters([])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByRole('button', { name: /new kit/i }))
     await user.click(screen.getByRole('button', { name: 'stub-save' }))
@@ -129,7 +180,7 @@ describe('KitBuilderSection', () => {
   it('tapping a roster opens edit and saving calls updateRoster with its id', async () => {
     const user = userEvent.setup()
     setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByText('Editable'))
     expect(screen.getByTestId('form-rosterId')).toHaveTextContent('kit-7')
@@ -143,12 +194,55 @@ describe('KitBuilderSection', () => {
   it('cancel returns to the list without writing', async () => {
     const user = userEvent.setup()
     setRosters([])
-    render(<KitBuilderSection activeChildId="lincoln" />)
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
 
     await user.click(screen.getByRole('button', { name: /new kit/i }))
     await user.click(screen.getByRole('button', { name: 'stub-cancel' }))
 
     expect(screen.queryByTestId('form')).not.toBeInTheDocument()
     expect(createRosterMock).not.toHaveBeenCalled()
+  })
+
+  it('hides the Add to catalog affordance for a non-parent (kids never price/publish — §6)', () => {
+    setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
+    // Kids can still see and edit the roster itself…
+    expect(screen.getByText('The Seed Safe')).toBeInTheDocument()
+    // …but not promote it into a priced/published catalog product.
+    expect(screen.queryByRole('button', { name: /add to catalog/i })).not.toBeInTheDocument()
+  })
+
+  it('Add to catalog opens the pre-filled product form without editing the roster', async () => {
+    const user = userEvent.setup()
+    setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe', status: 'Complete' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
+
+    await user.click(screen.getByRole('button', { name: /add to catalog/i }))
+
+    // Catalog form (not the roster form) opens, pre-filled from the roster.
+    expect(screen.getByTestId('catalog-form')).toBeInTheDocument()
+    expect(screen.queryByTestId('form')).not.toBeInTheDocument()
+    expect(screen.getByTestId('cf-title')).toHaveTextContent('The Seed Safe')
+    expect(screen.getByTestId('cf-source')).toHaveTextContent('kit-9')
+    expect(screen.getByTestId('cf-madeby')).toHaveTextContent('Lincoln')
+    // Read-only of the roster — no roster write triggered by opening promote.
+    expect(updateRosterMock).not.toHaveBeenCalled()
+  })
+
+  it('saving a promoted product calls createProduct (roster untouched) and returns to the list', async () => {
+    const user = userEvent.setup()
+    setRosters([roster({ id: 'kit-9', vaultName: 'The Seed Safe' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
+
+    await user.click(screen.getByRole('button', { name: /add to catalog/i }))
+    await user.click(screen.getByRole('button', { name: 'cf-save' }))
+
+    await waitFor(() => expect(createProductMock).toHaveBeenCalledTimes(1))
+    const body = createProductMock.mock.calls[0][0] as { sourceRef?: { kind: string; id: string } }
+    expect(body.sourceRef).toEqual({ kind: 'kitRoster', id: 'kit-9' })
+    // Promote never mutates the roster.
+    expect(createRosterMock).not.toHaveBeenCalled()
+    expect(updateRosterMock).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('catalog-form')).not.toBeInTheDocument()
   })
 })

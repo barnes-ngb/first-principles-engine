@@ -176,3 +176,95 @@ export interface KitRoster {
   createdAt: string // ISO
   updatedAt: string // ISO
 }
+
+// ── Barnes Bros Product Catalog (FEAT-81) ─────────────────────────
+//
+// The "show" layer for the business — a curated catalog / lookbook of what the
+// boys offer (design: docs/BARNES_BROS_CATALOG_DESIGN.md §2). A CatalogProduct
+// is parent-curated: kids' made things (Books / stickers / kit rosters) are the
+// SOURCE; a parent promotes one into a product, sets its price, and lists it.
+// Additive — nothing above moves. Business data, NOT a learner-model input (no
+// concept states, no compliance/hours/XP writes — §5).
+//
+// Load-bearing invariants baked into these shapes:
+//   1. `images` hold REFERENCES to already-generated art (Storage URLs) — never
+//      a new asset; the catalog never regenerates art (§6).
+//   2. Pricing + `status` transitions are parent-only (§6). The shape keeps the
+//      kids' `madeBy` credit verbatim; a kid never publishes or prices — that is
+//      enforced at the surface via `canEdit`.
+
+/** One image on a catalog product — a REFERENCE to existing art, not a new asset. */
+export interface CatalogImageRef {
+  /** Firebase Storage download URL of an already-generated image. */
+  url: string
+  /** Optional alt text for accessibility / the printable & web views. */
+  alt?: string
+}
+
+/** Where a promoted product came from (optional — manual products omit it). */
+export interface CatalogSourceRef {
+  /** The source collection: a finished Book, a sticker, or a FEAT-80 KitRoster. */
+  kind: 'book' | 'sticker' | 'kitRoster'
+  /** Doc ID in the source collection. */
+  id: string
+}
+
+/** Lifecycle of a catalog product. Only `Listed` is eligible for a public export (§4). */
+export const CatalogProductStatus = {
+  Draft: 'draft',
+  Listed: 'listed',
+  Retired: 'retired',
+} as const
+export type CatalogProductStatus = (typeof CatalogProductStatus)[keyof typeof CatalogProductStatus]
+
+/** Human-readable label for each catalog product status. */
+export const CatalogProductStatusLabel: Record<CatalogProductStatus, string> = {
+  [CatalogProductStatus.Draft]: 'Draft',
+  [CatalogProductStatus.Listed]: 'Listed',
+  [CatalogProductStatus.Retired]: 'Retired',
+}
+
+/**
+ * A product the Barnes Bros offer, shown in the in-app catalog / lookbook
+ * (design §2). Stored at `families/{familyId}/catalogProducts/{autoId}`.
+ * Family-scoped: a catalog is the family's storefront, not per-child.
+ */
+export interface CatalogProduct {
+  id: string
+  /** Display name, e.g. "Garden Defense Quest — Seed Vault Kit". */
+  title: string
+  /**
+   * What kind of product this is. REUSES `BusinessItemType` so a catalog item
+   * and a `businessLog` sale line-item speak the same vocabulary
+   * (StarterKit / PartyKit / CustomKit / StickerSheet / Book / Other).
+   */
+  type: BusinessItemType
+  /** Parent/kid-authored blurb. Empty string until written. */
+  description: string
+  /**
+   * Price in whole cents (avoids float drift; display divides by 100). `0` means
+   * "no price yet" — a draft promoted from a roster starts unpriced, since
+   * pricing is parent-only (§2/§6).
+   */
+  priceCents: number
+  /**
+   * Image references. These POINT AT already-generated art — a Book's
+   * `coverImageUrl`, a sticker's stored URL, a kit's sticker sheet. The catalog
+   * NEVER regenerates art (§6). Empty ⇒ the card shows a placeholder.
+   */
+  images: CatalogImageRef[]
+  /**
+   * Optional provenance: what artifact this product was promoted from. Lets
+   * "made by…" and the source thumbnail resolve without duplicating data.
+   * Omitted on manually-authored products.
+   */
+  sourceRef?: CatalogSourceRef
+  /** Child names credited, e.g. ["Lincoln", "London"]. Stored verbatim. */
+  madeBy: string[]
+  /** Lifecycle. Only `listed` products are eligible for the public export (§4). */
+  status: CatalogProductStatus
+  /** ISO timestamp. */
+  createdAt: string
+  /** ISO timestamp of last parent edit. */
+  updatedAt: string
+}
