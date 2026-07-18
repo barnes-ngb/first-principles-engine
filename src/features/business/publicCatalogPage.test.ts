@@ -239,18 +239,24 @@ describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
     const html = buildPublicCatalogHtml([product({})])
     expect(html).not.toContain('<form')
     expect(html).not.toContain('<script')
-    expect(html).not.toContain('class="want-btn"')
+    expect(html).not.toContain('class="qty-row"')
   })
 
-  it('emits the "I want this!" toggle on each product when interactive', () => {
+  it('emits a quantity stepper on each product when interactive (FEAT-92)', () => {
     const html = buildPublicCatalogHtml(
       [product({ id: 'a', title: 'Listed Kit' })],
       {},
       ORDER_CFG,
     )
-    expect(html).toContain('class="want-btn"')
+    expect(html).toContain('class="qty-row"')
     expect(html).toContain('data-product-id="a"')
     expect(html).toContain('data-title="Listed Kit"')
+    // The stepper controls: minus, a live value, plus.
+    expect(html).toContain('class="qty-btn qty-dec"')
+    expect(html).toContain('class="qty-val"')
+    expect(html).toContain('class="qty-btn qty-inc"')
+    // No trace of the old binary toggle.
+    expect(html).not.toContain('class="want-btn"')
   })
 
   it('bakes the endpoint + familyId into the form script', () => {
@@ -266,10 +272,10 @@ describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
   it('does not ship the form when nothing is listed (no picks possible)', () => {
     const html = buildPublicCatalogHtml([product({ status: 'draft' })], {}, ORDER_CFG)
     expect(html).not.toContain('<form id="orderForm"')
-    expect(html).not.toContain('class="want-btn"')
+    expect(html).not.toContain('class="qty-row"')
   })
 
-  it('escapes a crafted product title inside the toggle data attribute', () => {
+  it('escapes a crafted product title inside the stepper data attribute', () => {
     const html = buildPublicCatalogHtml(
       [product({ id: 'x', title: 'Kit "evil" <b>' })],
       {},
@@ -279,10 +285,20 @@ describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
     expect(html).not.toContain('data-title="Kit "evil"')
   })
 
-  it('builds order chips with textContent, never innerHTML (getAttribute decodes titles)', () => {
+  it('builds the order summary with textContent, never innerHTML (getAttribute decodes titles)', () => {
     const html = buildPublicCatalogHtml([product({ title: 'Kit' })], {}, ORDER_CFG)
     // The form script must not route a decoded title back through innerHTML.
     expect(html).not.toContain('.innerHTML')
-    expect(html).toContain('chip.textContent = picks[id]')
+    // The per-pick chip shows "title ×qty" via textContent.
+    expect(html).toContain("chip.textContent = p.title + ' ×' + p.qty")
+  })
+
+  it('sends qty in each payload line-item and caps client-side (FEAT-92)', () => {
+    const html = buildPublicCatalogHtml([product({ title: 'Kit' })], {}, ORDER_CFG)
+    // The payload carries qty per item…
+    expect(html).toContain('qty: picks[id].qty')
+    // …and the stepper mirrors the server caps for honest UX.
+    expect(html).toContain('QTY_MAX = 9')
+    expect(html).toContain('TOTAL_MAX = 20')
   })
 })

@@ -177,11 +177,19 @@ function productCard(
   // Preview renders only when opted-in AND a resolved preview with pages exists.
   const peek = shouldRenderPeek(p, preview) ? previewBlock(p, preview) : ''
 
-  // FEAT-89: the "I want this!" toggle. Data attributes carry the pick to the
-  // form script; escaped so a crafted title can't break out of the attribute.
-  const want = interactive
-    ? `<button type="button" class="want-btn" aria-pressed="false"
-        data-product-id="${escapeHtml(p.id)}" data-title="${escapeHtml(p.title)}">I want this!</button>`
+  // FEAT-92: the per-product quantity stepper (replaces FEAT-89's binary "I want
+  // this!" toggle). Data attributes carry the pick to the form script; escaped so
+  // a crafted title can't break out of the attribute. The value starts at 0
+  // (nothing picked) and the script clamps it to 0..9.
+  const qty = interactive
+    ? `<div class="qty-row" data-product-id="${escapeHtml(p.id)}" data-title="${escapeHtml(p.title)}">
+        <span class="qty-label">How many?</span>
+        <div class="qty-stepper" role="group" aria-label="Quantity for ${escapeHtml(p.title)}">
+          <button type="button" class="qty-btn qty-dec" aria-label="One fewer">−</button>
+          <span class="qty-val" role="status" aria-live="polite">0</span>
+          <button type="button" class="qty-btn qty-inc" aria-label="One more">+</button>
+        </div>
+      </div>`
     : ''
 
   return `<article class="card">
@@ -193,7 +201,7 @@ function productCard(
         ${priceLine(p.priceCents)}
         ${made}
         ${peek}
-        ${want}
+        ${qty}
       </div>
     </article>`
 }
@@ -225,11 +233,17 @@ export interface OrderFormConfig {
  * form ships, so the read-only FEAT-84 lookbook stays byte-identical.
  */
 const ORDER_STYLES = `
-    /* ── Order form (FEAT-89) ── */
-    .want-btn { margin-top: 10px; width: 100%; border: 2px solid #2e7d32; background: #fff;
-      color: #2e7d32; font-weight: bold; font-size: 15px; padding: 9px 12px; border-radius: 999px;
-      cursor: pointer; font-family: inherit; }
-    .want-btn[aria-pressed="true"] { background: #2e7d32; color: #fff; }
+    /* ── Order form (FEAT-89) + quantity cart (FEAT-92) ── */
+    .qty-row { margin-top: 10px; display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; }
+    .qty-label { font-size: 14px; font-weight: bold; color: #33691e; }
+    .qty-stepper { display: flex; align-items: center; gap: 4px; }
+    .qty-btn { width: 40px; height: 40px; border: 2px solid #2e7d32; background: #fff;
+      color: #2e7d32; font-weight: bold; font-size: 22px; line-height: 1; border-radius: 999px;
+      cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; }
+    .qty-btn:disabled { opacity: 0.4; cursor: default; }
+    .qty-val { min-width: 28px; text-align: center; font-weight: bold; font-size: 18px; color: #2a2a2a; }
+    .order-total { display: inline-block; margin-left: 4px; font-weight: bold; color: #33691e; }
     .order-bar { position: sticky; bottom: 0; left: 0; right: 0; margin-top: 24px;
       background: #fff; border-top: 3px solid #2e7d32; box-shadow: 0 -3px 12px rgba(0,0,0,0.12);
       border-radius: 16px 16px 0 0; z-index: 10; }
@@ -282,44 +296,74 @@ function orderForm(cfg: OrderFormConfig): string {
     <script>
     (function () {
       var CONFIG = ${config};
+      // Client-side caps mirror functions ORDER_LIMITS (qtyMax / totalQtyMax).
+      // The server re-validates authoritatively; these are for honest UX only.
+      var QTY_MAX = 9, TOTAL_MAX = 20;
+      // picks[id] = { title: string, qty: number>0 }. A product drops out at qty 0.
       var picks = {};
       var form = document.getElementById('orderForm');
       var picksEl = document.getElementById('orderPicks');
       var msgEl = document.getElementById('orderMsg');
 
+      function totalUnits() {
+        return Object.keys(picks).reduce(function (n, id) { return n + picks[id].qty; }, 0);
+      }
+
       function render() {
         var ids = Object.keys(picks);
         form.hidden = ids.length === 0;
-        // Build chips with text nodes — a product title is untrusted markup, so
-        // never route it through innerHTML (it is escaped in the card, but
-        // getAttribute decodes it back).
+        // Build the summary from text nodes — a product title is untrusted markup,
+        // so never route it through innerHTML (it is escaped in the card, but
+        // getAttribute decodes it back). Shape: "Steven ×2 · Tom Tom ×1 — 3 items".
         picksEl.textContent = '';
         if (!ids.length) return;
-        picksEl.appendChild(document.createTextNode('Your picks: '));
-        ids.forEach(function (id) {
+        var total = 0;
+        ids.forEach(function (id, idx) {
+          var p = picks[id];
+          total += p.qty;
+          if (idx > 0) picksEl.appendChild(document.createTextNode(' · '));
           var chip = document.createElement('span');
           chip.className = 'order-chip';
-          chip.textContent = picks[id];
+          chip.textContent = p.title + ' ×' + p.qty;
           picksEl.appendChild(chip);
-          picksEl.appendChild(document.createTextNode(' '));
         });
+        var totalEl = document.createElement('span');
+        totalEl.className = 'order-total';
+        totalEl.textContent = ' — ' + total + (total === 1 ? ' item' : ' items');
+        picksEl.appendChild(totalEl);
       }
 
-      Array.prototype.forEach.call(document.querySelectorAll('.want-btn'), function (btn) {
-        btn.addEventListener('click', function () {
-          var id = btn.getAttribute('data-product-id');
-          var title = btn.getAttribute('data-title') || '';
-          if (picks[id]) {
-            delete picks[id];
-            btn.setAttribute('aria-pressed', 'false');
-            btn.textContent = 'I want this!';
-          } else {
-            picks[id] = title;
-            btn.setAttribute('aria-pressed', 'true');
-            btn.textContent = 'Picked ✓';
-          }
+      Array.prototype.forEach.call(document.querySelectorAll('.qty-row'), function (row) {
+        var id = row.getAttribute('data-product-id');
+        var title = row.getAttribute('data-title') || '';
+        var valEl = row.querySelector('.qty-val');
+        var dec = row.querySelector('.qty-dec');
+        var inc = row.querySelector('.qty-inc');
+        var qty = 0;
+
+        function sync() {
+          valEl.textContent = String(qty);
+          dec.disabled = qty <= 0;
+          inc.disabled = qty >= QTY_MAX;
+          if (qty > 0) { picks[id] = { title: title, qty: qty }; }
+          else { delete picks[id]; }
           render();
-        });
+        }
+        function setQty(next) {
+          next = Math.max(0, Math.min(QTY_MAX, next));
+          // Guard the cart-wide cap: block a bump that would exceed TOTAL_MAX.
+          if (next > qty && totalUnits() - qty + next > TOTAL_MAX) {
+            msgEl.textContent = "That's our max order — please send this one first. 💚";
+            return;
+          }
+          msgEl.textContent = '';
+          qty = next;
+          sync();
+        }
+
+        dec.addEventListener('click', function () { setQty(qty - 1); });
+        inc.addEventListener('click', function () { setQty(qty + 1); });
+        sync();
       });
 
       form.addEventListener('submit', function (e) {
@@ -331,7 +375,9 @@ function orderForm(cfg: OrderFormConfig): string {
         var payload = {
           familyId: CONFIG.familyId,
           customerName: name,
-          items: ids.map(function (id) { return { productId: id, title: picks[id] }; }),
+          items: ids.map(function (id) {
+            return { productId: id, title: picks[id].title, qty: picks[id].qty };
+          }),
           note: (document.getElementById('orderNote').value || '').trim(),
           contact: (document.getElementById('orderContact').value || '').trim(),
           website: document.getElementById('orderHp').value
@@ -454,7 +500,7 @@ export function buildPublicCatalogHtml(
       <div class="sub">made by ${escapeHtml(credit)}</div>
       <div class="want">${
         interactive
-          ? `Tap "I want this!" on your favorites, then send it our way 💚`
+          ? `Set a quantity on your favorites, then send it our way 💚`
           : 'Want one? Tell us your favorites! 💚'
       }</div>
     </header>
