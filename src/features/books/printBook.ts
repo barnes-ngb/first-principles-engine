@@ -73,6 +73,24 @@ export function contentImagesToDraw(
   return images.filter((img) => img.url !== dedupeUrl)
 }
 
+/* ───────────────────── page-number placement (FEAT-98) ───────────────────── */
+
+/**
+ * Full-document formats that keep printed page numbers. The picture-book
+ * formats (half-letter, booklet, mini-5x7, square-6) are small folded/stapled
+ * storybooks: a bottom-center number sits in the fold/trim zone and reads as
+ * clutter on a kids' picture book, so it's suppressed there regardless of the
+ * `includePageNumbers` toggle. letter/a4 read as documents and keep numbers.
+ */
+const PAGE_NUMBER_FORMATS: ReadonlySet<PrintSettings['pageSize']> = new Set(['letter', 'a4'])
+
+export function shouldRenderPageNumbers(
+  pageSize: PrintSettings['pageSize'],
+  includePageNumbers: boolean,
+): boolean {
+  return includePageNumbers && PAGE_NUMBER_FORMATS.has(pageSize)
+}
+
 /* ───────────────────── image pre-fetch (Firebase SDK) ───────────────────── */
 
 /**
@@ -692,8 +710,8 @@ async function drawContentPage(
     )
   }
 
-  // Page number at bottom center
-  if (settings.includePageNumbers) {
+  // Page number at bottom center — document formats only (FEAT-98)
+  if (shouldRenderPageNumbers(settings.pageSize, settings.includePageNumbers)) {
     pdf.setFont('times', 'normal')
     pdf.setFontSize(12)
     pdf.setTextColor(...textColor)
