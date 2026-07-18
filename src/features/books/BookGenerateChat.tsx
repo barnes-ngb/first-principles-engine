@@ -71,10 +71,6 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const childAge = ageFromBirthdate(activeChild?.birthdate, isLincoln ? 10 : 6)
-  // Target page count is a product decision (FEAT-95) — default to the priced
-  // product size (10), let the kid pick Short / Normal / Long before the story
-  // starts. Locked once a draft exists (revisions inherit the book's length).
-  const [pageCount, setPageCount] = useState<number>(DEFAULT_TARGET_PAGE_COUNT)
   const defaultStyle = isLincoln ? 'minecraft' : 'storybook'
 
   const attribution = isParent && childId
@@ -88,7 +84,9 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     childId,
     childName,
     childAge,
-    pageCount,
+    // Fresh drafts start at the priced product size (FEAT-95); the hook owns the
+    // live value from here and hydrates it when resuming a saved draft.
+    initialPageCount: DEFAULT_TARGET_PAGE_COUNT,
     defaultIllustrationStyle: defaultStyle,
     attribution,
     resumeBookId,
@@ -103,6 +101,8 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     clarificationPhase,
     pendingRefinement,
     canStartStory,
+    pageCount,
+    setPageCount,
     illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,

@@ -8,6 +8,7 @@ import type { Book, BookPage, BookTheme, ChatTurn } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
 import { generatePageId } from './bookTypes'
 import { inferBookTheme } from './useBookGenerator'
+import { clampTargetPageCount } from './storyPageTargets'
 import { useBookIllustrator } from './useBookIllustrator'
 import type { IllustrationProgress as IllustratorProgress } from './useBookIllustrator'
 
@@ -38,7 +39,12 @@ export interface UseBookGenerateChatOptions {
   childId: string
   childName: string
   childAge: number
-  pageCount: number
+  /**
+   * Initial target page count for a fresh draft (FEAT-95). The hook then owns
+   * the live value as state — it's hydrated from the saved `generationConfig`
+   * when resuming a draft, and driven by the length selector via `setPageCount`.
+   */
+  initialPageCount: number
   defaultIllustrationStyle: string
   /** Parent attribution to apply when a draft is committed. */
   attribution?: { createdBy: 'parent' | string; createdFor: string }
@@ -62,6 +68,10 @@ export interface UseBookGenerateChat {
   pendingIdea: string
   pendingRefinement: string | null
   canStartStory: boolean
+
+  /** Live target page count (FEAT-95) — hydrated from a resumed draft. */
+  pageCount: number
+  setPageCount: (pages: number) => void
 
   illustrationProgress: IllustrationProgress
 
@@ -166,7 +176,7 @@ export function useBookGenerateChat(
     childId,
     childName,
     childAge,
-    pageCount,
+    initialPageCount,
     defaultIllustrationStyle,
     attribution,
     resumeBookId,
@@ -181,6 +191,7 @@ export function useBookGenerateChat(
     defaultIllustrationStyle,
   )
   const [bookId, setBookId] = useState<string | null>(resumeBookId ?? null)
+  const [pageCount, setPageCount] = useState<number>(initialPageCount)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -211,6 +222,11 @@ export function useBookGenerateChat(
         if (!snap.exists() || cancelled) return
         const data = snap.data() as Book
         const state = data.reviewState
+        // Restore the saved target page count so a resumed draft generates at the
+        // length the user picked, not the reset default (FEAT-95).
+        if (typeof data.generationConfig?.pageCount === 'number') {
+          setPageCount(clampTargetPageCount(data.generationConfig.pageCount))
+        }
         if (state?.chatHistory) setChatHistory(state.chatHistory)
         if (state?.illustrationStyle) setIllustrationStyle(state.illustrationStyle)
         if (state?.clarificationPhase) setClarificationPhase(state.clarificationPhase)
@@ -784,6 +800,8 @@ export function useBookGenerateChat(
     pendingIdea,
     pendingRefinement,
     canStartStory,
+    pageCount,
+    setPageCount,
     illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,
