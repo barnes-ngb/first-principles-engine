@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
@@ -27,6 +28,10 @@ export interface WeekRibbonProps {
   weekStart: string
   /** YYYY-MM-DD — calendar today, used to highlight the current dot. */
   today: string
+  /** YYYY-MM-DD — the day currently being viewed (drives the selected highlight). */
+  selectedDate?: string
+  /** When provided, day dots become tappable and call this with the tapped dateKey. */
+  onSelectDate?: (dateKey: string) => void
 }
 
 function formatLongDate(dateKey: string): string {
@@ -58,10 +63,13 @@ function getDotPaletteColor(
 interface DayDotProps {
   stats: DayStats
   isToday: boolean
+  isSelected: boolean
+  onSelect?: (dateKey: string) => void
 }
 
-function DayDot({ stats, isToday }: DayDotProps) {
+function DayDot({ stats, isToday, isSelected, onSelect }: DayDotProps) {
   const palette = getDotPaletteColor(stats.state)
+  const interactive = Boolean(onSelect)
   const tooltipBody =
     stats.plannedMinutes > 0 ? (
       <Box>
@@ -89,11 +97,32 @@ function DayDot({ stats, isToday }: DayDotProps) {
       <Stack
         alignItems="center"
         spacing={0.25}
+        {...(interactive
+          ? {
+              onClick: () => onSelect?.(stats.date),
+              onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+                // The dot is a role="button" div, so it must handle Enter/Space
+                // itself to stay keyboard-operable (the removed MUI Chip was a
+                // native button). Space is preventDefault'd to avoid page scroll.
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelect?.(stats.date)
+                }
+              },
+              role: 'button',
+              tabIndex: 0,
+              'aria-label': `View ${formatLongDate(stats.date)}`,
+              'aria-current': isSelected ? ('date' as const) : undefined,
+            }
+          : {})}
         sx={{
           flex: 1,
           minWidth: { xs: 44, sm: 64 },
-          cursor: 'default',
+          cursor: interactive ? 'pointer' : 'default',
           py: 0.25,
+          borderRadius: 1,
+          ...(isSelected ? { bgcolor: 'action.selected' } : {}),
+          ...(interactive ? { '&:hover': { bgcolor: 'action.hover' } } : {}),
         }}
       >
         <Typography
@@ -152,6 +181,8 @@ export default function WeekRibbon({
   familyId,
   weekStart,
   today,
+  selectedDate,
+  onSelectDate,
 }: WeekRibbonProps) {
   const weekDates = useMemo(() => buildWeekDates(weekStart), [weekStart])
   const subscriptionKey = `${familyId}|${childId}|${weekStart}`
@@ -333,7 +364,13 @@ export default function WeekRibbon({
         justifyContent="space-between"
       >
         {stats.map((d) => (
-          <DayDot key={d.date} stats={d} isToday={d.date === today} />
+          <DayDot
+            key={d.date}
+            stats={d}
+            isToday={d.date === today}
+            isSelected={d.date === selectedDate}
+            onSelect={onSelectDate}
+          />
         ))}
       </Stack>
     </Box>

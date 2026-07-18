@@ -18,14 +18,14 @@ describe('buildReadingCompletionContent (Share artifact)', () => {
   })
 
   it('call path: appends the audience clause and keeps everything else', () => {
-    const withAudience = buildReadingCompletionContent(book, 'London', 'Grandma')
-    expect(withAudience).toContain('Read aloud to Grandma on a video call')
+    const withAudience = buildReadingCompletionContent(book, 'London', 'Mimi')
+    expect(withAudience).toContain('Read aloud to Mimi on a video call')
     // Only difference from the un-stamped content is the inserted audience clause.
     const withoutAudience = buildReadingCompletionContent(book, 'London')
     expect(withAudience).toBe(
       withoutAudience.replace(
         '. Completed reading on',
-        '. Read aloud to Grandma on a video call. Completed reading on',
+        '. Read aloud to Mimi on a video call. Completed reading on',
       ),
     )
   })
@@ -43,9 +43,9 @@ describe('buildReadingHoursNotes', () => {
   })
 
   it('call path: appends the Story Call clause', () => {
-    const notes = buildReadingHoursNotes('The Brave Dog', true, 3, 3, 2, 'Grandpa')
+    const notes = buildReadingHoursNotes('The Brave Dog', true, 3, 3, 2, 'Papa')
     expect(notes).toBe(
-      'Read "The Brave Dog" (3 pages, completed) — 2 sight words (Story Call — read to Grandpa)',
+      'Read "The Brave Dog" (3 pages, completed) — 2 sight words (Story Call — read to Papa)',
     )
   })
 
