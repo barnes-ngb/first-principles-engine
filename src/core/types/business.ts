@@ -138,6 +138,21 @@ export interface KitInvader {
   menace: string
 }
 
+/**
+ * One generated character-art reference on a roster (FEAT-88 — the kit art
+ * pipeline). Points at an already-generated transparent sticker in Storage —
+ * the roster REFERENCES art, exactly as `CatalogImageRef` does for products; it
+ * never stores image bytes. Business art only — never a learner-model input.
+ */
+export interface KitArtRef {
+  /** Firebase Storage download URL of the generated transparent sticker. */
+  url: string
+  /** Storage object path (kept for future cleanup — not engineered this slice). */
+  storagePath: string
+  /** ISO timestamp when the image was generated. */
+  generatedAt: string
+}
+
 export const KitRosterStatus = {
   InProgress: 'InProgress',
   Complete: 'Complete',
@@ -172,6 +187,16 @@ export interface KitRoster {
    * NOT a numeric index — the defender/invader beats are variable-length.
    */
   resumeBeat?: string
+
+  /**
+   * Optional per-character generated sticker art (FEAT-88). Keyed by a **stable**
+   * character key: `hero`, `defender:${defender.id}`, `invader:${invader.id}`
+   * (see `kitArt.ts`). Additive + **partial** — some characters may have art
+   * while others don't; a regenerate replaces that key's ref (the prior Storage
+   * file may linger — cleanup is deliberately out of scope this slice). Business
+   * art only: never a learner-model / compliance / hours / XP input.
+   */
+  art?: Record<string, KitArtRef>
 
   createdAt: string // ISO
   updatedAt: string // ISO
