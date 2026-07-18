@@ -600,6 +600,14 @@ describe("buildStoryPrompt", () => {
     expect(p).toContain("STORY IDEA: a dragon who can't fly");
   });
 
+  it("threads the target page count into an explicit 'exactly N pages' rule (FEAT-95)", () => {
+    expect(buildStoryPrompt(londonInput)).toContain("Write exactly 6 pages");
+    expect(buildStoryPrompt(lincolnInput)).toContain("Write exactly 10 pages");
+    expect(buildStoryPrompt({ ...lincolnInput, pageCount: 14 })).toContain(
+      "Write exactly 14 pages",
+    );
+  });
+
   it("uses the age-appropriate fallback for London when the idea is empty", () => {
     const p = buildStoryPrompt({ ...londonInput, storyIdea: "" });
     expect(p).toContain("A fun story with animals and a happy ending");
