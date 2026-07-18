@@ -45,6 +45,7 @@ import XpDiamondBar from '../../components/XpDiamondBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook, useCompletedBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useScrollToHash } from '../../core/hooks/useScrollToHash'
 import ExplorerMap from './ExplorerMap'
 import KidExtraLogger from './KidExtraLogger'
 import KidMiningCard from './KidMiningCard'
@@ -154,6 +155,9 @@ export default function KidTodayView({
   weekFocus,
 }: KidTodayViewProps) {
   const navigate = useNavigate()
+  // Hero Hub mission CTAs deep-link /today#conundrum and /today#chapter; scroll
+  // to those cards once they render (they depend on async weekFocus/bookProgress).
+  useScrollToHash()
   const [selectedChoices, setSelectedChoices] = useState<Set<number>>(new Set())
   const [showCapture, setShowCapture] = useState<'photo' | 'note' | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
@@ -623,6 +627,7 @@ export default function KidTodayView({
           independently. */}
       {selectedBook && isReadAloudSectionVisible(true, bookProgress?.questionPool) && (
         <SectionErrorBoundary section="chapter pool">
+          <Box id="chapter" />
           {bookProgress && isChapterPoolVisible(bookProgress.questionPool) ? (
             <KidChapterPool
               book={selectedBook}
@@ -742,6 +747,7 @@ export default function KidTodayView({
       </SectionErrorBoundary>
 
       {/* ── CONUNDRUM RESPONSE ── */}
+      {weekFocus?.conundrum && <Box id="conundrum" />}
       {weekFocus?.conundrum && (
         <KidConundrumResponse
           conundrum={weekFocus.conundrum}

@@ -1,4 +1,5 @@
-import { type SyntheticEvent, type ReactNode, useState } from 'react'
+import { type SyntheticEvent, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Container from '@mui/material/Container'
 import Tab from '@mui/material/Tab'
@@ -23,20 +24,28 @@ import WordWall from './WordWall'
  * `{ label, render }` array replaces the old index-based `tab === N` guards so
  * future inserts don't require hand-renumbering (design §6.4).
  */
-const TABS: Array<{ label: string; render: () => ReactNode }> = [
-  { label: 'Foundations', render: () => <FoundationsTab /> },
-  { label: 'Monthly Books', render: () => <MonthlyBooksTab /> },
-  { label: 'Learning Map', render: () => <LearningMap /> },
-  { label: 'Curriculum', render: () => <CurriculumTab /> },
-  { label: 'Skill Snapshot', render: () => <SkillSnapshotPage /> },
-  { label: 'Word Wall', render: () => <WordWall /> },
+const TABS: Array<{ label: string; slug: string; render: () => ReactNode }> = [
+  { label: 'Foundations', slug: 'foundations', render: () => <FoundationsTab /> },
+  { label: 'Monthly Books', slug: 'monthly-books', render: () => <MonthlyBooksTab /> },
+  { label: 'Learning Map', slug: 'learning-map', render: () => <LearningMap /> },
+  { label: 'Curriculum', slug: 'curriculum', render: () => <CurriculumTab /> },
+  { label: 'Skill Snapshot', slug: 'skill-snapshot', render: () => <SkillSnapshotPage /> },
+  { label: 'Word Wall', slug: 'word-wall', render: () => <WordWall /> },
 ]
 
 export default function ProgressPage() {
-  const [tab, setTab] = useState(0)
+  // URL is the source of truth: `?tab=<slug>` selects the tab so deep links
+  // (e.g. planner "+ Add" → /progress?tab=curriculum) land on the right tab.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = Math.max(
+    0,
+    TABS.findIndex((t) => t.slug === searchParams.get('tab')),
+  )
 
   const handleChange = (_: SyntheticEvent, newValue: number) => {
-    setTab(newValue)
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', TABS[newValue].slug)
+    setSearchParams(next, { replace: true })
   }
 
   return (

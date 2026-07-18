@@ -5,7 +5,6 @@ import EvaluateChatPage from '../features/evaluate/EvaluateChatPage'
 import NotFoundPage from '../features/not-found/NotFoundPage'
 import PlannerChatPage from '../features/planner-chat/PlannerChatPage'
 import ProgressPage from '../features/progress/ProgressPage'
-import EvaluationsPage from '../features/records/EvaluationsPage'
 import PortfolioPage from '../features/records/PortfolioPage'
 import RecordsPage from '../features/records/RecordsPage'
 import SettingsPage from '../features/settings/SettingsPage'
@@ -84,7 +83,6 @@ const routes = [
       { path: '/ladders', element: <Navigate to="/progress" replace /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
       { path: '/records', element: <RecordsPage /> },
-      { path: '/records/evaluations', element: <EvaluationsPage /> },
       { path: '/records/portfolio', element: <PortfolioPage /> },
       { path: '/settings', element: <SettingsPage /> },
       { path: '/chat', element: <ShellyChatPage /> },

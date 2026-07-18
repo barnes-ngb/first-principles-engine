@@ -37,6 +37,7 @@ import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
+import { useScrollToHash } from '../../core/hooks/useScrollToHash'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   artifactsCollection,
@@ -99,6 +100,10 @@ export default function TodayPage() {
   const today = selectedDate
   const realToday = useMemo(() => formatDateYmd(new Date()), [])
   const isToday = selectedDate === realToday
+
+  // Hero Hub mission CTAs deep-link /today#conundrum and /today#chapter; scroll
+  // to those cards once they render (they depend on async weekFocus/bookProgress).
+  useScrollToHash()
 
   const handlePrevDay = useCallback(() => {
     setSelectedDate((prev) => {
@@ -923,7 +928,7 @@ export default function TodayPage() {
       <HelperPanel template={activeTemplate} />
 
       {/* --- Energy selector --- */}
-      <SectionCard title={`DayLog (${dayLog.date})`}>
+      <SectionCard title="How's today going?">
         <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
           <Typography color="text.secondary" variant="body2">
             How&apos;s your energy today?
@@ -944,7 +949,7 @@ export default function TodayPage() {
             <Chip
               size="small"
               label={PlanTypeLabel[planType]}
-              color={planType === PlanType.Normal ? 'success' : 'warning'}
+              color={planType === PlanType.Normal ? 'success' : 'info'}
               variant="outlined"
             />
             <SaveIndicator state={saveState} />
@@ -967,6 +972,7 @@ export default function TodayPage() {
       {/* --- Week Focus + Conundrum --- */}
       {weekFocus && (
         <SectionErrorBoundary section="week focus">
+          <Box id="conundrum" />
           <WeekFocusCard
             weekFocus={weekFocus}
             familyId={familyId}
@@ -995,6 +1001,7 @@ export default function TodayPage() {
 
       {/* --- Chapter Question Pool (read-aloud discussion) --- */}
       <SectionErrorBoundary section="chapter question">
+        <Box id="chapter" />
         <ChapterQuestionPool
           book={selectedBook}
           bookProgress={bookProgress}
