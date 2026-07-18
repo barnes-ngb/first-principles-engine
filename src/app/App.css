@@ -69,6 +69,18 @@
   min-width: 0; /* prevent grid blowout on long content */
 }
 
+/* Story Call (FEAT-94): full-bleed broadcast surface — no sidebar column, no
+ * padding, so the shared screen is only the reader. */
+.app-shell--call {
+  display: block;
+  grid-template-columns: none;
+  min-height: 100dvh;
+}
+.app-shell__content--call {
+  padding: 0;
+  min-width: 0;
+}
+
 @media (max-width: 899.95px) {
   .app-shell__content {
     padding: 8px 16px 16px;
