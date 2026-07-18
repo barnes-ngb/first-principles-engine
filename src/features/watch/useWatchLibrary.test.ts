@@ -93,6 +93,23 @@ describe('useWatchLibrary', () => {
     expect(result.current.videos.map((v) => v.childId)).toEqual(['both'])
   })
 
+  it('clears prior results immediately when the child scope changes (no sibling bleed)', async () => {
+    const { result, rerender } = renderHook(({ child }) => useWatchLibrary(child), {
+      initialProps: { child: 'lincoln' as string },
+    })
+
+    act(() => {
+      emitSnapshot([videoAt('lincolns', '2026-07-17T00:00:00.000Z', 'lincoln')])
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.videos).toHaveLength(1)
+
+    // Switching to London must reset scoped state before the new snapshot lands.
+    rerender({ child: 'london' })
+    expect(result.current.videos).toEqual([])
+    expect(result.current.loading).toBe(true)
+  })
+
   it('lists the whole family library (no filter) when childId is omitted', () => {
     renderHook(() => useWatchLibrary())
     expect(whereMock).not.toHaveBeenCalled()
