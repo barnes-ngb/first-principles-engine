@@ -5,6 +5,11 @@ import { callClaude, logAiUsage } from "../chatTypes.js";
 import { buildStoryPrompt, modelForTask } from "../chat.js";
 import type { StoryGenInput } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
+import {
+  DEFAULT_TARGET_PAGE_COUNT,
+  maxTokensForPageCount,
+  reconcileStoryPageCount,
+} from "../storyPageBudget.js";
 
 // ── Preset themes (server-side mirror of client PRESET_THEMES) ──
 
@@ -113,6 +118,26 @@ async function resolveThemeGuidance(
 }
 
 /**
+ * Best-effort page-count reconciliation from the raw model text (FEAT-95).
+ * Parses the story JSON only to count `pages` for telemetry — never throws and
+ * never blocks the raw return; a story we can't parse here still flows to the
+ * client untouched (returns `null`).
+ */
+export function reconcilePagesFromStory(
+  target: number,
+  rawText: string,
+): ReturnType<typeof reconcileStoryPageCount> | null {
+  try {
+    const cleaned = rawText.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned) as { pages?: unknown };
+    if (!Array.isArray(parsed.pages)) return null;
+    return reconcileStoryPageCount(target, parsed.pages.length);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Task: generateStory
  * Context: childProfile + sightWords + wordMastery (via buildContextForTask)
  * Model: Sonnet
@@ -179,10 +204,15 @@ export const handleGenerateStory = async (
   // Resolve theme guidance from preset or custom Firestore theme
   const themeGuidance = await resolveThemeGuidance(db, familyId, storyConfig.theme);
 
+  // Target page count is a product decision (FEAT-95). Default to the priced
+  // product size when the client sends no target, and scale the output budget
+  // with it so a long book doesn't truncate (the FEAT-77/78 lesson).
+  const targetPageCount = storyConfig.pageCount ?? DEFAULT_TARGET_PAGE_COUNT;
+
   const storyPrompt = buildStoryPrompt({
     storyIdea,
     words: storyWords,
-    pageCount: storyConfig.pageCount ?? 10,
+    pageCount: targetPageCount,
     childName: storyChildName,
     childAge: storyChildAge,
     childInterests,
@@ -206,13 +236,27 @@ export const handleGenerateStory = async (
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: 6144,
+    maxTokens: maxTokensForPageCount(targetPageCount),
     temperature: 0.7,
     systemPrompt: storySystemPrompt,
     messages: [{ role: "user", content: "Generate the story now." }],
   });
 
-  console.log(`[AI] taskType=generateStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`);
+  // Validate on parse (FEAT-95): the model may return a different count. Accept a
+  // good story regardless (the client derives the book from pages.length) — just
+  // report the delta as telemetry, and warn only when it's wildly off (>±3).
+  const pageMeta = reconcilePagesFromStory(targetPageCount, result.text);
+  console.log(
+    `[AI] taskType=generateStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}` +
+      (pageMeta
+        ? ` targetPages=${pageMeta.target} actualPages=${pageMeta.actual} pageDelta=${pageMeta.delta}`
+        : ` targetPages=${targetPageCount} actualPages=?`),
+  );
+  if (pageMeta?.wildlyOff) {
+    console.warn(
+      `[AI] generateStory page count wildly off: target=${pageMeta.target} actual=${pageMeta.actual} (delta=${pageMeta.delta})`,
+    );
+  }
 
   await logAiUsage(db, familyId, {
     childId,
