@@ -118,7 +118,7 @@ async function resolveThemeGuidance(
 }
 
 /**
- * Best-effort page-count reconciliation from the raw model text (FEAT-95).
+ * Best-effort page-count reconciliation from the raw model text (FEAT-97).
  * Parses the story JSON only to count `pages` for telemetry — never throws and
  * never blocks the raw return; a story we can't parse here still flows to the
  * client untouched (returns `null`).
@@ -204,7 +204,7 @@ export const handleGenerateStory = async (
   // Resolve theme guidance from preset or custom Firestore theme
   const themeGuidance = await resolveThemeGuidance(db, familyId, storyConfig.theme);
 
-  // Target page count is a product decision (FEAT-95). Default to the priced
+  // Target page count is a product decision (FEAT-97). Default to the priced
   // product size when the client sends no target, and scale the output budget
   // with it so a long book doesn't truncate (the FEAT-77/78 lesson).
   const targetPageCount = storyConfig.pageCount ?? DEFAULT_TARGET_PAGE_COUNT;
@@ -242,7 +242,7 @@ export const handleGenerateStory = async (
     messages: [{ role: "user", content: "Generate the story now." }],
   });
 
-  // Validate on parse (FEAT-95): the model may return a different count. Accept a
+  // Validate on parse (FEAT-97): the model may return a different count. Accept a
   // good story regardless (the client derives the book from pages.length) — just
   // report the delta as telemetry, and warn only when it's wildly off (>±3).
   const pageMeta = reconcilePagesFromStory(targetPageCount, result.text);

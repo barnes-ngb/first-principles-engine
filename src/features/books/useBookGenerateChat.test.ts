@@ -527,7 +527,7 @@ describe('useBookGenerateChat clarification state machine', () => {
     expect(result.current.pageCount).toBe(6)
   })
 
-  it('restores the saved target page count when resuming a draft (FEAT-95)', async () => {
+  it('restores the saved target page count when resuming a draft (FEAT-97)', async () => {
     const firestore = await import('firebase/firestore')
     const getDoc = firestore.getDoc as ReturnType<typeof vi.fn>
     getDoc.mockResolvedValueOnce({

@@ -40,7 +40,7 @@ export interface UseBookGenerateChatOptions {
   childName: string
   childAge: number
   /**
-   * Initial target page count for a fresh draft (FEAT-95). The hook then owns
+   * Initial target page count for a fresh draft (FEAT-97). The hook then owns
    * the live value as state — it's hydrated from the saved `generationConfig`
    * when resuming a draft, and driven by the length selector via `setPageCount`.
    */
@@ -69,7 +69,7 @@ export interface UseBookGenerateChat {
   pendingRefinement: string | null
   canStartStory: boolean
 
-  /** Live target page count (FEAT-95) — hydrated from a resumed draft. */
+  /** Live target page count (FEAT-97) — hydrated from a resumed draft. */
   pageCount: number
   setPageCount: (pages: number) => void
 
@@ -223,7 +223,7 @@ export function useBookGenerateChat(
         const data = snap.data() as Book
         const state = data.reviewState
         // Restore the saved target page count so a resumed draft generates at the
-        // length the user picked, not the reset default (FEAT-95).
+        // length the user picked, not the reset default (FEAT-97).
         if (typeof data.generationConfig?.pageCount === 'number') {
           setPageCount(clampTargetPageCount(data.generationConfig.pageCount))
         }
@@ -463,7 +463,7 @@ export function useBookGenerateChat(
                     childAge,
                     childName,
                     illustrationStyle,
-                    // Revisions inherit the book's actual length (FEAT-95) — the
+                    // Revisions inherit the book's actual length (FEAT-97) — the
                     // revise prompt locks "do not add or remove pages", so the
                     // book's real page count is the source of truth, not the
                     // (now user-adjustable) generation target.

@@ -57,7 +57,7 @@ export default function CreateSightWordBook() {
 
   const [wordsInput, setWordsInput] = useState('')
   const [theme, setTheme] = useState('')
-  // Default to the shared priced-product size (FEAT-95); the slider still lets a
+  // Default to the shared priced-product size (FEAT-97); the slider still lets a
   // parent target any length in the 5–15 range for this sight-word tool.
   const [pageCount, setPageCount] = useState<number>(DEFAULT_TARGET_PAGE_COUNT)
   const [preview, setPreview] = useState<GeneratedStory | null>(null)

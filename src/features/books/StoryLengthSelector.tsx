@@ -14,7 +14,7 @@ interface Props {
 }
 
 /**
- * Kid-friendly "How long is your book?" length picker (FEAT-95). Short / Normal /
+ * Kid-friendly "How long is your book?" length picker (FEAT-97). Short / Normal /
  * Long, with the actual page numbers shown so the choice is concrete. Shared by
  * the Story Guide and Generate Chat generation entry points; the target it emits
  * is threaded straight into the `generateStory` task input.

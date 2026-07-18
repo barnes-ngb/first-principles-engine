@@ -11,7 +11,7 @@ function storyJson(n: number): string {
   return JSON.stringify({ title: "T", pages });
 }
 
-describe("reconcilePagesFromStory (validate on parse, FEAT-95)", () => {
+describe("reconcilePagesFromStory (validate on parse, FEAT-97)", () => {
   it("reports a matching count", () => {
     const r = reconcilePagesFromStory(10, storyJson(10));
     expect(r).toEqual({ target: 10, actual: 10, delta: 0, wildlyOff: false });

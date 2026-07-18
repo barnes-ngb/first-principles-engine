@@ -84,7 +84,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     childId,
     childName,
     childAge,
-    // Fresh drafts start at the priced product size (FEAT-95); the hook owns the
+    // Fresh drafts start at the priced product size (FEAT-97); the hook owns the
     // live value from here and hydrates it when resuming a saved draft.
     initialPageCount: DEFAULT_TARGET_PAGE_COUNT,
     defaultIllustrationStyle: defaultStyle,

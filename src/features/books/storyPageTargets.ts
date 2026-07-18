@@ -1,5 +1,5 @@
 /**
- * Target page count for story/book generation (FEAT-95).
+ * Target page count for story/book generation (FEAT-97).
  *
  * Books are a priced product ($8 ≈ 10 pages), so page count is a **product
  * decision**, not an accident of generation. Every story-generation entry point

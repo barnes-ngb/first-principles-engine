@@ -1,5 +1,5 @@
 /**
- * Story page-count budget + parse reconciliation (FEAT-95).
+ * Story page-count budget + parse reconciliation (FEAT-97).
  *
  * Page count is a **product decision** ($8 book ≈ 10 pages), targeted by the
  * client and threaded into `generateStory` / `reviseStory`. This module owns the

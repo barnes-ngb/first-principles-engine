@@ -105,7 +105,7 @@ export const handleReviseStory = async (
     apiKey,
     model,
     // A revise rewrites the whole story, so scale the budget with the book's
-    // page count the same way generation does (FEAT-95).
+    // page count the same way generation does (FEAT-97).
     maxTokens: maxTokensForPageCount(normalizedInput.childCalibration.pageCount),
     temperature: 0.7,
     systemPrompt,
