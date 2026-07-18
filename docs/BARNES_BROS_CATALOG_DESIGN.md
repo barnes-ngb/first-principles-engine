@@ -1,9 +1,17 @@
 # Barnes Bros Product Catalog + Website Export Path
 
-**Status:** NEW (design) · v0.1 · 2026-07-17
-**Ledger anchor:** FEAT-79
+**Status:** design + slices 1–3 + Option C shipped (PRs open) · v0.2 · 2026-07-17
+**Ledger anchor:** FEAT-79 (design); build rows FEAT-80/81/82/83/84
 **Depends on:** FEAT-78 (GDQ Kit Builder — `docs/GDQ_KIT_BUILDER_DESIGN.md`)
 **Companion to:** `BUSINESS_TAB_DESIGN.md` (FEAT-30), `GARDEN_DEFENSE_QUEST_PLAN.md` (FEAT-29)
+
+> **Owner decision (2026-07-17): the sale-gate on the public storefront is lifted.**
+> The catalog now holds real `listed`/priced products with real art, and the near-term
+> family outreach ("send a link, they pick, no money") is better served by a URL than a PDF.
+> Option C is therefore built now (as **C1**, see §4) **consciously un-gated** — the
+> "kit #1 + one confirmed sale" predicate in §1/§7 no longer blocks it. The other Never
+> invariants (§6) still hold: no public Firestore read, no PII capture, the authed app
+> is never exposed.
 
 Design-only. No source is authorized by this doc. Build is serialized and gated (see §7).
 
@@ -211,10 +219,24 @@ copy-pasteable block — or a CSV — the owner pastes into **Etsy**.
 - **Best for:** the **digital** kit line specifically (the GDQ plan: "Lead digital on Etsy; keep
   physical local"), once there's inventory worth the listing effort.
 
-### Option C — Public storefront site (biggest)
+### Option C — Public storefront site (biggest) — SHIPPED as **C1** (FEAT-84, 2026-07-17)
 
 A separate, **static, unauthenticated** page serving `status: 'listed'` products — a thin
 read-only lookbook generated from the catalog.
+
+> **Shipped as C1 (Storage-published static page), not C2 (second Hosting target).**
+> Recon confirmed C2 would need a **deploy per republish** (a push to the `deploy` branch
+> triggers the full CI deploy) — a poor fit for a phone-only owner who republishes whenever
+> the catalog changes. **C1** instead: the parent taps "Publish site" → the `listed` products
+> render to a self-contained static page (`publicCatalogPage.ts`, the mobile-first sibling of
+> FEAT-83's `catalogSheet.ts`) → it uploads to a **world-readable, per-family** Storage path
+> (`public/catalog/{familyId}/index.html`) → the parent shares the stable, token-less URL.
+> Republish is one tap, no deploy. Images **reference the products' existing Storage download
+> URLs** directly (those carry a download token, so they resolve for a not-logged-in viewer
+> with no rules change — the design's static-snapshot recommendation below). The only rules
+> change is the narrow, world-readable `public/catalog/{familyId}/**` **Storage** rule —
+> **read public, but create/update/delete gated on `isOwner(familyId)`** so one family can
+> never clobber another's storefront (per Codex review); `firestore.rules` is **untouched**.
 
 **What this actually requires** (from Step 0.4 recon — the current app is a single, fully-authed
 SPA, so *none of this exists today*):

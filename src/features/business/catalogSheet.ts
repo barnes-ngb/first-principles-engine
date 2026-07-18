@@ -19,8 +19,12 @@ export function selectListedProducts(products: CatalogProduct[]): CatalogProduct
   return products.filter((p) => p.status === CatalogProductStatus.Listed)
 }
 
-/** Minimal HTML escape for user-authored text going into the sheet document. */
-function esc(text: string): string {
+/**
+ * Minimal HTML escape for user-authored text going into a generated document.
+ * Shared by the printable sheet (this file) and the public catalog page
+ * (`publicCatalogPage.ts`) so both escape identically (FEAT-84).
+ */
+export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -28,6 +32,9 @@ function esc(text: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 }
+
+/** Back-compat local alias — the rest of this file reads `esc(...)`. */
+const esc = escapeHtml
 
 /** Price shows ONLY when set (>0). An unpriced product shows nothing — never "$0". */
 function priceLine(cents: number): string {
@@ -38,7 +45,7 @@ function priceLine(cents: number): string {
 /** The "made by …" footer credit — the union of every listed product's `madeBy`,
  *  in first-seen order, so the boys' names are featured. Falls back to a warm
  *  generic when nothing is credited. */
-function creditNames(products: CatalogProduct[]): string {
+export function creditNames(products: CatalogProduct[]): string {
   const seen: string[] = []
   for (const p of products) {
     for (const name of p.madeBy) {
