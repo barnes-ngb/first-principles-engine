@@ -18,6 +18,7 @@ import Typography from '@mui/material/Typography'
 
 import type { KitArtRef, KitDefender, KitInvader, KitRoster } from '../../core/types/business'
 import { KitRosterStatus } from '../../core/types/business'
+import { ART_QUOTA_MESSAGE } from './useArtQuota'
 import { defenderArtKey, heroDescriptor, HERO_ART_KEY, invaderArtKey } from './kitArt'
 import type { NewKitRoster } from './useKitRosters'
 
@@ -70,17 +71,17 @@ function draftFromRoster(roster?: KitRoster): RosterDraft {
 
 /**
  * Per-character art affordance (FEAT-88): a thumbnail once art exists, plus a
- * `canEdit`-gated "Make sticker" / "Regenerate" button. The thumbnail renders
- * for EVERYONE with art (a kid/read-only viewer still sees his cast); the paid
- * generate button renders only when `canGenerate`. Loading + honest-error are
- * per-character (FEAT-61): the spinner is scoped to this row, a failure shows an
- * inline message, and existing art is never lost on a failed retry.
+ * "Make sticker" / "Regenerate" button. The thumbnail renders for EVERYONE with
+ * art; the generate button renders whenever `canGenerate` — which, since FEAT-94,
+ * is true for kids too (making art on your own kit is kid effort, not money or
+ * public exposure). Loading + honest-error are per-character (FEAT-61): the
+ * spinner is scoped to this row, a failure shows an inline message, and existing
+ * art is never lost on a failed retry.
  *
  * FEAT-92: the ~56px thumbnail is a button that opens a lightbox `Dialog` with
  * the full-size image + the character's name. Viewing is kid-safe (everyone with
  * art can tap it open); the Regenerate action inside the dialog rides the SAME
- * `canGenerate` gate as the inline button — so a read-only viewer sees a bigger
- * picture and nothing more.
+ * `canGenerate` gate as the inline button.
  */
 function CharacterArtControl({
   characterKey,
@@ -204,14 +205,29 @@ export interface KitBuilderFormProps {
   onSave: (body: NewKitRoster, id?: string) => Promise<void>
   onCancel: () => void
   /**
-   * Parent gate for art generation (FEAT-88). Each image is a paid, explicit
-   * `canEdit` tap — never auto-generated. Falsy ⇒ no generate buttons render
-   * (a kid sees existing thumbnails read-only; a brand-new unsaved roster has
-   * no persisted target so the parent passes false until the first save).
+   * Whether art generation is offered (FEAT-88). Each image is a paid, explicit
+   * tap — never auto-generated. Falsy ⇒ no generate buttons render (a brand-new
+   * unsaved roster has no persisted target, so the caller passes false until the
+   * first save). Since FEAT-94 this is NOT a parent gate — kids generate too;
+   * kid generation is metered by the caller via a light daily quota.
    */
   canGenerateArt?: boolean
   /** Generate + persist one character's sticker. Required for the art buttons. */
   onGenerateArt?: GenerateKitArt
+  /**
+   * The generator has hit today's light daily cap (FEAT-94). When true, the
+   * generate buttons are swapped for a friendly, non-shaming nudge (charter: no
+   * error styling, no shame) rather than blocked outright with an error. Only
+   * ever true for a capped kid profile; a parent is uncapped.
+   */
+  capReached?: boolean
+  /**
+   * How many paid generations the actor may still make today (FEAT-94). The
+   * batch loop is bounded by this so a roster with more ungenerated characters
+   * than remaining quota can't exceed the daily cap in a single tap. `Infinity`
+   * for an uncapped parent (the default).
+   */
+  remainingArt?: number
 }
 
 /**
@@ -235,6 +251,8 @@ export default function KitBuilderForm({
   onCancel,
   canGenerateArt = false,
   onGenerateArt,
+  capReached = false,
+  remainingArt = Infinity,
 }: KitBuilderFormProps) {
   const [draft, setDraft] = useState<RosterDraft>(() => draftFromRoster(roster))
   const [saving, setSaving] = useState(false)
@@ -248,10 +266,13 @@ export default function KitBuilderForm({
   const [artErrors, setArtErrors] = useState<Record<string, string>>({})
   const [confirmBatch, setConfirmBatch] = useState(false)
 
-  // Generation is a paid, parent-only, persisted-roster affordance; thumbnails
-  // are shown to everyone with art (a read-only kid still sees his cast).
+  // Generation is a paid, persisted-roster affordance offered to parents AND
+  // kids (FEAT-94); thumbnails are shown to everyone with art.
   const canGenerate = canGenerateArt && Boolean(onGenerateArt)
-  const showControl = (characterKey: string) => canGenerate || Boolean(art[characterKey]?.url)
+  // The generate buttons only render when generation is possible AND today's cap
+  // isn't reached; hitting the cap shows a friendly nudge instead (FEAT-94).
+  const canGenerateNow = canGenerate && !capReached
+  const showControl = (characterKey: string) => canGenerateNow || Boolean(art[characterKey]?.url)
 
   const set = <K extends keyof RosterDraft>(key: K, value: RosterDraft[K]) =>
     setDraft((prev) => ({ ...prev, [key]: value }))
@@ -299,18 +320,30 @@ export default function KitBuilderForm({
     }
   }
 
-  /** Sequentially generate every remaining character (confirmed count first). */
+  /**
+   * Sequentially generate every remaining character (confirmed count first),
+   * but never more than the actor's remaining daily allowance (FEAT-94). The
+   * quota's snapshot count lags a synchronous loop, so we bound by the allowance
+   * captured at batch start rather than re-reading it mid-loop — a big roster
+   * with few slots left can't blow past the cap in one tap.
+   */
   const generateAllRemaining = async () => {
     setConfirmBatch(false)
+    let budget = remainingArt
     for (const c of draftCharacters()) {
       if (art[c.key]?.url) continue
+      if (budget <= 0) break // out of daily allowance — stop before another paid call
       // One paid call at a time — sequential so per-row state stays honest.
       const ok = await generateOne(c.key, { name: c.name, descriptor: c.descriptor })
       if (!ok) break // stop the batch on the first failure; nothing already made is lost
+      budget -= 1
     }
   }
 
   const remainingCount = draftCharacters().filter((c) => !art[c.key]?.url).length
+  // What the batch will actually make: never more than the daily allowance
+  // (equals remainingCount for an uncapped parent) — FEAT-94.
+  const batchCount = Math.min(remainingCount, remainingArt)
 
   const addDefender = () =>
     setDraft((prev) => ({
@@ -411,7 +444,7 @@ export default function KitBuilderForm({
               characterKey={HERO_ART_KEY}
               character={{ name: draft.heroName, descriptor: heroDescriptor(draft) }}
               art={art[HERO_ART_KEY]}
-              canGenerate={canGenerate}
+              canGenerate={canGenerateNow}
               busy={generatingKey === HERO_ART_KEY}
               error={artErrors[HERO_ART_KEY] ?? null}
               onGenerate={(k, c) => void generateOne(k, c)}
@@ -467,7 +500,7 @@ export default function KitBuilderForm({
                     characterKey={defenderArtKey(d.id)}
                     character={{ name: d.name, descriptor: d.power }}
                     art={art[defenderArtKey(d.id)]}
-                    canGenerate={canGenerate}
+                    canGenerate={canGenerateNow}
                     busy={generatingKey === defenderArtKey(d.id)}
                     error={artErrors[defenderArtKey(d.id)] ?? null}
                     onGenerate={(k, c) => void generateOne(k, c)}
@@ -529,7 +562,7 @@ export default function KitBuilderForm({
                     characterKey={invaderArtKey(inv.id)}
                     character={{ name: inv.name, descriptor: inv.menace }}
                     art={art[invaderArtKey(inv.id)]}
-                    canGenerate={canGenerate}
+                    canGenerate={canGenerateNow}
                     busy={generatingKey === invaderArtKey(inv.id)}
                     error={artErrors[invaderArtKey(inv.id)] ?? null}
                     onGenerate={(k, c) => void generateOne(k, c)}
@@ -565,7 +598,7 @@ export default function KitBuilderForm({
         <MenuItem value={KitRosterStatus.Complete}>Ready</MenuItem>
       </TextField>
 
-      {canGenerate && remainingCount > 0 && (
+      {canGenerateNow && batchCount > 0 && (
         <Box>
           <Button
             variant="text"
@@ -573,12 +606,21 @@ export default function KitBuilderForm({
             disabled={generatingKey !== null}
             onClick={() => setConfirmBatch(true)}
           >
-            Make stickers for the rest ({remainingCount})
+            Make stickers for the rest ({batchCount})
           </Button>
           <Typography variant="caption" color="text.secondary" display="block">
             Each sticker is a real image — we'll ask before making them.
           </Typography>
         </Box>
+      )}
+
+      {/* Daily cap reached (FEAT-94): a warm nudge, never an error. Only shows to
+          someone who could otherwise generate (a capped kid), so a read-only
+          viewer sees nothing extra. */}
+      {canGenerate && capReached && (
+        <Typography variant="body2" color="text.secondary">
+          {ART_QUOTA_MESSAGE}
+        </Typography>
       )}
 
       {error && (
@@ -598,10 +640,10 @@ export default function KitBuilderForm({
 
       {/* Count-confirm before any batch generation — never auto-generate (FEAT-88). */}
       <Dialog open={confirmBatch} onClose={() => setConfirmBatch(false)}>
-        <DialogTitle>Make {remainingCount} images?</DialogTitle>
+        <DialogTitle>Make {batchCount} images?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This makes {remainingCount} sticker {remainingCount === 1 ? 'image' : 'images'} — one for
+            This makes {batchCount} sticker {batchCount === 1 ? 'image' : 'images'} — one for
             each character that doesn't have one yet. Making images costs money, so we only do it when
             you tap Make.
           </DialogContentText>
@@ -609,7 +651,7 @@ export default function KitBuilderForm({
         <DialogActions>
           <Button onClick={() => setConfirmBatch(false)}>Cancel</Button>
           <Button variant="contained" onClick={() => void generateAllRemaining()}>
-            Make {remainingCount}
+            Make {batchCount}
           </Button>
         </DialogActions>
       </Dialog>

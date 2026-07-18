@@ -17,6 +17,7 @@ import type {
   Book,
   BookProgress,
   BookThemeConfig,
+  ArtQuota,
   BusinessGoal,
   BusinessLogEntry,
   CatalogOrder,
@@ -698,6 +699,21 @@ export const catalogOrdersCollection = (
   collection(db, `families/${familyId}/orders`).withConverter(
     catalogOrderConverter,
   ) as CollectionReference<CatalogOrder>
+
+// ── Kid art-generation quota (FEAT-94) ──────────────────────────
+
+/**
+ * Per-child daily art-generation counter (FEAT-94). A tiny courtesy cap so a
+ * kid's image generation (a paid call) has a light, non-shaming daily limit —
+ * never a lock. Doc ID: `{childId}-{YYYY-MM-DD}`. Additive; client-writable
+ * under the existing owner rule (kids share the family auth, so the cap is UX,
+ * not security — `firestore.rules` is untouched). Path:
+ * families/{familyId}/artQuota/{docId}
+ */
+export const artQuotaCollection = (
+  familyId: string,
+): CollectionReference<ArtQuota> =>
+  collection(db, `families/${familyId}/artQuota`) as CollectionReference<ArtQuota>
 
 // ── Error Log (ARCH-11 client error reporting) ──────────────────
 
