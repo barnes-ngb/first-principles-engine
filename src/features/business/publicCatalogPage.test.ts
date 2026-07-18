@@ -186,4 +186,11 @@ describe('buildPublicCatalogHtml — order form (FEAT-88)', () => {
     expect(html).toContain('data-title="Kit &quot;evil&quot; &lt;b&gt;"')
     expect(html).not.toContain('data-title="Kit "evil"')
   })
+
+  it('builds order chips with textContent, never innerHTML (getAttribute decodes titles)', () => {
+    const html = buildPublicCatalogHtml([product({ title: 'Kit' })], {}, ORDER_CFG)
+    // The form script must not route a decoded title back through innerHTML.
+    expect(html).not.toContain('.innerHTML')
+    expect(html).toContain('chip.textContent = picks[id]')
+  })
 })

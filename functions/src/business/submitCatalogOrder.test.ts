@@ -89,7 +89,7 @@ describe("validateOrderSubmission", () => {
   });
 
   it("drops items not in the product allowlist and rejects when none survive", () => {
-    const allowed = new Set(["prod-1"]);
+    const allowed = new Map([["prod-1", "Real Kit"]]);
     const mixed = validateOrderSubmission(
       {
         ...goodBody,
@@ -110,6 +110,19 @@ describe("validateOrderSubmission", () => {
       allowed,
     );
     expect(none.ok).toBe(false);
+  });
+
+  it("replaces a client-supplied title with the authoritative listed title", () => {
+    const allowed = new Map([["prod-1", "Seed Vault Kit"]]);
+    const result = validateOrderSubmission(
+      { ...goodBody, items: [{ productId: "prod-1", title: "Free Xbox lol" }] },
+      allowed,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok && !result.spam) {
+      // The browser's title snapshot is discarded — the server name wins.
+      expect(result.order.items).toEqual([{ productId: "prod-1", title: "Seed Vault Kit" }]);
+    }
   });
 
   it("passes all well-formed items on caps alone when the allowlist is unavailable", () => {

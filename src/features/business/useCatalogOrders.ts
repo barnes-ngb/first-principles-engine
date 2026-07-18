@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { doc, onSnapshot, query, updateDoc } from 'firebase/firestore'
+import { doc, onSnapshot, query, runTransaction } from 'firebase/firestore'
 
 import { useFamilyId } from '../../core/auth/useAuth'
-import { catalogOrdersCollection } from '../../core/firebase/firestore'
+import { catalogOrdersCollection, db } from '../../core/firebase/firestore'
 import type { CatalogOrder, CatalogOrderStatus } from '../../core/types/business'
 import { nextOrderStatus } from '../../core/types/business'
 
@@ -14,7 +14,10 @@ export interface UseCatalogOrdersResult {
   /**
    * Advance an order one step forward in the flow (new → making → ready →
    * delivered). Forward-only: a no-op when already `delivered`. NOT parent-gated
-   * — the making is the kids' work (design §6).
+   * — the making is the kids' work (design §6). The `current` arg is only the
+   * button's optimistic view; the actual step is computed inside a transaction
+   * from the STORED status, so two devices (or a stale tab) can never regress
+   * the queue.
    */
   advanceStatus: (id: string, current: CatalogOrderStatus) => Promise<void>
 }
@@ -68,11 +71,20 @@ export function useCatalogOrders(): UseCatalogOrdersResult {
   const advanceStatus = useCallback(
     async (id: string, current: CatalogOrderStatus) => {
       if (!familyId) return
-      const next = nextOrderStatus(current)
-      if (!next) return // already delivered — forward-only, nothing to do
-      await updateDoc(doc(catalogOrdersCollection(familyId), id), {
-        status: next,
-        updatedAt: new Date().toISOString(),
+      // Optimistic fast-path: if the button's view already shows delivered,
+      // skip the round-trip. The transaction below is still authoritative.
+      if (!nextOrderStatus(current)) return
+      const ref = doc(catalogOrdersCollection(familyId), id)
+      // Compute the step from the STORED status inside a transaction so a
+      // concurrent advance (two devices / a stale tab) can never regress the
+      // queue — the write is monotonic regardless of the caller's stale view.
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref)
+        if (!snap.exists()) return
+        const stored = snap.data().status
+        const next = nextOrderStatus(stored)
+        if (!next) return // already delivered — forward-only, nothing to do
+        tx.update(ref, { status: next, updatedAt: new Date().toISOString() })
       })
     },
     [familyId],

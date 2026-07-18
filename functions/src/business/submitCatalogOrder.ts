@@ -36,21 +36,27 @@ import type { ValidatedOrder } from "./orderValidation.js";
 const rateStore = new Map<string, { count: number; resetAt: number }>();
 
 /**
- * Read the family's LISTED catalog product IDs, or `undefined` if the lookup
- * fails / the family has no catalog. `undefined` (not empty set) signals
- * "allowlist unavailable" so validation falls back to caps-only rather than
- * rejecting every item on a transient read error.
+ * Read the family's LISTED catalog products as an id→title map, or `undefined`
+ * if the lookup fails / the family has no catalog. `undefined` (not an empty
+ * map) signals "allowlist unavailable" so validation falls back to caps-only
+ * rather than rejecting every item on a transient read error. The title lets the
+ * endpoint store the AUTHORITATIVE product name instead of the browser snapshot.
  */
-async function loadListedProductIds(
+async function loadListedProducts(
   db: FirebaseFirestore.Firestore,
   familyId: string,
-): Promise<ReadonlySet<string> | undefined> {
+): Promise<ReadonlyMap<string, string> | undefined> {
   try {
     const snap = await db
       .collection(`families/${familyId}/catalogProducts`)
       .where("status", "==", "listed")
       .get();
-    return new Set(snap.docs.map((d) => d.id));
+    const map = new Map<string, string>();
+    for (const d of snap.docs) {
+      const title = (d.data() as { title?: unknown }).title;
+      map.set(d.id, typeof title === "string" ? title : "");
+    }
+    return map;
   } catch {
     return undefined;
   }
@@ -116,7 +122,7 @@ export const submitCatalogOrder = onRequest(
       return;
     }
 
-    const allowed = await loadListedProductIds(getFirestore(), familyId);
+    const allowed = await loadListedProducts(getFirestore(), familyId);
     const result = validateOrderSubmission(body, allowed);
 
     // Honeypot tripped — pretend all is well, write nothing.

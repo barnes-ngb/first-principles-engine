@@ -69,17 +69,20 @@ function asString(v: unknown): string {
  * - Honeypot first: any non-empty honeypot value → `{ ok: true, spam: true }`.
  * - `customerName` required, trimmed, ≤ cap.
  * - `items` required, array of `{ productId, title }`, 1..itemsMax, each capped.
- *   If `allowedProductIds` is provided (the family's LISTED products), items
- *   whose `productId` isn't listed are dropped; an order with no surviving item
- *   is rejected. When the set is absent (allowlist lookup failed/unavailable),
- *   all well-formed items pass on caps alone.
+ *   If `allowedProducts` is provided (the family's LISTED products as an
+ *   id→title map), items whose `productId` isn't listed are dropped, and the
+ *   stored **authoritative title** REPLACES the client-supplied one — a valid id
+ *   can't be paired with a misleading title (the browser snapshot is never
+ *   trusted for display). An order with no surviving item is rejected. When the
+ *   map is absent (allowlist lookup failed/unavailable), well-formed items pass
+ *   on caps alone, keeping the client title.
  * - `note` / `contact` optional, trimmed, ≤ caps; empty → omitted.
  *
  * Never throws — every malformed shape returns an `{ ok: false }` reason.
  */
 export function validateOrderSubmission(
   body: unknown,
-  allowedProductIds?: ReadonlySet<string>,
+  allowedProducts?: ReadonlyMap<string, string>,
 ): OrderValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { ok: false, spam: false, reason: 'Body must be a JSON object.' }
@@ -113,15 +116,24 @@ export function validateOrderSubmission(
     }
     const item = raw as Record<string, unknown>
     const productId = asString(item.productId).trim()
-    const title = asString(item.title).trim()
     if (!productId || productId.length > ORDER_LIMITS.productIdMax) {
       return { ok: false, spam: false, reason: 'Malformed item id.' }
     }
-    if (!title || title.length > ORDER_LIMITS.titleMax) {
-      return { ok: false, spam: false, reason: 'Malformed item title.' }
+    let title: string
+    if (allowedProducts) {
+      // Product-id allowlist available: drop unlisted picks and take the
+      // AUTHORITATIVE stored title — never trust the browser's title snapshot.
+      const authoritative = allowedProducts.get(productId)
+      if (authoritative === undefined) continue
+      title = authoritative.slice(0, ORDER_LIMITS.titleMax)
+    } else {
+      // Allowlist unavailable (transient read failure): keep the client title,
+      // cap-checked, so a real order still lands rather than being rejected.
+      title = asString(item.title).trim()
+      if (!title || title.length > ORDER_LIMITS.titleMax) {
+        return { ok: false, spam: false, reason: 'Malformed item title.' }
+      }
     }
-    // Product-id allowlist (when available): silently drop unlisted picks.
-    if (allowedProductIds && !allowedProductIds.has(productId)) continue
     items.push({ productId, title })
   }
   if (items.length === 0) {

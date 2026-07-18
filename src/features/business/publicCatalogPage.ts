@@ -201,11 +201,19 @@ function orderForm(cfg: OrderFormConfig): string {
       function render() {
         var ids = Object.keys(picks);
         form.hidden = ids.length === 0;
-        picksEl.innerHTML = ids.length
-          ? 'Your picks: ' + ids.map(function (id) {
-              return '<span class="order-chip">' + picks[id] + '</span>';
-            }).join(' ')
-          : '';
+        // Build chips with text nodes — a product title is untrusted markup, so
+        // never route it through innerHTML (it is escaped in the card, but
+        // getAttribute decodes it back).
+        picksEl.textContent = '';
+        if (!ids.length) return;
+        picksEl.appendChild(document.createTextNode('Your picks: '));
+        ids.forEach(function (id) {
+          var chip = document.createElement('span');
+          chip.className = 'order-chip';
+          chip.textContent = picks[id];
+          picksEl.appendChild(chip);
+          picksEl.appendChild(document.createTextNode(' '));
+        });
       }
 
       Array.prototype.forEach.call(document.querySelectorAll('.want-btn'), function (btn) {
@@ -248,8 +256,12 @@ function orderForm(cfg: OrderFormConfig): string {
           body: JSON.stringify(payload)
         }).then(function (res) {
           if (!res.ok) throw new Error('bad status');
-          form.innerHTML = '<p class="order-done">Got it, ' + name.replace(/</g, '') +
-            '! The bros are on it. 💪</p>';
+          // Text node — the visitor's own name goes back to them as text, never markup.
+          form.textContent = '';
+          var done = document.createElement('p');
+          done.className = 'order-done';
+          done.textContent = 'Got it, ' + name + '! The bros are on it. 💪';
+          form.appendChild(done);
         }).catch(function () {
           btn.disabled = false;
           msgEl.textContent = "Hmm, that didn't send. Please try again in a moment.";
