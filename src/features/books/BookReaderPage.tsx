@@ -39,6 +39,7 @@ import { useComprehensionQuestions } from './useComprehensionQuestions'
 import ComprehensionQuestions from './ComprehensionQuestions'
 import AskMePanel from './AskMePanel'
 import { buildReadingCompletionContent, buildReadingHoursNotes } from './readingLog.logic'
+import { STORY_CALL_AUDIENCES } from './storyCallLabels'
 
 // ── Reading session helpers ──────────────────────────────────────
 
@@ -102,8 +103,8 @@ async function logReadingCompletion(
 
 const SWIPE_THRESHOLD = 50
 
-/** Story Call audience chips — "Who did you read to?" (skippable). */
-const AUDIENCE_OPTIONS = ['Grandma', 'Grandpa', 'Someone else'] as const
+/** Story Call audience chips — "Who did you read to?" (skippable). Labels: {@link STORY_CALL_AUDIENCES}. */
+const AUDIENCE_OPTIONS = STORY_CALL_AUDIENCES
 
 export default function BookReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
