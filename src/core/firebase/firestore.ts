@@ -19,6 +19,7 @@ import type {
   BookThemeConfig,
   BusinessGoal,
   BusinessLogEntry,
+  CatalogProduct,
   ChapterBook,
   ChapterResponse,
   Child,
@@ -647,6 +648,30 @@ export const kitRostersCollection = (
   collection(db, `families/${familyId}/kitRosters`).withConverter(
     kitRosterConverter,
   ) as CollectionReference<KitRoster>
+
+// ── Barnes Bros Product Catalog (FEAT-81) ───────────────────────
+
+export const catalogProductConverter: FirestoreDataConverter<CatalogProduct> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as CatalogProduct
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * Curated products the Barnes Bros show/sell (the "show" layer). A kid makes
+ * many products, so this is an auto-ID collection (like `businessLog`), not a
+ * one-doc-per-child config. Family-scoped — a catalog is the family's
+ * storefront, not per-child. Use `addDoc` to create; `updateDoc` to edit (no
+ * deletes — `status: 'retired'` retires). Path: families/{familyId}/catalogProducts/{autoId}
+ */
+export const catalogProductsCollection = (
+  familyId: string,
+): CollectionReference<CatalogProduct> =>
+  collection(db, `families/${familyId}/catalogProducts`).withConverter(
+    catalogProductConverter,
+  ) as CollectionReference<CatalogProduct>
 
 // ── Error Log (ARCH-11 client error reporting) ──────────────────
 
