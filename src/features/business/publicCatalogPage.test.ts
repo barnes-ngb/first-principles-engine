@@ -137,6 +137,98 @@ describe('buildPublicCatalogHtml', () => {
   })
 })
 
+describe('buildPublicCatalogHtml — book preview flipper (FEAT-91)', () => {
+  const peekProduct = (over: Partial<CatalogProduct> = {}) =>
+    product({
+      id: 'book1',
+      title: 'Tom Tom',
+      priceCents: 800,
+      includePreview: true,
+      sourceRef: { kind: 'book', id: 'b1' },
+      ...over,
+    })
+
+  it('emits one slide per cover + page and a hidden nav with a counter', () => {
+    const html = buildPublicCatalogHtml([peekProduct()], {
+      book1: {
+        coverUrl: 'https://cdn/cover.png',
+        pages: [
+          { imageUrl: 'https://cdn/p1.png', text: 'one' },
+          { imageUrl: 'https://cdn/p2.png', text: 'two' },
+        ],
+      },
+    })
+    // 3 slides: cover + 2 pages.
+    expect((html.match(/class="peek-slide"/g) ?? []).length).toBe(3)
+    expect(html).toContain('class="peek-viewer"')
+    // Nav ships hidden (graceful fallback: JS off ⇒ slides stack, no controls).
+    expect(html).toContain('<div class="peek-nav" hidden>')
+    expect(html).toContain('class="peek-counter"')
+    expect(html).toContain('aria-label="Previous page"')
+    expect(html).toContain('aria-label="Next page"')
+  })
+
+  it('ships the flipper script exactly once, only when a preview renders', () => {
+    const withPeek = buildPublicCatalogHtml([peekProduct()], {
+      book1: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }] },
+    })
+    expect((withPeek.match(/querySelectorAll\('\.peek-viewer'\)/g) ?? []).length).toBe(1)
+
+    // Opted-in product but NO resolved preview ⇒ no flipper script.
+    expect(buildPublicCatalogHtml([peekProduct()])).not.toContain('.peek-viewer')
+    // A preview-less catalog stays script-free entirely.
+    expect(buildPublicCatalogHtml([product({})])).not.toContain('<script')
+  })
+
+  it('the flipper script never routes text through innerHTML (FEAT-88 rule)', () => {
+    const html = buildPublicCatalogHtml([peekProduct()], {
+      book1: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }] },
+    })
+    expect(html).not.toContain('.innerHTML')
+    // The counter is written as a text node.
+    expect(html).toContain('counter.textContent =')
+  })
+
+  it('renders a sticker strip only when the preview carries stickers', () => {
+    const withStickers = buildPublicCatalogHtml([peekProduct()], {
+      book1: {
+        coverUrl: 'https://cdn/c.png',
+        pages: [{ imageUrl: 'https://cdn/1.png' }],
+        stickers: ['https://cdn/star.png', 'https://cdn/heart.png'],
+      },
+    })
+    expect(withStickers).toContain('Stickers in this book')
+    expect(withStickers).toContain('class="peek-sticker-strip"')
+    expect(withStickers).toContain('src="https://cdn/star.png"')
+    expect(withStickers).toContain('src="https://cdn/heart.png"')
+
+    // No stickers on the preview ⇒ no strip.
+    const noStickers = buildPublicCatalogHtml([peekProduct()], {
+      book1: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }] },
+    })
+    expect(noStickers).not.toContain('Stickers in this book')
+    // The CSS selector is always present; the markup class attribute is not.
+    expect(noStickers).not.toContain('class="peek-sticker-strip"')
+  })
+
+  it('never shows a sticker strip for a product that did not opt in', () => {
+    // Stickers resolved but the product is not opted in ⇒ no peek at all.
+    const html = buildPublicCatalogHtml([product({ id: 'x', title: 'No Peek' })], {
+      x: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }], stickers: ['https://cdn/s.png'] },
+    })
+    expect(html).not.toContain('Stickers in this book')
+    expect(html).not.toContain('Peek inside')
+  })
+
+  it('escapes page + cover image URLs in the slides', () => {
+    const html = buildPublicCatalogHtml([peekProduct({ title: 'A "Book"' })], {
+      book1: { coverUrl: 'https://cdn/c.png', pages: [{ imageUrl: 'https://cdn/1.png' }] },
+    })
+    expect(html).toContain('A &quot;Book&quot; cover')
+    expect(html).not.toContain('alt="A "Book" cover"')
+  })
+})
+
 describe('buildPublicCatalogHtml — order form (FEAT-89)', () => {
   const ORDER_CFG = {
     endpoint: 'https://us-central1-demo.cloudfunctions.net/submitCatalogOrder',

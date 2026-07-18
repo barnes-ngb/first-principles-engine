@@ -40,34 +40,124 @@ function previewCta(cents: number): string {
 }
 
 /**
- * The opt-in "Peek inside" block (FEAT-85). A pure-HTML `<details>` (no JS) so
- * the page stays self-contained: cover + the first N inside pages (image + text),
- * closed by a warm CTA. Rendered ONLY when the parent opted the product in and a
- * resolved preview with at least one page was passed. Page images hotlink the
- * SAME tokenized Storage URLs the cover uses — nothing new is uploaded.
+ * The "Stickers in this book ✨" strip (FEAT-91). A horizontally-scrollable row
+ * of the book's sticker thumbnails, hotlinked like every other preview image.
+ * Rendered ONLY when the resolved preview carries stickers — it rides the SAME
+ * `includePreview` opt-in as the flipper (no new toggle), so a parent who didn't
+ * open the peek shows nothing. Returns '' when the book has no stickers.
+ */
+function stickerStrip(p: CatalogProduct, preview: CatalogPreview): string {
+  const stickers = preview.stickers ?? []
+  if (stickers.length === 0) return ''
+  const thumbs = stickers
+    .map(
+      (url) =>
+        `<img class="peek-sticker" src="${escapeHtml(url)}" alt="A sticker from ${escapeHtml(p.title)}" loading="lazy" />`,
+    )
+    .join('\n            ')
+  return `<div class="peek-stickers">
+            <div class="peek-stickers-label">Stickers in this book ✨</div>
+            <div class="peek-sticker-strip">
+            ${thumbs}
+            </div>
+          </div>`
+}
+
+/** True when a product's peek should render: opted-in with a non-empty preview. */
+function shouldRenderPeek(
+  p: CatalogProduct,
+  preview: CatalogPreview | undefined,
+): preview is CatalogPreview {
+  return Boolean(p.includePreview && preview && preview.pages.length > 0)
+}
+
+/**
+ * The opt-in "Peek inside" block (FEAT-85, flipper FEAT-91). A `<details>`
+ * holding a compact page flipper: cover + the first N inside pages (image +
+ * text) as `.peek-slide`s, plus a hidden `‹ Prev / Next ›` nav the page script
+ * ({@link pagerScript}) reveals and drives one-slide-at-a-time. **Graceful
+ * fallback:** with JS disabled the nav stays hidden and the slides simply stack
+ * (the original FEAT-85 behavior) — no deps, no broken controls. Rendered ONLY
+ * when the parent opted in and a non-empty preview was passed. Page images
+ * hotlink the SAME tokenized Storage URLs the cover uses — nothing new uploaded.
  */
 function previewBlock(p: CatalogProduct, preview: CatalogPreview): string {
-  const cover = preview.coverUrl
-    ? `<img class="peek-img" src="${escapeHtml(preview.coverUrl)}" alt="${escapeHtml(`${p.title} cover`)}" loading="lazy" />`
-    : ''
-  const pages = preview.pages
-    .map((pg) => {
-      const img = pg.imageUrl
-        ? `<img class="peek-img" src="${escapeHtml(pg.imageUrl)}" alt="A page from ${escapeHtml(p.title)}" loading="lazy" />`
-        : ''
-      const text = pg.text ? `<p class="peek-text">${escapeHtml(pg.text)}</p>` : ''
-      return `<div class="peek-page">${img}${text}</div>`
-    })
-    .join('\n')
+  const slides: string[] = []
+  if (preview.coverUrl) {
+    slides.push(
+      `<div class="peek-slide"><img class="peek-img" src="${escapeHtml(preview.coverUrl)}" alt="${escapeHtml(`${p.title} cover`)}" loading="lazy" /></div>`,
+    )
+  }
+  for (const pg of preview.pages) {
+    const img = pg.imageUrl
+      ? `<img class="peek-img" src="${escapeHtml(pg.imageUrl)}" alt="A page from ${escapeHtml(p.title)}" loading="lazy" />`
+      : ''
+    const text = pg.text ? `<p class="peek-text">${escapeHtml(pg.text)}</p>` : ''
+    slides.push(`<div class="peek-slide">${img}${text}</div>`)
+  }
+
+  // Nav ships hidden; the page script un-hides it and switches to one slide at a
+  // time. Buttons carry no untrusted text — the counter is filled by textContent.
+  const nav = `<div class="peek-nav" hidden>
+            <button type="button" class="peek-btn peek-prev" aria-label="Previous page">‹ Prev</button>
+            <span class="peek-counter" role="status" aria-live="polite"></span>
+            <button type="button" class="peek-btn peek-next" aria-label="Next page">Next ›</button>
+          </div>`
 
   return `<details class="peek">
         <summary>Peek inside 📖</summary>
         <div class="peek-body">
-          ${cover}
-          ${pages}
+          <div class="peek-viewer">
+            <div class="peek-stage">
+              ${slides.join('\n            ')}
+            </div>
+            ${nav}
+          </div>
+          ${stickerStrip(p, preview)}
           ${previewCta(p.priceCents)}
         </div>
       </details>`
+}
+
+/**
+ * The page-flipper client script (FEAT-91). Self-contained, no external refs,
+ * CSP-safe: it only toggles `hidden` and writes the counter via `textContent`
+ * (never `innerHTML`). Emitted once per page and ONLY when a preview renders, so
+ * a preview-less catalog stays script-free. Reveals the nav, shows one slide at
+ * a time with a "N of M" counter + disabled ends, and adds cheap pointer-swipe.
+ */
+function pagerScript(): string {
+  return `<script>
+    (function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.peek-viewer'), function (viewer) {
+        var slides = viewer.querySelectorAll('.peek-slide');
+        if (slides.length < 2) return;
+        var nav = viewer.querySelector('.peek-nav');
+        var counter = viewer.querySelector('.peek-counter');
+        var prev = viewer.querySelector('.peek-prev');
+        var next = viewer.querySelector('.peek-next');
+        var i = 0;
+        function show(n) {
+          i = Math.max(0, Math.min(slides.length - 1, n));
+          Array.prototype.forEach.call(slides, function (s, idx) { s.hidden = idx !== i; });
+          counter.textContent = (i + 1) + ' of ' + slides.length;
+          prev.disabled = i === 0;
+          next.disabled = i === slides.length - 1;
+        }
+        prev.addEventListener('click', function () { show(i - 1); });
+        next.addEventListener('click', function () { show(i + 1); });
+        var x0 = null;
+        viewer.addEventListener('pointerdown', function (e) { x0 = e.clientX; });
+        viewer.addEventListener('pointerup', function (e) {
+          if (x0 === null) return;
+          var dx = e.clientX - x0; x0 = null;
+          if (dx > 40) show(i - 1); else if (dx < -40) show(i + 1);
+        });
+        nav.hidden = false;
+        show(0);
+      });
+    })();
+    </script>`
 }
 
 function productCard(
@@ -85,8 +175,7 @@ function productCard(
     ? `<div class="desc">${escapeHtml(p.description.trim())}</div>`
     : ''
   // Preview renders only when opted-in AND a resolved preview with pages exists.
-  const peek =
-    p.includePreview && preview && preview.pages.length > 0 ? previewBlock(p, preview) : ''
+  const peek = shouldRenderPeek(p, preview) ? previewBlock(p, preview) : ''
 
   // FEAT-89: the "I want this!" toggle. Data attributes carry the pick to the
   // form script; escaped so a crafted title can't break out of the attribute.
@@ -289,6 +378,10 @@ export function buildPublicCatalogHtml(
 
   // The order form only ships when the endpoint was baked AND something is listed.
   const form = interactive && orderConfig ? orderForm(orderConfig) : ''
+  // The page flipper ships once, and only when a preview actually renders — a
+  // preview-less catalog (with or without the order form) stays this-block-free.
+  const hasPreview = listed.some((p) => shouldRenderPeek(p, previews[p.id]))
+  const pager = hasPreview ? pagerScript() : ''
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -329,10 +422,25 @@ export function buildPublicCatalogHtml(
       list-style: none; }
     .peek summary::-webkit-details-marker { display: none; }
     .peek-body { margin-top: 8px; }
-    .peek-page { margin-bottom: 10px; }
-    .peek-img { display: block; width: 100%; border-radius: 8px; margin-bottom: 4px;
-      background: #f3f7f3; }
+    .peek-slide { margin-bottom: 6px; }
+    /* Fixed aspect box so flipping pages never makes the card jump; contain
+       (never crop/distort) since book pages and the cover vary in shape. */
+    .peek-img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: contain;
+      border-radius: 8px; margin-bottom: 4px; background: #f3f7f3; }
     .peek-text { font-size: 13px; color: #444; }
+    .peek-nav { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .peek-btn { flex: 0 0 auto; min-width: 88px; min-height: 44px; border: 2px solid #2e7d32;
+      background: #fff; color: #2e7d32; font-weight: bold; font-size: 15px; border-radius: 999px;
+      cursor: pointer; font-family: inherit; }
+    .peek-btn:disabled { opacity: 0.4; cursor: default; }
+    .peek-counter { flex: 1 1 auto; text-align: center; font-size: 13px; font-weight: bold;
+      color: #555; }
+    .peek-stickers { margin-top: 10px; }
+    .peek-stickers-label { font-size: 13px; font-weight: bold; color: #33691e; margin-bottom: 6px; }
+    .peek-sticker-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch; }
+    .peek-sticker { flex: 0 0 auto; width: 64px; height: 64px; object-fit: contain;
+      background: #f3f7f3; border-radius: 10px; padding: 4px; }
     .peek-cta { margin-top: 6px; font-size: 14px; font-weight: bold; color: #2e7d32; }
     .empty { text-align: center; color: #777; font-size: 16px; padding: 40px 12px; }
     footer { margin-top: 32px; text-align: center; font-size: 14px; color: #666; }
@@ -356,6 +464,7 @@ export function buildPublicCatalogHtml(
     <footer>Made with <span class="heart" aria-hidden="true">♥</span> by ${escapeHtml(credit)}</footer>
   </div>
   ${form}
+  ${pager}
 </body>
 </html>`
 }
