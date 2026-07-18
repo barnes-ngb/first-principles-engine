@@ -48,6 +48,32 @@ export interface CatalogPreview {
   coverUrl?: string
   /** The first N inside pages, in order. */
   pages: CatalogPreviewPage[]
+  /**
+   * Distinct sticker image URLs placed anywhere in the book (FEAT-91). Deduped,
+   * in first-seen order; omitted when the book has no stickers. Hotlinked like
+   * every other preview image — the same tokenized Storage URLs, never copied.
+   */
+  stickers?: string[]
+}
+
+/**
+ * Collect the DISTINCT sticker image URLs across a book's pages (FEAT-91). A
+ * sticker is a `PageImage` with `type === 'sticker'` — books carry them as extra
+ * images layered on a page (beyond the base `images[0]` scene the page preview
+ * pulls), which is why they never surfaced in the peek before. Deduped by URL in
+ * first-seen (page then z-order) order.
+ */
+function collectStickerUrls(book: Book): string[] {
+  const seen = new Set<string>()
+  const urls: string[] = []
+  for (const page of [...book.pages].sort((a, b) => a.pageNumber - b.pageNumber)) {
+    for (const image of page.images) {
+      if (image.type !== 'sticker' || !image.url || seen.has(image.url)) continue
+      seen.add(image.url)
+      urls.push(image.url)
+    }
+  }
+  return urls
 }
 
 /**
@@ -55,20 +81,32 @@ export interface CatalogPreview {
  * pages (clamped ≤ {@link PREVIEW_MAX_PAGES}). Pure and read-only — it never
  * mutates the book, and pulls only existing image URLs + text. A page with
  * neither an image nor text is dropped, so an empty preview can be skipped.
+ *
+ * Preview images are **deduped by URL** (FEAT-91): a page image that repeats the
+ * cover (the common case when a book has no explicit cover and the cover falls
+ * back to page 1's image) is dropped so the cover never shows twice as "page 1".
+ * The `count` cap applies to real pages *after* dedup.
  */
 export function buildBookPreview(book: Book, count: number | undefined): CatalogPreview {
   const n = clampPreviewPageCount(count)
   const coverUrl =
     book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
 
+  const seen = new Set<string>()
+  if (coverUrl) seen.add(coverUrl)
+
   const pages: CatalogPreviewPage[] = []
   for (const page of [...book.pages].sort((a, b) => a.pageNumber - b.pageNumber)) {
     if (pages.length >= n) break
-    const imageUrl = page.images[0]?.url
+    let imageUrl: string | undefined = page.images[0]?.url
+    // Dedup by URL: drop an image that repeats the cover (or an earlier page).
+    if (imageUrl && seen.has(imageUrl)) imageUrl = undefined
+    if (imageUrl) seen.add(imageUrl)
     const text = page.text?.trim() || undefined
     if (!imageUrl && !text) continue
     pages.push({ imageUrl, text })
   }
 
-  return { coverUrl, pages }
+  const stickers = collectStickerUrls(book)
+  return { coverUrl, pages, ...(stickers.length > 0 ? { stickers } : {}) }
 }
