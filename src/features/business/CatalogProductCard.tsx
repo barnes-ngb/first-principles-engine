@@ -6,6 +6,7 @@ import Typography from '@mui/material/Typography'
 
 import type { CatalogProduct } from '../../core/types/business'
 import { BusinessItemTypeLabel, CatalogProductStatus } from '../../core/types/business'
+import { productWantsPreview } from './catalogPreview'
 import { formatPriceCents } from './catalogPrice'
 
 interface CatalogProductCardProps {
@@ -73,6 +74,14 @@ export default function CatalogProductCard({ product, onClick }: CatalogProductC
           <Typography variant="caption" color="text.secondary">
             Made by {product.madeBy.join(', ')}
           </Typography>
+        )}
+        {productWantsPreview(product) && (
+          <Chip
+            size="small"
+            label="📖 Preview on"
+            variant="outlined"
+            sx={{ alignSelf: 'flex-start' }}
+          />
         )}
       </Stack>
     </Box>

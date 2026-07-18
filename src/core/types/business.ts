@@ -263,6 +263,20 @@ export interface CatalogProduct {
   madeBy: string[]
   /** Lifecycle. Only `listed` products are eligible for the public export (§4). */
   status: CatalogProductStatus
+  /**
+   * Opt-in book preview (FEAT-85, design §4). When `true`, a listed product
+   * promoted from a Book (`sourceRef.kind === 'book'`) publishes a **partial**
+   * peek — cover + the first {@link previewPageCount} pages — inside the public
+   * catalog page. **Default OFF** and parent-controlled: never auto-enabled, and
+   * meaningless for non-book products (nothing to page through). It is a
+   * deliberately partial preview — never the whole book (that IS the product).
+   */
+  includePreview?: boolean
+  /**
+   * How many inside pages the preview shows (FEAT-85). Default 3, capped at 5 —
+   * a taste, not the book. Only meaningful when `includePreview` is set.
+   */
+  previewPageCount?: number
   /** ISO timestamp. */
   createdAt: string
   /** ISO timestamp of last parent edit. */
