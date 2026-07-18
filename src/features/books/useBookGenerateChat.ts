@@ -447,7 +447,11 @@ export function useBookGenerateChat(
                     childAge,
                     childName,
                     illustrationStyle,
-                    pageCount,
+                    // Revisions inherit the book's actual length (FEAT-95) — the
+                    // revise prompt locks "do not add or remove pages", so the
+                    // book's real page count is the source of truth, not the
+                    // (now user-adjustable) generation target.
+                    pageCount: currentStory?.pages.length ?? pageCount,
                   },
                   newFeedback: trimmed,
                 }),

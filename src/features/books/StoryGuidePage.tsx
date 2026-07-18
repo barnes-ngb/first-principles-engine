@@ -16,7 +16,9 @@ import { useBookGenerator, inferBookTheme } from './useBookGenerator'
 import { useSightWordProgress } from './useSightWordProgress'
 import StoryGuideQuestion from './StoryGuideQuestion'
 import GenerationProgress from './GenerationProgress'
+import StoryLengthSelector from './StoryLengthSelector'
 import { useStoryGuide, assembleStoryPrompt } from './useStoryGuide'
+import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
 
 /** Compute age in years from a YYYY-MM-DD birthdate string. */
 function ageFromBirthdate(birthdate: string | undefined, fallback: number): number {
@@ -44,7 +46,9 @@ export default function StoryGuidePage() {
   const isLincoln = childName.toLowerCase() === 'lincoln'
 
   const childAge = ageFromBirthdate(activeChild?.birthdate, isLincoln ? 10 : 6)
-  const pageCount = isLincoln ? 10 : 6
+  // Target page count is a product decision (FEAT-95) — default to the priced
+  // product size (10), let the kid pick Short / Normal / Long.
+  const [pageCount, setPageCount] = useState<number>(DEFAULT_TARGET_PAGE_COUNT)
   const genStyle = isLincoln ? 'minecraft' : 'storybook'
 
   const { generateBook, progress, generating, resetProgress } = useBookGenerator()
@@ -255,6 +259,8 @@ export default function StoryGuidePage() {
         <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
           "{storyPromptPreview.length > 120 ? storyPromptPreview.slice(0, 120) + '...' : storyPromptPreview}"
         </Typography>
+
+        <StoryLengthSelector value={pageCount} onChange={setPageCount} disabled={generating} />
 
         {generationError && (
           <Alert severity="error" onClose={() => setGenerationError(null)}>

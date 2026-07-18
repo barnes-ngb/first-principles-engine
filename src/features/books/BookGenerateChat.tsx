@@ -21,6 +21,8 @@ import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { ChatTurn } from '../../core/types'
 import { useBookGenerateChat } from './useBookGenerateChat'
+import StoryLengthSelector from './StoryLengthSelector'
+import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
 
 interface Props {
   /** Called after commitAndClose; parent dialog should close itself and navigate. */
@@ -69,7 +71,10 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const childAge = ageFromBirthdate(activeChild?.birthdate, isLincoln ? 10 : 6)
-  const pageCount = isLincoln ? 10 : 6
+  // Target page count is a product decision (FEAT-95) — default to the priced
+  // product size (10), let the kid pick Short / Normal / Long before the story
+  // starts. Locked once a draft exists (revisions inherit the book's length).
+  const [pageCount, setPageCount] = useState<number>(DEFAULT_TARGET_PAGE_COUNT)
   const defaultStyle = isLincoln ? 'minecraft' : 'storybook'
 
   const attribution = isParent && childId
@@ -480,6 +485,15 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           showConfirmation={true}
           disabled={composerDisabled}
           onTranscript={(text) => void handleVoiceTranscript(text)}
+        />
+      )}
+
+      {/* Story length — choose before the story starts; locked once a draft exists */}
+      {!currentStory && (
+        <StoryLengthSelector
+          value={pageCount}
+          onChange={setPageCount}
+          disabled={isLoading || isIllustrating}
         />
       )}
 
