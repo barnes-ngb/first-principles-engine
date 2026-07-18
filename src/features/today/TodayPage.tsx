@@ -191,7 +191,6 @@ export default function TodayPage() {
   const {
     dayLog,
     saveState,
-    lastSavedAt,
     weekPlanId,
     weekFocus,
     readAloudBookId,
@@ -742,28 +741,6 @@ export default function TodayPage() {
     artifactSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [])
 
-  // Compute Daily Log status label
-  const dailyLogStatus = useMemo(() => {
-    if (!dayLog) return null
-    if (lastSavedAt) {
-      try {
-        const d = new Date(lastSavedAt)
-        return `Saved at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-      } catch {
-        return 'Saved'
-      }
-    }
-    if (dayLog.updatedAt) {
-      try {
-        const d = new Date(dayLog.updatedAt)
-        return `Saved at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-      } catch {
-        return 'Saved'
-      }
-    }
-    return 'Not saved yet'
-  }, [dayLog, lastSavedAt])
-
   const handleSnackMessage = useCallback(
     (msg: { text: string; severity: 'success' | 'error' }) => setSnackMessage(msg),
     [setSnackMessage],
@@ -855,28 +832,19 @@ export default function TodayPage() {
         </IconButton>
       </Stack>
 
-      {/* Week-at-a-glance day chips */}
-      <Stack direction="row" spacing={0.5} justifyContent="center" sx={{ mb: 1 }}>
-        {weekDayDates.map(({ label, dateKey }) => {
-          const isSelected = dateKey === selectedDate
-          const isRealToday = dateKey === realToday
-          return (
-            <Chip
-              key={dateKey}
-              label={label}
-              size="small"
-              onClick={() => setSelectedDate(dateKey)}
-              color={isSelected ? 'primary' : 'default'}
-              variant={isSelected ? 'filled' : 'outlined'}
-              sx={{
-                minWidth: 48,
-                fontWeight: isSelected || isRealToday ? 700 : 400,
-                ...(isRealToday && !isSelected ? { borderColor: 'primary.main', borderWidth: 2 } : {}),
-              }}
-            />
-          )
-        })}
-      </Stack>
+      {/* --- Week Ribbon: 5-dot Mon-Fri progress + day switcher (parent only) --- */}
+      {selectedChildId && (
+        <SectionErrorBoundary section="week ribbon">
+          <WeekRibbon
+            childId={selectedChildId}
+            familyId={familyId}
+            weekStart={weekDayDates[0].dateKey}
+            today={realToday}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+          />
+        </SectionErrorBoundary>
+      )}
 
       {!isToday && (
         <Alert severity="info" sx={{ mb: 1 }}>
@@ -904,26 +872,6 @@ export default function TodayPage() {
           emptyMessage="Add a child to start logging."
         />
       )}
-
-      {/* Daily Log status line */}
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          px: 1.5,
-          py: 0.75,
-          borderRadius: 1,
-          bgcolor: lastSavedAt ? 'success.50' : 'action.hover',
-          border: '1px solid',
-          borderColor: lastSavedAt ? 'success.200' : 'divider',
-        }}
-      >
-        <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
-          Daily Log: {dailyLogStatus}
-        </Typography>
-        <SaveIndicator state={saveState} />
-      </Box>
 
       <HelperPanel template={activeTemplate} />
 
@@ -956,62 +904,6 @@ export default function TodayPage() {
           </Stack>
         </Stack>
       </SectionCard>
-
-      {/* --- Week Ribbon: 5-dot Mon-Fri progress at-a-glance (parent only) --- */}
-      {selectedChildId && (
-        <SectionErrorBoundary section="week ribbon">
-          <WeekRibbon
-            childId={selectedChildId}
-            familyId={familyId}
-            weekStart={weekDayDates[0].dateKey}
-            today={realToday}
-          />
-        </SectionErrorBoundary>
-      )}
-
-      {/* --- Week Focus + Conundrum --- */}
-      {weekFocus && (
-        <SectionErrorBoundary section="week focus">
-          <Box id="conundrum" />
-          <WeekFocusCard
-            weekFocus={weekFocus}
-            familyId={familyId}
-            selectedChildId={selectedChildId}
-            onSnackMessage={handleSnackMessage}
-          />
-        </SectionErrorBoundary>
-      )}
-
-      {/* --- Knowledge Mine parent recap (no-shame, read-only, today only) --- */}
-      {latestMineSession && (
-        <SectionErrorBoundary section="mine recap">
-          <MineRecapCard
-            session={latestMineSession}
-            childName={selectedChild?.name ?? 'Your child'}
-          />
-        </SectionErrorBoundary>
-      )}
-
-      {/* --- Draft Ready: surface unpublished monthly books --- */}
-      {familyId && (
-        <SectionErrorBoundary section="monthly draft ready">
-          <DraftReadyCard familyId={familyId} />
-        </SectionErrorBoundary>
-      )}
-
-      {/* --- Chapter Question Pool (read-aloud discussion) --- */}
-      <SectionErrorBoundary section="chapter question">
-        <Box id="chapter" />
-        <ChapterQuestionPool
-          book={selectedBook}
-          bookProgress={bookProgress}
-          bookProgressLoading={bookProgressLoading}
-          onChapterAnswered={updateChapter}
-          dayLog={dayLog}
-          persistDayLogImmediate={persistDayLogImmediate}
-          onRetryGeneration={() => void handleRetryChapterGen()}
-        />
-      </SectionErrorBoundary>
 
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {selectedChild && (
@@ -1050,6 +942,55 @@ export default function TodayPage() {
           scanFeedbackBySubject={scanFeedbackBySubject}
           recentScans={todayRecentScans}
         />
+        </SectionErrorBoundary>
+      )}
+
+      {/* --- For you today: parent-facing cards, below the primary checklist --- */}
+      <Typography variant="overline" color="text.secondary" sx={{ mt: 1 }}>
+        For you today
+      </Typography>
+
+      {/* --- Week Focus + Conundrum --- */}
+      {weekFocus && (
+        <SectionErrorBoundary section="week focus">
+          <Box id="conundrum" />
+          <WeekFocusCard
+            weekFocus={weekFocus}
+            familyId={familyId}
+            selectedChildId={selectedChildId}
+            onSnackMessage={handleSnackMessage}
+          />
+        </SectionErrorBoundary>
+      )}
+
+      {/* --- Chapter Question Pool (read-aloud discussion) --- */}
+      <SectionErrorBoundary section="chapter question">
+        <Box id="chapter" />
+        <ChapterQuestionPool
+          book={selectedBook}
+          bookProgress={bookProgress}
+          bookProgressLoading={bookProgressLoading}
+          onChapterAnswered={updateChapter}
+          dayLog={dayLog}
+          persistDayLogImmediate={persistDayLogImmediate}
+          onRetryGeneration={() => void handleRetryChapterGen()}
+        />
+      </SectionErrorBoundary>
+
+      {/* --- Knowledge Mine parent recap (no-shame, read-only, today only) --- */}
+      {latestMineSession && (
+        <SectionErrorBoundary section="mine recap">
+          <MineRecapCard
+            session={latestMineSession}
+            childName={selectedChild?.name ?? 'Your child'}
+          />
+        </SectionErrorBoundary>
+      )}
+
+      {/* --- Draft Ready: surface unpublished monthly books --- */}
+      {familyId && (
+        <SectionErrorBoundary section="monthly draft ready">
+          <DraftReadyCard familyId={familyId} />
         </SectionErrorBoundary>
       )}
 

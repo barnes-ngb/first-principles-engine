@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -63,6 +63,8 @@ function renderRibbon(props: {
   weekStart?: string
   today?: string
   childId?: string
+  selectedDate?: string
+  onSelectDate?: (dateKey: string) => void
 } = {}) {
   return render(
     <MemoryRouter>
@@ -71,6 +73,8 @@ function renderRibbon(props: {
         familyId="fam-1"
         weekStart={props.weekStart ?? '2026-05-11'}
         today={props.today ?? '2026-05-14'}
+        selectedDate={props.selectedDate}
+        onSelectDate={props.onSelectDate}
       />
     </MemoryRouter>,
   )
@@ -161,5 +165,55 @@ describe('WeekRibbon', () => {
   it('returns null when childId is empty', () => {
     const { container } = renderRibbon({ childId: '' })
     expect(container.textContent).toBe('')
+  })
+
+  it('calls onSelectDate with the tapped dateKey when a day dot is clicked', () => {
+    setSnapshot([
+      dayLog('2026-05-11', [{ label: 'a', completed: false, plannedMinutes: 30 }]),
+    ])
+    const onSelectDate = vi.fn()
+    renderRibbon({ onSelectDate })
+
+    fireEvent.click(screen.getByLabelText('View Monday, May 11'))
+
+    expect(onSelectDate).toHaveBeenCalledWith('2026-05-11')
+  })
+
+  it('marks only the selected day dot with aria-current="date"', () => {
+    setSnapshot([
+      dayLog('2026-05-11', [{ label: 'a', completed: false, plannedMinutes: 30 }]),
+      dayLog('2026-05-12', [{ label: 'b', completed: false, plannedMinutes: 30 }]),
+    ])
+    renderRibbon({ onSelectDate: vi.fn(), selectedDate: '2026-05-12' })
+
+    expect(screen.getByLabelText('View Tuesday, May 12')).toHaveAttribute('aria-current', 'date')
+    expect(screen.getByLabelText('View Monday, May 11')).not.toHaveAttribute('aria-current')
+  })
+
+  it('makes interactive day dots keyboard-operable (focusable + Enter/Space)', () => {
+    setSnapshot([
+      dayLog('2026-05-11', [{ label: 'a', completed: false, plannedMinutes: 30 }]),
+    ])
+    const onSelectDate = vi.fn()
+    renderRibbon({ onSelectDate })
+
+    const dot = screen.getByLabelText('View Monday, May 11')
+    expect(dot).toHaveAttribute('tabindex', '0')
+
+    fireEvent.keyDown(dot, { key: 'Enter' })
+    fireEvent.keyDown(dot, { key: ' ' })
+
+    expect(onSelectDate).toHaveBeenCalledTimes(2)
+    expect(onSelectDate).toHaveBeenNthCalledWith(1, '2026-05-11')
+    expect(onSelectDate).toHaveBeenNthCalledWith(2, '2026-05-11')
+  })
+
+  it('renders no interactive day dots when onSelectDate is absent (back-compat)', () => {
+    setSnapshot([
+      dayLog('2026-05-11', [{ label: 'a', completed: false, plannedMinutes: 30 }]),
+    ])
+    renderRibbon()
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 })
