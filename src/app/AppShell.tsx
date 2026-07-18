@@ -10,11 +10,13 @@ import DebugPanel from '../components/DebugPanel'
 import ProfileMenu from '../components/ProfileMenu'
 import { useAuth } from '../core/auth/useAuth'
 import { useActiveChild } from '../core/hooks/useActiveChild'
+import { useChildSkillSnapshot } from '../core/hooks/useChildSkillSnapshot'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 import { isArmorComplete } from '../features/avatar/armorGate'
+import { canAccessKnowledgeMine } from '../features/quest/knowledgeMineAccess'
 
 const navItems = [
   { label: 'Today', to: '/today' },
@@ -52,14 +54,21 @@ function NavContent({
   activeChild,
   avatarProfile,
   armorReady,
+  showKnowledgeMine,
 }: {
   isParent: boolean
   onNavigate?: () => void
   activeChild?: { id: string; name: string } | null
   avatarProfile?: import('../core/types').AvatarProfile | null
   armorReady?: boolean
+  showKnowledgeMine?: boolean
 }) {
-  const items = isParent ? navItems : kidNavItems
+  // Hide the Knowledge Mine item for kids without Mine calibration — the /quest
+  // route guard would silently bounce them to Today, so nav shouldn't advertise
+  // a link that goes nowhere. Same predicate as RequireKnowledgeMineAccess.
+  const items = (isParent ? navItems : kidNavItems).filter(
+    (item) => item.to !== '/quest' || isParent || showKnowledgeMine,
+  )
   return (
     <>
       <div className="app-shell__profile-row">
@@ -143,13 +152,23 @@ function NavContent({
 
 export function AppShell({ children }: AppShellProps) {
   const { profile } = useProfile()
-  const { activeChild } = useActiveChild()
+  const { activeChild, activeChildId } = useActiveChild()
   const { familyId } = useAuth()
   const avatarProfile = useAvatarProfile(familyId ?? undefined, activeChild?.id)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const location = useLocation()
 
   const isParent = profile === UserProfile.Parents
+
+  // Kid nav Knowledge Mine visibility mirrors the /quest route guard: only kids
+  // with Mine calibration see the item (gate + nav can never disagree).
+  const { snapshot: kidSnapshot, loaded: kidSnapshotLoaded } = useChildSkillSnapshot(
+    familyId ?? undefined,
+    !isParent ? activeChildId || undefined : undefined,
+  )
+  const showKnowledgeMine =
+    !isParent && kidSnapshotLoaded && canAccessKnowledgeMine(kidSnapshot)
+
   const armorReady = !isParent && avatarProfile ? isArmorComplete(avatarProfile) : undefined
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
@@ -165,7 +184,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="app-shell">
       {/* Desktop sidebar (hidden on mobile via CSS) */}
       <aside className="app-shell__nav">
-        <NavContent isParent={isParent} activeChild={activeChild} avatarProfile={avatarProfile} armorReady={armorReady} />
+        <NavContent isParent={isParent} activeChild={activeChild} avatarProfile={avatarProfile} armorReady={armorReady} showKnowledgeMine={showKnowledgeMine} />
       </aside>
 
       {/* Mobile header + drawer (hidden on desktop via CSS) */}
@@ -235,6 +254,7 @@ export function AppShell({ children }: AppShellProps) {
           activeChild={activeChild}
           avatarProfile={avatarProfile}
           armorReady={armorReady}
+          showKnowledgeMine={showKnowledgeMine}
         />
       </Drawer>
 
