@@ -10,7 +10,14 @@ const { useCatalogProductsMock, createProductMock, updateProductMock } = vi.hois
   updateProductMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
 }))
 
+const { useCatalogSiteMock, publishMock, unpublishMock } = vi.hoisted(() => ({
+  useCatalogSiteMock: vi.fn(),
+  publishMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+  unpublishMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+}))
+
 vi.mock('./useCatalogProducts', () => ({ useCatalogProducts: useCatalogProductsMock }))
+vi.mock('./useCatalogSite', () => ({ useCatalogSite: useCatalogSiteMock }))
 
 // Stub the form so the section test stays focused on list/mode behavior.
 vi.mock('./CatalogProductForm', () => ({
@@ -59,9 +66,24 @@ function setProducts(products: CatalogProduct[], loading = false) {
   })
 }
 
+function setSite(over: Partial<ReturnType<typeof useCatalogSiteMock>> = {}) {
+  useCatalogSiteMock.mockReturnValue({
+    published: null,
+    loading: false,
+    busy: false,
+    error: null,
+    publish: publishMock,
+    unpublish: unpublishMock,
+    ...over,
+  })
+}
+
 beforeEach(() => {
   createProductMock.mockClear()
   updateProductMock.mockClear()
+  publishMock.mockClear()
+  unpublishMock.mockClear()
+  setSite()
 })
 
 describe('CatalogSection', () => {
@@ -150,5 +172,46 @@ describe('CatalogSection', () => {
     expect(createProductMock).not.toHaveBeenCalled()
     expect(updateProductMock).not.toHaveBeenCalled()
     openSpy.mockRestore()
+  })
+
+  it('hides the Publish site action from a non-parent', () => {
+    setProducts([product({ id: 'p1', title: 'Kept', status: 'listed' })])
+    render(<CatalogSection canEdit={false} />)
+    expect(screen.queryByRole('button', { name: /publish site/i })).not.toBeInTheDocument()
+  })
+
+  it('disables Publish site when no product is listed', () => {
+    setProducts([product({ id: 'p1', title: 'Draft only', status: 'draft' })])
+    render(<CatalogSection canEdit />)
+    expect(screen.getByRole('button', { name: /publish site/i })).toBeDisabled()
+  })
+
+  it('publishes the catalog products when a listed product exists', async () => {
+    const user = userEvent.setup()
+    const listed = product({ id: 'p1', title: 'Seed Vault Kit', status: 'listed' })
+    setProducts([listed])
+    render(<CatalogSection canEdit />)
+
+    await user.click(screen.getByRole('button', { name: /publish site/i }))
+    await waitFor(() => expect(publishMock).toHaveBeenCalledTimes(1))
+    expect(publishMock.mock.calls[0][0]).toEqual([listed])
+    // Publishing must not touch the catalog data itself.
+    expect(createProductMock).not.toHaveBeenCalled()
+    expect(updateProductMock).not.toHaveBeenCalled()
+  })
+
+  it('shows the live URL, a copy button, and unpublish once published', async () => {
+    const user = userEvent.setup()
+    setProducts([product({ id: 'p1', title: 'Kept', status: 'listed' })])
+    setSite({
+      published: { url: 'https://firebasestorage.example/public/catalog', publishedAt: '2026-07-18T12:00:00.000Z' },
+    })
+    render(<CatalogSection canEdit />)
+
+    expect(screen.getByRole('link', { name: /firebasestorage\.example/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /republish site/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /unpublish/i }))
+    await waitFor(() => expect(unpublishMock).toHaveBeenCalledTimes(1))
   })
 })
