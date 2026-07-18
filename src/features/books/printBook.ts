@@ -46,7 +46,7 @@ export interface PrintBookOptions {
   settings?: PrintSettings
 }
 
-/* ───────────────────── cover URL + dedupe (FEAT-98 / FEAT-91) ───────────────────── */
+/* ───────────────────── cover URL + dedupe (FEAT-99 / FEAT-91) ───────────────────── */
 
 /**
  * The cover image URL: the explicit `coverImageUrl`, else the first page image
@@ -59,7 +59,7 @@ export function resolveCoverImageUrl(book: Book): string | undefined {
 
 /**
  * Images to draw on a content page, dropping any that duplicate the cover image
- * (FEAT-98). When a book has no explicit cover the cover falls back to page 1's
+ * (FEAT-99). When a book has no explicit cover the cover falls back to page 1's
  * image (see {@link resolveCoverImageUrl}); without this filter that art would
  * render again on story page 1, so the cover reads as "two pages." Deduping by
  * URL mirrors the FEAT-91 fix in `catalogPreview.buildBookPreview`. `dedupeUrl`
@@ -73,7 +73,7 @@ export function contentImagesToDraw(
   return images.filter((img) => img.url !== dedupeUrl)
 }
 
-/* ───────────────────── page-number placement (FEAT-98) ───────────────────── */
+/* ───────────────────── page-number placement (FEAT-99) ───────────────────── */
 
 /**
  * Full-document formats that keep printed page numbers. The picture-book
@@ -571,7 +571,7 @@ async function drawContentPage(
   const textColor = hexToRgb(colors.text)
   let curY = area.y
 
-  // Drop any image that duplicates the cover art (FEAT-98) so it never repeats
+  // Drop any image that duplicates the cover art (FEAT-99) so it never repeats
   // as story page 1.
   const pageImages = contentImagesToDraw(page.images, dedupeUrl)
 
@@ -673,7 +673,7 @@ async function drawContentPage(
   if (page.text) {
     const textLen = page.text.length
     // Only reserve the bottom strip when a number actually prints there, so the
-    // picture-book formats reclaim it for the story text (FEAT-98).
+    // picture-book formats reclaim it for the story text (FEAT-99).
     const pageNumSpace = shouldRenderPageNumbers(settings.pageSize, settings.includePageNumbers) ? 6 : 0
     const maxTextY = area.y + area.h - pageNumSpace
     const availableTextH = maxTextY - curY
@@ -712,7 +712,7 @@ async function drawContentPage(
     )
   }
 
-  // Page number at bottom center — document formats only (FEAT-98)
+  // Page number at bottom center — document formats only (FEAT-99)
   if (shouldRenderPageNumbers(settings.pageSize, settings.includePageNumbers)) {
     pdf.setFont('times', 'normal')
     pdf.setFontSize(12)
@@ -902,7 +902,7 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<Pri
   const sightWordSet = new Set((opts.sightWords ?? []).map((w) => w.toLowerCase()))
   const isBooklet = settings.pageSize === 'booklet'
   // Cover art to suppress on content pages (only when a cover page exists) so it
-  // never repeats as story page 1 (FEAT-98).
+  // never repeats as story page 1 (FEAT-99).
   const dedupeUrl = settings.includeCover ? resolveCoverImageUrl(book) : undefined
 
   // Pre-fetch all images as base64 to avoid CORS issues

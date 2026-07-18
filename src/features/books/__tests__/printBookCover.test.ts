@@ -34,7 +34,7 @@ function book(over: Partial<Book> = {}): Book {
   } as Book
 }
 
-describe('resolveCoverImageUrl (FEAT-98)', () => {
+describe('resolveCoverImageUrl (FEAT-99)', () => {
   it('prefers the explicit coverImageUrl', () => {
     expect(resolveCoverImageUrl(book({ coverImageUrl: 'cover.png' }))).toBe('cover.png')
   })
@@ -48,7 +48,7 @@ describe('resolveCoverImageUrl (FEAT-98)', () => {
   })
 })
 
-describe('buildLogicalPages emits exactly one cover (FEAT-98)', () => {
+describe('buildLogicalPages emits exactly one cover (FEAT-99)', () => {
   it('emits the cover once, in front, then content pages', () => {
     const seq = buildLogicalPages(book(), true, false, false)
     expect(seq.filter((p) => p.type === 'cover')).toHaveLength(1)
@@ -75,7 +75,7 @@ describe('buildLogicalPages emits exactly one cover (FEAT-98)', () => {
   })
 })
 
-describe('contentImagesToDraw dedupes the cover image (FEAT-98 / FEAT-91)', () => {
+describe('contentImagesToDraw dedupes the cover image (FEAT-99 / FEAT-91)', () => {
   it('drops the page-1 image when it duplicates the fallback cover URL', () => {
     // No explicit cover → cover falls back to page 1 image 'scene-1.png'.
     const b = book()
