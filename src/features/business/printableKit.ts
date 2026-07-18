@@ -1,6 +1,6 @@
 import type { KitRoster } from '../../core/types/business'
 import { escapeHtml } from './catalogSheet'
-import { defenderArtKey, HERO_ART_KEY, heroDescriptor, invaderArtKey } from './kitArt'
+import { defenderArtKey, HERO_ART_KEY, invaderArtKey } from './kitArt'
 
 /**
  * Printable GDQ kit (FEAT-90, design GDQ_KIT_BUILDER_DESIGN.md §5): a pure builder
