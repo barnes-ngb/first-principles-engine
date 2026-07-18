@@ -51,6 +51,15 @@ vi.mock('../../core/auth/useAuth', () => ({
   useFamilyId: () => 'fam-1',
 }))
 
+// Spy on the download side-effect; keep the pure name-builders real (FEAT-93).
+const downloadArtFilesMock = vi.hoisted(() =>
+  vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+)
+vi.mock('./stickerArtExport', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./stickerArtExport')>()
+  return { ...actual, downloadArtFiles: downloadArtFilesMock }
+})
+
 // Stub the catalog form so the section test stays focused; echo the pre-fill.
 vi.mock('./CatalogProductForm', () => ({
   default: ({
@@ -178,6 +187,7 @@ beforeEach(() => {
   createProductMock.mockClear()
   updateProductMock.mockClear()
   generateImageMock.mockClear()
+  downloadArtFilesMock.mockClear()
   generateImageMock.mockResolvedValue({
     url: 'https://img/hero.png',
     storagePath: 'families/fam-1/generated-images/hero.png',
@@ -353,6 +363,53 @@ describe('KitBuilderSection', () => {
     expect(createRosterMock).not.toHaveBeenCalled()
     expect(updateRosterMock).not.toHaveBeenCalled()
     expect(screen.queryByTestId('catalog-form')).not.toBeInTheDocument()
+  })
+
+  // ── Download art (FEAT-93) ────────────────────────────────────
+
+  const rosterWithArt = (over: Partial<KitRoster> = {}) =>
+    roster({
+      id: 'kit-1',
+      vaultName: 'Neptune',
+      heroName: 'Link',
+      art: {
+        hero: { url: 'https://img/hero.png', storagePath: 'p', generatedAt: '2026-07-18T00:00:00.000Z' },
+      },
+      ...over,
+    })
+
+  it('Download art downloads named production files with the kit zip name, writing nothing', async () => {
+    const user = userEvent.setup()
+    setRosters([rosterWithArt()])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
+
+    await user.click(screen.getByRole('button', { name: /download art/i }))
+
+    await waitFor(() => expect(downloadArtFilesMock).toHaveBeenCalledTimes(1))
+    const [files, zipName] = downloadArtFilesMock.mock.calls[0] as [
+      Array<{ url: string; filename: string }>,
+      string,
+    ]
+    expect(files[0]).toEqual({ url: 'https://img/hero.png', filename: 'neptune-hero-link.png' })
+    expect(zipName).toBe('neptune-stickers.zip')
+    // Pure read → download: no writes anywhere.
+    expect(updateRosterMock).not.toHaveBeenCalled()
+    expect(createRosterMock).not.toHaveBeenCalled()
+    expect(updateProductMock).not.toHaveBeenCalled()
+    expect(generateImageMock).not.toHaveBeenCalled()
+  })
+
+  it('hides Download art when the roster has no art', () => {
+    setRosters([roster({ id: 'kit-1', vaultName: 'Neptune', art: {} })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit />)
+    expect(screen.queryByRole('button', { name: /download art/i })).not.toBeInTheDocument()
+  })
+
+  it('hides Download art for a non-parent (canEdit-gated)', () => {
+    setRosters([rosterWithArt()])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
+    expect(screen.getByText('Neptune')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /download art/i })).not.toBeInTheDocument()
   })
 
   // ── Art pipeline (FEAT-88) ────────────────────────────────────

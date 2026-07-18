@@ -16,6 +16,7 @@ import { artToProductImages, buildKitCharacterPrompt, hasAnyArt } from './kitArt
 import type { KitArtCharacter } from './KitBuilderForm'
 import KitBuilderForm from './KitBuilderForm'
 import { buildPrintableKitHtml } from './printableKit'
+import { buildKitArtDownloads, downloadArtFiles, kitArtZipName } from './stickerArtExport'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
 import type { NewKitRoster } from './useKitRosters'
@@ -155,6 +156,16 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
     }
   }
 
+  /**
+   * "Download art" (FEAT-93): download every generated character sticker with
+   * production names (kit-scoped, kebab-case — `neptune-hero-link.png`), zipped.
+   * Pure read → fetch-to-blob → download; writes nothing anywhere. The missing
+   * production link — print on sticker paper, or upload to a die-cut service.
+   */
+  const handleDownloadArt = async (r: KitRoster) => {
+    await downloadArtFiles(buildKitArtDownloads(r), kitArtZipName(r))
+  }
+
   if (mode.kind === 'promote') {
     return (
       <CatalogProductForm
@@ -239,6 +250,19 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
                         Print kit
                       </Button>
                     )}
+                    {canEdit && hasAnyArt(r) && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={(e) => {
+                          // Don't trigger the row's edit tap.
+                          e.stopPropagation()
+                          void handleDownloadArt(r)
+                        }}
+                      >
+                        Download art
+                      </Button>
+                    )}
                     {canEdit && hasAnyArt(r) && productForRoster(r) && (
                       <Button
                         size="small"
@@ -277,6 +301,13 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
             )
           })}
         </Stack>
+      )}
+
+      {canEdit && rosters.some(hasAnyArt) && (
+        <Typography variant="caption" color="text.secondary">
+          <strong>Download art</strong> saves each character as a transparent PNG. Print on sticker
+          paper, or upload to a sticker service.
+        </Typography>
       )}
 
       <Button
