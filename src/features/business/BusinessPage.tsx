@@ -6,6 +6,7 @@ import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
+import CatalogSection from './CatalogSection'
 import GoalBuilder from './GoalBuilder'
 import GoalThermometer from './GoalThermometer'
 import KitBuilderSection from './KitBuilderSection'
@@ -85,6 +86,12 @@ export default function BusinessPage() {
               Loading…
             </Typography>
           )}
+        </SectionCard>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="business catalog">
+        <SectionCard title="Catalog">
+          <CatalogSection canEdit={canEdit} />
         </SectionCard>
       </SectionErrorBoundary>
 
