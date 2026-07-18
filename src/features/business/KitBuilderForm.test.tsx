@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { KitRoster } from '../../core/types/business'
+import type { KitArtRef, KitRoster } from '../../core/types/business'
 import KitBuilderForm from './KitBuilderForm'
 import type { NewKitRoster } from './useKitRosters'
 
@@ -12,6 +12,56 @@ function renderForm(roster?: KitRoster) {
   render(<KitBuilderForm childId="lincoln" roster={roster} onSave={onSave} onCancel={onCancel} />)
   return { onSave, onCancel }
 }
+
+const artRef = (url: string): KitArtRef => ({
+  url,
+  storagePath: `families/f/generated-images/${url}.png`,
+  generatedAt: '2026-07-18T00:00:00.000Z',
+})
+
+function renderArtForm(
+  roster: KitRoster,
+  opts: { canGenerateArt?: boolean; onGenerateArt?: ReturnType<typeof vi.fn> } = {},
+) {
+  const onSave = vi.fn<(body: NewKitRoster, id?: string) => Promise<void>>(async () => undefined)
+  const onCancel = vi.fn()
+  const onGenerateArt =
+    opts.onGenerateArt ??
+    vi.fn<(key: string, c: { name: string; descriptor: string }) => Promise<KitArtRef | null>>(
+      async () => artRef('new'),
+    )
+  render(
+    <KitBuilderForm
+      childId="lincoln"
+      roster={roster}
+      onSave={onSave}
+      onCancel={onCancel}
+      canGenerateArt={opts.canGenerateArt ?? true}
+      onGenerateArt={onGenerateArt}
+    />,
+  )
+  return { onSave, onCancel, onGenerateArt }
+}
+
+const savedRoster = (over: Partial<KitRoster> = {}): KitRoster => ({
+  id: 'kit-1',
+  childId: 'lincoln',
+  source: 'kitBuilder',
+  status: 'InProgress',
+  vaultName: 'Vault',
+  heroName: 'Zappy',
+  heroLook: 'green pea',
+  heroMove: 'shoots sparks',
+  defenders: [
+    { id: 'd1', name: 'Thorny', power: 'grows thorns' },
+    { id: 'd2', name: 'Sappy', power: 'sticky sap' },
+  ],
+  invaders: [{ id: 'i1', name: 'Digger', menace: 'digs under' }],
+  winCondition: 'win',
+  createdAt: '2026-07-17T00:00:00.000Z',
+  updatedAt: '2026-07-17T00:00:00.000Z',
+  ...over,
+})
 
 // Bulk text entry goes through fireEvent.change (one synchronous re-render per
 // field) instead of userEvent.type (a re-render PER KEYSTROKE across every
@@ -185,5 +235,102 @@ describe('KitBuilderForm', () => {
     expect(body.defenders).toEqual([])
     expect(body.invaders).toEqual([])
     expect(body.vaultName).toBe('')
+  })
+
+  // ── Art pipeline (FEAT-88) ────────────────────────────────────
+
+  it('shows no art affordances without the art props', () => {
+    renderForm(savedRoster())
+    expect(screen.queryAllByRole('button', { name: /make sticker/i })).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: /make stickers for the rest/i })).not.toBeInTheDocument()
+  })
+
+  it('renders a "Make sticker" button per character when art is enabled', () => {
+    renderArtForm(savedRoster())
+    // hero + 2 defenders + 1 invader = 4
+    expect(screen.getAllByRole('button', { name: /make sticker$/i })).toHaveLength(4)
+  })
+
+  it('generating one character calls onGenerateArt with its key + verbatim words, then shows the thumbnail', async () => {
+    const user = userEvent.setup({ delay: null })
+    const onGenerateArt = vi.fn<
+      (key: string, c: { name: string; descriptor: string }) => Promise<KitArtRef | null>
+    >(async () => artRef('https://img/hero.png'))
+    renderArtForm(savedRoster({ defenders: [], invaders: [] }), { onGenerateArt })
+
+    await user.click(screen.getByRole('button', { name: /make sticker$/i }))
+
+    await waitFor(() => expect(onGenerateArt).toHaveBeenCalledTimes(1))
+    expect(onGenerateArt.mock.calls[0][0]).toBe('hero')
+    expect(onGenerateArt.mock.calls[0][1]).toEqual({ name: 'Zappy', descriptor: 'green pea, shoots sparks' })
+    // Thumbnail appears from the returned ref.
+    await waitFor(() =>
+      expect(screen.getByAltText(/Zappy sticker/i)).toHaveAttribute('src', 'https://img/hero.png'),
+    )
+  })
+
+  it('a failed generation shows an honest error and keeps existing art', async () => {
+    const user = userEvent.setup({ delay: null })
+    const onGenerateArt = vi.fn(async () => null) // failure
+    renderArtForm(
+      savedRoster({
+        defenders: [],
+        invaders: [],
+        art: { hero: artRef('https://img/OLD.png') },
+      }),
+      { onGenerateArt },
+    )
+
+    // Existing art shown, button reads "Regenerate".
+    expect(screen.getByAltText(/Zappy sticker/i)).toHaveAttribute('src', 'https://img/OLD.png')
+    await user.click(screen.getByRole('button', { name: /regenerate/i }))
+
+    await waitFor(() => expect(screen.getByText(/couldn't make that sticker/i)).toBeInTheDocument())
+    // Prior art is not lost.
+    expect(screen.getByAltText(/Zappy sticker/i)).toHaveAttribute('src', 'https://img/OLD.png')
+  })
+
+  it('disables "Make sticker" for an entirely-empty character row', async () => {
+    const user = userEvent.setup({ delay: null })
+    renderArtForm(savedRoster({ defenders: [], invaders: [] }))
+    await user.click(screen.getByRole('button', { name: /add a defender/i }))
+    // The new empty defender's Make sticker button is disabled.
+    const buttons = screen.getAllByRole('button', { name: /make sticker$/i })
+    // hero (has content) enabled, new empty defender disabled.
+    const disabled = buttons.filter((b) => (b as HTMLButtonElement).disabled)
+    expect(disabled).toHaveLength(1)
+  })
+
+  it('the batch button confirms the count and never auto-generates', async () => {
+    const user = userEvent.setup({ delay: null })
+    const onGenerateArt = vi.fn(async () => artRef('x'))
+    renderArtForm(savedRoster(), { onGenerateArt })
+
+    // 4 characters, none with art → "the rest (4)".
+    const batch = screen.getByRole('button', { name: /make stickers for the rest \(4\)/i })
+    // Nothing generated just by rendering.
+    expect(onGenerateArt).not.toHaveBeenCalled()
+
+    await user.click(batch)
+    // A confirm dialog states the exact count — no generation yet.
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent(/make 4 images\?/i)
+    expect(onGenerateArt).not.toHaveBeenCalled()
+
+    // Cancel (scoped to the dialog) → still nothing generated.
+    await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }))
+    expect(onGenerateArt).not.toHaveBeenCalled()
+
+    // Confirm → generates once per character. (findByRole waits out the MUI
+    // dialog close transition that briefly aria-hides the background.)
+    await user.click(await screen.findByRole('button', { name: /make stickers for the rest \(4\)/i }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^make 4$/i }))
+    await waitFor(() => expect(onGenerateArt).toHaveBeenCalledTimes(4))
+  })
+
+  it('labels the button "Regenerate" once a character has art', () => {
+    renderArtForm(savedRoster({ defenders: [], invaders: [], art: { hero: artRef('u') } }))
+    expect(screen.getByRole('button', { name: /regenerate/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /make sticker$/i })).not.toBeInTheDocument()
   })
 })
