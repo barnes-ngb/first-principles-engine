@@ -27,7 +27,7 @@ interface KitBuilderSectionProps {
  * (`KitBuilderForm`) to create or edit one. The voice-capture flow is slice 2.
  */
 export default function KitBuilderSection({ activeChildId }: KitBuilderSectionProps) {
-  const { rosters, loading, createRoster, updateRoster } = useKitRosters()
+  const { rosters, loading, createRoster, updateRoster } = useKitRosters(activeChildId)
   const { children } = useChildren()
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
 

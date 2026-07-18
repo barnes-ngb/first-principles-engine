@@ -9,8 +9,8 @@ import type { KitRoster } from '../../core/types/business'
 const { useKitRostersMock, useChildrenMock, createRosterMock, updateRosterMock } = vi.hoisted(() => ({
   useKitRostersMock: vi.fn(),
   useChildrenMock: vi.fn(),
-  createRosterMock: vi.fn(async (..._args: unknown[]) => 'kit-new'),
-  updateRosterMock: vi.fn(async (..._args: unknown[]) => undefined),
+  createRosterMock: vi.fn<(...args: unknown[]) => Promise<string>>(async () => 'kit-new'),
+  updateRosterMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
 }))
 
 vi.mock('./useKitRosters', () => ({

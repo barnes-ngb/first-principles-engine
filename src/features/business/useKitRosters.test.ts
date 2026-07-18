@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ── Hoisted mocks ───────────────────────────────────────────────
 
-const { addDocMock, updateDocMock, getDocMock, onSnapshotMock } = vi.hoisted(() => ({
-  addDocMock: vi.fn(async (..._args: unknown[]) => ({ id: 'kit-new' })),
-  updateDocMock: vi.fn(async (..._args: unknown[]) => undefined),
+const { addDocMock, updateDocMock, getDocMock, onSnapshotMock, whereMock } = vi.hoisted(() => ({
+  addDocMock: vi.fn<(...args: unknown[]) => Promise<{ id: string }>>(async () => ({ id: 'kit-new' })),
+  updateDocMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
   getDocMock: vi.fn(),
-  onSnapshotMock: vi.fn((..._args: unknown[]) => () => undefined),
+  onSnapshotMock: vi.fn<(...args: unknown[]) => () => void>(() => () => undefined),
+  whereMock: vi.fn(() => ({ __where: true })),
 }))
 
 vi.mock('firebase/firestore', () => ({
@@ -15,9 +16,9 @@ vi.mock('firebase/firestore', () => ({
   updateDoc: updateDocMock,
   getDoc: getDocMock,
   onSnapshot: onSnapshotMock,
-  doc: vi.fn((_coll, id) => ({ __doc: id })),
-  query: vi.fn((coll) => coll),
-  orderBy: vi.fn(() => ({ __orderBy: true })),
+  doc: vi.fn((_coll: unknown, id: string) => ({ __doc: id })),
+  query: vi.fn((coll: unknown) => coll),
+  where: whereMock,
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
@@ -45,41 +46,56 @@ beforeEach(() => {
   getDocMock.mockReset()
   onSnapshotMock.mockReset()
   onSnapshotMock.mockReturnValue(() => undefined)
+  whereMock.mockClear()
 })
 
 describe('useKitRosters', () => {
-  it('lists rosters from the snapshot, id after the spread', async () => {
-    const { result } = renderHook(() => useKitRosters())
+  const rosterAt = (id: string, updatedAt: string): KitRoster => ({
+    id,
+    childId: 'lincoln',
+    source: 'kitBuilder',
+    status: 'InProgress',
+    vaultName: id,
+    heroName: '',
+    heroLook: '',
+    heroMove: '',
+    defenders: [],
+    invaders: [],
+    winCondition: '',
+    createdAt: '2026-07-17T00:00:00.000Z',
+    updatedAt,
+  })
+
+  it('lists rosters from the snapshot (id after the spread), newest-updated first', async () => {
+    const { result } = renderHook(() => useKitRosters('lincoln'))
     expect(result.current.loading).toBe(true)
 
     act(() => {
       emitSnapshot([
-        {
-          id: 'kit-1',
-          childId: 'lincoln',
-          source: 'kitBuilder',
-          status: 'InProgress',
-          vaultName: 'The Vault',
-          heroName: 'Lincoln',
-          heroLook: '',
-          heroMove: '',
-          defenders: [],
-          invaders: [],
-          winCondition: '',
-          createdAt: '2026-07-17T00:00:00.000Z',
-          updatedAt: '2026-07-17T00:00:00.000Z',
-        },
+        rosterAt('older', '2026-07-15T00:00:00.000Z'),
+        rosterAt('newest', '2026-07-17T00:00:00.000Z'),
+        rosterAt('middle', '2026-07-16T00:00:00.000Z'),
       ])
     })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.rosters).toHaveLength(1)
-    expect(result.current.rosters[0].id).toBe('kit-1')
-    expect(result.current.rosters[0].vaultName).toBe('The Vault')
+    expect(result.current.rosters.map((r) => r.id)).toEqual(['newest', 'middle', 'older'])
+  })
+
+  it('filters the subscription by childId (scoped to the active child)', () => {
+    renderHook(() => useKitRosters('lincoln'))
+    expect(whereMock).toHaveBeenCalledWith('childId', '==', 'lincoln')
+  })
+
+  it('returns an empty list and does not subscribe when there is no active child', () => {
+    const { result } = renderHook(() => useKitRosters(null))
+    expect(result.current.loading).toBe(false)
+    expect(result.current.rosters).toEqual([])
+    expect(onSnapshotMock).not.toHaveBeenCalled()
   })
 
   it('creates a roster via addDoc, stamping source/status/timestamps', async () => {
-    const { result } = renderHook(() => useKitRosters())
+    const { result } = renderHook(() => useKitRosters('lincoln'))
 
     let newId = ''
     await act(async () => {
@@ -106,7 +122,7 @@ describe('useKitRosters', () => {
   })
 
   it('honors an explicit status on create', async () => {
-    const { result } = renderHook(() => useKitRosters())
+    const { result } = renderHook(() => useKitRosters('lincoln'))
     await act(async () => {
       await result.current.createRoster({
         childId: 'lincoln',
@@ -125,7 +141,7 @@ describe('useKitRosters', () => {
   })
 
   it('updates a roster via updateDoc, re-stamping updatedAt', async () => {
-    const { result } = renderHook(() => useKitRosters())
+    const { result } = renderHook(() => useKitRosters('lincoln'))
     await act(async () => {
       await result.current.updateRoster('kit-1', { vaultName: 'renamed' })
     })
@@ -137,7 +153,7 @@ describe('useKitRosters', () => {
 
   it('gets a single roster, returning null when it does not exist', async () => {
     getDocMock.mockResolvedValueOnce({ exists: () => false })
-    const { result } = renderHook(() => useKitRosters())
+    const { result } = renderHook(() => useKitRosters('lincoln'))
     let got: KitRoster | null = { id: 'sentinel' } as KitRoster
     await act(async () => {
       got = await result.current.getRoster('missing')

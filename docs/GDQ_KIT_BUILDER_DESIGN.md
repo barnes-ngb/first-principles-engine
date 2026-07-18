@@ -290,7 +290,7 @@ Serialized slices — each a reviewable PR, smallest-testable-thing first:
    the smallest thing that stores a real roster. First slice. *As built:* `KitRoster` / `KitDefender` /
    `KitInvader` / `KitRosterStatus` in `src/core/types/business.ts` (§2 shape, verbatim); the
    `kitRostersCollection` auto-ID helper + `kitRosterConverter` in `firestore.ts` (mirrors `businessLog`);
-   `useKitRosters` (list/create/update/get); `KitBuilderForm` (plain MUI form, add/remove defender +
+   `useKitRosters(childId)` (child-scoped `where('childId','==',…)` list — §4; create/update/get); `KitBuilderForm` (plain MUI form, add/remove defender +
    invader rows, verbatim words, target-hint not a cap, partial saves valid); `KitBuilderSection` entry
    point on `BusinessPage` (roster list + status chip + "New kit" / empty state). No voice flow (slice 2).
 2. **The voice capture flow.** Extract the shared capture primitive from the Story Guide
