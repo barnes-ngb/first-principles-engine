@@ -1,5 +1,13 @@
 {
   "projects": {
     "default": "barneshome-3dfbb"
+  },
+  "targets": {
+    "barneshome-3dfbb": {
+      "hosting": {
+        "app": ["first-principles-engine"],
+        "shop": ["barnesbro"]
+      }
+    }
   }
 }

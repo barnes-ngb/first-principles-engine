@@ -27,7 +27,9 @@
   <script>
     // The exact, stable published catalog URL (from the in-app "live" panel).
     // Leave empty to show the setup note; paste the family's URL to go live.
-    var CATALOG_URL = ''
+    // Baked (FEAT-86) so /shop redirects too — the sibling barnesbro.web.app site
+    // (shop-site/index.html) carries the same target; both addresses work.
+    var CATALOG_URL = 'https://firebasestorage.googleapis.com/v0/b/barneshome-3dfbb.appspot.com/o/public%2Fcatalog%2FrqQMDnF3ltTlUzdj6oNTcYlL1br2%2Findex.html?alt=media'
     if (CATALOG_URL) {
       // Instant redirect for JS clients — replace() so the clean address doesn't
       // linger in history (Back returns to wherever the family came from).
