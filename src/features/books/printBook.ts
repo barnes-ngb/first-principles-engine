@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf'
-import type { Book, BookPage } from '../../core/types'
+import type { Book, BookPage, PageImage } from '../../core/types'
 import { startStep } from '../../core/utils/perf'
 import { fetchAsDataUri } from './imageDataUri'
 import type { PrintSettings } from './PrintSettingsDialog'
@@ -46,6 +46,33 @@ export interface PrintBookOptions {
   settings?: PrintSettings
 }
 
+/* ───────────────────── cover URL + dedupe (FEAT-98 / FEAT-91) ───────────────────── */
+
+/**
+ * The cover image URL: the explicit `coverImageUrl`, else the first page image
+ * as a fallback. Single source of truth used by both the prefetch pass and
+ * `drawCover` so they never disagree.
+ */
+export function resolveCoverImageUrl(book: Book): string | undefined {
+  return book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+}
+
+/**
+ * Images to draw on a content page, dropping any that duplicate the cover image
+ * (FEAT-98). When a book has no explicit cover the cover falls back to page 1's
+ * image (see {@link resolveCoverImageUrl}); without this filter that art would
+ * render again on story page 1, so the cover reads as "two pages." Deduping by
+ * URL mirrors the FEAT-91 fix in `catalogPreview.buildBookPreview`. `dedupeUrl`
+ * is `undefined` when there is no cover page (nothing to duplicate).
+ */
+export function contentImagesToDraw(
+  images: PageImage[],
+  dedupeUrl: string | undefined,
+): PageImage[] {
+  if (!dedupeUrl) return images
+  return images.filter((img) => img.url !== dedupeUrl)
+}
+
 /* ───────────────────── image pre-fetch (Firebase SDK) ───────────────────── */
 
 /**
@@ -55,7 +82,7 @@ async function prefetchBookImages(book: Book): Promise<Map<string, string>> {
   const entries: Array<{ url: string; storagePath?: string }> = []
   const seen = new Set<string>()
 
-  const coverUrl = book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+  const coverUrl = resolveCoverImageUrl(book)
   if (coverUrl && !seen.has(coverUrl)) {
     seen.add(coverUrl)
     const coverImg = book.pages.flatMap((p) => p.images).find((img) => img.url === coverUrl)
@@ -424,7 +451,7 @@ async function drawCover(
   const centerX = area.x + area.w / 2
 
   // Cover image
-  const coverUrl = book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
+  const coverUrl = resolveCoverImageUrl(book)
   let contentY = area.y + area.h * 0.1
 
   if (coverUrl) {
@@ -521,12 +548,17 @@ async function drawContentPage(
   sightWordSet: Set<string>,
   resolveUrl: (url: string) => string,
   area: ContentArea,
+  dedupeUrl: string | undefined,
 ): Promise<void> {
   const textColor = hexToRgb(colors.text)
   let curY = area.y
 
+  // Drop any image that duplicates the cover art (FEAT-98) so it never repeats
+  // as story page 1.
+  const pageImages = contentImagesToDraw(page.images, dedupeUrl)
+
   // Render page images
-  if (page.images.length > 0) {
+  if (pageImages.length > 0) {
     // Lock to the same 3:2 aspect ratio used in editor + reader containers.
     // Derive height from available width so the container always fits.
     const IMAGE_ASPECT_RATIO = 3 / 2
@@ -535,7 +567,7 @@ async function drawContentPage(
     const imgAreaX = area.x
 
     // Sort: backgrounds first (non-stickers), then stickers on top, each sub-group by zIndex
-    const sortedImages = [...page.images].sort((a, b) => {
+    const sortedImages = [...pageImages].sort((a, b) => {
       const aIsSticker = a.type === 'sticker' ? 1 : 0
       const bIsSticker = b.type === 'sticker' ? 1 : 0
       if (aIsSticker !== bIsSticker) return aIsSticker - bIsSticker
@@ -703,11 +735,31 @@ function drawBackCover(
 
 /* ───────────────────── booklet rendering ───────────────────── */
 
-type LogicalPage =
+export type LogicalPage =
   | { type: 'cover' }
   | { type: 'sight-words' }
   | { type: 'content'; page: BookPage; index: number }
   | { type: 'back' }
+
+/**
+ * Build the ordered logical-page sequence for a book: cover (once) → sight-words
+ * (if any) → each content page → back cover. Pure and read-only — the single
+ * source of truth shared by the flat and booklet render paths, so the cover is
+ * emitted exactly once regardless of format.
+ */
+export function buildLogicalPages(
+  book: Book,
+  includeCover: boolean,
+  hasSightWords: boolean,
+  includeBackCover: boolean,
+): LogicalPage[] {
+  const pages: LogicalPage[] = []
+  if (includeCover) pages.push({ type: 'cover' })
+  if (hasSightWords) pages.push({ type: 'sight-words' })
+  book.pages.forEach((page, index) => pages.push({ type: 'content', page, index }))
+  if (includeBackCover) pages.push({ type: 'back' })
+  return pages
+}
 
 async function drawLogicalPage(
   pdf: jsPDF,
@@ -720,6 +772,7 @@ async function drawLogicalPage(
   resolveUrl: (url: string) => string,
   area: ContentArea,
   isLincoln: boolean,
+  dedupeUrl: string | undefined,
 ): Promise<void> {
   switch (logicalPage.type) {
     case 'cover':
@@ -729,7 +782,7 @@ async function drawLogicalPage(
       drawSightWordsPage(pdf, [...sightWordSet], colors, isLincoln, area)
       break
     case 'content':
-      await drawContentPage(pdf, logicalPage.page, logicalPage.index, colors, settings, sightWordSet, resolveUrl, area)
+      await drawContentPage(pdf, logicalPage.page, logicalPage.index, colors, settings, sightWordSet, resolveUrl, area, dedupeUrl)
       break
     case 'back':
       drawBackCover(pdf, book, childName, colors, area)
@@ -751,12 +804,15 @@ async function renderBooklet(
   const config = PAGE_CONFIGS.booklet
   const halfW = config.widthMM / 2
 
-  // Build logical page sequence
-  const logicalPages: LogicalPage[] = []
-  if (settings.includeCover) logicalPages.push({ type: 'cover' })
-  if (sightWordSet.size > 0) logicalPages.push({ type: 'sight-words' })
-  book.pages.forEach((page, i) => logicalPages.push({ type: 'content', page, index: i }))
-  if (settings.includeBackCover) logicalPages.push({ type: 'back' })
+  // Build logical page sequence (cover emitted exactly once)
+  const logicalPages = buildLogicalPages(
+    book,
+    settings.includeCover,
+    sightWordSet.size > 0,
+    settings.includeBackCover,
+  )
+  // Cover art to suppress on content pages (only when a cover page exists).
+  const dedupeUrl = settings.includeCover ? resolveCoverImageUrl(book) : undefined
 
   for (let i = 0; i < logicalPages.length; i += 2) {
     if (i > 0) pdf.addPage()
@@ -771,7 +827,7 @@ async function renderBooklet(
       w: halfW - MARGIN_MM * 2,
       h: config.heightMM - MARGIN_MM * 2,
     }
-    await drawLogicalPage(pdf, logicalPages[i], book, childName, colors, settings, sightWordSet, resolveUrl, leftArea, isLincoln)
+    await drawLogicalPage(pdf, logicalPages[i], book, childName, colors, settings, sightWordSet, resolveUrl, leftArea, isLincoln, dedupeUrl)
 
     // Right half
     if (i + 1 < logicalPages.length) {
@@ -781,7 +837,7 @@ async function renderBooklet(
         w: halfW - MARGIN_MM * 2,
         h: config.heightMM - MARGIN_MM * 2,
       }
-      await drawLogicalPage(pdf, logicalPages[i + 1], book, childName, colors, settings, sightWordSet, resolveUrl, rightArea, isLincoln)
+      await drawLogicalPage(pdf, logicalPages[i + 1], book, childName, colors, settings, sightWordSet, resolveUrl, rightArea, isLincoln, dedupeUrl)
     }
 
     // Fold line (dashed)
@@ -825,6 +881,9 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<Pri
   const config = PAGE_CONFIGS[settings.pageSize]
   const sightWordSet = new Set((opts.sightWords ?? []).map((w) => w.toLowerCase()))
   const isBooklet = settings.pageSize === 'booklet'
+  // Cover art to suppress on content pages (only when a cover page exists) so it
+  // never repeats as story page 1 (FEAT-98).
+  const dedupeUrl = settings.includeCover ? resolveCoverImageUrl(book) : undefined
 
   // Pre-fetch all images as base64 to avoid CORS issues
   const endPrefetch = startStep('printBook.prefetchImages')
@@ -882,7 +941,7 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<Pri
     for (let i = 0; i < book.pages.length; i++) {
       if (pageAdded) pdf.addPage()
       drawBackground(pdf, colors.bg, config.widthMM, config.heightMM, bleedOffset, bleedOffset)
-      await drawContentPage(pdf, book.pages[i], i, colors, settings, sightWordSet, resolveUrl, contentArea)
+      await drawContentPage(pdf, book.pages[i], i, colors, settings, sightWordSet, resolveUrl, contentArea, dedupeUrl)
       if (settings.trimMarks) drawTrimMarks(pdf, pdfW, pdfH)
       pageAdded = true
     }
