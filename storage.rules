@@ -64,5 +64,26 @@ service firebase.storage {
       allow read: if isOwner(familyId);
       // Write is server-side only (admin SDK) — no client write rule needed
     }
+
+    // Public catalog storefront (FEAT-84 — the ONLY world-readable path).
+    //
+    // A parent taps "Publish site" in the Barnes Bros → Catalog section, which
+    // uploads a self-contained static lookbook (public/catalog/index.html) of the
+    // family's `status:'listed'` products. Read is PUBLIC so a family opens the
+    // shared URL on a phone with no login; this is the deliberate, owner-approved
+    // exposure of that one path — nothing else here is world-readable.
+    //
+    // Write (create/update = republish, delete = unpublish) requires an
+    // authenticated household member; the app further gates the controls on
+    // `canEdit` (parent-only). Uploads are size-capped and restricted to the HTML
+    // page + any referenced images. No `families/{familyId}/**` data and no
+    // Firestore read is opened by this rule — the page is a baked static snapshot.
+    match /public/catalog/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if request.auth != null
+          && request.resource.size < 5 * 1024 * 1024
+          && request.resource.contentType.matches('text/html.*|image/.*');
+      allow delete: if request.auth != null;
+    }
   }
 }
