@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { shouldRenderPageNumbers } from '../printBook'
 
-describe('shouldRenderPageNumbers (FEAT-98)', () => {
+describe('shouldRenderPageNumbers (FEAT-99)', () => {
   it('keeps page numbers on full-document formats when enabled (characterization)', () => {
     expect(shouldRenderPageNumbers('letter', true)).toBe(true)
     expect(shouldRenderPageNumbers('a4', true)).toBe(true)
