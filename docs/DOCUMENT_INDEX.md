@@ -16,7 +16,7 @@
 | `PROCESS_OVERVIEW.md` | **CURRENT** (new 2026-06-20) | How the project is developed (dev loop, ledger discipline), the audit pipeline (daily health / weekly test builder / monthly ARCH_AUDIT / monthly human deep-audit + COLLISION rule), and the kid learning loop with its loose points. **Audits read this first** (linked from `PROMPT_ARCH_AUDIT.md` Step 0). |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative; `firestore.ts` defines <!-- gen:collection-count -->43<!-- /gen --> exported collection helpers (count generated + verified by `npm run docs:check`; see `DOCS_ALIGNMENT.md`). |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative; `firestore.ts` defines <!-- gen:collection-count -->44<!-- /gen --> exported collection helpers (count generated + verified by `npm run docs:check`; see `DOCS_ALIGNMENT.md`). |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |

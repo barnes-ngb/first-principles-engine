@@ -8,6 +8,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import GoalBuilder from './GoalBuilder'
 import GoalThermometer from './GoalThermometer'
+import KitBuilderSection from './KitBuilderSection'
 import SaleEntryForm from './SaleEntryForm'
 import SalesLogList from './SalesLogList'
 import { useBusinessGoal } from './useBusinessGoal'
@@ -72,6 +73,18 @@ export default function BusinessPage() {
               onRemove={removeSale}
             />
           </Stack>
+        </SectionCard>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="kit builder">
+        <SectionCard title="Kit Builder">
+          {activeChildId ? (
+            <KitBuilderSection activeChildId={activeChildId} />
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Loading…
+            </Typography>
+          )}
         </SectionCard>
       </SectionErrorBoundary>
 

@@ -103,3 +103,76 @@ export interface BusinessGoal {
   /** ISO timestamp of the last config edit. */
   updatedAt: string
 }
+
+// ── GDQ Kit Builder (FEAT-80) ─────────────────────────────────────
+//
+// A kit ROSTER — a reusable cast + rules a different family plays — is business
+// data, NOT a narrative (that's the Story Guide / My Books). The roster is the
+// seed from which the production pipeline grows the actual kit (stickers,
+// booklet, defense map, clue cards, badge). Design: docs/GDQ_KIT_BUILDER_DESIGN.md
+// (§2 data model, §4 collection). Additive — nothing above moves.
+//
+// Load-bearing invariants baked into these shapes:
+//   1. The kid's words are stored VERBATIM — no autocorrect, no normalization,
+//      no capitalization fix on name/power/menace/vaultName. Weird is canon.
+//   2. Targets (4–6 defenders / 3–4 invaders) are GUIDANCE, not schema caps.
+//      A kid who names 7 defenders keeps all 7 — the shape never blocks a count.
+
+/** One plant defender: a kid-named character with a kid-named power. */
+export interface KitDefender {
+  /** Stable id for list ordering / mid-list resume. */
+  id: string
+  /** The kid's word — never corrected. */
+  name: string
+  /** What it does — "shoots sticky sap", "grows a thorn wall". Verbatim. */
+  power: string
+}
+
+/** One invader: a kid-named threat with a kid-named menace. */
+export interface KitInvader {
+  /** Stable id for list ordering / mid-list resume. */
+  id: string
+  /** The kid's word — never corrected. */
+  name: string
+  /** What it does — "steals the seeds", "digs under the fence". Verbatim. */
+  menace: string
+}
+
+export const KitRosterStatus = {
+  InProgress: 'InProgress',
+  Complete: 'Complete',
+} as const
+export type KitRosterStatus = (typeof KitRosterStatus)[keyof typeof KitRosterStatus]
+
+/**
+ * A reusable GDQ kit roster — the seed for stickers, booklet, map, clue cards,
+ * badge. Business data, NOT a narrative. Stored at
+ * `families/{familyId}/kitRosters/{autoId}` (§4).
+ */
+export interface KitRoster {
+  id: string
+  /** The child who dreamed it up (the operator/author). */
+  childId: string
+  /** Capture provenance — always 'kitBuilder' for this flow. */
+  source: 'kitBuilder'
+  status: KitRosterStatus
+
+  // ── The roster ──
+  vaultName: string
+  heroName: string
+  heroLook: string
+  heroMove: string
+  defenders: KitDefender[] // target 4–6 (guidance, not a cap)
+  invaders: KitInvader[] // target 3–4 (guidance, not a cap)
+  winCondition: string
+
+  /**
+   * Which capture beat is "current" for mid-flow resume (§3). Free-form beat key
+   * (e.g. 'vault' | 'hero.look' | 'defenders' | 'invaders' | 'win' | 'done'),
+   * NOT a numeric index — the defender/invader beats are variable-length.
+   */
+  resumeBeat?: string
+
+  createdAt: string // ISO
+  updatedAt: string // ISO
+}
