@@ -14,6 +14,7 @@ import { CatalogProductStatus } from '../../core/types/business'
 import CatalogProductCard from './CatalogProductCard'
 import CatalogProductForm from './CatalogProductForm'
 import { buildCatalogSheetHtml, selectListedProducts } from './catalogSheet'
+import { PUBLIC_CATALOG_CLEAN_URL, PUBLIC_CATALOG_SHORT_URL } from './catalogSitePublish'
 import type { NewCatalogProduct } from './useCatalogProducts'
 import { useCatalogProducts } from './useCatalogProducts'
 import { useCatalogSite } from './useCatalogSite'
@@ -92,14 +93,20 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
     }
   }
 
+  // FEAT-86: once the dedicated short site (barnesbro.web.app) is baked + live,
+  // its redirect target constant is non-empty and we promote it as the primary
+  // Copy-link address. Until then (empty), we fall back to the always-working
+  // direct Storage URL — never hand a family a dead link (Codex P1).
+  const shortUrl = PUBLIC_CATALOG_SHORT_URL
+
   const handleCopyUrl = async () => {
     if (!published) return
     try {
-      await navigator.clipboard.writeText(published.url)
+      await navigator.clipboard.writeText(shortUrl || published.url)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Clipboard blocked — the URL is still shown as a tappable link.
+      // Clipboard blocked — the address is still shown as a tappable link.
     }
   }
 
@@ -195,11 +202,39 @@ export default function CatalogSection({ canEdit }: CatalogSectionProps) {
         >
           <Stack spacing={1}>
             <Typography variant="subtitle2">Your public catalog is live 🌱</Typography>
-            <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
-              <Link href={published.url} target="_blank" rel="noopener noreferrer">
-                {published.url}
-              </Link>
-            </Typography>
+            {shortUrl ? (
+              <>
+                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+                  <Link href={shortUrl} target="_blank" rel="noopener noreferrer">
+                    {shortUrl}
+                  </Link>
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
+                  Short, sayable address — this is the one to text or say aloud. Direct link (always
+                  works):{' '}
+                  <Link href={published.url} target="_blank" rel="noopener noreferrer">
+                    {published.url}
+                  </Link>
+                </Typography>
+              </>
+            ) : (
+              <>
+                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+                  <Link href={published.url} target="_blank" rel="noopener noreferrer">
+                    {published.url}
+                  </Link>
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ wordBreak: 'break-all' }}
+                >
+                  Short address (one-time setup): <strong>{PUBLIC_CATALOG_CLEAN_URL}</strong> — paste
+                  the link above into <code>public/shop/index.html</code> (<code>CATALOG_URL</code>)
+                  once, then you can share the short one.
+                </Typography>
+              </>
+            )}
             <Typography variant="caption" color="text.secondary">
               Last published {new Date(published.publishedAt).toLocaleString()} — text this link to a
               family so they can pick their favorites. Republish any time the catalog changes.

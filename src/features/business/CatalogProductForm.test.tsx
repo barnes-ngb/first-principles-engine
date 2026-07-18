@@ -98,4 +98,74 @@ describe('CatalogProductForm', () => {
     expect(body.priceCents).toBe(0)
     expect(body.status).toBe('draft')
   })
+
+  it('offers the preview toggle only for book-sourced products (default off)', async () => {
+    const onSave = vi.fn<(b: NewCatalogProduct) => Promise<void>>(async () => undefined)
+    const user = userEvent.setup()
+    render(
+      <CatalogProductForm
+        initial={{
+          title: "Tom Tom the Crab's Big Quest",
+          type: 'Book',
+          madeBy: ['Lincoln'],
+          images: [{ url: 'https://cdn/cover.png' }],
+          sourceRef: { kind: 'book', id: 'book-9' },
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    // Toggle is present for a book; default OFF ⇒ nothing persisted yet.
+    const toggle = screen.getByLabelText(/peek inside/i)
+    expect(toggle).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: /save product/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0].includePreview).toBe(false)
+  })
+
+  it('persists includePreview + a capped page count when turned on', async () => {
+    const onSave = vi.fn<(b: NewCatalogProduct) => Promise<void>>(async () => undefined)
+    const user = userEvent.setup()
+    render(
+      <CatalogProductForm
+        initial={{
+          title: 'A Book',
+          type: 'Book',
+          madeBy: ['London'],
+          images: [],
+          sourceRef: { kind: 'book', id: 'book-1' },
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByLabelText(/peek inside/i))
+    // Over the cap → clamped to the max (5).
+    typeInto(/preview pages/i, '99')
+    await user.click(screen.getByRole('button', { name: /save product/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const body = onSave.mock.calls[0][0]
+    expect(body.includePreview).toBe(true)
+    expect(body.previewPageCount).toBe(5)
+  })
+
+  it('never offers a preview for a non-book product', () => {
+    render(
+      <CatalogProductForm
+        initial={{
+          title: 'A Sticker',
+          type: 'StickerSheet',
+          madeBy: [],
+          images: [{ url: 'https://cdn/s.png' }],
+          sourceRef: { kind: 'sticker', id: 's-1' },
+        }}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.queryByLabelText(/peek inside/i)).toBeNull()
+  })
 })

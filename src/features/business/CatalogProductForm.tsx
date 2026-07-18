@@ -2,12 +2,19 @@ import { useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import InputAdornment from '@mui/material/InputAdornment'
 import Stack from '@mui/material/Stack'
+import Switch from '@mui/material/Switch'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import { useChildren } from '../../core/hooks/useChildren'
+import {
+  clampPreviewPageCount,
+  PREVIEW_DEFAULT_PAGES,
+  PREVIEW_MAX_PAGES,
+} from './catalogPreview'
 import type { BusinessItemType, CatalogProductStatus } from '../../core/types/business'
 import {
   BusinessItemType as ItemType,
@@ -55,8 +62,16 @@ export default function CatalogProductForm({ initial, onSave, onCancel }: Catalo
   )
   const [madeBy, setMadeBy] = useState<string[]>(initial?.madeBy ?? [])
   const [status, setStatus] = useState<CatalogProductStatus>(initial?.status ?? Status.Draft)
+  const [includePreview, setIncludePreview] = useState<boolean>(initial?.includePreview ?? false)
+  const [previewPageCount, setPreviewPageCount] = useState<number>(
+    clampPreviewPageCount(initial?.previewPageCount),
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // A book preview only makes sense for a product promoted from a Book — a
+  // manual/kit/sticker product has no pages to page through (FEAT-85, §4).
+  const canPreview = initial?.sourceRef?.kind === 'book'
 
   const toggleMadeBy = (name: string) => {
     setMadeBy((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
@@ -83,6 +98,11 @@ export default function CatalogProductForm({ initial, onSave, onCancel }: Catalo
         ...(initial?.sourceRef ? { sourceRef: initial.sourceRef } : {}),
         madeBy,
         status,
+        // Only persist preview settings for book-sourced products; keep them off
+        // (and out of the doc) otherwise so the flag stays additive + default-off.
+        ...(canPreview
+          ? { includePreview, previewPageCount: clampPreviewPageCount(previewPageCount) }
+          : {}),
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save product.')
@@ -177,6 +197,38 @@ export default function CatalogProductForm({ initial, onSave, onCancel }: Catalo
           ))}
         </Box>
       </Box>
+
+      {canPreview && (
+        <Box>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Book preview
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={includePreview}
+                onChange={(e) => setIncludePreview(e.target.checked)}
+              />
+            }
+            label="Let families peek inside"
+          />
+          <Typography variant="caption" color="text.secondary" display="block">
+            Shows the cover + the first few pages on the public site — never the whole book.
+          </Typography>
+          {includePreview && (
+            <TextField
+              label="Preview pages"
+              value={previewPageCount}
+              onChange={(e) => setPreviewPageCount(clampPreviewPageCount(Number(e.target.value)))}
+              type="number"
+              inputMode="numeric"
+              helperText={`Cover + up to ${PREVIEW_MAX_PAGES} pages (default ${PREVIEW_DEFAULT_PAGES}).`}
+              slotProps={{ htmlInput: { min: 1, max: PREVIEW_MAX_PAGES, step: 1 } }}
+              sx={{ mt: 1, maxWidth: 180 }}
+            />
+          )}
+        </Box>
+      )}
 
       {error && (
         <Typography variant="body2" color="error">
