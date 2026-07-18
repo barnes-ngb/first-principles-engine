@@ -1,0 +1,110 @@
+name: Create shop site
+
+# One-time, owner-run site creator for the dedicated Barnes Bros catalog address
+# (FEAT-86). The owner is phone-only and cannot use the Firebase Console, so the
+# short address `barnesbro.web.app` is created here via CI using the SAME deploy
+# credential the main deploy already uses (secrets.FIREBASE_SERVICE_ACCOUNT).
+#
+# HOW TO RUN (owner, from the GitHub mobile app):
+#   Actions → "Create shop site" → Run workflow.
+# Read the log for which site name succeeded (expect `barnesbro`). If it reports
+# a permission error, one IAM grant fixes it (the log names the exact role). If a
+# fallback name was used instead of `barnesbro`, tell Claude Code the name for a
+# one-line `.firebaserc` + short-URL-constant follow-up.
+#
+# This workflow ONLY creates the Hosting site. Target → site mapping lives in the
+# repo's `.firebaserc` (checked in), and the actual page deploy happens on the
+# normal `deploy` branch push. Creating an existing site is treated as success,
+# so re-running is safe.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-site:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Same auth path as deploy.yml — google-github-actions/auth@v2 writes the
+      # service-account key to disk and exports GOOGLE_APPLICATION_CREDENTIALS,
+      # which firebase-tools reads for non-interactive auth.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Create the Barnes Bros shop hosting site
+        run: |
+          set -uo pipefail
+          PROJECT="barneshome-3dfbb"
+
+          # Preferred name first, then the fallbacks in order. Firebase Hosting
+          # site names are GLOBALLY unique, so a preferred name can be taken by
+          # another project — hence the ladder.
+          CANDIDATES="barnesbro barnes-bros barnesbros barnesbros-shop"
+
+          created=""
+          for name in $CANDIDATES; do
+            echo "──────────────────────────────────────────────"
+            echo "Trying site name: $name"
+            # Capture stdout+stderr together so we can classify the outcome.
+            out="$(npx --yes firebase-tools@latest hosting:sites:create "$name" --project "$PROJECT" 2>&1)" && rc=0 || rc=$?
+            echo "$out"
+
+            if [ "$rc" -eq 0 ]; then
+              created="$name"
+              echo "✅ Created site: $name"
+              break
+            fi
+
+            # Idempotent: a site that already exists (and we own) is SUCCESS, not
+            # a failure — re-running this workflow must be safe.
+            if echo "$out" | grep -qiE "already exists"; then
+              created="$name"
+              echo "✅ Site already exists (owned) — treating as success: $name"
+              break
+            fi
+
+            # Permission denied → stop and name the EXACT IAM role to grant. The
+            # deploy service account needs Firebase Hosting Admin to create sites;
+            # we can't verify the role from the repo, so we fail loud and clear
+            # instead of crashing cryptically.
+            if echo "$out" | grep -qiE "permission|forbidden|not have|caller does not have|PERMISSION_DENIED"; then
+              echo "::error::Permission denied creating a Hosting site on project $PROJECT."
+              echo "::error::Grant the deploy service account the role 'Firebase Hosting Admin' (roles/firebasehosting.admin), then re-run this workflow."
+              exit 1
+            fi
+
+            # Name unavailable (taken by another project / reserved / invalid) →
+            # try the next fallback rather than fail.
+            if echo "$out" | grep -qiE "already been taken|globally unique|not available|reserved|invalid"; then
+              echo "⚠️  '$name' is unavailable — trying the next fallback name."
+              continue
+            fi
+
+            # Anything else: surface it and move on to the next candidate so one
+            # odd error doesn't sink the whole run.
+            echo "⚠️  Unexpected error for '$name' (rc=$rc) — trying the next fallback name."
+          done
+
+          if [ -z "$created" ]; then
+            echo "::error::Could not create any candidate site name ($CANDIDATES)."
+            echo "::error::If every name reports 'taken', pick a new one, add it to this workflow's CANDIDATES list, and re-run."
+            exit 1
+          fi
+
+          echo "══════════════════════════════════════════════"
+          echo "SHOP SITE READY: $created"
+          echo "It will be live at: https://$created.web.app"
+          if [ "$created" != "barnesbro" ]; then
+            echo "::warning::Created name '$created' differs from the expected 'barnesbro'."
+            echo "::warning::Tell Claude Code the name so the one-line '.firebaserc' (shop target) + the app's short-URL constant get pointed at '$created'."
+          fi
+          echo "Next: update the 'deploy' branch so CI deploys both sites → https://$created.web.app goes live."
