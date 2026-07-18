@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -11,6 +11,15 @@ function renderForm(roster?: KitRoster) {
   const onCancel = vi.fn()
   render(<KitBuilderForm childId="lincoln" roster={roster} onSave={onSave} onCancel={onCancel} />)
   return { onSave, onCancel }
+}
+
+// Bulk text entry goes through fireEvent.change (one synchronous re-render per
+// field) instead of userEvent.type (a re-render PER KEYSTROKE across every
+// repeating row). The value still flows through the component's onChange, so
+// the "stored verbatim, no autocorrect" claim is proven identically — just far
+// cheaper under CI's slower, parallel load. Clicks stay on userEvent.
+function typeInto(el: HTMLElement, value: string) {
+  fireEvent.change(el, { target: { value } })
 }
 
 describe('KitBuilderForm', () => {
@@ -40,33 +49,33 @@ describe('KitBuilderForm', () => {
     const user = userEvent.setup({ delay: null })
     const { onSave } = renderForm()
 
-    await user.type(screen.getByLabelText(/Vault name/i), 'the seed safe')
-    await user.type(screen.getByLabelText('Name'), 'lincoln')
-    await user.type(screen.getByLabelText('Look'), 'green cape')
-    await user.type(screen.getByLabelText(/Special move/i), 'super jump')
+    typeInto(screen.getByLabelText(/Vault name/i), 'the seed safe')
+    typeInto(screen.getByLabelText('Name'), 'lincoln')
+    typeInto(screen.getByLabelText('Look'), 'green cape')
+    typeInto(screen.getByLabelText(/Special move/i), 'super jump')
 
     // 2 defenders.
     await user.click(screen.getByRole('button', { name: /add a defender/i }))
-    await user.type(screen.getByLabelText(/Defender 1 name/i), 'plants-turn-to-life')
-    await user.type(screen.getByLabelText('Power'), 'brings plants alive')
+    typeInto(screen.getByLabelText(/Defender 1 name/i), 'plants-turn-to-life')
+    typeInto(screen.getByLabelText('Power'), 'brings plants alive')
     await user.click(screen.getByRole('button', { name: /add a defender/i }))
-    await user.type(screen.getByLabelText(/Defender 2 name/i), 'Beacon shield')
+    typeInto(screen.getByLabelText(/Defender 2 name/i), 'Beacon shield')
     // second row's Power field
-    await user.type(screen.getAllByLabelText('Power')[1], 'blocks the zombies')
+    typeInto(screen.getAllByLabelText('Power')[1], 'blocks the zombies')
 
     // 3 invaders.
     for (let i = 1; i <= 3; i += 1) {
       await user.click(screen.getByRole('button', { name: /add an invader/i }))
     }
-    await user.type(screen.getByLabelText(/Invader 1 name/i), 'small zombie')
-    await user.type(screen.getByLabelText(/Invader 2 name/i), 'big zombie')
-    await user.type(screen.getByLabelText(/Invader 3 name/i), 'super-smart zombie')
+    typeInto(screen.getByLabelText(/Invader 1 name/i), 'small zombie')
+    typeInto(screen.getByLabelText(/Invader 2 name/i), 'big zombie')
+    typeInto(screen.getByLabelText(/Invader 3 name/i), 'super-smart zombie')
     const menaces = screen.getAllByLabelText('Menace')
-    await user.type(menaces[0], 'sneaks in')
-    await user.type(menaces[1], 'smashes the fence')
-    await user.type(menaces[2], 'plans an attack')
+    typeInto(menaces[0], 'sneaks in')
+    typeInto(menaces[1], 'smashes the fence')
+    typeInto(menaces[2], 'plans an attack')
 
-    await user.type(screen.getByLabelText(/Win condition/i), 'zombies pull the white flag')
+    typeInto(screen.getByLabelText(/Win condition/i), 'zombies pull the white flag')
 
     await user.click(screen.getByRole('button', { name: /save kit/i }))
 
@@ -86,15 +95,15 @@ describe('KitBuilderForm', () => {
     expect(body.invaders[2].menace).toBe('plans an attack')
     expect(body.winCondition).toBe('zombies pull the white flag')
     expect(body.status).toBe('InProgress')
-  }, 15000) // heavy multi-field interaction — generous timeout under full-file load
+  }, 15000) // heavy multi-field interaction — margin retained though fireEvent.change keeps it well under
 
   it('stores an odd-spelling/lowercase name unchanged', async () => {
     const user = userEvent.setup({ delay: null })
     const { onSave } = renderForm()
 
     await user.click(screen.getByRole('button', { name: /add a defender/i }))
-    await user.type(screen.getByLabelText(/Defender 1 name/i), 'zombieee eatr')
-    await user.type(screen.getByLabelText('Power'), 'chomps')
+    typeInto(screen.getByLabelText(/Defender 1 name/i), 'zombieee eatr')
+    typeInto(screen.getByLabelText('Power'), 'chomps')
 
     await user.click(screen.getByRole('button', { name: /save kit/i }))
 
@@ -109,7 +118,7 @@ describe('KitBuilderForm', () => {
 
     // One filled-name-only defender, one totally empty.
     await user.click(screen.getByRole('button', { name: /add a defender/i }))
-    await user.type(screen.getByLabelText(/Defender 1 name/i), 'namey')
+    typeInto(screen.getByLabelText(/Defender 1 name/i), 'namey')
     await user.click(screen.getByRole('button', { name: /add a defender/i }))
     // Defender 2 left blank.
 
@@ -143,9 +152,8 @@ describe('KitBuilderForm', () => {
     // Seeded defender is present.
     expect(screen.getByDisplayValue('Sunny')).toBeInTheDocument()
 
-    const vault = screen.getByLabelText(/Vault name/i)
-    await user.clear(vault)
-    await user.type(vault, 'New Vault')
+    // fireEvent.change replaces the field value in one shot — no separate clear.
+    typeInto(screen.getByLabelText(/Vault name/i), 'New Vault')
 
     // Flip status to Ready.
     await user.click(screen.getByLabelText(/Status/i))
