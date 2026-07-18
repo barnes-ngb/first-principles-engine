@@ -2,10 +2,17 @@ import { describe, expect, it } from 'vitest'
 
 import type { KitRoster } from '../../core/types/business'
 import {
+  buildBadgeSection,
   buildBookletSection,
+  buildClueCardsSection,
   buildCoverSection,
+  buildDefenseMapSection,
+  buildParentCardSection,
+  buildPrintableKitHtml,
   buildStickerSheetSection,
   clip,
+  CLUE_CARD_COUNT,
+  MAP_STOP_COUNT,
   namedDefenders,
   namedInvaders,
   NAME_CAP,
@@ -145,10 +152,125 @@ describe('buildStickerSheetSection', () => {
   })
 })
 
+describe('buildDefenseMapSection', () => {
+  it('renders start → five stops → the vault, each stop labeled with a defender', () => {
+    const html = buildDefenseMapSection(roster())
+    expect(html).toContain('kit-map')
+    expect((html.match(/map-stop/g) ?? []).length).toBe(MAP_STOP_COUNT)
+    expect(html).toContain('Start')
+    expect(html).toContain('Seed Vault')
+    expect(html).toContain('Place your sticker')
+    expect(html).toContain('Peashooter Pete') // defenders cycle to fill 5 stops
+  })
+
+  it('invites a drawing at every stop when no defenders are named', () => {
+    const html = buildDefenseMapSection(roster({ defenders: [] }))
+    expect((html.match(/draw a defender here!/g) ?? []).length).toBe(MAP_STOP_COUNT)
+  })
+})
+
+describe('buildClueCardsSection', () => {
+  it('renders five quarter-sheet clue cards referencing real cast names', () => {
+    const html = buildClueCardsSection(roster())
+    expect(html).toContain('kit-clues')
+    expect((html.match(/clue-card/g) ?? []).length).toBe(CLUE_CARD_COUNT)
+    // Real defenders + invaders are woven in by name.
+    expect(html).toContain('Peashooter Pete')
+    expect(html).toContain('Blocky Bog Monster')
+    expect(html).toContain('Dig Bug')
+    // The five patterns are all present.
+    for (const title of ['Find', 'Count', 'Match', 'Follow', 'Defend']) {
+      expect(html).toContain(title)
+    }
+  })
+
+  it('falls back to warm generics on an empty cast (never blank, never crashes)', () => {
+    const html = buildClueCardsSection(roster({ defenders: [], invaders: [] }))
+    expect((html.match(/clue-card/g) ?? []).length).toBe(CLUE_CARD_COUNT)
+    expect(html).toContain('a plant defender')
+    expect(html).toContain('a garden invader')
+  })
+})
+
+describe('buildBadgeSection', () => {
+  it('renders a circular badge with the official caption and hero art/frame', () => {
+    const withArt = buildBadgeSection(
+      roster({ art: { hero: { url: 'https://x/hero.png', storagePath: 'p', generatedAt: 't' } } }),
+    )
+    expect(withArt).toContain('kit-badge')
+    expect(withArt).toContain('Official Garden Defender')
+    expect(withArt).toContain('https://x/hero.png')
+
+    const noArt = buildBadgeSection(roster())
+    expect(noArt).toContain('draw Sunflower Sam here!')
+  })
+})
+
+describe('buildParentCardSection', () => {
+  it('renders the adult setup card with the vault + hero for context', () => {
+    const html = buildParentCardSection(roster())
+    expect(html).toContain('kit-parent')
+    expect(html).toContain('For the Grown-Up')
+    expect(html).toContain('Ages 5+')
+    expect(html).toContain('Seed Vault')
+    expect(html).toContain('Sunflower Sam')
+  })
+})
+
+describe('buildPrintableKitHtml (full document)', () => {
+  it('emits all seven sections in a complete HTML document', () => {
+    const html = buildPrintableKitHtml(roster(), 'Lincoln')
+    expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
+    for (const section of [
+      'kit-cover',
+      'kit-booklet',
+      'kit-stickers',
+      'kit-map',
+      'kit-clues',
+      'kit-badge',
+      'kit-parent',
+    ]) {
+      expect(html).toContain(section)
+    }
+    expect(html).toContain('A Garden Defense Quest by Lincoln')
+    expect(html).toContain('You win when all the seeds are safe in the vault!')
+  })
+
+  it('never crashes and stays byte-safe on a fully-empty roster', () => {
+    const empty = roster({
+      vaultName: '',
+      heroName: '',
+      heroLook: '',
+      heroMove: '',
+      defenders: [],
+      invaders: [],
+      winCondition: '',
+    })
+    const html = buildPrintableKitHtml(empty, '')
+    expect(html).toContain('kit-parent')
+    expect(html).toContain('A Garden Defense Quest') // no author suffix, no crash
+  })
+})
+
 describe('escaping (kid text verbatim but HTML-safe)', () => {
   it('escapes crafted markup in a kid field', () => {
     const html = buildCoverSection(roster({ vaultName: '<script>alert(1)</script>' }), 'Lincoln')
     expect(html).not.toContain('<script>alert(1)</script>')
     expect(html).toContain('&lt;script&gt;')
+  })
+
+  it('escapes crafted markup woven into a clue card via a cast name', () => {
+    const html = buildClueCardsSection(
+      roster({ defenders: [{ id: 'd1', name: '<img src=x onerror=1>', power: 'zap' }] }),
+    )
+    expect(html).not.toContain('<img src=x onerror=1>')
+    expect(html).toContain('&lt;img')
+  })
+
+  it('is a pure read — an empty title clip check confirms no roster mutation', () => {
+    const r = roster()
+    const before = JSON.stringify(r)
+    buildPrintableKitHtml(r, 'Lincoln')
+    expect(JSON.stringify(r)).toBe(before)
   })
 })

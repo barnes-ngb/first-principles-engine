@@ -235,5 +235,276 @@ export function buildStickerSheetSection(roster: KitRoster): string {
   </section>`
 }
 
-// Sections 4–7 (defense map, clue cards, badge, parent setup) + the full-document
-// assembler are added in the next commit.
+// ── Section 4 · Defense map ───────────────────────────────────────────
+
+/** How many stops the map path has (start → 5 stops → the Vault). */
+export const MAP_STOP_COUNT = 5
+
+/**
+ * Pick the defender guarding stop `i`, cycling through the named defenders so a
+ * short roster still labels all five stops. Returns undefined when there are no
+ * named defenders (the stop then shows a draw-frame label).
+ */
+function defenderForStop(defenders: KitRoster['defenders'], i: number): KitRoster['defenders'][number] | undefined {
+  if (defenders.length === 0) return undefined
+  return defenders[i % defenders.length]
+}
+
+/**
+ * The defense map — a simple numbered path (start → 5 stops → the Vault), each
+ * stop labeled with a defender, and the instruction "place your sticker when you
+ * clear each stop." Defenders cycle to fill five stops; with none named, each
+ * stop invites a drawing.
+ */
+export function buildDefenseMapSection(roster: KitRoster): string {
+  const defenders = namedDefenders(roster)
+  const vault = vaultLabel(roster)
+
+  const stops = Array.from({ length: MAP_STOP_COUNT }, (_, i) => {
+    const guard = defenderForStop(defenders, i)
+    const label = guard ? field(guard.name, NAME_CAP) || `Defender ${i + 1}` : `draw a defender here!`
+    return `<li class="map-stop">
+      <span class="map-num">${i + 1}</span>
+      <span class="map-guard">Guarded by <strong>${label}</strong></span>
+    </li>`
+  }).join('\n')
+
+  return `<section class="page kit-map">
+    <h2 class="section-title">Defense Map</h2>
+    <p class="section-hint">Place your sticker when you clear each stop! 🌱</p>
+    <ol class="map-path">
+      <li class="map-start"><span class="map-num">▶</span><span class="map-guard">Start</span></li>
+      ${stops}
+      <li class="map-vault"><span class="map-num">★</span><span class="map-guard">${vault}</span></li>
+    </ol>
+  </section>`
+}
+
+// ── Section 5 · Clue cards (5, quarter-sheet) ─────────────────────────
+
+/** How many clue cards the kit ships. */
+export const CLUE_CARD_COUNT = 5
+
+/** Safe cast pickers for the clue templates — cycle, warm generic fallback. */
+function defenderName(defenders: KitRoster['defenders'], i: number): string {
+  const d = defenders.length > 0 ? defenders[i % defenders.length] : undefined
+  return d ? field(d.name, NAME_CAP) || 'a defender' : 'a plant defender'
+}
+function defenderPower(defenders: KitRoster['defenders'], i: number): string {
+  const d = defenders.length > 0 ? defenders[i % defenders.length] : undefined
+  return d ? field(d.power, DESC_CAP) || 'its special power' : 'its special power'
+}
+function invaderName(invaders: KitRoster['invaders'], i: number): string {
+  const inv = invaders.length > 0 ? invaders[i % invaders.length] : undefined
+  return inv ? field(inv.name, NAME_CAP) || 'a bad guy' : 'a garden invader'
+}
+
+/** One quarter-sheet clue card: a number, a title, and a picture-forward line. */
+function clueCard(n: number, title: string, body: string): string {
+  return `<div class="clue-card">
+    <div class="clue-num">Clue ${n}</div>
+    <div class="clue-title">${escapeHtml(title)}</div>
+    <div class="clue-body">${body}</div>
+  </div>`
+}
+
+/**
+ * Five clue cards — template instructions woven from the cast (find / count /
+ * match / follow / defend patterns), each referencing real defenders and invaders
+ * by name, one card per quarter-sheet with cut lines. Picture-forward wording a
+ * 5-year-old can follow with help.
+ */
+export function buildClueCardsSection(roster: KitRoster): string {
+  const defenders = namedDefenders(roster)
+  const invaders = namedInvaders(roster)
+  const vault = vaultLabel(roster)
+
+  // FIND · COUNT · MATCH · FOLLOW · DEFEND — the five clue patterns.
+  const cards = [
+    clueCard(
+      1,
+      'Find',
+      `<p>Find <strong>${defenderName(defenders, 0)}</strong>! Look where something grows. 🌿</p>`,
+    ),
+    clueCard(
+      2,
+      'Count',
+      `<p>How many <strong>${invaderName(invaders, 0)}</strong> can you spot? Count them all! 🔢</p>`,
+    ),
+    clueCard(
+      3,
+      'Match',
+      `<p>Match <strong>${defenderName(defenders, 1)}</strong> to the invader it beats: <strong>${invaderName(invaders, 1)}</strong>. 🧩</p>`,
+    ),
+    clueCard(
+      4,
+      'Follow',
+      `<p>Follow the path to the next stop, guarded by <strong>${defenderName(defenders, 2)}</strong>. 👣</p>`,
+    ),
+    clueCard(
+      5,
+      'Defend',
+      `<p><strong>${invaderName(invaders, 2)}</strong> is attacking ${vault}! Use <strong>${defenderName(defenders, 3)}</strong>'s power — <strong>${defenderPower(defenders, 3)}</strong> — to defend! 🛡️</p>`,
+    ),
+  ].join('\n')
+
+  return `<section class="page kit-clues">
+    <h2 class="section-title">Clue Cards</h2>
+    <p class="section-hint">Cut apart and hide them around the garden ✂️</p>
+    <div class="clue-grid">${cards}</div>
+  </section>`
+}
+
+// ── Section 6 · Garden Defender badge ─────────────────────────────────
+
+/**
+ * The badge — a circular Garden Defender badge with the hero's art (or a
+ * draw-frame) and "Official Garden Defender".
+ */
+export function buildBadgeSection(roster: KitRoster): string {
+  return `<section class="page kit-badge">
+    <div class="badge">
+      <div class="badge-ring">
+        <div class="badge-art">${artOrFrame(roster, HERO_ART_KEY, roster.heroName, 'sm')}</div>
+        <div class="badge-caption">Official Garden Defender</div>
+      </div>
+    </div>
+    <p class="section-hint">Cut it out and wear it proud! 🏅</p>
+  </section>`
+}
+
+// ── Section 7 · Parent setup card ─────────────────────────────────────
+
+/**
+ * The parent setup card — a 30-second "what this is, how to hide clues + lay the
+ * map, ages 5+". The one adult-facing page; deterministic copy, no kid text
+ * beyond the vault/hero names for context.
+ */
+export function buildParentCardSection(roster: KitRoster): string {
+  const vault = vaultLabel(roster)
+  const hero = heroLabel(roster)
+  return `<section class="page kit-parent">
+    <h2 class="section-title">For the Grown-Up 👋</h2>
+    <div class="parent-body">
+      <p><strong>What this is:</strong> a Garden Defense Quest — a make-believe adventure where a young
+      Garden Defender protects <strong>${vault}</strong> alongside the hero <strong>${hero}</strong>. Ages 5+,
+      adult setup recommended.</p>
+      <p><strong>30-second setup:</strong></p>
+      <ol class="parent-steps">
+        <li>Cut apart the sticker sheet and the five clue cards.</li>
+        <li>Lay out the defense map somewhere the kids can reach it.</li>
+        <li>Hide the clue cards around the garden (or the living room!).</li>
+        <li>Give the kids the map — they clear each stop, solve the clue, and place a sticker.</li>
+        <li>When every stop is cleared, ${vault} is safe — award the Garden Defender badge! 🏅</li>
+      </ol>
+      <p class="parent-note">Contains small parts. Adult setup recommended. Have fun defending the garden! 🌱</p>
+    </div>
+  </section>`
+}
+
+// ── Full document assembler ───────────────────────────────────────────
+
+/** Shared print CSS — letter pages, one section per page, kid-warm styling. */
+const KIT_STYLES = `
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Comic Sans MS', 'Trebuchet MS', system-ui, sans-serif; color: #2a2a2a; background: #fff; }
+  .page { width: 100%; min-height: 10in; padding: 0.6in; page-break-after: always; break-after: page; page-break-inside: avoid; }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .section-title { font-size: 24pt; color: #2e7d32; text-align: center; margin-bottom: 6pt; }
+  .section-hint { text-align: center; font-size: 12pt; color: #777; margin-bottom: 18pt; }
+
+  /* Cover */
+  .kit-cover { display: flex; align-items: center; justify-content: center; text-align: center; }
+  .cover-kicker { font-size: 16pt; letter-spacing: 2pt; text-transform: uppercase; color: #66a266; margin-bottom: 8pt; }
+  .cover-title { font-size: 48pt; color: #2e7d32; line-height: 1.1; margin-bottom: 24pt; word-break: break-word; }
+  .cover-hero { margin: 0 auto 24pt; }
+  .cover-credit { font-size: 18pt; color: #555; font-style: italic; }
+
+  /* Art + draw-frames */
+  .art { display: block; object-fit: contain; margin: 0 auto; }
+  .art.sm { width: 130pt; height: 130pt; }
+  .art.lg { width: 260pt; height: 260pt; }
+  .frame { display: flex; align-items: center; justify-content: center; text-align: center; margin: 0 auto;
+    border: 3px dashed #bcd6bc; border-radius: 12pt; color: #8bab8b; background: #f6faf6; font-size: 12pt; padding: 8pt; }
+  .frame.sm { width: 130pt; height: 130pt; }
+  .frame.lg { width: 260pt; height: 260pt; font-size: 16pt; }
+
+  /* Booklet */
+  .booklet-page { display: flex; flex-direction: column; }
+  .beat-label { font-size: 12pt; color: #999; text-transform: uppercase; letter-spacing: 1pt; margin-bottom: 6pt; }
+  .beat-heading { font-size: 32pt; color: #2e7d32; margin-bottom: 18pt; }
+  .beat-body { font-size: 20pt; line-height: 1.5; }
+  .beat-body p { margin-bottom: 10pt; }
+  .beat-body .cast { list-style: none; }
+  .beat-body .cast li { margin-bottom: 8pt; }
+  .beat-art { margin-top: 20pt; }
+  .win-line { font-size: 24pt; font-weight: bold; color: #2e7d32; }
+
+  /* Sticker sheet */
+  .sticker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14pt; }
+  .sticker { border: 2px dashed #bbb; border-radius: 10pt; padding: 10pt; text-align: center; page-break-inside: avoid; break-inside: avoid; }
+  .sticker-name { margin-top: 6pt; font-size: 12pt; font-weight: bold; }
+
+  /* Defense map */
+  .map-path { list-style: none; max-width: 5in; margin: 0 auto; }
+  .map-path li { display: flex; align-items: center; gap: 12pt; padding: 10pt 0; border-bottom: 2px dashed #cfe8cf; }
+  .map-path li:last-child { border-bottom: none; }
+  .map-num { flex: none; width: 30pt; height: 30pt; border-radius: 50%; background: #2e7d32; color: #fff;
+    display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14pt; }
+  .map-vault .map-num { background: #f9a825; }
+  .map-guard { font-size: 16pt; }
+
+  /* Clue cards — quarter-sheet grid */
+  .clue-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0; }
+  .clue-card { border: 2px dashed #bbb; padding: 18pt; min-height: 3.5in; page-break-inside: avoid; break-inside: avoid; }
+  .clue-num { font-size: 12pt; color: #66a266; text-transform: uppercase; letter-spacing: 1pt; }
+  .clue-title { font-size: 22pt; color: #2e7d32; font-weight: bold; margin: 4pt 0 12pt; }
+  .clue-body { font-size: 18pt; line-height: 1.5; }
+
+  /* Badge */
+  .kit-badge { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .badge-ring { width: 320pt; height: 320pt; border-radius: 50%; border: 8pt solid #f9a825; background: #fffdf5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .badge-caption { margin-top: 12pt; font-size: 18pt; font-weight: bold; color: #2e7d32; }
+
+  /* Parent card */
+  .parent-body { max-width: 6in; margin: 0 auto; font-size: 14pt; line-height: 1.5; }
+  .parent-body p { margin-bottom: 12pt; }
+  .parent-steps { margin: 0 0 12pt 20pt; }
+  .parent-steps li { margin-bottom: 8pt; }
+  .parent-note { font-size: 12pt; color: #777; font-style: italic; }
+
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+`
+
+/**
+ * Build the whole print-ready kit document from a roster — all seven sections in
+ * canonical order (cover · booklet · sticker sheet · defense map · clue cards ·
+ * badge · parent card), each print-paginated. `childName` credits the author on
+ * the cover. Returns a complete `<!DOCTYPE html>` string suitable for
+ * `window.open` + `print()`. Pure — reads the roster, writes nothing.
+ */
+export function buildPrintableKitHtml(roster: KitRoster, childName: string): string {
+  const sections = [
+    buildCoverSection(roster, childName),
+    buildBookletSection(roster),
+    buildStickerSheetSection(roster),
+    buildDefenseMapSection(roster),
+    buildClueCardsSection(roster),
+    buildBadgeSection(roster),
+    buildParentCardSection(roster),
+  ].join('\n')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(clip(roster.vaultName, NAME_CAP) || 'Garden Defense Quest')} — Kit</title>
+  <style>${KIT_STYLES}</style>
+</head>
+<body>
+${sections}
+</body>
+</html>`
+}
