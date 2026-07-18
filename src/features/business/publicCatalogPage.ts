@@ -70,7 +70,11 @@ function previewBlock(p: CatalogProduct, preview: CatalogPreview): string {
       </details>`
 }
 
-function productCard(p: CatalogProduct, preview?: CatalogPreview): string {
+function productCard(
+  p: CatalogProduct,
+  preview?: CatalogPreview,
+  interactive = false,
+): string {
   const cover = p.images[0]
   const image = cover
     ? `<img class="art" src="${escapeHtml(cover.url)}" alt="${escapeHtml(cover.alt ?? p.title)}" loading="lazy" />`
@@ -84,6 +88,13 @@ function productCard(p: CatalogProduct, preview?: CatalogPreview): string {
   const peek =
     p.includePreview && preview && preview.pages.length > 0 ? previewBlock(p, preview) : ''
 
+  // FEAT-88: the "I want this!" toggle. Data attributes carry the pick to the
+  // form script; escaped so a crafted title can't break out of the attribute.
+  const want = interactive
+    ? `<button type="button" class="want-btn" aria-pressed="false"
+        data-product-id="${escapeHtml(p.id)}" data-title="${escapeHtml(p.title)}">I want this!</button>`
+    : ''
+
   return `<article class="card">
       ${image}
       <div class="body">
@@ -93,6 +104,7 @@ function productCard(p: CatalogProduct, preview?: CatalogPreview): string {
         ${priceLine(p.priceCents)}
         ${made}
         ${peek}
+        ${want}
       </div>
     </article>`
 }
@@ -105,17 +117,166 @@ function productCard(p: CatalogProduct, preview?: CatalogPreview): string {
  * If nothing is listed, renders a friendly note (defensive — the publish surface
  * gates the action so this is rarely hit).
  */
+/**
+ * Config for the FEAT-88 public order form, baked into the page at publish time.
+ * When present, product cards get an "I want this!" toggle and a sticky order
+ * form posts the picks to {@link endpoint}. Absent ⇒ the page is the read-only
+ * FEAT-84 lookbook, byte-for-byte (script-free), so a project without the
+ * endpoint deployed never ships a broken form.
+ */
+export interface OrderFormConfig {
+  /** The `submitCatalogOrder` endpoint URL. */
+  endpoint: string
+  /** The family whose shop this is — posted so the endpoint knows where to write. */
+  familyId: string
+}
+
+/**
+ * The FEAT-88 order-form CSS. Injected into the page `<style>` ONLY when the
+ * form ships, so the read-only FEAT-84 lookbook stays byte-identical.
+ */
+const ORDER_STYLES = `
+    /* ── Order form (FEAT-88) ── */
+    .want-btn { margin-top: 10px; width: 100%; border: 2px solid #2e7d32; background: #fff;
+      color: #2e7d32; font-weight: bold; font-size: 15px; padding: 9px 12px; border-radius: 999px;
+      cursor: pointer; font-family: inherit; }
+    .want-btn[aria-pressed="true"] { background: #2e7d32; color: #fff; }
+    .order-bar { position: sticky; bottom: 0; left: 0; right: 0; margin-top: 24px;
+      background: #fff; border-top: 3px solid #2e7d32; box-shadow: 0 -3px 12px rgba(0,0,0,0.12);
+      border-radius: 16px 16px 0 0; z-index: 10; }
+    .order-inner { max-width: 640px; margin: 0 auto; padding: 14px 16px 18px;
+      display: flex; flex-direction: column; gap: 8px; }
+    .order-picks { font-size: 13px; color: #555; }
+    .order-chip { display: inline-block; background: #e8f5e9; color: #2e7d32; border-radius: 999px;
+      padding: 2px 10px; margin: 2px 2px 0 0; font-weight: bold; font-size: 12px; }
+    .order-field { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #444; }
+    .order-field input { font: inherit; font-size: 16px; padding: 9px 11px; border: 1px solid #cfe8cf;
+      border-radius: 10px; background: #f9fdf9; }
+    .order-known { font-size: 13px; color: #33691e; margin: 2px 0; }
+    .order-hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+    .order-send { font: inherit; font-weight: bold; font-size: 16px; padding: 12px; border: none;
+      border-radius: 12px; background: #2e7d32; color: #fff; cursor: pointer; }
+    .order-send:disabled { opacity: 0.6; cursor: default; }
+    .order-msg { font-size: 13px; color: #b71c1c; margin: 0; min-height: 1em; }
+    .order-done { font-size: 16px; font-weight: bold; color: #2e7d32; text-align: center;
+      padding: 12px 0; margin: 0; }`
+
+/**
+ * The sticky order form + its client script (FEAT-88). Self-contained, no
+ * external refs. Only emitted when an {@link OrderFormConfig} is passed, so the
+ * read-only page stays script-free. The endpoint + familyId are JSON-embedded
+ * (they're controlled values — our URL + a UID — never user text).
+ */
+function orderForm(cfg: OrderFormConfig): string {
+  const config = JSON.stringify({ endpoint: cfg.endpoint, familyId: cfg.familyId })
+  return `<form id="orderForm" class="order-bar" hidden aria-label="Send an order to the Barnes Bros">
+      <div class="order-inner">
+        <div class="order-picks" id="orderPicks"></div>
+        <label class="order-field">
+          <span>Your first name</span>
+          <input type="text" id="orderName" name="customerName" maxlength="80" autocomplete="given-name" required />
+        </label>
+        <label class="order-field">
+          <span>Note (optional)</span>
+          <input type="text" id="orderNote" name="note" maxlength="600" placeholder="Anything we should know?" />
+        </label>
+        <label class="order-field">
+          <span>How to reach you (optional)</span>
+          <input type="text" id="orderContact" name="contact" maxlength="120" placeholder="Text, call, or @handle" />
+        </label>
+        <p class="order-known">We know you — we'll be in touch! 💚</p>
+        <input type="text" id="orderHp" name="website" class="order-hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+        <button type="submit" id="orderSubmit" class="order-send">Send to the Barnes Bros</button>
+        <p id="orderMsg" class="order-msg" role="status" aria-live="polite"></p>
+      </div>
+    </form>
+    <script>
+    (function () {
+      var CONFIG = ${config};
+      var picks = {};
+      var form = document.getElementById('orderForm');
+      var picksEl = document.getElementById('orderPicks');
+      var msgEl = document.getElementById('orderMsg');
+
+      function render() {
+        var ids = Object.keys(picks);
+        form.hidden = ids.length === 0;
+        picksEl.innerHTML = ids.length
+          ? 'Your picks: ' + ids.map(function (id) {
+              return '<span class="order-chip">' + picks[id] + '</span>';
+            }).join(' ')
+          : '';
+      }
+
+      Array.prototype.forEach.call(document.querySelectorAll('.want-btn'), function (btn) {
+        btn.addEventListener('click', function () {
+          var id = btn.getAttribute('data-product-id');
+          var title = btn.getAttribute('data-title') || '';
+          if (picks[id]) {
+            delete picks[id];
+            btn.setAttribute('aria-pressed', 'false');
+            btn.textContent = 'I want this!';
+          } else {
+            picks[id] = title;
+            btn.setAttribute('aria-pressed', 'true');
+            btn.textContent = 'Picked ✓';
+          }
+          render();
+        });
+      });
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var name = (document.getElementById('orderName').value || '').trim();
+        if (!name) { msgEl.textContent = 'Please add your first name.'; return; }
+        var ids = Object.keys(picks);
+        if (!ids.length) { return; }
+        var payload = {
+          familyId: CONFIG.familyId,
+          customerName: name,
+          items: ids.map(function (id) { return { productId: id, title: picks[id] }; }),
+          note: (document.getElementById('orderNote').value || '').trim(),
+          contact: (document.getElementById('orderContact').value || '').trim(),
+          website: document.getElementById('orderHp').value
+        };
+        var btn = document.getElementById('orderSubmit');
+        btn.disabled = true;
+        msgEl.textContent = 'Sending…';
+        fetch(CONFIG.endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function (res) {
+          if (!res.ok) throw new Error('bad status');
+          form.innerHTML = '<p class="order-done">Got it, ' + name.replace(/</g, '') +
+            '! The bros are on it. 💪</p>';
+        }).catch(function () {
+          btn.disabled = false;
+          msgEl.textContent = "Hmm, that didn't send. Please try again in a moment.";
+        });
+      });
+    })();
+    </script>`
+}
+
 export function buildPublicCatalogHtml(
   products: CatalogProduct[],
   previews: Record<string, CatalogPreview> = {},
+  orderConfig?: OrderFormConfig,
 ): string {
   const listed = selectListedProducts(products)
   const credit = creditNames(listed)
+  // Interactive ONLY when the endpoint is baked AND there's something to pick —
+  // an empty catalog never shows toggles, a form, or the "tap to pick" copy.
+  const interactive = Boolean(orderConfig) && listed.length > 0
 
   const cards =
     listed.length > 0
-      ? listed.map((p) => productCard(p, previews[p.id])).join('\n')
+      ? listed.map((p) => productCard(p, previews[p.id], interactive)).join('\n')
       : `<p class="empty">Our catalog is being set up — check back soon! 🌱</p>`
+
+  // The order form only ships when the endpoint was baked AND something is listed.
+  const form = interactive && orderConfig ? orderForm(orderConfig) : ''
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -163,7 +324,7 @@ export function buildPublicCatalogHtml(
     .peek-cta { margin-top: 6px; font-size: 14px; font-weight: bold; color: #2e7d32; }
     .empty { text-align: center; color: #777; font-size: 16px; padding: 40px 12px; }
     footer { margin-top: 32px; text-align: center; font-size: 14px; color: #666; }
-    footer .heart { color: #e57373; }
+    footer .heart { color: #e57373; }${interactive ? ORDER_STYLES : ''}
   </style>
 </head>
 <body>
@@ -171,13 +332,18 @@ export function buildPublicCatalogHtml(
     <header>
       <h1>Barnes Bros</h1>
       <div class="sub">made by ${escapeHtml(credit)}</div>
-      <div class="want">Want one? Tell us your favorites! 💚</div>
+      <div class="want">${
+        interactive
+          ? `Tap "I want this!" on your favorites, then send it our way 💚`
+          : 'Want one? Tell us your favorites! 💚'
+      }</div>
     </header>
     <div class="grid">
       ${cards}
     </div>
     <footer>Made with <span class="heart" aria-hidden="true">♥</span> by ${escapeHtml(credit)}</footer>
   </div>
+  ${form}
 </body>
 </html>`
 }

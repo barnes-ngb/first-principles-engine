@@ -79,6 +79,18 @@ export function publicCatalogUrl(familyId: string): string {
   return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encoded}?alt=media`
 }
 
+/**
+ * The public order endpoint the baked form POSTs to (FEAT-88). The
+ * `submitCatalogOrder` v2 `onRequest` function has no region override, so it
+ * lives at the default `us-central1` and is reachable at the deterministic
+ * `cloudfunctions.net` alias. Baked into the published page at publish time —
+ * the SAME "bake it at publish, not build" pattern as the catalog URL (the
+ * familyId is the parent's runtime UID, unknowable at build time).
+ */
+export function catalogOrderEndpoint(projectId: string): string {
+  return `https://us-central1-${projectId}.cloudfunctions.net/submitCatalogOrder`
+}
+
 export interface PublishedState {
   /** The shareable public URL. */
   url: string
@@ -132,7 +144,13 @@ export async function publishCatalogSite(
   products: CatalogProduct[],
 ): Promise<PublishedState> {
   const previews = await resolveBookPreviews(familyId, products)
-  const html = buildPublicCatalogHtml(products, previews)
+  // Bake the order endpoint + familyId so the published form can POST (FEAT-88).
+  // projectId is a runtime firebase-app option, same source as the bucket above.
+  const projectId = storage.app.options.projectId
+  const orderConfig = projectId
+    ? { endpoint: catalogOrderEndpoint(projectId), familyId }
+    : undefined
+  const html = buildPublicCatalogHtml(products, previews, orderConfig)
   const blob = new Blob([html], { type: 'text/html; charset=utf-8' })
   const objectRef = ref(storage, publicCatalogPath(familyId))
   await uploadBytes(objectRef, blob, {

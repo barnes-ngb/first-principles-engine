@@ -136,3 +136,54 @@ describe('buildPublicCatalogHtml', () => {
     expect(html).toContain('Barnes Bros')
   })
 })
+
+describe('buildPublicCatalogHtml — order form (FEAT-88)', () => {
+  const ORDER_CFG = {
+    endpoint: 'https://us-central1-demo.cloudfunctions.net/submitCatalogOrder',
+    familyId: 'fam-123',
+  }
+
+  it('stays a read-only, script-free lookbook when no order config is passed', () => {
+    const html = buildPublicCatalogHtml([product({})])
+    expect(html).not.toContain('<form')
+    expect(html).not.toContain('<script')
+    expect(html).not.toContain('class="want-btn"')
+  })
+
+  it('emits the "I want this!" toggle on each product when interactive', () => {
+    const html = buildPublicCatalogHtml(
+      [product({ id: 'a', title: 'Listed Kit' })],
+      {},
+      ORDER_CFG,
+    )
+    expect(html).toContain('class="want-btn"')
+    expect(html).toContain('data-product-id="a"')
+    expect(html).toContain('data-title="Listed Kit"')
+  })
+
+  it('bakes the endpoint + familyId into the form script', () => {
+    const html = buildPublicCatalogHtml([product({})], {}, ORDER_CFG)
+    expect(html).toContain('<form id="orderForm"')
+    expect(html).toContain(ORDER_CFG.endpoint)
+    expect(html).toContain('"familyId":"fam-123"')
+    // The honeypot + the "we know you" warm copy ship.
+    expect(html).toContain('name="website"')
+    expect(html).toMatch(/We know you/)
+  })
+
+  it('does not ship the form when nothing is listed (no picks possible)', () => {
+    const html = buildPublicCatalogHtml([product({ status: 'draft' })], {}, ORDER_CFG)
+    expect(html).not.toContain('<form id="orderForm"')
+    expect(html).not.toContain('class="want-btn"')
+  })
+
+  it('escapes a crafted product title inside the toggle data attribute', () => {
+    const html = buildPublicCatalogHtml(
+      [product({ id: 'x', title: 'Kit "evil" <b>' })],
+      {},
+      ORDER_CFG,
+    )
+    expect(html).toContain('data-title="Kit &quot;evil&quot; &lt;b&gt;"')
+    expect(html).not.toContain('data-title="Kit "evil"')
+  })
+})
