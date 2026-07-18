@@ -672,7 +672,9 @@ async function drawContentPage(
   // Render text with dynamic font sizing to prevent overflow
   if (page.text) {
     const textLen = page.text.length
-    const pageNumSpace = settings.includePageNumbers ? 6 : 0
+    // Only reserve the bottom strip when a number actually prints there, so the
+    // picture-book formats reclaim it for the story text (FEAT-98).
+    const pageNumSpace = shouldRenderPageNumbers(settings.pageSize, settings.includePageNumbers) ? 6 : 0
     const maxTextY = area.y + area.h - pageNumSpace
     const availableTextH = maxTextY - curY
 
