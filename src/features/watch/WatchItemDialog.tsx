@@ -35,7 +35,7 @@ interface WatchItemDialogProps {
 }
 
 /**
- * Watch Vehicle — the PLANNED Today player (FEAT-103 / design FEAT-86, slice 3).
+ * Watch Vehicle — the PLANNED Today player (FEAT-104 / design FEAT-86, slice 3).
  *
  * Wraps the shared, safety-hardened `WatchPlayer` (embed + end-stop + app-owned
  * fullscreen) and adds the completion beat: after the video ends, an OPTIONAL

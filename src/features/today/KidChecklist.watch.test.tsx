@@ -55,7 +55,7 @@ function renderKid(
   return { persist }
 }
 
-describe('KidChecklist — Watch Vehicle (FEAT-103)', () => {
+describe('KidChecklist — Watch Vehicle (FEAT-104)', () => {
   beforeEach(() => addXpEventMock.mockClear())
 
   it('renders a Watch button that opens the player for a planned watch item', () => {

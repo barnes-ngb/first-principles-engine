@@ -361,7 +361,7 @@ export interface ChecklistItem {
   evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
   /**
    * Links a watch item to a `WatchVideo` in the family's `watchLibrary`
-   * (present iff `itemType==='watch'`, FEAT-103/design FEAT-86). Mirrors `bookId`:
+   * (present iff `itemType==='watch'`, FEAT-104/design FEAT-86). Mirrors `bookId`:
    * the plan references the curated library entry by id, and the player resolves
    * the `WatchVideo` at render — the vetted `youtubeId` lives in exactly one place.
    */

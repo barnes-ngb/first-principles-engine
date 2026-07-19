@@ -209,7 +209,7 @@ export default function TodayPage() {
     activeRoutineItems,
   })
 
-  // Watch Vehicle (FEAT-103): curated videos in scope for this child (D7) + the
+  // Watch Vehicle (FEAT-104): curated videos in scope for this child (D7) + the
   // shared completion (credit hours + artifact, no XP/concept). Parent surface.
   const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary(selectedChildId)
   const watch = useWatchItemCompletion({
@@ -1057,7 +1057,7 @@ export default function TodayPage() {
         />
       )}
 
-      {/* Watch Vehicle — planned curated-video player (FEAT-103). */}
+      {/* Watch Vehicle — planned curated-video player (FEAT-104). */}
       <WatchItemDialog
         video={watch.watchVideo}
         open={watch.watchTarget !== null}

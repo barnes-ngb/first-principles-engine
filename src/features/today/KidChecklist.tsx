@@ -54,7 +54,7 @@ interface KidChecklistProps {
   persistDayLogImmediate: (updated: DayLog) => void
   onCaptureOpen: (itemIndex: number) => void
   onXpToast: (toast: { amount: number; reason: string }) => void
-  /** Open the curated-video player for a planned watch item (FEAT-103). */
+  /** Open the curated-video player for a planned watch item (FEAT-104). */
   onWatchOpen?: (item: ChecklistItem, index: number) => void
 }
 
@@ -94,7 +94,7 @@ export default function KidChecklist({
       // A watch item completes ONLY through the player's "Mark it done" (credits
       // hours + artifact + end-stop). Tapping the row/checkbox to complete it
       // routes to the player instead, so it can't be credited without watching
-      // or without the capture (FEAT-103; Codex P2). Unchecking still toggles.
+      // or without the capture (FEAT-104; Codex P2). Unchecking still toggles.
       if (item.itemType === 'watch' && !item.completed && onWatchOpen) {
         onWatchOpen(item, itemIndex)
         return
@@ -239,7 +239,7 @@ export default function KidChecklist({
                     </Button>
                   </Box>
                 )}
-                {/* Watch button for curated-video items (FEAT-103) */}
+                {/* Watch button for curated-video items (FEAT-104) */}
                 {item.itemType === 'watch' && onWatchOpen && !item.completed && (
                   <Box sx={{ ml: 5, mt: 1 }}>
                     <Button
@@ -448,7 +448,7 @@ export default function KidChecklist({
                         </Button>
                       </Box>
                     )}
-                    {/* Watch button for curated-video items (FEAT-103) */}
+                    {/* Watch button for curated-video items (FEAT-104) */}
                     {item.itemType === 'watch' && onWatchOpen && !item.completed && (
                       <Box sx={{ ml: 5, mt: 1 }}>
                         <Button

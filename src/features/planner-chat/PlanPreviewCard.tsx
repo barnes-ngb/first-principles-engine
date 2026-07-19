@@ -46,7 +46,7 @@ interface PlanPreviewCardProps {
   onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
   onRemoveItem?: (dayIndex: number, itemIndex: number) => void
   onUpdateTime?: (dayIndex: number, itemIndex: number, newMinutes: number) => void
-  /** Open the curated-video picker to plan a watch item onto this day (FEAT-103). */
+  /** Open the curated-video picker to plan a watch item onto this day (FEAT-104). */
   onAddWatchItem?: (dayIndex: number) => void
 }
 
@@ -391,7 +391,7 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
               )
             })()}
 
-            {/* Plan a curated video onto this day (FEAT-103) — picks from the
+            {/* Plan a curated video onto this day (FEAT-104) — picks from the
                 vetted library, never an open search. */}
             {onAddWatchItem && (
               <Button

@@ -1726,7 +1726,7 @@ Generate a plan for Monday through Friday.`.trim()
     setCurrentDraft(updated)
   }, [currentDraft])
 
-  // Watch Vehicle (FEAT-103): plan a curated video onto a day by picking from
+  // Watch Vehicle (FEAT-104): plan a curated video onto a day by picking from
   // the vetted library, scoped to this child (D7). The picker + append are the
   // manual "a parent plans a watch item" path; lock-in threads watchVideoId onto
   // the ChecklistItem exactly like bookId.
@@ -2805,7 +2805,7 @@ ${dayPrompts}`
         />
       )}
 
-      {/* Watch Vehicle — pick a vetted video to plan onto the chosen day (FEAT-103). */}
+      {/* Watch Vehicle — pick a vetted video to plan onto the chosen day (FEAT-104). */}
       <WatchLibraryPicker
         open={watchPickerDay !== null}
         onClose={() => setWatchPickerDay(null)}

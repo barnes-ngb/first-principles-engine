@@ -3,7 +3,7 @@ import { EngineStage, EvidenceType } from '../../core/types/enums'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 
 /**
- * Watch Vehicle — completion capture (FEAT-103 / design FEAT-86, slice 3).
+ * Watch Vehicle — completion capture (FEAT-104 / design FEAT-86, slice 3).
  *
  * Pure, side-effect-free logic for completing a *planned* watch checklist item.
  * Two responsibilities, both deliberately narrow:

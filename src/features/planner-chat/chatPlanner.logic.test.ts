@@ -1381,10 +1381,10 @@ describe('parseAIResponse — FEAT-72 catalog-tag backfill', () => {
   })
 })
 
-// FEAT-103: the Watch Vehicle plan-item hook — `itemType:'watch'` + a
+// FEAT-104: the Watch Vehicle plan-item hook — `itemType:'watch'` + a
 // `watchVideoId` companion — survives the AI-response parse (the plan → draft
 // leg of the plan → lock-in → Today round trip).
-describe('parseAIResponse — watch items (FEAT-103)', () => {
+describe('parseAIResponse — watch items (FEAT-104)', () => {
   const respond = (items: Array<Record<string, unknown>>): ChatResponse => ({
     message: JSON.stringify({
       days: [{ day: 'Monday', timeBudgetMinutes: 150, items }],

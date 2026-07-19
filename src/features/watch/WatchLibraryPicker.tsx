@@ -26,7 +26,7 @@ interface WatchLibraryPickerProps {
 }
 
 /**
- * Watch Vehicle — the planner's "pick a vetted video" dialog (FEAT-103 / design
+ * Watch Vehicle — the planner's "pick a vetted video" dialog (FEAT-104 / design
  * FEAT-86, slice 3). A parent plans a watch item onto a day by choosing from the
  * curated library — never an open search or a raw URL. Scope (D7) is applied by
  * the caller's `useWatchLibrary(childId)`, so only in-scope videos ever show.

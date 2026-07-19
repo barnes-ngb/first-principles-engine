@@ -37,7 +37,7 @@ export interface UseWatchItemCompletionResult {
 
 /**
  * Watch Vehicle completion, shared by the parent (`TodayPage`) and kid
- * (`KidTodayView`) shells (FEAT-103 / design FEAT-86, slice 3). Centralizes the
+ * (`KidTodayView`) shells (FEAT-104 / design FEAT-86, slice 3). Centralizes the
  * hours-credit + artifact so both surfaces behave identically, and so the two
  * writes live in ONE place that provably touches neither the XP ledger nor the
  * learner model — the artifact `addDoc` is fire-and-forget (a failed capture

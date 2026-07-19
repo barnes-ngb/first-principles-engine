@@ -167,7 +167,7 @@ describe('WatchPlayer', () => {
     expect(fsMock.exitFullscreenIfActive).toHaveBeenCalled()
   })
 
-  // FEAT-103: the PLANNED Today flow supplies onComplete + a note slot; the
+  // FEAT-104: the PLANNED Today flow supplies onComplete + a note slot; the
   // LIBRARY practice flow supplies neither and therefore writes nothing.
   it('planned flow: the completion button fires onComplete (not onDone) and renders the note slot', () => {
     const onDone = vi.fn()

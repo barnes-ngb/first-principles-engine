@@ -154,7 +154,7 @@ interface TodayChecklistProps {
   activeRoutineItems: RoutineItemKey[] | undefined
   persistDayLogImmediate: (updated: DayLog) => void
   onTeachHelperOpen: (item: ChecklistItemType) => void
-  /** Open the curated-video player for a planned watch item (FEAT-103). */
+  /** Open the curated-video player for a planned watch item (FEAT-104). */
   onWatchOpen?: (item: ChecklistItemType, index: number) => void
   onUnifiedCapture: (file: File, index: number) => void
   /**
@@ -464,7 +464,7 @@ export default function TodayChecklist({
     // A watch item completes ONLY through the player's "Mark it done" (which
     // credits hours + leaves the artifact and enforces the end-stop). Checking
     // the box to *complete* it instead routes to the player, so it can never be
-    // credited without watching or without the capture (FEAT-103; Codex P2).
+    // credited without watching or without the capture (FEAT-104; Codex P2).
     // Unchecking a completed watch item still toggles normally.
     if (item.itemType === 'watch' && !item.completed && onWatchOpen) {
       onWatchOpen(item, index)
@@ -916,7 +916,7 @@ export default function TodayChecklist({
                     ⛏️ Start Mining
                   </Button>
                 )}
-                {/* Watch button for curated-video items (FEAT-103) */}
+                {/* Watch button for curated-video items (FEAT-104) */}
                 {item.itemType === 'watch' && onWatchOpen && !item.completed && (
                   <Button
                     size="small"
