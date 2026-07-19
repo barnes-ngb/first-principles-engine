@@ -355,10 +355,17 @@ export interface ChecklistItem {
   rolledOver?: boolean
   /** ISO date string (YYYY-MM-DD) of the original day this item was rolled from. */
   rolledOverFrom?: string
-  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
-  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), activity, or watch (curated video). */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity' | 'watch'
   /** Evaluation mode when itemType is 'evaluation'. */
   evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
+  /**
+   * Links a watch item to a `WatchVideo` in the family's `watchLibrary`
+   * (present iff `itemType==='watch'`, FEAT-103/design FEAT-86). Mirrors `bookId`:
+   * the plan references the curated library entry by id, and the player resolves
+   * the `WatchVideo` at render — the vetted `youtubeId` lives in exactly one place.
+   */
+  watchVideoId?: string
   /** Route to navigate to (e.g., '/quest') for in-app activities. */
   link?: string
   /** Actual minutes spent (set on auto-complete from quest/fluency). */
@@ -539,14 +546,16 @@ export interface DraftPlanItem {
   category?: 'must-do' | 'choose'
   /** Guidance note when an item is skipped (from AI). */
   skipGuidance?: string
-  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), or activity. */
-  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity'
+  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), activity, or watch (curated video). */
+  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity' | 'watch'
   /** Evaluation mode when itemType is 'evaluation'. */
   evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
   /** Route to navigate to (e.g., '/quest') for in-app activities. */
   link?: string
   /** Linked book ID — set for "Read: {title}" (Mom's Book / AI story) or "Continue Book: {title}" (kid draft) items. */
   bookId?: string
+  /** Links a watch item to a `WatchVideo` in the family's `watchLibrary` (present iff `itemType==='watch'`). Mirrors `bookId`. */
+  watchVideoId?: string
   /** Which schedule block this item belongs to */
   block?: ScheduleBlock
   /** Activity ID this runs simultaneously with */
