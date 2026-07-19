@@ -58,10 +58,7 @@ import type {
 import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
-import {
-  getStateConfig,
-  type HomeschoolState,
-} from '../../core/compliance/stateCompliance'
+import type { HomeschoolState } from '../../core/compliance/stateCompliance'
 import { parseDateFromDocId } from '../today/daylog.model'
 import ComplianceDashboard from './ComplianceDashboard'
 import MonthlyTrend from './MonthlyTrend'
@@ -73,6 +70,7 @@ import {
   assertAttributed,
   buildComplianceZip,
   computeHoursSummary,
+  computeSubjectDistribution,
   deriveChildIdFromDocId,
   generateComplianceReportHtml,
   generateDailyLogCsv,
@@ -142,11 +140,6 @@ function HoursComplianceTab() {
   // but not activated, and there is no switch UI. When a family doc carries
   // `settings.homeschoolState`, thread it in here.
   const homeschoolState: HomeschoolState | undefined = undefined
-  const stateConfig = getStateConfig(homeschoolState)
-  const stateLabel = homeschoolState ?? 'MO'
-  const coreAtHomeLabel = stateConfig.hoursRequirement
-    ? `Core at home (${stateLabel} ≥${stateConfig.hoursRequirement.coreAtHome})`
-    : `Core at home (${stateLabel})`
   const { start, end } = useMemo(() => getSchoolYearRange(), [])
   const [startDate, setStartDate] = useState(start)
   const [endDate, setEndDate] = useState(end)
@@ -338,6 +331,13 @@ function HoursComplianceTab() {
   const summary = useMemo(
     () => computeHoursSummary(dayLogs, hoursEntries, adjustments, activeChildId),
     [dayLogs, hoursEntries, adjustments, activeChildId],
+  )
+
+  // FEAT-105: descriptive "where did the time go" distribution, derived purely
+  // from the summary so it always reconciles with the compliance total above.
+  const distribution = useMemo(
+    () => computeSubjectDistribution(summary),
+    [summary],
   )
 
   const hasHoursEntries = hoursEntries.length > 0
@@ -819,51 +819,103 @@ function HoursComplianceTab() {
         />
       )}
 
-      {/* Hours Breakdown by Subject */}
+      {/* Hours by Subject — descriptive distribution (FEAT-105) */}
       {activeChildId && !isLoading && hasData && (
         <SectionCard title="Hours by Subject">
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Subject</TableCell>
-                <TableCell align="right">Total Hours</TableCell>
-                <TableCell align="right">Home Hours</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {summary.bySubject.map((row) => (
-                <TableRow key={row.subjectBucket}>
-                  <TableCell>{row.subjectBucket}</TableCell>
-                  <TableCell align="right">
-                    {formatHours(row.totalMinutes)}
+          <Stack spacing={1.5}>
+            <Typography variant="body2" color="text.secondary">
+              Where the recorded time went this range. Bars are scaled to the
+              busiest subject — a picture of the mix, not a target.
+            </Typography>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Subject</TableCell>
+                  <TableCell align="right">Hours</TableCell>
+                  <TableCell align="right">% of total</TableCell>
+                  <TableCell align="right">Home</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {distribution.rows.map((row) => {
+                  const barPct =
+                    distribution.maxSubjectMinutes > 0
+                      ? Math.max(
+                          0,
+                          (row.totalMinutes / distribution.maxSubjectMinutes) *
+                            100,
+                        )
+                      : 0
+                  return (
+                    <TableRow key={row.subjectBucket}>
+                      <TableCell sx={{ minWidth: 140 }}>
+                        <Typography variant="body2">{row.label}</Typography>
+                        {/* Neutral bar scaled to the largest subject — no
+                            pass/fail color, no quota. */}
+                        <Box
+                          aria-hidden
+                          sx={{
+                            mt: 0.5,
+                            height: 6,
+                            width: '100%',
+                            borderRadius: 3,
+                            bgcolor: 'action.hover',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              height: '100%',
+                              width: `${barPct}%`,
+                              borderRadius: 3,
+                              bgcolor: 'text.secondary',
+                              opacity: 0.55,
+                            }}
+                          />
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatHours(row.totalMinutes)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {row.percent.toFixed(0)}%
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatHours(row.homeMinutes)}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                <TableRow>
+                  <TableCell>
+                    <strong>Total</strong>
                   </TableCell>
                   <TableCell align="right">
-                    {formatHours(row.homeMinutes)}
+                    <strong>{formatHours(distribution.totalMinutes)}</strong>
+                  </TableCell>
+                  <TableCell align="right">
+                    <strong>100%</strong>
+                  </TableCell>
+                  <TableCell align="right">
+                    <strong>{formatHours(summary.homeMinutes)}</strong>
                   </TableCell>
                 </TableRow>
-              ))}
-              <TableRow>
-                <TableCell>
-                  <strong>Total</strong>
-                </TableCell>
-                <TableCell align="right">
-                  <strong>{formatHours(summary.totalMinutes)}</strong>
-                </TableCell>
-                <TableCell align="right">
-                  <strong>{formatHours(summary.homeMinutes)}</strong>
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>{coreAtHomeLabel}</TableCell>
-                <TableCell align="right">
-                  {formatHours(summary.coreMinutes)}
-                </TableCell>
-                <TableCell align="right">
-                  {formatHours(summary.coreHomeMinutes)}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+              </TableBody>
+            </Table>
+            {/* Factual MO statutory split — descriptive, no deficit language. */}
+            <Box>
+              <Typography variant="body2">
+                Core subjects: {formatHours(distribution.coreMinutes)} h
+                &nbsp;·&nbsp; Everything else:{' '}
+                {formatHours(distribution.nonCoreMinutes)} h
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Missouri counts Reading, Language Arts, Math, Science, and Social
+                Studies as core; the rest still count toward total instruction.
+                Shown for reference — this is the statutory split, not a target.
+              </Typography>
+            </Box>
+          </Stack>
         </SectionCard>
       )}
 
