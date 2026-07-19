@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
@@ -41,8 +41,20 @@ const NOCOOKIE_HOST = 'https://www.youtube-nocookie.com'
 
 interface WatchPlayerProps {
   video: WatchVideo
-  /** Return to wherever the child came from — the ONLY forward action. */
+  /** Return to wherever the child came from — used for close and the error "Go back". */
   onDone: () => void
+  /**
+   * Completion action fired from the end-of-video panel only (never the error
+   * path). When provided, the panel's button becomes the "complete" affordance
+   * — the planned Today flow uses it to credit hours + leave an artifact (slice
+   * 3). Omitted (the library practice case) → the panel just closes via `onDone`,
+   * so unplanned watching writes nothing.
+   */
+  onComplete?: () => void
+  /** Label for the end-of-video panel button (default "Done"). */
+  doneLabel?: string
+  /** Optional extra content rendered inside the completion panel (e.g. a "what we saw" note). */
+  completionExtra?: ReactNode
 }
 
 /**
@@ -58,7 +70,13 @@ interface WatchPlayerProps {
  * Writes nothing (no hours, artifact, concept state, or XP) — this slice is
  * practice/preview only (D3). Planned watching counts time in slice 3.
  */
-export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
+export default function WatchPlayer({
+  video,
+  onDone,
+  onComplete,
+  doneLabel = 'Done',
+  completionExtra,
+}: WatchPlayerProps) {
   const { status, yt, error } = useYouTubeIframeApi()
   const containerRef = useRef<HTMLDivElement | null>(null)
   // The player FRAME wraps both the iframe host and the overlays. App-owned
@@ -92,6 +110,15 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
   const handleDone = () => {
     exitFullscreenIfActive()
     onDone()
+  }
+
+  // End-of-video panel action. Prefers `onComplete` (the planned Today flow —
+  // credit hours + artifact); falls back to `onDone` (library practice = close,
+  // no writes). Never reached from the error path, so an errored video never
+  // "completes".
+  const handleComplete = () => {
+    exitFullscreenIfActive()
+    ;(onComplete ?? onDone)()
   }
 
   useEffect(() => {
@@ -245,8 +272,9 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
             <Typography variant="h5" component="p" textAlign="center">
               All done! 🌱
             </Typography>
-            <Button variant="contained" size="large" onClick={handleDone}>
-              Done
+            {completionExtra}
+            <Button variant="contained" size="large" onClick={handleComplete}>
+              {doneLabel}
             </Button>
           </Stack>
         )}
@@ -273,11 +301,20 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
         )}
       </Box>
 
-      {/* Honest scope: this is practice; it does NOT count hours yet (D3). */}
-      <Typography variant="caption" color="text.secondary">
-        Practice watching — this doesn&apos;t count hours yet. Planned watching counts your time —
-        that&apos;s coming next.
-      </Typography>
+      {/* Honest scope. The library practice case (no onComplete) counts nothing;
+          the planned Today case (onComplete supplied) credits time on "Mark it
+          done" — never show the "doesn't count" copy there (it would say the
+          opposite of what the button does). */}
+      {onComplete ? (
+        <Typography variant="caption" color="text.secondary">
+          When it ends, tap “Mark it done” to count your time and save what you saw.
+        </Typography>
+      ) : (
+        <Typography variant="caption" color="text.secondary">
+          Practice watching — this doesn&apos;t count hours. Planned watching (from your day) counts
+          your time.
+        </Typography>
+      )}
     </Stack>
   )
 }

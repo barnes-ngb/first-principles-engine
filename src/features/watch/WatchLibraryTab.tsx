@@ -42,7 +42,9 @@ export default function WatchLibraryTab() {
       <Stack spacing={1.5}>
         <Typography variant="h6">Library</Typography>
         <Typography variant="body2" color="text.secondary">
-          Vetted videos live here. Planning and watching come next.
+          Vetted videos live here. Plan one onto a day in Plan My Week (it counts time and
+          leaves a portfolio note), or press Watch to preview it — previewing here doesn&apos;t
+          count hours.
         </Typography>
 
         {loading ? (
