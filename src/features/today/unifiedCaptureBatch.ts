@@ -1,5 +1,5 @@
 /**
- * FEAT-107 (batch photo capture): the tiny presentation helper for the summary
+ * FEAT-108 (batch photo capture): the tiny presentation helper for the summary
  * toast shown after the extra pages of a batch are saved.
  *
  * A batch capture runs photo #1 through the full unified-capture pipeline (the

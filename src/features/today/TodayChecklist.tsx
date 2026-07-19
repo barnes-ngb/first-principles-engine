@@ -158,7 +158,7 @@ interface TodayChecklistProps {
   onWatchOpen?: (item: ChecklistItemType, index: number) => void
   onUnifiedCapture: (file: File, index: number) => void
   /**
-   * FEAT-107 (batch capture): save several photos of ONE item in one action.
+   * FEAT-108 (batch capture): save several photos of ONE item in one action.
    * The per-item Upload picker is multi-select; >1 file routes here, 1 file
    * stays on `onUnifiedCapture`. Absent → the picker falls back to single.
    */
@@ -1060,7 +1060,7 @@ export default function TodayChecklist({
                         const input = document.createElement('input')
                         input.type = 'file'
                         input.accept = 'image/*'
-                        // FEAT-107: pick several pages of one item, save once.
+                        // FEAT-108: pick several pages of one item, save once.
                         input.multiple = true
                         input.onchange = (e) => {
                           const files = Array.from((e.target as HTMLInputElement).files ?? [])

@@ -47,7 +47,7 @@ export interface UseUnifiedCaptureResult {
   /** Run the unified capture pipeline for a checklist item. */
   handleUnifiedCapture: (file: File, index: number) => Promise<void>
   /**
-   * FEAT-107 (batch capture): save several photos of the SAME checklist item in
+   * FEAT-108 (batch capture): save several photos of the SAME checklist item in
    * one action. Photo #1 runs the full `handleUnifiedCapture` pipeline (the only
    * photo that registers/links/advances the workbook); photos 2..N save as
    * evidence-only artifacts on the same item (no scan, no advance, no checklist
@@ -383,7 +383,7 @@ export function useUnifiedCapture({
   )
 
   /**
-   * FEAT-107 (batch capture): save one photo as an evidence-only artifact on an
+   * FEAT-108 (batch capture): save one photo as an evidence-only artifact on an
    * item, mirroring the ARTIFACTS path of `handleUnifiedCapture` but WITHOUT any
    * scan/advance and WITHOUT touching `dayLog.checklist`. This is the write used
    * for photos 2..N of a batch — a data-correctness rail: extra pages of one
@@ -423,7 +423,7 @@ export function useUnifiedCapture({
   )
 
   /**
-   * FEAT-107 (batch capture): snap several pages of ONE checklist item and save
+   * FEAT-108 (batch capture): snap several pages of ONE checklist item and save
    * once. Photo #1 goes through the full `handleUnifiedCapture` pipeline (the
    * lone photo that may register/link/advance the workbook); photos 2..N save as
    * evidence-only artifacts on the same item. Two rails held: (1) no curriculum
