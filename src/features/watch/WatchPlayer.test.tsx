@@ -13,12 +13,18 @@ interface FakePlayer {
 }
 
 // ── Hoisted capture + write spies ───────────────────────────────────────────
-const { capture, apiState, addDocMock, setDocMock, updateDocMock } = vi.hoisted(() => ({
+const { capture, apiState, fsMock, addDocMock, setDocMock, updateDocMock } = vi.hoisted(() => ({
   capture: { options: null as YTPlayerOptions | null, player: null as FakePlayer | null },
   apiState: {
     status: 'ready' as 'loading' | 'ready' | 'error',
     yt: null as YTNamespace | null,
     error: null as string | null,
+  },
+  fsMock: {
+    fullscreenSupported: vi.fn(() => true),
+    currentFullscreenElement: vi.fn((): Element | null => null),
+    requestFrameFullscreen: vi.fn(),
+    exitFullscreenIfActive: vi.fn(),
   },
   addDocMock: vi.fn(),
   setDocMock: vi.fn(),
@@ -36,6 +42,13 @@ vi.mock('firebase/firestore', () => ({
 
 vi.mock('./youtubeIframeApi', () => ({
   useYouTubeIframeApi: () => apiState,
+}))
+
+vi.mock('./playerFullscreen', () => ({
+  fullscreenSupported: fsMock.fullscreenSupported,
+  currentFullscreenElement: fsMock.currentFullscreenElement,
+  requestFrameFullscreen: fsMock.requestFrameFullscreen,
+  exitFullscreenIfActive: fsMock.exitFullscreenIfActive,
 }))
 
 import WatchPlayer from './WatchPlayer'
@@ -89,6 +102,10 @@ beforeEach(() => {
   apiState.status = 'ready'
   apiState.yt = fakeYT()
   apiState.error = null
+  fsMock.fullscreenSupported.mockReturnValue(true)
+  fsMock.currentFullscreenElement.mockReturnValue(null)
+  fsMock.requestFrameFullscreen.mockClear()
+  fsMock.exitFullscreenIfActive.mockClear()
   addDocMock.mockClear()
   setDocMock.mockClear()
   updateDocMock.mockClear()
@@ -139,13 +156,44 @@ describe('WatchPlayer', () => {
     expect(screen.queryByText(/all done/i)).not.toBeInTheDocument()
   })
 
-  it('Done returns to where the child came from (the only forward action)', () => {
+  it('Done returns to where the child came from + leaves fullscreen (only forward action)', () => {
     const onDone = vi.fn()
     render(<WatchPlayer video={VIDEO} onDone={onDone} />)
 
     emitState(0)
-    fireEvent.click(screen.getByRole('button', { name: /done/i }))
+    fsMock.exitFullscreenIfActive.mockClear() // ignore the ENDED-driven exit
+    fireEvent.click(screen.getByRole('button', { name: /^done$/i }))
     expect(onDone).toHaveBeenCalledTimes(1)
+    expect(fsMock.exitFullscreenIfActive).toHaveBeenCalled()
+  })
+
+  it('offers an app-owned "Make it big" fullscreen toggle (YouTube fs stays off)', () => {
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /make it big/i }))
+    expect(fsMock.requestFrameFullscreen).toHaveBeenCalledTimes(1)
+    // Requested on the frame element, not the bare iframe host.
+    expect(fsMock.requestFrameFullscreen.mock.calls[0][0]).toBeInstanceOf(HTMLElement)
+  })
+
+  it('hides the fullscreen toggle when the Fullscreen API is unsupported', () => {
+    fsMock.fullscreenSupported.mockReturnValue(false)
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /make it big/i })).not.toBeInTheDocument()
+  })
+
+  it('ENDED while fullscreen still shows the completion panel, exits, and loads NOTHING', () => {
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+
+    // Go fullscreen (app-owned).
+    fireEvent.click(screen.getByRole('button', { name: /make it big/i }))
+    expect(fsMock.requestFrameFullscreen).toHaveBeenCalledTimes(1)
+
+    emitState(0) // ENDED while fullscreen
+
+    expect(capture.player!.stopVideo).toHaveBeenCalledTimes(1)
+    expect(fsMock.exitFullscreenIfActive).toHaveBeenCalled() // left fullscreen on end
+    expect(screen.getByText(/all done/i)).toBeInTheDocument() // completion still shows
+    expect(capture.player!.loadVideoById).not.toHaveBeenCalled() // nothing unplanned loads
   })
 
   it('shows a friendly kid message + parent-visible detail for an unavailable video', () => {

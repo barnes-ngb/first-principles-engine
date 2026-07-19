@@ -3,12 +3,20 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import FullscreenIcon from '@mui/icons-material/Fullscreen'
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit'
 
 import { ErrorState, LoadingState } from '../../components/states'
 import type { WatchVideo } from '../../core/types'
 import type { YTPlayer } from './youtubeIframeApi'
 import { useYouTubeIframeApi } from './youtubeIframeApi'
 import { isEndedState, mapPlayerError, type WatchErrorMessage } from './watchPlayerState'
+import {
+  currentFullscreenElement,
+  exitFullscreenIfActive,
+  fullscreenSupported,
+  requestFrameFullscreen,
+} from './playerFullscreen'
 
 /**
  * Locked player params (design §4). Chrome-stripped and safety-first — no
@@ -53,9 +61,38 @@ interface WatchPlayerProps {
 export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
   const { status, yt, error } = useYouTubeIframeApi()
   const containerRef = useRef<HTMLDivElement | null>(null)
+  // The player FRAME wraps both the iframe host and the overlays. App-owned
+  // fullscreen goes on THIS element so the completion overlay renders above the
+  // video in fullscreen (YouTube's own fullscreen stays off — see PLAYER_VARS).
+  const frameRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YTPlayer | null>(null)
   const [done, setDone] = useState(false)
   const [playError, setPlayError] = useState<WatchErrorMessage | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const canFullscreen = fullscreenSupported()
+
+  // Keep local fullscreen state in sync with the browser (e.g. the child presses
+  // Esc, or we exit programmatically on ENDED/Done). setState lives in the event
+  // callback, not the effect body — no cascading render.
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(currentFullscreenElement() === frameRef.current)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
+  const toggleFullscreen = () => {
+    const el = frameRef.current
+    if (!el) return
+    if (currentFullscreenElement() === el) exitFullscreenIfActive()
+    else requestFrameFullscreen(el)
+  }
+
+  // The single forward action: leave fullscreen first so we never strand the
+  // browser in fullscreen after the dialog closes, then hand control back.
+  const handleDone = () => {
+    exitFullscreenIfActive()
+    onDone()
+  }
 
   useEffect(() => {
     if (status !== 'ready' || !yt || !containerRef.current) return
@@ -91,6 +128,10 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
           } catch {
             // A destroyed player can throw; the overlay still covers it.
           }
+          // Leave app-owned fullscreen alongside the stop. (Even if we didn't,
+          // the completion overlay lives inside the fullscreen frame, so it
+          // still covers the video — belt and suspenders for the end-stop.)
+          exitFullscreenIfActive()
           setDone(true)
         },
         onError: (event) => {
@@ -143,6 +184,7 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
       )}
 
       <Box
+        ref={frameRef}
         sx={{
           position: 'relative',
           width: '100%',
@@ -150,27 +192,60 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
           bgcolor: 'black',
           borderRadius: 1,
           overflow: 'hidden',
+          // When fullscreen, fill the screen and keep the video centered.
+          '&:fullscreen': { borderRadius: 0 },
+          '&:fullscreen .watch-video-host': {
+            aspectRatio: '16 / 9',
+            maxHeight: '100%',
+            maxWidth: '100%',
+          },
         }}
       >
         {/* The Player API replaces this node with the nocookie iframe. */}
         <Box
           ref={containerRef}
+          className="watch-video-host"
           sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         />
 
+        {/* App-owned fullscreen toggle. Lives INSIDE the frame so it stays
+            usable in fullscreen (only the frame subtree is visible then).
+            Hidden once done/errored — the overlay owns the frame. */}
+        {canFullscreen && !done && !playError && (
+          <Button
+            size="small"
+            variant="contained"
+            color="inherit"
+            startIcon={isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+            onClick={toggleFullscreen}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              zIndex: 2,
+              bgcolor: 'rgba(0, 0, 0, 0.55)',
+              color: 'common.white',
+              '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.75)' },
+            }}
+          >
+            {isFullscreen ? 'Make it small' : 'Make it big'}
+          </Button>
+        )}
+
         {/* End-stop overlay: OPAQUE + covers the whole player so the (already
-            stopped) YouTube end screen can never be tapped. */}
+            stopped) YouTube end screen can never be tapped. Because it lives
+            inside the frame, it renders above the video in fullscreen too. */}
         {done && !playError && (
           <Stack
             spacing={2}
             alignItems="center"
             justifyContent="center"
-            sx={{ position: 'absolute', inset: 0, bgcolor: 'background.paper', p: 3 }}
+            sx={{ position: 'absolute', inset: 0, bgcolor: 'background.paper', p: 3, zIndex: 3 }}
           >
             <Typography variant="h5" component="p" textAlign="center">
               All done! 🌱
             </Typography>
-            <Button variant="contained" size="large" onClick={onDone}>
+            <Button variant="contained" size="large" onClick={handleDone}>
               Done
             </Button>
           </Stack>
@@ -183,7 +258,7 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
             spacing={1.5}
             alignItems="center"
             justifyContent="center"
-            sx={{ position: 'absolute', inset: 0, bgcolor: 'background.paper', p: 3 }}
+            sx={{ position: 'absolute', inset: 0, bgcolor: 'background.paper', p: 3, zIndex: 3 }}
           >
             <Typography variant="body1" textAlign="center">
               {playError.kid}
@@ -191,7 +266,7 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
             <Typography variant="caption" color="text.secondary" textAlign="center">
               {playError.detail}
             </Typography>
-            <Button variant="contained" onClick={onDone}>
+            <Button variant="contained" onClick={handleDone}>
               Go back
             </Button>
           </Stack>
