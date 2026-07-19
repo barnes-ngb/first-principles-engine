@@ -146,6 +146,10 @@ export function loadYouTubeIframeApi(
         settled = true
         window.clearTimeout(timer)
         apiPromise = null
+        // Remove the failed tag so a retry re-injects — otherwise the
+        // existing-tag guard would skip injection and the next attempt would
+        // only ever hit the timeout (no recovery without a page reload).
+        script.remove()
         reject(new Error('The video player failed to load.'))
       }
       document.head.appendChild(script)

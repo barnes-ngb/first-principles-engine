@@ -21,7 +21,12 @@ const PLAYER_VARS = {
   iv_load_policy: 3, // no video annotations
   playsinline: 1, // play inline on iOS, never fullscreen-hijack
   disablekb: 0, // keyboard controls remain (accessibility)
-  fs: 1, // allow the player's own fullscreen button
+  // fs=0 (design §4 showed fs=1). Fullscreen puts the iframe in the browser's
+  // top layer, ABOVE our sibling end-stop overlay — so YouTube's end screen
+  // would stay tappable at video end, defeating the C1 end-stop. C1 (the heart
+  // of the ask) wins: no fullscreen button, and without allowfullscreen the
+  // iframe's Fullscreen API is blocked too.
+  fs: 0,
 } as const
 
 const NOCOOKIE_HOST = 'https://www.youtube-nocookie.com'
@@ -57,7 +62,20 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
 
     // (Per-video `done`/`playError` reset comes from the `key`-driven remount in
     // WatchPlayerDialog — no state reset in this effect, so no cascading render.)
-    const player = new yt.Player(containerRef.current, {
+
+    // Mount into a FRESH attached child, not the ref'd container directly: the
+    // Player API *replaces* the node it's given with the iframe, so passing the
+    // ref would leave `containerRef.current` detached after `destroy()`. Under
+    // StrictMode's dev setup→cleanup→setup replay the second setup would then
+    // mount into detached DOM (a blank player). A per-setup host keeps the
+    // container stable and always attached.
+    const container = containerRef.current
+    const host = document.createElement('div')
+    host.style.width = '100%'
+    host.style.height = '100%'
+    container.appendChild(host)
+
+    const player = new yt.Player(host, {
       host: NOCOOKIE_HOST,
       videoId: video.youtubeId,
       width: '100%',
@@ -88,6 +106,10 @@ export default function WatchPlayer({ video, onDone }: WatchPlayerProps) {
       } catch {
         // Best-effort teardown.
       }
+      // Remove the per-setup host (the API replaced it with the iframe, which
+      // destroy() removes; this clears any residual node so the next setup
+      // starts clean).
+      host.remove()
       playerRef.current = null
     }
     // Re-create only when the API becomes ready or the video changes.

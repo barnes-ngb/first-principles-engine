@@ -107,6 +107,9 @@ describe('WatchPlayer', () => {
     expect(vars.modestbranding).toBe(1)
     expect(vars.iv_load_policy).toBe(3)
     expect(vars.playsinline).toBe(1)
+    // fs=0: no fullscreen button — fullscreen would put the iframe above the
+    // end-stop overlay and defeat it (Codex P1).
+    expect(vars.fs).toBe(0)
   })
 
   it('shows the PARENT-authored title, never the YouTube title (D4)', () => {

@@ -65,6 +65,21 @@ describe('loadYouTubeIframeApi', () => {
     await expect(p).rejects.toThrow(/failed to load/i)
   })
 
+  it('removes the failed tag on error so a retry re-injects (recoverable)', async () => {
+    const p1 = loadYouTubeIframeApi()
+    scriptTags()[0].onerror?.(new Event('error'))
+    await expect(p1).rejects.toThrow(/failed to load/i)
+    // The dead tag must be gone, or the existing-tag guard would skip re-inject.
+    expect(scriptTags()).toHaveLength(0)
+
+    // A fresh attempt injects a new script and can succeed.
+    const p2 = loadYouTubeIframeApi()
+    expect(scriptTags()).toHaveLength(1)
+    window.YT = fakeYT()
+    window.onYouTubeIframeAPIReady?.()
+    await expect(p2).resolves.toBe(window.YT)
+  })
+
   it('rejects with a named error when the API never becomes ready (timeout guard)', async () => {
     vi.useFakeTimers()
     const p = loadYouTubeIframeApi(5_000)
