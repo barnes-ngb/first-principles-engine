@@ -39,7 +39,6 @@ import { getDailyArmorStatusFromSession } from '../avatar/armorStatus'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
 import { calculateTier } from '../avatar/voxel/tierMaterials'
 import ArmorGateScreen from '../avatar/ArmorGateScreen'
-import MinecraftXpBar from '../avatar/MinecraftXpBar'
 import { getAppliedVoxelPieces } from '../avatar/armorPieceState'
 import XpDiamondBar from '../../components/XpDiamondBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
@@ -121,8 +120,7 @@ function getMotivation(profile: import('../../core/types').AvatarProfile): strin
   const unlocked = new Set(VOXEL_ARMOR_PIECES.filter((p) => xp >= XP_THRESHOLDS[p.id]).map((p) => p.id))
   const next = VOXEL_ARMOR_PIECES.find((p) => !unlocked.has(p.id))
   if (next) {
-    const xpAway = XP_THRESHOLDS[next.id] - xp
-    return `${xpAway} XP to ${next.name}!`
+    return `Keep mining to forge your ${next.name}!`
   }
   const tier = calculateTier(xp)
   return `Full ${tier.charAt(0) + tier.slice(1).toLowerCase()} armor! Keep earning.`
@@ -569,12 +567,9 @@ export default function KidTodayView({
         </Box>
       </Stack>
 
-      {/* XP bar + Diamond count */}
+      {/* XP bar + Diamond count — one strip, tier identity + momentum, no goal numbers */}
       {!xpLedger.loading && (
-        <>
-          <XpDiamondBar familyId={familyId} childId={child.id} compact />
-          <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
-        </>
+        <XpDiamondBar familyId={familyId} childId={child.id} compact earningMode />
       )}
 
       {/* Gate banner */}
