@@ -871,9 +871,20 @@ export default function PlannerChatPage() {
         }
       } catch (err) {
         if (err instanceof TransientConnectivityError) {
-          console.warn('[Planner] Conversation save deferred — offline', err)
+          // The read-modify-write's pre-read can't complete offline (reads reject;
+          // they don't queue). But a merge WRITE still enters the Firestore SDK's
+          // in-memory mutation queue and flushes on the next reconnect — so we
+          // don't drop the draft, we queue it, honoring the "will sync" notice.
+          // (This app uses the default in-memory cache, so a same-session reconnect
+          // syncs; surviving a hard reload/eviction before reconnect is the deferred
+          // durable-draft work — the draft also stays in React state meanwhile.)
+          const now = new Date().toISOString()
+          void setDoc(ref, { ...updates, updatedAt: now }, { merge: true }).catch(
+            (writeErr) => console.warn('[Planner] Queued conversation save failed', writeErr),
+          )
+          console.warn('[Planner] Conversation read offline — queued a merge write to sync on reconnect', err)
           setSnack({
-            text: 'You went offline — your draft is safe here and will sync when you reconnect.',
+            text: 'You went offline — your draft is saved here and will sync when you reconnect.',
             severity: 'info',
           })
           return
