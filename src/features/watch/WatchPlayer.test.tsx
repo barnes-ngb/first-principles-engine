@@ -188,6 +188,16 @@ describe('WatchPlayer', () => {
     expect(onDone).not.toHaveBeenCalled()
   })
 
+  it('footer copy reflects whether the session counts (Codex P2)', () => {
+    const { rerender } = render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+    // Library/practice: honest "doesn't count".
+    expect(screen.getByText(/doesn't count hours/i)).toBeInTheDocument()
+    // Planned Today: it DOES count on "Mark it done" — never the "doesn't count" copy.
+    rerender(<WatchPlayer video={VIDEO} onDone={vi.fn()} onComplete={vi.fn()} />)
+    expect(screen.queryByText(/doesn't count hours/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/count your time/i)).toBeInTheDocument()
+  })
+
   it('library flow (no onComplete): the player itself still writes NOTHING through completion', () => {
     render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
     emitState(0) // ENDED

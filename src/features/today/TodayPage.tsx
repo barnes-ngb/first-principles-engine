@@ -211,7 +211,7 @@ export default function TodayPage() {
 
   // Watch Vehicle (FEAT-103): curated videos in scope for this child (D7) + the
   // shared completion (credit hours + artifact, no XP/concept). Parent surface.
-  const { videos: watchVideos } = useWatchLibrary(selectedChildId)
+  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary(selectedChildId)
   const watch = useWatchItemCompletion({
     familyId,
     childId: selectedChildId,
@@ -1061,6 +1061,8 @@ export default function TodayPage() {
       <WatchItemDialog
         video={watch.watchVideo}
         open={watch.watchTarget !== null}
+        loading={watchLoading}
+        error={watchError}
         onClose={watch.closeWatch}
         onComplete={watch.completeWatch}
         voiceProfile={

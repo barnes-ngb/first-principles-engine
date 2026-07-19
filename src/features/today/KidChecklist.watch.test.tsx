@@ -5,9 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChecklistItem, Child, DayLog } from '../../core/types'
 
 // Spy on the XP writer to prove a watch completion earns NO XP (D6).
-const addXpEventMock = vi.fn((..._args: unknown[]) => Promise.resolve(0))
+const addXpEventMock = vi.fn(() => Promise.resolve(0))
 vi.mock('../../core/xp/addXpEvent', () => ({
-  addXpEvent: (...args: unknown[]) => addXpEventMock(...args),
+  addXpEvent: () => addXpEventMock(),
 }))
 
 import KidChecklist from './KidChecklist'
@@ -16,7 +16,10 @@ function makeItem(overrides: Partial<ChecklistItem> = {}): ChecklistItem {
   return { label: 'Item', completed: false, category: 'must-do', ...overrides }
 }
 
-function renderKid(mustDo: ChecklistItem[], onWatchOpen = vi.fn()) {
+function renderKid(
+  mustDo: ChecklistItem[],
+  onWatchOpen?: (item: ChecklistItem, index: number) => void,
+) {
   const persist = vi.fn()
   const dayLog = { id: '2026-07-19', date: '2026-07-19', checklist: mustDo } as unknown as DayLog
   const child = { id: 'c1', name: 'Lincoln' } as unknown as Child
@@ -66,16 +69,29 @@ describe('KidChecklist — Watch Vehicle (FEAT-103)', () => {
     expect(onWatchOpen.mock.calls[0][0].watchVideoId).toBe('v1')
   })
 
-  it('completing a watch item via the checkbox awards NO XP (D6)', () => {
+  it('checking the box on a watch item routes to the player — never a bypass self-complete (Codex P2)', () => {
+    const onWatchOpen = vi.fn()
+    const { persist } = renderKid(
+      [makeItem({ label: 'Watch: History (12m)', itemType: 'watch', watchVideoId: 'v1' })],
+      onWatchOpen,
+    )
+    fireEvent.click(screen.getByRole('checkbox'))
+    // The checkbox opens the player instead of self-completing…
+    expect(onWatchOpen).toHaveBeenCalledTimes(1)
+    // …so the item is NOT credited and NO XP is awarded via the checklist path.
+    expect(persist).not.toHaveBeenCalled()
+    expect(addXpEventMock).not.toHaveBeenCalled()
+  })
+
+  it('defense in depth: a watch completion never awards XP even without a player wired (D6)', () => {
+    // With no onWatchOpen the row can complete via the checkbox — the XP guard
+    // still exempts watch items so a watch completion never earns XP/diamonds.
     const { persist } = renderKid([
       makeItem({ label: 'Watch: History (12m)', itemType: 'watch', watchVideoId: 'v1' }),
     ])
-    // Toggle the item complete via its checkbox.
     fireEvent.click(screen.getByRole('checkbox'))
-    // It still completes (hours ride the checklist path)…
-    expect(persist).toHaveBeenCalledTimes(1)
-    // …but no XP is awarded for a watch completion.
-    expect(addXpEventMock).not.toHaveBeenCalled()
+    expect(persist).toHaveBeenCalledTimes(1) // completes (hours ride the checklist)
+    expect(addXpEventMock).not.toHaveBeenCalled() // but no XP (D6)
   })
 
   it('completing a NORMAL item still awards XP (characterization — guard is watch-only)', () => {

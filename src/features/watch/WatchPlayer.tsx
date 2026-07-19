@@ -301,11 +301,20 @@ export default function WatchPlayer({
         )}
       </Box>
 
-      {/* Honest scope: this is practice; it does NOT count hours yet (D3). */}
-      <Typography variant="caption" color="text.secondary">
-        Practice watching — this doesn&apos;t count hours yet. Planned watching counts your time —
-        that&apos;s coming next.
-      </Typography>
+      {/* Honest scope. The library practice case (no onComplete) counts nothing;
+          the planned Today case (onComplete supplied) credits time on "Mark it
+          done" — never show the "doesn't count" copy there (it would say the
+          opposite of what the button does). */}
+      {onComplete ? (
+        <Typography variant="caption" color="text.secondary">
+          When it ends, tap “Mark it done” to count your time and save what you saw.
+        </Typography>
+      ) : (
+        <Typography variant="caption" color="text.secondary">
+          Practice watching — this doesn&apos;t count hours. Planned watching (from your day) counts
+          your time.
+        </Typography>
+      )}
     </Stack>
   )
 }

@@ -7,7 +7,9 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import CloseIcon from '@mui/icons-material/Close'
+import OndemandVideoIcon from '@mui/icons-material/OndemandVideo'
 
+import { EmptyState, LoadingState } from '../../components/states'
 import VoiceInput from '../../components/VoiceInput'
 import type { WatchVideo } from '../../core/types'
 import WatchPlayer from './WatchPlayer'
@@ -16,6 +18,10 @@ interface WatchItemDialogProps {
   /** The curated video this planned item points at (resolved from `watchVideoId`). */
   video: WatchVideo | null
   open: boolean
+  /** True while the library subscription is still resolving the video. */
+  loading?: boolean
+  /** Library subscription error, if any. */
+  error?: string | null
   onClose: () => void
   /**
    * Fired from the end-of-video "Mark it done" action with the optional note.
@@ -43,6 +49,8 @@ interface WatchItemDialogProps {
 export default function WatchItemDialog({
   video,
   open,
+  loading = false,
+  error = null,
   onClose,
   onComplete,
   voiceProfile,
@@ -105,7 +113,7 @@ export default function WatchItemDialog({
       </DialogTitle>
       <DialogContent>
         {/* key by video so switching remounts fresh player + note state. */}
-        {video && (
+        {video ? (
           <WatchPlayer
             key={video.id}
             video={video}
@@ -113,6 +121,21 @@ export default function WatchItemDialog({
             onComplete={handleComplete}
             doneLabel="Mark it done"
             completionExtra={completionExtra}
+          />
+        ) : loading ? (
+          <LoadingState label="Finding the video…" />
+        ) : (
+          // The referenced video couldn't be resolved (still loading elsewhere,
+          // a library error, or its scope was edited after it was planned).
+          // Never a blank dialog — offer a recovery path.
+          <EmptyState
+            icon={<OndemandVideoIcon />}
+            title="This video isn't available right now"
+            description={
+              error
+                ? `The library couldn't load (${error}). Tell a grown-up and try again.`
+                : "Ask a grown-up to check it's still in the Watch Library."
+            }
           />
         )}
       </DialogContent>

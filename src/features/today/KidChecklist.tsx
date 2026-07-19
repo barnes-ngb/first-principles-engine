@@ -91,6 +91,14 @@ export default function KidChecklist({
       const updatedChecklist = [...(updated.checklist ?? [])]
       if (itemIndex < 0 || itemIndex >= updatedChecklist.length) return
       const item = updatedChecklist[itemIndex]
+      // A watch item completes ONLY through the player's "Mark it done" (credits
+      // hours + artifact + end-stop). Tapping the row/checkbox to complete it
+      // routes to the player instead, so it can't be credited without watching
+      // or without the capture (FEAT-103; Codex P2). Unchecking still toggles.
+      if (item.itemType === 'watch' && !item.completed && onWatchOpen) {
+        onWatchOpen(item, itemIndex)
+        return
+      }
       const nowComplete = !item.completed
       updatedChecklist[itemIndex] = { ...item, completed: nowComplete }
       persistDayLogImmediate({ ...updated, checklist: updatedChecklist })
@@ -110,7 +118,7 @@ export default function KidChecklist({
         }).catch((err) => console.error('[XP] Award failed:', err))
       }
     },
-    [dayLog, persistDayLogImmediate, child.id, familyId, today, onXpToast],
+    [dayLog, persistDayLogImmediate, child.id, familyId, today, onXpToast, onWatchOpen],
   )
 
   const getAbsoluteIndex = useCallback(

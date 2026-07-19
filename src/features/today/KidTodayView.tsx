@@ -249,7 +249,7 @@ export default function KidTodayView({
 
   // Watch Vehicle (FEAT-103): curated videos in scope for this kid (D7) + shared
   // completion (credit hours + artifact, no XP/concept). Kid surface.
-  const { videos: watchVideos } = useWatchLibrary(child.id)
+  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary(child.id)
   const watch = useWatchItemCompletion({
     familyId,
     childId: child.id,
@@ -1077,6 +1077,8 @@ export default function KidTodayView({
       <WatchItemDialog
         video={watch.watchVideo}
         open={watch.watchTarget !== null}
+        loading={watchLoading}
+        error={watchError}
         onClose={watch.closeWatch}
         onComplete={watch.completeWatch}
         voiceProfile={{ id: child.id, voiceInputEnhanced: child.voiceInputEnhanced }}

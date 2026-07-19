@@ -461,6 +461,15 @@ export default function TodayChecklist({
 
   const handleToggleItem = (index: number) => {
     const item = rawChecklist[index]
+    // A watch item completes ONLY through the player's "Mark it done" (which
+    // credits hours + leaves the artifact and enforces the end-stop). Checking
+    // the box to *complete* it instead routes to the player, so it can never be
+    // credited without watching or without the capture (FEAT-103; Codex P2).
+    // Unchecking a completed watch item still toggles normally.
+    if (item.itemType === 'watch' && !item.completed && onWatchOpen) {
+      onWatchOpen(item, index)
+      return
+    }
     const newCompleted = !item.completed
     const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
       i === index ? { ...ci, completed: newCompleted } : ci
