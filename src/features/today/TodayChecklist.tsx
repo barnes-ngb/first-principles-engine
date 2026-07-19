@@ -158,6 +158,12 @@ interface TodayChecklistProps {
   onWatchOpen?: (item: ChecklistItemType, index: number) => void
   onUnifiedCapture: (file: File, index: number) => void
   /**
+   * FEAT-107 (batch capture): save several photos of ONE item in one action.
+   * The per-item Upload picker is multi-select; >1 file routes here, 1 file
+   * stays on `onUnifiedCapture`. Absent → the picker falls back to single.
+   */
+  onUnifiedCaptureBatch?: (files: File[], index: number) => void
+  /**
    * FEAT-62: register an already-captured photo on a workbook item as a scan.
    * `photoUris` (FEAT-62 polish) are the display-resolved photo(s) to analyze —
    * one for a single page, several for "analyze all". Omitted → the handler
@@ -210,6 +216,7 @@ export default function TodayChecklist({
   onTeachHelperOpen,
   onWatchOpen,
   onUnifiedCapture,
+  onUnifiedCaptureBatch,
   onBackfillWorkbookScan,
   todayArtifacts = [],
   configs = [],
@@ -1053,9 +1060,13 @@ export default function TodayChecklist({
                         const input = document.createElement('input')
                         input.type = 'file'
                         input.accept = 'image/*'
+                        // FEAT-107: pick several pages of one item, save once.
+                        input.multiple = true
                         input.onchange = (e) => {
-                          const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) onUnifiedCapture(file, index)
+                          const files = Array.from((e.target as HTMLInputElement).files ?? [])
+                          if (files.length === 0) return
+                          if (files.length > 1 && onUnifiedCaptureBatch) onUnifiedCaptureBatch(files, index)
+                          else onUnifiedCapture(files[0], index)
                         }
                         input.click()
                       }}

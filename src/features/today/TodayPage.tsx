@@ -279,6 +279,7 @@ export default function TodayPage() {
   // --- Unified capture hook (shared with kid views) ---
   const {
     handleUnifiedCapture,
+    handleUnifiedCaptureBatch,
     handleBackfillWorkbookScan,
     scanItemIndex,
     setScanItemIndex,
@@ -939,6 +940,7 @@ export default function TodayPage() {
           }}
           onWatchOpen={watch.openWatch}
           onUnifiedCapture={handleUnifiedCapture}
+          onUnifiedCaptureBatch={handleUnifiedCaptureBatch}
           onBackfillWorkbookScan={handleBackfillWorkbookScan}
           todayArtifacts={todayArtifacts}
           configs={activityConfigs}
