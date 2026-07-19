@@ -23,6 +23,12 @@ const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), 'utf8')
 // The main app's behavior-bearing hosting config, frozen from the pre-FEAT-86
 // single-site block. If a future change alters any of these, the app deploy is
 // no longer byte-equivalent and this snapshot must be updated deliberately.
+//
+// FEAT-101 (Watch Vehicle slice 2): the `**` `Content-Security-Policy` header was
+// added deliberately — a net-new, `frame-src`-only allowlist so the app can only
+// ever frame the nocookie YouTube embed. It is `frame-src`-only (no `default-src`)
+// so scripts/fonts/Firebase/connect stay unrestricted; the shop hosting target is
+// untouched (its own entry, no CSP). This snapshot is updated to match.
 const PREVIOUS_APP_CONFIG = {
   public: 'dist',
   ignore: ['firebase.json', '**/.*', '**/node_modules/**'],
@@ -31,6 +37,15 @@ const PREVIOUS_APP_CONFIG = {
     {
       source: '/assets/**',
       headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
+    },
+    {
+      source: '**',
+      headers: [
+        {
+          key: 'Content-Security-Policy',
+          value: "frame-src 'self' https://www.youtube-nocookie.com",
+        },
+      ],
     },
   ],
 }
