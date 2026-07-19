@@ -8,6 +8,7 @@ import Typography from '@mui/material/Typography'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import LockIcon from '@mui/icons-material/Lock'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
+import OndemandVideoIcon from '@mui/icons-material/OndemandVideo'
 import { useNavigate } from 'react-router-dom'
 
 import SectionCard from '../../components/SectionCard'
@@ -53,6 +54,8 @@ interface KidChecklistProps {
   persistDayLogImmediate: (updated: DayLog) => void
   onCaptureOpen: (itemIndex: number) => void
   onXpToast: (toast: { amount: number; reason: string }) => void
+  /** Open the curated-video player for a planned watch item (FEAT-104). */
+  onWatchOpen?: (item: ChecklistItem, index: number) => void
 }
 
 export default function KidChecklist({
@@ -78,6 +81,7 @@ export default function KidChecklist({
   persistDayLogImmediate,
   onCaptureOpen,
   onXpToast,
+  onWatchOpen,
 }: KidChecklistProps) {
   const navigate = useNavigate()
 
@@ -87,12 +91,22 @@ export default function KidChecklist({
       const updatedChecklist = [...(updated.checklist ?? [])]
       if (itemIndex < 0 || itemIndex >= updatedChecklist.length) return
       const item = updatedChecklist[itemIndex]
+      // A watch item completes ONLY through the player's "Mark it done" (credits
+      // hours + artifact + end-stop). Tapping the row/checkbox to complete it
+      // routes to the player instead, so it can't be credited without watching
+      // or without the capture (FEAT-104; Codex P2). Unchecking still toggles.
+      if (item.itemType === 'watch' && !item.completed && onWatchOpen) {
+        onWatchOpen(item, itemIndex)
+        return
+      }
       const nowComplete = !item.completed
       updatedChecklist[itemIndex] = { ...item, completed: nowComplete }
       persistDayLogImmediate({ ...updated, checklist: updatedChecklist })
 
-      // Award per-item XP when checked (not unchecked)
-      if (nowComplete && child.id && familyId) {
+      // Award per-item XP when checked (not unchecked). Watch items are exempt
+      // (D6 — a curated-video completion earns hours but no XP/diamonds; watching
+      // is lower-effort than a lab, and there's no watch reward in v1).
+      if (nowComplete && child.id && familyId && item.itemType !== 'watch') {
         const label = (item.label ?? '').toLowerCase()
         const isPrayer = label.includes('prayer') || label.includes('formation') || label.includes('scripture') || label.includes('devotion')
         const xpAmount = isPrayer ? XP_AWARDS.checklistPrayer : XP_AWARDS.checklistItem
@@ -104,7 +118,7 @@ export default function KidChecklist({
         }).catch((err) => console.error('[XP] Award failed:', err))
       }
     },
-    [dayLog, persistDayLogImmediate, child.id, familyId, today, onXpToast],
+    [dayLog, persistDayLogImmediate, child.id, familyId, today, onXpToast, onWatchOpen],
   )
 
   const getAbsoluteIndex = useCallback(
@@ -222,6 +236,21 @@ export default function KidChecklist({
                       }}
                     >
                       ⛏️ Mine this!
+                    </Button>
+                  </Box>
+                )}
+                {/* Watch button for curated-video items (FEAT-104) */}
+                {item.itemType === 'watch' && onWatchOpen && !item.completed && (
+                  <Box sx={{ ml: 5, mt: 1 }}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="secondary"
+                      startIcon={<OndemandVideoIcon />}
+                      onClick={(e) => { e.stopPropagation(); onWatchOpen(item, absIndex) }}
+                      sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                    >
+                      ▶ Watch
                     </Button>
                   </Box>
                 )}
@@ -416,6 +445,21 @@ export default function KidChecklist({
                           }}
                         >
                           ⛏️ Mine this!
+                        </Button>
+                      </Box>
+                    )}
+                    {/* Watch button for curated-video items (FEAT-104) */}
+                    {item.itemType === 'watch' && onWatchOpen && !item.completed && (
+                      <Box sx={{ ml: 5, mt: 1 }}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="secondary"
+                          startIcon={<OndemandVideoIcon />}
+                          onClick={(e) => { e.stopPropagation(); onWatchOpen(item, absIndex) }}
+                          sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                        >
+                          ▶ Watch
                         </Button>
                       </Box>
                     )}

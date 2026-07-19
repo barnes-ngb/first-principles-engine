@@ -154,6 +154,8 @@ interface TodayChecklistProps {
   activeRoutineItems: RoutineItemKey[] | undefined
   persistDayLogImmediate: (updated: DayLog) => void
   onTeachHelperOpen: (item: ChecklistItemType) => void
+  /** Open the curated-video player for a planned watch item (FEAT-104). */
+  onWatchOpen?: (item: ChecklistItemType, index: number) => void
   onUnifiedCapture: (file: File, index: number) => void
   /**
    * FEAT-62: register an already-captured photo on a workbook item as a scan.
@@ -206,6 +208,7 @@ export default function TodayChecklist({
   activeRoutineItems,
   persistDayLogImmediate,
   onTeachHelperOpen,
+  onWatchOpen,
   onUnifiedCapture,
   onBackfillWorkbookScan,
   todayArtifacts = [],
@@ -458,6 +461,15 @@ export default function TodayChecklist({
 
   const handleToggleItem = (index: number) => {
     const item = rawChecklist[index]
+    // A watch item completes ONLY through the player's "Mark it done" (which
+    // credits hours + leaves the artifact and enforces the end-stop). Checking
+    // the box to *complete* it instead routes to the player, so it can never be
+    // credited without watching or without the capture (FEAT-104; Codex P2).
+    // Unchecking a completed watch item still toggles normally.
+    if (item.itemType === 'watch' && !item.completed && onWatchOpen) {
+      onWatchOpen(item, index)
+      return
+    }
     const newCompleted = !item.completed
     const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
       i === index ? { ...ci, completed: newCompleted } : ci
@@ -902,6 +914,24 @@ export default function TodayChecklist({
                     }}
                   >
                     ⛏️ Start Mining
+                  </Button>
+                )}
+                {/* Watch button for curated-video items (FEAT-104) */}
+                {item.itemType === 'watch' && onWatchOpen && !item.completed && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<OndemandVideoIcon />}
+                    onClick={() => onWatchOpen(item, index)}
+                    sx={{
+                      mt: 0.5,
+                      ml: 5,
+                      borderColor: 'secondary.main',
+                      color: 'secondary.main',
+                      fontSize: '0.75rem',
+                    }}
+                  >
+                    Watch
                   </Button>
                 )}
                 {/* Scan results panel (from pre-completion scans) */}

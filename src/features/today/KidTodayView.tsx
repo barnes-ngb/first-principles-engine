@@ -39,7 +39,6 @@ import { getDailyArmorStatusFromSession } from '../avatar/armorStatus'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
 import { calculateTier } from '../avatar/voxel/tierMaterials'
 import ArmorGateScreen from '../avatar/ArmorGateScreen'
-import MinecraftXpBar from '../avatar/MinecraftXpBar'
 import { getAppliedVoxelPieces } from '../avatar/armorPieceState'
 import XpDiamondBar from '../../components/XpDiamondBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
@@ -53,6 +52,9 @@ import { useTodayMiningMinutes } from './useTodayMiningMinutes'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
 import KidChecklist from './KidChecklist'
+import WatchItemDialog from '../watch/WatchItemDialog'
+import { useWatchLibrary } from '../watch/useWatchLibrary'
+import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
 import { computeQuestProgress } from './kidQuestGate'
 import KidCelebration from './KidCelebration'
 import KidChapterPool from './KidChapterPool'
@@ -121,8 +123,7 @@ function getMotivation(profile: import('../../core/types').AvatarProfile): strin
   const unlocked = new Set(VOXEL_ARMOR_PIECES.filter((p) => xp >= XP_THRESHOLDS[p.id]).map((p) => p.id))
   const next = VOXEL_ARMOR_PIECES.find((p) => !unlocked.has(p.id))
   if (next) {
-    const xpAway = XP_THRESHOLDS[next.id] - xp
-    return `${xpAway} XP to ${next.name}!`
+    return `Keep mining to forge your ${next.name}!`
   }
   const tier = calculateTier(xp)
   return `Full ${tier.charAt(0) + tier.slice(1).toLowerCase()} armor! Keep earning.`
@@ -243,6 +244,18 @@ export default function KidTodayView({
   const [dailyArmorSession, setDailyArmorSession] = useState<DailyArmorSession | null>(null)
 
   const todayMinedMinutes = useTodayMiningMinutes(familyId, child.id, today)
+
+  // Watch Vehicle (FEAT-104): curated videos in scope for this kid (D7) + shared
+  // completion (credit hours + artifact, no XP/concept). Kid surface.
+  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary(child.id)
+  const watch = useWatchItemCompletion({
+    familyId,
+    childId: child.id,
+    dayLog,
+    persistDayLogImmediate,
+    videos: watchVideos,
+    dayLogId: today,
+  })
 
   const greeting = useMemo(() => getGreeting(child.name, isLincoln), [child.name, isLincoln])
   const celebrationMessage = useMemo(() => getCelebration(today, isLincoln), [today, isLincoln])
@@ -569,12 +582,9 @@ export default function KidTodayView({
         </Box>
       </Stack>
 
-      {/* XP bar + Diamond count */}
+      {/* XP bar + Diamond count — one strip, tier identity + momentum, no goal numbers */}
       {!xpLedger.loading && (
-        <>
-          <XpDiamondBar familyId={familyId} childId={child.id} compact />
-          <MinecraftXpBar totalXp={xpLedger.totalXp} todayXp={todayXp} compact />
-        </>
+        <XpDiamondBar familyId={familyId} childId={child.id} compact earningMode />
       )}
 
       {/* Gate banner */}
@@ -727,6 +737,7 @@ export default function KidTodayView({
           persistDayLogImmediate={persistDayLogImmediate}
           onCaptureOpen={handleKidCapture}
           onXpToast={setXpToast}
+          onWatchOpen={watch.openWatch}
         />
       </SectionErrorBoundary>
 
@@ -1056,6 +1067,17 @@ export default function KidTodayView({
           +{xpToast?.amount} XP — {xpToast?.reason}
         </Alert>
       </Snackbar>
+
+      {/* Watch Vehicle — planned curated-video player (FEAT-104). */}
+      <WatchItemDialog
+        video={watch.watchVideo}
+        open={watch.watchTarget !== null}
+        loading={watchLoading}
+        error={watchError}
+        onClose={watch.closeWatch}
+        onComplete={watch.completeWatch}
+        voiceProfile={{ id: child.id, voiceInputEnhanced: child.voiceInputEnhanced }}
+      />
     </Page>
   )
 }

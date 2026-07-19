@@ -17,6 +17,7 @@ interface PlanDayCardsProps {
   onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
   onRemoveItem?: (dayIndex: number, itemIndex: number) => void
   onUpdateTime?: (dayIndex: number, itemIndex: number, newMinutes: number) => void
+  onAddWatchItem?: (dayIndex: number) => void
 }
 
 export default function PlanDayCards({
@@ -31,6 +32,7 @@ export default function PlanDayCards({
   onMoveItem,
   onRemoveItem,
   onUpdateTime,
+  onAddWatchItem,
 }: PlanDayCardsProps) {
   return (
     <Box sx={{
@@ -52,6 +54,7 @@ export default function PlanDayCards({
         onMoveItem={!applied ? onMoveItem : undefined}
         onRemoveItem={!applied ? onRemoveItem : undefined}
         onUpdateTime={!applied ? onUpdateTime : undefined}
+        onAddWatchItem={!applied ? onAddWatchItem : undefined}
       />
     </Box>
   )

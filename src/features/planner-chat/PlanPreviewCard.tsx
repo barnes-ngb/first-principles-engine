@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import OndemandVideoIcon from '@mui/icons-material/OndemandVideo'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CloseIcon from '@mui/icons-material/Close'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
@@ -45,6 +46,8 @@ interface PlanPreviewCardProps {
   onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
   onRemoveItem?: (dayIndex: number, itemIndex: number) => void
   onUpdateTime?: (dayIndex: number, itemIndex: number, newMinutes: number) => void
+  /** Open the curated-video picker to plan a watch item onto this day (FEAT-104). */
+  onAddWatchItem?: (dayIndex: number) => void
 }
 
 const TIME_PRESETS = [5, 10, 15, 20, 30, 45, 60]
@@ -104,7 +107,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
   )
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const [removeConfirm, setRemoveConfirm] = useState<{ dayIndex: number; itemIndex: number; title: string } | null>(null)
 
@@ -387,6 +390,19 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                 </>
               )
             })()}
+
+            {/* Plan a curated video onto this day (FEAT-104) — picks from the
+                vetted library, never an open search. */}
+            {onAddWatchItem && (
+              <Button
+                size="small"
+                startIcon={<OndemandVideoIcon sx={{ fontSize: 16 }} />}
+                onClick={() => onAddWatchItem(dayIndex)}
+                sx={{ mt: 0.5, ml: 1, textTransform: 'none' }}
+              >
+                Add a video
+              </Button>
+            )}
           </Box>
         )
       })}

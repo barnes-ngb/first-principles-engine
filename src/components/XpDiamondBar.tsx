@@ -3,31 +3,20 @@ import Typography from '@mui/material/Typography'
 
 import { useXpLedger } from '../core/xp/useXpLedger'
 import { useDiamondBalance } from '../core/xp/useDiamondBalance'
-import { TIERS } from '../features/avatar/voxel/tierMaterials'
+import { getCurrentTierLabel, getNextTier } from './xpTier'
 
 interface XpDiamondBarProps {
   familyId: string
   childId: string
   compact?: boolean
   diamondBalanceOverride?: number | null
-}
-
-/** Compute next tier label and XP needed */
-function getNextTier(totalXp: number): { label: string; xpNeeded: number; progress: number } | null {
-  const tierEntries = Object.values(TIERS).sort((a, b) => a.minXp - b.minXp)
-  for (let i = 0; i < tierEntries.length; i++) {
-    if (totalXp < tierEntries[i].minXp) {
-      const prev = i > 0 ? tierEntries[i - 1] : { minXp: 0, label: 'Start' }
-      const range = tierEntries[i].minXp - prev.minXp
-      const earned = totalXp - prev.minXp
-      return {
-        label: tierEntries[i].label,
-        xpNeeded: tierEntries[i].minXp - totalXp,
-        progress: range > 0 ? Math.min(earned / range, 1) : 1,
-      }
-    }
-  }
-  return null // Max tier reached
+  /**
+   * "Earning" presentation (opt-in, default off): show the current tier NAME
+   * as identity instead of `XP {n}`, and hide the `→ {nextTier}` goal label.
+   * The momentum fill and diamond count are unchanged. Default-off keeps every
+   * existing caller (e.g. MyAvatarPage HUD) byte-identical.
+   */
+  earningMode?: boolean
 }
 
 /**
@@ -39,6 +28,7 @@ export default function XpDiamondBar({
   childId,
   compact,
   diamondBalanceOverride = null,
+  earningMode = false,
 }: XpDiamondBarProps) {
   const { totalXp, loading: xpLoading } = useXpLedger(familyId, childId)
   const { balance: diamondBalance, loading: diamondsLoading } = useDiamondBalance(familyId, childId)
@@ -72,9 +62,9 @@ export default function XpDiamondBar({
               lineHeight: 1,
             }}
           >
-            XP {totalXp}
+            {earningMode ? getCurrentTierLabel(totalXp) : `XP ${totalXp}`}
           </Typography>
-          {nextTier && (
+          {!earningMode && nextTier && (
             <Typography
               sx={{
                 fontFamily: '"Press Start 2P", monospace',

@@ -60,6 +60,7 @@ import type {
   PhotoLabel,
   PhotoContentExtraction,
   SkillSnapshot,
+  WatchVideo,
   WeekPlan,
   WorkbookConfig,
 } from '../../core/types'
@@ -112,6 +113,8 @@ import PlannerCompactSetup from './PlannerCompactSetup'
 import PlannerChatDrawer from './PlannerChatDrawer'
 import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
+import WatchLibraryPicker from '../watch/WatchLibraryPicker'
+import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { clonePlanWithAdvancedLessons } from './repeatWeek.logic'
 import { consumePlanAdjustment } from '../shelly-chat/stagePlanAdjustment'
 
@@ -1723,6 +1726,34 @@ Generate a plan for Monday through Friday.`.trim()
     setCurrentDraft(updated)
   }, [currentDraft])
 
+  // Watch Vehicle (FEAT-104): plan a curated video onto a day by picking from
+  // the vetted library, scoped to this child (D7). The picker + append are the
+  // manual "a parent plans a watch item" path; lock-in threads watchVideoId onto
+  // the ChecklistItem exactly like bookId.
+  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary(activeChildId)
+  const [watchPickerDay, setWatchPickerDay] = useState<number | null>(null)
+
+  const handleAddWatchItem = useCallback((dayIndex: number, video: WatchVideo) => {
+    if (!currentDraft) return
+    const newItem: DraftPlanItem = {
+      id: generateItemId(),
+      title: `Watch: ${video.title}`,
+      subjectBucket: video.subjectBucket,
+      estimatedMinutes: video.plannedMinutes, // planned = actual (D3)
+      skillTags: [], // non-curriculum — never a concept-graph input (C2/§6)
+      accepted: true,
+      category: 'choose',
+      itemType: 'watch',
+      watchVideoId: video.id,
+    }
+    setCurrentDraft({
+      ...currentDraft,
+      days: currentDraft.days.map((day, i) =>
+        i === dayIndex ? { ...day, items: [...day.items, newItem] } : day,
+      ),
+    })
+  }, [currentDraft])
+
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
     if (!currentDraft) return
     const updated: DraftWeeklyPlan = {
@@ -1915,6 +1946,7 @@ Generate a plan for Monday through Friday.`.trim()
             ...(item.evaluationMode ? { evaluationMode: item.evaluationMode } : {}),
             ...(item.link ? { link: item.link } : {}),
             ...(item.bookId ? { bookId: item.bookId } : {}),
+            ...(item.watchVideoId ? { watchVideoId: item.watchVideoId } : {}),
             ...(workbookConfigId ? { workbookConfigId } : {}),
           }
         })
@@ -2594,6 +2626,7 @@ ${dayPrompts}`
               onMoveItem={handleMoveItem}
               onRemoveItem={handleRemoveItem}
               onUpdateTime={handleUpdateTime}
+              onAddWatchItem={(dayIndex) => setWatchPickerDay(dayIndex)}
             />
           )}
 
@@ -2771,6 +2804,19 @@ ${dayPrompts}`
           onSave={handleSaveLessonCard}
         />
       )}
+
+      {/* Watch Vehicle — pick a vetted video to plan onto the chosen day (FEAT-104). */}
+      <WatchLibraryPicker
+        open={watchPickerDay !== null}
+        onClose={() => setWatchPickerDay(null)}
+        videos={watchVideos}
+        loading={watchLoading}
+        error={watchError}
+        onSelect={(video) => {
+          if (watchPickerDay !== null) handleAddWatchItem(watchPickerDay, video)
+          setWatchPickerDay(null)
+        }}
+      />
     </Page>
   )
 }
