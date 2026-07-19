@@ -74,6 +74,9 @@ import MineRecapCard from './MineRecapCard'
 import TeachBackSection from './TeachBackSection'
 import { useLatestMineSession } from './useLatestMineSession'
 import TodayChecklist from './TodayChecklist'
+import WatchItemDialog from '../watch/WatchItemDialog'
+import { useWatchLibrary } from '../watch/useWatchLibrary'
+import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
@@ -204,6 +207,18 @@ export default function TodayPage() {
     selectedChild,
     activeTemplate,
     activeRoutineItems,
+  })
+
+  // Watch Vehicle (FEAT-103): curated videos in scope for this child (D7) + the
+  // shared completion (credit hours + artifact, no XP/concept). Parent surface.
+  const { videos: watchVideos } = useWatchLibrary(selectedChildId)
+  const watch = useWatchItemCompletion({
+    familyId,
+    childId: selectedChildId,
+    dayLog,
+    persistDayLogImmediate,
+    videos: watchVideos,
+    dayLogId: today,
   })
 
   // (Rollover is wired below, after dailyPlan is loaded so MVD/low-energy can halve the budget.)
@@ -922,6 +937,7 @@ export default function TodayPage() {
             setTeachHelperItem(item)
             setTeachHelperOpen(true)
           }}
+          onWatchOpen={watch.openWatch}
           onUnifiedCapture={handleUnifiedCapture}
           onBackfillWorkbookScan={handleBackfillWorkbookScan}
           todayArtifacts={todayArtifacts}
@@ -1040,6 +1056,19 @@ export default function TodayPage() {
           weekTheme={weekFocus?.theme}
         />
       )}
+
+      {/* Watch Vehicle — planned curated-video player (FEAT-103). */}
+      <WatchItemDialog
+        video={watch.watchVideo}
+        open={watch.watchTarget !== null}
+        onClose={watch.closeWatch}
+        onComplete={watch.completeWatch}
+        voiceProfile={
+          selectedChild?.id
+            ? { id: selectedChild.id, voiceInputEnhanced: activeChild?.voiceInputEnhanced }
+            : undefined
+        }
+      />
 
       <Fab
         color="primary"
