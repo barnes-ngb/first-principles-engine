@@ -167,6 +167,37 @@ describe('WatchPlayer', () => {
     expect(fsMock.exitFullscreenIfActive).toHaveBeenCalled()
   })
 
+  // FEAT-103: the PLANNED Today flow supplies onComplete + a note slot; the
+  // LIBRARY practice flow supplies neither and therefore writes nothing.
+  it('planned flow: the completion button fires onComplete (not onDone) and renders the note slot', () => {
+    const onDone = vi.fn()
+    const onComplete = vi.fn()
+    render(
+      <WatchPlayer
+        video={VIDEO}
+        onDone={onDone}
+        onComplete={onComplete}
+        doneLabel="Mark it done"
+        completionExtra={<div>what we saw</div>}
+      />,
+    )
+    emitState(0) // ENDED
+    expect(screen.getByText('what we saw')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /mark it done/i }))
+    expect(onComplete).toHaveBeenCalledTimes(1)
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it('library flow (no onComplete): the player itself still writes NOTHING through completion', () => {
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+    emitState(0) // ENDED
+    fireEvent.click(screen.getByRole('button', { name: /^done$/i }))
+    // The player never touches Firestore — planned crediting lives in the shell.
+    expect(addDocMock).not.toHaveBeenCalled()
+    expect(setDocMock).not.toHaveBeenCalled()
+    expect(updateDocMock).not.toHaveBeenCalled()
+  })
+
   it('offers an app-owned "Make it big" fullscreen toggle (YouTube fs stays off)', () => {
     render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /make it big/i }))

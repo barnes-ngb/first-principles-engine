@@ -1380,3 +1380,71 @@ describe('parseAIResponse — FEAT-72 catalog-tag backfill', () => {
     expect(allTags.some((t) => t.endsWith('.general'))).toBe(false)
   })
 })
+
+// FEAT-103: the Watch Vehicle plan-item hook — `itemType:'watch'` + a
+// `watchVideoId` companion — survives the AI-response parse (the plan → draft
+// leg of the plan → lock-in → Today round trip).
+describe('parseAIResponse — watch items (FEAT-103)', () => {
+  const respond = (items: Array<Record<string, unknown>>): ChatResponse => ({
+    message: JSON.stringify({
+      days: [{ day: 'Monday', timeBudgetMinutes: 150, items }],
+      skipSuggestions: [],
+      minimumWin: 'x',
+    }),
+    model: 'claude-sonnet-4-20250514',
+    usage: { inputTokens: 1, outputTokens: 1 },
+  })
+
+  it("preserves itemType:'watch' and watchVideoId on a watch item", () => {
+    const result = parseAIResponse(
+      respond([
+        {
+          title: 'Watch: The American Revolution',
+          subjectBucket: 'SocialStudies',
+          estimatedMinutes: 12,
+          skillTags: [],
+          accepted: true,
+          itemType: 'watch',
+          watchVideoId: 'vid-abc123',
+        },
+      ]),
+    )
+    expect(result).not.toBeNull()
+    const item = result!.days[0].items[0]
+    expect(item.itemType).toBe('watch')
+    expect(item.watchVideoId).toBe('vid-abc123')
+    expect(item.subjectBucket).toBe(SubjectBucket.SocialStudies)
+    // Non-curriculum: never seeded with skill tags (C2/§6).
+    expect(item.skillTags).toEqual([])
+  })
+
+  it('drops watchVideoId when it is empty or non-string (never a stray field)', () => {
+    const result = parseAIResponse(
+      respond([
+        { title: 'A', subjectBucket: 'SocialStudies', estimatedMinutes: 10, skillTags: [], accepted: true, itemType: 'watch', watchVideoId: '' },
+        { title: 'B', subjectBucket: 'SocialStudies', estimatedMinutes: 10, skillTags: [], accepted: true, itemType: 'watch', watchVideoId: 42 },
+      ]),
+    )
+    expect(result!.days[0].items[0].watchVideoId).toBeUndefined()
+    expect(result!.days[0].items[1].watchVideoId).toBeUndefined()
+  })
+
+  it('leaves existing item types unchanged (characterization)', () => {
+    const result = parseAIResponse(
+      respond([
+        { title: 'Fluency Practice', subjectBucket: 'Reading', estimatedMinutes: 10, skillTags: [], accepted: true, itemType: 'evaluation', evaluationMode: 'fluency', link: '/quest' },
+        { title: 'Read: My Book', subjectBucket: 'Reading', estimatedMinutes: 15, skillTags: [], accepted: true, bookId: 'book-1' },
+        { title: 'Bogus kind', subjectBucket: 'Math', estimatedMinutes: 10, skillTags: [], accepted: true, itemType: 'nonsense' },
+      ]),
+    )
+    const [evalItem, bookItem, bogus] = result!.days[0].items
+    expect(evalItem.itemType).toBe('evaluation')
+    expect(evalItem.evaluationMode).toBe('fluency')
+    expect(evalItem.link).toBe('/quest')
+    expect(evalItem.watchVideoId).toBeUndefined()
+    expect(bookItem.bookId).toBe('book-1')
+    expect(bookItem.itemType).toBeUndefined()
+    // An unknown itemType is still dropped by the whitelist — watch didn't widen it.
+    expect(bogus.itemType).toBeUndefined()
+  })
+})
