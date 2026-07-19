@@ -10,9 +10,15 @@ import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 const addDocCalls: { key: string; data: Record<string, unknown> }[] = []
 const updateDocCalls: Record<string, unknown>[] = []
 let addDocShouldThrow = false
+/** Reject only the first N addDoc calls, then succeed (batch primary-failure test). */
+let addDocThrowFirst = 0
 
 vi.mock('firebase/firestore', () => ({
   addDoc: vi.fn((col: { __key: string }, data: Record<string, unknown>) => {
+    if (addDocThrowFirst > 0) {
+      addDocThrowFirst -= 1
+      return Promise.reject(new Error('addDoc failed'))
+    }
     if (addDocShouldThrow) return Promise.reject(new Error('addDoc failed'))
     addDocCalls.push({ key: col.__key, data })
     return Promise.resolve({ id: `artifact-${addDocCalls.length}` })
@@ -121,6 +127,7 @@ beforeEach(() => {
   addDocCalls.length = 0
   updateDocCalls.length = 0
   addDocShouldThrow = false
+  addDocThrowFirst = 0
   runScanMock.mockReset()
   syncScanToConfigMock.mockReset()
   clearScanMock.mockReset()
@@ -416,5 +423,64 @@ describe('useUnifiedCapture — FEAT-62 polish: display-parity backfill (owner c
       severity: 'error',
     })
     vi.unstubAllGlobals()
+  })
+})
+
+describe('useUnifiedCapture — FEAT-108 batch photo capture', () => {
+  it('saves photo #1 through the full pipeline, the extras as evidence-only, and one summary toast', async () => {
+    // Non-workbook item → artifacts path. #1 links evidence; extras save plain.
+    runScanMock.mockResolvedValue(null)
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ /* no workbookConfigId */ })
+    await act(async () => {
+      await result.current.handleUnifiedCaptureBatch([file(), file(), file()], 0)
+    })
+
+    // Three artifacts written (one per photo).
+    expect(addDocCalls.filter((c) => c.key === 'artifacts')).toHaveLength(3)
+    // Only photo #1 touches the checklist (evidence link) — extras never persist.
+    expect(persistDayLogImmediate).toHaveBeenCalledTimes(1)
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.evidenceCollection).toBe('artifacts')
+    // One summary toast for the two extras.
+    expect(onMessage).toHaveBeenCalledWith({ text: '+2 more pages saved', severity: 'success' })
+  })
+
+  it('routes a single-file batch straight through the normal path (no summary toast)', async () => {
+    runScanMock.mockResolvedValue(null)
+
+    const { result, persistDayLogImmediate, onMessage } = setup({})
+    await act(async () => {
+      await result.current.handleUnifiedCaptureBatch([file()], 0)
+    })
+
+    expect(addDocCalls.filter((c) => c.key === 'artifacts')).toHaveLength(1)
+    expect(persistDayLogImmediate).toHaveBeenCalledTimes(1)
+    // No "+N more" toast for a lone photo.
+    expect(onMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('more page') }),
+    )
+  })
+
+  it('aborts — no extras, no success toast — when photo #1 fails (Codex P1 guard)', async () => {
+    // Only photo #1's artifact write fails; the extras WOULD succeed. The batch
+    // must still abort so it never saves orphan extras against a lost primary,
+    // nor overwrites #1's error with a batch success toast.
+    runScanMock.mockResolvedValue(null)
+    addDocThrowFirst = 1
+
+    const { result, persistDayLogImmediate, onMessage } = setup({})
+    await act(async () => {
+      await result.current.handleUnifiedCaptureBatch([file(), file(), file()], 0)
+    })
+
+    // No extra artifacts were attempted (abort before saveEvidenceArtifact).
+    expect(addDocCalls.filter((c) => c.key === 'artifacts')).toHaveLength(0)
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    // The primary's honest error stands; no batch success toast.
+    expect(onMessage).toHaveBeenCalledWith({ text: 'Photo capture failed. Try again.', severity: 'error' })
+    expect(onMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('more page') }),
+    )
   })
 })
