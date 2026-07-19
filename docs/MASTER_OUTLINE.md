@@ -136,6 +136,9 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
   - Kid variant (Lincoln, London): hides free-form text input, uses +/- duration stepper, audio-only note tab (Photo + Audio only — no text note), kid-themed palette per child (Minecraft green for Lincoln, sage/cream for London), larger chip touch targets, chip-required save.
   - Rendered on KidTodayView regardless of plan state — capture works on plan-less days.
 
+### Today Page (Kid)
+- **One finish-line + checklist spine (UX-C2a / FEAT-106, UX review §K1)** — `KidTodayView` shows a single finish-line: the standalone top-of-screen gate banner ("N/threshold quests done — complete N more to unlock…") is removed (it duplicated the checklist's own summary line); the unlock message still appears in context on the locked Workshop + book cards, and the "🔓 unlocked!" celebration is unchanged. The checklist (`KidChecklist`) is lifted above the ritual cards to render immediately after the morning verse (formation-first), above read-aloud/chapter-pool, Knowledge Mine, Workshop, and the extra-logger. Presentation-only — completion math (`computeQuestProgress`, `dayLog.checklist`, gate, per-item XP, rollover, budget) is untouched; rituals keep their own state and are not written into `dayLog.checklist`. The inline-row consolidation (rituals as list rows) is deferred to UX-C2b.
+
 ### Plan My Week
 - **Returning-user compact setup is the default** — energy, read-aloud picker, workbook chips, special notes, Generate/Repeat as equal CTAs. First-visit users (no prior `plannerConversations` doc for that child) still get the full wizard. Chat thread available as collapsible drawer for power users.
 - **"Edit setup" back-link** in review phase — returns to the compact card without losing draft state.
