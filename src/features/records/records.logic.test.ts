@@ -1895,4 +1895,51 @@ describe('generateComplianceReportHtml', () => {
       '<p class="muted">MO RSMo 167.031 requires 1,000 hours of instruction (600 in core subjects: Reading, Language Arts, Math, Science, Social Studies). At least 600 hours must occur at the regular place of instruction.</p>',
     )
   })
+
+  // FEAT-105: the print/export carries the same descriptive subject
+  // distribution as the screen — largest first, a % column, and the honest
+  // "Other / untagged" label — and its subject rows still reconcile to the total.
+  it('includes the subject distribution: % column, descending order, Other / untagged', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'lincoln',
+        date: '2026-01-10',
+        blocks: [
+          { type: DayBlockType.Math, subjectBucket: SubjectBucket.Math, actualMinutes: 90, location: 'Home' },
+          { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 30, location: 'Home' },
+        ],
+      },
+    ]
+    // Untagged entry → Other / untagged bucket.
+    const entries: HoursEntry[] = [
+      { childId: 'lincoln', date: '2026-01-11', minutes: 30, location: 'Home' },
+    ]
+    const summary = computeHoursSummary(logs, entries, [], 'lincoln')
+
+    const html = generateComplianceReportHtml({
+      summary,
+      dayLogs: logs,
+      hoursEntries: entries,
+      evaluations: [],
+      artifacts: [],
+      children: [{ id: 'lincoln', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    // New share-of-total column + honest untagged label are present.
+    expect(html).toContain('% of Total')
+    expect(html).toContain('Other / untagged')
+    // Math (90) sorts before Reading (30) before Other (30, tie → label order).
+    expect(html.indexOf('>Math<')).toBeLessThan(html.indexOf('>Reading<'))
+    // The factual core/non-core reference line (no target language).
+    expect(html).toContain('count toward total instruction')
+
+    // Reconciliation: the subject-row hour values sum to the displayed total.
+    const dist = computeSubjectDistribution(summary)
+    const rowSum = dist.rows.reduce((s, r) => s + r.totalMinutes, 0)
+    expect(rowSum).toBe(summary.totalMinutes)
+    expect(html).toContain(`<div class="value">${(summary.totalMinutes / 60).toFixed(1)}</div>`)
+  })
 })

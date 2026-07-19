@@ -822,19 +822,6 @@ export async function buildComplianceZip(
 
 // ─── Printable Compliance Report (HTML) ──────────────────────────────────────
 
-const CORE_SUBJECT_LABELS: Record<string, string> = {
-  Reading: 'Reading',
-  LanguageArts: 'Language Arts',
-  Math: 'Math',
-  Science: 'Science',
-  SocialStudies: 'Social Studies',
-  Music: 'Music',
-  Art: 'Art',
-  PracticalArts: 'Practical Arts',
-  PE: 'PE',
-  Other: 'Other',
-}
-
 export function generateComplianceReportHtml(
   input: CompliancePackInput,
 ): string {
@@ -848,14 +835,21 @@ export function generateComplianceReportHtml(
   const coreHours = (summary.coreMinutes / 60).toFixed(1)
   const coreHomeHours = (summary.coreHomeMinutes / 60).toFixed(1)
 
-  const subjectRows = summary.bySubject
+  // FEAT-105: the subject breakdown rides the same descriptive distribution the
+  // Records screen shows — largest first, with a share-of-total column and the
+  // honest "Other / untagged" label. Derived from `summary`, so the subject
+  // rows still sum to the same total.
+  const distribution = computeSubjectDistribution(summary)
+  const nonCoreHours = (distribution.nonCoreMinutes / 60).toFixed(1)
+  const subjectRows = distribution.rows
     .map(
       (row) =>
         `<tr>
-          <td>${CORE_SUBJECT_LABELS[row.subjectBucket] ?? row.subjectBucket}</td>
+          <td>${row.label}</td>
           <td class="num">${(row.totalMinutes / 60).toFixed(1)}</td>
+          <td class="num">${row.percent.toFixed(0)}%</td>
           <td class="num">${(row.homeMinutes / 60).toFixed(1)}</td>
-          <td class="num">${coreBuckets.has(row.subjectBucket as SubjectBucket) ? 'Core' : ''}</td>
+          <td class="num">${row.isCore ? 'Core' : ''}</td>
         </tr>`,
     )
     .join('\n')
@@ -956,26 +950,30 @@ export function generateComplianceReportHtml(
   </div>
 
   <h2>Hours by Subject</h2>
+  <p class="muted">Where the recorded instructional time went this period, largest first.</p>
   <table>
     <thead>
-      <tr><th>Subject</th><th class="num">Total Hours</th><th class="num">Home Hours</th><th>Category</th></tr>
+      <tr><th>Subject</th><th class="num">Total Hours</th><th class="num">% of Total</th><th class="num">Home Hours</th><th>Category</th></tr>
     </thead>
     <tbody>
       ${subjectRows}
       <tr style="font-weight:bold">
         <td>TOTAL</td>
         <td class="num">${totalHours}</td>
+        <td class="num">${distribution.totalMinutes > 0 ? '100%' : '&mdash;'}</td>
         <td class="num">${(summary.homeMinutes / 60).toFixed(1)}</td>
         <td></td>
       </tr>
       <tr>
         <td>Core at home (MO &ge;600)</td>
         <td class="num">${coreHours}</td>
+        <td class="num"></td>
         <td class="num">${coreHomeHours}</td>
         <td>Core</td>
       </tr>
     </tbody>
   </table>
+  <p class="muted">Core subjects (Reading, Language Arts, Math, Science, Social Studies): ${coreHours} h &middot; Everything else: ${nonCoreHours} h. Missouri's statute defines the five core subjects; the rest still count toward total instruction. Shown for reference, not as a target.</p>
 
   <h2>Daily Instruction Log</h2>
   <p class="muted">${sortedDates.length} school days logged</p>
