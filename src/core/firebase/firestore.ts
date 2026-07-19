@@ -49,6 +49,7 @@ import type {
   Sticker,
   StonebridgeProgress,
   StoryGame,
+  WatchVideo,
   WeekPlan,
   WeeklyReview,
   WorkbookConfig,
@@ -714,6 +715,31 @@ export const artQuotaCollection = (
   familyId: string,
 ): CollectionReference<ArtQuota> =>
   collection(db, `families/${familyId}/artQuota`) as CollectionReference<ArtQuota>
+
+// ── Watch Vehicle curated library (FEAT-100) ────────────────────
+
+const watchVideoConverter: FirestoreDataConverter<WatchVideo> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as WatchVideo
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * Curated, Shelly-vetted videos the kids can watch (FEAT-100, design FEAT-86).
+ * A family curates MANY videos, so this is an auto-ID collection (like
+ * `businessLog`/`kitRosters`), not a one-doc-per-child config. Family-scoped
+ * with a `childId | 'both'` filter (D7, like `activityConfigs`). Use `addDoc`
+ * to vet a video in; `updateDoc` to edit. Stores a validated `youtubeId` only,
+ * never a free-form url (§4). Path: families/{familyId}/watchLibrary/{autoId}
+ */
+export const watchLibraryCollection = (
+  familyId: string,
+): CollectionReference<WatchVideo> =>
+  collection(db, `families/${familyId}/watchLibrary`).withConverter(
+    watchVideoConverter,
+  ) as CollectionReference<WatchVideo>
 
 // ── Error Log (ARCH-11 client error reporting) ──────────────────
 

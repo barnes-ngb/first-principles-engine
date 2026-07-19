@@ -37,6 +37,7 @@ import DiagnosticsTab from './DiagnosticsTab'
 import SoftProfileSection from './SoftProfileSection'
 import StickerLibraryTab from './StickerLibraryTab'
 import VoiceInputSection from './VoiceInputSection'
+import WatchLibraryTab from '../watch/WatchLibraryTab'
 
 /**
  * Nathan's Firebase Auth UID. The "Dev" admin tab in Settings is only
@@ -73,9 +74,11 @@ export default function SettingsPage() {
 
   const isParent = profile === UserProfile.Parents
   const isAdmin = familyId === ADMIN_UID
-  // Diagnostics sits after the (admin-only) Dev tab, so its positional tab value
-  // shifts by one when the Dev tab is present.
-  const diagnosticsTabIndex = isAdmin ? 4 : 3
+  // Tab order (parent): General(0) · Avatar(1) · Sticker Library(2) ·
+  // Watch Library(3) · [Dev(4), admin only] · Diagnostics. Dev shifts the
+  // trailing tabs by one when present.
+  const devTabIndex = 4
+  const diagnosticsTabIndex = isAdmin ? 5 : 4
 
   const handleSeedDemoData = async () => {
     try {
@@ -125,6 +128,7 @@ export default function SettingsPage() {
             <Tab label="General" />
             <Tab label="Avatar & XP" />
             <Tab label="Sticker Library" />
+            <Tab label="Watch Library" />
             {isAdmin && <Tab label="Dev" />}
             <Tab label="Diagnostics" />
           </Tabs>
@@ -213,8 +217,11 @@ export default function SettingsPage() {
         {/* ── Sticker Library tab (parent only) ───────────────── */}
         {isParent && activeTab === 2 && <StickerLibraryTab />}
 
+        {/* ── Watch Library tab (FEAT-100, parent only) ───────── */}
+        {isParent && activeTab === 3 && <WatchLibraryTab />}
+
         {/* ── Dev admin tab (admin UID only) ──────────────────── */}
-        {isAdmin && activeTab === 3 && <DevAdminTab />}
+        {isAdmin && activeTab === devTabIndex && <DevAdminTab />}
 
         {/* ── Diagnostics tab (ARCH-11, parent only, read-only) ─ */}
         {isParent && activeTab === diagnosticsTabIndex && <DiagnosticsTab />}
