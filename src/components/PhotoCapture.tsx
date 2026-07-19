@@ -49,6 +49,11 @@ export default function PhotoCapture({
   const [preview, setPreview] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [staged, setStaged] = useState<StagedPhoto[]>([])
+  // Count of in-flight compressions. A camera shot / upload is compressed
+  // asynchronously before it lands in `staged`, so Save must wait for these to
+  // settle — otherwise a Save tapped mid-compression commits the stale set,
+  // unmounts this component, and the late shot's setStaged is silently lost.
+  const [pendingStaging, setPendingStaging] = useState(0)
 
   // Staging mode is active whenever a batch handler is supplied.
   const staging = Boolean(onCaptureBatch)
@@ -70,15 +75,21 @@ export default function PhotoCapture({
 
     if (staging) {
       // Compress and stage every selected file; camera shots and multi-select
-      // uploads both accumulate into the pending list.
-      const additions: StagedPhoto[] = []
-      for (let i = 0; i < files.length; i++) {
-        const compressedFile = await compressToJpeg(files[i])
-        additions.push({ file: compressedFile, url: URL.createObjectURL(compressedFile) })
+      // uploads both accumulate into the pending list. Guarded by a pending
+      // counter so Save stays disabled until every shot has landed in `staged`.
+      setPendingStaging((n) => n + 1)
+      try {
+        const additions: StagedPhoto[] = []
+        for (let i = 0; i < files.length; i++) {
+          const compressedFile = await compressToJpeg(files[i])
+          additions.push({ file: compressedFile, url: URL.createObjectURL(compressedFile) })
+        }
+        setStaged((prev) => [...prev, ...additions])
+        if (cameraInputRef.current) cameraInputRef.current.value = ''
+        if (uploadInputRef.current) uploadInputRef.current.value = ''
+      } finally {
+        setPendingStaging((n) => n - 1)
       }
-      setStaged((prev) => [...prev, ...additions])
-      if (cameraInputRef.current) cameraInputRef.current.value = ''
-      if (uploadInputRef.current) uploadInputRef.current.value = ''
       return
     }
 
@@ -129,11 +140,13 @@ export default function PhotoCapture({
   }, [])
 
   const handleSaveStaged = useCallback(() => {
-    if (staged.length === 0) return
+    // Don't commit while a compression is still landing in `staged` — the late
+    // shot would be dropped (Save button is also disabled in this state).
+    if (staged.length === 0 || pendingStaging > 0) return
     onCaptureBatch?.(staged.map((p) => p.file))
     staged.forEach((p) => URL.revokeObjectURL(p.url))
     setStaged([])
-  }, [staged, onCaptureBatch])
+  }, [staged, onCaptureBatch, pendingStaging])
 
   return (
     <Stack spacing={2}>
@@ -197,7 +210,7 @@ export default function PhotoCapture({
                       size="small"
                       aria-label={`Remove photo ${i + 1}`}
                       onClick={() => removeStaged(i)}
-                      disabled={uploading}
+                      disabled={uploading || pendingStaging > 0}
                       sx={{
                         position: 'absolute',
                         top: -8,
@@ -216,11 +229,13 @@ export default function PhotoCapture({
               <Button
                 variant="contained"
                 onClick={handleSaveStaged}
-                disabled={uploading}
-                startIcon={uploading ? <CircularProgress size={18} /> : undefined}
+                disabled={uploading || pendingStaging > 0}
+                startIcon={uploading || pendingStaging > 0 ? <CircularProgress size={18} /> : undefined}
               >
                 {uploading
                   ? 'Uploading...'
+                  : pendingStaging > 0
+                  ? 'Processing...'
                   : `Save ${staged.length} photo${staged.length > 1 ? 's' : ''}`}
               </Button>
             </>

@@ -587,30 +587,6 @@ export default function KidTodayView({
         <XpDiamondBar familyId={familyId} childId={child.id} compact earningMode />
       )}
 
-      {/* Gate banner */}
-      {!gateUnlocked && checklist.length > 0 && (
-        <Stack
-          direction="row"
-          spacing={1}
-          alignItems="center"
-          justifyContent="center"
-          sx={{
-            py: 1,
-            px: 2,
-            bgcolor: 'warning.light',
-            borderRadius: 1,
-            opacity: 0.9,
-          }}
-        >
-          <Typography variant="body2" fontWeight={600}>
-            ⛏️ {mustDoCompleted}/{gateThreshold} quests done
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            — complete {gateThreshold - mustDoCompleted} more to unlock Workshop + Books!
-          </Typography>
-        </Stack>
-      )}
-
       {justUnlockedGate && (
         <Stack alignItems="center" sx={{ py: 1 }}>
           <Typography variant="body1" fontWeight={700} color="success.main">
@@ -627,6 +603,42 @@ export default function KidTodayView({
           </Typography>
         </Box>
       )}
+
+      {/* MVD warm message */}
+      {isMvd && (
+        <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
+          Light day today. Just these {mustDo.length}!
+        </Typography>
+      )}
+
+      {/* ── CHECKLIST (Must-Do + Choose) — the spine, above the ritual cards ── */}
+      <SectionErrorBoundary section="checklist">
+        <KidChecklist
+          mustDo={mustDo}
+          choose={choose}
+          checklist={checklist}
+          maxChoices={maxChoices}
+          isLincoln={isLincoln}
+          isMvd={!!isMvd}
+          gateUnlocked={gateUnlocked}
+          gateThreshold={gateThreshold}
+          mustDoCompleted={mustDoCompleted}
+          mustDoSkipped={mustDoSkipped}
+          mustDoDone={mustDoDone}
+          mustDoRemaining={mustDoRemaining}
+          dailyXp={dailyXp}
+          selectedChoices={selectedChoices}
+          onToggleChoice={handleToggleChoice}
+          dayLog={dayLog}
+          child={child}
+          familyId={familyId}
+          today={today}
+          persistDayLogImmediate={persistDayLogImmediate}
+          onCaptureOpen={handleKidCapture}
+          onXpToast={setXpToast}
+          onWatchOpen={watch.openWatch}
+        />
+      </SectionErrorBoundary>
 
       {/* ── KID READ-ALOUD SECTION (FUNC-09) ──
           Mounts on the SHARED week book (selectedBook), independent of whether
@@ -694,13 +706,6 @@ export default function KidTodayView({
         )
       )}
 
-      {/* MVD warm message */}
-      {isMvd && (
-        <Typography variant="body1" color="text.secondary" sx={{ mt: -1 }}>
-          Light day today. Just these {mustDo.length}!
-        </Typography>
-      )}
-
       {/* ── I DID MORE MINING! ── */}
       {(
         <KidExtraLogger
@@ -711,35 +716,6 @@ export default function KidTodayView({
           today={today}
         />
       )}
-
-      {/* ── CHECKLIST (Must-Do + Choose) ── */}
-      <SectionErrorBoundary section="checklist">
-        <KidChecklist
-          mustDo={mustDo}
-          choose={choose}
-          checklist={checklist}
-          maxChoices={maxChoices}
-          isLincoln={isLincoln}
-          isMvd={!!isMvd}
-          gateUnlocked={gateUnlocked}
-          gateThreshold={gateThreshold}
-          mustDoCompleted={mustDoCompleted}
-          mustDoSkipped={mustDoSkipped}
-          mustDoDone={mustDoDone}
-          mustDoRemaining={mustDoRemaining}
-          dailyXp={dailyXp}
-          selectedChoices={selectedChoices}
-          onToggleChoice={handleToggleChoice}
-          dayLog={dayLog}
-          child={child}
-          familyId={familyId}
-          today={today}
-          persistDayLogImmediate={persistDayLogImmediate}
-          onCaptureOpen={handleKidCapture}
-          onXpToast={setXpToast}
-          onWatchOpen={watch.openWatch}
-        />
-      </SectionErrorBoundary>
 
       {/* ── UNIFIED CAPTURE (kid variant) ── */}
       <SectionErrorBoundary section="kid capture">

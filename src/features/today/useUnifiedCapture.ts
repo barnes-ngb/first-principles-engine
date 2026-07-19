@@ -17,6 +17,7 @@ import { downscaleImage } from '../../core/utils/downscaleImage'
 import { withTimeout, UploadTimeoutError } from '../foundations-review/uploadTimeout'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
+import { batchExtraSummary } from './unifiedCaptureBatch'
 
 /** Hard ceiling on the workbook-scan analysis so the spinner never hangs (FEAT-62, mirrors FEAT-61). */
 const WORKBOOK_SCAN_TIMEOUT_MS = 120_000
@@ -43,8 +44,22 @@ export interface UseUnifiedCaptureOptions {
 }
 
 export interface UseUnifiedCaptureResult {
-  /** Run the unified capture pipeline for a checklist item. */
-  handleUnifiedCapture: (file: File, index: number) => Promise<void>
+  /**
+   * Run the unified capture pipeline for a checklist item. Resolves `true` when
+   * the photo was captured (evidence linked / registered), `false` when it
+   * failed and its own error toast was shown — the batch handler (FEAT-108)
+   * reads this so it never masks a lost primary photo with a success toast.
+   */
+  handleUnifiedCapture: (file: File, index: number) => Promise<boolean>
+  /**
+   * FEAT-108 (batch capture): save several photos of the SAME checklist item in
+   * one action. Photo #1 runs the full `handleUnifiedCapture` pipeline (the only
+   * photo that registers/links/advances the workbook); photos 2..N save as
+   * evidence-only artifacts on the same item (no scan, no advance, no checklist
+   * mutation), so a stack of pages of one lesson never double-advances and never
+   * races photo #1's async evidence link. One summary toast covers the extras.
+   */
+  handleUnifiedCaptureBatch: (files: File[], index: number) => Promise<void>
   /**
    * FEAT-62 backfill: re-analyze a workbook-linked item's already-captured photo
    * and register it as a curriculum scan (no new artifact). One-tap recovery for
@@ -150,8 +165,8 @@ export function useUnifiedCapture({
   )
 
   const handleUnifiedCapture = useCallback(
-    async (file: File, index: number) => {
-      if (!dayLog?.checklist) return
+    async (file: File, index: number): Promise<boolean> => {
+      if (!dayLog?.checklist) return false
       const item = dayLog.checklist[index]
       setScanItemIndex(index)
 
@@ -168,6 +183,7 @@ export function useUnifiedCapture({
       const resolvedConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
       const stampConfigId = !item.workbookConfigId && resolvedConfigId ? { workbookConfigId: resolvedConfigId } : {}
       if (resolvedConfigId) {
+        let ok = false
         try {
           // Analysis first (best-effort, timeout-guarded) so its lesson/name can
           // stamp the visibility line in the same single checklist write.
@@ -217,6 +233,7 @@ export function useUnifiedCapture({
                 }
               : { text: 'Work captured!', severity: 'success' },
           )
+          ok = true
         } catch (err) {
           console.error('[UnifiedCapture] Workbook capture failed:', {
             childId,
@@ -228,7 +245,7 @@ export function useUnifiedCapture({
         } finally {
           setScanItemIndex(null)
         }
-        return
+        return ok
       }
 
       try {
@@ -358,6 +375,7 @@ export function useUnifiedCapture({
           // No scan analysis to show for artifacts — clear the index
           setScanItemIndex(null)
         }
+        return true
       } catch (err) {
         console.error('[UnifiedCapture] Capture failed:', {
           childId,
@@ -367,9 +385,86 @@ export function useUnifiedCapture({
         })
         onMessage?.({ text: 'Photo capture failed. Try again.', severity: 'error' })
         setScanItemIndex(null)
+        return false
       }
     },
     [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage, configs],
+  )
+
+  /**
+   * FEAT-108 (batch capture): save one photo as an evidence-only artifact on an
+   * item, mirroring the ARTIFACTS path of `handleUnifiedCapture` but WITHOUT any
+   * scan/advance and WITHOUT touching `dayLog.checklist`. This is the write used
+   * for photos 2..N of a batch — a data-correctness rail: extra pages of one
+   * lesson must not advance the workbook again, and must not clobber photo #1's
+   * asynchronously-written evidence link. Returns true on success.
+   */
+  const saveEvidenceArtifact = useCallback(
+    async (file: File, item: NonNullable<DayLog['checklist']>[number]): Promise<boolean> => {
+      try {
+        const artifact = {
+          childId,
+          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${childName}'s work`,
+          type: EvidenceType.Photo,
+          dayLogId: today,
+          createdAt: new Date().toISOString(),
+          tags: {
+            engineStage: EngineStage.Build,
+            domain: '',
+            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
+            location: 'Home',
+            planItem: item.label,
+          },
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        onArtifactCreated?.({ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact)
+        return true
+      } catch (err) {
+        console.warn('[UnifiedCapture] Extra batch page failed to save (non-blocking):', err)
+        return false
+      }
+    },
+    [childId, childName, today, familyId, onArtifactCreated],
+  )
+
+  /**
+   * FEAT-108 (batch capture): snap several pages of ONE checklist item and save
+   * once. Photo #1 goes through the full `handleUnifiedCapture` pipeline (the
+   * lone photo that may register/link/advance the workbook); photos 2..N save as
+   * evidence-only artifacts on the same item. Two rails held: (1) no curriculum
+   * double-advance — only photo #1 advances; (2) no stale-closure race — the
+   * extras never call `persistDayLogImmediate` / touch the checklist.
+   */
+  const handleUnifiedCaptureBatch = useCallback(
+    async (files: File[], index: number) => {
+      const valid = (files ?? []).filter((f): f is File => !!f)
+      if (valid.length === 0) return
+
+      // Photo #1: full pipeline (registration + evidence link + workbook advance).
+      // If it fails it shows its own error toast; abort so we never save the
+      // extras against a lost primary photo, nor overwrite that error with a
+      // batch success toast (the primary photo carries the evidence link +
+      // workbook advance the extras deliberately don't).
+      const primaryOk = await handleUnifiedCapture(valid[0], index)
+      if (!primaryOk || valid.length === 1) return
+
+      // Photos 2..N: evidence-only on the same item. Read the item's stable
+      // label/subject once — no checklist mutation, so no race with photo #1.
+      const item = dayLog?.checklist?.[index]
+      if (!item) return
+      let extra = 0
+      for (const file of valid.slice(1)) {
+        if (await saveEvidenceArtifact(file, item)) extra += 1
+      }
+      if (extra > 0) {
+        onMessage?.({ text: batchExtraSummary(extra), severity: 'success' })
+      }
+    },
+    [handleUnifiedCapture, dayLog, saveEvidenceArtifact, onMessage],
   )
 
   /**
@@ -465,6 +560,7 @@ export function useUnifiedCapture({
 
   return {
     handleUnifiedCapture,
+    handleUnifiedCaptureBatch,
     handleBackfillWorkbookScan,
     scanItemIndex,
     setScanItemIndex,

@@ -9,7 +9,11 @@ import type {
   HoursAdjustment,
   HoursEntry,
 } from '../../core/types'
-import { LearningLocation, SubjectBucket } from '../../core/types/enums'
+import {
+  LearningLocation,
+  SubjectBucket,
+  SubjectBucketLabel,
+} from '../../core/types/enums'
 import { formatDateForCsv, toCsvValue } from '../../core/utils/format'
 import { deriveChildIdFromDocId } from '../../core/utils/docId'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
@@ -326,6 +330,118 @@ export const computeHoursSummary = (
     adjustmentMinutes,
     bySubject,
     byDate,
+  }
+}
+
+// ─── Subject distribution (FEAT-105) ─────────────────────────────────────────
+//
+// A descriptive "where did the time actually go" rollup DERIVED from the
+// canonical `HoursSummary` — never a re-count. Because it folds
+// `summary.bySubject` (itself produced by the single counting path,
+// `collectHoursContributions` / DATA-11), its `totalMinutes` is structurally
+// identical to the compliance total already displayed: no schema change, no new
+// counting path, zero writes.
+//
+// Charter (FEAT-105): descriptive, never evaluative — no targets, no deficit
+// language, no per-subject quota. The `Other` bucket, which also absorbs
+// untagged time (every source defaults a missing `subjectBucket` to `'Other'`),
+// is surfaced honestly as "Other / untagged" — never dropped or redistributed.
+// The core / non-core split is shown FACTUALLY (it is the MO statute, not a
+// judgment): `coreMinutes` uses the same `coreBuckets` set as the compliance
+// path, and `coreMinutes + nonCoreMinutes === totalMinutes`.
+
+export type SubjectDistributionRow = {
+  subjectBucket: string
+  /** Display label; the catch-all `Other` bucket is labelled "Other / untagged". */
+  label: string
+  totalMinutes: number
+  homeMinutes: number
+  /** Share of the grand total in percent, precise/unrounded (the view rounds for
+   *  display). Reads naturally only in a clean non-negative distribution (see
+   *  `SubjectDistribution.percentagesMeaningful`); 0 when the grand total is 0.
+   *  A net-negative subject (from an over-correcting adjustment) yields a share
+   *  outside 0–100, which is exactly why the view/export suppress the whole `%`
+   *  column in that case rather than print a misleading number. */
+  percent: number
+  /** A MO core subject (Reading / Language Arts / Math / Science / Social Studies). */
+  isCore: boolean
+  /** The catch-all bucket — also where untagged time lands. */
+  isOther: boolean
+}
+
+export type SubjectDistribution = {
+  /** One row per subject that recorded time, sorted by minutes DESCENDING (label
+   *  ascending on ties). Subjects whose net minutes are exactly zero are omitted. */
+  rows: SubjectDistributionRow[]
+  totalMinutes: number
+  coreMinutes: number
+  /** Non-core minutes = total − core. Includes the Other / untagged bucket. */
+  nonCoreMinutes: number
+  /** Largest single-subject total — the denominator for scaling a bar to the
+   *  DATA (never to a target). 0 when there are no rows. */
+  maxSubjectMinutes: number
+  /** True only when a `% of total` reads naturally: a positive grand total AND
+   *  no net-negative subject. When false (an over-correcting adjustment left the
+   *  total at/below zero, or one subject net-negative), the view and export
+   *  suppress the whole `%` column with an em-dash rather than print shares that
+   *  fall outside 0–100 or a bogus 100% total. */
+  percentagesMeaningful: boolean
+}
+
+/** Human label for a subject bucket, with the catch-all relabelled so untagged
+ *  time reads honestly. */
+const subjectDistributionLabel = (bucket: string): string => {
+  if (bucket === SubjectBucket.Other) return 'Other / untagged'
+  return SubjectBucketLabel[bucket as SubjectBucket] ?? bucket
+}
+
+/**
+ * Pure "hours by subject" distribution over an already-computed `HoursSummary`.
+ * Reconciles exactly with the summary's total by construction (it only reshapes
+ * `summary.bySubject`), so the on-screen breakdown and the export can never
+ * drift from the compliance total (FEAT-105).
+ */
+export const computeSubjectDistribution = (
+  summary: HoursSummary,
+): SubjectDistribution => {
+  const total = summary.totalMinutes
+
+  const rows: SubjectDistributionRow[] = summary.bySubject
+    .filter((row) => row.totalMinutes !== 0)
+    .map((row) => ({
+      subjectBucket: row.subjectBucket,
+      label: subjectDistributionLabel(row.subjectBucket),
+      totalMinutes: row.totalMinutes,
+      homeMinutes: row.homeMinutes,
+      percent: total > 0 ? (row.totalMinutes / total) * 100 : 0,
+      isCore: coreBuckets.has(row.subjectBucket as SubjectBucket),
+      isOther: row.subjectBucket === SubjectBucket.Other,
+    }))
+    .sort(
+      (a, b) =>
+        b.totalMinutes - a.totalMinutes || a.label.localeCompare(b.label),
+    )
+
+  // Scale bars to the largest POSITIVE subject; a net-negative subject (from a
+  // correcting adjustment) never sets the scale and its bar simply clamps to 0.
+  const maxSubjectMinutes = rows.reduce(
+    (max, row) => Math.max(max, row.totalMinutes),
+    0,
+  )
+
+  // Percentages only read naturally when the total is positive and no subject is
+  // net-negative; otherwise a "share of total" is misleading (a negative
+  // correction can push one subject over 100% while another goes below 0).
+  const percentagesMeaningful =
+    total > 0 && rows.every((row) => row.totalMinutes >= 0)
+
+  return {
+    rows,
+    totalMinutes: total,
+    coreMinutes: summary.coreMinutes,
+    nonCoreMinutes: total - summary.coreMinutes,
+    maxSubjectMinutes,
+    percentagesMeaningful,
   }
 }
 
@@ -723,19 +839,6 @@ export async function buildComplianceZip(
 
 // ─── Printable Compliance Report (HTML) ──────────────────────────────────────
 
-const CORE_SUBJECT_LABELS: Record<string, string> = {
-  Reading: 'Reading',
-  LanguageArts: 'Language Arts',
-  Math: 'Math',
-  Science: 'Science',
-  SocialStudies: 'Social Studies',
-  Music: 'Music',
-  Art: 'Art',
-  PracticalArts: 'Practical Arts',
-  PE: 'PE',
-  Other: 'Other',
-}
-
 export function generateComplianceReportHtml(
   input: CompliancePackInput,
 ): string {
@@ -749,14 +852,25 @@ export function generateComplianceReportHtml(
   const coreHours = (summary.coreMinutes / 60).toFixed(1)
   const coreHomeHours = (summary.coreHomeMinutes / 60).toFixed(1)
 
-  const subjectRows = summary.bySubject
+  // FEAT-105: the subject breakdown rides the same descriptive distribution the
+  // Records screen shows — largest first, with a share-of-total column and the
+  // honest "Other / untagged" label. Derived from `summary`, so the subject
+  // rows still sum to the same total.
+  const distribution = computeSubjectDistribution(summary)
+  const nonCoreHours = (distribution.nonCoreMinutes / 60).toFixed(1)
+  // Suppress the share column when a "% of total" can't read naturally (a
+  // negative correction left the total ≤ 0 or a subject net-negative).
+  const pctCell = (row: SubjectDistributionRow) =>
+    distribution.percentagesMeaningful ? `${row.percent.toFixed(0)}%` : '&mdash;'
+  const subjectRows = distribution.rows
     .map(
       (row) =>
         `<tr>
-          <td>${CORE_SUBJECT_LABELS[row.subjectBucket] ?? row.subjectBucket}</td>
+          <td>${row.label}</td>
           <td class="num">${(row.totalMinutes / 60).toFixed(1)}</td>
+          <td class="num">${pctCell(row)}</td>
           <td class="num">${(row.homeMinutes / 60).toFixed(1)}</td>
-          <td class="num">${coreBuckets.has(row.subjectBucket as SubjectBucket) ? 'Core' : ''}</td>
+          <td class="num">${row.isCore ? 'Core' : ''}</td>
         </tr>`,
     )
     .join('\n')
@@ -857,26 +971,30 @@ export function generateComplianceReportHtml(
   </div>
 
   <h2>Hours by Subject</h2>
+  <p class="muted">Where the recorded instructional time went this period, largest first.</p>
   <table>
     <thead>
-      <tr><th>Subject</th><th class="num">Total Hours</th><th class="num">Home Hours</th><th>Category</th></tr>
+      <tr><th>Subject</th><th class="num">Total Hours</th><th class="num">% of Total</th><th class="num">Home Hours</th><th>Category</th></tr>
     </thead>
     <tbody>
       ${subjectRows}
       <tr style="font-weight:bold">
         <td>TOTAL</td>
         <td class="num">${totalHours}</td>
+        <td class="num">${distribution.percentagesMeaningful ? '100%' : '&mdash;'}</td>
         <td class="num">${(summary.homeMinutes / 60).toFixed(1)}</td>
         <td></td>
       </tr>
       <tr>
         <td>Core at home (MO &ge;600)</td>
         <td class="num">${coreHours}</td>
+        <td class="num"></td>
         <td class="num">${coreHomeHours}</td>
         <td>Core</td>
       </tr>
     </tbody>
   </table>
+  <p class="muted">Core subjects (Reading, Language Arts, Math, Science, Social Studies): ${coreHours} h &middot; Everything else: ${nonCoreHours} h. Missouri's statute defines the five core subjects; the rest still count toward total instruction. Shown for reference, not as a target.</p>
 
   <h2>Daily Instruction Log</h2>
   <p class="muted">${sortedDates.length} school days logged</p>
