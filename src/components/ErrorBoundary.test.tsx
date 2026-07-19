@@ -35,6 +35,12 @@ function setVisibility(state: 'visible' | 'hidden'): void {
   })
 }
 
+function fireReconnect(): void {
+  act(() => {
+    window.dispatchEvent(new Event('online'))
+  })
+}
+
 describe('ErrorBoundary (FEAT-110 transient connectivity)', () => {
   beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -86,6 +92,41 @@ describe('ErrorBoundary (FEAT-110 transient connectivity)', () => {
 
     expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument()
     expect(screen.getByText('planner content')).toBeInTheDocument()
+  })
+
+  it('clears a transient boundary on an `online` reconnect even without a visibility transition (already-visible blip)', () => {
+    // Simulate a blip that arrives while the tab is already foregrounded — a
+    // future visibilitychange never comes, so the online signal must clear it.
+    setVisibility('visible')
+    render(
+      <ErrorBoundary>
+        <div>planner content</div>
+      </ErrorBoundary>,
+    )
+
+    rejectGlobally(
+      makeError('Could not reach Cloud Firestore backend', 'unavailable'),
+    )
+    expect(screen.getByText('Reconnecting…')).toBeInTheDocument()
+
+    fireReconnect()
+
+    expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument()
+    expect(screen.getByText('planner content')).toBeInTheDocument()
+  })
+
+  it('does NOT clear a genuine error on an `online` reconnect', () => {
+    render(
+      <ErrorBoundary>
+        <div>planner content</div>
+      </ErrorBoundary>,
+    )
+
+    rejectGlobally(makeError('Missing or insufficient permissions.', 'permission-denied'))
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument()
+
+    fireReconnect()
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument()
   })
 
   it('escalates a genuine permission-denied error to the full crash screen and does NOT auto-clear on foreground', () => {

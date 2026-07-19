@@ -17,12 +17,22 @@ interface State {
   error: Error | null
   // FEAT-110: a transient connectivity blip (mobile backgrounds the tab → the
   // Firestore socket drops → an in-flight read rejects "client is offline") is
-  // shown as a gentle "reconnecting" state, not a crash, and auto-clears when
-  // the tab returns to the foreground. Genuine faults keep the full crash screen.
+  // shown as a gentle "reconnecting" state, not a crash, and auto-clears on any of
+  // three recovery signals: a foreground `visibilitychange`, a browser `online`
+  // event, or a fallback self-heal timer. Genuine faults keep the full crash screen.
   transient: boolean
 }
 
+// Fallback self-heal: a transient boundary auto-retries after this delay even if
+// neither a foreground `visibilitychange` nor an `online` event fires (some mobile
+// suspensions never flip `navigator.onLine`). Clearing just re-renders the
+// children — if they immediately re-throw the boundary shows again, so this can't
+// spin faster than this interval.
+const TRANSIENT_AUTO_RETRY_MS = 4000
+
 export default class ErrorBoundary extends Component<Props, State> {
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+
   constructor(props: Props) {
     super(props)
     this.state = { hasError: false, error: null, transient: false }
@@ -39,6 +49,7 @@ export default class ErrorBoundary extends Component<Props, State> {
   componentDidMount() {
     window.addEventListener('unhandledrejection', this.handleUnhandledRejection)
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
+    window.addEventListener('online', this.handleReconnect)
   }
 
   componentWillUnmount() {
@@ -47,6 +58,8 @@ export default class ErrorBoundary extends Component<Props, State> {
       this.handleUnhandledRejection,
     )
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+    window.removeEventListener('online', this.handleReconnect)
+    this.clearRetryTimer()
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -75,6 +88,12 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (transient) console.warn('Transient connectivity blip:', error)
     else console.error('Unhandled promise rejection:', error)
     this.setState({ hasError: true, error, transient })
+    // The rejection may arrive while the tab is ALREADY visible (an ordinary blip,
+    // or a suspended tab draining its queued rejection after the foreground
+    // visibilitychange already fired) — in which case no future visibility
+    // transition would clear it. Schedule a self-heal so a transient state always
+    // clears on its own; the `online` listener clears it sooner on real reconnect.
+    if (transient) this.scheduleTransientAutoRetry()
   }
 
   // FEAT-110: returning to the foreground is the natural "retry" — mobile
@@ -90,11 +109,34 @@ export default class ErrorBoundary extends Component<Props, State> {
     }
   }
 
+  // A browser `online` event is an actual reconnect signal — clear a transient
+  // boundary immediately when connectivity returns, whatever the tab's visibility.
+  handleReconnect = () => {
+    if (this.state.hasError && this.state.transient) {
+      this.handleRetry()
+    }
+  }
+
+  scheduleTransientAutoRetry = () => {
+    this.clearRetryTimer()
+    this.retryTimer = setTimeout(() => {
+      if (this.state.hasError && this.state.transient) this.handleRetry()
+    }, TRANSIENT_AUTO_RETRY_MS)
+  }
+
+  clearRetryTimer = () => {
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+    }
+  }
+
   handleReload = () => {
     window.location.reload()
   }
 
   handleRetry = () => {
+    this.clearRetryTimer()
     this.setState({ hasError: false, error: null, transient: false })
   }
 
