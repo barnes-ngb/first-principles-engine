@@ -1,15 +1,19 @@
+import { useState } from 'react'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import OndemandVideoIcon from '@mui/icons-material/OndemandVideo'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 
 import { EmptyState, ErrorState, LoadingState } from '../../components/states'
 import { useChildren } from '../../core/hooks/useChildren'
 import { SubjectBucketLabel } from '../../core/types/enums'
 import type { WatchVideo } from '../../core/types'
 import WatchVetInForm from './WatchVetInForm'
+import WatchPlayerDialog from './WatchPlayerDialog'
 import { useWatchLibrary } from './useWatchLibrary'
 
 /** Resolve a scope value to a display label (child name, or "Both"). */
@@ -27,6 +31,7 @@ export default function WatchLibraryTab() {
   const { videos, loading, error, addVideo } = useWatchLibrary()
   const { children } = useChildren()
   const names = Object.fromEntries(children.map((c) => [c.id, c.name])) as Record<string, string>
+  const [playing, setPlaying] = useState<WatchVideo | null>(null)
 
   return (
     <Stack spacing={3}>
@@ -74,11 +79,29 @@ export default function WatchLibraryTab() {
                   <Chip size="small" variant="outlined" label={scopeLabel(v.childId, names)} />
                   <Chip size="small" variant="outlined" label={`Added by ${v.addedBy}`} />
                 </Box>
+                <Box sx={{ mt: 1 }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<PlayArrowIcon />}
+                    onClick={() => setPlaying(v)}
+                  >
+                    Watch
+                  </Button>
+                </Box>
               </Box>
             ))}
           </Stack>
         )}
       </Stack>
+
+      {/* Practice player — watch a curated video outside a plan (§9). It does
+          not count hours yet (D3); planning + counting come in slice 3. */}
+      <WatchPlayerDialog
+        video={playing}
+        open={playing !== null}
+        onClose={() => setPlaying(null)}
+      />
     </Stack>
   )
 }

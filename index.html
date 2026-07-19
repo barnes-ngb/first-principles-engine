@@ -2,6 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Watch Vehicle (FEAT-101): net-new frame-src allowlist. frame-src only —
+         no default-src — so scripts/fonts/Firebase/connect are unrestricted; the
+         app can only ever frame the nocookie YouTube embed. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="frame-src 'self' https://www.youtube-nocookie.com"
+    />
     <link rel="icon" type="image/svg+xml" href="/icons/sunny.svg" />
     <link rel="apple-touch-icon" href="/icons/sunny-180.png" />
     <link rel="manifest" href="/manifest.json" />
