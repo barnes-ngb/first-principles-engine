@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ChecklistItem, DayBlock, DayLog, WatchVideo } from '../../core/types'
-import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { DayBlockType, EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { applyWatchCompletion, buildWatchArtifact, WATCH_ARTIFACT_DOMAIN } from './watchItemCompletion'
 
 // A curated history video → SocialStudies (History folds into SocialStudies).
@@ -30,11 +30,11 @@ const watchItem: ChecklistItem = {
 // Block whose title matches the item label (minus the "(Nm)" suffix), exactly
 // as the planner lock-in writes it.
 const watchBlock: DayBlock = {
-  type: 'other',
+  type: DayBlockType.Other,
   title: 'Watch: The American Revolution',
   subjectBucket: SubjectBucket.SocialStudies,
   plannedMinutes: 12,
-} as DayBlock
+}
 
 const baseDayLog: DayLog = {
   childId: 'lincoln',

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChecklistItem, Child, DayLog } from '../../core/types'
 
 // Spy on the XP writer to prove a watch completion earns NO XP (D6).
-const addXpEventMock = vi.fn(() => Promise.resolve(0))
+const addXpEventMock = vi.fn((..._args: unknown[]) => Promise.resolve(0))
 vi.mock('../../core/xp/addXpEvent', () => ({
   addXpEvent: (...args: unknown[]) => addXpEventMock(...args),
 }))
