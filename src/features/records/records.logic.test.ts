@@ -19,6 +19,7 @@ import {
   collectHoursContributions,
   computeHoursSummary,
   computeMonthlyTrend,
+  computeSubjectDistribution,
   dayLogMinuteContributions,
   deriveChildIdFromDocId,
   entryMinutes,
@@ -910,6 +911,170 @@ describe('computeMonthlyTrend', () => {
     const trend = computeMonthlyTrend(mixed, hoursEntries, adjustments, '2026-01', '2026-02', 'lincoln')
     // London's 999 must not leak into Lincoln's Jan core.
     expect(trend[0].coreMinutes).toBe(150)
+  })
+})
+
+// ─── computeSubjectDistribution (FEAT-105) ───────────────────────────────────
+//
+// The "hours by subject" distribution is a PURE reshape of the canonical
+// HoursSummary, so its total must reconcile EXACTLY with the compliance total
+// already displayed. Fixtures: multi-subject, untagged-only, empty range,
+// single subject.
+
+describe('computeSubjectDistribution (FEAT-105)', () => {
+  // Multi-subject dataset: Reading 60 (core), Math 30 (core), Art 30 (non-core),
+  // plus an untagged 20-minute entry that lands in the Other bucket.
+  const multiSubjectSummary = computeHoursSummary(
+    [
+      {
+        childId: 'lincoln',
+        date: '2026-01-10',
+        blocks: [
+          { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 60, location: 'Home' },
+          { type: DayBlockType.Math, subjectBucket: SubjectBucket.Math, actualMinutes: 30, location: 'Home' },
+          { type: DayBlockType.Movement, subjectBucket: SubjectBucket.Art, actualMinutes: 30, location: 'Library' },
+        ],
+      },
+    ],
+    // Untagged entry — no subjectBucket → folds into 'Other'.
+    [{ childId: 'lincoln', date: '2026-01-11', minutes: 20, location: 'Home' }],
+    [],
+    'lincoln',
+  )
+
+  it('sorts subjects by minutes DESCENDING (label ascending on ties)', () => {
+    const dist = computeSubjectDistribution(multiSubjectSummary)
+    expect(dist.rows.map((r) => r.subjectBucket)).toEqual([
+      'Reading', // 60
+      // Math and Art both 30 → tie broken by label ('Art' < 'Math')
+      'Art',
+      'Math',
+      'Other', // 20
+    ])
+  })
+
+  it('RECONCILES exactly with the summary total (the FEAT-105 guard)', () => {
+    const dist = computeSubjectDistribution(multiSubjectSummary)
+    const rowSum = dist.rows.reduce((s, r) => s + r.totalMinutes, 0)
+    // The distribution total, the sum of its rows, and the canonical compliance
+    // total are all the same number — no re-count, no drift.
+    expect(dist.totalMinutes).toBe(multiSubjectSummary.totalMinutes)
+    expect(rowSum).toBe(multiSubjectSummary.totalMinutes)
+    expect(dist.totalMinutes).toBe(140) // 60 + 30 + 30 + 20
+  })
+
+  it('splits core vs non-core factually — core + non-core === total', () => {
+    const dist = computeSubjectDistribution(multiSubjectSummary)
+    // Core = Reading 60 + Math 30 = 90; non-core = Art 30 + Other 20 = 50.
+    expect(dist.coreMinutes).toBe(90)
+    expect(dist.nonCoreMinutes).toBe(50)
+    expect(dist.coreMinutes + dist.nonCoreMinutes).toBe(dist.totalMinutes)
+    expect(dist.coreMinutes).toBe(multiSubjectSummary.coreMinutes)
+
+    const reading = dist.rows.find((r) => r.subjectBucket === 'Reading')
+    const art = dist.rows.find((r) => r.subjectBucket === 'Art')
+    expect(reading?.isCore).toBe(true)
+    expect(art?.isCore).toBe(false)
+  })
+
+  it('percentages are precise shares of the total that sum to ~100', () => {
+    const dist = computeSubjectDistribution(multiSubjectSummary)
+    const reading = dist.rows.find((r) => r.subjectBucket === 'Reading')
+    expect(reading?.percent).toBeCloseTo((60 / 140) * 100, 6)
+    const sum = dist.rows.reduce((s, r) => s + r.percent, 0)
+    expect(sum).toBeCloseTo(100, 6)
+  })
+
+  it('scales the bar to the largest subject, never to a target', () => {
+    const dist = computeSubjectDistribution(multiSubjectSummary)
+    // maxSubjectMinutes is the biggest single-subject total (Reading 60) — the
+    // denominator for a bar scaled to the DATA.
+    expect(dist.maxSubjectMinutes).toBe(60)
+  })
+
+  it('surfaces untagged time honestly as an "Other / untagged" row', () => {
+    const dist = computeSubjectDistribution(multiSubjectSummary)
+    const other = dist.rows.find((r) => r.subjectBucket === 'Other')
+    expect(other).toBeDefined()
+    expect(other?.label).toBe('Other / untagged')
+    expect(other?.isOther).toBe(true)
+    expect(other?.isCore).toBe(false)
+    expect(other?.totalMinutes).toBe(20)
+  })
+
+  it('untagged-only range: a single Other/untagged row at 100%', () => {
+    const summary = computeHoursSummary(
+      [],
+      [
+        { childId: 'lincoln', date: '2026-01-10', minutes: 45, location: 'Home' },
+        { childId: 'lincoln', date: '2026-01-11', minutes: 15, location: 'Home' },
+      ],
+      [],
+      'lincoln',
+    )
+    const dist = computeSubjectDistribution(summary)
+    expect(dist.rows).toHaveLength(1)
+    expect(dist.rows[0].label).toBe('Other / untagged')
+    expect(dist.rows[0].percent).toBeCloseTo(100, 6)
+    expect(dist.coreMinutes).toBe(0)
+    expect(dist.nonCoreMinutes).toBe(60)
+    expect(dist.totalMinutes).toBe(60)
+  })
+
+  it('empty range: no rows, zeroed totals, no divide-by-zero', () => {
+    const dist = computeSubjectDistribution(computeHoursSummary([], [], []))
+    expect(dist.rows).toEqual([])
+    expect(dist.totalMinutes).toBe(0)
+    expect(dist.coreMinutes).toBe(0)
+    expect(dist.nonCoreMinutes).toBe(0)
+    expect(dist.maxSubjectMinutes).toBe(0)
+  })
+
+  it('single subject: one row at 100%, all core', () => {
+    const summary = computeHoursSummary(
+      [
+        {
+          childId: 'lincoln',
+          date: '2026-01-10',
+          blocks: [
+            { type: DayBlockType.Math, subjectBucket: SubjectBucket.Math, actualMinutes: 50, location: 'Home' },
+          ],
+        },
+      ],
+      [],
+      [],
+      'lincoln',
+    )
+    const dist = computeSubjectDistribution(summary)
+    expect(dist.rows).toHaveLength(1)
+    expect(dist.rows[0].subjectBucket).toBe('Math')
+    expect(dist.rows[0].label).toBe('Math')
+    expect(dist.rows[0].percent).toBeCloseTo(100, 6)
+    expect(dist.coreMinutes).toBe(50)
+    expect(dist.nonCoreMinutes).toBe(0)
+  })
+
+  it('omits a subject whose net minutes are exactly zero (adjustment cancels it)', () => {
+    const summary = computeHoursSummary(
+      [
+        {
+          childId: 'lincoln',
+          date: '2026-01-10',
+          blocks: [
+            { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 40, location: 'Home' },
+            { type: DayBlockType.Project, subjectBucket: SubjectBucket.Art, actualMinutes: 20, location: 'Home' },
+          ],
+        },
+      ],
+      [],
+      // Cancel the Art time back out.
+      [{ childId: 'lincoln', date: '2026-01-11', minutes: -20, reason: 'miscount', subjectBucket: SubjectBucket.Art }],
+      'lincoln',
+    )
+    const dist = computeSubjectDistribution(summary)
+    expect(dist.rows.map((r) => r.subjectBucket)).toEqual(['Reading'])
+    // Still reconciles: 40 Reading + 0 net Art = 40.
+    expect(dist.totalMinutes).toBe(40)
   })
 })
 

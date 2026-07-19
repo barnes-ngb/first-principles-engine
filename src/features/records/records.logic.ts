@@ -9,7 +9,11 @@ import type {
   HoursAdjustment,
   HoursEntry,
 } from '../../core/types'
-import { LearningLocation, SubjectBucket } from '../../core/types/enums'
+import {
+  LearningLocation,
+  SubjectBucket,
+  SubjectBucketLabel,
+} from '../../core/types/enums'
 import { formatDateForCsv, toCsvValue } from '../../core/utils/format'
 import { deriveChildIdFromDocId } from '../../core/utils/docId'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
@@ -326,6 +330,101 @@ export const computeHoursSummary = (
     adjustmentMinutes,
     bySubject,
     byDate,
+  }
+}
+
+// ─── Subject distribution (FEAT-105) ─────────────────────────────────────────
+//
+// A descriptive "where did the time actually go" rollup DERIVED from the
+// canonical `HoursSummary` — never a re-count. Because it folds
+// `summary.bySubject` (itself produced by the single counting path,
+// `collectHoursContributions` / DATA-11), its `totalMinutes` is structurally
+// identical to the compliance total already displayed: no schema change, no new
+// counting path, zero writes.
+//
+// Charter (FEAT-105): descriptive, never evaluative — no targets, no deficit
+// language, no per-subject quota. The `Other` bucket, which also absorbs
+// untagged time (every source defaults a missing `subjectBucket` to `'Other'`),
+// is surfaced honestly as "Other / untagged" — never dropped or redistributed.
+// The core / non-core split is shown FACTUALLY (it is the MO statute, not a
+// judgment): `coreMinutes` uses the same `coreBuckets` set as the compliance
+// path, and `coreMinutes + nonCoreMinutes === totalMinutes`.
+
+export type SubjectDistributionRow = {
+  subjectBucket: string
+  /** Display label; the catch-all `Other` bucket is labelled "Other / untagged". */
+  label: string
+  totalMinutes: number
+  homeMinutes: number
+  /** Share of the grand total in percent (0–100), precise/unrounded (the view
+   *  rounds for display). 0 when the grand total is 0. */
+  percent: number
+  /** A MO core subject (Reading / Language Arts / Math / Science / Social Studies). */
+  isCore: boolean
+  /** The catch-all bucket — also where untagged time lands. */
+  isOther: boolean
+}
+
+export type SubjectDistribution = {
+  /** One row per subject that recorded time, sorted by minutes DESCENDING (label
+   *  ascending on ties). Subjects whose net minutes are exactly zero are omitted. */
+  rows: SubjectDistributionRow[]
+  totalMinutes: number
+  coreMinutes: number
+  /** Non-core minutes = total − core. Includes the Other / untagged bucket. */
+  nonCoreMinutes: number
+  /** Largest single-subject total — the denominator for scaling a bar to the
+   *  DATA (never to a target). 0 when there are no rows. */
+  maxSubjectMinutes: number
+}
+
+/** Human label for a subject bucket, with the catch-all relabelled so untagged
+ *  time reads honestly. */
+const subjectDistributionLabel = (bucket: string): string => {
+  if (bucket === SubjectBucket.Other) return 'Other / untagged'
+  return SubjectBucketLabel[bucket as SubjectBucket] ?? bucket
+}
+
+/**
+ * Pure "hours by subject" distribution over an already-computed `HoursSummary`.
+ * Reconciles exactly with the summary's total by construction (it only reshapes
+ * `summary.bySubject`), so the on-screen breakdown and the export can never
+ * drift from the compliance total (FEAT-105).
+ */
+export const computeSubjectDistribution = (
+  summary: HoursSummary,
+): SubjectDistribution => {
+  const total = summary.totalMinutes
+
+  const rows: SubjectDistributionRow[] = summary.bySubject
+    .filter((row) => row.totalMinutes !== 0)
+    .map((row) => ({
+      subjectBucket: row.subjectBucket,
+      label: subjectDistributionLabel(row.subjectBucket),
+      totalMinutes: row.totalMinutes,
+      homeMinutes: row.homeMinutes,
+      percent: total > 0 ? (row.totalMinutes / total) * 100 : 0,
+      isCore: coreBuckets.has(row.subjectBucket as SubjectBucket),
+      isOther: row.subjectBucket === SubjectBucket.Other,
+    }))
+    .sort(
+      (a, b) =>
+        b.totalMinutes - a.totalMinutes || a.label.localeCompare(b.label),
+    )
+
+  // Scale bars to the largest POSITIVE subject; a net-negative subject (from a
+  // correcting adjustment) never sets the scale and its bar simply clamps to 0.
+  const maxSubjectMinutes = rows.reduce(
+    (max, row) => Math.max(max, row.totalMinutes),
+    0,
+  )
+
+  return {
+    rows,
+    totalMinutes: total,
+    coreMinutes: summary.coreMinutes,
+    nonCoreMinutes: total - summary.coreMinutes,
+    maxSubjectMinutes,
   }
 }
 
