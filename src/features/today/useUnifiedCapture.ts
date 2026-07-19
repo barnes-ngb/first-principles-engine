@@ -44,8 +44,13 @@ export interface UseUnifiedCaptureOptions {
 }
 
 export interface UseUnifiedCaptureResult {
-  /** Run the unified capture pipeline for a checklist item. */
-  handleUnifiedCapture: (file: File, index: number) => Promise<void>
+  /**
+   * Run the unified capture pipeline for a checklist item. Resolves `true` when
+   * the photo was captured (evidence linked / registered), `false` when it
+   * failed and its own error toast was shown — the batch handler (FEAT-108)
+   * reads this so it never masks a lost primary photo with a success toast.
+   */
+  handleUnifiedCapture: (file: File, index: number) => Promise<boolean>
   /**
    * FEAT-108 (batch capture): save several photos of the SAME checklist item in
    * one action. Photo #1 runs the full `handleUnifiedCapture` pipeline (the only
@@ -160,8 +165,8 @@ export function useUnifiedCapture({
   )
 
   const handleUnifiedCapture = useCallback(
-    async (file: File, index: number) => {
-      if (!dayLog?.checklist) return
+    async (file: File, index: number): Promise<boolean> => {
+      if (!dayLog?.checklist) return false
       const item = dayLog.checklist[index]
       setScanItemIndex(index)
 
@@ -178,6 +183,7 @@ export function useUnifiedCapture({
       const resolvedConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
       const stampConfigId = !item.workbookConfigId && resolvedConfigId ? { workbookConfigId: resolvedConfigId } : {}
       if (resolvedConfigId) {
+        let ok = false
         try {
           // Analysis first (best-effort, timeout-guarded) so its lesson/name can
           // stamp the visibility line in the same single checklist write.
@@ -227,6 +233,7 @@ export function useUnifiedCapture({
                 }
               : { text: 'Work captured!', severity: 'success' },
           )
+          ok = true
         } catch (err) {
           console.error('[UnifiedCapture] Workbook capture failed:', {
             childId,
@@ -238,7 +245,7 @@ export function useUnifiedCapture({
         } finally {
           setScanItemIndex(null)
         }
-        return
+        return ok
       }
 
       try {
@@ -368,6 +375,7 @@ export function useUnifiedCapture({
           // No scan analysis to show for artifacts — clear the index
           setScanItemIndex(null)
         }
+        return true
       } catch (err) {
         console.error('[UnifiedCapture] Capture failed:', {
           childId,
@@ -377,6 +385,7 @@ export function useUnifiedCapture({
         })
         onMessage?.({ text: 'Photo capture failed. Try again.', severity: 'error' })
         setScanItemIndex(null)
+        return false
       }
     },
     [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage, configs],
@@ -436,8 +445,12 @@ export function useUnifiedCapture({
       if (valid.length === 0) return
 
       // Photo #1: full pipeline (registration + evidence link + workbook advance).
-      await handleUnifiedCapture(valid[0], index)
-      if (valid.length === 1) return
+      // If it fails it shows its own error toast; abort so we never save the
+      // extras against a lost primary photo, nor overwrite that error with a
+      // batch success toast (the primary photo carries the evidence link +
+      // workbook advance the extras deliberately don't).
+      const primaryOk = await handleUnifiedCapture(valid[0], index)
+      if (!primaryOk || valid.length === 1) return
 
       // Photos 2..N: evidence-only on the same item. Read the item's stable
       // label/subject once — no checklist mutation, so no race with photo #1.
