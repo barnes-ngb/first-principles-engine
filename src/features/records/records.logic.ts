@@ -356,8 +356,12 @@ export type SubjectDistributionRow = {
   label: string
   totalMinutes: number
   homeMinutes: number
-  /** Share of the grand total in percent (0–100), precise/unrounded (the view
-   *  rounds for display). 0 when the grand total is 0. */
+  /** Share of the grand total in percent, precise/unrounded (the view rounds for
+   *  display). Reads naturally only in a clean non-negative distribution (see
+   *  `SubjectDistribution.percentagesMeaningful`); 0 when the grand total is 0.
+   *  A net-negative subject (from an over-correcting adjustment) yields a share
+   *  outside 0–100, which is exactly why the view/export suppress the whole `%`
+   *  column in that case rather than print a misleading number. */
   percent: number
   /** A MO core subject (Reading / Language Arts / Math / Science / Social Studies). */
   isCore: boolean
@@ -376,6 +380,12 @@ export type SubjectDistribution = {
   /** Largest single-subject total — the denominator for scaling a bar to the
    *  DATA (never to a target). 0 when there are no rows. */
   maxSubjectMinutes: number
+  /** True only when a `% of total` reads naturally: a positive grand total AND
+   *  no net-negative subject. When false (an over-correcting adjustment left the
+   *  total at/below zero, or one subject net-negative), the view and export
+   *  suppress the whole `%` column with an em-dash rather than print shares that
+   *  fall outside 0–100 or a bogus 100% total. */
+  percentagesMeaningful: boolean
 }
 
 /** Human label for a subject bucket, with the catch-all relabelled so untagged
@@ -419,12 +429,19 @@ export const computeSubjectDistribution = (
     0,
   )
 
+  // Percentages only read naturally when the total is positive and no subject is
+  // net-negative; otherwise a "share of total" is misleading (a negative
+  // correction can push one subject over 100% while another goes below 0).
+  const percentagesMeaningful =
+    total > 0 && rows.every((row) => row.totalMinutes >= 0)
+
   return {
     rows,
     totalMinutes: total,
     coreMinutes: summary.coreMinutes,
     nonCoreMinutes: total - summary.coreMinutes,
     maxSubjectMinutes,
+    percentagesMeaningful,
   }
 }
 
@@ -841,13 +858,17 @@ export function generateComplianceReportHtml(
   // rows still sum to the same total.
   const distribution = computeSubjectDistribution(summary)
   const nonCoreHours = (distribution.nonCoreMinutes / 60).toFixed(1)
+  // Suppress the share column when a "% of total" can't read naturally (a
+  // negative correction left the total ≤ 0 or a subject net-negative).
+  const pctCell = (row: SubjectDistributionRow) =>
+    distribution.percentagesMeaningful ? `${row.percent.toFixed(0)}%` : '&mdash;'
   const subjectRows = distribution.rows
     .map(
       (row) =>
         `<tr>
           <td>${row.label}</td>
           <td class="num">${(row.totalMinutes / 60).toFixed(1)}</td>
-          <td class="num">${row.percent.toFixed(0)}%</td>
+          <td class="num">${pctCell(row)}</td>
           <td class="num">${(row.homeMinutes / 60).toFixed(1)}</td>
           <td class="num">${row.isCore ? 'Core' : ''}</td>
         </tr>`,
@@ -960,7 +981,7 @@ export function generateComplianceReportHtml(
       <tr style="font-weight:bold">
         <td>TOTAL</td>
         <td class="num">${totalHours}</td>
-        <td class="num">${distribution.totalMinutes > 0 ? '100%' : '&mdash;'}</td>
+        <td class="num">${distribution.percentagesMeaningful ? '100%' : '&mdash;'}</td>
         <td class="num">${(summary.homeMinutes / 60).toFixed(1)}</td>
         <td></td>
       </tr>

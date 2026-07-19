@@ -878,7 +878,9 @@ function HoursComplianceTab() {
                         {formatHours(row.totalMinutes)}
                       </TableCell>
                       <TableCell align="right">
-                        {row.percent.toFixed(0)}%
+                        {distribution.percentagesMeaningful
+                          ? `${row.percent.toFixed(0)}%`
+                          : '—'}
                       </TableCell>
                       <TableCell align="right">
                         {formatHours(row.homeMinutes)}
@@ -894,7 +896,9 @@ function HoursComplianceTab() {
                     <strong>{formatHours(distribution.totalMinutes)}</strong>
                   </TableCell>
                   <TableCell align="right">
-                    <strong>100%</strong>
+                    <strong>
+                      {distribution.percentagesMeaningful ? '100%' : '—'}
+                    </strong>
                   </TableCell>
                   <TableCell align="right">
                     <strong>{formatHours(summary.homeMinutes)}</strong>

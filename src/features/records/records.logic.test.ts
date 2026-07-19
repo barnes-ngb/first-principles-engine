@@ -1054,6 +1054,65 @@ describe('computeSubjectDistribution (FEAT-105)', () => {
     expect(dist.nonCoreMinutes).toBe(0)
   })
 
+  it('flags percentages meaningful for a clean non-negative distribution', () => {
+    const dist = computeSubjectDistribution(multiSubjectSummary)
+    expect(dist.percentagesMeaningful).toBe(true)
+  })
+
+  it('marks percentages NOT meaningful when a negative adjustment makes a subject net-negative', () => {
+    // Codex P2: Reading 60 and a -20 Art correction → total stays positive (40)
+    // but Reading would read as 150% and Art as -50%. Percentages can no longer
+    // read naturally, so the flag is false (the view/export suppress the column).
+    const summary = computeHoursSummary(
+      [
+        {
+          childId: 'lincoln',
+          date: '2026-01-10',
+          blocks: [
+            { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 60, location: 'Home' },
+          ],
+        },
+      ],
+      [],
+      [{ childId: 'lincoln', date: '2026-01-11', minutes: -20, reason: 'over-logged art', subjectBucket: SubjectBucket.Art }],
+      'lincoln',
+    )
+    const dist = computeSubjectDistribution(summary)
+    expect(dist.percentagesMeaningful).toBe(false)
+    // Minutes still reconcile even though percentages are suppressed.
+    expect(dist.totalMinutes).toBe(40)
+    expect(dist.rows.reduce((s, r) => s + r.totalMinutes, 0)).toBe(40)
+  })
+
+  it('marks percentages NOT meaningful when the net total is zero (fully cancelled)', () => {
+    // Codex P2: recorded hours exactly cancelled by an adjustment → no positive
+    // total, so a "100%" row would be a lie. Flag is false.
+    const summary = computeHoursSummary(
+      [
+        {
+          childId: 'lincoln',
+          date: '2026-01-10',
+          blocks: [
+            { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 40, location: 'Home' },
+          ],
+        },
+      ],
+      [],
+      [{ childId: 'lincoln', date: '2026-01-11', minutes: -40, reason: 'miscount', subjectBucket: SubjectBucket.Reading }],
+      'lincoln',
+    )
+    const dist = computeSubjectDistribution(summary)
+    expect(dist.totalMinutes).toBe(0)
+    expect(dist.percentagesMeaningful).toBe(false)
+    // The exactly-zero-net Reading row drops out; nothing left to show.
+    expect(dist.rows).toEqual([])
+  })
+
+  it('empty range: percentages are not meaningful', () => {
+    const dist = computeSubjectDistribution(computeHoursSummary([], [], []))
+    expect(dist.percentagesMeaningful).toBe(false)
+  })
+
   it('omits a subject whose net minutes are exactly zero (adjustment cancels it)', () => {
     const summary = computeHoursSummary(
       [
@@ -1941,5 +2000,42 @@ describe('generateComplianceReportHtml', () => {
     const rowSum = dist.rows.reduce((s, r) => s + r.totalMinutes, 0)
     expect(rowSum).toBe(summary.totalMinutes)
     expect(html).toContain(`<div class="value">${(summary.totalMinutes / 60).toFixed(1)}</div>`)
+  })
+
+  it('suppresses the % column (em-dash) when a negative correction makes it meaningless', () => {
+    // Sign-mixed distribution (Reading 60, Art -20): percentages can't read
+    // naturally, so the report shows an em-dash instead of 150% / -50% / 100%.
+    const logs: DayLog[] = [
+      {
+        childId: 'lincoln',
+        date: '2026-01-10',
+        blocks: [
+          { type: DayBlockType.Reading, subjectBucket: SubjectBucket.Reading, actualMinutes: 60, location: 'Home' },
+        ],
+      },
+    ]
+    const adjustments: HoursAdjustment[] = [
+      { childId: 'lincoln', date: '2026-01-11', minutes: -20, reason: 'over-logged art', subjectBucket: SubjectBucket.Art },
+    ]
+    const summary = computeHoursSummary(logs, [], adjustments, 'lincoln')
+
+    const html = generateComplianceReportHtml({
+      summary,
+      dayLogs: logs,
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [{ id: 'lincoln', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+      childName: 'Lincoln',
+    })
+
+    // No out-of-range percentages leak into the filed report.
+    expect(html).not.toContain('150%')
+    expect(html).not.toContain('-50%')
+    // The column header stays; the values are em-dashes.
+    expect(html).toContain('% of Total')
+    expect(html).toContain('&mdash;')
   })
 })
