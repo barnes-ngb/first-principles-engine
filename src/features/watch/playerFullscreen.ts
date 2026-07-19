@@ -14,12 +14,19 @@
  * iOS Safari doesn't fullscreen arbitrary elements) and that is never fatal.
  */
 
-/** True iff the standard element Fullscreen API is available. */
+/**
+ * True iff the standard element Fullscreen API is available AND currently
+ * permitted. `requestFullscreen` can exist while `document.fullscreenEnabled`
+ * is false (embedded without fullscreen permission, or administratively
+ * disabled) — in that case every request rejects, so we treat it as unsupported
+ * and hide the toggle rather than show a button that silently does nothing.
+ */
 export function fullscreenSupported(): boolean {
   return (
     typeof document !== 'undefined' &&
     typeof Element !== 'undefined' &&
-    typeof Element.prototype.requestFullscreen === 'function'
+    typeof Element.prototype.requestFullscreen === 'function' &&
+    document.fullscreenEnabled === true
   )
 }
 

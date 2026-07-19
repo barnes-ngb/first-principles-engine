@@ -14,10 +14,18 @@ function setFullscreenElement(el: Element | null) {
   })
 }
 
+function setFullscreenEnabled(enabled: boolean | undefined) {
+  Object.defineProperty(document, 'fullscreenEnabled', {
+    configurable: true,
+    value: enabled,
+  })
+}
+
 afterEach(() => {
   Reflect.deleteProperty(Element.prototype, 'requestFullscreen')
   Reflect.deleteProperty(document, 'exitFullscreen')
   setFullscreenElement(null)
+  setFullscreenEnabled(undefined)
 })
 
 describe('fullscreenSupported', () => {
@@ -25,9 +33,16 @@ describe('fullscreenSupported', () => {
     expect(fullscreenSupported()).toBe(false)
   })
 
-  it('is true when Element.prototype.requestFullscreen exists', () => {
+  it('is true when the API exists AND fullscreen is enabled', () => {
     Element.prototype.requestFullscreen = vi.fn()
+    setFullscreenEnabled(true)
     expect(fullscreenSupported()).toBe(true)
+  })
+
+  it('is false when the API exists but fullscreen is disabled by policy', () => {
+    Element.prototype.requestFullscreen = vi.fn()
+    setFullscreenEnabled(false)
+    expect(fullscreenSupported()).toBe(false)
   })
 })
 
