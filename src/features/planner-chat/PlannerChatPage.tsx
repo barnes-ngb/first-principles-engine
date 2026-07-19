@@ -21,6 +21,7 @@ import { LoadingState } from '../../components/states'
 import { AIFeatureFlag, useAIFeatureFlags } from '../../core/ai/featureFlags'
 import { useAI, TaskType, useGenerateActivity } from '../../core/ai/useAI'
 import { deriveChildAge } from '../../core/profile/childAge'
+import { useProfile } from '../../core/profile/useProfile'
 import type { ChatMessage as AIChatMessage, GeneratedActivity } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
@@ -74,6 +75,7 @@ import {
   EvidenceType,
   PlannerConversationStatus,
   SubjectBucket,
+  UserProfile,
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
@@ -223,6 +225,10 @@ export default function PlannerChatPage() {
   } = useActiveChild()
 
   const navigate = useNavigate()
+  const { profile } = useProfile()
+  // Curation is a parent job — the inline vet-in + "Manage library" affordances
+  // are gated to parents, exactly like the Settings Watch Library tab (FEAT-107).
+  const isParent = profile === UserProfile.Parents
   const weekRange = useMemo(() => getWeekRange(new Date()), [])
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
@@ -1730,7 +1736,12 @@ Generate a plan for Monday through Friday.`.trim()
   // the vetted library, scoped to this child (D7). The picker + append are the
   // manual "a parent plans a watch item" path; lock-in threads watchVideoId onto
   // the ChecklistItem exactly like bookId.
-  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary(activeChildId)
+  const {
+    videos: watchVideos,
+    loading: watchLoading,
+    error: watchError,
+    addVideo: addWatchVideo,
+  } = useWatchLibrary(activeChildId)
   const [watchPickerDay, setWatchPickerDay] = useState<number | null>(null)
 
   const handleAddWatchItem = useCallback((dayIndex: number, video: WatchVideo) => {
@@ -2805,7 +2816,10 @@ ${dayPrompts}`
         />
       )}
 
-      {/* Watch Vehicle — pick a vetted video to plan onto the chosen day (FEAT-104). */}
+      {/* Watch Vehicle — pick a vetted video to plan onto the chosen day (FEAT-104).
+          FEAT-107: parents can vet a new video in inline (no trip to Settings) and
+          jump to the full library for bulk curation. Both affordances are gated to
+          parents — omitting the handlers hides them for kids. */}
       <WatchLibraryPicker
         open={watchPickerDay !== null}
         onClose={() => setWatchPickerDay(null)}
@@ -2816,6 +2830,8 @@ ${dayPrompts}`
           if (watchPickerDay !== null) handleAddWatchItem(watchPickerDay, video)
           setWatchPickerDay(null)
         }}
+        onAddVideo={isParent ? async (video) => { await addWatchVideo(video) } : undefined}
+        onManageLibrary={isParent ? () => navigate('/settings') : undefined}
       />
     </Page>
   )
