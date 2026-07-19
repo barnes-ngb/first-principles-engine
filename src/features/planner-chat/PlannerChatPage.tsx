@@ -39,6 +39,7 @@ import {
   db,
 } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
+import { TransientConnectivityError, withTransientRetry } from '../../core/firebase/transientRetry'
 import { generateHelpCardsForPlan } from './generateHelpCards'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useDebounce } from '../../core/hooks/useDebounce'
@@ -835,29 +836,49 @@ export default function PlannerChatPage() {
     }
   }, [weekPlan, activeChildId, setupComplete])
 
-  // Persist conversation
+  // Persist conversation (draft is saved server-side to plannerConversations and
+  // restored on reload). FEAT-110: every caller invokes this fire-and-forget
+  // (`void persistConversation(...)`), so a rejecting read here would reach the
+  // app-root ErrorBoundary's global unhandledrejection listener and crash the
+  // page. Mobile backgrounds the tab mid-generation → the socket drops → the
+  // pre-write `getDoc` rejects with the transient offline code. We retry that
+  // read through a reconnect, and on exhaustion swallow it with an honest,
+  // non-crashing notice (the draft stays in client state and re-persists on the
+  // next turn). Genuine faults (permission-denied, etc.) still rethrow → boundary.
   const persistConversation = useCallback(
     async (updates: Partial<PlannerConversation>) => {
       if (!activeChildId || !conversationDocId) return
       const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
-      const snap = await getDoc(ref)
-      const now = new Date().toISOString()
-      if (snap.exists()) {
-        await setDoc(ref, { ...snap.data(), ...updates, updatedAt: now })
-      } else {
-        const conversation: PlannerConversation = {
-          childId: activeChildId,
-          weekKey: weekRange.start,
-          status: PlannerConversationStatus.Draft,
-          messages: [],
-          availableHoursPerDay: hoursPerDay,
-          appBlocks: filteredAppBlocks,
-          assignments: [],
-          createdAt: now,
-          updatedAt: now,
-          ...updates,
+      try {
+        const snap = await withTransientRetry(() => getDoc(ref))
+        const now = new Date().toISOString()
+        if (snap.exists()) {
+          await setDoc(ref, { ...snap.data(), ...updates, updatedAt: now })
+        } else {
+          const conversation: PlannerConversation = {
+            childId: activeChildId,
+            weekKey: weekRange.start,
+            status: PlannerConversationStatus.Draft,
+            messages: [],
+            availableHoursPerDay: hoursPerDay,
+            appBlocks: filteredAppBlocks,
+            assignments: [],
+            createdAt: now,
+            updatedAt: now,
+            ...updates,
+          }
+          await setDoc(ref, conversation)
         }
-        await setDoc(ref, conversation)
+      } catch (err) {
+        if (err instanceof TransientConnectivityError) {
+          console.warn('[Planner] Conversation save deferred — offline', err)
+          setSnack({
+            text: 'You went offline — your draft is safe here and will sync when you reconnect.',
+            severity: 'info',
+          })
+          return
+        }
+        throw err
       }
     },
     [familyId, conversationDocId, activeChildId, weekRange.start, hoursPerDay, filteredAppBlocks],
