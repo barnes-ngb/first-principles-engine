@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
+import AddAPhotoIcon from '@mui/icons-material/AddAPhoto'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import DocumentScannerIcon from '@mui/icons-material/DocumentScanner'
-import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary'
 import CheckIcon from '@mui/icons-material/Check'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
@@ -21,6 +21,9 @@ import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
@@ -28,6 +31,7 @@ import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
+import PhotoCapture from '../../components/PhotoCapture'
 import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanResultsPanel from '../../components/ScanResultsPanel'
 import SectionCard from '../../components/SectionCard'
@@ -244,6 +248,10 @@ export default function TodayChecklist({
   const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
   const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
   const [expandedCaptureIndex, setExpandedCaptureIndex] = useState<number | null>(null)
+  // FEAT-109 (camera multi-shot): the checklist item whose "Add photo(s)" dialog
+  // is open (null = closed). The dialog hosts PhotoCapture in staging mode so
+  // repeated camera taps + multi-select uploads accumulate into one batch.
+  const [captureDialogIndex, setCaptureDialogIndex] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [showDeferred, setShowDeferred] = useState(false)
   // FEAT-20: in-context Lesson Video dialog target (null = closed).
@@ -1024,57 +1032,25 @@ export default function TodayChecklist({
                   </Stack>
                 )}
 
-                {/* Unified capture — camera + photo library for all completed items */}
+                {/* Unified capture (FEAT-109): one "Add photo(s)" button opens a
+                    staging dialog where repeated camera taps AND multi-select
+                    uploads accumulate into one batch, saved together — so Shelly
+                    can shoot several pages of one item, not just upload them. */}
                 {item.completed && !item.evidenceArtifactId && (
-                  <Stack direction="row" spacing={1} sx={{ ml: 5, mt: 0.5 }}>
+                  <Box sx={{ ml: 5, mt: 0.5 }}>
                     <Button
                       size="small"
                       variant="text"
                       startIcon={captureLoading && captureItemIndex === index
                         ? <CircularProgress size={14} />
-                        : <CameraAltIcon sx={{ fontSize: 16 }} />}
+                        : <AddAPhotoIcon sx={{ fontSize: 16 }} />}
                       disabled={captureLoading && captureItemIndex === index}
-                      onClick={() => {
-                        const input = document.createElement('input')
-                        input.type = 'file'
-                        input.accept = 'image/*'
-                        input.capture = 'environment'
-                        input.onchange = (e) => {
-                          const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) onUnifiedCapture(file, index)
-                        }
-                        input.click()
-                      }}
+                      onClick={() => setCaptureDialogIndex(index)}
                       sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'none' }}
                     >
-                      Camera
+                      Add photo(s)
                     </Button>
-                    <Button
-                      size="small"
-                      variant="text"
-                      startIcon={captureLoading && captureItemIndex === index
-                        ? <CircularProgress size={14} />
-                        : <PhotoLibraryIcon sx={{ fontSize: 16 }} />}
-                      disabled={captureLoading && captureItemIndex === index}
-                      onClick={() => {
-                        const input = document.createElement('input')
-                        input.type = 'file'
-                        input.accept = 'image/*'
-                        // FEAT-108: pick several pages of one item, save once.
-                        input.multiple = true
-                        input.onchange = (e) => {
-                          const files = Array.from((e.target as HTMLInputElement).files ?? [])
-                          if (files.length === 0) return
-                          if (files.length > 1 && onUnifiedCaptureBatch) onUnifiedCaptureBatch(files, index)
-                          else onUnifiedCapture(files[0], index)
-                        }
-                        input.click()
-                      }}
-                      sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'none' }}
-                    >
-                      Upload
-                    </Button>
-                  </Stack>
+                  </Box>
                 )}
                 {item.completed && item.evidenceArtifactId && (() => {
                   const scanDoc = item.evidenceCollection === 'scans'
@@ -1360,6 +1336,43 @@ export default function TodayChecklist({
           </Typography>
         </Stack>
       )}
+
+      {/* FEAT-109: "Add photo(s)" staging dialog — camera multi-shot + upload.
+          PhotoCapture staging mode lets repeated Take-Photo taps and multi-select
+          uploads accumulate into a pending tray, then one Save commits them all as
+          a single batch. A 1-photo batch delegates to the single pipeline (the
+          batch handler already handles a 1-item array); >1 routes through the
+          FEAT-108 batch handler (photo #1 registers/advances, 2..N are
+          evidence-only), so both correctness rails are unchanged. */}
+      <Dialog
+        open={captureDialogIndex !== null}
+        onClose={() => setCaptureDialogIndex(null)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle sx={{ pb: 1 }}>
+          Add photos
+          {captureDialogIndex !== null && checklist[captureDialogIndex] &&
+            ` — ${checklist[captureDialogIndex].label.replace(/\s*\(\d+m\)\s*$/, '').trim()}`}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Snap several pages, then Save once — or upload a batch. The first page
+            registers to today; extra pages are saved alongside it.
+          </Typography>
+          <PhotoCapture
+            multiple
+            uploading={captureLoading && captureItemIndex === captureDialogIndex}
+            onCaptureBatch={(files) => {
+              const idx = captureDialogIndex
+              setCaptureDialogIndex(null)
+              if (idx == null || !files.length) return
+              if (onUnifiedCaptureBatch) onUnifiedCaptureBatch(files, idx)
+              else onUnifiedCapture(files[0], idx)
+            }}
+          />
+        </DialogContent>
+      </Dialog>
 
       {/* FEAT-20: in-context Lesson Video dialog (parent-only). */}
       <LessonVideoDialog
