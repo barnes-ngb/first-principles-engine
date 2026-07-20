@@ -13,13 +13,13 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
 **Scale (current):**
-- TypeScript lines: **205,891** total
-- Commits: **185**
-- Tests: **248 test files**
-- Firestore collections/doc helpers: **43** in `firestore.ts`
-- Cloud Functions: **26**
+- TypeScript lines: **229,428** total
+- Commits: **221**
+- Tests: **325 test files**
+- Firestore collections/doc helpers: **48** in `firestore.ts`
+- Cloud Functions: **27**
 - Chat task types: **21**
-- Routes: **36**
+- Routes: **35**
 
 ## Navigation
 **Parent:** Today, Plan My Week, Weekly Review, Progress (**Foundations** · **Monthly Books** · Learning Map · Curriculum · Skill Snapshot · Word Wall — Foundations is index 0, absorbing the former Learning Profile tab with dispositions as a section, FEAT-65), Records, Books, **Barnes Bros**, Game Workshop, Dad Lab, Settings, Ask AI  
