@@ -33,7 +33,7 @@
     }
   ],
 
-  "_dayWrite_readme": "FEAT-113 day-write routing invariant (check 10, HARD). Every write to families/{familyId}/days must route through src/features/today/dayWriteGuard.ts; a raw setDoc/updateDoc/deleteDoc on a days ref anywhere else fails the build. dayWriteAllow lists the (currently none) files with a documented exemption — each needs {file, reason, ledger}. The guard module itself is the sanctioned chokepoint and is skipped by name, not allowlisted.",
+  "_dayWrite_readme": "FEAT-114 day-write routing invariant (check 10, HARD). Every write to families/{familyId}/days must route through src/features/today/dayWriteGuard.ts; a raw setDoc/updateDoc/deleteDoc on a days ref anywhere else fails the build. dayWriteAllow lists the (currently none) files with a documented exemption — each needs {file, reason, ledger}. The guard module itself is the sanctioned chokepoint and is skipped by name, not allowlisted.",
 
   "dayWriteAllow": [],
 

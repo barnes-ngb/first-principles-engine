@@ -9,7 +9,7 @@ import {
 import type { ChecklistItem, DayBlock, DayLog } from '../../core/types'
 
 /**
- * Day-write preservation guard (FEAT-113).
+ * Day-write preservation guard (FEAT-114).
  *
  * Days (`families/{familyId}/days/{date}_{childId}`) are the **irrecoverable
  * source of truth** for what school actually happened — hours are derived and

@@ -200,7 +200,7 @@ export default function DevAdminTab() {
     const blocked: string[] = []
     for (const id of ids) {
       try {
-        // Route deletes through the guard (FEAT-113): it refuses to silently
+        // Route deletes through the guard (FEAT-114): it refuses to silently
         // destroy a day that still holds completed work or logged minutes
         // unless the human explicitly forces it below.
         await deleteDayLogGuarded(doc(daysCollection(familyId), id), `sunday-sweep:${id}`, {

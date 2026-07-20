@@ -1292,7 +1292,7 @@ export function useQuestSession() {
       // Auto-complete matching evaluation item on today's checklist
       try {
         const today = new Date().toISOString().split('T')[0]
-        // Canonical `{date}_{childId}` id (FEAT-113) — the previous legacy
+        // Canonical `{date}_{childId}` id (FEAT-114) — the previous legacy
         // `{childId}_{date}` id never matched today's doc, so quest completions
         // (and their minutes) silently never reached Today.
         const dayRef = doc(daysCollection(familyId), dayLogDocId(today, activeChildId))
@@ -1957,7 +1957,7 @@ export function useQuestSession() {
       // Auto-complete matching fluency evaluation item on today's checklist
       try {
         const today = new Date().toISOString().split('T')[0]
-        // Canonical `{date}_{childId}` id (FEAT-113) — see endSession above.
+        // Canonical `{date}_{childId}` id (FEAT-114) — see endSession above.
         const dayRef = doc(daysCollection(familyId), dayLogDocId(today, activeChildId))
         const daySnap = await getDoc(dayRef)
 

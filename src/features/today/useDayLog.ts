@@ -128,7 +128,7 @@ export function useDayLog({
       setSaveState('saving')
       try {
         const now = new Date().toISOString()
-        // Route through the preservation guard (FEAT-113). This is the
+        // Route through the preservation guard (FEAT-114). This is the
         // interactive manual-edit lane, so it runs in observe-only mode
         // (`enforce: false`): rename / un-check / delete are the parent's
         // authoritative edits and must never be blocked, but a genuine anomaly

@@ -5,7 +5,7 @@ import { retainBlocksForApply, retainChecklistForApply } from './applyReset'
 import { findDayPreservationViolations } from './dayWriteGuard'
 
 /**
- * Pure-logic invariant (FEAT-113, Part 2): the day-reshaping transforms that
+ * Pure-logic invariant (FEAT-114, Part 2): the day-reshaping transforms that
  * run on apply/redo — `retainChecklistForApply` / `retainBlocksForApply` — can
  * NEVER produce a `before → after` that drops a completed item or drops a block
  * carrying logged minutes. These are the only reachable automated transforms in

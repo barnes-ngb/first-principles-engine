@@ -625,7 +625,7 @@ function HoursComplianceTab() {
     setIsClearing(true)
     try {
       // Count what would be destroyed BEFORE asking — a delete is loud, not
-      // silent (FEAT-113). Only manual entries (no source tag or 'manual') go;
+      // silent (FEAT-114). Only manual entries (no source tag or 'manual') go;
       // auto-generated hours are kept and are regenerable via Generate Hours.
       const hoursSnap = await getDocs(hoursCollection(familyId))
       const manualDocs = hoursSnap.docs.filter(docSnap => {

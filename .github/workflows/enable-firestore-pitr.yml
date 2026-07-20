@@ -4,7 +4,7 @@ name: Enable Firestore PITR
 # window) on the default database. PITR is the safety net for the one gap that
 # in-app regeneration cannot cover: a `days` doc that is destroyed outright is
 # the irrecoverable source of truth (hours are derived + regenerable; day logs
-# are not). Recommended by the 2026-07-20 P0 audit (FEAT-113 / DATA-17).
+# are not). Recommended by the 2026-07-20 P0 audit (FEAT-114).
 #
 # The owner is phone-only and cannot use the Firebase Console, so this runs in
 # CI using the SAME deploy credential the main deploy already uses

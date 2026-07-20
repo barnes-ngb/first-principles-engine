@@ -232,7 +232,7 @@ describe('catchIsHandled / findSilentCatches', () => {
   })
 })
 
-describe('findUnroutedDayWrites (day-write routing invariant, FEAT-113)', () => {
+describe('findUnroutedDayWrites (day-write routing invariant, FEAT-114)', () => {
   it('flags a raw setDoc on a daysCollection ref (inline)', () => {
     const content = [
       "const ref = doc(daysCollection(familyId), dayLogDocId(today, childId))",

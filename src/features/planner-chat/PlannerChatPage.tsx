@@ -2528,6 +2528,20 @@ ${dayPrompts}`
   const handleRedoPlan = useCallback(async () => {
     setConfirmNewPlan(false)
     if (!activeChildId || !currentDraft) return
+
+    // Past-week backstop (mirrors handleApplyPlan's FEAT-112 guard, which this
+    // sibling path lacked): never run the destructive clear against a week that
+    // has already passed. A stale tab could carry a past week key here, and
+    // clearing dead dates would attack the historical record. Redo has no
+    // forward-shift, so warn and stop rather than offering to retarget.
+    if (isPlanningWeekPast(weekRange.start, todayKey())) {
+      setSnack({
+        text: 'That week has already passed — nothing was cleared. Completed work and logged time stay put.',
+        severity: 'info',
+      })
+      return
+    }
+
     try {
       // Remove planner-generated blocks and checklist from each day's DayLog
       for (const dayPlan of currentDraft.days) {
@@ -2540,13 +2554,14 @@ ${dayPrompts}`
         const dayLogSnap = await getDoc(dayLogRef)
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
-          // Redo clears the planner residue, but completed work (with its
-          // minutes/evidence) and manual items are NEVER dropped — the same
-          // preservation contract as apply (FEAT-113). The retain helpers
-          // encode exactly that: keep completed + manual + blocks with logged
-          // minutes, drop only incomplete planner residue. Routed through the
-          // guard so a regression can't silently ship the old "manual-only"
-          // filter that dropped completed days.
+          // Reuse the FEAT-111 apply-reset guards instead of a raw
+          // `source === 'manual'` filter (which destroyed completed planner work
+          // and its logged minutes — the FEAT-113 P0 hotfix). Keep completed
+          // items (+ their minutes / evidence) and manual items; keep any block
+          // carrying logged actualMinutes. Only un-started planner residue is
+          // cleared — the feature's actual purpose. Routed through the FEAT-114
+          // preservation guard so a regression can't silently ship the old
+          // "manual-only" filter again — see `applyReset.ts` (HARD CONSTRAINT).
           const retainedChecklist = retainChecklistForApply(existing.checklist ?? [])
           const retainedBlocks = retainBlocksForApply(existing.blocks ?? [])
           await updateDayLogGuarded(
@@ -2876,7 +2891,8 @@ ${dayPrompts}`
                 <DialogTitle>Redo Plan?</DialogTitle>
                 <DialogContent>
                   <DialogContentText>
-                    This will clear your current plan from Today and let you start fresh. Continue?
+                    This clears the planned items from your days so you can start fresh.
+                    Anything already completed, and the time already logged, stays. Continue?
                   </DialogContentText>
                 </DialogContent>
                 <DialogActions>

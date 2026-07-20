@@ -665,7 +665,7 @@ export async function markWorkshopPlayed(
   const existing = snap.data()
   const gamesPlayed = (existing?.workshop?.gamesPlayed ?? 0) + 1
 
-  // Merge-write via the preservation guard (FEAT-113). Only touches the
+  // Merge-write via the preservation guard (FEAT-114). Only touches the
   // `workshop` field; checklist/blocks are untouched so the guard passes.
   await mergeDayLogGuarded(
     dayRef,

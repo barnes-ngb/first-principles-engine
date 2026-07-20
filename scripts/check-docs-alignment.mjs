@@ -329,7 +329,7 @@ export function findSilentCatches(content) {
 }
 
 /**
- * Day-write routing invariant (DOC-09 / FEAT-113). Days
+ * Day-write routing invariant (DOC-09 / FEAT-114). Days
  * (`families/{familyId}/days/{date}_{childId}`) are the irrecoverable source of
  * truth; twice the same compliance-destroying filter shipped independently in a
  * raw day write. Every day write must route through the single guarded writer
@@ -735,7 +735,7 @@ export function runChecks({ fix = false } = {}) {
   }
   log('')
 
-  // ── Check 10: day-write routing (HARD, FEAT-113) ──────────────────────────
+  // ── Check 10: day-write routing (HARD, FEAT-114) ──────────────────────────
   // Every days write must route through the guarded writer module. A raw
   // setDoc/updateDoc/deleteDoc on a days ref anywhere else is the drift that
   // shipped the compliance-destroying filter twice (FEAT-111 + the P0 hotfix).
