@@ -22,12 +22,18 @@ export function useUnappliedDraft(
   weekStartKey: string | undefined,
 ): boolean {
   const [hasDraft, setHasDraft] = useState(false)
+  const key = `${familyId ?? ''}|${childId ?? ''}|${weekStartKey ?? ''}`
+  const [lastKey, setLastKey] = useState(key)
+
+  // Reset synchronously when the week/child changes so a reader never shows a
+  // stale week's draft banner for a frame (repo pattern — see useLearnerModel).
+  if (lastKey !== key) {
+    setLastKey(key)
+    setHasDraft(false)
+  }
 
   useEffect(() => {
-    if (!familyId || !childId || !weekStartKey) {
-      setHasDraft(false)
-      return
-    }
+    if (!familyId || !childId || !weekStartKey) return
     const ref = doc(
       plannerConversationsCollection(familyId),
       plannerConversationDocId(weekStartKey, childId),
