@@ -622,27 +622,45 @@ function HoursComplianceTab() {
   }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, startDate, endDate])
 
   const handleClearHoursData = useCallback(async () => {
-    if (!window.confirm(
-      'This will delete ALL manual hours entries and backfill adjustments for ALL children. ' +
-      'Auto-generated hours (Dad Lab completions, checklist day logs) will be kept. Continue?'
-    )) return
-
     setIsClearing(true)
     try {
-      // Delete ONLY manual hours entries (no source tag or source === 'manual')
+      // Count what would be destroyed BEFORE asking — a delete is loud, not
+      // silent (FEAT-113). Only manual entries (no source tag or 'manual') go;
+      // auto-generated hours are kept and are regenerable via Generate Hours.
       const hoursSnap = await getDocs(hoursCollection(familyId))
-      const hoursDeletes = hoursSnap.docs
-        .filter(docSnap => {
-          const data = docSnap.data() as unknown as Record<string, unknown>
-          const source = data.source as string | undefined
-          return !source || source === 'manual'
-        })
-        .map(docSnap => deleteDoc(doc(hoursCollection(familyId), docSnap.id)))
-
-      // Delete ALL adjustments (backfills + manual adjustments)
+      const manualDocs = hoursSnap.docs.filter(docSnap => {
+        const data = docSnap.data() as unknown as Record<string, unknown>
+        const source = data.source as string | undefined
+        return !source || source === 'manual'
+      })
       const adjSnap = await getDocs(hoursAdjustmentsCollection(familyId))
-      const adjDeletes = adjSnap.docs
-        .map(docSnap => deleteDoc(doc(hoursAdjustmentsCollection(familyId), docSnap.id)))
+
+      if (manualDocs.length === 0 && adjSnap.size === 0) {
+        setSnackMessage({ text: 'No manual hours or adjustments to clear.', severity: 'success' })
+        setIsClearing(false)
+        return
+      }
+
+      const manualMinutes = manualDocs.reduce((sum, docSnap) => {
+        const m = (docSnap.data() as unknown as Record<string, unknown>).minutes
+        return sum + (typeof m === 'number' ? m : 0)
+      }, 0)
+      const hoursLabel = manualMinutes > 0 ? ` (~${(manualMinutes / 60).toFixed(1)}h)` : ''
+
+      if (!window.confirm(
+        `This will permanently delete ${manualDocs.length} manual hours entr${manualDocs.length === 1 ? 'y' : 'ies'}${hoursLabel} ` +
+        `and ${adjSnap.size} backfill adjustment(s) for ALL children. ` +
+        'Auto-generated hours (Dad Lab completions, checklist day logs) are kept and can be regenerated. ' +
+        'This cannot be undone. Continue?'
+      )) {
+        setIsClearing(false)
+        return
+      }
+
+      const hoursDeletes = manualDocs.map(docSnap =>
+        deleteDoc(doc(hoursCollection(familyId), docSnap.id)))
+      const adjDeletes = adjSnap.docs.map(docSnap =>
+        deleteDoc(doc(hoursAdjustmentsCollection(familyId), docSnap.id)))
 
       // Wait for ALL deletes to complete before refreshing
       await Promise.all([...hoursDeletes, ...adjDeletes])
