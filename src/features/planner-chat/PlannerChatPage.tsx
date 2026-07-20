@@ -242,7 +242,7 @@ export default function PlannerChatPage() {
   // visibility / minute-tick, and `getPlanningWeekRange` rolls a Saturday
   // forward so weekend planning always targets the UPCOMING Mon–Fri, not the
   // week that already passed.
-  const todayKeyLive = useTodayKey()
+  const [todayKeyLive, refreshTodayKey] = useTodayKey()
   const weekRange = useMemo(
     () => getPlanningWeekRange(parseDateYmd(todayKeyLive) ?? new Date()),
     [todayKeyLive],
@@ -2130,7 +2130,7 @@ Generate a plan for Monday through Friday.`.trim()
       // forward-shift that's the shifted week, not the stale one it was drafted
       // in, so reopening the upcoming week restores the applied plan (FEAT-112
       // follow-up). For a normal apply this resolves to the live conversationDocId.
-      void persistConversation(
+      const persistPromise = persistConversation(
         {
           status: PlannerConversationStatus.Applied,
           messages: updatedMessages,
@@ -2138,6 +2138,20 @@ Generate a plan for Monday through Friday.`.trim()
         },
         { docId: plannerConversationDocId(effectiveWeekStart, activeChildId), weekKey: effectiveWeekStart },
       )
+
+      if (overrideWeekStart) {
+        // Forward-shift: catch the page's live week up to the shifted week so
+        // `weekRange` / `conversationDocId` (and every read/write derived from
+        // them — the drawer's later `persistConversation`, the WeekPlan/day-doc
+        // reads) re-key onto the week we just wrote to, instead of lingering on
+        // the stale week until the next focus/tick (FEAT-112 follow-up: keeps
+        // post-shift edits on the shifted conversation). Await the applied-
+        // conversation write first so the re-keyed subscription finds it.
+        await persistPromise.catch(() => {})
+        refreshTodayKey()
+      } else {
+        void persistPromise
+      }
 
       setSnack({ text: 'Plan applied! Check This Week and Today.', severity: 'success' })
 
@@ -2268,7 +2282,7 @@ Generate a plan for Monday through Friday.`.trim()
       console.error('Failed to apply plan', err)
       setSnack({ text: 'Failed to apply plan.', severity: 'error' })
     }
-  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs])
+  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
