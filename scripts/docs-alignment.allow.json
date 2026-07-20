@@ -33,6 +33,10 @@
     }
   ],
 
+  "_dayWrite_readme": "FEAT-113 day-write routing invariant (check 10, HARD). Every write to families/{familyId}/days must route through src/features/today/dayWriteGuard.ts; a raw setDoc/updateDoc/deleteDoc on a days ref anywhere else fails the build. dayWriteAllow lists the (currently none) files with a documented exemption — each needs {file, reason, ledger}. The guard module itself is the sanctioned chokepoint and is skipped by name, not allowlisted.",
+
+  "dayWriteAllow": [],
+
   "_resilience_readme": "DOC-09 resilience invariants. remoteCallAllow = src/features files whose raw httpsCallable call is deliberately un-guarded (justified exceptions to check 7, SOFT→HARD). imageDownscaleAllow = image file-inputs that legitimately skip in-file downscale — either the downscale lives in an imported handler (pointer in the reason) or the flow genuinely needs the original (sketch/photo). Check 9 (silent-fallback census) has NO allowlist by design — it is report-only and never fails CI.",
 
   "remoteCallAllow": [],

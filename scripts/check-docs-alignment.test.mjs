@@ -13,6 +13,7 @@ import {
   analyzeImageDownscale,
   catchIsHandled,
   findSilentCatches,
+  findUnroutedDayWrites,
 } from './check-docs-alignment.mjs'
 
 describe('parseLedgerIds', () => {
@@ -228,5 +229,61 @@ describe('catchIsHandled / findSilentCatches', () => {
     const silent = findSilentCatches(content)
     expect(silent).toHaveLength(1)
     expect(silent[0].line).toBe(2)
+  })
+})
+
+describe('findUnroutedDayWrites (day-write routing invariant, FEAT-113)', () => {
+  it('flags a raw setDoc on a daysCollection ref (inline)', () => {
+    const content = [
+      "const ref = doc(daysCollection(familyId), dayLogDocId(today, childId))",
+      "await setDoc(doc(daysCollection(familyId), id), payload)",
+    ].join('\n')
+    const hits = findUnroutedDayWrites(content)
+    expect(hits.map((h) => h.verb)).toContain('setDoc')
+  })
+
+  it('flags a raw updateDoc via a same-file day-ref variable', () => {
+    const content = [
+      "const dayLogRef = doc(daysCollection(familyId), docId)",
+      "const snap = await getDoc(dayLogRef)",
+      "await updateDoc(dayLogRef, { checklist })",
+    ].join('\n')
+    const hits = findUnroutedDayWrites(content)
+    expect(hits).toHaveLength(1)
+    expect(hits[0].verb).toBe('updateDoc')
+    expect(hits[0].line).toBe(3)
+  })
+
+  it('flags a raw deleteDoc on a raw families/…/days path', () => {
+    const content =
+      'await deleteDoc(doc(db, `families/${familyId}/days`, id))'
+    const hits = findUnroutedDayWrites(content)
+    expect(hits.map((h) => h.verb)).toEqual(['deleteDoc'])
+  })
+
+  it('does NOT flag a read (getDoc) of a day ref', () => {
+    const content = [
+      "const dayLogRef = doc(daysCollection(familyId), docId)",
+      "const snap = await getDoc(dayLogRef)",
+    ].join('\n')
+    expect(findUnroutedDayWrites(content)).toEqual([])
+  })
+
+  it('does NOT flag a routed call through the guarded writers', () => {
+    const content = [
+      "const dayLogRef = doc(daysCollection(familyId), docId)",
+      "await setDayLogGuarded(dayLogRef, payload, 'apply-plan')",
+      "await updateDayLogGuarded(dayLogRef, { checklist }, 'redo-plan')",
+      "await deleteDayLogGuarded(doc(daysCollection(familyId), id), 'sweep')",
+    ].join('\n')
+    expect(findUnroutedDayWrites(content)).toEqual([])
+  })
+
+  it('does NOT flag writes to other collections', () => {
+    const content = [
+      "await setDoc(doc(hoursCollection(familyId), id), entry)",
+      "await deleteDoc(doc(weeksCollection(familyId), weekId))",
+    ].join('\n')
+    expect(findUnroutedDayWrites(content)).toEqual([])
   })
 })
