@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { todayKey } from '../utils/dateKey'
 
@@ -13,18 +13,23 @@ import { todayKey } from '../utils/dateKey'
  * date-derived memos on this value forces them to recompute the moment the
  * calendar day changes under an open tab.
  *
- * The returned identity is stable across renders within the same day (the
- * setter no-ops when the key is unchanged), so it is safe as a memo/effect
- * dependency.
+ * The first tuple element (the key) is stable across renders within the same
+ * day (the setter no-ops when the key is unchanged), so it is safe as a
+ * memo/effect dependency. The second element is a stable manual `refresh()` —
+ * used to force an immediate re-read after an action that must catch the live
+ * day up right away (FEAT-112: a forward-shifted apply advances the live week so
+ * the whole page re-keys to the week it just wrote to, instead of waiting for
+ * the next focus/tick).
  */
-export function useTodayKey(): string {
+export function useTodayKey(): readonly [string, () => void] {
   const [key, setKey] = useState<string>(() => todayKey())
 
+  const refresh = useCallback(() => {
+    const next = todayKey()
+    setKey((prev) => (prev === next ? prev : next))
+  }, [])
+
   useEffect(() => {
-    const refresh = () => {
-      const next = todayKey()
-      setKey((prev) => (prev === next ? prev : next))
-    }
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', refresh)
     // A foregrounded-but-unfocused tab still needs to roll over at midnight.
@@ -34,7 +39,7 @@ export function useTodayKey(): string {
       document.removeEventListener('visibilitychange', refresh)
       window.clearInterval(interval)
     }
-  }, [])
+  }, [refresh])
 
-  return key
+  return [key, refresh]
 }
