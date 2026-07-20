@@ -20,7 +20,7 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
 import type { DraftPlanItem, DraftWeeklyPlan, SkillSnapshot, SkipAdvisorResult } from '../../core/types'
-import { dayTotalMinutes } from './chatPlanner.logic'
+import { dayTotalMinutes, formatDayCardLabel } from './chatPlanner.logic'
 import { batchEvaluateSkip } from './skipAdvisor.logic'
 import SkipAdvisorChip from './SkipAdvisorChip'
 
@@ -39,6 +39,10 @@ interface PlanPreviewCardProps {
   plan: DraftWeeklyPlan
   hoursPerDay: number
   masteryReviewLine?: string
+  /** Sunday-start of the planning week; renders each day header as the concrete
+   *  mapped calendar date ("Monday · Jul 20"), FEAT-112. Optional — falls back
+   *  to the bare weekday name when absent. */
+  weekStart?: string
   snapshot?: SkillSnapshot | null
   onToggleItem?: (dayIndex: number, itemId: string) => void
   onGenerateActivity?: (item: DraftPlanItem) => void
@@ -107,7 +111,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
   )
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, weekStart, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const [removeConfirm, setRemoveConfirm] = useState<{ dayIndex: number; itemIndex: number; title: string } | null>(null)
 
@@ -281,7 +285,7 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
           <Box key={day.day} sx={{ mb: 2 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                {day.day}
+                {weekStart ? formatDayCardLabel(weekStart, day.day) : day.day}
               </Typography>
               <Chip
                 label={`${total}m / ${budgetMinutes}m`}

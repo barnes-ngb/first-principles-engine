@@ -11,7 +11,7 @@ import type {
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
 import { ALL_SKILL_TAGS, SKILL_TAG_MAP, suggestTagsForSubject } from '../../core/types/skillTags'
-import { formatDateYmd } from '../../core/utils/format'
+import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { getEffectiveMasteryGate } from './skipAdvisor.logic'
 
 /** Default app blocks that run "on rails" */
@@ -92,6 +92,57 @@ export function dateKeyForDayPlan(
   const target = new Date(start)
   target.setDate(start.getDate() + dayIndex + 1)
   return formatDateYmd(target)
+}
+
+/**
+ * Format a single day's card header from the planning-week start, e.g.
+ * "Monday · Jul 20" — the concrete calendar date that `dateKeyForDayPlan`
+ * (and therefore apply) will write to, so the week being edited is never
+ * invisible again (FEAT-112). Falls back to the bare day name for any string
+ * outside `WEEK_DAYS`.
+ */
+export function formatDayCardLabel(weekStart: string, day: string): string {
+  if (!WEEK_DAYS.includes(day as WeekDay)) return day
+  const dateKey = dateKeyForDayPlan(weekStart, day as WeekDay)
+  const parsed = parseDateYmd(dateKey)
+  if (!parsed) return day
+  return `${day} · ${parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+}
+
+/**
+ * Format the Mon–Fri school body of a planning week as a prominent header,
+ * e.g. "Week of Jul 20–24" (or "Week of Jul 27 – Aug 1" across a month
+ * boundary). Uses the same `dateKeyForDayPlan` mapping apply uses, so the
+ * header and the write can never disagree. Returns `''` if the start is
+ * unparseable.
+ */
+export function formatPlanningWeekLabel(weekStart: string): string {
+  const monday = parseDateYmd(dateKeyForDayPlan(weekStart, 'Monday'))
+  const friday = parseDateYmd(dateKeyForDayPlan(weekStart, 'Friday'))
+  if (!monday || !friday) return ''
+  const mondayLabel = monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const fridayLabel =
+    monday.getMonth() === friday.getMonth()
+      ? String(friday.getDate())
+      : friday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const separator = monday.getMonth() === friday.getMonth() ? '–' : ' – '
+  return `Week of ${mondayLabel}${separator}${fridayLabel}`
+}
+
+/**
+ * FEAT-112 apply backstop: is the Mon–Fri body of this planning week entirely
+ * in the past relative to `todayKey`? True only when even Friday — the last
+ * school day — is before today, i.e. applying would write the whole plan to
+ * days that have already gone by (the stale-tab case the live memo is meant to
+ * prevent; this is the belt-and-suspenders). Mid-week planning — some earlier
+ * days past but Friday today-or-future — is deliberately NOT flagged, so
+ * re-planning the rest of an in-progress week is never blocked. An unparseable
+ * start returns `false` (never a false block).
+ */
+export function isPlanningWeekPast(weekStart: string, todayKey: string): boolean {
+  if (!parseDateYmd(weekStart)) return false
+  const friday = dateKeyForDayPlan(weekStart, 'Friday')
+  return friday < todayKey
 }
 
 let _nextId = 1
