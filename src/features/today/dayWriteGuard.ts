@@ -49,10 +49,16 @@ import type { ChecklistItem, DayBlock, DayLog } from '../../core/types'
  *   3. a checklist item carrying `evidenceArtifactId` in `before` has no matching
  *      present item still carrying it in `after` — dropped evidence.
  *
- * On violation the guard logs at warn+ (DOC-09 posture — no silent swallow) and
- * throws a named `DayPreservationError`; the calling flow's existing catch
- * surfaces it. Legitimate writes (additive completions, capture, un-check,
- * fresh-day create, migrations) pass untouched.
+ * On violation the guard logs at warn+ (DOC-09 posture — no silent swallow).
+ * Whether it *blocks* the write depends on the lane (see `assertDayPreservation`):
+ * **automated structural writers** (apply/redo/quest/workshop/migrations) throw
+ * `DayPreservationError` — dropping completed work there is always a bug (both
+ * audited failures lived on these paths). The **interactive manual-edit lane**
+ * (`useDayLog`, `enforce: false`) logs the anomaly but proceeds, because rename /
+ * un-check / delete are the parent's authoritative edits over their own day and
+ * id-less items key on the editable label (a strict block would reject a
+ * legitimate rename of a completed item every keystroke). Legitimate writes
+ * (additive completions, capture, fresh-day create, migrations) pass untouched.
  */
 
 /** Named error thrown when a day write would drop preservation-critical data. */
@@ -190,22 +196,36 @@ export function findDayPreservationViolations(
 }
 
 /**
- * Throw `DayPreservationError` (after logging at warn+) if `before → after`
- * would drop preservation-critical data. Pure-comparison core is
- * `findDayPreservationViolations`.
+ * Check `before → after` for preservation violations. Violations are ALWAYS
+ * logged at warn+ (DOC-09 posture — never silent). Whether a violation *blocks*
+ * the write depends on `enforce`:
+ *
+ *  - `enforce: true` (default) — **automated structural writers** (apply-plan,
+ *    redo-plan, quest/fluency auto-complete, workshop, migrations): dropping a
+ *    completed item here is always a bug (the two audited failures both lived on
+ *    these paths), so it throws `DayPreservationError`.
+ *  - `enforce: false` — the **interactive manual-edit lane** (`useDayLog`, all
+ *    Today toggles/capture/rollover): rename, un-check, delete, reorder are the
+ *    parent's *authoritative* edits over their own day and must never be blocked
+ *    (id-less items key on the editable label, so a legitimate rename of a
+ *    completed item would otherwise be misread as a dropped completion). Here a
+ *    violation is logged for observability (a warn-logged anomaly also surfaces
+ *    a genuine last-write-wins clobber, which the run-prompt scoped as a
+ *    follow-up) but the write proceeds.
  */
 export function assertDayPreservation(
   before: DayShape | null | undefined,
   after: DayShape,
   context: string,
+  opts: { enforce?: boolean } = {},
 ): void {
+  const enforce = opts.enforce ?? true
   const violations = findDayPreservationViolations(before, after)
-  if (violations.length > 0) {
-    console.warn(
-      `[dayWriteGuard] refusing to persist ${context}: ${violations.join('; ')}`,
-    )
-    throw new DayPreservationError(context, violations)
-  }
+  if (violations.length === 0) return
+  console.warn(
+    `[dayWriteGuard] ${enforce ? 'refusing to persist' : 'anomaly on trusted write'} ${context}: ${violations.join('; ')}`,
+  )
+  if (enforce) throw new DayPreservationError(context, violations)
 }
 
 /**
@@ -229,15 +249,20 @@ export function dayLogPreservationSummary(
 // the days collection. Each reads the live doc, asserts preservation against the
 // resulting document, then performs the underlying write.
 
-/** Full-document `setDoc`. Use for the canonical save, apply-plan, migrations. */
+/**
+ * Full-document `setDoc`. Use for the canonical save, apply-plan, migrations.
+ * `enforce: false` marks the interactive manual-edit lane (parent authority —
+ * logs anomalies but never blocks the write); default `true` hard-throws.
+ */
 export async function setDayLogGuarded(
   ref: DocumentReference<DayLog>,
   payload: DayLog,
   context: string,
+  opts: { enforce?: boolean } = {},
 ): Promise<void> {
   const snap = await getDoc(ref)
   const before = snap.exists() ? snap.data() : undefined
-  assertDayPreservation(before, payload, context)
+  assertDayPreservation(before, payload, context, opts)
   await setDoc(ref, payload)
 }
 
@@ -246,11 +271,12 @@ export async function mergeDayLogGuarded(
   ref: DocumentReference<DayLog>,
   partial: Partial<DayLog>,
   context: string,
+  opts: { enforce?: boolean } = {},
 ): Promise<void> {
   const snap = await getDoc(ref)
   const before = snap.exists() ? snap.data() : undefined
   const after: DayShape = { ...(before ?? {}), ...partial }
-  assertDayPreservation(before, after, context)
+  assertDayPreservation(before, after, context, opts)
   await setDoc(ref, partial as DayLog, { merge: true })
 }
 
@@ -259,11 +285,12 @@ export async function updateDayLogGuarded(
   ref: DocumentReference<DayLog>,
   partial: Partial<DayLog>,
   context: string,
+  opts: { enforce?: boolean } = {},
 ): Promise<void> {
   const snap = await getDoc(ref)
   const before = snap.exists() ? snap.data() : undefined
   const after: DayShape = { ...(before ?? {}), ...partial }
-  assertDayPreservation(before, after, context)
+  assertDayPreservation(before, after, context, opts)
   await updateDoc(ref, partial as Partial<DayLog>)
 }
 

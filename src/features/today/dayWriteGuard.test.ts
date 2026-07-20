@@ -198,6 +198,17 @@ describe('assertDayPreservation', () => {
       ),
     ).not.toThrow()
   })
+
+  it('enforce:false logs the anomaly at warn+ but does NOT throw (interactive lane)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const before = { checklist: [item({ label: 'X', completed: true })], blocks: [] }
+    const after = { checklist: [], blocks: [] }
+    expect(() =>
+      assertDayPreservation(before, after, 'today-save', { enforce: false }),
+    ).not.toThrow()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('anomaly on trusted write today-save'))
+    warn.mockRestore()
+  })
 })
 
 // ── dayLogPreservationSummary ────────────────────────────────────────────────
@@ -250,6 +261,22 @@ describe('guarded writers', () => {
       DayPreservationError,
     )
     expect(setDoc).not.toHaveBeenCalled()
+  })
+
+  it('setDayLogGuarded with enforce:false writes through a rename of a completed item (interactive lane)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // Before: a completed, id-less item labeled "Reading (20m)".
+    getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => day({ checklist: [item({ label: 'Reading (20m)', completed: true })], blocks: [] }),
+    })
+    // After: the same item renamed — strict identity-by-label would read this as
+    // a dropped completion, but the interactive lane must let the parent rename.
+    const payload = day({ checklist: [item({ label: 'Reading aloud (20m)', completed: true })], blocks: [] })
+    await setDayLogGuarded(ref, payload, 'today-save', { enforce: false })
+    expect(setDoc).toHaveBeenCalledWith(ref, payload)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('anomaly on trusted write'))
+    warn.mockRestore()
   })
 
   it('setDayLogGuarded creates a fresh doc when none exists', async () => {

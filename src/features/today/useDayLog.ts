@@ -128,10 +128,15 @@ export function useDayLog({
       setSaveState('saving')
       try {
         const now = new Date().toISOString()
-        // Route through the preservation guard (FEAT-113). This is the single
-        // canonical save lane; the guard also converts a last-write-wins clobber
-        // of an out-of-band completion into a loud refusal instead of silent loss.
-        await setDayLogGuarded(dayLogRef, { ...safeLog, updatedAt: now }, 'today-save')
+        // Route through the preservation guard (FEAT-113). This is the
+        // interactive manual-edit lane, so it runs in observe-only mode
+        // (`enforce: false`): rename / un-check / delete are the parent's
+        // authoritative edits and must never be blocked, but a genuine anomaly
+        // (e.g. a last-write-wins clobber of an out-of-band completion) is still
+        // logged at warn+ for observability.
+        await setDayLogGuarded(dayLogRef, { ...safeLog, updatedAt: now }, 'today-save', {
+          enforce: false,
+        })
         setSaveState('saved')
         setLastSavedAt(now)
         setSnackMessage({ text: 'Saved', severity: 'success' })
