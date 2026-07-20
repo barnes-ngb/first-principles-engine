@@ -81,7 +81,8 @@ import {
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd } from '../../core/utils/format'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
-import { getWeekRange } from '../engine/engine.logic'
+import { getPlanningWeekRange } from '../../core/utils/time'
+import { useTodayKey } from '../../core/hooks/useTodayKey'
 import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import {
   applyChapterPoolToAll,
@@ -232,7 +233,13 @@ export default function PlannerChatPage() {
   // Curation is a parent job — the inline vet-in + "Manage library" affordances
   // are gated to parents, exactly like the Settings Watch Library tab (FEAT-107).
   const isParent = profile === UserProfile.Parents
-  const weekRange = useMemo(() => getWeekRange(new Date()), [])
+  // Keyed to the live day (FEAT-112): a phone-first tab is rarely closed, so the
+  // planning week must not freeze at mount. `useTodayKey` refreshes on focus /
+  // visibility / minute-tick, and `getPlanningWeekRange` rolls a Saturday
+  // forward so weekend planning always targets the UPCOMING Mon–Fri, not the
+  // week that already passed.
+  const todayKeyLive = useTodayKey()
+  const weekRange = useMemo(() => getPlanningWeekRange(new Date()), [todayKeyLive])
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
