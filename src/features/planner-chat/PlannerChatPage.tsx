@@ -88,6 +88,7 @@ import {
   collectExistingChapterPool,
 } from '../today/applyChapterPoolForChild'
 import { dayLogDocId } from '../today/daylog.model'
+import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
@@ -2011,13 +2012,13 @@ Generate a plan for Monday through Friday.`.trim()
 
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
-          // Replace planner-generated items, keep manually-added ones
-          const existingChecklist = (existing.checklist ?? []).filter(
-            (item: ChecklistItem) => item.source === 'manual'
-          )
-          const existingBlocks = (existing.blocks ?? []).filter(
-            (block: DayBlock) => block.source === 'manual'
-          )
+          // Applied plan is authoritative for the days it covers (owner decision
+          // 2026-07-19). Keep completed work (+ its minutes/evidence) and manual
+          // items, DROP stale incomplete rolled-over residue, then append the
+          // fresh planned items. The reset never touches completed work or logged
+          // minutes — see `applyReset.ts` (HARD CONSTRAINT).
+          const existingChecklist = retainChecklistForApply(existing.checklist ?? [])
+          const existingBlocks = retainBlocksForApply(existing.blocks ?? [])
           await setDoc(dayLogRef, {
             ...existing,
             checklist: [...existingChecklist, ...checklist],
