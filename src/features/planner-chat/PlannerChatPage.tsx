@@ -2881,7 +2881,8 @@ ${dayPrompts}`
                 <DialogTitle>Redo Plan?</DialogTitle>
                 <DialogContent>
                   <DialogContentText>
-                    This will clear your current plan from Today and let you start fresh. Continue?
+                    This clears the planned items from your days so you can start fresh.
+                    Anything already completed, and the time already logged, stays. Continue?
                   </DialogContentText>
                 </DialogContent>
                 <DialogActions>
