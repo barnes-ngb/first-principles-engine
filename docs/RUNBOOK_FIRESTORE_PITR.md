@@ -45,16 +45,21 @@ If CI cannot be used (e.g. the IAM grant is declined), enable it by hand:
 ## Recovering a destroyed day (deliberate, rare)
 
 PITR only *enables* recovery; it does not restore anything on its own. If a day
-doc is ever destroyed, recover within the 7-day window via a deliberate restore
-(new database from a timestamp), then copy the recovered doc back:
+doc is ever destroyed, recover within the 7-day window by **cloning** the
+database as it stood at a past timestamp into a new database, then copy the
+recovered doc back. Timestamp-based PITR recovery is `gcloud firestore databases
+**clone**` (`--source-database` + `--snapshot-time`); `... databases restore` is
+a different operation that restores a *scheduled backup* (`--source-backup`) and
+will not work here.
 
 ```
-gcloud firestore databases restore \
-  --source-database="(default)" \
-  --snapshot-time=<RFC3339 timestamp within 7 days> \
+gcloud firestore databases clone \
+  --source-database="projects/barneshome-3dfbb/databases/(default)" \
+  --snapshot-time=<RFC3339 timestamp within the last 7 days> \
   --destination-database=recovery-tmp --project=barneshome-3dfbb
 ```
 
 Read the recovered `families/{familyId}/days/{docId}` from `recovery-tmp` and
 re-write it to the live default database, then delete `recovery-tmp`. This is a
-one-off engineering action, not a routine.
+one-off engineering action, not a routine. Refs:
+<https://cloud.google.com/sdk/gcloud/reference/firestore/databases/clone>.
