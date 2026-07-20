@@ -8,7 +8,9 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { activityConfigsCollection, db, evaluationSessionsCollection, hoursCollection, learnerModelsCollection, sightWordProgressCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { activityConfigsCollection, daysCollection, db, evaluationSessionsCollection, hoursCollection, learnerModelsCollection, sightWordProgressCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { dayLogDocId } from '../today/daylog.model'
+import { updateDayLogGuarded } from '../today/dayWriteGuard'
 import { selectQuestTargets } from '../../core/foundations/questTargeting'
 import type { QuestTargetConcept } from '../../core/foundations/questTargeting'
 import { syncQuestResultsToModel } from './questModelSync'
@@ -1290,7 +1292,10 @@ export function useQuestSession() {
       // Auto-complete matching evaluation item on today's checklist
       try {
         const today = new Date().toISOString().split('T')[0]
-        const dayRef = doc(db, `families/${familyId}/days/${activeChildId}_${today}`)
+        // Canonical `{date}_{childId}` id (FEAT-114) — the previous legacy
+        // `{childId}_{date}` id never matched today's doc, so quest completions
+        // (and their minutes) silently never reached Today.
+        const dayRef = doc(daysCollection(familyId), dayLogDocId(today, activeChildId))
         const daySnap = await getDoc(dayRef)
 
         if (daySnap.exists()) {
@@ -1298,20 +1303,19 @@ export function useQuestSession() {
           const items = dayData.checklist || []
           const questMode = activeQuestModeRef.current
 
-          const matchIdx = items.findIndex((item: Record<string, unknown>) =>
+          const matchIdx = items.findIndex((item) =>
             item.itemType === 'evaluation' &&
             !item.completed &&
             (
               (questMode === 'comprehension' && item.evaluationMode === 'comprehension') ||
               (questMode === 'phonics' && item.evaluationMode === 'phonics') ||
               (questMode === 'fluency' && item.evaluationMode === 'fluency') ||
-              (domain === 'math' && item.evaluationMode === 'math') ||
-              (typeof item.title === 'string' && item.title.toLowerCase().includes(domain))
+              (domain === 'math' && item.evaluationMode === 'math')
             ),
           )
 
           if (matchIdx >= 0) {
-            const updatedItems = items.map((item: Record<string, unknown>, i: number) =>
+            const updatedItems = items.map((item, i) =>
               i === matchIdx
                 ? {
                     ...item,
@@ -1321,9 +1325,8 @@ export function useQuestSession() {
                   }
                 : item,
             )
-            const { updateDoc } = await import('firebase/firestore')
-            await updateDoc(dayRef, { checklist: updatedItems })
-            console.log('[Quest] Auto-completed evaluation item:', items[matchIdx].title)
+            await updateDayLogGuarded(dayRef, { checklist: updatedItems }, 'quest-autocomplete')
+            console.log('[Quest] Auto-completed evaluation item:', items[matchIdx].label)
           }
         }
       } catch (err) {
@@ -1954,21 +1957,22 @@ export function useQuestSession() {
       // Auto-complete matching fluency evaluation item on today's checklist
       try {
         const today = new Date().toISOString().split('T')[0]
-        const dayRef = doc(db, `families/${familyId}/days/${activeChildId}_${today}`)
+        // Canonical `{date}_{childId}` id (FEAT-114) — see endSession above.
+        const dayRef = doc(daysCollection(familyId), dayLogDocId(today, activeChildId))
         const daySnap = await getDoc(dayRef)
 
         if (daySnap.exists()) {
           const dayData = daySnap.data()
           const items = dayData.checklist || []
 
-          const matchIdx = items.findIndex((item: Record<string, unknown>) =>
+          const matchIdx = items.findIndex((item) =>
             item.itemType === 'evaluation' &&
             !item.completed &&
             item.evaluationMode === 'fluency',
           )
 
           if (matchIdx >= 0) {
-            const updatedItems = items.map((item: Record<string, unknown>, i: number) =>
+            const updatedItems = items.map((item, i) =>
               i === matchIdx
                 ? {
                     ...item,
@@ -1978,9 +1982,8 @@ export function useQuestSession() {
                   }
                 : item,
             )
-            const { updateDoc } = await import('firebase/firestore')
-            await updateDoc(dayRef, { checklist: updatedItems })
-            console.log('[Fluency] Auto-completed evaluation item:', items[matchIdx].title)
+            await updateDayLogGuarded(dayRef, { checklist: updatedItems }, 'fluency-autocomplete')
+            console.log('[Fluency] Auto-completed evaluation item:', items[matchIdx].label)
           }
         }
       } catch (err) {

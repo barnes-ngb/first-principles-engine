@@ -91,10 +91,12 @@ import {
 } from '../today/applyChapterPoolForChild'
 import { dayLogDocId } from '../today/daylog.model'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
+import { setDayLogGuarded, updateDayLogGuarded } from '../today/dayWriteGuard'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
   buildPlannerPrompt,
+  buildShiftedWeekPlan,
   dateKeyForDayPlan,
   ensureEvaluationItems,
   formatPlanningWeekLabel,
@@ -241,7 +243,7 @@ export default function PlannerChatPage() {
   // visibility / minute-tick, and `getPlanningWeekRange` rolls a Saturday
   // forward so weekend planning always targets the UPCOMING Mon–Fri, not the
   // week that already passed.
-  const todayKeyLive = useTodayKey()
+  const [todayKeyLive, refreshTodayKey] = useTodayKey()
   const weekRange = useMemo(
     () => getPlanningWeekRange(parseDateYmd(todayKeyLive) ?? new Date()),
     [todayKeyLive],
@@ -590,6 +592,18 @@ export default function PlannerChatPage() {
   // Load existing conversation
   useEffect(() => {
     if (!conversationDocId || !activeChildId) return
+    // FEAT-112 follow-up: the planning week (or child) changed, so `weekRange`
+    // and `conversationDocId` re-keyed. Clear the previous context's week-scoped
+    // state before (re)subscribing — otherwise, when the new week's doc is absent
+    // (the common "haven't planned next week yet" case), the snapshot handler's
+    // `exists()` guard does nothing and the old week's draft/applied plan lingers,
+    // relabeled with the new week's dates or falsely reported as already active.
+    // The snapshot repopulates from the doc when it exists. (On first mount these
+    // already hold their initial values, so this is a no-op there.)
+    setMessages([])
+    setCurrentDraft(null)
+    setApplied(false)
+    setSetupComplete(false)
     const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
     const unsubscribe = onSnapshot(ref, (snap) => {
       if (snap.exists()) {
@@ -870,9 +884,15 @@ export default function PlannerChatPage() {
   // non-crashing notice (the draft stays in client state and re-persists on the
   // next turn). Genuine faults (permission-denied, etc.) still rethrow → boundary.
   const persistConversation = useCallback(
-    async (updates: Partial<PlannerConversation>) => {
-      if (!activeChildId || !conversationDocId) return
-      const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
+    // FEAT-112 follow-up: `target` overrides the doc id + weekKey so a
+    // forward-shifted apply persists the applied conversation under the SHIFTED
+    // week (not the stale one it was drafted in). Omitted everywhere else → the
+    // live `conversationDocId` / `weekRange.start`, unchanged.
+    async (updates: Partial<PlannerConversation>, target?: { docId: string; weekKey: string }) => {
+      const docId = target?.docId ?? conversationDocId
+      const weekKey = target?.weekKey ?? weekRange.start
+      if (!activeChildId || !docId) return
+      const ref = doc(plannerConversationsCollection(familyId), docId)
       try {
         const snap = await withTransientRetry(() => getDoc(ref))
         const now = new Date().toISOString()
@@ -881,7 +901,7 @@ export default function PlannerChatPage() {
         } else {
           const conversation: PlannerConversation = {
             childId: activeChildId,
-            weekKey: weekRange.start,
+            weekKey,
             status: PlannerConversationStatus.Draft,
             messages: [],
             availableHoursPerDay: hoursPerDay,
@@ -1956,19 +1976,23 @@ Generate a plan for Monday through Friday.`.trim()
 
       setSnack({ text: 'Applying plan...', severity: 'info' })
 
-      // Step 2: Write WeekPlan update
+      // Step 2: Write WeekPlan update (upsert). A forward-shifted apply can
+      // target a week whose WeekPlan doc the page never created (only the live
+      // `weekRange.start` doc is auto-seeded), so childGoals must land even when
+      // the doc is absent — otherwise the plan's days land on the shifted week
+      // while its WeekPlan summary is missing (FEAT-112 follow-up).
       const weekRef = doc(weeksCollection(familyId), effectiveWeekStart)
       const weekSnap = await getDoc(weekRef)
+      const planGoals = currentDraft.days
+        .flatMap((d) => d.items)
+        .filter((item) => item.accepted && !item.isAppBlock)
+        .map((item) => item.title)
       if (weekSnap.exists()) {
         const existing = weekSnap.data()
         const existingGoals = existing.childGoals ?? []
         const childGoalIndex = existingGoals.findIndex(
           (g: { childId: string }) => g.childId === activeChildId,
         )
-        const planGoals = currentDraft.days
-          .flatMap((d) => d.items)
-          .filter((item) => item.accepted && !item.isAppBlock)
-          .map((item) => item.title)
         const updatedGoals = [...existingGoals]
         if (childGoalIndex >= 0) {
           updatedGoals[childGoalIndex] = {
@@ -1985,6 +2009,14 @@ Generate a plan for Monday through Friday.`.trim()
           childGoals: updatedGoals,
           ...(selectedBook ? { readAloudBookId: selectedBook.id } : {}),
         })
+      } else {
+        // Absent — typically the forward-shift target. Create the WeekPlan with
+        // this child's goals, mirroring the default shape the weekPlanRef effect
+        // seeds for the live week.
+        await setDoc(
+          weekRef,
+          buildShiftedWeekPlan(effectiveWeekStart, children, activeChildId, planGoals, selectedBook?.id),
+        )
       }
 
       // Persist readAloudBookId to plannerDefaults so it carries to the next week
@@ -2062,13 +2094,17 @@ Generate a plan for Monday through Friday.`.trim()
           // minutes — see `applyReset.ts` (HARD CONSTRAINT).
           const existingChecklist = retainChecklistForApply(existing.checklist ?? [])
           const existingBlocks = retainBlocksForApply(existing.blocks ?? [])
-          await setDoc(dayLogRef, {
-            ...existing,
-            checklist: [...existingChecklist, ...checklist],
-            blocks: [...existingBlocks, ...blocks],
-            dailyBudgetMinutes,
-            updatedAt: new Date().toISOString(),
-          })
+          await setDayLogGuarded(
+            dayLogRef,
+            {
+              ...existing,
+              checklist: [...existingChecklist, ...checklist],
+              blocks: [...existingBlocks, ...blocks],
+              dailyBudgetMinutes,
+              updatedAt: new Date().toISOString(),
+            },
+            'apply-plan',
+          )
         } else {
           const newDayLog: DayLog = {
             childId: activeChildId,
@@ -2079,7 +2115,7 @@ Generate a plan for Monday through Friday.`.trim()
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }
-          await setDoc(dayLogRef, newDayLog)
+          await setDayLogGuarded(dayLogRef, newDayLog, 'apply-plan-new')
         }
       }
 
@@ -2095,11 +2131,32 @@ Generate a plan for Monday through Friday.`.trim()
       setApplied(true)
       setPlanDirty(false) // the plan is now saved to the days — no pending edits
 
-      void persistConversation({
-        status: PlannerConversationStatus.Applied,
-        messages: updatedMessages,
-        currentDraft,
-      })
+      // Persist the applied conversation under the week actually written — for a
+      // forward-shift that's the shifted week, not the stale one it was drafted
+      // in, so reopening the upcoming week restores the applied plan (FEAT-112
+      // follow-up). For a normal apply this resolves to the live conversationDocId.
+      const persistPromise = persistConversation(
+        {
+          status: PlannerConversationStatus.Applied,
+          messages: updatedMessages,
+          currentDraft,
+        },
+        { docId: plannerConversationDocId(effectiveWeekStart, activeChildId), weekKey: effectiveWeekStart },
+      )
+
+      if (overrideWeekStart) {
+        // Forward-shift: catch the page's live week up to the shifted week so
+        // `weekRange` / `conversationDocId` (and every read/write derived from
+        // them — the drawer's later `persistConversation`, the WeekPlan/day-doc
+        // reads) re-key onto the week we just wrote to, instead of lingering on
+        // the stale week until the next focus/tick (FEAT-112 follow-up: keeps
+        // post-shift edits on the shifted conversation). Await the applied-
+        // conversation write first so the re-keyed subscription finds it.
+        await persistPromise.catch(() => {})
+        refreshTodayKey()
+      } else {
+        void persistPromise
+      }
 
       setSnack({ text: 'Plan applied! Check This Week and Today.', severity: 'success' })
 
@@ -2230,7 +2287,7 @@ Generate a plan for Monday through Friday.`.trim()
       console.error('Failed to apply plan', err)
       setSnack({ text: 'Failed to apply plan.', severity: 'error' })
     }
-  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs])
+  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -2471,6 +2528,20 @@ ${dayPrompts}`
   const handleRedoPlan = useCallback(async () => {
     setConfirmNewPlan(false)
     if (!activeChildId || !currentDraft) return
+
+    // Past-week backstop (mirrors handleApplyPlan's FEAT-112 guard, which this
+    // sibling path lacked): never run the destructive clear against a week that
+    // has already passed. A stale tab could carry a past week key here, and
+    // clearing dead dates would attack the historical record. Redo has no
+    // forward-shift, so warn and stop rather than offering to retarget.
+    if (isPlanningWeekPast(weekRange.start, todayKey())) {
+      setSnack({
+        text: 'That week has already passed — nothing was cleared. Completed work and logged time stay put.',
+        severity: 'info',
+      })
+      return
+    }
+
     try {
       // Remove planner-generated blocks and checklist from each day's DayLog
       for (const dayPlan of currentDraft.days) {
@@ -2483,14 +2554,21 @@ ${dayPrompts}`
         const dayLogSnap = await getDoc(dayLogRef)
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
-          // Keep manually-added items, remove planner-generated ones
-          const manualChecklist = (existing.checklist ?? []).filter(
-            (item: ChecklistItem) => item.source === 'manual'
+          // Reuse the FEAT-111 apply-reset guards instead of a raw
+          // `source === 'manual'` filter (which destroyed completed planner work
+          // and its logged minutes — the FEAT-113 P0 hotfix). Keep completed
+          // items (+ their minutes / evidence) and manual items; keep any block
+          // carrying logged actualMinutes. Only un-started planner residue is
+          // cleared — the feature's actual purpose. Routed through the FEAT-114
+          // preservation guard so a regression can't silently ship the old
+          // "manual-only" filter again — see `applyReset.ts` (HARD CONSTRAINT).
+          const retainedChecklist = retainChecklistForApply(existing.checklist ?? [])
+          const retainedBlocks = retainBlocksForApply(existing.blocks ?? [])
+          await updateDayLogGuarded(
+            dayLogRef,
+            { checklist: retainedChecklist, blocks: retainedBlocks },
+            'redo-plan',
           )
-          const manualBlocks = (existing.blocks ?? []).filter(
-            (block: DayBlock) => block.source === 'manual'
-          )
-          await updateDoc(dayLogRef, { checklist: manualChecklist, blocks: manualBlocks })
         }
       }
 
@@ -2813,7 +2891,8 @@ ${dayPrompts}`
                 <DialogTitle>Redo Plan?</DialogTitle>
                 <DialogContent>
                   <DialogContentText>
-                    This will clear your current plan from Today and let you start fresh. Continue?
+                    This clears the planned items from your days so you can start fresh.
+                    Anything already completed, and the time already logged, stays. Continue?
                   </DialogContentText>
                 </DialogContent>
                 <DialogActions>

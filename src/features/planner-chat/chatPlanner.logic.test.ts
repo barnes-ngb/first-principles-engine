@@ -7,6 +7,7 @@ import {
   applySnapshotSuggestions,
   buildMinimumWinText,
   buildPlannerPrompt,
+  buildShiftedWeekPlan,
   dateKeyForDayPlan,
   dayTotalMinutes,
   fillMissingDaysFromRoutine,
@@ -1342,6 +1343,44 @@ describe('isPlanningWeekPast (FEAT-112 apply backstop)', () => {
 
   it('never blocks on an unparseable start', () => {
     expect(isPlanningWeekPast('not-a-date', '2026-07-20')).toBe(false)
+  })
+})
+
+describe('buildShiftedWeekPlan (FEAT-112 follow-up)', () => {
+  const children = [{ id: 'lincoln' }, { id: 'london' }]
+
+  it('stamps the applied child\'s goals and leaves siblings empty', () => {
+    const plan = buildShiftedWeekPlan('2026-07-19', children, 'lincoln', ['Math', 'Reading'])
+    expect(plan.childGoals).toEqual([
+      { childId: 'lincoln', goals: ['Math', 'Reading'] },
+      { childId: 'london', goals: [] },
+    ])
+  })
+
+  it('sets startDate + the Saturday endDate (start + 6 days)', () => {
+    const plan = buildShiftedWeekPlan('2026-07-19', children, 'lincoln', [])
+    expect(plan.startDate).toBe('2026-07-19')
+    expect(plan.endDate).toBe('2026-07-25')
+  })
+
+  it('mirrors the seed default shape (empty theme/virtue/tracks/buildLab)', () => {
+    const plan = buildShiftedWeekPlan('2026-07-19', children, 'lincoln', [])
+    expect(plan.theme).toBe('')
+    expect(plan.virtue).toBe('')
+    expect(plan.tracks).toEqual([])
+    expect(plan.buildLab).toEqual({ title: '', materials: [], steps: [] })
+  })
+
+  it('includes readAloudBookId only when provided', () => {
+    expect(buildShiftedWeekPlan('2026-07-19', children, 'lincoln', []).readAloudBookId).toBeUndefined()
+    expect(
+      buildShiftedWeekPlan('2026-07-19', children, 'lincoln', [], 'book-42').readAloudBookId,
+    ).toBe('book-42')
+  })
+
+  it('handles a month/year boundary in the endDate', () => {
+    // Sunday-start 2025-12-28 → Saturday 2026-01-03
+    expect(buildShiftedWeekPlan('2025-12-28', children, 'lincoln', []).endDate).toBe('2026-01-03')
   })
 })
 
