@@ -1,6 +1,8 @@
-import { addDoc, getDoc, setDoc } from 'firebase/firestore'
+import { addDoc, getDoc } from 'firebase/firestore'
 import { hoursCollection, artifactsCollection, storyGamesCollection, daysCollection, stripUndefined } from '../../core/firebase/firestore'
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore'
+import { dayLogDocId } from '../today/daylog.model'
+import { mergeDayLogGuarded } from '../today/dayWriteGuard'
 import type { AdventureTree, CardGameData, ChallengeCard, GeneratedGame, VoiceRecordingMap } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 import { WorkshopStatus } from '../../core/types/workshop'
@@ -657,19 +659,24 @@ export async function markWorkshopPlayed(
   gameTitle: string,
 ): Promise<void> {
   const today = new Date().toISOString().slice(0, 10)
-  const docId = `${today}_${childId}`
-  const dayRef = doc(daysCollection(familyId), docId)
+  const dayRef = doc(daysCollection(familyId), dayLogDocId(today, childId))
 
   const snap = await getDoc(dayRef)
   const existing = snap.data()
   const gamesPlayed = (existing?.workshop?.gamesPlayed ?? 0) + 1
 
-  await setDoc(dayRef, {
-    workshop: {
-      done: true,
-      gamesPlayed,
-      note: gameTitle,
+  // Merge-write via the preservation guard (FEAT-113). Only touches the
+  // `workshop` field; checklist/blocks are untouched so the guard passes.
+  await mergeDayLogGuarded(
+    dayRef,
+    {
+      workshop: {
+        done: true,
+        gamesPlayed,
+        note: gameTitle,
+      },
+      updatedAt: new Date().toISOString(),
     },
-    updatedAt: new Date().toISOString(),
-  }, { merge: true })
+    'workshop-played',
+  )
 }

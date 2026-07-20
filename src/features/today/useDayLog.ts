@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore'
+import { doc, getDoc, onSnapshot } from 'firebase/firestore'
 
 import type { SaveState } from '../../components/SaveIndicator'
 import { daysCollection, weeksCollection } from '../../core/firebase/firestore'
@@ -9,6 +9,7 @@ import type { RoutineItemKey } from '../../core/types/enums'
 import { getWeekRange } from '../../core/utils/time'
 import type { DailyPlanTemplate } from './dailyPlanTemplates'
 import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
+import { setDayLogGuarded } from './dayWriteGuard'
 
 interface UseDayLogParams {
   familyId: string
@@ -127,7 +128,10 @@ export function useDayLog({
       setSaveState('saving')
       try {
         const now = new Date().toISOString()
-        await setDoc(dayLogRef, { ...safeLog, updatedAt: now })
+        // Route through the preservation guard (FEAT-113). This is the single
+        // canonical save lane; the guard also converts a last-write-wins clobber
+        // of an out-of-band completion into a loud refusal instead of silent loss.
+        await setDayLogGuarded(dayLogRef, { ...safeLog, updatedAt: now }, 'today-save')
         setSaveState('saved')
         setLastSavedAt(now)
         setSnackMessage({ text: 'Saved', severity: 'success' })
@@ -185,10 +189,11 @@ export function useDayLog({
           const legacySnap = await getDoc(legacyRef)
           if (legacySnap.exists()) {
             const legacyData = legacySnap.data()
-            await setDoc(dayLogRef, {
-              ...legacyData,
-              updatedAt: new Date().toISOString(),
-            })
+            await setDayLogGuarded(
+              dayLogRef,
+              { ...legacyData, updatedAt: new Date().toISOString() },
+              'legacy-migration',
+            )
             // onSnapshot will fire again with the migrated doc
             return
           }
@@ -204,7 +209,7 @@ export function useDayLog({
                 childId: selectedChildId,
                 updatedAt: new Date().toISOString(),
               }
-              await setDoc(dayLogRef, migrated)
+              await setDayLogGuarded(dayLogRef, migrated, 'baredate-migration')
               // onSnapshot will fire again
               return
             }
@@ -217,7 +222,7 @@ export function useDayLog({
             selectedChild?.dayBlocks ?? activeTemplate?.dayBlocks,
             activeRoutineItems,
           )
-          await setDoc(dayLogRef, defaultLog)
+          await setDayLogGuarded(dayLogRef, defaultLog, 'default-create')
           // onSnapshot will fire again with the new doc
         } catch (err) {
           console.error('Failed to load day log', err)

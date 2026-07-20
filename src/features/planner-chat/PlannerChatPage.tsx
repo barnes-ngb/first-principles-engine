@@ -91,6 +91,7 @@ import {
 } from '../today/applyChapterPoolForChild'
 import { dayLogDocId } from '../today/daylog.model'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
+import { setDayLogGuarded, updateDayLogGuarded } from '../today/dayWriteGuard'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
@@ -2093,13 +2094,17 @@ Generate a plan for Monday through Friday.`.trim()
           // minutes — see `applyReset.ts` (HARD CONSTRAINT).
           const existingChecklist = retainChecklistForApply(existing.checklist ?? [])
           const existingBlocks = retainBlocksForApply(existing.blocks ?? [])
-          await setDoc(dayLogRef, {
-            ...existing,
-            checklist: [...existingChecklist, ...checklist],
-            blocks: [...existingBlocks, ...blocks],
-            dailyBudgetMinutes,
-            updatedAt: new Date().toISOString(),
-          })
+          await setDayLogGuarded(
+            dayLogRef,
+            {
+              ...existing,
+              checklist: [...existingChecklist, ...checklist],
+              blocks: [...existingBlocks, ...blocks],
+              dailyBudgetMinutes,
+              updatedAt: new Date().toISOString(),
+            },
+            'apply-plan',
+          )
         } else {
           const newDayLog: DayLog = {
             childId: activeChildId,
@@ -2110,7 +2115,7 @@ Generate a plan for Monday through Friday.`.trim()
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }
-          await setDoc(dayLogRef, newDayLog)
+          await setDayLogGuarded(dayLogRef, newDayLog, 'apply-plan-new')
         }
       }
 
@@ -2535,14 +2540,20 @@ ${dayPrompts}`
         const dayLogSnap = await getDoc(dayLogRef)
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
-          // Keep manually-added items, remove planner-generated ones
-          const manualChecklist = (existing.checklist ?? []).filter(
-            (item: ChecklistItem) => item.source === 'manual'
+          // Redo clears the planner residue, but completed work (with its
+          // minutes/evidence) and manual items are NEVER dropped — the same
+          // preservation contract as apply (FEAT-113). The retain helpers
+          // encode exactly that: keep completed + manual + blocks with logged
+          // minutes, drop only incomplete planner residue. Routed through the
+          // guard so a regression can't silently ship the old "manual-only"
+          // filter that dropped completed days.
+          const retainedChecklist = retainChecklistForApply(existing.checklist ?? [])
+          const retainedBlocks = retainBlocksForApply(existing.blocks ?? [])
+          await updateDayLogGuarded(
+            dayLogRef,
+            { checklist: retainedChecklist, blocks: retainedBlocks },
+            'redo-plan',
           )
-          const manualBlocks = (existing.blocks ?? []).filter(
-            (block: DayBlock) => block.source === 'manual'
-          )
-          await updateDoc(dayLogRef, { checklist: manualChecklist, blocks: manualBlocks })
         }
       }
 
