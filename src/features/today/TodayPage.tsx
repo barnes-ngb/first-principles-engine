@@ -83,6 +83,8 @@ import { useDayLog } from './useDayLog'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivityConfigs'
 import { useRolloverUnchecked } from './useRolloverUnchecked'
+import { useUnappliedDraft } from './useUnappliedDraft'
+import { selectTodayDayBanner } from './unappliedDraft'
 import { useUnifiedCapture } from './useUnifiedCapture'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import DraftReadyCard from '../monthly-review/DraftReadyCard'
@@ -275,6 +277,15 @@ export default function TodayPage() {
     dailyPlan,
     persistDayLogImmediate,
   })
+
+  // --- Unapplied-draft awareness (FEAT-111 P2): does a drafted-but-unapplied
+  // plan exist for this week? Drives the actionable "review and apply" banner on
+  // empty/upcoming days so Today never shows a silently empty day. ---
+  const hasUnappliedDraft = useUnappliedDraft(
+    familyId,
+    selectedChildId,
+    weekDayDates[0]?.dateKey,
+  )
 
   // --- Unified capture hook (shared with kid views) ---
   const {
@@ -862,13 +873,60 @@ export default function TodayPage() {
         </SectionErrorBoundary>
       )}
 
-      {!isToday && (
-        <Alert severity="info" sx={{ mb: 1 }}>
-          {new Date(selectedDate + 'T00:00:00') < new Date(realToday + 'T00:00:00')
-            ? `Viewing ${selectedDayName} (past). You can mark items complete or add notes.`
-            : `Viewing ${selectedDayName} (upcoming). Items will appear on this day.`}
-        </Alert>
-      )}
+      {(() => {
+        const isPast =
+          new Date(selectedDate + 'T00:00:00') <
+          new Date(realToday + 'T00:00:00')
+        const dayIsEmpty = (dayLog?.checklist?.length ?? 0) === 0
+        const banner = selectTodayDayBanner({
+          isToday,
+          isPast,
+          dayIsEmpty,
+          hasUnappliedDraft,
+        })
+
+        // FEAT-111 P2: a plan is drafted but never applied → actionable,
+        // non-blaming prompt (charter) deep-linking to the planner (which lands
+        // in review phase while an unapplied draft exists). Shows on empty or
+        // upcoming days so Today never renders a silently empty day.
+        if (banner === 'draft') {
+          return (
+            <Alert
+              severity="warning"
+              sx={{ mb: 1 }}
+              action={
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => navigate('/planner/chat')}
+                >
+                  Review &amp; apply
+                </Button>
+              }
+            >
+              A plan for this week is drafted but not applied — review and apply
+              it?
+            </Alert>
+          )
+        }
+        if (banner === 'past') {
+          return (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              {`Viewing ${selectedDayName} (past). You can mark items complete or add notes.`}
+            </Alert>
+          )
+        }
+        // FEAT-111 P4: only tell the parent items will appear when the upcoming
+        // day is genuinely empty — never when applied items already sit on it.
+        if (banner === 'upcoming-empty') {
+          return (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              {`Viewing ${selectedDayName} (upcoming). Items will appear on this day.`}
+            </Alert>
+          )
+        }
+        return null
+      })()}
 
       <HelpStrip
         pageKey="today"
