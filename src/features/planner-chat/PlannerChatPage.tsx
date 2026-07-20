@@ -79,7 +79,7 @@ import {
   UserProfile,
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
-import { formatDateYmd } from '../../core/utils/format'
+import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import { getPlanningWeekRange } from '../../core/utils/time'
 import { useTodayKey } from '../../core/hooks/useTodayKey'
@@ -96,6 +96,7 @@ import {
   buildPlannerPrompt,
   dateKeyForDayPlan,
   ensureEvaluationItems,
+  formatPlanningWeekLabel,
   fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   generateItemId,
@@ -239,7 +240,10 @@ export default function PlannerChatPage() {
   // forward so weekend planning always targets the UPCOMING Mon–Fri, not the
   // week that already passed.
   const todayKeyLive = useTodayKey()
-  const weekRange = useMemo(() => getPlanningWeekRange(new Date()), [todayKeyLive])
+  const weekRange = useMemo(
+    () => getPlanningWeekRange(parseDateYmd(todayKeyLive) ?? new Date()),
+    [todayKeyLive],
+  )
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
@@ -2607,7 +2611,7 @@ ${dayPrompts}`
           {phase === 'setup' && hasPriorPlan === true && (
             <PlannerCompactSetup
               childName={activeChild?.name ?? 'your child'}
-              weekRangeLabel={`${weekRange.start} → ${weekRange.end}`}
+              weekRangeLabel={`Planning ${formatPlanningWeekLabel(weekRange.start)}`}
               weekEnergy={weekEnergy}
               onWeekEnergyChange={setWeekEnergy}
               hoursPerDay={hoursPerDay}
@@ -2681,6 +2685,7 @@ ${dayPrompts}`
                 hoursPerDay={hoursPerDay}
                 masteryReviewLine={masteryReviewLine}
                 readAloudBook={readAloudBook}
+                weekStart={weekRange.start}
                 snapshot={snapshot}
                 onToggleItem={handleToggleItem}
                 onGenerateActivity={handleGenerateActivity}

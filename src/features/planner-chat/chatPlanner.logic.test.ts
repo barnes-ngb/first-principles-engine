@@ -10,6 +10,8 @@ import {
   dateKeyForDayPlan,
   dayTotalMinutes,
   fillMissingDaysFromRoutine,
+  formatDayCardLabel,
+  formatPlanningWeekLabel,
   generateDraftPlanFromInputs,
   parseAIResponse,
   planTotalMinutes,
@@ -1271,6 +1273,44 @@ describe('dateKeyForDayPlan', () => {
     expect(() => dateKeyForDayPlan('2026-04-05', 'Saturday' as typeof WEEK_DAYS[number])).toThrow(
       /Invalid day/,
     )
+  })
+})
+
+describe('formatDayCardLabel (FEAT-112)', () => {
+  // Planning week of Jul 20–24, 2026 has Sunday-start 2026-07-19.
+  it('renders the concrete mapped date next to the weekday', () => {
+    expect(formatDayCardLabel('2026-07-19', 'Monday')).toBe('Monday · Jul 20')
+    expect(formatDayCardLabel('2026-07-19', 'Friday')).toBe('Friday · Jul 24')
+  })
+
+  it('uses the same mapping as dateKeyForDayPlan (labels the day apply writes)', () => {
+    for (const day of WEEK_DAYS) {
+      const dateKey = dateKeyForDayPlan('2026-07-19', day)
+      // e.g. "Monday · Jul 20" ends with the day-of-month of the mapped key
+      const dom = Number(dateKey.slice(-2))
+      expect(formatDayCardLabel('2026-07-19', day)).toContain(String(dom))
+    }
+  })
+
+  it('falls back to the bare name for a non-WEEK_DAYS string', () => {
+    expect(formatDayCardLabel('2026-07-19', 'Saturday')).toBe('Saturday')
+  })
+})
+
+describe('formatPlanningWeekLabel (FEAT-112)', () => {
+  it('renders the Mon–Fri school body of the week', () => {
+    expect(formatPlanningWeekLabel('2026-07-19')).toBe('Week of Jul 20–24')
+  })
+
+  it('handles a month boundary within the week', () => {
+    // Sunday-start 2026-07-26 → Mon Jul 27 … Fri Jul 31 (same month)
+    expect(formatPlanningWeekLabel('2026-07-26')).toBe('Week of Jul 27–31')
+    // Sunday-start 2026-08-30 → Mon Aug 31 … Fri Sep 4 (crosses into September)
+    expect(formatPlanningWeekLabel('2026-08-30')).toBe('Week of Aug 31 – Sep 4')
+  })
+
+  it('returns empty string for an unparseable start', () => {
+    expect(formatPlanningWeekLabel('not-a-date')).toBe('')
   })
 })
 

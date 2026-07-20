@@ -2,6 +2,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
 import type { DraftPlanItem, DraftWeeklyPlan, SkillSnapshot } from '../../core/types'
+import { formatPlanningWeekLabel } from './chatPlanner.logic'
 import PlanPreviewCard from './PlanPreviewCard'
 
 interface PlanDayCardsProps {
@@ -9,6 +10,9 @@ interface PlanDayCardsProps {
   hoursPerDay: number
   masteryReviewLine: string
   readAloudBook: string
+  /** Sunday-start of the planning week; drives the "Week of …" header and each
+   *  day card's concrete date (FEAT-112). */
+  weekStart: string
   snapshot?: SkillSnapshot | null
   onToggleItem: (dayIndex: number, itemId: string) => void
   onGenerateActivity?: (item: DraftPlanItem) => void
@@ -24,6 +28,7 @@ export default function PlanDayCards({
   draft,
   hoursPerDay,
   masteryReviewLine,
+  weekStart,
   snapshot,
   onToggleItem,
   onGenerateActivity,
@@ -34,6 +39,7 @@ export default function PlanDayCards({
   onUpdateTime,
   onAddWatchItem,
 }: PlanDayCardsProps) {
+  const weekLabel = formatPlanningWeekLabel(weekStart)
   return (
     <Box sx={{
       border: '1px solid',
@@ -42,11 +48,21 @@ export default function PlanDayCards({
       bgcolor: 'background.paper',
       p: 2,
     }}>
-      <Typography variant="h6" gutterBottom>Your Week Plan</Typography>
+      <Typography variant="h6" gutterBottom={!weekLabel}>Your Week Plan</Typography>
+      {weekLabel && (
+        <Typography
+          variant="subtitle1"
+          color="primary"
+          sx={{ fontWeight: 700, mb: 1.5 }}
+        >
+          {weekLabel}
+        </Typography>
+      )}
       <PlanPreviewCard
         plan={draft}
         hoursPerDay={hoursPerDay}
         masteryReviewLine={masteryReviewLine}
+        weekStart={weekStart}
         snapshot={snapshot ?? null}
         onToggleItem={onToggleItem}
         onGenerateActivity={!applied ? onGenerateActivity : undefined}
