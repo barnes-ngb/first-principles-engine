@@ -122,6 +122,22 @@ describe('getPlanningWeekRange', () => {
     expect(range.start).toBe('2025-12-28') // next Sunday
     expect(range.end).toBe('2026-01-03') // Saturday in January
   })
+
+  it('forward-shift invariant: the derived week is NEVER entirely in the past', () => {
+    // Sweep a full week of "now" values (each weekday) and confirm the derived
+    // planning week's Friday is always today-or-future — this is what the
+    // Part 4 forward-shift relies on (the shifted target is always applicable).
+    const pad = (n: number) => String(n).padStart(2, '0')
+    for (let day = 13; day <= 26; day++) {
+      const now = new Date(2026, 6, day, 12, 0, 0) // noon local, Jul 13–26 2026
+      const todayKey = `2026-07-${pad(day)}`
+      const range = getPlanningWeekRange(now)
+      const friday = new Date(range.start + 'T00:00:00')
+      friday.setDate(friday.getDate() + 5)
+      const fridayKey = `${friday.getFullYear()}-${pad(friday.getMonth() + 1)}-${pad(friday.getDate())}`
+      expect(fridayKey >= todayKey).toBe(true)
+    }
+  })
 })
 
 describe('lastCompletedWeekKey', () => {

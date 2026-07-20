@@ -129,6 +129,22 @@ export function formatPlanningWeekLabel(weekStart: string): string {
   return `Week of ${mondayLabel}${separator}${fridayLabel}`
 }
 
+/**
+ * FEAT-112 apply backstop: is the Mon–Fri body of this planning week entirely
+ * in the past relative to `todayKey`? True only when even Friday — the last
+ * school day — is before today, i.e. applying would write the whole plan to
+ * days that have already gone by (the stale-tab case the live memo is meant to
+ * prevent; this is the belt-and-suspenders). Mid-week planning — some earlier
+ * days past but Friday today-or-future — is deliberately NOT flagged, so
+ * re-planning the rest of an in-progress week is never blocked. An unparseable
+ * start returns `false` (never a false block).
+ */
+export function isPlanningWeekPast(weekStart: string, todayKey: string): boolean {
+  if (!parseDateYmd(weekStart)) return false
+  const friday = dateKeyForDayPlan(weekStart, 'Friday')
+  return friday < todayKey
+}
+
 let _nextId = 1
 export function generateItemId(): string {
   return `ci_${Date.now()}_${_nextId++}`
