@@ -88,6 +88,7 @@ import {
   collectExistingChapterPool,
 } from '../today/applyChapterPoolForChild'
 import { dayLogDocId } from '../today/daylog.model'
+import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
@@ -116,6 +117,7 @@ import PlannerCompactSetup from './PlannerCompactSetup'
 import PlannerChatDrawer from './PlannerChatDrawer'
 import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
+import StickyApplyBar from './StickyApplyBar'
 import WatchLibraryPicker from '../watch/WatchLibraryPicker'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { clonePlanWithAdvancedLessons } from './repeatWeek.logic'
@@ -247,6 +249,10 @@ export default function PlannerChatPage() {
   // showPhotos state removed — photo upload now lives in setup phase accordion
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [applied, setApplied] = useState(false)
+  // FEAT-111 P3: true once the parent edits the draft after generation (add a
+  // video, remove/move an item, retime) — drives the "Plan changed — apply to
+  // save" hint in the sticky apply bar. Cleared on (re)generate and on apply.
+  const [planDirty, setPlanDirty] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' | 'warning'; action?: { label: string; onClick: () => void } } | null>(null)
 
   // Week plan state (theme/virtue/scripture/heartQuestion)
@@ -1745,6 +1751,7 @@ Generate a plan for Monday through Friday.`.trim()
       }),
     }
     setCurrentDraft(updated)
+    setPlanDirty(true)
   }, [currentDraft])
 
   const handleMoveItem = useCallback((dayIndex: number, itemIndex: number, direction: -1 | 1) => {
@@ -1762,6 +1769,7 @@ Generate a plan for Monday through Friday.`.trim()
       }),
     }
     setCurrentDraft(updated)
+    setPlanDirty(true)
   }, [currentDraft])
 
   // Watch Vehicle (FEAT-104): plan a curated video onto a day by picking from
@@ -1795,6 +1803,7 @@ Generate a plan for Monday through Friday.`.trim()
         i === dayIndex ? { ...day, items: [...day.items, newItem] } : day,
       ),
     })
+    setPlanDirty(true)
   }, [currentDraft])
 
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
@@ -1808,6 +1817,7 @@ Generate a plan for Monday through Friday.`.trim()
       }),
     }
     setCurrentDraft(updated)
+    setPlanDirty(true)
   }, [currentDraft])
 
   const handleUpdateTime = useCallback((dayIndex: number, itemIndex: number, newMinutes: number) => {
@@ -1824,6 +1834,7 @@ Generate a plan for Monday through Friday.`.trim()
       }),
     }
     setCurrentDraft(updated)
+    setPlanDirty(true)
   }, [currentDraft])
 
   // Map SubjectBucket to activity type for the generate Cloud Function
@@ -2011,13 +2022,13 @@ Generate a plan for Monday through Friday.`.trim()
 
         if (dayLogSnap.exists()) {
           const existing = dayLogSnap.data()
-          // Replace planner-generated items, keep manually-added ones
-          const existingChecklist = (existing.checklist ?? []).filter(
-            (item: ChecklistItem) => item.source === 'manual'
-          )
-          const existingBlocks = (existing.blocks ?? []).filter(
-            (block: DayBlock) => block.source === 'manual'
-          )
+          // Applied plan is authoritative for the days it covers (owner decision
+          // 2026-07-19). Keep completed work (+ its minutes/evidence) and manual
+          // items, DROP stale incomplete rolled-over residue, then append the
+          // fresh planned items. The reset never touches completed work or logged
+          // minutes — see `applyReset.ts` (HARD CONSTRAINT).
+          const existingChecklist = retainChecklistForApply(existing.checklist ?? [])
+          const existingBlocks = retainBlocksForApply(existing.blocks ?? [])
           await setDoc(dayLogRef, {
             ...existing,
             checklist: [...existingChecklist, ...checklist],
@@ -2049,6 +2060,7 @@ Generate a plan for Monday through Friday.`.trim()
       const updatedMessages = [...messages, appliedMsg]
       setMessages(updatedMessages)
       setApplied(true)
+      setPlanDirty(false) // the plan is now saved to the days — no pending edits
 
       void persistConversation({
         status: PlannerConversationStatus.Applied,
@@ -2656,21 +2668,28 @@ ${dayPrompts}`
           )}
 
           {phase === 'review' && currentDraft && (
-            <PlanDayCards
-              draft={currentDraft}
-              hoursPerDay={hoursPerDay}
-              masteryReviewLine={masteryReviewLine}
-              readAloudBook={readAloudBook}
-              snapshot={snapshot}
-              onToggleItem={handleToggleItem}
-              onGenerateActivity={handleGenerateActivity}
-              generatingItemId={generatingItemId}
-              applied={applied}
-              onMoveItem={handleMoveItem}
-              onRemoveItem={handleRemoveItem}
-              onUpdateTime={handleUpdateTime}
-              onAddWatchItem={(dayIndex) => setWatchPickerDay(dayIndex)}
-            />
+            <Box>
+              <PlanDayCards
+                draft={currentDraft}
+                hoursPerDay={hoursPerDay}
+                masteryReviewLine={masteryReviewLine}
+                readAloudBook={readAloudBook}
+                snapshot={snapshot}
+                onToggleItem={handleToggleItem}
+                onGenerateActivity={handleGenerateActivity}
+                generatingItemId={generatingItemId}
+                applied={applied}
+                onMoveItem={handleMoveItem}
+                onRemoveItem={handleRemoveItem}
+                onUpdateTime={handleUpdateTime}
+                onAddWatchItem={(dayIndex) => setWatchPickerDay(dayIndex)}
+              />
+
+              {/* FEAT-111 P3: sticky/floating Apply bar — pinned to the viewport
+                  bottom while the seven day cards scroll above it, so Apply is
+                  reachable on a phone without scrolling past every card. */}
+              <StickyApplyBar planDirty={planDirty} onApply={handleApplyPlan} />
+            </Box>
           )}
 
           {phase === 'active' && (
@@ -2730,26 +2749,17 @@ ${dayPrompts}`
               </Typography>
               <QuickSuggestionButtons onSelect={handleQuickSuggestion} visible />
 
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                <Button
-                  variant="contained"
-                  color="success"
-                  size="large"
-                  onClick={handleApplyPlan}
-                  fullWidth
-                >
-                  Apply This Week&apos;s Plan
-                </Button>
-                <Button
-                  variant="outlined"
-                  size="large"
-                  onClick={handlePrintWeekMaterials}
-                  disabled={printingMaterials || aiLoading}
-                  fullWidth
-                >
-                  {printingMaterials ? 'Generating print packet...' : 'Print Week Materials'}
-                </Button>
-              </Stack>
+              {/* Apply now lives in the sticky bar above the day cards (FEAT-111
+                  P3); this row keeps the secondary Print action. */}
+              <Button
+                variant="outlined"
+                size="large"
+                onClick={handlePrintWeekMaterials}
+                disabled={printingMaterials || aiLoading}
+                fullWidth
+              >
+                {printingMaterials ? 'Generating print packet...' : 'Print Week Materials'}
+              </Button>
             </>
           )}
 
