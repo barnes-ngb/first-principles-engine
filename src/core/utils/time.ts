@@ -21,6 +21,42 @@ export const getWeekRange = (date: Date = new Date(), weekStartsOn = 0): WeekRan
 }
 
 /**
+ * Sunday-start week range for *planning the school week*.
+ *
+ * The school body is Monday–Friday (`WEEK_DAYS` in `chatPlanner.logic.ts`), but
+ * `getWeekRange` returns the Sun–Sat week that *contains* `now`. From Saturday
+ * onward the Mon–Fri body of that week is already in the past, so planning on a
+ * Saturday against the plain `getWeekRange` start targets days that have gone by
+ * (the FEAT-112 bug: a weekend plan landed on the previous Mon–Fri).
+ *
+ * The rule, in one sentence: **plan the Mon–Fri of the Sun–Sat week containing
+ * today, except on Saturday — when that block has fully passed — roll forward
+ * to the next week, so weekend planning always targets the upcoming school
+ * week.** (Sunday needs no roll: `getWeekRange(Sunday)` already starts on that
+ * Sunday, so its Mon–Fri is tomorrow-onward. Monday–Friday resolve to the
+ * in-progress week, unchanged.)
+ *
+ * This is deliberately planning-specific and does **not** touch `getWeekRange`,
+ * which stays the shared Sun–Sat helper for hours / compliance / records week
+ * math. Only the planner consumes this.
+ */
+export const getPlanningWeekRange = (now: Date = new Date()): WeekRange => {
+  const base = getWeekRange(now) // Sun–Sat week containing `now`
+  // Sun (0) already resolves to the upcoming Mon–Fri; Mon–Fri (1–5) to the
+  // in-progress week. Only Saturday (6) needs rolling forward a week.
+  if (now.getDay() !== 6) return base
+
+  const start = new Date(base.start + 'T00:00:00')
+  start.setDate(start.getDate() + 7)
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+  return {
+    start: formatDateYmd(start),
+    end: formatDateYmd(end),
+  }
+}
+
+/**
  * Return the Sunday-start key of the most recently completed Sun–Sat week.
  * Mirrors `lastWeekKey` in `functions/src/ai/evaluate.ts` so the weekly
  * review page and the scheduled Cloud Function agree on which week's doc

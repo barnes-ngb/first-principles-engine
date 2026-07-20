@@ -79,9 +79,11 @@ import {
   UserProfile,
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
-import { formatDateYmd } from '../../core/utils/format'
+import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
-import { getWeekRange } from '../engine/engine.logic'
+import { getPlanningWeekRange } from '../../core/utils/time'
+import { todayKey } from '../../core/utils/dateKey'
+import { useTodayKey } from '../../core/hooks/useTodayKey'
 import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import {
   applyChapterPoolToAll,
@@ -95,6 +97,8 @@ import {
   buildPlannerPrompt,
   dateKeyForDayPlan,
   ensureEvaluationItems,
+  formatPlanningWeekLabel,
+  isPlanningWeekPast,
   fillMissingDaysFromRoutine,
   generateDraftPlanFromInputs,
   generateItemId,
@@ -232,7 +236,16 @@ export default function PlannerChatPage() {
   // Curation is a parent job — the inline vet-in + "Manage library" affordances
   // are gated to parents, exactly like the Settings Watch Library tab (FEAT-107).
   const isParent = profile === UserProfile.Parents
-  const weekRange = useMemo(() => getWeekRange(new Date()), [])
+  // Keyed to the live day (FEAT-112): a phone-first tab is rarely closed, so the
+  // planning week must not freeze at mount. `useTodayKey` refreshes on focus /
+  // visibility / minute-tick, and `getPlanningWeekRange` rolls a Saturday
+  // forward so weekend planning always targets the UPCOMING Mon–Fri, not the
+  // week that already passed.
+  const todayKeyLive = useTodayKey()
+  const weekRange = useMemo(
+    () => getPlanningWeekRange(parseDateYmd(todayKeyLive) ?? new Date()),
+    [todayKeyLive],
+  )
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
@@ -253,6 +266,11 @@ export default function PlannerChatPage() {
   // video, remove/move an item, retime) — drives the "Plan changed — apply to
   // save" hint in the sticky apply bar. Cleared on (re)generate and on apply.
   const [planDirty, setPlanDirty] = useState(false)
+  // FEAT-112 P4: set when Apply is blocked because the target week is entirely
+  // in the past; drives the non-blaming "week already passed" dialog + the
+  // one-tap forward-shift. `attempted` = the past week key, `shifted` = the
+  // correct upcoming planning-week start to apply to instead.
+  const [pastWeekBlock, setPastWeekBlock] = useState<{ attempted: string; shifted: string } | null>(null)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' | 'info' | 'warning'; action?: { label: string; onClick: () => void } } | null>(null)
 
   // Week plan state (theme/virtue/scripture/heartQuestion)
@@ -1848,8 +1866,23 @@ Generate a plan for Monday through Friday.`.trim()
   }, [])
 
   // Apply plan to WeekPlan + DayLogs
-  const handleApplyPlan = useCallback(async () => {
+  const handleApplyPlan = useCallback(async (overrideWeekStart?: string) => {
     if (!activeChildId || !currentDraft) return
+
+    // FEAT-112 backstop: never silently write a plan to a week that's already
+    // passed. The live weekRange memo should already target the upcoming week,
+    // but a stale tab (or a focus event that never fired) could still carry a
+    // past week key here. If the whole Mon–Fri body is behind us, stop and offer
+    // a one-tap forward-shift to the correct upcoming week instead of writing to
+    // dead dates. An explicit override (the forward-shift itself) skips the guard.
+    const effectiveWeekStart = overrideWeekStart ?? weekRange.start
+    if (!overrideWeekStart && isPlanningWeekPast(effectiveWeekStart, todayKey())) {
+      const shifted = getPlanningWeekRange(new Date()).start
+      setPastWeekBlock({ attempted: effectiveWeekStart, shifted })
+      return
+    }
+    setPastWeekBlock(null)
+
     try {
       // Step 1: Auto-generate lesson cards for non-app-block accepted items
       // Note: category is optional and often unset, so we include items that are
@@ -1924,7 +1957,7 @@ Generate a plan for Monday through Friday.`.trim()
       setSnack({ text: 'Applying plan...', severity: 'info' })
 
       // Step 2: Write WeekPlan update
-      const weekRef = doc(weeksCollection(familyId), weekRange.start)
+      const weekRef = doc(weeksCollection(familyId), effectiveWeekStart)
       const weekSnap = await getDoc(weekRef)
       if (weekSnap.exists()) {
         const existing = weekSnap.data()
@@ -1969,7 +2002,7 @@ Generate a plan for Monday through Friday.`.trim()
         if (dayItems.length === 0) continue
         if (!WEEK_DAYS.includes(dayPlan.day as typeof WEEK_DAYS[number])) continue
 
-        const dateKey = dateKeyForDayPlan(weekRange.start, dayPlan.day as typeof WEEK_DAYS[number])
+        const dateKey = dateKeyForDayPlan(effectiveWeekStart, dayPlan.day as typeof WEEK_DAYS[number])
 
         const docId = dayLogDocId(dateKey, activeChildId)
         const dayLogRef = doc(daysCollection(familyId), docId)
@@ -2600,7 +2633,7 @@ ${dayPrompts}`
           {phase === 'setup' && hasPriorPlan === true && (
             <PlannerCompactSetup
               childName={activeChild?.name ?? 'your child'}
-              weekRangeLabel={`${weekRange.start} → ${weekRange.end}`}
+              weekRangeLabel={`Planning ${formatPlanningWeekLabel(weekRange.start)}`}
               weekEnergy={weekEnergy}
               onWeekEnergyChange={setWeekEnergy}
               hoursPerDay={hoursPerDay}
@@ -2674,6 +2707,7 @@ ${dayPrompts}`
                 hoursPerDay={hoursPerDay}
                 masteryReviewLine={masteryReviewLine}
                 readAloudBook={readAloudBook}
+                weekStart={weekRange.start}
                 snapshot={snapshot}
                 onToggleItem={handleToggleItem}
                 onGenerateActivity={handleGenerateActivity}
@@ -2688,7 +2722,7 @@ ${dayPrompts}`
               {/* FEAT-111 P3: sticky/floating Apply bar — pinned to the viewport
                   bottom while the seven day cards scroll above it, so Apply is
                   reachable on a phone without scrolling past every card. */}
-              <StickyApplyBar planDirty={planDirty} onApply={handleApplyPlan} />
+              <StickyApplyBar planDirty={planDirty} onApply={() => handleApplyPlan()} />
             </Box>
           )}
 
@@ -2801,6 +2835,33 @@ ${dayPrompts}`
         appBlocks={filteredAppBlocks}
         snapshot={snapshot}
       />
+
+      {/* FEAT-112 P4: past-week apply backstop. Non-blaming; offers a one-tap
+          forward-shift to the correct upcoming week rather than writing to
+          dates that have already passed. */}
+      <Dialog open={pastWeekBlock !== null} onClose={() => setPastWeekBlock(null)}>
+        <DialogTitle>Plan the upcoming week?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {pastWeekBlock
+              ? `This plan targets ${formatPlanningWeekLabel(pastWeekBlock.attempted)}, which has already passed. Want to apply it to ${formatPlanningWeekLabel(pastWeekBlock.shifted)} instead?`
+              : ''}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPastWeekBlock(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              const shifted = pastWeekBlock?.shifted
+              setPastWeekBlock(null)
+              if (shifted) void handleApplyPlan(shifted)
+            }}
+          >
+            {pastWeekBlock ? `Apply to ${formatPlanningWeekLabel(pastWeekBlock.shifted)}` : 'Apply to upcoming week'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snack !== null}
