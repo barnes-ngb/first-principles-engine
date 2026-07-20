@@ -1,0 +1,98 @@
+name: Enable Firestore PITR
+
+# One-time, owner-run enabler for Firestore Point-in-Time Recovery (7-day
+# window) on the default database. PITR is the safety net for the one gap that
+# in-app regeneration cannot cover: a `days` doc that is destroyed outright is
+# the irrecoverable source of truth (hours are derived + regenerable; day logs
+# are not). Recommended by the 2026-07-20 P0 audit (FEAT-113 / DATA-17).
+#
+# The owner is phone-only and cannot use the Firebase Console, so this runs in
+# CI using the SAME deploy credential the main deploy already uses
+# (secrets.FIREBASE_SERVICE_ACCOUNT) — mirroring create-shop-site.yml.
+#
+# HOW TO RUN (owner, from the GitHub mobile app):
+#   Actions → "Enable Firestore PITR" → Run workflow.
+# Read the log. If it reports a permission error, ONE IAM grant fixes it (the
+# log names the exact role: Cloud Datastore Owner / roles/datastore.owner).
+# Re-running after PITR is already on is a no-op ("already enabled" → success),
+# so it is safe to run more than once.
+#
+# PITR here only ENABLES recovery; it does not restore anything. Actual recovery
+# (should a day ever be destroyed) is a separate, deliberate console/CLI action.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  enable-pitr:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      # Same auth path as deploy.yml / create-shop-site.yml —
+      # google-github-actions/auth@v2 writes the service-account key to disk and
+      # exports GOOGLE_APPLICATION_CREDENTIALS.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Enable Point-in-Time Recovery on the default database
+        run: |
+          set -uo pipefail
+          PROJECT="barneshome-3dfbb"
+          DB="(default)"
+
+          echo "──────────────────────────────────────────────"
+          echo "Checking current PITR state for $PROJECT / $DB …"
+
+          state="$(gcloud firestore databases describe \
+            --database="$DB" --project="$PROJECT" \
+            --format='value(pointInTimeRecoveryEnablement)' 2>&1)" && rc=0 || rc=$?
+
+          if [ "$rc" -ne 0 ]; then
+            echo "$state"
+            if echo "$state" | grep -qiE "permission|forbidden|caller does not have|PERMISSION_DENIED|not have"; then
+              echo "::error::Permission denied reading the Firestore database on $PROJECT."
+              echo "::error::Grant the deploy service account 'Cloud Datastore Owner' (roles/datastore.owner), then re-run this workflow."
+              exit 1
+            fi
+            echo "::error::Could not read the Firestore database state (rc=$rc). See the message above."
+            exit 1
+          fi
+
+          echo "Current PITR state: $state"
+
+          # Idempotent: already on → success, no change.
+          if echo "$state" | grep -qi "ENABLED"; then
+            echo "✅ PITR is already enabled — nothing to do."
+            echo "══════════════════════════════════════════════"
+            echo "FIRESTORE PITR: ENABLED (7-day recovery window)"
+            exit 0
+          fi
+
+          echo "Enabling PITR …"
+          out="$(gcloud firestore databases update \
+            --database="$DB" --project="$PROJECT" \
+            --enable-pitr 2>&1)" && urc=0 || urc=$?
+          echo "$out"
+
+          if [ "$urc" -ne 0 ]; then
+            if echo "$out" | grep -qiE "permission|forbidden|caller does not have|PERMISSION_DENIED|not have"; then
+              echo "::error::Permission denied enabling PITR on $PROJECT."
+              echo "::error::Grant the deploy service account 'Cloud Datastore Owner' (roles/datastore.owner) — it needs the 'datastore.databases.update' permission — then re-run this workflow."
+              exit 1
+            fi
+            echo "::error::Failed to enable PITR (rc=$urc). See the message above."
+            exit 1
+          fi
+
+          echo "══════════════════════════════════════════════"
+          echo "FIRESTORE PITR: ENABLED (7-day recovery window)"
+          echo "Destroyed days docs can now be recovered within 7 days via a"
+          echo "deliberate restore (console or 'gcloud firestore databases restore')."
