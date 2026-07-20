@@ -7,6 +7,7 @@ import type {
   DraftWeeklyPlan,
   SkillSnapshot,
   SkipSuggestion,
+  WeekPlan,
 } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
@@ -143,6 +144,41 @@ export function isPlanningWeekPast(weekStart: string, todayKey: string): boolean
   if (!parseDateYmd(weekStart)) return false
   const friday = dateKeyForDayPlan(weekStart, 'Friday')
   return friday < todayKey
+}
+
+/**
+ * FEAT-112 follow-up: build a fresh `WeekPlan` for a forward-shifted apply that
+ * targets a week whose doc the page never auto-seeded (only the live
+ * `weekRange.start` doc is created by the planner's `weekPlanRef` effect). Mirrors
+ * that effect's default shape and stamps the applied child's goals; siblings get
+ * empty goal lists, exactly like the seed. `endDate` is the Saturday six days
+ * after the Sunday-based `weekStart`.
+ */
+export function buildShiftedWeekPlan(
+  weekStart: string,
+  children: { id: string }[],
+  activeChildId: string,
+  planGoals: string[],
+  readAloudBookId?: string,
+): WeekPlan {
+  const end = parseDateYmd(weekStart)
+  if (end) end.setDate(end.getDate() + 6)
+  return {
+    startDate: weekStart,
+    endDate: end ? formatDateYmd(end) : weekStart,
+    theme: '',
+    virtue: '',
+    scriptureRef: '',
+    heartQuestion: '',
+    tracks: [],
+    flywheelPlan: '',
+    buildLab: { title: '', materials: [], steps: [] },
+    childGoals: children.map((c) => ({
+      childId: c.id,
+      goals: c.id === activeChildId ? planGoals : [],
+    })),
+    ...(readAloudBookId ? { readAloudBookId } : {}),
+  }
 }
 
 let _nextId = 1
