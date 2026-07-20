@@ -91,6 +91,7 @@ import {
 } from '../today/applyChapterPoolForChild'
 import { dayLogDocId } from '../today/daylog.model'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
+import { setDayLogGuarded, updateDayLogGuarded } from '../today/dayWriteGuard'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
@@ -2093,13 +2094,17 @@ Generate a plan for Monday through Friday.`.trim()
           // minutes — see `applyReset.ts` (HARD CONSTRAINT).
           const existingChecklist = retainChecklistForApply(existing.checklist ?? [])
           const existingBlocks = retainBlocksForApply(existing.blocks ?? [])
-          await setDoc(dayLogRef, {
-            ...existing,
-            checklist: [...existingChecklist, ...checklist],
-            blocks: [...existingBlocks, ...blocks],
-            dailyBudgetMinutes,
-            updatedAt: new Date().toISOString(),
-          })
+          await setDayLogGuarded(
+            dayLogRef,
+            {
+              ...existing,
+              checklist: [...existingChecklist, ...checklist],
+              blocks: [...existingBlocks, ...blocks],
+              dailyBudgetMinutes,
+              updatedAt: new Date().toISOString(),
+            },
+            'apply-plan',
+          )
         } else {
           const newDayLog: DayLog = {
             childId: activeChildId,
@@ -2110,7 +2115,7 @@ Generate a plan for Monday through Friday.`.trim()
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }
-          await setDoc(dayLogRef, newDayLog)
+          await setDayLogGuarded(dayLogRef, newDayLog, 'apply-plan-new')
         }
       }
 
@@ -2551,14 +2556,19 @@ ${dayPrompts}`
           const existing = dayLogSnap.data()
           // Reuse the FEAT-111 apply-reset guards instead of a raw
           // `source === 'manual'` filter (which destroyed completed planner work
-          // and its logged minutes). Keep completed items (+ their minutes /
-          // evidence) and manual items; keep any block carrying logged
-          // actualMinutes. Only un-started planner residue is cleared — the
-          // feature's actual purpose. Never destroys completed work or logged
-          // hours — see `applyReset.ts` (HARD CONSTRAINT).
+          // and its logged minutes — the FEAT-113 P0 hotfix). Keep completed
+          // items (+ their minutes / evidence) and manual items; keep any block
+          // carrying logged actualMinutes. Only un-started planner residue is
+          // cleared — the feature's actual purpose. Routed through the FEAT-114
+          // preservation guard so a regression can't silently ship the old
+          // "manual-only" filter again — see `applyReset.ts` (HARD CONSTRAINT).
           const retainedChecklist = retainChecklistForApply(existing.checklist ?? [])
           const retainedBlocks = retainBlocksForApply(existing.blocks ?? [])
-          await updateDoc(dayLogRef, { checklist: retainedChecklist, blocks: retainedBlocks })
+          await updateDayLogGuarded(
+            dayLogRef,
+            { checklist: retainedChecklist, blocks: retainedBlocks },
+            'redo-plan',
+          )
         }
       }
 

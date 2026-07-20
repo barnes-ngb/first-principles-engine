@@ -328,6 +328,64 @@ export function findSilentCatches(content) {
   return out
 }
 
+/**
+ * Day-write routing invariant (DOC-09 / FEAT-114). Days
+ * (`families/{familyId}/days/{date}_{childId}`) are the irrecoverable source of
+ * truth; twice the same compliance-destroying filter shipped independently in a
+ * raw day write. Every day write must route through the single guarded writer
+ * module (`src/features/today/dayWriteGuard.ts`) — this check fails the build if
+ * a raw `setDoc`/`updateDoc`/`deleteDoc` targets the days collection anywhere
+ * else. Like the other DOC-09 invariants it's a deliberately coarse file-level
+ * heuristic: it flags a write verb applied to a ref built from `daysCollection(`
+ * or a raw `families/…/days` path (inline or via a same-file `const dayRef =`),
+ * so it can miss a ref threaded in from another module but catches every
+ * call-site shape the audit found.
+ *
+ * @returns {{ line: number, verb: string, snippet: string }[]}
+ */
+export function findUnroutedDayWrites(content) {
+  const out = []
+  // A ref that originates at the days collection: `daysCollection(` or a raw
+  // `db|firestore, `families/…/days…`` (backtick or quoted) path.
+  const ORIGIN = String.raw`(?:daysCollection\s*\(|(?:db|firestore)\s*,\s*[` + '`' + String.raw`'"]families\/[^` + '`' + String.raw`'"]*\/days)`
+  const WRITE = String.raw`\b(setDoc|updateDoc|deleteDoc)\s*\(`
+
+  const lineAt = (index) => content.slice(0, index).split(/\r?\n/).length
+  const snippetAt = (index) =>
+    content.slice(index, index + 90).split(/\r?\n/)[0].trim()
+
+  // 1) Inline: `setDoc(doc(daysCollection(...` / `deleteDoc(doc(db, `…/days`, id))`.
+  const inlineRe = new RegExp(WRITE + String.raw`\s*doc\(\s*` + ORIGIN, 'g')
+  let m
+  while ((m = inlineRe.exec(content)) !== null) {
+    out.push({ line: lineAt(m.index), verb: m[1], snippet: snippetAt(m.index) })
+  }
+
+  // 2) Via a same-file day-ref variable: collect `const/let X = doc(<origin>`,
+  //    then flag `setDoc(X` / `updateDoc(X` / `deleteDoc(X`.
+  const varRe = new RegExp(
+    String.raw`(?:const|let|var)\s+(\w+)\s*=\s*doc\(\s*` + ORIGIN,
+    'g',
+  )
+  const dayRefVars = new Set()
+  while ((m = varRe.exec(content)) !== null) dayRefVars.add(m[1])
+  for (const v of dayRefVars) {
+    const varWriteRe = new RegExp(WRITE + String.raw`\s*` + v + String.raw`\b`, 'g')
+    while ((m = varWriteRe.exec(content)) !== null) {
+      out.push({ line: lineAt(m.index), verb: m[1], snippet: snippetAt(m.index) })
+    }
+  }
+
+  // De-dupe by line+verb (inline + var rules can both fire on one statement).
+  const seen = new Set()
+  return out.filter((r) => {
+    const k = `${r.line}:${r.verb}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+}
+
 // ── Filesystem helpers (CLI only) ───────────────────────────────────────────
 
 function walkFiles(dir, filter, out = []) {
@@ -674,6 +732,48 @@ export function runChecks({ fix = false } = {}) {
   }
   if (silentByFile.length > 15) {
     log(paint(DIM, `        …and ${silentByFile.length - 15} more file(s)`))
+  }
+  log('')
+
+  // ── Check 10: day-write routing (HARD, FEAT-114) ──────────────────────────
+  // Every days write must route through the guarded writer module. A raw
+  // setDoc/updateDoc/deleteDoc on a days ref anywhere else is the drift that
+  // shipped the compliance-destroying filter twice (FEAT-111 + the P0 hotfix).
+  const DAY_GUARD_MODULE = 'src/features/today/dayWriteGuard.ts'
+  const dayWriteAllow = new Set(
+    (config.dayWriteAllow || []).map((r) => r.file),
+  )
+  const daySeenAllow = new Set()
+  const dayWriteProblems = []
+  for (const { file, body } of srcContents) {
+    if (file === DAY_GUARD_MODULE) continue // the sanctioned chokepoint
+    const hits = findUnroutedDayWrites(body)
+    if (hits.length === 0) continue
+    if (dayWriteAllow.has(file)) {
+      daySeenAllow.add(file)
+      continue
+    }
+    for (const h of hits) {
+      dayWriteProblems.push(
+        `${file}:${h.line} raw ${h.verb} on a days ref — route through ${DAY_GUARD_MODULE} (setDayLogGuarded / updateDayLogGuarded / mergeDayLogGuarded / deleteDayLogGuarded)`,
+      )
+    }
+  }
+  for (const r of config.dayWriteAllow || []) {
+    if (!daySeenAllow.has(r.file)) {
+      dayWriteProblems.push(
+        `stale allowlist entry: ${r.file} no longer contains a raw days write`,
+      )
+    }
+  }
+  if (dayWriteProblems.length === 0) {
+    log(paint(GREEN, `PASS  [day-write-routing] all days writes route through ${DAY_GUARD_MODULE}`))
+  } else {
+    log(paint(RED, `FAIL  [day-write-routing] unrouted days write(s):`))
+    for (const m of dayWriteProblems) {
+      log(`        ${m}`)
+      hard.push({ check: 'day-write-routing', message: m })
+    }
   }
   log('')
 

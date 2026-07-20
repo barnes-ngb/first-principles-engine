@@ -18,7 +18,6 @@ import {
 } from '@mui/material'
 import {
   collection,
-  deleteDoc,
   doc,
   getCountFromServer,
   getDoc,
@@ -40,8 +39,13 @@ import {
   bookProgressCollection,
   bookProgressDocId,
   chapterBooksCollection,
+  daysCollection,
   db,
 } from '../../core/firebase/firestore'
+import {
+  DayPreservationError,
+  deleteDayLogGuarded,
+} from '../today/dayWriteGuard'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { BookProgress, ChapterBook, ChapterQuestionPoolItem } from '../../core/types'
 import { SEED_CHAPTER_BOOKS } from '../../core/data/chapterBooks'
@@ -58,6 +62,10 @@ type SundayDoc = {
   date: string
   childId?: string
   blockCount: number
+  /** Completed checklist items — irrecoverable evidence a delete would destroy. */
+  completedCount: number
+  /** Sum of logged block actualMinutes — compliance minutes a delete would destroy. */
+  minutesLogged: number
 }
 
 type StatusMsg = {
@@ -140,11 +148,21 @@ export default function DevAdminTab() {
         const parsed = parseDateYmd(dateStr)
         if (parsed && parsed.getDay() === 0) {
           const data = d.data() as Record<string, unknown>
+          const blocks = Array.isArray(data.blocks) ? data.blocks : []
+          const checklist = Array.isArray(data.checklist) ? data.checklist : []
           sundays.push({
             id: d.id,
             date: dateStr,
             childId: (data.childId as string) || undefined,
-            blockCount: Array.isArray(data.blocks) ? data.blocks.length : 0,
+            blockCount: blocks.length,
+            completedCount: checklist.filter(
+              (i: Record<string, unknown>) => i?.completed,
+            ).length,
+            minutesLogged: blocks.reduce(
+              (sum: number, b: Record<string, unknown>) =>
+                sum + (typeof b?.actualMinutes === 'number' ? b.actualMinutes : 0),
+              0,
+            ),
           })
         }
       }
@@ -171,24 +189,63 @@ export default function DevAdminTab() {
     })
   }
 
-  const deleteDocs = async (ids: string[]) => {
+  // Ids blocked by the preservation guard because they still hold completed
+  // work / logged minutes — deleting them needs an explicit force confirm.
+  const [forceCandidates, setForceCandidates] = useState<string[]>([])
+
+  const deleteDocs = async (ids: string[], opts: { force?: boolean } = {}) => {
     setDeleting(true)
     setScanStatus(null)
     let deleted = 0
+    const blocked: string[] = []
     for (const id of ids) {
       try {
-        await deleteDoc(doc(db, `families/${familyId}/days`, id))
+        // Route deletes through the guard (FEAT-114): it refuses to silently
+        // destroy a day that still holds completed work or logged minutes
+        // unless the human explicitly forces it below.
+        await deleteDayLogGuarded(doc(daysCollection(familyId), id), `sunday-sweep:${id}`, {
+          force: opts.force,
+        })
         deleted++
       } catch (err) {
-        console.error(`Failed to delete ${id}`, err)
+        if (err instanceof DayPreservationError) {
+          blocked.push(id)
+        } else {
+          console.error(`Failed to delete ${id}`, err)
+        }
       }
     }
-    setScanStatus({
-      severity: 'success',
-      text: `Deleted ${deleted} of ${ids.length} doc(s).`,
+
+    const deletedIds = ids.filter((id) => !blocked.includes(id))
+    setSundayDocs((prev) => prev.filter((d) => !deletedIds.includes(d.id)))
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      deletedIds.forEach((id) => next.delete(id))
+      return next
     })
-    setSundayDocs((prev) => prev.filter((d) => !ids.includes(d.id)))
-    setSelectedIds(new Set())
+
+    if (blocked.length > 0) {
+      const totals = sundayDocs
+        .filter((d) => blocked.includes(d.id))
+        .reduce(
+          (acc, d) => ({
+            items: acc.items + d.completedCount,
+            minutes: acc.minutes + d.minutesLogged,
+          }),
+          { items: 0, minutes: 0 },
+        )
+      setForceCandidates(blocked)
+      setScanStatus({
+        severity: 'info',
+        text: `Deleted ${deleted}. ${blocked.length} doc(s) still hold completed work (${totals.items} item(s), ${totals.minutes}m logged) — confirm below to delete anyway.`,
+      })
+    } else {
+      setForceCandidates([])
+      setScanStatus({
+        severity: 'success',
+        text: `Deleted ${deleted} of ${ids.length} doc(s).`,
+      })
+    }
     setDeleting(false)
   }
 
@@ -196,6 +253,11 @@ export default function DevAdminTab() {
   const handleDeleteAll = () => {
     setConfirmDeleteAll(false)
     deleteDocs(sundayDocs.map((d) => d.id))
+  }
+  const handleForceDelete = () => {
+    const ids = forceCandidates
+    setForceCandidates([])
+    deleteDocs(ids, { force: true })
   }
 
   // ── Section C: Current Week Sanity Check ────────────────────────
@@ -588,6 +650,16 @@ export default function DevAdminTab() {
                   <Typography variant="body2" component="span">
                     <code>{d.id}</code> &mdash; {d.date}
                     {d.childId ? ` (${d.childId})` : ''}, {d.blockCount} block(s)
+                    {(d.completedCount > 0 || d.minutesLogged > 0) && (
+                      <Typography
+                        component="span"
+                        variant="body2"
+                        color="warning.main"
+                        sx={{ fontWeight: 600 }}
+                      >
+                        {' '}&mdash; holds {d.completedCount} completed item(s), {d.minutesLogged}m logged
+                      </Typography>
+                    )}
                   </Typography>
                 }
               />
@@ -629,6 +701,24 @@ export default function DevAdminTab() {
           <Button onClick={() => setConfirmDeleteAll(false)}>Cancel</Button>
           <Button onClick={handleDeleteAll} color="error" variant="contained">
             Delete All
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Force-delete confirm — only for docs the guard blocked (hold real work) */}
+      <Dialog open={forceCandidates.length > 0} onClose={() => setForceCandidates([])}>
+        <DialogTitle>These days hold completed work</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {forceCandidates.length} of the selected Sunday DayLog doc(s) still contain
+            completed items or logged minutes — the irrecoverable record of school that
+            happened. Deleting them destroys that record permanently. Delete anyway?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setForceCandidates([])}>Keep them</Button>
+          <Button onClick={handleForceDelete} color="error" variant="contained">
+            Delete anyway ({forceCandidates.length})
           </Button>
         </DialogActions>
       </Dialog>
