@@ -23,6 +23,7 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { createEmptyPage, generateImageId } from './bookTypes'
 import { cleanSketchBackground } from './cleanSketch'
+import { moveInStack, normalizedStackZ } from './draggableImageUtils'
 
 interface UseBookResult {
   book: Book | null
@@ -44,6 +45,10 @@ interface UseBookResult {
    *  Returns the storage URL + path so callers can also save it to the library. */
   addStickerFileToPage: (pageId: string, file: File, label: string) => Promise<{ url: string; storagePath: string } | undefined>
   updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
+  /** Move one image a single step in the layer stack ('up' = toward the top).
+   *  Normalizes every image on the page to a contiguous zIndex so the order is
+   *  explicit and survives reload. */
+  reorderImage: (pageId: string, imageId: string, direction: 'up' | 'down') => void
   /** Add a hand-drawn sketch photo to a page. Returns the image ID and storage path for later enhancement. */
   addSketchToPage: (pageId: string, file: File) => Promise<{ imageId: string; storagePath: string } | undefined>
   /** Update a sketch PageImage after AI enhancement resolves. */
@@ -470,6 +475,35 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [applyUpdate],
   )
 
+  const reorderImage = useCallback(
+    (pageId: string, imageId: string, direction: 'up' | 'down') => {
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) => {
+          if (p.id !== pageId) return p
+          const newOrder = moveInStack(p.images, imageId, direction)
+          const zById = normalizedStackZ(newOrder)
+          return {
+            ...p,
+            images: p.images.map((img) => ({
+              ...img,
+              position: {
+                x: img.position?.x ?? 0,
+                y: img.position?.y ?? 0,
+                width: img.position?.width ?? 100,
+                height: img.position?.height ?? 100,
+                ...(img.position ?? {}),
+                zIndex: zById[img.id] ?? img.position?.zIndex ?? 0,
+              },
+            })),
+            updatedAt: new Date().toISOString(),
+          }
+        }),
+      }))
+    },
+    [applyUpdate],
+  )
+
   const addSketchToPage = useCallback(
     async (pageId: string, file: File): Promise<{ imageId: string; storagePath: string } | undefined> => {
       if (!familyId || !bookId) return undefined
@@ -709,6 +743,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     addStickerToPage,
     addStickerFileToPage,
     updateImagePosition,
+    reorderImage,
     addSketchToPage,
     applySketchEnhancement,
     pickSketchVersion,

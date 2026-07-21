@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { clampPosition } from './draggableImageUtils'
+import {
+  clampPosition,
+  scaleAboutCenter,
+  stackOrder,
+  stackOrderTopFirst,
+  moveInStack,
+  normalizedStackZ,
+  type StackImage,
+} from './draggableImageUtils'
 
 // ── clampPosition ──────────────────────────────────────────────
 
@@ -150,5 +158,172 @@ describe('percentage <-> pixel conversion', () => {
 
   it('position at 200px on 800px canvas = 25%', () => {
     expect(pxToPercent(200, 800)).toBeCloseTo(25)
+  })
+})
+
+// ── scale about center (Step 3 invariant) ──────────────────────
+
+/** Center of a box in container %. */
+function centerOf(pos: { x: number; y: number; width: number; height: number }) {
+  return { cx: pos.x + pos.width / 2, cy: pos.y + pos.height / 2 }
+}
+
+describe('scaleAboutCenter', () => {
+  it('keeps the center fixed when growing (center before === center after)', () => {
+    const pos = { x: 20, y: 30, width: 40, height: 20 }
+    const before = centerOf(pos)
+    const { x, y } = scaleAboutCenter(pos, 60, 30)
+    const after = centerOf({ x, y, width: 60, height: 30 })
+    expect(after.cx).toBeCloseTo(before.cx)
+    expect(after.cy).toBeCloseTo(before.cy)
+  })
+
+  it('keeps the center fixed when shrinking', () => {
+    const pos = { x: 10, y: 10, width: 80, height: 80 }
+    const before = centerOf(pos)
+    const { x, y } = scaleAboutCenter(pos, 20, 20)
+    const after = centerOf({ x, y, width: 20, height: 20 })
+    expect(after.cx).toBeCloseTo(before.cx)
+    expect(after.cy).toBeCloseTo(before.cy)
+  })
+
+  it('does NOT behave like the old top-left-anchored resize (regression)', () => {
+    // Old behavior kept x,y fixed → center drifted toward bottom-right.
+    const pos = { x: 0, y: 0, width: 40, height: 40 }
+    const oldCenter = centerOf({ x: 0, y: 0, width: 80, height: 80 }) // top-left anchored
+    const { x, y } = scaleAboutCenter(pos, 80, 80)
+    const newCenter = centerOf({ x, y, width: 80, height: 80 })
+    expect(newCenter.cx).not.toBeCloseTo(oldCenter.cx)
+    expect(newCenter.cx).toBeCloseTo(20) // original center preserved
+  })
+
+  it('drives many scale steps without center drift', () => {
+    let pos = { x: 25, y: 25, width: 50, height: 50 }
+    const before = centerOf(pos)
+    for (const size of [30, 45, 60, 20, 55]) {
+      const { x, y } = scaleAboutCenter(pos, size, size)
+      pos = { x, y, width: size, height: size }
+    }
+    const after = centerOf(pos)
+    expect(after.cx).toBeCloseTo(before.cx)
+    expect(after.cy).toBeCloseTo(before.cy)
+  })
+})
+
+// ── stacking order + layer reorder (Steps 1 & 2) ───────────────
+
+function img(id: string, type: StackImage['type'], zIndex?: number): StackImage {
+  return { id, type, position: zIndex === undefined ? undefined : { zIndex } }
+}
+
+describe('stackOrder', () => {
+  it('legacy (no zIndex): backgrounds below stickers, in array order', () => {
+    const images = [
+      img('s1', 'sticker'),
+      img('bg', 'ai-generated'),
+      img('s2', 'sticker'),
+    ]
+    // bottom → top
+    expect(stackOrder(images).map((i) => i.id)).toEqual(['bg', 's1', 's2'])
+  })
+
+  it('honors explicit contiguous zIndex across types (cross-type ordering)', () => {
+    const images = [
+      img('bg', 'ai-generated', 2), // background lifted above stickers
+      img('s1', 'sticker', 0),
+      img('s2', 'sticker', 1),
+    ]
+    expect(stackOrder(images).map((i) => i.id)).toEqual(['s1', 's2', 'bg'])
+  })
+
+  it('newly added (unset) sticker floats to the top of a normalized page', () => {
+    const images = [
+      img('bg', 'ai-generated', 0),
+      img('s1', 'sticker', 1),
+      img('new', 'sticker'), // just added, no zIndex yet
+    ]
+    expect(stackOrder(images).map((i) => i.id).at(-1)).toBe('new')
+  })
+
+  it('is stable and tie-free (no ambiguous ordering)', () => {
+    const images = [img('a', 'sticker', 0), img('b', 'sticker', 1), img('c', 'sticker', 2)]
+    const order = stackOrder(images).map((i) => i.id)
+    expect(order).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('stackOrderTopFirst', () => {
+  it('reads top of stack first (how a layers panel lists)', () => {
+    const images = [img('bg', 'ai-generated', 0), img('s1', 'sticker', 1), img('s2', 'sticker', 2)]
+    expect(stackOrderTopFirst(images)).toEqual(['s2', 's1', 'bg'])
+  })
+})
+
+describe('moveInStack', () => {
+  const base = () => [
+    img('a', 'sticker', 0),
+    img('b', 'sticker', 1),
+    img('c', 'sticker', 2),
+  ]
+
+  it("'up' moves an element toward the top", () => {
+    expect(moveInStack(base(), 'a', 'up')).toEqual(['b', 'a', 'c'])
+  })
+
+  it("'down' moves an element toward the bottom", () => {
+    expect(moveInStack(base(), 'c', 'down')).toEqual(['a', 'c', 'b'])
+  })
+
+  it('is a no-op at the top edge', () => {
+    expect(moveInStack(base(), 'c', 'up')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('is a no-op at the bottom edge', () => {
+    expect(moveInStack(base(), 'a', 'down')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('is a no-op for an unknown id', () => {
+    expect(moveInStack(base(), 'zzz', 'up')).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('z-order survives reorder → normalize → reload (the bug regression)', () => {
+  // Simulate the full write path: three elements, reorder each direction,
+  // normalize to persisted zIndex, then re-derive order (a "reload").
+  type Persisted = { id: string; type: StackImage['type']; position?: { zIndex?: number } | null }
+
+  function reorderAndPersist(images: Persisted[], id: string, dir: 'up' | 'down'): Persisted[] {
+    const order = moveInStack(images, id, dir)
+    const z = normalizedStackZ(order)
+    return images.map((i) => ({ ...i, position: { ...i.position, zIndex: z[i.id] } }))
+  }
+
+  function reload(images: Persisted[]): string[] {
+    // Fresh objects, order re-derived only from persisted zIndex.
+    const fresh = images.map((i) => ({ id: i.id, type: i.type, position: { zIndex: i.position?.zIndex } }))
+    return stackOrder(fresh).map((i) => i.id)
+  }
+
+  it('holds order across move up, move down, and reload', () => {
+    let images: Persisted[] = [
+      img('a', 'sticker'),
+      img('b', 'sticker'),
+      img('c', 'sticker'),
+    ]
+
+    // Move 'a' up twice → top.
+    images = reorderAndPersist(images, 'a', 'up')
+    images = reorderAndPersist(images, 'a', 'up')
+    expect(reload(images)).toEqual(['b', 'c', 'a'])
+
+    // Move 'a' back down once.
+    images = reorderAndPersist(images, 'a', 'down')
+    expect(reload(images)).toEqual(['b', 'a', 'c'])
+
+    // Reload again — order is stable, never reverts.
+    expect(reload(images)).toEqual(['b', 'a', 'c'])
+    // Every element carries an explicit contiguous zIndex (no ties).
+    const zs = images.map((i) => i.position?.zIndex).sort()
+    expect(zs).toEqual([0, 1, 2])
   })
 })

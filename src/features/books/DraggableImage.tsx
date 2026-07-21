@@ -15,8 +15,10 @@ import RotateRightIcon from '@mui/icons-material/RotateRight'
 import FlipIcon from '@mui/icons-material/Flip'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import OpenWithIcon from '@mui/icons-material/OpenWith'
+import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import type { PageImage } from '../../core/types'
-import { clampPosition } from './draggableImageUtils'
+import { clampPosition, scaleAboutCenter } from './draggableImageUtils'
 import type { ImagePosition } from './draggableImageUtils'
 export type { ImagePosition } from './draggableImageUtils'
 
@@ -26,7 +28,8 @@ interface DraggableImageProps {
   onSelect: () => void
   onPositionChange?: (position: ImagePosition) => void
   onRemove?: () => void
-  onZIndexChange?: (delta: 1 | -1) => void
+  /** Move this element one step in the layer stack ('up' = toward the top). */
+  onReorder?: (direction: 'up' | 'down') => void
   style?: React.CSSProperties
 }
 
@@ -56,7 +59,7 @@ export default function DraggableImage({
   onSelect,
   onPositionChange,
   onRemove,
-  onZIndexChange,
+  onReorder,
   style,
 }: DraggableImageProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -75,13 +78,18 @@ export default function DraggableImage({
   })
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
+  const [rotating, setRotating] = useState(false)
   const [pinching, setPinching] = useState(false)
   const dragStart = useRef({ px: 0, py: 0, startX: 0, startY: 0 })
-  const resizeStart = useRef({ px: 0, py: 0, startW: 0, startH: 0 })
+  // centerX/centerY are captured at gesture start so scaling stays anchored to
+  // the object's center (the invariant: center before === center after).
+  const resizeStart = useRef({ px: 0, py: 0, startW: 0, startH: 0, centerX: 0, centerY: 0 })
   const pinchStart = useRef<{
     initialDistance: number
     initialWidth: number
     initialHeight: number
+    centerX: number
+    centerY: number
   } | null>(null)
   const activePointers = useRef<Map<number, { x: number; y: number }>>(new Map())
 
@@ -104,7 +112,7 @@ export default function DraggableImage({
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (resizing) return
+      if (resizing || rotating) return
       e.stopPropagation()
       updatePointer(e)
 
@@ -121,6 +129,8 @@ export default function DraggableImage({
           initialDistance: distance,
           initialWidth: pos.width,
           initialHeight: pos.height,
+          centerX: pos.x + pos.width / 2,
+          centerY: pos.y + pos.height / 2,
         }
         return
       }
@@ -128,7 +138,7 @@ export default function DraggableImage({
       setDragging(true)
       dragStart.current = { px: e.clientX, py: e.clientY, startX: pos.x, startY: pos.y }
     },
-    [pos.x, pos.y, pos.width, pos.height, resizing, updatePointer],
+    [pos.x, pos.y, pos.width, pos.height, resizing, rotating, updatePointer],
   )
 
   const handlePointerMove = useCallback(
@@ -143,8 +153,10 @@ export default function DraggableImage({
         const newW = clamp(pinchStart.current.initialWidth * scale, 10, 100)
         const aspectRatio = pinchStart.current.initialHeight / pinchStart.current.initialWidth
         const newH = clamp(newW * aspectRatio, 10, 100)
+        // Anchor to the center captured at pinch start — scaling never drifts.
+        const { centerX, centerY } = pinchStart.current
 
-        setPos((prev) => ({ ...prev, width: newW, height: newH }))
+        setPos((prev) => ({ ...prev, width: newW, height: newH, x: centerX - newW / 2, y: centerY - newH / 2 }))
         return
       }
 
@@ -187,9 +199,16 @@ export default function DraggableImage({
       const el = e.currentTarget as HTMLElement
       el.setPointerCapture(e.pointerId)
       setResizing(true)
-      resizeStart.current = { px: e.clientX, py: e.clientY, startW: pos.width, startH: pos.height }
+      resizeStart.current = {
+        px: e.clientX,
+        py: e.clientY,
+        startW: pos.width,
+        startH: pos.height,
+        centerX: pos.x + pos.width / 2,
+        centerY: pos.y + pos.height / 2,
+      }
     },
-    [pos.width, pos.height],
+    [pos.x, pos.y, pos.width, pos.height],
   )
 
   const handleResizePointerMove = useCallback(
@@ -197,13 +216,22 @@ export default function DraggableImage({
       if (!resizing) return
       const rect = getContainerRect()
       if (!rect) return
+      // Corner drag scales about the object's center: grow symmetrically, so
+      // the dragged corner tracks the pointer while the center stays fixed.
       const dx = ((e.clientX - resizeStart.current.px) / rect.width) * 100
-      const newW = clamp(resizeStart.current.startW + dx, 15, 100 - pos.x)
+      const newW = clamp(resizeStart.current.startW + dx * 2, 15, 100)
       const aspectRatio = resizeStart.current.startH / resizeStart.current.startW
-      const newH = clamp(newW * aspectRatio, 15, 100 - pos.y)
-      setPos((prev) => ({ ...prev, width: newW, height: newH }))
+      const newH = clamp(newW * aspectRatio, 15, 100)
+      setPos((prev) => {
+        const { x, y } = scaleAboutCenter(
+          { x: prev.x, y: prev.y, width: prev.width, height: prev.height },
+          newW,
+          newH,
+        )
+        return { ...prev, width: newW, height: newH, x, y }
+      })
     },
-    [resizing, getContainerRect, pos.x, pos.y],
+    [resizing, getContainerRect],
   )
 
   const handleResizePointerUp = useCallback(
@@ -218,6 +246,45 @@ export default function DraggableImage({
       })
     },
     [resizing, onPositionChange],
+  )
+
+  // ── Rotate handle (drag) ────────────────────────────────────
+
+  const handleRotatePointerDown = useCallback((e: React.PointerEvent) => {
+    e.stopPropagation()
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
+    setRotating(true)
+  }, [])
+
+  const handleRotatePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!rotating) return
+      const el = ref.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const cx = r.left + r.width / 2
+      const cy = r.top + r.height / 2
+      // Handle sits at top-center, so add 90° to align pointer angle to it.
+      const angle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
+      const rotation = wrapRotation(angle + 90)
+      setPos((prev) => ({ ...prev, rotation }))
+    },
+    [rotating],
+  )
+
+  const handleRotatePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (!rotating) return
+      const el = e.currentTarget as HTMLElement
+      el.releasePointerCapture(e.pointerId)
+      setRotating(false)
+      setPos((curr) => {
+        onPositionChange?.(curr)
+        return curr
+      })
+    },
+    [rotating, onPositionChange],
   )
 
   // ── Sticker toolbar actions ─────────────────────────────────
@@ -337,34 +404,90 @@ export default function DraggableImage({
         </IconButton>
       )}
 
-      {/* Resize handle */}
+      {/* Corner handles — fresh look, finger-sized (28px), one job each.
+          top-left: move · bottom-right: scale · bottom-left: rotate. */}
       {selected && (
-        <Box
-          onPointerDown={handleResizePointerDown}
-          onPointerMove={handleResizePointerMove}
-          onPointerUp={handleResizePointerUp}
-          sx={{
-            position: 'absolute',
-            bottom: -6,
-            right: -6,
-            width: 24,
-            height: 24,
-            bgcolor: 'primary.main',
-            borderRadius: '50%',
-            cursor: 'nwse-resize',
-            touchAction: 'none',
-            border: '2px solid white',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            '&::before': {
-              content: '""',
+        <>
+          {/* Move affordance (drag the body; this badge just signals it) */}
+          <Box
+            aria-hidden
+            sx={{
               position: 'absolute',
-              top: -8,
-              left: -8,
-              right: -8,
-              bottom: -8,
-            },
-          }}
-        />
+              top: -10,
+              left: -10,
+              width: 28,
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'primary.main',
+              color: 'white',
+              borderRadius: '50%',
+              border: '2px solid white',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+              cursor: dragging ? 'grabbing' : 'grab',
+              pointerEvents: 'none',
+            }}
+          >
+            <OpenWithIcon sx={{ fontSize: 16 }} />
+          </Box>
+
+          {/* Rotate handle (drag) */}
+          <Box
+            role="button"
+            aria-label="Rotate"
+            onPointerDown={handleRotatePointerDown}
+            onPointerMove={handleRotatePointerMove}
+            onPointerUp={handleRotatePointerUp}
+            sx={{
+              position: 'absolute',
+              bottom: -10,
+              left: -10,
+              width: 28,
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'secondary.main',
+              color: 'white',
+              borderRadius: '50%',
+              cursor: 'grab',
+              touchAction: 'none',
+              border: '2px solid white',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+            }}
+          >
+            <RotateRightIcon sx={{ fontSize: 16 }} />
+          </Box>
+
+          {/* Scale handle (corner, scales about center) */}
+          <Box
+            role="button"
+            aria-label="Resize"
+            onPointerDown={handleResizePointerDown}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={handleResizePointerUp}
+            sx={{
+              position: 'absolute',
+              bottom: -10,
+              right: -10,
+              width: 28,
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'primary.main',
+              color: 'white',
+              borderRadius: '50%',
+              cursor: 'nwse-resize',
+              touchAction: 'none',
+              border: '2px solid white',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+            }}
+          >
+            <OpenInFullIcon sx={{ fontSize: 15 }} />
+          </Box>
+        </>
       )}
 
       {/* Sticker toolbar — only for stickers when selected */}
@@ -456,19 +579,19 @@ export default function DraggableImage({
             </Tooltip>
           </Stack>
 
-          {/* Z-index row */}
-          {onZIndexChange && (
+          {/* Layer row */}
+          {onReorder && (
             <Stack direction="row" alignItems="center" spacing={0.25}>
-              <Tooltip title="Move backward">
-                <IconButton size="small" onClick={() => onZIndexChange(-1)} sx={{ p: 0.5 }}>
+              <Tooltip title="Send backward">
+                <IconButton size="small" onClick={() => onReorder('down')} sx={{ p: 0.5 }}>
                   <KeyboardArrowDownIcon sx={{ fontSize: 14 }} />
                 </IconButton>
               </Tooltip>
               <Typography variant="caption" sx={{ fontSize: '0.6rem' }}>
                 Layer
               </Typography>
-              <Tooltip title="Move forward">
-                <IconButton size="small" onClick={() => onZIndexChange(1)} sx={{ p: 0.5 }}>
+              <Tooltip title="Bring forward">
+                <IconButton size="small" onClick={() => onReorder('up')} sx={{ p: 0.5 }}>
                   <KeyboardArrowUpIcon sx={{ fontSize: 14 }} />
                 </IconButton>
               </Tooltip>

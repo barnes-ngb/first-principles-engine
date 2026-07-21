@@ -29,6 +29,8 @@ import type { BookPage } from '../../core/types'
 import { PAGE_LAYOUTS, TEXT_SIZES, TEXT_FONTS, TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
 import DraggableImage from './DraggableImage'
 import type { ImagePosition } from './DraggableImage'
+import LayersPanel from './LayersPanel'
+import { stackOrder } from './draggableImageUtils'
 
 interface PageEditorProps {
   page: BookPage
@@ -38,6 +40,8 @@ interface PageEditorProps {
   onChangeBackground?: () => void
   onReRecord?: () => void
   onImagePositionChange?: (imageId: string, position: ImagePosition) => void
+  /** Move an image one step in the layer stack ('up' = toward the top). */
+  onReorderImage?: (imageId: string, direction: 'up' | 'down') => void
   childName: string
   /** Increment to deselect all images from parent (e.g. when action buttons are clicked) */
   deselectSignal?: number
@@ -55,6 +59,7 @@ export default function PageEditor({
   onChangeBackground,
   onReRecord,
   onImagePositionChange,
+  onReorderImage,
   childName,
   deselectSignal,
   onSelectedImageChange,
@@ -62,6 +67,7 @@ export default function PageEditor({
 }: PageEditorProps) {
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
+  const [layersOpen, setLayersOpen] = useState(false)
   const [confirmRemoveBg, setConfirmRemoveBg] = useState(false)
   const [bgMenuAnchor, setBgMenuAnchor] = useState<HTMLElement | null>(null)
   const [versionHistoryImageId, setVersionHistoryImageId] = useState<string | null>(null)
@@ -130,9 +136,11 @@ export default function PageEditor({
   const isTextOnly = page.layout === 'text-only'
   const isImageLeft = page.layout === 'image-left'
 
-  // Separate background images (scenes, photos, sketches, AI-generated) from stickers
+  // Background images (scenes, photos, sketches, AI-generated) drive the
+  // "Change background" menu. Stacking/render order over *all* images comes
+  // from stackOrder — no fixed background-vs-sticker container split.
   const backgroundImages = page.images.filter((img) => img.type !== 'sticker')
-  const stickerImages = page.images.filter((img) => img.type === 'sticker')
+  const orderedImages = stackOrder(page.images)
 
   const imageSection = !isTextOnly && (
     <Box sx={{ width: isImageLeft ? '50%' : '100%' }}>
@@ -193,72 +201,60 @@ export default function PageEditor({
         onClick={() => setSelectedImageId(null)}
       >
         {page.images.length > 0 ? (
-          <>
-            {/* Layer 1: Background — locked, not draggable */}
-            <Box sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-              {backgroundImages.map((img) => {
-                const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
-                const transforms: string[] = []
-                if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
-                if (pos.flipH) transforms.push('scaleX(-1)')
-                if (pos.flipV) transforms.push('scaleY(-1)')
+          // Single stacking container — every element ordered by stackOrder
+          // (bottom → top). Stickers stay interactive; backgrounds are
+          // selectable + orderable but not dragged. Explicit per-element
+          // zIndex = stack position keeps stacking tie-free.
+          <Box sx={{ position: 'absolute', inset: 0 }}>
+            {orderedImages.map((img, stackIdx) => {
+              const renderZ = stackIdx + 1
+              if (img.type === 'sticker') {
                 return (
-                  <Box
+                  <DraggableImage
                     key={img.id}
-                    component="img"
-                    src={img.url}
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation()
-                      setSelectedImageId(img.id)
-                    }}
-                    sx={{
-                      position: 'absolute',
-                      left: `${pos.x}%`,
-                      top: `${pos.y}%`,
-                      width: `${pos.width}%`,
-                      height: `${pos.height}%`,
-                      objectFit: 'cover',
-                      pointerEvents: 'auto',
-                      transform: transforms.length > 0 ? transforms.join(' ') : undefined,
-                      transformOrigin: 'center center',
-                      border: selectedImageId === img.id ? '2px dashed' : 'none',
-                      borderColor: 'warning.main',
-                      cursor: 'pointer',
-                    }}
+                    image={img}
+                    selected={selectedImageId === img.id}
+                    onSelect={() => setSelectedImageId(img.id)}
+                    onPositionChange={(pos) => onImagePositionChange?.(img.id, pos)}
+                    onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
+                    onReorder={onReorderImage ? (dir) => onReorderImage(img.id, dir) : undefined}
+                    style={{ zIndex: renderZ, pointerEvents: 'auto' }}
                   />
                 )
-              })}
-            </Box>
-
-            {/* Layer 2: Stickers — interactive, draggable, always on top */}
-          <Box sx={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none' }}>
-            {stickerImages.map((img, idx) => (
-              <DraggableImage
-                key={img.id}
-                image={img}
-                selected={selectedImageId === img.id}
-                onSelect={() => setSelectedImageId(img.id)}
-                onPositionChange={(pos) => onImagePositionChange?.(img.id, pos)}
-                onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
-                onZIndexChange={(delta) => {
-                  const currentZ = img.position?.zIndex ?? idx
-                  const newZ = Math.max(0, Math.min(stickerImages.length - 1, currentZ + delta))
-                  onImagePositionChange?.(img.id, {
-                    x: img.position?.x ?? 0,
-                    y: img.position?.y ?? 0,
-                    width: img.position?.width ?? 100,
-                    height: img.position?.height ?? 100,
-                    rotation: img.position?.rotation ?? 0,
-                    zIndex: newZ,
-                    flipH: img.position?.flipH ?? false,
-                    flipV: img.position?.flipV ?? false,
-                  })
-                }}
-                style={{ zIndex: (img.position?.zIndex ?? idx) + 1, pointerEvents: 'auto' }}
-              />
-            ))}
+              }
+              const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+              const transforms: string[] = []
+              if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
+              if (pos.flipH) transforms.push('scaleX(-1)')
+              if (pos.flipV) transforms.push('scaleY(-1)')
+              return (
+                <Box
+                  key={img.id}
+                  component="img"
+                  src={img.url}
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation()
+                    setSelectedImageId(img.id)
+                  }}
+                  sx={{
+                    position: 'absolute',
+                    left: `${pos.x}%`,
+                    top: `${pos.y}%`,
+                    width: `${pos.width}%`,
+                    height: `${pos.height}%`,
+                    objectFit: 'cover',
+                    zIndex: renderZ,
+                    pointerEvents: 'auto',
+                    transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                    transformOrigin: 'center center',
+                    border: selectedImageId === img.id ? '2px dashed' : 'none',
+                    borderColor: 'warning.main',
+                    cursor: 'pointer',
+                  }}
+                />
+              )
+            })}
           </Box>
-        </>
       ) : (
         <label style={{ cursor: 'pointer', textAlign: 'center', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <input
@@ -276,6 +272,20 @@ export default function PageEditor({
         </label>
       )}
       </Box>
+
+      {/* Layers panel — reorder every placed element (collapsible, phone-first) */}
+      {page.images.length > 1 && onReorderImage && (
+        <Box sx={{ mt: 1 }}>
+          <LayersPanel
+            images={page.images}
+            selectedImageId={selectedImageId}
+            onSelect={(id) => setSelectedImageId(id)}
+            onReorder={onReorderImage}
+            open={layersOpen}
+            onToggle={() => setLayersOpen((v) => !v)}
+          />
+        </Box>
+      )}
     </Box>
   )
 

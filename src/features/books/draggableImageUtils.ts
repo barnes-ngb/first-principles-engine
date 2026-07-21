@@ -26,3 +26,99 @@ export function clampPosition(
     y: Math.min(Math.max(y, minY), maxY),
   }
 }
+
+/**
+ * Resize about the object's center: given the current box and a new size,
+ * return the top-left (x, y) that keeps the center fixed.
+ *
+ * The invariant is `centerBefore === centerAfter` — scaling never drifts the
+ * object toward a corner. All values are container percentages (0–100).
+ */
+export function scaleAboutCenter(
+  pos: { x: number; y: number; width: number; height: number },
+  newWidth: number,
+  newHeight: number,
+): { x: number; y: number } {
+  const centerX = pos.x + pos.width / 2
+  const centerY = pos.y + pos.height / 2
+  return {
+    x: centerX - newWidth / 2,
+    y: centerY - newHeight / 2,
+  }
+}
+
+// ── Stacking order (layers) ────────────────────────────────────
+//
+// A single, unambiguous z-order over *all* page images (backgrounds and
+// stickers alike). The render sorts by `effectiveZ` so order is tie-free and
+// survives reload; reordering normalizes every image to a contiguous 0..n-1
+// `zIndex` (see `normalizedStackZ`). Legacy docs (no stored zIndex) fall back
+// to backgrounds-below-stickers in array order, reproducing the prior visual.
+
+/** Minimal shape needed to compute stacking order. */
+export interface StackImage {
+  id: string
+  type: 'photo' | 'ai-generated' | 'sticker' | 'sketch'
+  position?: { zIndex?: number } | null
+}
+
+// Unset images sort into type bands far above any normalized (small-integer)
+// zIndex, so a freshly added element lands on top of its band. Backgrounds
+// band < stickers band → legacy backgrounds stay below legacy stickers.
+const UNSET_BG_BAND = 1_000_000
+const UNSET_STICKER_BAND = 2_000_000
+
+/** The z-value used to order an image, honoring a stored zIndex when present. */
+export function effectiveZ(img: StackImage, index: number): number {
+  const z = img.position?.zIndex
+  if (typeof z === 'number') return z
+  const band = img.type === 'sticker' ? UNSET_STICKER_BAND : UNSET_BG_BAND
+  return band + index
+}
+
+/** Images sorted bottom → top for rendering. Stable and tie-free. */
+export function stackOrder<T extends StackImage>(images: T[]): T[] {
+  return images
+    .map((img, index) => ({ img, index, z: effectiveZ(img, index) }))
+    .sort((a, b) => a.z - b.z || a.index - b.index)
+    .map((entry) => entry.img)
+}
+
+/** Image ids top → bottom (how a layers panel reads). */
+export function stackOrderTopFirst(images: StackImage[]): string[] {
+  return stackOrder(images)
+    .map((img) => img.id)
+    .reverse()
+}
+
+/**
+ * New bottom→top id order after moving one image a single step.
+ * `direction: 'up'` moves it toward the top of the stack (higher z).
+ */
+export function moveInStack(
+  images: StackImage[],
+  imageId: string,
+  direction: 'up' | 'down',
+): string[] {
+  const ids = stackOrder(images).map((img) => img.id)
+  const from = ids.indexOf(imageId)
+  if (from === -1) return ids
+  const to = direction === 'up' ? from + 1 : from - 1
+  if (to < 0 || to >= ids.length) return ids
+  const next = [...ids]
+  ;[next[from], next[to]] = [next[to], next[from]]
+  return next
+}
+
+/**
+ * Map of image id → normalized contiguous zIndex (0 = bottom) for a given
+ * bottom→top id order. Persisting these values makes the order fully explicit
+ * and reload-stable.
+ */
+export function normalizedStackZ(bottomToTopIds: string[]): Record<string, number> {
+  const result: Record<string, number> = {}
+  bottomToTopIds.forEach((id, index) => {
+    result[id] = index
+  })
+  return result
+}

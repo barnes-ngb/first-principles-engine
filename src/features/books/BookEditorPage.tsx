@@ -154,6 +154,7 @@ export default function BookEditorPage() {
     addStickerToPage,
     addStickerFileToPage,
     updateImagePosition,
+    reorderImage,
     reorderPages,
     addSketchToPage,
     applySketchEnhancement,
@@ -338,6 +339,14 @@ export default function BookEditorPage() {
       updateImagePosition(activePage.id, imageId, position)
     },
     [activePage, updateImagePosition],
+  )
+
+  const handleReorderImage = useCallback(
+    (imageId: string, direction: 'up' | 'down') => {
+      if (!activePage) return
+      reorderImage(activePage.id, imageId, direction)
+    },
+    [activePage, reorderImage],
   )
 
   const handleAddImageFile = useCallback(
@@ -1187,6 +1196,7 @@ export default function BookEditorPage() {
             onRemoveImage={handleTrackedRemoveImage}
             onChangeBackground={handleChangeBackground}
             onImagePositionChange={handleImagePositionChange}
+            onReorderImage={handleReorderImage}
             onReRecord={() => { setShowVoicePanel(true); setVoiceMode('record') }}
             childName={childName}
             deselectSignal={deselectSignal}
