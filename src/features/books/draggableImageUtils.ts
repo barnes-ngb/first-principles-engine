@@ -47,6 +47,24 @@ export function scaleAboutCenter(
   }
 }
 
+/** Wrap degrees into [0, 360). */
+export function wrapDegrees(deg: number): number {
+  return ((deg % 360) + 360) % 360
+}
+
+/**
+ * Rotation while dragging a rotate handle: continue from the rotation captured
+ * at grab, applying the pointer's angular delta. Prevents the image snapping to
+ * the handle's own start angle on the first move.
+ */
+export function rotationFromDrag(
+  startRotation: number,
+  startPointerAngle: number,
+  currentPointerAngle: number,
+): number {
+  return wrapDegrees(startRotation + (currentPointerAngle - startPointerAngle))
+}
+
 // ── Stacking order (layers) ────────────────────────────────────
 //
 // A single, unambiguous z-order over *all* page images (backgrounds and
@@ -60,6 +78,21 @@ export interface StackImage {
   id: string
   type: 'photo' | 'ai-generated' | 'sticker' | 'sketch'
   position?: { zIndex?: number } | null
+}
+
+/**
+ * Per-type default geometry (container %). Shared by the renderer's fallback
+ * and any writer that must materialize a missing position — a sticker with no
+ * stored position must stay `25,15,30,30`, not become a full-canvas image.
+ */
+export const DEFAULT_IMAGE_GEOMETRY: Record<
+  StackImage['type'],
+  { x: number; y: number; width: number; height: number }
+> = {
+  'ai-generated': { x: 0, y: 0, width: 100, height: 100 },
+  photo: { x: 10, y: 10, width: 40, height: 40 },
+  sticker: { x: 25, y: 15, width: 30, height: 30 },
+  sketch: { x: 0, y: 0, width: 100, height: 100 },
 }
 
 // Unset images sort into type bands far above any normalized (small-integer)

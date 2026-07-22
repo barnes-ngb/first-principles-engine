@@ -23,7 +23,7 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { createEmptyPage, generateImageId } from './bookTypes'
 import { cleanSketchBackground } from './cleanSketch'
-import { moveInStack, normalizedStackZ } from './draggableImageUtils'
+import { moveInStack, normalizedStackZ, DEFAULT_IMAGE_GEOMETRY } from './draggableImageUtils'
 
 interface UseBookResult {
   book: Book | null
@@ -463,9 +463,20 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           p.id === pageId
             ? {
                 ...p,
-                images: p.images.map((img) =>
-                  img.id === imageId ? { ...img, position } : img,
-                ),
+                images: p.images.map((img) => {
+                  if (img.id !== imageId) return img
+                  // Layer order is owned solely by reorderImage. A transform
+                  // (drag/resize/rotate/flip) must NOT rewrite zIndex — the
+                  // DraggableImage's local pos.zIndex can be stale after a
+                  // reorder, and writing it back would undo the visible order.
+                  const preservedZ = img.position?.zIndex
+                  const nextPos = position ? { ...position } : position
+                  if (nextPos) {
+                    if (preservedZ !== undefined) nextPos.zIndex = preservedZ
+                    else delete nextPos.zIndex
+                  }
+                  return { ...img, position: nextPos }
+                }),
                 updatedAt: new Date().toISOString(),
               }
             : p,
@@ -485,17 +496,22 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           const zById = normalizedStackZ(newOrder)
           return {
             ...p,
-            images: p.images.map((img) => ({
-              ...img,
-              position: {
-                x: img.position?.x ?? 0,
-                y: img.position?.y ?? 0,
-                width: img.position?.width ?? 100,
-                height: img.position?.height ?? 100,
-                ...(img.position ?? {}),
-                zIndex: zById[img.id] ?? img.position?.zIndex ?? 0,
-              },
-            })),
+            images: p.images.map((img) => {
+              // Preserve each image's own geometry; only materialize per-type
+              // defaults when there is no stored position (never full-canvas).
+              const geom = DEFAULT_IMAGE_GEOMETRY[img.type]
+              return {
+                ...img,
+                position: {
+                  x: geom.x,
+                  y: geom.y,
+                  width: geom.width,
+                  height: geom.height,
+                  ...(img.position ?? {}),
+                  zIndex: zById[img.id] ?? img.position?.zIndex ?? 0,
+                },
+              }
+            }),
             updatedAt: new Date().toISOString(),
           }
         }),

@@ -18,7 +18,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import OpenWithIcon from '@mui/icons-material/OpenWith'
 import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import type { PageImage } from '../../core/types'
-import { clampPosition, scaleAboutCenter } from './draggableImageUtils'
+import { clampPosition, scaleAboutCenter, rotationFromDrag, DEFAULT_IMAGE_GEOMETRY } from './draggableImageUtils'
 import type { ImagePosition } from './draggableImageUtils'
 export type { ImagePosition } from './draggableImageUtils'
 
@@ -33,12 +33,7 @@ interface DraggableImageProps {
   style?: React.CSSProperties
 }
 
-const DEFAULT_POSITIONS: Record<PageImage['type'], { x: number; y: number; width: number; height: number }> = {
-  'ai-generated': { x: 0, y: 0, width: 100, height: 100 },
-  photo: { x: 10, y: 10, width: 40, height: 40 },
-  sticker: { x: 25, y: 15, width: 30, height: 30 },
-  sketch: { x: 0, y: 0, width: 100, height: 100 },
-}
+const DEFAULT_POSITIONS = DEFAULT_IMAGE_GEOMETRY
 
 /** Rotation increment per tap (degrees). */
 const ROTATION_STEP = 15
@@ -91,6 +86,9 @@ export default function DraggableImage({
     centerX: number
     centerY: number
   } | null>(null)
+  // Pointer angle + rotation captured at rotate-handle grab, so the drag
+  // applies an angular delta (no jump from the handle's own start angle).
+  const rotateStart = useRef({ pointerAngle: 0, startRotation: 0 })
   const activePointers = useRef<Map<number, { x: number; y: number }>>(new Map())
 
   const getContainerRect = useCallback(() => {
@@ -250,12 +248,22 @@ export default function DraggableImage({
 
   // ── Rotate handle (drag) ────────────────────────────────────
 
-  const handleRotatePointerDown = useCallback((e: React.PointerEvent) => {
-    e.stopPropagation()
-    const el = e.currentTarget as HTMLElement
-    el.setPointerCapture(e.pointerId)
-    setRotating(true)
-  }, [])
+  const handleRotatePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.stopPropagation()
+      const el = e.currentTarget as HTMLElement
+      el.setPointerCapture(e.pointerId)
+      setRotating(true)
+      const box = ref.current?.getBoundingClientRect()
+      if (box) {
+        const cx = box.left + box.width / 2
+        const cy = box.top + box.height / 2
+        const pointerAngle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
+        rotateStart.current = { pointerAngle, startRotation: pos.rotation }
+      }
+    },
+    [pos.rotation],
+  )
 
   const handleRotatePointerMove = useCallback(
     (e: React.PointerEvent) => {
@@ -265,9 +273,14 @@ export default function DraggableImage({
       const r = el.getBoundingClientRect()
       const cx = r.left + r.width / 2
       const cy = r.top + r.height / 2
-      // Handle sits at top-center, so add 90° to align pointer angle to it.
+      // Apply the angular delta from grab — the image continues from its
+      // current rotation instead of snapping to the handle's start angle.
       const angle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
-      const rotation = wrapRotation(angle + 90)
+      const rotation = rotationFromDrag(
+        rotateStart.current.startRotation,
+        rotateStart.current.pointerAngle,
+        angle,
+      )
       setPos((prev) => ({ ...prev, rotation }))
     },
     [rotating],

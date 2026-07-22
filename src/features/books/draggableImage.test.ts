@@ -6,6 +6,8 @@ import {
   stackOrderTopFirst,
   moveInStack,
   normalizedStackZ,
+  rotationFromDrag,
+  DEFAULT_IMAGE_GEOMETRY,
   type StackImage,
 } from './draggableImageUtils'
 
@@ -284,6 +286,74 @@ describe('moveInStack', () => {
 
   it('is a no-op for an unknown id', () => {
     expect(moveInStack(base(), 'zzz', 'up')).toEqual(['a', 'b', 'c'])
+  })
+})
+
+// ── review follow-ups (PR #1613) ───────────────────────────────
+
+describe('DEFAULT_IMAGE_GEOMETRY (reorder must not full-canvas a sticker)', () => {
+  it('keeps per-type defaults — a positionless sticker stays small', () => {
+    expect(DEFAULT_IMAGE_GEOMETRY.sticker).toEqual({ x: 25, y: 15, width: 30, height: 30 })
+    expect(DEFAULT_IMAGE_GEOMETRY.photo).toEqual({ x: 10, y: 10, width: 40, height: 40 })
+    // Full-canvas is only correct for backgrounds.
+    expect(DEFAULT_IMAGE_GEOMETRY['ai-generated']).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+    expect(DEFAULT_IMAGE_GEOMETRY.sketch).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+  })
+
+  it('materializing a missing position uses the type default, never full-canvas', () => {
+    // Mirrors reorderImage's per-image position construction.
+    const materialize = (type: StackImage['type'], stored: object | undefined, z: number) => {
+      const geom = DEFAULT_IMAGE_GEOMETRY[type]
+      return { x: geom.x, y: geom.y, width: geom.width, height: geom.height, ...(stored ?? {}), zIndex: z }
+    }
+    expect(materialize('sticker', undefined, 2)).toEqual({ x: 25, y: 15, width: 30, height: 30, zIndex: 2 })
+    // An existing position is preserved (only zIndex changes).
+    expect(materialize('sticker', { x: 60, y: 40, width: 20, height: 20 }, 1)).toEqual({
+      x: 60, y: 40, width: 20, height: 20, zIndex: 1,
+    })
+  })
+})
+
+describe('rotationFromDrag (rotate handle applies angular delta, no jump)', () => {
+  it('a zero-movement grab does not change rotation', () => {
+    // Handle at bottom-left → start angle ~135°; no movement must hold rotation.
+    expect(rotationFromDrag(0, 135, 135)).toBe(0)
+    expect(rotationFromDrag(90, 135, 135)).toBe(90)
+  })
+
+  it('applies the pointer delta on top of the current rotation', () => {
+    expect(rotationFromDrag(30, 135, 165)).toBe(60) // +30° pointer → +30° rotation
+    expect(rotationFromDrag(0, 135, 90)).toBe(315) // -45° wraps
+  })
+
+  it('wraps past 360', () => {
+    expect(rotationFromDrag(350, 0, 20)).toBe(10)
+  })
+})
+
+describe('transform writes preserve the stored zIndex (no order corruption)', () => {
+  // Mirrors updateImagePosition: a transform strips the incoming (possibly
+  // stale) zIndex and keeps the stored normalized one.
+  function applyTransform(
+    stored: { zIndex?: number } | undefined,
+    incoming: { x: number; y: number; zIndex: number },
+  ) {
+    const next: { x: number; y: number; zIndex?: number } = { ...incoming }
+    const preserved = stored?.zIndex
+    if (preserved !== undefined) next.zIndex = preserved
+    else delete next.zIndex
+    return next
+  }
+
+  it('a drag after reorder keeps the normalized z (does not revert to stale)', () => {
+    // Sticker was reordered from z=0 to z=1; DraggableImage still holds z=0.
+    const result = applyTransform({ zIndex: 1 }, { x: 50, y: 50, zIndex: 0 })
+    expect(result.zIndex).toBe(1)
+  })
+
+  it('a never-reordered element writes no spurious zIndex', () => {
+    const result = applyTransform(undefined, { x: 50, y: 50, zIndex: 0 })
+    expect('zIndex' in result).toBe(false)
   })
 })
 
