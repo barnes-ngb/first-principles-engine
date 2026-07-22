@@ -91,6 +91,7 @@ export function useBookIllustrator() {
               url: imgResult.url,
               storagePath: imgResult.storagePath,
               type: 'ai-generated',
+              layerType: 'background',
               prompt: page.sceneDescription,
             }
 
