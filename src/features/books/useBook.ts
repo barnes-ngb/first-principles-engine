@@ -23,6 +23,7 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { createEmptyPage, generateImageId } from './bookTypes'
 import { cleanSketchBackground } from './cleanSketch'
+import { moveInStack, normalizedStackZ, DEFAULT_IMAGE_GEOMETRY } from './draggableImageUtils'
 
 interface UseBookResult {
   book: Book | null
@@ -44,6 +45,10 @@ interface UseBookResult {
    *  Returns the storage URL + path so callers can also save it to the library. */
   addStickerFileToPage: (pageId: string, file: File, label: string) => Promise<{ url: string; storagePath: string } | undefined>
   updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
+  /** Move one image a single step in the layer stack ('up' = toward the top).
+   *  Normalizes every image on the page to a contiguous zIndex so the order is
+   *  explicit and survives reload. */
+  reorderImage: (pageId: string, imageId: string, direction: 'up' | 'down') => void
   /** Add a hand-drawn sketch photo to a page. Returns the image ID and storage path for later enhancement. */
   addSketchToPage: (pageId: string, file: File) => Promise<{ imageId: string; storagePath: string } | undefined>
   /** Update a sketch PageImage after AI enhancement resolves. */
@@ -458,13 +463,58 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           p.id === pageId
             ? {
                 ...p,
-                images: p.images.map((img) =>
-                  img.id === imageId ? { ...img, position } : img,
-                ),
+                images: p.images.map((img) => {
+                  if (img.id !== imageId) return img
+                  // Layer order is owned solely by reorderImage. A transform
+                  // (drag/resize/rotate/flip) must NOT rewrite zIndex — the
+                  // DraggableImage's local pos.zIndex can be stale after a
+                  // reorder, and writing it back would undo the visible order.
+                  const preservedZ = img.position?.zIndex
+                  const nextPos = position ? { ...position } : position
+                  if (nextPos) {
+                    if (preservedZ !== undefined) nextPos.zIndex = preservedZ
+                    else delete nextPos.zIndex
+                  }
+                  return { ...img, position: nextPos }
+                }),
                 updatedAt: new Date().toISOString(),
               }
             : p,
         ),
+      }))
+    },
+    [applyUpdate],
+  )
+
+  const reorderImage = useCallback(
+    (pageId: string, imageId: string, direction: 'up' | 'down') => {
+      applyUpdate((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) => {
+          if (p.id !== pageId) return p
+          const newOrder = moveInStack(p.images, imageId, direction)
+          const zById = normalizedStackZ(newOrder)
+          return {
+            ...p,
+            images: p.images.map((img) => {
+              // Preserve each image's own geometry; only materialize per-type
+              // defaults when there is no stored position (never full-canvas).
+              const geom = DEFAULT_IMAGE_GEOMETRY[img.type]
+              return {
+                ...img,
+                position: {
+                  x: geom.x,
+                  y: geom.y,
+                  width: geom.width,
+                  height: geom.height,
+                  ...(img.position ?? {}),
+                  zIndex: zById[img.id] ?? img.position?.zIndex ?? 0,
+                },
+              }
+            }),
+            updatedAt: new Date().toISOString(),
+          }
+        }),
       }))
     },
     [applyUpdate],
@@ -709,6 +759,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     addStickerToPage,
     addStickerFileToPage,
     updateImagePosition,
+    reorderImage,
     addSketchToPage,
     applySketchEnhancement,
     pickSketchVersion,

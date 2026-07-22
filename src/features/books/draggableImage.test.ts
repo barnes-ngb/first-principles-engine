@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { clampPosition } from './draggableImageUtils'
+import {
+  clampPosition,
+  scaleAboutCenter,
+  stackOrder,
+  stackOrderTopFirst,
+  moveInStack,
+  normalizedStackZ,
+  rotationFromDrag,
+  DEFAULT_IMAGE_GEOMETRY,
+  type StackImage,
+} from './draggableImageUtils'
 
 // ── clampPosition ──────────────────────────────────────────────
 
@@ -150,5 +160,240 @@ describe('percentage <-> pixel conversion', () => {
 
   it('position at 200px on 800px canvas = 25%', () => {
     expect(pxToPercent(200, 800)).toBeCloseTo(25)
+  })
+})
+
+// ── scale about center (Step 3 invariant) ──────────────────────
+
+/** Center of a box in container %. */
+function centerOf(pos: { x: number; y: number; width: number; height: number }) {
+  return { cx: pos.x + pos.width / 2, cy: pos.y + pos.height / 2 }
+}
+
+describe('scaleAboutCenter', () => {
+  it('keeps the center fixed when growing (center before === center after)', () => {
+    const pos = { x: 20, y: 30, width: 40, height: 20 }
+    const before = centerOf(pos)
+    const { x, y } = scaleAboutCenter(pos, 60, 30)
+    const after = centerOf({ x, y, width: 60, height: 30 })
+    expect(after.cx).toBeCloseTo(before.cx)
+    expect(after.cy).toBeCloseTo(before.cy)
+  })
+
+  it('keeps the center fixed when shrinking', () => {
+    const pos = { x: 10, y: 10, width: 80, height: 80 }
+    const before = centerOf(pos)
+    const { x, y } = scaleAboutCenter(pos, 20, 20)
+    const after = centerOf({ x, y, width: 20, height: 20 })
+    expect(after.cx).toBeCloseTo(before.cx)
+    expect(after.cy).toBeCloseTo(before.cy)
+  })
+
+  it('does NOT behave like the old top-left-anchored resize (regression)', () => {
+    // Old behavior kept x,y fixed → center drifted toward bottom-right.
+    const pos = { x: 0, y: 0, width: 40, height: 40 }
+    const oldCenter = centerOf({ x: 0, y: 0, width: 80, height: 80 }) // top-left anchored
+    const { x, y } = scaleAboutCenter(pos, 80, 80)
+    const newCenter = centerOf({ x, y, width: 80, height: 80 })
+    expect(newCenter.cx).not.toBeCloseTo(oldCenter.cx)
+    expect(newCenter.cx).toBeCloseTo(20) // original center preserved
+  })
+
+  it('drives many scale steps without center drift', () => {
+    let pos = { x: 25, y: 25, width: 50, height: 50 }
+    const before = centerOf(pos)
+    for (const size of [30, 45, 60, 20, 55]) {
+      const { x, y } = scaleAboutCenter(pos, size, size)
+      pos = { x, y, width: size, height: size }
+    }
+    const after = centerOf(pos)
+    expect(after.cx).toBeCloseTo(before.cx)
+    expect(after.cy).toBeCloseTo(before.cy)
+  })
+})
+
+// ── stacking order + layer reorder (Steps 1 & 2) ───────────────
+
+function img(id: string, type: StackImage['type'], zIndex?: number): StackImage {
+  return { id, type, position: zIndex === undefined ? undefined : { zIndex } }
+}
+
+describe('stackOrder', () => {
+  it('legacy (no zIndex): backgrounds below stickers, in array order', () => {
+    const images = [
+      img('s1', 'sticker'),
+      img('bg', 'ai-generated'),
+      img('s2', 'sticker'),
+    ]
+    // bottom → top
+    expect(stackOrder(images).map((i) => i.id)).toEqual(['bg', 's1', 's2'])
+  })
+
+  it('honors explicit contiguous zIndex across types (cross-type ordering)', () => {
+    const images = [
+      img('bg', 'ai-generated', 2), // background lifted above stickers
+      img('s1', 'sticker', 0),
+      img('s2', 'sticker', 1),
+    ]
+    expect(stackOrder(images).map((i) => i.id)).toEqual(['s1', 's2', 'bg'])
+  })
+
+  it('newly added (unset) sticker floats to the top of a normalized page', () => {
+    const images = [
+      img('bg', 'ai-generated', 0),
+      img('s1', 'sticker', 1),
+      img('new', 'sticker'), // just added, no zIndex yet
+    ]
+    expect(stackOrder(images).map((i) => i.id).at(-1)).toBe('new')
+  })
+
+  it('is stable and tie-free (no ambiguous ordering)', () => {
+    const images = [img('a', 'sticker', 0), img('b', 'sticker', 1), img('c', 'sticker', 2)]
+    const order = stackOrder(images).map((i) => i.id)
+    expect(order).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('stackOrderTopFirst', () => {
+  it('reads top of stack first (how a layers panel lists)', () => {
+    const images = [img('bg', 'ai-generated', 0), img('s1', 'sticker', 1), img('s2', 'sticker', 2)]
+    expect(stackOrderTopFirst(images)).toEqual(['s2', 's1', 'bg'])
+  })
+})
+
+describe('moveInStack', () => {
+  const base = () => [
+    img('a', 'sticker', 0),
+    img('b', 'sticker', 1),
+    img('c', 'sticker', 2),
+  ]
+
+  it("'up' moves an element toward the top", () => {
+    expect(moveInStack(base(), 'a', 'up')).toEqual(['b', 'a', 'c'])
+  })
+
+  it("'down' moves an element toward the bottom", () => {
+    expect(moveInStack(base(), 'c', 'down')).toEqual(['a', 'c', 'b'])
+  })
+
+  it('is a no-op at the top edge', () => {
+    expect(moveInStack(base(), 'c', 'up')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('is a no-op at the bottom edge', () => {
+    expect(moveInStack(base(), 'a', 'down')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('is a no-op for an unknown id', () => {
+    expect(moveInStack(base(), 'zzz', 'up')).toEqual(['a', 'b', 'c'])
+  })
+})
+
+// ── review follow-ups (PR #1613) ───────────────────────────────
+
+describe('DEFAULT_IMAGE_GEOMETRY (reorder must not full-canvas a sticker)', () => {
+  it('keeps per-type defaults — a positionless sticker stays small', () => {
+    expect(DEFAULT_IMAGE_GEOMETRY.sticker).toEqual({ x: 25, y: 15, width: 30, height: 30 })
+    expect(DEFAULT_IMAGE_GEOMETRY.photo).toEqual({ x: 10, y: 10, width: 40, height: 40 })
+    // Full-canvas is only correct for backgrounds.
+    expect(DEFAULT_IMAGE_GEOMETRY['ai-generated']).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+    expect(DEFAULT_IMAGE_GEOMETRY.sketch).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+  })
+
+  it('materializing a missing position uses the type default, never full-canvas', () => {
+    // Mirrors reorderImage's per-image position construction.
+    const materialize = (type: StackImage['type'], stored: object | undefined, z: number) => {
+      const geom = DEFAULT_IMAGE_GEOMETRY[type]
+      return { x: geom.x, y: geom.y, width: geom.width, height: geom.height, ...(stored ?? {}), zIndex: z }
+    }
+    expect(materialize('sticker', undefined, 2)).toEqual({ x: 25, y: 15, width: 30, height: 30, zIndex: 2 })
+    // An existing position is preserved (only zIndex changes).
+    expect(materialize('sticker', { x: 60, y: 40, width: 20, height: 20 }, 1)).toEqual({
+      x: 60, y: 40, width: 20, height: 20, zIndex: 1,
+    })
+  })
+})
+
+describe('rotationFromDrag (rotate handle applies angular delta, no jump)', () => {
+  it('a zero-movement grab does not change rotation', () => {
+    // Handle at bottom-left → start angle ~135°; no movement must hold rotation.
+    expect(rotationFromDrag(0, 135, 135)).toBe(0)
+    expect(rotationFromDrag(90, 135, 135)).toBe(90)
+  })
+
+  it('applies the pointer delta on top of the current rotation', () => {
+    expect(rotationFromDrag(30, 135, 165)).toBe(60) // +30° pointer → +30° rotation
+    expect(rotationFromDrag(0, 135, 90)).toBe(315) // -45° wraps
+  })
+
+  it('wraps past 360', () => {
+    expect(rotationFromDrag(350, 0, 20)).toBe(10)
+  })
+})
+
+describe('transform writes preserve the stored zIndex (no order corruption)', () => {
+  // Mirrors updateImagePosition: a transform strips the incoming (possibly
+  // stale) zIndex and keeps the stored normalized one.
+  function applyTransform(
+    stored: { zIndex?: number } | undefined,
+    incoming: { x: number; y: number; zIndex: number },
+  ) {
+    const next: { x: number; y: number; zIndex?: number } = { ...incoming }
+    const preserved = stored?.zIndex
+    if (preserved !== undefined) next.zIndex = preserved
+    else delete next.zIndex
+    return next
+  }
+
+  it('a drag after reorder keeps the normalized z (does not revert to stale)', () => {
+    // Sticker was reordered from z=0 to z=1; DraggableImage still holds z=0.
+    const result = applyTransform({ zIndex: 1 }, { x: 50, y: 50, zIndex: 0 })
+    expect(result.zIndex).toBe(1)
+  })
+
+  it('a never-reordered element writes no spurious zIndex', () => {
+    const result = applyTransform(undefined, { x: 50, y: 50, zIndex: 0 })
+    expect('zIndex' in result).toBe(false)
+  })
+})
+
+describe('z-order survives reorder → normalize → reload (the bug regression)', () => {
+  // Simulate the full write path: three elements, reorder each direction,
+  // normalize to persisted zIndex, then re-derive order (a "reload").
+  type Persisted = { id: string; type: StackImage['type']; position?: { zIndex?: number } | null }
+
+  function reorderAndPersist(images: Persisted[], id: string, dir: 'up' | 'down'): Persisted[] {
+    const order = moveInStack(images, id, dir)
+    const z = normalizedStackZ(order)
+    return images.map((i) => ({ ...i, position: { ...i.position, zIndex: z[i.id] } }))
+  }
+
+  function reload(images: Persisted[]): string[] {
+    // Fresh objects, order re-derived only from persisted zIndex.
+    const fresh = images.map((i) => ({ id: i.id, type: i.type, position: { zIndex: i.position?.zIndex } }))
+    return stackOrder(fresh).map((i) => i.id)
+  }
+
+  it('holds order across move up, move down, and reload', () => {
+    let images: Persisted[] = [
+      img('a', 'sticker'),
+      img('b', 'sticker'),
+      img('c', 'sticker'),
+    ]
+
+    // Move 'a' up twice → top.
+    images = reorderAndPersist(images, 'a', 'up')
+    images = reorderAndPersist(images, 'a', 'up')
+    expect(reload(images)).toEqual(['b', 'c', 'a'])
+
+    // Move 'a' back down once.
+    images = reorderAndPersist(images, 'a', 'down')
+    expect(reload(images)).toEqual(['b', 'a', 'c'])
+
+    // Reload again — order is stable, never reverts.
+    expect(reload(images)).toEqual(['b', 'a', 'c'])
+    // Every element carries an explicit contiguous zIndex (no ties).
+    const zs = images.map((i) => i.position?.zIndex).sort()
+    expect(zs).toEqual([0, 1, 2])
   })
 })

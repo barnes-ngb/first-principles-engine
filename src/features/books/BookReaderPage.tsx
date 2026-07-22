@@ -29,6 +29,7 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { useBook } from './useBook'
+import { stackOrder } from './draggableImageUtils'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
@@ -594,78 +595,46 @@ export default function BookReaderPage() {
           {/* Content pages */}
           {contentPage && (
             <Stack spacing={2}>
-              {/* Images — separated into background + sticker layers */}
-              {contentPage.images.length > 0 && (() => {
-                const bgImages = contentPage.images.filter((img) => img.type !== 'sticker')
-                const stickerImgs = contentPage.images.filter((img) => img.type === 'sticker')
-                return (
-                  <Box
-                    sx={{
-                      position: 'relative',
-                      width: '100%',
-                      aspectRatio: '3 / 2',
-                      borderRadius: 2,
-                      overflow: 'hidden',
-                      bgcolor: isLincoln ? 'rgba(255,255,255,0.05)' : 'grey.100',
-                    }}
-                  >
-                    {/* Background layer */}
-                    {bgImages.map((img) => {
-                      const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
-                      const transforms: string[] = []
-                      if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
-                      if (pos.flipH) transforms.push('scaleX(-1)')
-                      if (pos.flipV) transforms.push('scaleY(-1)')
-                      return (
-                        <Box
-                          key={img.id}
-                          component="img"
-                          src={img.url}
-                          sx={{
-                            position: 'absolute',
-                            left: `${pos.x}%`,
-                            top: `${pos.y}%`,
-                            width: `${pos.width}%`,
-                            height: `${pos.height}%`,
-                            objectFit: 'cover',
-                            borderRadius: 1,
-                            zIndex: 0,
-                            transform: transforms.length > 0 ? transforms.join(' ') : undefined,
-                            transformOrigin: 'center center',
-                          }}
-                        />
-                      )
-                    })}
-                    {/* Sticker layer — always on top */}
-                    {stickerImgs.map((img) => {
-                      const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
-                      const transforms: string[] = []
-                      if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
-                      if (pos.flipH) transforms.push('scaleX(-1)')
-                      if (pos.flipV) transforms.push('scaleY(-1)')
-                      return (
-                        <Box
-                          key={img.id}
-                          component="img"
-                          src={img.url}
-                          sx={{
-                            position: 'absolute',
-                            left: `${pos.x}%`,
-                            top: `${pos.y}%`,
-                            width: `${pos.width}%`,
-                            height: `${pos.height}%`,
-                            objectFit: 'contain',
-                            borderRadius: 1,
-                            zIndex: (pos.zIndex ?? 0) + 1,
-                            transform: transforms.length > 0 ? transforms.join(' ') : undefined,
-                            transformOrigin: 'center center',
-                          }}
-                        />
-                      )
-                    })}
-                  </Box>
-                )
-              })()}
+              {/* Images — single unified stacking order (matches the editor) */}
+              {contentPage.images.length > 0 && (
+                <Box
+                  sx={{
+                    position: 'relative',
+                    width: '100%',
+                    aspectRatio: '3 / 2',
+                    borderRadius: 2,
+                    overflow: 'hidden',
+                    bgcolor: isLincoln ? 'rgba(255,255,255,0.05)' : 'grey.100',
+                  }}
+                >
+                  {stackOrder(contentPage.images).map((img, stackIdx) => {
+                    const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+                    const transforms: string[] = []
+                    if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
+                    if (pos.flipH) transforms.push('scaleX(-1)')
+                    if (pos.flipV) transforms.push('scaleY(-1)')
+                    return (
+                      <Box
+                        key={img.id}
+                        component="img"
+                        src={img.url}
+                        sx={{
+                          position: 'absolute',
+                          left: `${pos.x}%`,
+                          top: `${pos.y}%`,
+                          width: `${pos.width}%`,
+                          height: `${pos.height}%`,
+                          objectFit: img.type === 'sticker' ? 'contain' : 'cover',
+                          borderRadius: 1,
+                          zIndex: stackIdx + 1,
+                          transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                          transformOrigin: 'center center',
+                        }}
+                      />
+                    )
+                  })}
+                </Box>
+              )}
 
               {/* Text — all words tappable for TTS, sight words get colored chips */}
               {contentPage.text && (

@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf'
 import type { Book, BookPage, PageImage } from '../../core/types'
 import { startStep } from '../../core/utils/perf'
 import { fetchAsDataUri } from './imageDataUri'
+import { stackOrder } from './draggableImageUtils'
 import type { PrintSettings } from './PrintSettingsDialog'
 
 /* ───────────────────── page size & color constants ───────────────────── */
@@ -584,13 +585,11 @@ async function drawContentPage(
     const imgAreaH = Math.min(area.w / IMAGE_ASPECT_RATIO, area.h * 0.55)
     const imgAreaX = area.x
 
-    // Sort: backgrounds first (non-stickers), then stickers on top, each sub-group by zIndex
-    const sortedImages = [...pageImages].sort((a, b) => {
-      const aIsSticker = a.type === 'sticker' ? 1 : 0
-      const bIsSticker = b.type === 'sticker' ? 1 : 0
-      if (aIsSticker !== bIsSticker) return aIsSticker - bIsSticker
-      return (a.position?.zIndex ?? 0) - (b.position?.zIndex ?? 0)
-    })
+    // Draw bottom → top in the same unified stacking order as the editor and
+    // reader, so a cross-type reorder (e.g. a background lifted above a
+    // sticker) prints exactly as composed. Legacy books (no stored zIndex)
+    // fall back to backgrounds-below-stickers, preserving prior print output.
+    const sortedImages = stackOrder(pageImages)
 
     // Draw container background
     pdf.setFillColor(...hexToRgb(colors.imgBg))
