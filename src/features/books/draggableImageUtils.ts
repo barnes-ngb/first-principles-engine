@@ -115,25 +115,36 @@ export const DEFAULT_IMAGE_GEOMETRY: Record<
   sketch: { x: 0, y: 0, width: 100, height: 100 },
 }
 
-// Unset images sort into type bands far above any normalized (small-integer)
-// zIndex, so a freshly added element lands on top of its band. Backgrounds
-// band < stickers band → legacy backgrounds stay below legacy stickers.
-const UNSET_BG_BAND = 1_000_000
-const UNSET_STICKER_BAND = 2_000_000
+// An unset image sorts into a band far above any normalized (small-integer)
+// zIndex, so a freshly added image lands on top of its own plane, ordered by
+// array index. Plane separation is handled by the sort's primary key, so a
+// single band suffices.
+const UNSET_BAND = 1_000_000
 
-/** The z-value used to order an image, honoring a stored zIndex when present. */
+/**
+ * The z-value used to order an image *within its plane*, honoring a stored
+ * zIndex when present. Cross-plane separation is applied by `stackOrder`, not
+ * here.
+ */
 export function effectiveZ(img: StackImage, index: number): number {
   const z = img.position?.zIndex
   if (typeof z === 'number') return z
-  const band = img.type === 'sticker' ? UNSET_STICKER_BAND : UNSET_BG_BAND
-  return band + index
+  return UNSET_BAND + index
 }
 
-/** Images sorted bottom → top for rendering. Stable and tie-free. */
+/** Sort rank of a plane: backgrounds (0) always below elements (1). */
+function planeRank(img: StackImage): 0 | 1 {
+  return layerTypeOf(img) === 'background' ? 0 : 1
+}
+
+/**
+ * Images sorted bottom → top for rendering. Backgrounds first (in their own
+ * order), then elements (in their own order). Stable and tie-free.
+ */
 export function stackOrder<T extends StackImage>(images: T[]): T[] {
   return images
-    .map((img, index) => ({ img, index, z: effectiveZ(img, index) }))
-    .sort((a, b) => a.z - b.z || a.index - b.index)
+    .map((img, index) => ({ img, index, plane: planeRank(img), z: effectiveZ(img, index) }))
+    .sort((a, b) => a.plane - b.plane || a.z - b.z || a.index - b.index)
     .map((entry) => entry.img)
 }
 
@@ -145,19 +156,25 @@ export function stackOrderTopFirst(images: StackImage[]): string[] {
 }
 
 /**
- * New bottom→top id order after moving one image a single step.
- * `direction: 'up'` moves it toward the top of the stack (higher z).
+ * New bottom→top id order after moving one image a single step *within its
+ * plane*. `direction: 'up'` moves it toward the top of the stack (higher z).
+ * A background can never cross into the element plane and vice versa: because
+ * planes are contiguous in `stackOrder`, the neighbor at the boundary is in the
+ * other plane, so the move is refused (no-op) rather than interleaving.
  */
 export function moveInStack(
   images: StackImage[],
   imageId: string,
   direction: 'up' | 'down',
 ): string[] {
-  const ids = stackOrder(images).map((img) => img.id)
+  const ordered = stackOrder(images)
+  const ids = ordered.map((img) => img.id)
   const from = ids.indexOf(imageId)
   if (from === -1) return ids
   const to = direction === 'up' ? from + 1 : from - 1
   if (to < 0 || to >= ids.length) return ids
+  // Only swap with a same-plane neighbor — never let an image change planes.
+  if (planeRank(ordered[to]) !== planeRank(ordered[from])) return ids
   const next = [...ids]
   ;[next[from], next[to]] = [next[to], next[from]]
   return next
