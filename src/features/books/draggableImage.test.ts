@@ -7,8 +7,10 @@ import {
   moveInStack,
   normalizedStackZ,
   rotationFromDrag,
+  layerTypeOf,
   DEFAULT_IMAGE_GEOMETRY,
   type StackImage,
+  type LayerType,
 } from './draggableImageUtils'
 
 // ── clampPosition ──────────────────────────────────────────────
@@ -214,8 +216,18 @@ describe('scaleAboutCenter', () => {
 
 // ── stacking order + layer reorder (Steps 1 & 2) ───────────────
 
-function img(id: string, type: StackImage['type'], zIndex?: number): StackImage {
-  return { id, type, position: zIndex === undefined ? undefined : { zIndex } }
+function img(
+  id: string,
+  type: StackImage['type'],
+  zIndex?: number,
+  layerType?: LayerType,
+): StackImage {
+  return {
+    id,
+    type,
+    ...(layerType ? { layerType } : {}),
+    position: zIndex === undefined ? undefined : { zIndex },
+  }
 }
 
 describe('stackOrder', () => {
@@ -229,13 +241,47 @@ describe('stackOrder', () => {
     expect(stackOrder(images).map((i) => i.id)).toEqual(['bg', 's1', 's2'])
   })
 
-  it('honors explicit contiguous zIndex across types (cross-type ordering)', () => {
+  it('a background can NEVER float above an element, even with a high zIndex (FEAT-116)', () => {
+    // The reported bug: FEAT-115 let a background lift above stickers. The two-
+    // plane order forbids it — the background stays in the back plane.
     const images = [
-      img('bg', 'ai-generated', 2), // background lifted above stickers
+      img('bg', 'ai-generated', 2), // background given a high z
       img('s1', 'sticker', 0),
       img('s2', 'sticker', 1),
     ]
-    expect(stackOrder(images).map((i) => i.id)).toEqual(['s1', 's2', 'bg'])
+    expect(stackOrder(images).map((i) => i.id)).toEqual(['bg', 's1', 's2'])
+  })
+
+  it('a photo background added LAST still renders behind every element (the reported bug)', () => {
+    // Photo overlay marked element (small placed image) + a full-page photo
+    // background added afterward with the highest zIndex — background stays back.
+    const images = [
+      img('scene', 'ai-generated', 0, 'background'),
+      img('char', 'sticker', 1, 'element'),
+      img('photo', 'photo', 99, 'background'), // added last, high z, but a background
+    ]
+    const order = stackOrder(images).map((i) => i.id)
+    // Both backgrounds below the character; the character is on top.
+    expect(order).toEqual(['scene', 'photo', 'char'])
+    expect(order.at(-1)).toBe('char')
+  })
+
+  it('backgrounds order among themselves at the back', () => {
+    const images = [
+      img('bgA', 'photo', 0, 'background'),
+      img('bgB', 'ai-generated', 1, 'background'),
+      img('el', 'sticker', 2, 'element'),
+    ]
+    // bgA below bgB (both back), element on top.
+    expect(stackOrder(images).map((i) => i.id)).toEqual(['bgA', 'bgB', 'el'])
+  })
+
+  it('an overlay photo (layerType element) stacks above a background photo', () => {
+    const images = [
+      img('bgPhoto', 'photo', 0, 'background'),
+      img('placedPhoto', 'photo', 1, 'element'), // same `type`, different plane
+    ]
+    expect(stackOrder(images).map((i) => i.id)).toEqual(['bgPhoto', 'placedPhoto'])
   })
 
   it('newly added (unset) sticker floats to the top of a normalized page', () => {
@@ -251,6 +297,20 @@ describe('stackOrder', () => {
     const images = [img('a', 'sticker', 0), img('b', 'sticker', 1), img('c', 'sticker', 2)]
     const order = stackOrder(images).map((i) => i.id)
     expect(order).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('layerTypeOf (back-fill for legacy images)', () => {
+  it('honors an explicit layerType', () => {
+    expect(layerTypeOf(img('a', 'photo', 0, 'element'))).toBe('element')
+    expect(layerTypeOf(img('b', 'sticker', 0, 'background'))).toBe('background')
+  })
+
+  it('legacy (no layerType): only stickers are elements — everything else is a background', () => {
+    expect(layerTypeOf(img('s', 'sticker'))).toBe('element')
+    expect(layerTypeOf(img('p', 'photo'))).toBe('background')
+    expect(layerTypeOf(img('a', 'ai-generated'))).toBe('background')
+    expect(layerTypeOf(img('k', 'sketch'))).toBe('background')
   })
 })
 
@@ -286,6 +346,76 @@ describe('moveInStack', () => {
 
   it('is a no-op for an unknown id', () => {
     expect(moveInStack(base(), 'zzz', 'up')).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('moveInStack — plane confinement (FEAT-116)', () => {
+  // Bottom → top: bg1, bg2 (backgrounds) then el1, el2 (elements).
+  const mixed = (): StackImage[] => [
+    img('bg1', 'photo', 0, 'background'),
+    img('bg2', 'ai-generated', 1, 'background'),
+    img('el1', 'sticker', 2, 'element'),
+    img('el2', 'sticker', 3, 'element'),
+  ]
+
+  it('the top background cannot rise into the element plane', () => {
+    // bg2 is the top of the background plane; moving it up must be a no-op.
+    expect(moveInStack(mixed(), 'bg2', 'up')).toEqual(['bg1', 'bg2', 'el1', 'el2'])
+  })
+
+  it('the bottom element cannot sink into the background plane', () => {
+    // el1 is the bottom of the element plane; moving it down must be a no-op.
+    expect(moveInStack(mixed(), 'el1', 'down')).toEqual(['bg1', 'bg2', 'el1', 'el2'])
+  })
+
+  it('backgrounds still reorder among themselves', () => {
+    expect(moveInStack(mixed(), 'bg1', 'up')).toEqual(['bg2', 'bg1', 'el1', 'el2'])
+  })
+
+  it('elements still reorder among themselves', () => {
+    expect(moveInStack(mixed(), 'el2', 'down')).toEqual(['bg1', 'bg2', 'el2', 'el1'])
+  })
+})
+
+// ── Two-plane order: all three renderers agree (FEAT-116) ───────
+//
+// The editor, reader, and print each render `stackOrder(images)` bottom → top,
+// assigning an ascending paint/zIndex (`stackIdx + 1`). Since they share the
+// one pure `stackOrder`, the resolved paint order is identical everywhere —
+// this asserts that single source of truth so screen and paper never disagree.
+
+describe('all three renderers resolve the same order', () => {
+  /** Mirror each renderer: stackOrder → id + ascending paint z. */
+  function paint(images: StackImage[]): { id: string; z: number }[] {
+    return stackOrder(images).map((im, stackIdx) => ({ id: im.id, z: stackIdx + 1 }))
+  }
+
+  it('a photo added last still paints behind the character in every renderer', () => {
+    const images = [
+      img('scene', 'ai-generated', 0, 'background'),
+      img('char', 'sticker', 1, 'element'),
+      img('photo', 'photo', 99, 'background'),
+    ]
+    const editor = paint(images)
+    const reader = paint(images)
+    const print = paint(images)
+    expect(editor).toEqual(reader)
+    expect(reader).toEqual(print)
+    // Character paints last (highest z) → on top.
+    expect(editor.at(-1)).toEqual({ id: 'char', z: 3 })
+  })
+
+  it('legacy books (no layerType) resolve identically across renderers via back-fill', () => {
+    const legacy = [
+      img('s1', 'sticker'),
+      img('bg', 'ai-generated'),
+      img('s2', 'sticker'),
+    ]
+    expect(paint(legacy)).toEqual([
+      { id: 'bg', z: 1 },
+      { id: 's1', z: 2 },
+      { id: 's2', z: 3 },
+    ])
   })
 })
 

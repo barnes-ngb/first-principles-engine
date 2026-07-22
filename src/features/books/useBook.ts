@@ -366,11 +366,14 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           ? { x: 10, y: 10, width: 40, height: 40 }
           : undefined
 
+        // A first (full-page) photo is the page background; a photo added over
+        // an existing image is a placed element (FEAT-116).
         const image: PageImage = {
           id: imageId,
           url,
           storagePath,
           type: 'photo',
+          layerType: isOverlay ? 'element' : 'background',
           ...(overlayPosition ? { position: overlayPosition } : {}),
         }
         applyUpdate((prev) => ({
@@ -441,6 +444,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         url,
         storagePath,
         type: 'ai-generated',
+        layerType: 'background',
         prompt,
       }
       applyUpdate((prev) => ({
@@ -548,6 +552,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           url,
           storagePath,
           type: 'sketch',
+          layerType: 'background',
           style: 'sketch',
           originalSketchUrl: url,
           label: 'Hand-drawn sketch',
@@ -686,6 +691,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         url: stickerUrl,
         storagePath,
         type: 'sticker',
+        layerType: 'element',
         label,
         ...(tags?.length ? { tags } : {}),
       }
@@ -718,6 +724,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           url,
           storagePath,
           type: 'sticker',
+          layerType: 'element',
           label,
           // Sticker default position: small + centered so it's clearly a movable sticker
           position: { x: 30, y: 30, width: 40, height: 40 },

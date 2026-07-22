@@ -12,7 +12,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 
 import type { PageImage } from '../../core/types'
-import { stackOrder } from './draggableImageUtils'
+import { stackOrder, layerTypeOf } from './draggableImageUtils'
 
 interface LayersPanelProps {
   images: PageImage[]
@@ -46,7 +46,8 @@ export default function LayersPanel({
 }: LayersPanelProps) {
   if (images.length === 0) return null
 
-  // Top of stack first — matches every photo-editor layers panel.
+  // Top of stack first — matches every photo-editor layers panel. Elements sit
+  // at the top, backgrounds (their own back plane) group at the bottom.
   const topFirst = [...stackOrder(images)].reverse()
 
   return (
@@ -86,11 +87,39 @@ export default function LayersPanel({
         <Stack sx={{ px: 0.5, pb: 0.5 }}>
           {topFirst.map((img, i) => {
             const selected = img.id === selectedImageId
-            const isTop = i === 0
-            const isBottom = i === topFirst.length - 1
+            const plane = layerTypeOf(img)
+            // Up/down move only *within* the plane: enabled iff the neighbor in
+            // that direction exists and shares this plane. Prevents an element
+            // sinking below a background or a background rising above elements.
+            const upNeighbor = topFirst[i - 1]
+            const downNeighbor = topFirst[i + 1]
+            const canMoveUp = !!upNeighbor && layerTypeOf(upNeighbor) === plane
+            const canMoveDown = !!downNeighbor && layerTypeOf(downNeighbor) === plane
+            // Divider label above the first background in the (top-first) list.
+            const isFirstBackground =
+              plane === 'background' &&
+              (i === 0 || layerTypeOf(topFirst[i - 1]) !== 'background')
             return (
+              <Box key={img.id}>
+              {isFirstBackground && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    display: 'block',
+                    px: 1,
+                    pt: 0.75,
+                    pb: 0.25,
+                    color: 'text.secondary',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.5,
+                    borderTop: i === 0 ? 'none' : '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
+                  Background
+                </Typography>
+              )}
               <Stack
-                key={img.id}
                 direction="row"
                 alignItems="center"
                 spacing={1}
@@ -145,7 +174,7 @@ export default function LayersPanel({
                   <span>
                     <IconButton
                       size="small"
-                      disabled={isTop}
+                      disabled={!canMoveUp}
                       onClick={(e) => {
                         e.stopPropagation()
                         onReorder(img.id, 'up')
@@ -160,7 +189,7 @@ export default function LayersPanel({
                   <span>
                     <IconButton
                       size="small"
-                      disabled={isBottom}
+                      disabled={!canMoveDown}
                       onClick={(e) => {
                         e.stopPropagation()
                         onReorder(img.id, 'down')
@@ -172,6 +201,7 @@ export default function LayersPanel({
                   </span>
                 </Tooltip>
               </Stack>
+              </Box>
             )
           })}
         </Stack>
