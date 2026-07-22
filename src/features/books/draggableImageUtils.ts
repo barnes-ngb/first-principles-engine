@@ -67,17 +67,37 @@ export function rotationFromDrag(
 
 // ── Stacking order (layers) ────────────────────────────────────
 //
-// A single, unambiguous z-order over *all* page images (backgrounds and
-// stickers alike). The render sorts by `effectiveZ` so order is tie-free and
-// survives reload; reordering normalizes every image to a contiguous 0..n-1
-// `zIndex` (see `normalizedStackZ`). Legacy docs (no stored zIndex) fall back
-// to backgrounds-below-stickers in array order, reproducing the prior visual.
+// Two planes (FEAT-116): every *background* renders below every *element*, and
+// each plane orders among itself by `effectiveZ` (tie-free, survives reload).
+// A background can never float above an element, and an element can never sink
+// below a background — the plane is the primary sort key, so even a background
+// carrying a high stored `zIndex` stays behind the elements. Within a plane,
+// reordering normalizes to a contiguous `zIndex` (see `normalizedStackZ`);
+// legacy docs (no stored zIndex) order by array index. FEAT-115 unified
+// backgrounds and stickers into one reorderable stack, which let a photo
+// background float to the top — this restores the back plane.
+
+/** The two stacking planes. Backgrounds always render below all elements. */
+export type LayerType = 'background' | 'element'
 
 /** Minimal shape needed to compute stacking order. */
 export interface StackImage {
   id: string
   type: 'photo' | 'ai-generated' | 'sticker' | 'sketch'
+  /** Explicit plane (FEAT-116). Absent on legacy images → resolved by heuristic. */
+  layerType?: LayerType
   position?: { zIndex?: number } | null
+}
+
+/**
+ * Resolve an image's stacking plane. Honors an explicit `layerType` when
+ * present; otherwise falls back to the pre-`layerType` heuristic — only
+ * stickers were elements, everything else (photo / scene / sketch) was a
+ * background — so legacy books partition identically.
+ */
+export function layerTypeOf(img: StackImage): LayerType {
+  if (img.layerType) return img.layerType
+  return img.type === 'sticker' ? 'element' : 'background'
 }
 
 /**

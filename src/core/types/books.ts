@@ -331,6 +331,15 @@ export interface PageImage {
   url: string
   storagePath?: string
   type: 'photo' | 'ai-generated' | 'sticker' | 'sketch'
+  /**
+   * Which stacking plane this image belongs to (FEAT-116). A `background` is the
+   * full-page canvas (photo / scene / sketch) and always renders behind every
+   * `element`; an `element` (sticker / character / placed image) stacks freely
+   * above all backgrounds. Stamped at add time. Absent on legacy images →
+   * resolved via `layerTypeOf` (the prior heuristic: only stickers were
+   * elements), so pre-`layerType` books render identically.
+   */
+  layerType?: 'background' | 'element'
   /** Image style variant */
   style?: 'sketch' | 'ai-generated' | 'ai-enhanced' | 'photo'
   /** Original hand-drawn sketch URL (always saved when type is 'sketch') */
