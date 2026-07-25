@@ -16,6 +16,7 @@ import Typography from '@mui/material/Typography'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { app } from '../../core/firebase/firebase'
 import { useChildren } from '../../core/hooks/useChildren'
+import { useProfile } from '../../core/profile/useProfile'
 import {
   activityConfigsCollection,
   childSkillMapsCollection,
@@ -100,10 +101,24 @@ function formatSyncOutcome(name: string, position: number, outcome: WorkbookSync
  *
  * Reads `skillSnapshots` / `childSkillMaps` / `sightWordProgress`; writes **only**
  * `learnerModels` (merge). No LLM, no other collection touched.
+ *
+ * **Parent gate (capability, never a name — FEAT-122).** `?diag=1` is NOT an
+ * access control: `/progress` sits OUTSIDE the `RequireParent` block in
+ * `app/router.tsx`, so a kid profile that types `/progress?diag=1` renders this
+ * page. The stakes here are higher than a leak — the panel's buttons re-seed
+ * `learnerModels` (overwriting a child's stored concept states), sync workbook
+ * positions, and fire the paid `generateLearnerSynthesisNow` callable. So the
+ * panel additionally requires the parent capability (`canEdit`, the same signal
+ * `RequireParent` uses — ARCH-41/42/43), checked BEFORE the flag, exactly as
+ * FEAT-120 gated `DataReviewExportPanel` on the same route. The mount-time
+ * model read is gated too, so a kid profile costs zero Firestore reads. Moving
+ * the whole `/progress` route behind `RequireParent` would change kid access to
+ * Progress broadly and is out of this run's scope.
  */
 export default function FoundationsDiagPanel() {
   const [searchParams] = useSearchParams()
   const familyId = useFamilyId()
+  const { canEdit } = useProfile()
   const { children } = useChildren()
   const [byChild, setByChild] = useState<Record<string, ChildState>>({})
 
@@ -114,6 +129,8 @@ export default function FoundationsDiagPanel() {
   // only `learnerModels`; the idempotent `already-loaded` guard keeps a re-seed /
   // sync from being clobbered by a late fetch.
   useEffect(() => {
+    // Capability gate here too — a gated render must not reach Firestore at all.
+    if (!canEdit) return
     if (!familyId || children.length === 0) return
     let cancelled = false
     void (async () => {
@@ -144,7 +161,7 @@ export default function FoundationsDiagPanel() {
     return () => {
       cancelled = true
     }
-  }, [familyId, children])
+  }, [canEdit, familyId, children])
 
   const seedChild = useCallback(
     async (childId: string) => {
@@ -333,6 +350,8 @@ export default function FoundationsDiagPanel() {
     [familyId],
   )
 
+  // Capability gate FIRST — `?diag=1` is a surface flag, not access control.
+  if (!canEdit) return null
   if (searchParams.get('diag') !== '1') return null
 
   return (
