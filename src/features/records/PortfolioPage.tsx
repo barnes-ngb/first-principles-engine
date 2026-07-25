@@ -47,6 +47,7 @@ import {
   DAD_LAB_SECTION_TITLE,
   buildDadLabMarkdownSection,
   linkedArtifactLabel,
+  portfolioExportLabel,
   selectDadLabPortfolioEntries,
 } from './dadLabPortfolio.logic'
 
@@ -243,7 +244,13 @@ export default function PortfolioPage() {
       children.map((c) => ({ id: c.id, name: c.name })),
       monthStart,
       monthEnd,
-      buildDadLabMarkdownSection(dadLabEntries),
+      // The selected ids are already written above, so the Dad Lab section
+      // skips them and emits only the lab evidence the file would otherwise
+      // claim but not carry (whole-family artifacts are never selectable here).
+      buildDadLabMarkdownSection(
+        dadLabEntries,
+        selected.map((a) => a.id).filter((id): id is string => id != null),
+      ),
     )
 
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' })
@@ -575,12 +582,17 @@ export default function PortfolioPage() {
 
           <Divider />
 
+          {/*
+            A month can hold Dad Labs and no selected artifacts — that export is
+            worth downloading, so the button stays live when either side has
+            something to say.
+          */}
           <Button
             variant="contained"
             onClick={handleExportMarkdown}
-            disabled={selectedIds.size === 0}
+            disabled={selectedIds.size === 0 && dadLabEntries.length === 0}
           >
-            Export Portfolio Markdown ({selectedIds.size} artifacts)
+            {portfolioExportLabel(selectedIds.size, dadLabEntries.length)}
           </Button>
           </>}
         </Stack>

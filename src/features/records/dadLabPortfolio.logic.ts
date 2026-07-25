@@ -18,7 +18,7 @@
  */
 import type { Artifact, DadLabReport } from '../../core/types'
 import { DadLabStatus } from '../../core/types/enums'
-import { computeLabLinkage } from './dataReviewExport.logic'
+import { computeLabLinkage, reportOwnedArtifactIds } from './dataReviewExport.logic'
 
 /**
  * Dad Lab is a whole-family activity by design (DATA-04, resolved 2026-06-09):
@@ -35,6 +35,17 @@ export const DAD_LAB_SECTION_TITLE = 'Dad Lab'
 
 /** Default cap for a narrative excerpt, in characters. */
 export const DAD_LAB_EXCERPT_MAX_CHARS = 240
+
+/** One piece of captured lab evidence, ready to render as a markdown link. */
+export interface DadLabLinkedMedia {
+  /** The artifact's doc id, used to skip anything already rendered above. */
+  artifactId?: string
+  title: string
+  /** Drives image-embed vs plain link in the export. */
+  kind: 'photo' | 'audio' | 'other'
+  /** Every URL on the artifact (`mediaUrls` when present, else `uri`). */
+  urls: string[]
+}
 
 /** One report, ready to render in the month view or the markdown export. */
 export interface DadLabPortfolioEntry {
@@ -55,6 +66,13 @@ export interface DadLabPortfolioEntry {
    * **both** directions (see {@link computeLabLinkage}).
    */
   linkedArtifactCount: number
+  /**
+   * The linked evidence that actually carries a URL — the same artifacts the
+   * count describes, so the export can render what it claims exists rather than
+   * asserting a number the reader cannot see. Always a subset of
+   * `linkedArtifactCount` (an artifact with no URL is counted but not listed).
+   */
+  linkedMedia: DadLabLinkedMedia[]
 }
 
 /** Trim to `maxChars` at a word boundary, appending an ellipsis when cut. */
@@ -117,6 +135,14 @@ export const dadLabNarrativeExcerpt = (
   return fallback ? truncateAtWord(fallback, maxChars) : ''
 }
 
+/** Photo / audio / other, tolerating the legacy lowercase `type` values. */
+const mediaKind = (a: Artifact): DadLabLinkedMedia['kind'] => {
+  const type = (a.type as string)?.toLowerCase()
+  if (type === 'photo') return 'photo'
+  if (type === 'audio') return 'audio'
+  return 'other'
+}
+
 /**
  * A lab belongs in the portfolio once it has actually happened. `planned` labs
  * are on the calendar, not in the record, and carry no narrative yet.
@@ -150,6 +176,38 @@ export const selectDadLabPortfolioEntries = (
   // would report every three-beat session as having zero evidence.
   const linkage = computeLabLinkage(inMonth, monthArtifacts)
 
+  // Which report each artifact belongs to. The precedence decision is delegated
+  // to `linkage.linkKindFor` — the same call `countForReport` attributes by — so
+  // the media list below can never disagree with the count beside it.
+  const ownerIdByArtifactId = new Map<string, string>()
+  for (const report of inMonth) {
+    if (!report.id) continue
+    for (const artifactId of reportOwnedArtifactIds(report)) {
+      ownerIdByArtifactId.set(artifactId, report.id)
+    }
+  }
+  const reportIdFor = (a: Artifact): string | undefined => {
+    switch (linkage.linkKindFor(a)) {
+      case 'labSessionId':
+        return a.labSessionId
+      case 'report-owned':
+        return a.id ? ownerIdByArtifactId.get(a.id) : undefined
+      default:
+        return undefined
+    }
+  }
+
+  const mediaByReportId = new Map<string, DadLabLinkedMedia[]>()
+  for (const a of linkage.labArtifacts) {
+    const reportId = reportIdFor(a)
+    if (!reportId) continue
+    const urls = a.mediaUrls?.length ? a.mediaUrls : a.uri ? [a.uri] : []
+    if (urls.length === 0) continue
+    const list = mediaByReportId.get(reportId) ?? []
+    list.push({ artifactId: a.id, title: a.title, kind: mediaKind(a), urls })
+    mediaByReportId.set(reportId, list)
+  }
+
   return [...inMonth]
     .sort((a, b) => b.date.localeCompare(a.date))
     .map((report) => ({
@@ -158,6 +216,7 @@ export const selectDadLabPortfolioEntries = (
       date: report.date,
       excerpt: dadLabNarrativeExcerpt(report),
       linkedArtifactCount: linkage.countForReport(report.id),
+      linkedMedia: report.id ? (mediaByReportId.get(report.id) ?? []) : [],
     }))
 }
 
@@ -169,15 +228,25 @@ export const linkedArtifactLabel = (count: number): string =>
  * The markdown block for the month's Dad Labs. Returns `[]` for an empty month
  * so the export gains no empty header.
  *
- * Photo URLs are deliberately absent: the existing per-child Photos section of
- * the portfolio markdown already carries them, and duplicating them would bloat
- * the export with the same links twice.
+ * **Why this section carries its own media links.** The original plan was to
+ * leave photo URLs to the per-child Photos section. That premise does not hold
+ * for lab evidence: the FEAT-56 three-beat capture writes artifacts with
+ * `childId: 'both'` (DATA-04), and `PortfolioPage` only makes exact-childId
+ * artifacts selectable — so a normal lab's photos and recordings can never
+ * reach the Photos section at all. Emitting only a count would have the export
+ * assert that evidence exists while carrying none of it.
+ *
+ * `renderedArtifactIds` are the artifacts already written elsewhere in the file
+ * (the selected ones). Those are skipped here, so nothing is duplicated: this
+ * section fills the gap rather than repeating what is above it.
  */
 export const buildDadLabMarkdownSection = (
   entries: DadLabPortfolioEntry[],
+  renderedArtifactIds: Iterable<string> = [],
 ): string[] => {
   if (entries.length === 0) return []
 
+  const alreadyRendered = new Set(renderedArtifactIds)
   const lines: string[] = [`## ${DAD_LAB_SECTION_TITLE}`, '', `_${DAD_LAB_FAMILY_SCOPE_NOTE}_`, '']
   for (const entry of entries) {
     lines.push(`### ${entry.title} — ${entry.date}`)
@@ -188,6 +257,27 @@ export const buildDadLabMarkdownSection = (
     }
     lines.push(`Linked this month: ${linkedArtifactLabel(entry.linkedArtifactCount)}`)
     lines.push('')
+
+    const media = entry.linkedMedia.filter(
+      (m) => !(m.artifactId != null && alreadyRendered.has(m.artifactId)),
+    )
+    for (const item of media) {
+      for (const url of item.urls) {
+        // Photos embed; recordings link (markdown has no audio embed).
+        lines.push(item.kind === 'photo' ? `![${item.title}](${url})` : `[${item.title}](${url})`)
+        lines.push('')
+      }
+    }
   }
   return lines
+}
+
+/**
+ * Label for the export button. A month can hold Dad Labs and no selected
+ * artifacts, and that export is worth downloading — the count has to say so.
+ */
+export const portfolioExportLabel = (artifactCount: number, labCount: number): string => {
+  const artifacts = `${artifactCount} artifact${artifactCount === 1 ? '' : 's'}`
+  if (labCount === 0) return `Export Portfolio Markdown (${artifacts})`
+  return `Export Portfolio Markdown (${artifacts} + ${labCount} lab${labCount === 1 ? '' : 's'})`
 }
