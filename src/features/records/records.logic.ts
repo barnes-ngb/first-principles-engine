@@ -669,6 +669,18 @@ export const generatePortfolioMarkdown = (
   children: Array<{ id: string; name: string }>,
   startDate: string,
   endDate: string,
+  /**
+   * The month's Dad Lab section (FEAT-121), pre-rendered by
+   * `dadLabPortfolio.logic.ts` and appended once after the per-child sections —
+   * Dad Lab carries no `childId` (DATA-04), so it is not repeated per child.
+   *
+   * Passed in rather than built here on purpose: resolving the lab↔artifact
+   * link reuses `computeLabLinkage` from `dataReviewExport.logic.ts`, which
+   * already imports *this* module — importing it back would close a runtime
+   * cycle. Omit the argument for the previous output, byte for byte;
+   * `buildComplianceZip` does exactly that.
+   */
+  dadLabSection: string[] = [],
 ): string => {
   const lines: string[] = [
     `# Portfolio Index — ${startDate} to ${endDate}`,
@@ -715,6 +727,11 @@ export const generatePortfolioMarkdown = (
       }
     }
   }
+
+  // FEAT-121 — the Dad Lab narratives, once per month rather than per child.
+  // Photo URLs are not repeated here; the per-child Photos sections above
+  // already carry every lab photo that made the selection.
+  lines.push(...dadLabSection)
 
   return lines.join('\n')
 }
