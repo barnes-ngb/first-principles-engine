@@ -1,26 +1,41 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { conundrumXpDedupKey, useConundrumDoneToday } from '../useConundrumDoneToday'
 
-const getDocMock = vi.fn()
+type NextHandler = (snap: { exists: () => boolean }) => void
+type ErrHandler = (err: Error) => void
+
+/** Live subscribers keyed by the order they registered, so a test can push. */
+const subscribers: NextHandler[] = []
+const unsubscribe = vi.fn()
+const onSnapshotMock = vi.fn(
+  (_ref: unknown, onNext: NextHandler, onError?: ErrHandler) => {
+    subscribers.push(onNext)
+    if (snapshotState.error && onError) onError(snapshotState.error)
+    else onNext({ exists: () => snapshotState.exists })
+    return unsubscribe
+  },
+)
 const docMock = vi.fn((...args: unknown[]) => ({ path: args }))
+
+const snapshotState: { exists: boolean; error: Error | null } = {
+  exists: false,
+  error: null,
+}
 
 vi.mock('firebase/firestore', () => ({
   doc: (...args: unknown[]) => docMock(...args),
-  getDoc: (...args: unknown[]) => getDocMock(...args),
+  onSnapshot: (...args: unknown[]) =>
+    (onSnapshotMock as unknown as (...a: unknown[]) => () => void)(...args),
 }))
 
 vi.mock('../../../core/firebase/firestore', () => ({
   xpLedgerCollection: vi.fn((familyId: string) => ({ familyId })),
   xpLedgerDocId: vi.fn((childId: string, dedupKey: string) => `${childId}_${dedupKey}`),
 }))
-
-function exists(value: boolean) {
-  return Promise.resolve({ exists: () => value })
-}
 
 function Probe({
   familyId = 'fam-1',
@@ -42,8 +57,12 @@ function doneText(): string {
 }
 
 afterEach(() => {
-  getDocMock.mockReset()
+  onSnapshotMock.mockClear()
+  unsubscribe.mockClear()
   docMock.mockClear()
+  subscribers.length = 0
+  snapshotState.exists = false
+  snapshotState.error = null
 })
 
 describe('conundrumXpDedupKey', () => {
@@ -54,58 +73,82 @@ describe('conundrumXpDedupKey', () => {
 
 describe('useConundrumDoneToday', () => {
   it('reports done when the ledger event doc exists', async () => {
-    getDocMock.mockReturnValue(exists(true))
+    snapshotState.exists = true
     render(<Probe />)
 
     await waitFor(() => expect(doneText()).toBe('yes'))
-    expect(getDocMock).toHaveBeenCalledTimes(1)
+    expect(onSnapshotMock).toHaveBeenCalledTimes(1)
   })
 
   it('reports not-done when the ledger event doc is missing', async () => {
-    getDocMock.mockReturnValue(exists(false))
     render(<Probe />)
 
-    await waitFor(() => expect(getDocMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(onSnapshotMock).toHaveBeenCalledTimes(1))
     expect(doneText()).toBe('no')
   })
 
   it('reports not-done (and never throws) when the read fails', async () => {
-    getDocMock.mockReturnValue(Promise.reject(new Error('offline')))
+    snapshotState.error = new Error('offline')
     render(<Probe />)
 
-    await waitFor(() => expect(getDocMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(onSnapshotMock).toHaveBeenCalledTimes(1))
     expect(doneText()).toBe('no')
   })
 
+  it('flips to done when the kid saves mid-session, with no reload (Codex P1)', async () => {
+    // KidConundrumResponse keeps "saved" in local state and writes the ledger
+    // event fire-and-forget, so nothing this hook depends on changes. A
+    // one-shot getDoc would leave the row unfolded until a reload.
+    render(<Probe />)
+    await waitFor(() => expect(doneText()).toBe('no'))
+
+    act(() => subscribers[0]({ exists: () => true }))
+
+    await waitFor(() => expect(doneText()).toBe('yes'))
+  })
+
+  it('subscribes once per day and tears the listener down on unmount', async () => {
+    render(<Probe />)
+    await waitFor(() => expect(onSnapshotMock).toHaveBeenCalledTimes(1))
+
+    const { unmount } = render(<Probe today="2026-07-26" />)
+    unmount()
+
+    expect(unsubscribe).toHaveBeenCalled()
+  })
+
   it('issues no read at all when disabled (no conundrum this week)', async () => {
-    getDocMock.mockReturnValue(exists(true))
+    snapshotState.exists = true
     render(<Probe enabled={false} />)
 
     await waitFor(() => expect(doneText()).toBe('no'))
-    expect(getDocMock).not.toHaveBeenCalled()
+    expect(onSnapshotMock).not.toHaveBeenCalled()
   })
 
   it('issues no read when the family / child / date is not resolved yet', async () => {
-    getDocMock.mockReturnValue(exists(true))
+    snapshotState.exists = true
     render(<Probe childId="" />)
 
     await waitFor(() => expect(doneText()).toBe('no'))
-    expect(getDocMock).not.toHaveBeenCalled()
+    expect(onSnapshotMock).not.toHaveBeenCalled()
   })
 
-  it('resets to false on a day change before the new read resolves', async () => {
-    getDocMock.mockReturnValue(exists(true))
+  it('resets to false on a day change before the new subscription reports', async () => {
+    snapshotState.exists = true
     const { rerender } = render(<Probe today="2026-07-25" />)
     await waitFor(() => expect(doneText()).toBe('yes'))
 
     // New day: the stale `true` must not leak while the next read is in flight.
-    let resolveNext: ((v: { exists: () => boolean }) => void) | undefined
-    getDocMock.mockReturnValue(new Promise((res) => { resolveNext = res }))
+    // Register the new listener without letting it emit immediately.
+    onSnapshotMock.mockImplementationOnce((_ref, onNext: NextHandler) => {
+      subscribers.push(onNext)
+      return unsubscribe
+    })
     rerender(<Probe today="2026-07-26" />)
 
     expect(doneText()).toBe('no')
 
-    resolveNext!({ exists: () => true })
+    act(() => subscribers[subscribers.length - 1]({ exists: () => true }))
     await waitFor(() => expect(doneText()).toBe('yes'))
   })
 
@@ -117,7 +160,7 @@ describe('useConundrumDoneToday', () => {
       resolve(process.cwd(), 'src/features/today/useConundrumDoneToday.ts'),
       'utf8',
     )
-    expect(source).toMatch(/\bgetDoc\b/)
+    expect(source).toMatch(/\bonSnapshot\b/)
     expect(source).not.toMatch(/\bsetDoc\b/)
     expect(source).not.toMatch(/\baddDoc\b/)
     expect(source).not.toMatch(/\bupdateDoc\b/)

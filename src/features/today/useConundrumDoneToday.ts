@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, onSnapshot } from 'firebase/firestore'
 
 import { xpLedgerCollection, xpLedgerDocId } from '../../core/firebase/firestore'
 
@@ -18,11 +18,20 @@ export function conundrumXpDedupKey(date: string): string {
  * `KidTodayView`: `KidConundrumResponse` keeps "saved" in component state (lost
  * on reload) and its artifacts carry no `dayLogId`, so the view's artifact query
  * can't see them. The one durable trace is the per-event XP ledger doc the save
- * writes, so this probes for that doc's existence.
+ * writes, so this subscribes to that doc's existence.
  *
  * **This reads the `xpLedger` and never writes it.** The ledger stays a
- * propose-and-confirm invariant — this hook adds a single `getDoc` and no write
+ * propose-and-confirm invariant — this hook only ever subscribes, and no write
  * primitive is imported here at all.
+ *
+ * **Known limitation (Codex P2, needs an owner call):** the two save paths in
+ * `KidConundrumResponse` build their dedup key from
+ * `new Date().toISOString().slice(0, 10)` — a **UTC** date — while `today` here
+ * is the local `YYYY-MM-DD` from `TodayPage`. In US Central an evening answer is
+ * therefore filed under tomorrow's key, so this probe misses it that evening and
+ * *false-positives* the next morning. The root fix is in the writer, which means
+ * changing an `xpLedger` dedup key (a propose-and-confirm invariant, and a
+ * double-award risk on the boundary day), so it is deliberately NOT done here.
  *
  * @param enabled pass `false` when there's no conundrum this week; the read is
  *   skipped entirely.
@@ -49,21 +58,24 @@ export function useConundrumDoneToday(
 
   useEffect(() => {
     if (!key) return
-    let cancelled = false
     const eventRef = doc(
       xpLedgerCollection(familyId),
       xpLedgerDocId(childId, conundrumXpDedupKey(today)),
     )
-    getDoc(eventRef)
-      .then((snap) => {
-        if (!cancelled && snap.exists()) setDone(true)
-      })
-      .catch(() => {
+    // A live subscription, NOT a one-shot read: `KidConundrumResponse` keeps
+    // "saved" in its own local state and writes the ledger event
+    // fire-and-forget, so nothing this hook depends on changes when the kid
+    // answers. With a `getDoc` the row would stay unfolded and the finish-line
+    // would not decrement until a page reload (Codex P1) — precisely the
+    // "answer it and watch the number sit still" failure the chapter row's
+    // same-day check exists to avoid.
+    return onSnapshot(
+      eventRef,
+      (snap) => setDone(snap.exists()),
+      () => {
         // A failed read just means "not known done" — never block the row.
-      })
-    return () => {
-      cancelled = true
-    }
+      },
+    )
   }, [key, familyId, childId, today])
 
   return done
