@@ -34,6 +34,38 @@ import type {
 export type ReviewProposedState = 'solid' | 'forming' | 'frontier'
 
 /**
+ * Where an attestation was initiated (FEAT-66). Set by the client surface, never
+ * by the LLM (the parser ignores it), and used only to word the `changeFeed`
+ * cause honestly — the write itself is identical in every case, because an
+ * attestation means one thing wherever the parent gives it.
+ *
+ * - `reviewChat`     — the Foundations Review Chat (the original, default) path.
+ * - `foundationsTab` — the parent tapped a concept on the Foundations tab and
+ *                      recorded what they've seen (FEAT-66 A).
+ * - `reconcileKeep`  — the parent read a disagreeing eval and kept their word.
+ * - `reconcileTake`  — the parent read a disagreeing eval and chose its read.
+ */
+export type AttestOrigin =
+  | 'reviewChat'
+  | 'foundationsTab'
+  | 'reconcileKeep'
+  | 'reconcileTake'
+
+/** The `changeFeed` cause for one attestation, per origin. Plain words only (§14). */
+function attestCause(origin: AttestOrigin, kidName: string, state: ConceptStateKind): string {
+  switch (origin) {
+    case 'foundationsTab':
+      return `foundations: you recorded "${kidName}" as ${state}`
+    case 'reconcileKeep':
+      return `foundations: you reviewed the new take and kept your word on "${kidName}"`
+    case 'reconcileTake':
+      return `foundations: you reviewed the new take and went with it for "${kidName}"`
+    default:
+      return `reviewChat: you attested "${kidName}" as ${state}`
+  }
+}
+
+/**
  * The proposals the Review Chat can stage. A discriminated union that is the
  * structural allowlist for the write path — the writer rejects any other shape.
  */
@@ -45,6 +77,8 @@ export type FoundationsReviewAction =
       /** Parent's judgment; may be `solid` (attestation is top-quality evidence). */
       state: ReviewProposedState
       note?: string
+      /** Which surface the parent gave this word on. Client-set; defaults to `reviewChat`. */
+      origin?: AttestOrigin
     }
   | {
       kind: 'covered'
@@ -238,7 +272,7 @@ export function applyReviewActionToModel(
       observedAt: nowIso,
       overriddenBy: 'parent',
     }
-    cause = `reviewChat: you attested "${kidName}" as ${toState}`
+    cause = attestCause(action.origin ?? 'reviewChat', kidName, toState)
   } else {
     // covered — §13 clamp: curriculumPosition alone caps at `forming`.
     const clamped = clampCoveredState(action.proposedState ?? 'forming')
@@ -270,6 +304,12 @@ export function applyReviewActionToModel(
     state: toState,
     evidence: [...(prev?.evidence ?? []), evidence],
     seededAt: prev?.seededAt ?? nowIso,
+    // A standing eval-vs-parent disagreement (FEAT-76 `needsReconcile`) is resolved
+    // by exactly one thing: the parent giving their word again. An attestation
+    // clears it — written as an explicit `false` because the writer merges this
+    // entry into Firestore, where an *absent* key leaves the stored `true` in place.
+    // Any other write (covered) leaves the disagreement standing, untouched.
+    ...(prev?.needsReconcile ? { needsReconcile: action.kind !== 'attest' } : {}),
   }
 
   return {

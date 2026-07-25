@@ -1,14 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { doc } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Container from '@mui/material/Container'
 import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
 import Drawer from '@mui/material/Drawer'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import ListItemText from '@mui/material/ListItemText'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import ChildSelector from '../../components/ChildSelector'
@@ -16,13 +20,31 @@ import SectionCard from '../../components/SectionCard'
 import { LoadingState } from '../../components/states'
 import { FOUNDATION_NODE_MAP } from '../../core/foundations'
 import { useFamilyId } from '../../core/auth/useAuth'
+import { learnerModelsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useLearnerModel } from '../../core/hooks/useLearnerModel'
 import type {
   ConceptStateKind,
   LearnerModel,
 } from '../../core/types/learnerModel'
+import ReviewActionConfirmCard from '../foundations-review/ReviewActionConfirmCard'
+import type {
+  FoundationsReviewAction,
+  ReviewProposedState,
+} from '../foundations-review/foundationsReviewActions'
+import { applyAndWriteReviewAction } from '../foundations-review/writeReviewAction'
 import DispositionProfile from './DispositionProfile'
+import {
+  buildOverrideAction,
+  buildReconcileView,
+  KEEP_MY_WORD_NOTE,
+  PARENT_STATE_CHOICES,
+  proposableState,
+  RECONCILE_CHIP_TITLE,
+  RECONCILE_NOTICE,
+  stateChoiceLabel,
+  TAKE_MODEL_READ_NOTE,
+} from './conceptOverride'
 import {
   computeFocusConfirmations,
   computeMovedFeed,
@@ -46,11 +68,22 @@ function stateColor(state: ConceptStateKind): string {
 }
 
 /**
- * The Foundations tab (FEAT-65, Phase 3b) — the first-class, **read-only** parent
- * home for the Learner Model, graduating the `?diag=1` preview out from behind the
- * flag. Renders `synthesis.whatMattersNext`, the concept terrain, modality
- * calibration, the change-feed (with loop-confirmations, G3), routed open
- * questions, and the disposition narrative as a final section.
+ * The Foundations tab (FEAT-65, Phase 3b) — the first-class parent home for the
+ * Learner Model, graduating the `?diag=1` preview out from behind the flag.
+ * Renders `synthesis.whatMattersNext`, the concept terrain, modality calibration,
+ * the change-feed (with loop-confirmations, G3), routed open questions, and the
+ * disposition narrative as a final section.
+ *
+ * **FEAT-66 makes it a write surface too** — but only for the one deliberate human
+ * override the model already honours: tapping a concept lets the parent record
+ * what they have seen, which is written as an ordinary `attestation` through the
+ * *same* projector + writer the Foundations Review Chat uses. Every write is
+ * propose → confirm → write; nothing writes on a single tap. It also surfaces and
+ * resolves FEAT-76's `needsReconcile` flag — a guided eval that disagreed with a
+ * parent's word no longer sits invisible in the data.
+ *
+ * Everything else stays read-only, and the terrain redraws from the
+ * `useLearnerModel` snapshot after a write — never from local optimistic state.
  *
  * Every string passes the §14 display rules: no band numbers, no working-level
  * numbers, no percentages — four-state vocabulary only. Evidence renders via
@@ -62,8 +95,60 @@ export default function FoundationsTab() {
     useActiveChild()
   const { model, loading } = useLearnerModel(familyId, activeChildId)
   const [openConcept, setOpenConcept] = useState<TerrainConcept | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [savedNotice, setSavedNotice] = useState<string | null>(null)
 
   const childName = activeChild?.name ?? 'this child'
+
+  /**
+   * Write one confirmed override. The only write on this tab, and it reaches
+   * Firestore exclusively through the shared `writeReviewAction` merge — no second
+   * write path, no `skillSnapshots` touch, `learnerModels` only.
+   */
+  const handleConfirmOverride = useCallback(
+    async (action: FoundationsReviewAction) => {
+      if (saving) return
+      if (!familyId || !activeChildId || !model) {
+        setSaveError('Could not save that — try again.')
+        return
+      }
+      if (action.childId !== activeChildId) {
+        // Same guard the Review-Chat writer keeps: never write one child's word
+        // onto another's model.
+        console.warn('[foundations] rejected override — child mismatch', action)
+        setSaveError('Could not save that — try again.')
+        return
+      }
+      const concept = openConcept
+      setSaving(true)
+      setSaveError(null)
+      try {
+        await applyAndWriteReviewAction(
+          doc(learnerModelsCollection(familyId), activeChildId),
+          model,
+          action,
+          new Date().toISOString(),
+        )
+        if (action.kind === 'attest') {
+          const kidName =
+            FOUNDATION_NODE_MAP[action.conceptId]?.kidName ?? concept?.kidName ?? ''
+          setSavedNotice(
+            `Recorded — ${stateChoiceLabel(action.state, childName)}: “${kidName}”`,
+          )
+        }
+        setOpenConcept(null)
+      } catch (err) {
+        console.error('[foundations] failed to write learner model:', err)
+        // Leave the drawer open with the staged proposal intact — nothing partial
+        // was written, and the parent can retry without re-choosing.
+        setSaveError('Could not save that — try again.')
+      } finally {
+        setSaving(false)
+      }
+    },
+    [saving, familyId, activeChildId, model, openConcept, childName],
+  )
 
   return (
     <Container maxWidth="md" sx={{ py: 2 }}>
@@ -74,6 +159,12 @@ export default function FoundationsTab() {
         isLoading={isLoading}
         emptyMessage="Add a child to see their foundations."
       />
+
+      {savedNotice && (
+        <Alert severity="success" sx={{ mt: 2 }} onClose={() => setSavedNotice(null)}>
+          {savedNotice}
+        </Alert>
+      )}
 
       {loading && <LoadingState label="Loading foundations…" />}
 
@@ -97,7 +188,12 @@ export default function FoundationsTab() {
 
       <ConceptEvidenceDrawer
         concept={openConcept}
+        childId={activeChildId}
+        childName={childName}
         onClose={() => setOpenConcept(null)}
+        onConfirm={handleConfirmOverride}
+        saving={saving}
+        error={saveError}
       />
     </Container>
   )
@@ -203,10 +299,20 @@ function FoundationsBody({
                   key={c.conceptId}
                   label={c.kidName}
                   onClick={() => onOpenConcept(c)}
+                  // A standing eval-vs-parent disagreement (FEAT-76) gets a quiet
+                  // marker — never a colour change or a warning: the attested state
+                  // is still in force, there is just a new take to look at.
+                  icon={
+                    c.entry.needsReconcile ? (
+                      <InfoOutlinedIcon fontSize="small" />
+                    ) : undefined
+                  }
+                  title={c.entry.needsReconcile ? RECONCILE_CHIP_TITLE : undefined}
                   sx={{
                     borderColor: stateColor(c.entry.state),
                     color: stateColor(c.entry.state),
                     fontWeight: 600,
+                    '& .MuiChip-icon': { color: 'inherit' },
                   }}
                   variant="outlined"
                 />
@@ -340,51 +446,253 @@ function FoundationsBody({
 
 function ConceptEvidenceDrawer({
   concept,
+  childId,
+  childName,
   onClose,
+  onConfirm,
+  saving,
+  error,
 }: {
   concept: TerrainConcept | null
+  childId: string | undefined
+  childName: string
   onClose: () => void
+  onConfirm: (action: FoundationsReviewAction) => void
+  saving: boolean
+  error: string | null
 }) {
   return (
     <Drawer anchor="bottom" open={Boolean(concept)} onClose={onClose}>
+      {/* Mounted only while open, so the staged proposal + note reset every time
+          the drawer opens — a parent never lands on someone else's staging. */}
       {concept && (
-        <Box sx={{ p: 2, maxWidth: 640, mx: 'auto', width: '100%' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              {concept.kidName}
-            </Typography>
-            <Chip
-              size="small"
-              label={STATE_LABEL[concept.entry.state]}
-              sx={{ color: stateColor(concept.entry.state), fontWeight: 700 }}
-              variant="outlined"
-            />
-          </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            {concept.parentDescription}
-          </Typography>
-          <Divider sx={{ mb: 1 }} />
-          <Typography variant="overline" sx={{ fontWeight: 700 }}>
-            Evidence
-          </Typography>
-          {concept.entry.evidence.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No evidence captured yet.
-            </Typography>
-          ) : (
-            <List dense disablePadding>
-              {concept.entry.evidence.map((ref, i) => (
-                <ListItem key={i} disableGutters>
-                  <ListItemText
-                    primary={evidenceSourceLine(ref)}
-                    slotProps={{ primary: { variant: 'body2' } }}
-                  />
-                </ListItem>
-              ))}
-            </List>
-          )}
-        </Box>
+        <ConceptDrawerBody
+          concept={concept}
+          childId={childId}
+          childName={childName}
+          onConfirm={onConfirm}
+          saving={saving}
+          error={error}
+        />
       )}
     </Drawer>
+  )
+}
+
+/**
+ * The drawer's contents: the read-only evidence trail (FEAT-65), the reconcile
+ * affordance when a guided eval disagreed with a parent attestation (FEAT-66 B),
+ * and the parent override (FEAT-66 A).
+ *
+ * Nothing here writes. Choosing a state **stages** a proposal and renders the same
+ * `ReviewActionConfirmCard` the Review Chat uses — the write happens only on the
+ * card's Confirm tap, in the parent component.
+ */
+function ConceptDrawerBody({
+  concept,
+  childId,
+  childName,
+  onConfirm,
+  saving,
+  error,
+}: {
+  concept: TerrainConcept
+  childId: string | undefined
+  childName: string
+  onConfirm: (action: FoundationsReviewAction) => void
+  saving: boolean
+  error: string | null
+}) {
+  const [note, setNote] = useState('')
+  const [choice, setChoice] = useState<ReviewProposedState | null>(null)
+  const [staged, setStaged] = useState<FoundationsReviewAction | null>(null)
+
+  const reconcile = useMemo(
+    () => buildReconcileView(concept.entry, childName),
+    [concept.entry, childName],
+  )
+  /** "Keep my word" re-attests the standing state; the eval's read is the other route. */
+  const keepState = proposableState(concept.entry.state)
+  const evalState = reconcile?.evalState
+
+  /** Stage the parent's own read — the note rides along so the evidence line is honest. */
+  const stageChoice = (state: ReviewProposedState) => {
+    if (!childId) return
+    setChoice(state)
+    setStaged(
+      buildOverrideAction({
+        childId,
+        conceptId: concept.conceptId,
+        state,
+        note,
+        origin: 'foundationsTab',
+      }),
+    )
+  }
+
+  /** Stage a reconcile resolution — both routes are the same confirm-gated attestation. */
+  const stageReconcile = (state: ReviewProposedState, keep: boolean) => {
+    if (!childId) return
+    setChoice(null)
+    setStaged(
+      buildOverrideAction({
+        childId,
+        conceptId: concept.conceptId,
+        state,
+        note: keep ? KEEP_MY_WORD_NOTE : TAKE_MODEL_READ_NOTE,
+        origin: keep ? 'reconcileKeep' : 'reconcileTake',
+      }),
+    )
+  }
+
+  return (
+    <Box sx={{ p: 2, maxWidth: 640, mx: 'auto', width: '100%' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>
+          {concept.kidName}
+        </Typography>
+        <Chip
+          size="small"
+          label={STATE_LABEL[concept.entry.state]}
+          sx={{ color: stateColor(concept.entry.state), fontWeight: 700 }}
+          variant="outlined"
+        />
+      </Box>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+        {concept.parentDescription}
+      </Typography>
+
+      {/* B — the FEAT-76 `needsReconcile` flag, surfaced. Both reads, side by side,
+          then two confirm-gated ways out. Non-destructive: doing nothing leaves the
+          parent's word exactly where it is. */}
+      {reconcile && (
+        <Alert severity="info" icon={false} sx={{ mb: 1.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+            {RECONCILE_NOTICE}
+          </Typography>
+          <Typography variant="body2">{reconcile.yours.line}</Typography>
+          {reconcile.yours.detail && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {reconcile.yours.detail}
+            </Typography>
+          )}
+          <Typography variant="body2" sx={{ mt: 0.5 }}>
+            {reconcile.theirs.line}
+          </Typography>
+          {reconcile.theirs.detail && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {reconcile.theirs.detail}
+            </Typography>
+          )}
+          {childId && (
+            <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', gap: 1 }}>
+              {keepState && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={saving}
+                  onClick={() => stageReconcile(keepState, true)}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Keep my word
+                </Button>
+              )}
+              {evalState && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={saving}
+                  onClick={() => stageReconcile(evalState, false)}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Take the model’s read
+                </Button>
+              )}
+            </Stack>
+          )}
+        </Alert>
+      )}
+
+      <Divider sx={{ mb: 1 }} />
+      <Typography variant="overline" sx={{ fontWeight: 700 }}>
+        Evidence
+      </Typography>
+      {concept.entry.evidence.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          No evidence captured yet.
+        </Typography>
+      ) : (
+        <List dense disablePadding>
+          {concept.entry.evidence.map((ref, i) => (
+            <ListItem key={i} disableGutters>
+              <ListItemText
+                primary={evidenceSourceLine(ref)}
+                slotProps={{ primary: { variant: 'body2' } }}
+              />
+            </ListItem>
+          ))}
+        </List>
+      )}
+
+      {/* A — the parent override. Your word is the strongest evidence the model
+          has; this is where you give it. */}
+      {childId && (
+        <>
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="overline" sx={{ fontWeight: 700 }}>
+            Record what you’ve seen
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            What you’ve watched {childName} do counts more than anything the engine
+            works out on its own — pick what fits and it sticks.
+          </Typography>
+          <TextField
+            fullWidth
+            size="small"
+            label="What did you see? (optional)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            sx={{ mb: 1 }}
+          />
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+            {PARENT_STATE_CHOICES.map((state) => (
+              <Button
+                key={state}
+                size="small"
+                variant={choice === state ? 'contained' : 'outlined'}
+                disabled={saving}
+                onClick={() => stageChoice(state)}
+                sx={{ textTransform: 'none' }}
+              >
+                {stateChoiceLabel(state, childName)}
+              </Button>
+            ))}
+          </Stack>
+        </>
+      )}
+
+      {/* Propose → confirm → write. The same card the Review Chat confirms with,
+          so the preview wording and the §14 rails have exactly one definition. */}
+      {staged && (
+        <Box sx={{ mt: 1.5 }}>
+          <ReviewActionConfirmCard
+            pending={[{ id: 'override', action: staged, status: 'pending' }]}
+            childName={childName}
+            onConfirm={onConfirm}
+            onDismiss={() => {
+              setStaged(null)
+              setChoice(null)
+            }}
+            onConfirmAll={() => onConfirm(staged)}
+          />
+        </Box>
+      )}
+
+      {error && (
+        <Alert severity="error" sx={{ mt: 1 }}>
+          {error}
+        </Alert>
+      )}
+    </Box>
   )
 }

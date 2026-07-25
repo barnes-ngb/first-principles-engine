@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-import type { LearnerModel } from '../../core/types/learnerModel'
+import type { ConceptStateEntry, LearnerModel } from '../../core/types/learnerModel'
 
 vi.mock('../../core/auth/useAuth', () => ({
   useFamilyId: () => 'fam-1',
@@ -26,6 +27,22 @@ vi.mock('./DispositionProfile', () => ({
 // ChildSelector pulls its own data deps — stub to a marker.
 vi.mock('../../components/ChildSelector', () => ({
   default: () => <div>CHILD_SELECTOR</div>,
+}))
+
+// The write seam (FEAT-66). Firestore itself is never touched in tests; the
+// projector + merge shape are pinned in their own suites.
+const mockApplyAndWrite = vi.fn(async (...args: unknown[]) => {
+  void args
+  return {} as LearnerModel
+})
+/** The confirmed action is the 3rd arg: (modelRef, base, action, nowIso). */
+const confirmedAction = (call = 0) => mockApplyAndWrite.mock.calls[call][2]
+vi.mock('../foundations-review/writeReviewAction', () => ({
+  applyAndWriteReviewAction: (...args: unknown[]) => mockApplyAndWrite(...(args as [])),
+}))
+vi.mock('firebase/firestore', () => ({ doc: vi.fn(() => ({})) }))
+vi.mock('../../core/firebase/firestore', () => ({
+  learnerModelsCollection: vi.fn(() => ({})),
 }))
 
 import FoundationsTab from './FoundationsTab'
@@ -146,5 +163,220 @@ describe('FoundationsTab', () => {
     })
     render(<FoundationsTab />)
     expect(screen.getByText(/Getting to know how Lincoln learns/)).toBeInTheDocument()
+  })
+})
+
+// ── FEAT-66: the parent override + the reconcile affordance ───────────────
+
+/** The CVC entry with a parent attestation that a later eval disagreed with. */
+function flaggedCvc(): ConceptStateEntry {
+  return {
+    state: 'solid',
+    evidence: [
+      {
+        kind: 'attestation',
+        sourceId: 'reviewChat',
+        note: 'He read cat, run, sit for me',
+        observedAt: '2026-07-01T00:00:00.000Z',
+        overriddenBy: 'parent',
+      },
+      {
+        kind: 'eval',
+        sourceId: 'sess-9',
+        note: 'Guided eval — "Sound out short words": needed a hand on a few',
+        observedAt: '2026-07-20T00:00:00.000Z',
+        readState: 'forming',
+      },
+    ],
+    needsReconcile: true,
+  }
+}
+
+function modelWithReconcile(): LearnerModel {
+  const m = fullModel()
+  m.conceptStates[CVC] = flaggedCvc()
+  return m
+}
+
+/** Open the drawer for a terrain concept by its kid-name chip. */
+async function openConcept(user: ReturnType<typeof userEvent.setup>, kidName: string) {
+  await user.click(screen.getByText(kidName))
+}
+
+const CVC_NAME = 'Sound out short words'
+
+describe('FoundationsTab — parent concept override (FEAT-66 A)', () => {
+  beforeEach(() => {
+    mockApplyAndWrite.mockReset()
+    mockApplyAndWrite.mockResolvedValue({} as LearnerModel)
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: fullModel() })
+  })
+
+  it('stages a proposal on tap and writes NOTHING until Confirm', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    // The override affordance is there, with the shared plain-language wording.
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+
+    // Confirm preview rendered; nothing written.
+    expect(
+      screen.getByText(`Record that Lincoln has this solid: "${CVC_NAME}"`),
+    ).toBeInTheDocument()
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedAction()).toMatchObject({
+      kind: 'attest', childId: 'c1', conceptId: CVC, state: 'solid', origin: 'foundationsTab',
+    })
+  })
+
+  it('passes the parent’s note through so the evidence line is honest', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    await user.type(screen.getByLabelText(/What did you see/), 'He read the whole page')
+    await user.click(screen.getByRole('button', { name: 'Lincoln is working on this' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedAction()).toMatchObject({
+      state: 'frontier',
+      note: 'He read the whole page',
+    })
+  })
+
+  it('writes nothing when the proposal is dismissed', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
+
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+  })
+
+  it('confirms with success feedback naming what was recorded, and closes the drawer', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/Recorded — Lincoln has this solid/)).toBeInTheDocument(),
+    )
+    // Drawer closed — the override section is gone; the terrain redraws from the
+    // snapshot, not from local state.
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/What did you see/)).not.toBeInTheDocument(),
+    )
+  })
+
+  it('surfaces a failed write and leaves the drawer open with the proposal intact', async () => {
+    mockApplyAndWrite.mockRejectedValueOnce(new Error('firestore down'))
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('Could not save that — try again.')).toBeInTheDocument(),
+    )
+    expect(screen.getByLabelText(/What did you see/)).toBeInTheDocument() // still open
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument() // still staged
+    expect(screen.queryByText(/Recorded —/)).not.toBeInTheDocument()
+    errSpy.mockRestore()
+  })
+})
+
+describe('FoundationsTab — reconcile the eval’s new take (FEAT-66 B / FEAT-76)', () => {
+  beforeEach(() => {
+    mockApplyAndWrite.mockReset()
+    mockApplyAndWrite.mockResolvedValue({} as LearnerModel)
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: modelWithReconcile() })
+  })
+
+  it('marks the terrain chip and shows both reads in the drawer', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    expect(screen.getByTitle('The model has a new take on this')).toBeInTheDocument()
+
+    await openConcept(user, CVC_NAME)
+    expect(
+      screen.getByText('The model has a new take on this — view & reconcile.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/You recorded: Lincoln has this solid/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/The evaluation saw: Lincoln is coming along with this/),
+    ).toBeInTheDocument()
+  })
+
+  it('“keep my word” re-attests the standing state (confirm-gated)', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    await user.click(screen.getByRole('button', { name: 'Keep my word' }))
+    expect(mockApplyAndWrite).not.toHaveBeenCalled() // still propose → confirm
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedAction()).toMatchObject({
+      kind: 'attest', conceptId: CVC, state: 'solid', origin: 'reconcileKeep',
+    })
+  })
+
+  it('“take the model’s read” attests at the eval’s state (confirm-gated)', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    await user.click(screen.getByRole('button', { name: 'Take the model’s read' }))
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedAction()).toMatchObject({
+      kind: 'attest', conceptId: CVC, state: 'forming', origin: 'reconcileTake',
+    })
+  })
+
+  it('does not offer the model’s read when the eval ref predates FEAT-66', async () => {
+    const m = modelWithReconcile()
+    delete m.conceptStates[CVC].evidence[1].readState
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: m })
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    expect(screen.getByRole('button', { name: 'Keep my word' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Take the model’s read' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps the §14 / ETHOS-02 rails in the whole reconcile + override surface', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Lincoln is coming along with this' }))
+
+    const drawer = screen.getByRole('presentation')
+    const text = drawer.textContent ?? ''
+    // Sanity: we really are sweeping the reconcile + override + confirm copy.
+    expect(text).toContain('view & reconcile')
+    expect(text).toContain('Record that Lincoln is coming along with this')
+    expect(text).not.toMatch(/\bband\s*\d/i)
+    expect(text).not.toMatch(/\b(working\s+)?level\s*\d/i)
+    expect(text).not.toContain('%')
+    expect(text).not.toMatch(/regress|dropped|failed/i)
+    expect(text).not.toMatch(/\bscore\b/i)
   })
 })
