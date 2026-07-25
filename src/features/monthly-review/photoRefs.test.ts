@@ -3,8 +3,20 @@ import { getModePhotos } from './photoRefs'
 import type { MonthlyReviewPage, PhotoRef } from '../../core/types'
 
 describe('getModePhotos', () => {
-  const kidPhoto: PhotoRef = { url: 'https://example.com/kid.jpg', caption: 'kid view' }
-  const parentPhoto: PhotoRef = { url: 'https://example.com/parent.jpg', caption: 'parent view' }
+  const kidPhoto: PhotoRef = {
+    id: 'photo-kid',
+    storagePath: 'families/f1/scans/kid.jpg',
+    source: 'scan',
+    sourceDocId: 'scan-1',
+    capturedAt: '2026-07-01T10:00:00.000Z',
+  }
+  const parentPhoto: PhotoRef = {
+    id: 'photo-parent',
+    storagePath: 'families/f1/artifacts/parent.jpg',
+    source: 'artifact',
+    sourceDocId: 'artifact-1',
+    capturedAt: '2026-07-01T11:00:00.000Z',
+  }
 
   it('returns kid photos from new per-mode format', () => {
     const page = {
