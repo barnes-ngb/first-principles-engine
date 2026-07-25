@@ -229,16 +229,21 @@ export const linkedArtifactLabel = (count: number): string =>
  * so the export gains no empty header.
  *
  * **Why this section carries its own media links.** The original plan was to
- * leave photo URLs to the per-child Photos section. That premise does not hold
+ * leave photo URLs to the per-child Photos section. That premise did not hold
  * for lab evidence: the FEAT-56 three-beat capture writes artifacts with
- * `childId: 'both'` (DATA-04), and `PortfolioPage` only makes exact-childId
- * artifacts selectable — so a normal lab's photos and recordings can never
- * reach the Photos section at all. Emitting only a count would have the export
- * assert that evidence exists while carrying none of it.
+ * `childId: 'both'` (DATA-04), and `PortfolioPage` used to make only
+ * exact-childId artifacts selectable — so a normal lab's photos and recordings
+ * could never reach the Photos section at all. Emitting only a count would have
+ * had the export assert that evidence exists while carrying none of it.
+ *
+ * FEAT-123 widened that predicate, so a whole-family artifact CAN now be
+ * selected into Photos. This section still carries the rest — the lab evidence
+ * the parent did not select — which is the same job, over a smaller gap.
  *
  * `renderedArtifactIds` are the artifacts already written elsewhere in the file
  * (the selected ones). Those are skipped here, so nothing is duplicated: this
- * section fills the gap rather than repeating what is above it.
+ * section fills the gap rather than repeating what is above it. That skip is
+ * what keeps FEAT-123 from double-writing a selected lab photo.
  */
 export const buildDadLabMarkdownSection = (
   entries: DadLabPortfolioEntry[],

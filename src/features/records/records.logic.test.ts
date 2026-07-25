@@ -30,8 +30,13 @@ import {
   generatePortfolioMarkdown,
   getMonthLabel,
   getMonthRange,
+  isSharedArtifact,
   scoreArtifactsForPortfolio,
+  SHARED_ARTIFACT_CHILD_ID,
+  SHARED_ARTIFACT_LABEL,
+  selectPortfolioArtifactsForChild,
 } from './records.logic'
+import { BEAT_BOTH } from '../../core/types/dadlab'
 
 // ─── entryMinutes ────────────────────────────────────────────────────────────
 
@@ -1385,6 +1390,102 @@ describe('generatePortfolioMarkdown', () => {
     expect(md).toContain('Butterfly Observation')
     expect(md).toContain('Wonder')
     expect(md).toContain('Science')
+  })
+})
+
+// ─── FEAT-123: selectPortfolioArtifactsForChild ──────────────────────────────
+
+describe('selectPortfolioArtifactsForChild', () => {
+  const art = (id: string, childId: string): Artifact => ({
+    id,
+    childId,
+    title: id,
+    type: EvidenceType.Photo,
+    createdAt: '2026-07-11T10:00:00',
+    uri: `https://example.test/${id}.jpg`,
+    tags: {
+      engineStage: EngineStage.Build,
+      domain: 'science',
+      subjectBucket: SubjectBucket.Science,
+      location: 'Home',
+    },
+  })
+
+  const lincolnArt = art('lincoln-solo', 'lincoln')
+  const londonArt = art('london-solo', 'london')
+  const labArt = art('family-lab', 'both')
+  const month = [lincolnArt, londonArt, labArt]
+
+  it('uses the same sentinel the Dad Lab capture writes', () => {
+    expect(SHARED_ARTIFACT_CHILD_ID).toBe(BEAT_BOTH)
+    expect(isSharedArtifact(labArt)).toBe(true)
+    expect(isSharedArtifact(lincolnArt)).toBe(false)
+  })
+
+  it('shows a whole-family artifact in EACH child’s month', () => {
+    const ids = (childId: string) =>
+      selectPortfolioArtifactsForChild(month, childId).map((a) => a.id)
+
+    expect(ids('lincoln')).toContain('family-lab')
+    expect(ids('london')).toContain('family-lab')
+  })
+
+  it('still keeps a child-owned artifact out of the other child’s month', () => {
+    expect(selectPortfolioArtifactsForChild(month, 'lincoln').map((a) => a.id)).not.toContain(
+      'london-solo',
+    )
+    expect(selectPortfolioArtifactsForChild(month, 'london').map((a) => a.id)).not.toContain(
+      'lincoln-solo',
+    )
+  })
+
+  it('passes everything through when no child is selected', () => {
+    expect(selectPortfolioArtifactsForChild(month, '')).toEqual(month)
+    expect(selectPortfolioArtifactsForChild(month, null)).toEqual(month)
+  })
+
+  // Characterization: what each boy's portfolio shows BEFORE the widening
+  // (exact `childId` match, the old predicate) vs. AFTER. The difference must
+  // be exactly the whole-family artifacts — nothing else moves, in either
+  // direction.
+  it('changes each month by exactly the whole-family artifacts, nothing else', () => {
+    const before = (childId: string) => month.filter((a) => a.childId === childId)
+
+    for (const childId of ['lincoln', 'london']) {
+      const after = selectPortfolioArtifactsForChild(month, childId)
+      const beforeIds = new Set(before(childId).map((a) => a.id))
+      const afterIds = new Set(after.map((a) => a.id))
+
+      const added = [...afterIds].filter((id) => !beforeIds.has(id))
+      const removed = [...beforeIds].filter((id) => !afterIds.has(id))
+
+      expect(added).toEqual(['family-lab'])
+      expect(removed).toEqual([])
+    }
+  })
+
+  it('feeds the widened set into auto-suggest scoring unchanged', () => {
+    // The scorer is untouched by FEAT-123 — it simply receives a wider input,
+    // so a family lab photo can finally reach the top-5 like any other photo.
+    const scored = scoreArtifactsForPortfolio(
+      selectPortfolioArtifactsForChild(month, 'lincoln'),
+    )
+    expect(scored.map((s) => s.artifact.id)).toContain('family-lab')
+    const lab = scored.find((s) => s.artifact.id === 'family-lab')
+    const solo = scored.find((s) => s.artifact.id === 'lincoln-solo')
+    expect(lab?.score).toBe(solo?.score)
+  })
+
+  it('files the shared group under its own export heading', () => {
+    const md = generatePortfolioMarkdown(
+      [lincolnArt, labArt],
+      [{ id: 'lincoln', name: 'Lincoln' }],
+      '2026-07-01',
+      '2026-07-31',
+    )
+    expect(md).toContain('## Lincoln')
+    expect(md).toContain(`## ${SHARED_ARTIFACT_LABEL}`)
+    expect(md).not.toContain('## both')
   })
 })
 

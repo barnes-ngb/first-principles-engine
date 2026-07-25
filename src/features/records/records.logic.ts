@@ -9,6 +9,7 @@ import type {
   HoursAdjustment,
   HoursEntry,
 } from '../../core/types'
+import { BEAT_BOTH } from '../../core/types/dadlab'
 import {
   LearningLocation,
   SubjectBucket,
@@ -664,6 +665,59 @@ export const generateEvaluationMarkdown = (
   return lines.join('\n')
 }
 
+// ─── FEAT-123: whole-family ('both') artifact attribution ────────────────────
+//
+// Some evidence belongs to the family rather than to one kid. The three-beat
+// Dad Lab capture is the whole of it today: `LabReportForm.captureBeatArtifact`
+// writes `childId: BEAT_BOTH` by design (DATA-04 — a lab is a whole-family
+// activity, with the real per-item attribution living on the report's beat
+// entry), so EVERY lab photo and recording carries `'both'`.
+//
+// The portfolio grid used to select artifacts by exact `childId` match, which
+// dropped those artifacts out of *both* children's month views — unviewable,
+// unselectable, and never eligible for the auto-suggest top-5. That was the
+// last holdout of a predicate family already fixed twice: FEAT-120's export
+// loader (`dataReviewExportLoader`) and the DATA-09 hours-adjustment reads
+// (`collectHoursContributions`) both match `childId === child || 'both'`.
+// This section names that convention once so the third site matches the first
+// two instead of re-deriving it from a string literal.
+
+/**
+ * The `childId` sentinel for evidence that belongs to the whole family rather
+ * than one child. Sourced from `BEAT_BOTH` — the very constant the Dad Lab
+ * capture writes — so the reader and the writer can never drift apart.
+ */
+export const SHARED_ARTIFACT_CHILD_ID: string = BEAT_BOTH
+
+/**
+ * How a shared artifact is labelled wherever it appears beside a child's own
+ * work — a chip in the month grid, a section heading in the export. Shared
+ * evidence has to READ as shared; a family lab photo silently filed under one
+ * boy's name would misrepresent whose work it is.
+ */
+export const SHARED_ARTIFACT_LABEL = 'Family'
+
+/** True when this artifact belongs to the whole family (DATA-04). */
+export const isSharedArtifact = (artifact: Pick<Artifact, 'childId'>): boolean =>
+  artifact.childId === SHARED_ARTIFACT_CHILD_ID
+
+/**
+ * The artifacts one child's portfolio should show: their own, plus the
+ * family-shared ones. Filtered in memory on an already-loaded month (the same
+ * choice FEAT-120's loader made) — no `where` clause, so no new composite
+ * index and no schema change.
+ *
+ * A null/empty `childId` means "no child selected"; the input passes through
+ * untouched, matching the page's prior behaviour.
+ */
+export const selectPortfolioArtifactsForChild = (
+  artifacts: Artifact[],
+  childId: string | null | undefined,
+): Artifact[] =>
+  childId
+    ? artifacts.filter((a) => a.childId === childId || isSharedArtifact(a))
+    : artifacts
+
 export const generatePortfolioMarkdown = (
   artifacts: Artifact[],
   children: Array<{ id: string; name: string }>,
@@ -698,7 +752,13 @@ export const generatePortfolioMarkdown = (
 
   for (const [childId, childArtifacts] of byChild) {
     const child = children.find((c) => c.id === childId)
-    lines.push(`## ${child?.name ?? childId}`)
+    // FEAT-123: a whole-family artifact groups under its own heading rather
+    // than the raw `'both'` sentinel. No child is named `both`, so this can
+    // only ever rename the shared group.
+    const heading =
+      child?.name ??
+      (childId === SHARED_ARTIFACT_CHILD_ID ? SHARED_ARTIFACT_LABEL : childId)
+    lines.push(`## ${heading}`)
     lines.push('')
     lines.push(`| # | Date | Title | Type | Stage | Subject | Domain |`)
     lines.push(`|---|------|-------|------|-------|---------|--------|`)
