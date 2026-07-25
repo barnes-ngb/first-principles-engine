@@ -46,7 +46,14 @@ vi.mock('../../core/ai/useAI', () => ({
 }))
 
 // Heavy children — identity only; their own suites cover their behaviour.
-vi.mock('./KidLabView', () => ({ default: () => <div data-testid="kid-lab-view" /> }))
+// `KidLabView` echoes the child it was handed: that child is the key it reads
+// and writes `childReports` / artifacts under, so the routing tests can assert
+// WHOSE lab data an admitted profile would reach.
+vi.mock('./KidLabView', () => ({
+  default: ({ child }: { child: { id: string; name: string } }) => (
+    <div data-testid="kid-lab-view" data-child-id={child.id} data-child-name={child.name} />
+  ),
+}))
 vi.mock('./ConceptArcsSection', () => ({ default: () => <div data-testid="concept-arcs" /> }))
 vi.mock('./HoursRoutingAuditPanel', () => ({ default: () => <div data-testid="hours-audit" /> }))
 vi.mock('./LabReportForm', () => ({ default: () => <div data-testid="lab-form" /> }))
@@ -70,17 +77,19 @@ describe('DadLabPage — capability routing (FEAT-124)', () => {
     mockUseProfile.mockReturnValue({ profile: UserProfile.Parents, canEdit: true })
   })
 
-  it('routes Lincoln to the kid view', () => {
+  it('routes Lincoln to the kid view, on his own child record', () => {
     mockUseProfile.mockReturnValue({ profile: UserProfile.Lincoln, canEdit: false })
     render(<DadLabPage />)
     expect(kidView()).toBeInTheDocument()
+    expect(kidView()).toHaveAttribute('data-child-id', 'c-lincoln')
     expect(parentPage()).toBeNull()
   })
 
-  it('routes London to the kid view', () => {
+  it('routes London to the kid view, on his own child record', () => {
     mockUseProfile.mockReturnValue({ profile: UserProfile.London, canEdit: false })
     render(<DadLabPage />)
     expect(kidView()).toBeInTheDocument()
+    expect(kidView()).toHaveAttribute('data-child-id', 'c-london')
     expect(parentPage()).toBeNull()
   })
 
@@ -105,5 +114,21 @@ describe('DadLabPage — capability routing (FEAT-124)', () => {
     expect(parentPage()).toBeNull()
     // The diag surface with the `hoursAdjustments` write path is not mounted.
     expect(screen.queryByTestId('hours-audit')).toBeNull()
+  })
+
+  it('resolves an admitted profile to its OWN child, never falling back to London', () => {
+    // Codex P2 on this PR: routing on capability admits profiles the old
+    // Lincoln/London ternary could not name, and that ternary resolved every
+    // non-Lincoln profile to London — so a future third kid would have read and
+    // written London's `childReports` and artifacts. Identity is now derived
+    // from the profile itself.
+    mockUseProfile.mockReturnValue({
+      profile: 'grandma' as UserProfile,
+      canEdit: false,
+    })
+    render(<DadLabPage />)
+    expect(kidView()).toHaveAttribute('data-child-id', 'grandma')
+    expect(kidView()).toHaveAttribute('data-child-name', 'Grandma')
+    expect(kidView()).not.toHaveAttribute('data-child-id', 'c-london')
   })
 })

@@ -36,7 +36,7 @@ import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
 import type { ConceptArc, DadLabReport } from '../../core/types'
 import type { DadLabType } from '../../core/types/enums'
-import { DadLabStatus, UserProfile } from '../../core/types/enums'
+import { DadLabStatus } from '../../core/types/enums'
 import { formatDateShort, todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
 import { formatDateYmd } from '../../core/utils/format'
 import { parseChildRoles } from './childRoles'
@@ -122,8 +122,9 @@ function getNextSaturday(): Date {
  * `RequireParent` uses. (The panel carries its own capability gate too, so its
  * safety no longer depends on this routing decision — FEAT-122's precedent.)
  *
- * `UserProfile` still appears below for the kid's **display identity** only
- * (which name/child record to greet) — cosmetic, not access.
+ * The kid's **display identity** (which child record `KidLabView` reads and
+ * writes) is derived from the profile value itself — see `kidChild` below —
+ * so no name enumeration remains in this file at all.
  */
 export default function DadLabPage() {
   const { profile, canEdit } = useProfile()
@@ -362,15 +363,23 @@ export default function DadLabPage() {
     return { count: thisYear.length, totalHours: Math.round(totalMinutes / 60), byType }
   }, [completed])
 
-  // Resolve the signed-in kid's Child (stable identity) with a synthetic
-  // fallback that preserves today's lowercase-name keying if children haven't
-  // loaded or the name doesn't match a profile record.
+  // Resolve the signed-in kid's Child from the PROFILE ITSELF, not a
+  // Lincoln/London ternary (FEAT-124 review). The old ternary resolved EVERY
+  // non-Lincoln profile to London — harmless while the name enumeration only
+  // ever admitted the two known kids, but now that routing is capability-derived
+  // a future third kid profile would have read and written London's
+  // `childReports` and artifacts. `UserProfile` values ARE the lowercase child
+  // name, which is exactly the keying `KidLabView` uses, so the match is direct
+  // and Lincoln/London resolve exactly as before. The synthetic fallback
+  // preserves today's lowercase-name keying for when `children` hasn't loaded.
+  // (`profile` is non-null here — `App` renders `ProfileSelectPage` until one is
+  // chosen — and an absent one resolves to no child rather than to London's.)
   const kidChild = useMemo(() => {
-    const kidName = profile === UserProfile.Lincoln ? 'Lincoln' : 'London'
+    const profileKey = (profile ?? '').toLowerCase()
     return (
-      children.find((c) => c.name.toLowerCase() === kidName.toLowerCase()) ?? {
-        id: kidName.toLowerCase(),
-        name: kidName,
+      children.find((c) => c.name.toLowerCase() === profileKey) ?? {
+        id: profileKey,
+        name: profileKey ? profileKey[0].toUpperCase() + profileKey.slice(1) : '',
       }
     )
   }, [profile, children])
