@@ -12,6 +12,7 @@ import CertificateScanSection from './CertificateScanSection'
 import CurriculumTab from './CurriculumTab'
 import FoundationsTab from './FoundationsTab'
 import FoundationsDiagPanel from './FoundationsDiagPanel'
+import DataReviewExportPanel from '../records/DataReviewExportPanel'
 import FoundationsReviewLauncher from '../foundations-review/FoundationsReviewLauncher'
 import LearningMap from './learning-map/LearningMap'
 import MonthlyBooksTab from '../monthly-review/MonthlyBooksTab'
@@ -87,6 +88,11 @@ export default function ProgressPage() {
       {/* Flag-gated ( ?diag=1 ), parent-only — Learner Model seeder + preview (FEAT-48). */}
       <Container maxWidth="lg" sx={{ py: 0 }}>
         <FoundationsDiagPanel />
+      </Container>
+      {/* Flag-gated ( ?diag=1 ), parent-only — read-only per-child data-review
+          export for AI-assisted data audit (FEAT-120). Writes nothing. */}
+      <Container maxWidth="lg" sx={{ py: 0 }}>
+        <DataReviewExportPanel />
       </Container>
       {TABS[tab]?.render()}
     </>
