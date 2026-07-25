@@ -240,7 +240,14 @@ export async function loadDataReviewExportInput(
       caps.artifacts,
       (d) => {
         const a = d.data()
-        return a.childId === childId ? { ...a, id: a.id ?? d.id } : null
+        // DATA-04: a whole-family artifact is written with `childId: 'both'` —
+        // the three-beat Dad Lab capture (`LabReportForm.captureBeatArtifact`)
+        // does exactly this, with the real per-item attribution living on the
+        // report's beat entry. Keeping only an exact child id would drop those
+        // photos and recordings from BOTH children's indexes and integrity
+        // checks, undercounting the very evidence this export exists to audit.
+        if (a.childId !== childId && a.childId !== 'both') return null
+        return { ...a, id: a.id ?? d.id }
       },
     ),
     scanCollection<DayLog, DayLog>(

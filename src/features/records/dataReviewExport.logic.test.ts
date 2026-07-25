@@ -7,6 +7,7 @@ import {
   dataReviewExportFilename,
   evalLooksAppliedToSnapshot,
   OPEN_QUESTION_STALE_DAYS,
+  reportOwnedArtifactIds,
   schoolYearKey,
   workbookBridgeStatus,
   type DataReviewEvaluationSession,
@@ -468,7 +469,81 @@ describe('integrity — Dad Lab orphans (both directions)', () => {
   it('surfaces both orphan directions in the rendered §7', () => {
     const md = buildDataReviewExport(input)
     expect(md).toContain('**NO — orphan**')
-    expect(md).toContain('1 lab artifact(s) with no matching report')
+    expect(md).toContain('1 lab artifact(s) resolving to no report')
+  })
+})
+
+// Codex review (PR #1624, P2): the lab↔artifact link lives on EITHER side. The
+// FEAT-56 three-beat capture (`LabReportForm.captureBeatArtifact`) is today's
+// DEFAULT and writes an artifact with NO `labSessionId` — the link is the
+// report's own `beats[*].items[].artifactId`, and the artifact is written with
+// `childId: 'both'`. Resolving only the artifact side produced false findings
+// against perfectly well-connected data.
+describe('integrity — Dad Lab links resolved from the report side', () => {
+  /** A three-beat artifact exactly as LabReportForm writes it. */
+  const beatArtifact = artifact({
+    id: 'art-beat',
+    childId: 'both',
+    title: 'Dad Lab photo - Circuits',
+    labBeat: 'try',
+    labSessionId: undefined,
+    dayLogId: undefined,
+    weekKey: undefined,
+    tags: {
+      engineStage: EngineStage.Build,
+      domain: 'dad-lab',
+      subjectBucket: SubjectBucket.Science,
+      location: 'Home',
+    },
+  })
+  const beatReport = labReport({
+    id: 'lab-beats',
+    beats: {
+      predict: { items: [] },
+      try: { items: [{ artifactId: 'art-beat', child: 'both' }] },
+      saw: { items: [] },
+    },
+  })
+  const input = completeInput({
+    artifacts: [beatArtifact],
+    dadLabReports: [beatReport],
+  })
+  const checks = computeIntegrityChecks(input)
+
+  it('collects artifact ids a report owns from beats and childReports', () => {
+    expect(reportOwnedArtifactIds(beatReport)).toEqual(['art-beat'])
+    expect(
+      reportOwnedArtifactIds(
+        labReport({ childReports: { [CHILD_ID]: { artifacts: ['art-legacy'] } } }),
+      ),
+    ).toEqual(['art-legacy'])
+  })
+
+  it('does not call a three-beat report artifact-less', () => {
+    expect(checkById(checks, 'lab-report-no-artifacts').status).toBe('PASS')
+  })
+
+  it('does not call a report-owned artifact an orphan', () => {
+    expect(checkById(checks, 'lab-artifact-orphan').status).toBe('PASS')
+  })
+
+  it('does not call a report-owned artifact unlinked', () => {
+    expect(checkById(checks, 'artifact-unlinked').status).toBe('PASS')
+  })
+
+  it('names the resolution direction in the §7 cross-reference', () => {
+    const md = buildDataReviewExport(input)
+    expect(md).toContain('yes — the report lists this artifact id')
+    // The report's linked-artifact count reflects the report-side link.
+    expect(md).toContain('| `lab-beats` |')
+  })
+
+  it('still flags a dad-lab artifact that NO report lists and that names no session', () => {
+    const stray = computeIntegrityChecks(
+      completeInput({ artifacts: [beatArtifact], dadLabReports: [] }),
+    )
+    expect(checkById(stray, 'lab-artifact-orphan').status).toBe('FLAG')
+    expect(checkById(stray, 'lab-artifact-orphan').detail).toContain('art-beat')
   })
 })
 

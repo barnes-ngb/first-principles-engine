@@ -9,6 +9,7 @@ import Typography from '@mui/material/Typography'
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useChildren } from '../../core/hooks/useChildren'
+import { useProfile } from '../../core/profile/useProfile'
 import {
   buildDataReviewExport,
   DataReviewExportMode,
@@ -32,10 +33,19 @@ interface ChildExportState {
  * collection, no Cloud Function, no AI call. It reads existing collections
  * through the typed helpers in `core/firebase/firestore.ts` and builds a string.
  *
- * It lives on the diag panel deliberately — that surface is already parent-gated
- * and grandfathered out of the §14 display rules, and this file is for machine
- * review, so it MAY carry band numbers, node ids, counts, and percentages. None
- * of this belongs on a kid-facing or normal parent surface.
+ * It lives on the diag panel deliberately — that surface is grandfathered out of
+ * the §14 display rules, and this file is for machine review, so it MAY carry
+ * band numbers, node ids, counts, and percentages. None of this belongs on a
+ * kid-facing or normal parent surface.
+ *
+ * **Parent gate (capability, never a name).** `?diag=1` is NOT an access control
+ * — `/progress` sits OUTSIDE the `RequireParent` block in `app/router.tsx`, so a
+ * kid profile that types the URL renders this page. The export carries every
+ * child's birthdate, parent notes, assessment data, and artifact media URLs, so
+ * the panel additionally requires the parent capability (`canEdit`, the same
+ * signal `RequireParent` uses — ARCH-41/42/43: capability, never `isLincoln` or
+ * a name). Moving the whole `/progress` route behind `RequireParent` would
+ * change kid access to Progress broadly and is out of this run's scope.
  *
  * Full history is the default; the "current school year only" checkbox collapses
  * prior-year detail to rollups for later recurring audits.
@@ -43,6 +53,7 @@ interface ChildExportState {
 export default function DataReviewExportPanel() {
   const [searchParams] = useSearchParams()
   const familyId = useFamilyId()
+  const { canEdit } = useProfile()
   const { children } = useChildren()
   const [currentYearOnly, setCurrentYearOnly] = useState(false)
   const [byChild, setByChild] = useState<Record<string, ChildExportState>>({})
@@ -94,6 +105,8 @@ export default function DataReviewExportPanel() {
     [familyId, currentYearOnly],
   )
 
+  // Capability gate FIRST — `?diag=1` is a surface flag, not access control.
+  if (!canEdit) return null
   if (searchParams.get('diag') !== '1') return null
 
   return (

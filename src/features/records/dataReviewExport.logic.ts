@@ -373,8 +373,118 @@ export interface IntegrityCheck {
 /** An open question is "stale" once it has waited this long unresolved. */
 export const OPEN_QUESTION_STALE_DAYS = 30
 
-const artifactHasLink = (a: Artifact): boolean =>
-  Boolean(a.dayLogId || a.labSessionId || a.projectId || a.weekKey)
+/**
+ * Every artifact id a Dad Lab report OWNS. The lab↔artifact relationship is
+ * stored on **either** side depending on which capture flow wrote it:
+ *
+ * - `Artifact.labSessionId` — stamped on the artifact (the session-linked flow);
+ * - `DadLabReport.childReports[*].artifacts[]` — the legacy per-child capture;
+ * - `DadLabReport.beats[*].items[].artifactId` — the FEAT-56 three-beat capture,
+ *   which is today's DEFAULT and whose artifacts carry **no** `labSessionId`.
+ *
+ * Resolving only the artifact side would flag every three-beat report as having
+ * no evidence and would call its photos unlinked — false findings against
+ * perfectly well-connected data, which is exactly what this export must not do.
+ */
+export const reportOwnedArtifactIds = (report: DadLabReport): string[] => {
+  const ids = new Set<string>()
+  for (const childReport of Object.values(report.childReports ?? {})) {
+    for (const id of childReport?.artifacts ?? []) if (id) ids.add(id)
+  }
+  for (const beat of Object.values(report.beats ?? {})) {
+    for (const item of beat?.items ?? []) if (item?.artifactId) ids.add(item.artifactId)
+  }
+  return Array.from(ids)
+}
+
+/** How an artifact resolves to a Dad Lab report, if at all. */
+export type LabLinkKind = 'labSessionId' | 'report-owned' | 'none'
+
+export interface LabLinkage {
+  /** Artifacts that claim a lab connection of any kind. */
+  labArtifacts: Artifact[]
+  /** Lab artifacts that resolve to no report from EITHER direction. */
+  orphanArtifacts: Artifact[]
+  /** Reports no artifact resolves to from EITHER direction. */
+  reportsWithoutArtifacts: DadLabReport[]
+  /** Count of artifacts resolving to a report id (either direction). */
+  countForReport: (reportId: string | undefined) => number
+  /** How one artifact resolved. */
+  linkKindFor: (artifact: Artifact) => LabLinkKind
+  /** True when this artifact is owned by some report's own id list. */
+  isReportOwned: (artifactId: string | undefined) => boolean
+}
+
+/**
+ * Resolve the lab↔artifact graph from **both** directions (see
+ * {@link reportOwnedArtifactIds}) so neither capture flow reads as an orphan.
+ */
+export const computeLabLinkage = (
+  reports: DadLabReport[],
+  artifacts: Artifact[],
+): LabLinkage => {
+  const reportIds = new Set(
+    reports.map((r) => r.id).filter((id): id is string => Boolean(id)),
+  )
+  /** artifactId → the report that lists it. */
+  const ownerByArtifactId = new Map<string, DadLabReport>()
+  for (const report of reports) {
+    for (const artifactId of reportOwnedArtifactIds(report)) {
+      ownerByArtifactId.set(artifactId, report)
+    }
+  }
+
+  const linkKindFor = (a: Artifact): LabLinkKind => {
+    if (a.labSessionId && reportIds.has(a.labSessionId)) return 'labSessionId'
+    if (a.id && ownerByArtifactId.has(a.id)) return 'report-owned'
+    return 'none'
+  }
+
+  // An artifact "claims" a lab connection when it names a session, carries a
+  // capture beat, is tagged to the dad-lab domain, or a report lists its id.
+  const labArtifacts = artifacts.filter(
+    (a) =>
+      Boolean(a.labSessionId) ||
+      Boolean(a.labBeat) ||
+      a.tags?.domain === 'dad-lab' ||
+      (a.id != null && ownerByArtifactId.has(a.id)),
+  )
+
+  const countByReportId = new Map<string, number>()
+  for (const a of labArtifacts) {
+    const kind = linkKindFor(a)
+    const reportId =
+      kind === 'labSessionId'
+        ? (a.labSessionId as string)
+        : kind === 'report-owned'
+          ? ownerByArtifactId.get(a.id as string)?.id
+          : undefined
+    if (!reportId) continue
+    countByReportId.set(reportId, (countByReportId.get(reportId) ?? 0) + 1)
+  }
+
+  return {
+    labArtifacts,
+    orphanArtifacts: labArtifacts.filter((a) => linkKindFor(a) === 'none'),
+    reportsWithoutArtifacts: reports.filter(
+      (r) => !r.id || (countByReportId.get(r.id) ?? 0) === 0,
+    ),
+    countForReport: (reportId) =>
+      reportId ? (countByReportId.get(reportId) ?? 0) : 0,
+    linkKindFor,
+    isReportOwned: (artifactId) =>
+      Boolean(artifactId) && ownerByArtifactId.has(artifactId as string),
+  }
+}
+
+/**
+ * An artifact is "linked" when anything can resolve it — including a Dad Lab
+ * report that owns its id from the report side (the three-beat capture writes
+ * no `labSessionId`, so the artifact's own fields are not the whole story).
+ */
+const artifactHasLink = (a: Artifact, linkage: LabLinkage): boolean =>
+  Boolean(a.dayLogId || a.labSessionId || a.projectId || a.weekKey) ||
+  linkage.isReportOwned(a.id)
 
 /** The most recent `observedAt` across every evidence ref in the model. */
 const lastModelEvidenceAt = (model: LearnerModel | null): string | null => {
@@ -436,9 +546,10 @@ export const computeIntegrityChecks = (
 ): IntegrityCheck[] => {
   const checks: IntegrityCheck[] = []
   const { artifacts, dadLabReports, learnerModel, skillSnapshot } = input
+  const linkage = computeLabLinkage(dadLabReports, artifacts)
 
-  // 1 — artifacts with no resolvable link.
-  const unlinked = artifacts.filter((a) => !artifactHasLink(a))
+  // 1 — artifacts with no resolvable link (from either side).
+  const unlinked = artifacts.filter((a) => !artifactHasLink(a, linkage))
   checks.push({
     id: 'artifact-unlinked',
     label: 'Artifacts carry at least one resolvable link (dayLog / lab / project / week)',
@@ -446,40 +557,28 @@ export const computeIntegrityChecks = (
     detail:
       unlinked.length === 0
         ? `all ${artifacts.length} artifact(s) link to something`
-        : `${unlinked.length} of ${artifacts.length} artifact(s) have no dayLogId, labSessionId, projectId, or weekKey: ${idList(
+        : `${unlinked.length} of ${artifacts.length} artifact(s) have no dayLogId, labSessionId, projectId, or weekKey, and no Dad Lab report lists them: ${idList(
             unlinked.map((a) => a.id ?? MISSING),
           )}`,
   })
 
-  // 2 — lab artifacts whose labSessionId matches no report.
-  const reportIds = new Set(
-    dadLabReports.map((r) => r.id).filter((id): id is string => Boolean(id)),
-  )
-  const labArtifacts = artifacts.filter((a) => Boolean(a.labSessionId))
-  const orphanLabArtifacts = labArtifacts.filter(
-    (a) => !reportIds.has(a.labSessionId as string),
-  )
+  // 2 — lab artifacts that resolve to no report from EITHER direction.
+  const { labArtifacts, orphanArtifacts, reportsWithoutArtifacts } = linkage
   checks.push({
     id: 'lab-artifact-orphan',
     label: 'Lab-tagged artifacts resolve to a Dad Lab report',
-    status: orphanLabArtifacts.length === 0 ? 'PASS' : 'FLAG',
+    status: orphanArtifacts.length === 0 ? 'PASS' : 'FLAG',
     detail:
-      orphanLabArtifacts.length === 0
-        ? `all ${labArtifacts.length} lab-tagged artifact(s) resolve`
-        : `${orphanLabArtifacts.length} lab-tagged artifact(s) reference a labSessionId with no matching dadLabReports doc: ${idList(
-            orphanLabArtifacts.map(
-              (a) => `${a.id ?? MISSING}→${a.labSessionId ?? MISSING}`,
+      orphanArtifacts.length === 0
+        ? `all ${labArtifacts.length} lab-tagged artifact(s) resolve (by labSessionId or by a report listing them)`
+        : `${orphanArtifacts.length} of ${labArtifacts.length} lab-tagged artifact(s) resolve to no report — neither their labSessionId nor any report's own artifact-id list: ${idList(
+            orphanArtifacts.map(
+              (a) => `${a.id ?? MISSING}→${a.labSessionId ?? 'no labSessionId'}`,
             ),
           )}`,
   })
 
-  // 3 — reports with no artifacts pointing at them.
-  const linkedSessionIds = new Set(
-    labArtifacts.map((a) => a.labSessionId as string),
-  )
-  const reportsWithoutArtifacts = dadLabReports.filter(
-    (r) => !r.id || !linkedSessionIds.has(r.id),
-  )
+  // 3 — reports no artifact resolves to, from either direction.
   checks.push({
     id: 'lab-report-no-artifacts',
     label: 'Dad Lab reports have at least one linked artifact',
@@ -487,7 +586,7 @@ export const computeIntegrityChecks = (
     detail:
       reportsWithoutArtifacts.length === 0
         ? `all ${dadLabReports.length} report(s) have linked artifacts`
-        : `${reportsWithoutArtifacts.length} of ${dadLabReports.length} report(s) have no artifact referencing them: ${idList(
+        : `${reportsWithoutArtifacts.length} of ${dadLabReports.length} report(s) have no artifact referencing them and list none of their own: ${idList(
             reportsWithoutArtifacts.map((r) => r.id ?? MISSING),
           )}`,
   })
@@ -1284,15 +1383,8 @@ const buildDadLabSection = (input: DataReviewExportInput): string[] => {
   const start = input.schoolYearStart
   const currentKey = schoolYearKey(input.schoolYear.start, start)
   const reports = [...input.dadLabReports].sort((a, b) => b.date.localeCompare(a.date))
-  const labArtifacts = input.artifacts.filter((a) => Boolean(a.labSessionId))
-  const bySession = new Map<string, Artifact[]>()
-  for (const a of labArtifacts) {
-    const key = a.labSessionId as string
-    const list = bySession.get(key) ?? []
-    list.push(a)
-    bySession.set(key, list)
-  }
-  const reportIds = new Set(reports.map((r) => r.id).filter(Boolean) as string[])
+  const linkage = computeLabLinkage(reports, input.artifacts)
+  const { labArtifacts, orphanArtifacts, reportsWithoutArtifacts } = linkage
 
   const shown =
     input.mode === DataReviewExportMode.FullHistory
@@ -1300,9 +1392,17 @@ const buildDadLabSection = (input: DataReviewExportInput): string[] => {
       : reports.filter((r) => schoolYearKey(r.date, start) === currentKey)
   const collapsed = reports.length - shown.length
 
-  const orphanArtifacts = labArtifacts.filter(
-    (a) => !reportIds.has(a.labSessionId as string),
-  )
+  /** Human label for how one artifact resolved to a report. */
+  const linkLabel = (a: Artifact): string => {
+    switch (linkage.linkKindFor(a)) {
+      case 'labSessionId':
+        return 'yes — via `labSessionId`'
+      case 'report-owned':
+        return 'yes — the report lists this artifact id'
+      case 'none':
+        return '**NO — orphan**'
+    }
+  }
 
   return [
     '## 7. Dad Lab',
@@ -1325,7 +1425,7 @@ const buildDadLabSection = (input: DataReviewExportInput): string[] => {
         cell(r.status),
         r.subjectTags?.length ? r.subjectTags.join(', ') : MISSING,
         r.totalMinutes == null ? DASH : String(r.totalMinutes),
-        String(r.id ? (bySession.get(r.id)?.length ?? 0) : 0),
+        String(linkage.countForReport(r.id)),
         r.arcId ? `\`${r.arcId}\`${r.arcStepIndex != null ? ` step ${r.arcStepIndex}` : ''}` : DASH,
       ]),
       'No Dad Lab reports stored.',
@@ -1333,22 +1433,23 @@ const buildDadLabSection = (input: DataReviewExportInput): string[] => {
     '',
     `### 7b. Lab-tagged artifacts cross-reference — ${pluralItems(labArtifacts.length)}`,
     '',
+    '_The lab↔artifact link is stored on **either** side: on the artifact as `labSessionId`, or on the report as `childReports[*].artifacts[]` / `beats[*].items[].artifactId` (the FEAT-56 three-beat capture, today\'s default, writes no `labSessionId`). Both directions are resolved here, so a well-connected three-beat report is never reported as an orphan._',
+    '',
     ...table(
-      ['Artifact id', 'Date', 'labSessionId', 'Resolves to a report?', 'Stage', 'Beat'],
+      ['Artifact id', 'Date', 'labSessionId', 'Resolves to a report?', 'Stage', 'Beat', 'childId'],
       labArtifacts.map((a) => [
         `\`${a.id ?? MISSING}\``,
         cell(day(a.createdAt)),
-        `\`${a.labSessionId}\``,
-        reportIds.has(a.labSessionId as string) ? 'yes' : '**NO — orphan**',
+        a.labSessionId ? `\`${a.labSessionId}\`` : DASH,
+        linkLabel(a),
         cell(a.labStage),
         cell(a.labBeat),
+        cell(a.childId),
       ]),
       'No lab-tagged artifacts stored.',
     ),
     '',
-    `_Orphans: ${orphanArtifacts.length} lab artifact(s) with no matching report · ${
-      reports.filter((r) => !r.id || !bySession.has(r.id)).length
-    } report(s) with no linked artifact. Both directions are FLAGged in the integrity appendix with ids._`,
+    `_Orphans: ${orphanArtifacts.length} lab artifact(s) resolving to no report · ${reportsWithoutArtifacts.length} report(s) with no linked artifact. Both directions are FLAGged in the integrity appendix with ids._`,
     '',
     '---',
   ]
