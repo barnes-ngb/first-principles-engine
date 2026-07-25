@@ -54,6 +54,13 @@ Also record: the exact config name string (the bridge's `aliases[]` must match i
 tolerant normalizer, and the level-conflict guard needs the level digit — the `tgtbLa1Bridge`
 precedent, `workbookBridge.ts:180`).
 
+⚠️ **The seeded name carries no level.** The repo seeds this config as literally
+`'The Good and the Beautiful Math'` (`src/core/data/gatbCurriculum.ts`,
+`src/core/firebase/migrateActivityConfigs.ts`) → normalized `thegoodandthebeautifulmath`, on which
+`levelInName()` returns **null**. That is harmless while exactly one TGTB Math bridge exists (the
+guard only suppresses a *conflicting* declared level), but it is the crux of Q4/Q5 below — see the
+rollover constraint there.
+
 ## Candidate A — Math 2 (per-band `covers[]`, v0 — UNVERIFIED)
 
 Coarse 3-band map (40/80/120), the `tgtbLa1Bridge` granularity. Every id is a real
@@ -90,20 +97,55 @@ numerals in B) are recorded in the `notes` column and stay out of `covers[]`, ex
 `mathseedsBridge`'s band-200 rounding note does. Node-id validity is *not* what curation resolves —
 **band placement is.**
 
-## ❓ CURATION QUESTIONS 2–5
+## ❓ CURATION QUESTIONS 2–6
+
+> Q4's rollover constraint and Q6's in-band-credit trade-off were added 2026-07-25 after automated
+> review of the draft PR (#1622) raised both; Q4's is verified against the live matcher, Q6's is the
+> inherited precedent restated as an explicit choice.
 
 2. **Band boundaries (the uncertain layer).** Verify each candidate row against the actual course book
-   TOC (the family owns the books / free PDFs). Move `covers[]` ids between bands freely; the
-   cumulative union at the child's position is what the model sees, so *which side of the child's
-   current lesson* a concept sits on is the only boundary that changes anything today.
+   TOC (the family owns the books / free PDFs). Move `covers[]` ids between bands freely — but see Q6:
+   under the **inherited in-band-credit rule**, an L107 child rounds up to band ceiling 120 and is
+   credited the union of **all three** bands, so re-shuffling ids *among these three bands* changes
+   **nothing** for that child today. Band placement starts to matter (a) for a child at a lower
+   position, (b) as the position advances, and (c) immediately, if Q6 adopts completed-band semantics.
+   Verify it anyway — the table is the durable artifact, not just today's read.
 3. **3 bands or unit-aligned bands?** 40/80/120 mirrors `tgtbLa1Bridge`. If the course book's units
-   suggest natural boundaries (e.g. 4×30), band on those instead — pure data choice, same code.
+   suggest natural boundaries (e.g. 4×30), band on those instead — pure data choice, same code. Note
+   this does not, by itself, change what an L107 child is credited: under band-ceiling rounding, *any*
+   banding credits everything up to the top band the child is inside (4×30 → L107 still rounds to 120).
+   Only Q6 changes that.
 4. **Fall courses.** After the placement test lands, each new course (each boy) is a new data module of
    the same shape — Math K/1 for London and whatever Lincoln places into. Name the follow-up row then;
    do NOT pre-build on guessed levels (owner call, 2026-07-25: current now, fall later).
+   **⚠️ Blocking prerequisite for the multi-course world (verified, not hypothetical):**
+   `matchWorkbookBridge` resolves a bridge **by name only — it takes no `childId`**. Ship two leveled
+   math bridges (`tgtbMath2` + `tgtbMath3`) carrying the same generic alias and resolve the *seeded*
+   level-less name against them and both match at the identical alias length → the tie returns
+   **`ambiguous`**, so **neither** boy's position syncs (probed 2026-07-25 against the real matcher:
+   generic name → both bridges score 23 → tie; `'…Math Level 3'` → `levelInName` = 3 → `tgtbMath2`
+   suppressed, `tgtbMath3` matches cleanly). So the fall rollover **must** pick one:
+   **(a)** give each child's config a **level-bearing name** (`… Math Level 3`) — no code change, the
+   existing guard then does the work; **(b)** give each bridge a **distinct non-generic alias** and
+   drop the shared one; or **(c)** make resolution **child-aware** (a code change to `workbookBridge`,
+   the largest option). Recommended: **(a)** — it is a config-name edit, and the guard was built for it.
 5. **Rollover semantics.** If the fall placement puts a boy in a *different* course than the tracked
    one, the old config's evidence stands (cumulative, never downgraded) and the new course simply
-   becomes a new source — confirm no special handling is wanted.
+   becomes a new source — confirm no special handling is wanted. This is true **per bridge**; it
+   assumes Q4's disambiguation is settled first, or the new source resolves to `ambiguous` and writes
+   nothing.
+6. **In-band credit vs. completed-band semantics — inherited, and worth a deliberate re-confirm.**
+   Band-ceiling rounding credits the band the child is *inside*: L107 → ceiling 120, so concepts whose
+   real introduction sits at lessons 108–120 are recorded as `covered` before the child reaches them,
+   and each queues a verify-quest ask. That is **not new here** — it is the shipped, owner-curated rule
+   for both existing bridges (`mathseedsBridge` L122 → 150 and `tgtbLa1Bridge` L110 → 120, both pinned
+   as owner fixtures), justified by the `covered → forming` cap: the claim is *exposure*, never mastery,
+   and the verify-quest is exactly how a not-yet-reached concept gets corrected. Options if the owner
+   wants it tighter **for this bridge**: keep the precedent (default); use **completed-band** semantics
+   (credit only bands fully below the position — L107 → 80, dropping the whole third band); or cut
+   **finer bands** so the over-credit window shrinks. ⚠️ Changing the *rule* rather than this bridge's
+   data would also change Mathseeds/LA1 behavior — that is an invariant-level, propose-and-confirm
+   decision, not a data edit, and should not ride along with this bridge's curation.
 
 ## Named future (backlog, not built)
 
