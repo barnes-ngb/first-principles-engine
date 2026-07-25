@@ -43,6 +43,7 @@ import {
   parseFoundationsReviewActions,
 } from './foundationsReviewActions'
 import type { FoundationsReviewAction } from './foundationsReviewActions'
+import { writeReviewAction } from './writeReviewAction'
 import { groundCoveredProposals } from './uploadGrounding'
 
 /** How many concepts the agenda carries — enough for a ~10-min walk, bounded tokens. */
@@ -385,22 +386,13 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
         console.warn('[foundationsReview] no model loaded; cannot apply', action)
         return
       }
-      const { model: nextModel, changedConceptId } = applyReviewActionToModel(base, action, now())
-      modelRef.current = nextModel
+      const applied = applyReviewActionToModel(base, action, now())
+      modelRef.current = applied.model
 
-      const merge: Record<string, unknown> = {
-        openQuestions: nextModel.openQuestions,
-        changeFeed: nextModel.changeFeed,
-        updatedAt: nextModel.updatedAt,
-        // Mark the LLM synthesis stale — a confirmed review action changed concept
-        // state, so `whatMattersNext`/`narrative` are now behind (FEAT-57, D4).
-        synthesisStaleAt: nextModel.updatedAt,
-      }
-      if (changedConceptId) {
-        merge.conceptStates = { [changedConceptId]: nextModel.conceptStates[changedConceptId] }
-      }
       try {
-        await setDoc(modelDocRef(), merge as Partial<LearnerModel>, { merge: true })
+        // The one shared merge-write (FEAT-66) — the Foundations tab's concept
+        // override calls the same writer, so the payload shape has one definition.
+        await writeReviewAction(modelDocRef(), applied)
       } catch (err) {
         console.error('[foundationsReview] failed to write learner model:', err)
         setError('Could not save that — try again.')

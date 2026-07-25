@@ -6,7 +6,7 @@ import {
   parseFoundationsReviewActions,
 } from './foundationsReviewActions'
 import { mergeSeededModel } from '../../core/foundations/seedLearnerModel'
-import type { FoundationsReviewAction } from './foundationsReviewActions'
+import type { AttestOrigin, FoundationsReviewAction } from './foundationsReviewActions'
 import type { LearnerModel } from '../../core/types/learnerModel'
 
 const NOW = '2026-07-04T12:00:00.000Z'
@@ -86,8 +86,81 @@ describe('applyReviewActionToModel — attest', () => {
     expect(entry.state).toBe('solid')
     expect(entry.evidence[0].kind).toBe('attestation')
     expect(entry.evidence[0].overriddenBy).toBe('parent')
+    // The ref records what the parent said, so a later derived write moving
+    // `entry.state` can't be misreported back to them as their own word (FEAT-66).
+    expect(entry.evidence[0].readState).toBe('solid')
     expect(model.changeFeed.at(-1)).toMatchObject({ conceptId: CVC, from: 'not-yet', to: 'solid' })
     expect(model.changeFeed.at(-1)?.cause).toContain('reviewChat')
+  })
+})
+
+describe('applyReviewActionToModel — attest resolves a standing disagreement (FEAT-66)', () => {
+  const attested = (): LearnerModel => {
+    const base = emptyModel()
+    base.conceptStates[CVC] = {
+      state: 'solid',
+      evidence: [
+        { kind: 'attestation', sourceId: 'reviewChat', note: 'seen it', observedAt: NOW, overriddenBy: 'parent' },
+        { kind: 'eval', sourceId: 'sess-1', note: 'guided eval', observedAt: NOW, readState: 'forming' },
+      ],
+      needsReconcile: true,
+    }
+    return base
+  }
+
+  it('clears needsReconcile with an explicit false (an absent key would not clear the stored flag)', () => {
+    const action: FoundationsReviewAction = {
+      kind: 'attest', childId: 'c1', conceptId: CVC, state: 'solid', origin: 'reconcileKeep',
+    }
+    const { model } = applyReviewActionToModel(attested(), action, NOW)
+    const entry = model.conceptStates[CVC]
+    expect(entry.needsReconcile).toBe(false)
+    expect('needsReconcile' in entry).toBe(true) // written, not merely dropped
+    expect(entry.state).toBe('solid') // keeping your word leaves the state alone
+  })
+
+  it('takes the eval read when the parent chooses it — still an attestation', () => {
+    const action: FoundationsReviewAction = {
+      kind: 'attest', childId: 'c1', conceptId: CVC, state: 'forming', origin: 'reconcileTake',
+    }
+    const { model } = applyReviewActionToModel(attested(), action, NOW)
+    const entry = model.conceptStates[CVC]
+    expect(entry.state).toBe('forming')
+    expect(entry.needsReconcile).toBe(false)
+    expect(entry.evidence.at(-1)).toMatchObject({ kind: 'attestation', overriddenBy: 'parent' })
+  })
+
+  it('leaves a standing disagreement alone on a covered write (only a parent resolves it)', () => {
+    const action: FoundationsReviewAction = {
+      kind: 'covered', childId: 'c1', conceptId: CVC, source: 'Fast Phonics',
+    }
+    const { model } = applyReviewActionToModel(attested(), action, NOW)
+    expect(model.conceptStates[CVC].needsReconcile).toBe(true)
+  })
+
+  it('words the change-feed cause by origin, and keeps reviewChat as the default', () => {
+    const causeFor = (origin?: AttestOrigin) => {
+      const action: FoundationsReviewAction = {
+        kind: 'attest', childId: 'c1', conceptId: CVC, state: 'solid',
+        ...(origin ? { origin } : {}),
+      }
+      return applyReviewActionToModel(emptyModel(), action, NOW).model.changeFeed.at(-1)?.cause ?? ''
+    }
+    expect(causeFor()).toContain('reviewChat')
+    expect(causeFor('foundationsTab')).toContain('you recorded')
+    expect(causeFor('reconcileKeep')).toContain('kept your word')
+    expect(causeFor('reconcileTake')).toContain('went with it')
+    // ETHOS-02 — no shame words anywhere in the cause vocabulary.
+    for (const origin of ['foundationsTab', 'reconcileKeep', 'reconcileTake'] as const) {
+      expect(causeFor(origin)).not.toMatch(/regress|dropped|failed/i)
+    }
+  })
+
+  it('ignores an `origin` an LLM tries to emit (client-set only)', () => {
+    const raw = `<action>{"kind":"attest","childId":"c1","conceptId":"${CVC}","state":"solid","origin":"reconcileTake"}</action>`
+    const [action] = parseFoundationsReviewActions(raw).actions
+    expect(action).toMatchObject({ kind: 'attest', state: 'solid' })
+    expect((action as { origin?: string }).origin).toBeUndefined()
   })
 })
 
