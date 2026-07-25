@@ -108,10 +108,27 @@ function getNextSaturday(): Date {
   return d
 }
 
+/**
+ * Dad Lab.
+ *
+ * **Kid-vs-parent routing is capability-derived, never name-derived (FEAT-124).**
+ * `/dad-lab` sits OUTSIDE the `RequireParent` block in `app/router.tsx`, so this
+ * component decides which experience a profile gets. It used to enumerate names
+ * (`profile === Lincoln || profile === London`); with exactly three profiles that
+ * was behaviourally identical to `!canEdit`, but it inverted the ARCH-41/42/43
+ * rail — a fourth non-parent profile would have silently landed on the parent
+ * page, including its `?diag=1` `HoursRoutingAuditPanel` and that panel's
+ * `hoursAdjustments` write path. The gate is now the same `canEdit` capability
+ * `RequireParent` uses. (The panel carries its own capability gate too, so its
+ * safety no longer depends on this routing decision — FEAT-122's precedent.)
+ *
+ * `UserProfile` still appears below for the kid's **display identity** only
+ * (which name/child record to greet) — cosmetic, not access.
+ */
 export default function DadLabPage() {
-  const { profile } = useProfile()
+  const { profile, canEdit } = useProfile()
   const familyId = useFamilyId()
-  const isKid = profile === UserProfile.Lincoln || profile === UserProfile.London
+  const isKid = !canEdit
 
   const { reports, loading, saveReport, updateStatus, deleteReport } = useDadLabReports()
   const { arcs } = useConceptArcs()

@@ -11,6 +11,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import { hoursAdjustmentsCollection } from '../../core/firebase/firestore'
+import { useProfile } from '../../core/profile/useProfile'
 import type { DadLabReport, HoursAdjustment } from '../../core/types'
 import { SubjectBucketLabel } from '../../core/types/enums'
 import type { SubjectBucket } from '../../core/types/enums'
@@ -32,8 +33,17 @@ const tagLabels = (tags: SubjectBucket[]): string =>
 /**
  * DATA-16 — Dad Lab hours routing audit panel (Step 1: read-only surfacing).
  *
- * Flag-gated (`?diag=1`), parent-only (`DadLabPage` renders it only in the
- * parent view). Surfaces every **completed** Dad Lab report whose minutes may
+ * Flag-gated (`?diag=1`) **and** capability-gated (FEAT-124). `?diag=1` is a
+ * surface flag, not access control, and `/dad-lab` sits OUTSIDE the
+ * `RequireParent` block in `app/router.tsx` — so this panel checks the parent
+ * capability (`canEdit`, the same signal `RequireParent` uses — ARCH-41/42/43)
+ * BEFORE the flag, exactly as FEAT-120/122 gated their diag surfaces. The gate
+ * holds regardless of where the panel is mounted: `DadLabPage` also routes
+ * non-parents to `KidLabView`, but this panel's safety no longer depends on
+ * that. The mount-time `hoursAdjustments` read is gated too, so a kid profile
+ * costs zero Firestore reads.
+ *
+ * Surfaces every **completed** Dad Lab report whose minutes may
  * not have reached MO compliance totals, in-app, because the owner cannot reach
  * the Firestore console. Two clearly-separated tiers:
  *   - **Empty tags** — the headline: minutes routed to ZERO hours (the
@@ -51,6 +61,7 @@ const tagLabels = (tags: SubjectBucket[]): string =>
  */
 export default function HoursRoutingAuditPanel({ familyId, reports, children }: Props) {
   const [searchParams] = useSearchParams()
+  const { canEdit } = useProfile()
   const [adjustments, setAdjustments] = useState<HoursAdjustment[]>([])
   const [loading, setLoading] = useState(true)
   const [savingId, setSavingId] = useState<string | null>(null)
@@ -70,9 +81,11 @@ export default function HoursRoutingAuditPanel({ familyId, reports, children }: 
   }, [familyId])
 
   useEffect(() => {
+    // Capability gate here too — a gated render must not reach Firestore at all.
+    if (!canEdit) return
     if (!enabled) return
     void loadAdjustments()
-  }, [enabled, loadAdjustments])
+  }, [canEdit, enabled, loadAdjustments])
 
   const childIds = useMemo(() => children.map((c) => c.id), [children])
   const audit = useMemo(
@@ -128,6 +141,8 @@ export default function HoursRoutingAuditPanel({ familyId, reports, children }: 
     }
   }, [audit.emptyTags, familyId, loadAdjustments])
 
+  // Capability gate FIRST — `?diag=1` is a surface flag, not access control.
+  if (!canEdit) return null
   if (!enabled) return null
 
   const openCount = audit.emptyTags.filter((r) => !r.resolved).length
