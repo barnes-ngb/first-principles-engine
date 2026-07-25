@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // ── Mock Firestore ─────────────────────────────────────────────
 const mockGetDoc = vi.fn()
 const mockSetDoc = vi.fn()
-const mockDoc = vi.fn((..._args: unknown[]) => `mock-doc-ref`)
+const mockDoc = vi.fn(() => `mock-doc-ref`)
 
 vi.mock('firebase/firestore', () => ({
   doc: (...args: unknown[]) => mockDoc(...args),
