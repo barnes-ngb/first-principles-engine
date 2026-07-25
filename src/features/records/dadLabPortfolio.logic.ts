@@ -240,10 +240,18 @@ export const linkedArtifactLabel = (count: number): string =>
  * selected into Photos. This section still carries the rest — the lab evidence
  * the parent did not select — which is the same job, over a smaller gap.
  *
- * `renderedArtifactIds` are the artifacts already written elsewhere in the file
- * (the selected ones). Those are skipped here, so nothing is duplicated: this
- * section fills the gap rather than repeating what is above it. That skip is
- * what keeps FEAT-123 from double-writing a selected lab photo.
+ * `renderedArtifactIds` are the artifacts whose **media URL** was already
+ * written elsewhere in the file. Those are skipped here, so nothing is
+ * duplicated: this section fills the gap rather than repeating what is above
+ * it. That skip is what keeps FEAT-123 from double-writing a selected lab
+ * photo.
+ *
+ * **Rendered, not merely selected.** The per-child sections embed photos only —
+ * a selected *recording* becomes a table row with no URL anywhere. Passing its
+ * id here would suppress its link and drop the recording from the file, so a
+ * parent choosing to highlight it would silently lose it (Codex P1, PR #1627).
+ * Callers filter through `emitsPortfolioMediaUrl`; this function trusts the
+ * list it is given.
  */
 export const buildDadLabMarkdownSection = (
   entries: DadLabPortfolioEntry[],

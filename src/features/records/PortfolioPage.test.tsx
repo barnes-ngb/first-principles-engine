@@ -92,11 +92,16 @@ const renderFor = (activeChildId: string) => {
   return render(<PortfolioPage />)
 }
 
-/** Titles rendered in the artifact grid, in render order. */
+/**
+ * Titles rendered in the artifact grid, in render order.
+ *
+ * Waits on the grid's ROWS, not on the summary line: the page renders
+ * "0 artifacts for …" before the month's load effect resolves, so waiting on
+ * that line races the load and can read the empty state as the answer.
+ * One checkbox per row makes the wait a real signal.
+ */
 const gridTitles = async (): Promise<string[]> => {
-  await waitFor(() =>
-    expect(screen.getByText(/artifacts for/i).textContent).toMatch(/\d+ artifacts?/),
-  )
+  await waitFor(() => expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0))
   return MONTH.map((a) => a.title).filter((t) => screen.queryByText(t) != null)
 }
 

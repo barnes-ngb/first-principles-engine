@@ -9,7 +9,7 @@ import {
   portfolioExportLabel,
   selectDadLabPortfolioEntries,
 } from './dadLabPortfolio.logic'
-import { generatePortfolioMarkdown } from './records.logic'
+import { emitsPortfolioMediaUrl, generatePortfolioMarkdown } from './records.logic'
 
 const report = (over: Partial<DadLabReport> = {}): DadLabReport => ({
   id: 'r1',
@@ -542,6 +542,89 @@ describe('FEAT-123 — a selected whole-family lab artifact is written exactly o
 
     expect(md.match(/https:\/\/example\.test\/a1\.jpg/g)).toHaveLength(1)
     expect(md.match(/https:\/\/example\.test\/a2\.jpg/g)).toHaveLength(1)
+  })
+
+  // Codex P1 (PR #1627): the export embeds photos only, so a selected lab
+  // RECORDING is written as a table row with no URL. Treating "selected" as
+  // "rendered" would suppress its Dad Lab link too — choosing to highlight a
+  // recording would delete it from the file. The skip list is therefore
+  // filtered by what the export actually emits.
+  it('keeps a selected lab recording’s link — selecting it must not delete it', () => {
+    const recording = artifact({
+      id: 'a3',
+      childId: 'both',
+      title: 'Rocket countdown',
+      type: 'Audio' as Artifact['type'],
+      uri: 'https://example.test/a3.m4a',
+    })
+    const entries = selectDadLabPortfolioEntries(
+      [
+        report({
+          id: 'r1',
+          beats: {
+            predict: { items: [{ artifactId: 'a3', child: 'both' }] },
+            try: { items: [] },
+            saw: { items: [] },
+          },
+        }),
+      ],
+      [recording],
+      '2026-07-01',
+      '2026-07-31',
+    )
+
+    // The parent selected the recording, but only artifacts whose URL the
+    // Photos section actually emits belong in the skip list — and it emits
+    // none for audio.
+    const rendered = [recording].filter(emitsPortfolioMediaUrl).map((a) => a.id as string)
+    expect(rendered).toEqual([])
+
+    const md = generatePortfolioMarkdown(
+      [recording],
+      children,
+      '2026-07-01',
+      '2026-07-31',
+      buildDadLabMarkdownSection(entries, rendered),
+    )
+
+    // The row names it; the Dad Lab section carries the actual recording.
+    expect(md).toContain('Rocket countdown')
+    expect(md.match(/https:\/\/example\.test\/a3\.m4a/g)).toHaveLength(1)
+  })
+
+  it('drops a selected recording’s link if the skip list is not filtered (the bug)', () => {
+    // Characterizes the failure mode the filter exists to prevent, so a future
+    // caller that passes raw selected ids fails here rather than in an export.
+    const recording = artifact({
+      id: 'a3',
+      childId: 'both',
+      title: 'Rocket countdown',
+      type: 'Audio' as Artifact['type'],
+      uri: 'https://example.test/a3.m4a',
+    })
+    const entries = selectDadLabPortfolioEntries(
+      [
+        report({
+          id: 'r1',
+          beats: {
+            predict: { items: [{ artifactId: 'a3', child: 'both' }] },
+            try: { items: [] },
+            saw: { items: [] },
+          },
+        }),
+      ],
+      [recording],
+      '2026-07-01',
+      '2026-07-31',
+    )
+    const md = generatePortfolioMarkdown(
+      [recording],
+      children,
+      '2026-07-01',
+      '2026-07-31',
+      buildDadLabMarkdownSection(entries, ['a3']),
+    )
+    expect(md).not.toContain('https://example.test/a3.m4a')
   })
 
   it('files a selected shared artifact under a Family heading, not the raw sentinel', () => {

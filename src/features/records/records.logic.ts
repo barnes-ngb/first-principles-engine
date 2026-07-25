@@ -718,6 +718,26 @@ export const selectPortfolioArtifactsForChild = (
     ? artifacts.filter((a) => a.childId === childId || isSharedArtifact(a))
     : artifacts
 
+/**
+ * True when `generatePortfolioMarkdown` will actually emit this artifact's
+ * media URL — i.e. it lands in a per-child `### Photos` block. The export
+ * embeds **photos only** (markdown has no audio embed), and only from the
+ * single `uri` field, so a recording — or a photo carrying just `mediaUrls` —
+ * is written as a TABLE ROW and nothing more.
+ *
+ * Named here, and used by the emitter itself just below, because FEAT-121's
+ * Dad Lab section skips "what was already rendered above". Selecting is not
+ * rendering: a selected lab RECORDING would be suppressed from the lab's
+ * evidence links while never having its URL written anywhere — so choosing to
+ * highlight a recording would delete it from the file (Codex P1, PR #1627).
+ * Callers building that skip list must filter through this predicate so the
+ * two can never disagree about what "already rendered" means.
+ */
+export const emitsPortfolioMediaUrl = (artifact: Artifact): boolean => {
+  const type = artifact.type as string
+  return (type === 'Photo' || type === 'photo') && Boolean(artifact.uri)
+}
+
 export const generatePortfolioMarkdown = (
   artifacts: Artifact[],
   children: Array<{ id: string; name: string }>,
@@ -777,7 +797,7 @@ export const generatePortfolioMarkdown = (
     lines.push('')
 
     // Include image references for photo artifacts
-    const photos = sorted.filter((art) => ((art.type as string) === 'Photo' || (art.type as string) === 'photo') && art.uri)
+    const photos = sorted.filter(emitsPortfolioMediaUrl)
     if (photos.length > 0) {
       lines.push('### Photos')
       lines.push('')

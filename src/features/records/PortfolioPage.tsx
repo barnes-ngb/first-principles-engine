@@ -38,6 +38,7 @@ import type { Artifact, DadLabReport } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import {
   SHARED_ARTIFACT_LABEL,
+  emitsPortfolioMediaUrl,
   generatePortfolioMarkdown,
   getMonthLabel,
   getMonthRange,
@@ -252,14 +253,19 @@ export default function PortfolioPage() {
       children.map((c) => ({ id: c.id, name: c.name })),
       monthStart,
       monthEnd,
-      // The selected ids are already written above, so the Dad Lab section
-      // skips them and emits only the lab evidence the file would otherwise
-      // claim but not carry. FEAT-123 makes whole-family artifacts selectable,
-      // which is exactly what this skip list exists to absorb: a lab photo the
-      // parent picked into Photos is written once, not twice.
+      // The Dad Lab section skips whatever was already written above, so a lab
+      // photo the parent picked into Photos is written once, not twice —
+      // exactly what FEAT-123 needs, now that whole-family artifacts are
+      // selectable. The skip list is filtered by what the export ACTUALLY
+      // emits: selecting a lab *recording* renders only a table row (markdown
+      // has no audio embed), so passing its id would suppress the link in the
+      // Dad Lab section and drop the recording from the file entirely.
       buildDadLabMarkdownSection(
         dadLabEntries,
-        selected.map((a) => a.id).filter((id): id is string => id != null),
+        selected
+          .filter(emitsPortfolioMediaUrl)
+          .map((a) => a.id)
+          .filter((id): id is string => id != null),
       ),
     )
 
