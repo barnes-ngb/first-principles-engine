@@ -15,6 +15,7 @@ import SectionCard from '../../components/SectionCard'
 import type { ChecklistItem, Child, DayLog } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
+import { combinedRemaining } from './kidRitualRows'
 
 function getTimeLabel(minutes?: number): string {
   if (!minutes) return ''
@@ -44,6 +45,16 @@ interface KidChecklistProps {
   mustDoSkipped: number
   mustDoDone: boolean
   mustDoRemaining: number
+  /**
+   * Visible-but-unfinished rituals (chapter / conundrum / teach-back) folded
+   * into the one finish-line (UX-C2b-1 / FEAT-118).
+   *
+   * **Display only.** It is not part of `computeQuestProgress`: the Workshop /
+   * Books unlock gate, per-item XP, overnight rollover, and budget enforcement
+   * all still read must-do checklist items alone. Mining is excluded from this
+   * number entirely (it accrues minutes and has no "done").
+   */
+  ritualsRemaining?: number
   dailyXp: number
   selectedChoices: Set<number>
   onToggleChoice: (choiceIndex: number) => void
@@ -71,6 +82,7 @@ export default function KidChecklist({
   mustDoSkipped,
   mustDoDone,
   mustDoRemaining,
+  ritualsRemaining = 0,
   dailyXp,
   selectedChoices,
   onToggleChoice,
@@ -84,6 +96,10 @@ export default function KidChecklist({
   onWatchOpen,
 }: KidChecklistProps) {
   const navigate = useNavigate()
+
+  // The one finish-line: must-do items + visible rituals. Display only — the
+  // unlock gate below still reads `mustDoCompleted` / `gateThreshold`.
+  const listRemaining = combinedRemaining(mustDoRemaining, ritualsRemaining)
 
   const handleToggleItem = useCallback(
     (itemIndex: number) => {
@@ -305,7 +321,10 @@ export default function KidChecklist({
               />
             )}
           </Stack>
-          {!mustDoDone && mustDoRemaining > 0 && (
+          {/* No "then you choose/craft!" tail: this count now includes rituals,
+              which don't gate the unlock. The locked Workshop card carries the
+              gate message ("Complete N more quests to unlock!"). */}
+          {listRemaining > 0 && (
             <Typography
               variant="body1"
               color="text.secondary"
@@ -313,8 +332,8 @@ export default function KidChecklist({
               sx={{ fontWeight: 500 }}
             >
               {isLincoln
-                ? `${mustDoRemaining} quest${mustDoRemaining !== 1 ? 's' : ''} to go, then you craft!`
-                : `${mustDoRemaining} to go, then you choose!`}
+                ? `${listRemaining} quest${listRemaining !== 1 ? 's' : ''} to go!`
+                : `${listRemaining} to go!`}
             </Typography>
           )}
         </Stack>
