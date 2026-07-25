@@ -180,7 +180,7 @@ const items = snapshot.docs.map((doc) => ({
 - `src/features/weekly-review/` — Weekly review page
 - `src/features/workshop/` — Story Game Workshop (board/adventure/card games), `steps/` sub-module (wizard step components)
 - `src/features/monthly-review/` — Monthly review books (reader, kid books-about-me page, generate/publish controls, photo handling)
-- `src/features/watch/` — Watch Vehicle curated video library (FEAT-100, design FEAT-86): parent vet-in (`WatchVetInForm`), list (`WatchLibraryTab`, Settings-only), playback (`WatchPlayer`/`WatchPlayerDialog`, validated-YouTube-id only, `youtube-nocookie.com` embed) and completion tracking (`useWatchItemCompletion`/`watchItemCompletion.ts`) + `useWatchLibrary` hook. `WatchLibraryPicker` is prepped for planner integration but not yet wired in
+- `src/features/watch/` — Watch Vehicle curated video library (FEAT-100, design FEAT-86): parent vet-in (`WatchVetInForm`), list (`WatchLibraryTab`, Settings-only), playback (`WatchPlayer`/`WatchPlayerDialog`, validated-YouTube-id only, `youtube-nocookie.com` embed) and completion tracking (`useWatchItemCompletion`/`watchItemCompletion.ts`) + `useWatchLibrary` hook. `WatchLibraryPicker` is wired into `PlannerChatPage` (FEAT-104/107) — parents pick a vetted video to plan onto a day, with inline vet-in from the planner
 - `functions/src/` — Firebase Cloud Functions (AI endpoints)
 
 ## North Star
