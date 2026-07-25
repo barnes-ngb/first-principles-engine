@@ -30,10 +30,11 @@ import { EmptyState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
+  dadLabReportsCollection,
 } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { Artifact } from '../../core/types'
+import type { Artifact, DadLabReport } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import {
   generatePortfolioMarkdown,
@@ -41,6 +42,14 @@ import {
   getMonthRange,
   scoreArtifactsForPortfolio,
 } from './records.logic'
+import {
+  DAD_LAB_FAMILY_SCOPE_NOTE,
+  DAD_LAB_SECTION_TITLE,
+  buildDadLabMarkdownSection,
+  linkedArtifactLabel,
+  portfolioExportLabel,
+  selectDadLabPortfolioEntries,
+} from './dadLabPortfolio.logic'
 
 const currentDate = new Date()
 const currentYear = currentDate.getFullYear()
@@ -54,6 +63,7 @@ export default function PortfolioPage() {
   const [month, setMonth] = useState(currentMonth)
   const { activeChildId, activeChild, children } = useActiveChild()
   const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
+  const [dadLabReports, setDadLabReports] = useState<DadLabReport[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showAutoSuggest, setShowAutoSuggest] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
@@ -163,6 +173,36 @@ export default function PortfolioPage() {
     void load()
   }, [familyId, monthStart, monthEnd])
 
+  // FEAT-121 — load the month's Dad Lab reports. Read-only, and kept in its own
+  // effect so a lab-report failure never blanks the artifacts grid. The range is
+  // a single-field filter on `date`, so no new composite index is needed.
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const q = query(
+          dadLabReportsCollection(familyId),
+          where('date', '>=', monthStart),
+          where('date', '<=', monthEnd),
+        )
+        const snap = await getDocs(q)
+        setDadLabReports(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
+      } catch (err) {
+        setSnackMessage({ text: `Failed to load Dad Lab reports: ${err instanceof Error ? err.message : 'Unknown error'}`, severity: 'error' })
+      }
+    }
+    void load()
+  }, [familyId, monthStart, monthEnd])
+
+  // Dad Lab is whole-family (DATA-04) — a report carries no `childId`, so the
+  // same labs surface on every child's portfolio. Linked-artifact counts are
+  // resolved against ALL of the month's artifacts, not the active child's
+  // slice: the three-beat capture writes `childId: 'both'` artifacts, and
+  // pre-filtering by child would under-report a family lab's evidence.
+  const dadLabEntries = useMemo(
+    () => selectDadLabPortfolioEntries(dadLabReports, allArtifacts, monthStart, monthEnd),
+    [dadLabReports, allArtifacts, monthStart, monthEnd],
+  )
+
   const scored = useMemo(
     () => scoreArtifactsForPortfolio(artifacts),
     [artifacts],
@@ -204,6 +244,13 @@ export default function PortfolioPage() {
       children.map((c) => ({ id: c.id, name: c.name })),
       monthStart,
       monthEnd,
+      // The selected ids are already written above, so the Dad Lab section
+      // skips them and emits only the lab evidence the file would otherwise
+      // claim but not carry (whole-family artifacts are never selectable here).
+      buildDadLabMarkdownSection(
+        dadLabEntries,
+        selected.map((a) => a.id).filter((id): id is string => id != null),
+      ),
     )
 
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' })
@@ -216,7 +263,7 @@ export default function PortfolioPage() {
     link.click()
     link.remove()
     window.URL.revokeObjectURL(url)
-  }, [artifacts, selectedIds, children, activeChild, monthStart, monthEnd])
+  }, [artifacts, selectedIds, children, activeChild, monthStart, monthEnd, dadLabEntries])
 
   const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1)
   const yearOptions = [currentYear - 1, currentYear, currentYear + 1]
@@ -489,14 +536,63 @@ export default function PortfolioPage() {
             </Stack>
           )}
 
+          {/*
+            FEAT-121 — Dad Lab narratives join the portfolio. Read-only: the
+            reports render as story (predict → try → what we saw), never as
+            scores or marks (ETHOS-02). An empty month renders nothing at all,
+            so this already-busy page gains no empty-state noise.
+          */}
+          {dadLabEntries.length > 0 && (
+            <>
+              <Divider />
+              <Stack spacing={1.5}>
+                <Stack spacing={0.25}>
+                  <Typography variant="subtitle1" fontWeight={600}>
+                    {DAD_LAB_SECTION_TITLE}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {DAD_LAB_FAMILY_SCOPE_NOTE}
+                  </Typography>
+                </Stack>
+                {dadLabEntries.map((entry) => (
+                  <Stack
+                    key={entry.id ?? `${entry.date}-${entry.title}`}
+                    spacing={0.5}
+                    sx={{ p: 1.5, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}
+                  >
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Typography variant="body2" fontWeight={600}>
+                        {entry.title}
+                      </Typography>
+                      <Chip size="small" variant="outlined" label="Family lab" />
+                    </Stack>
+                    {entry.excerpt && (
+                      <Typography variant="caption" color="text.secondary">
+                        {entry.excerpt}
+                      </Typography>
+                    )}
+                    <Typography variant="caption" color="text.secondary">
+                      {entry.date} — {linkedArtifactLabel(entry.linkedArtifactCount)}
+                    </Typography>
+                  </Stack>
+                ))}
+              </Stack>
+            </>
+          )}
+
           <Divider />
 
+          {/*
+            A month can hold Dad Labs and no selected artifacts — that export is
+            worth downloading, so the button stays live when either side has
+            something to say.
+          */}
           <Button
             variant="contained"
             onClick={handleExportMarkdown}
-            disabled={selectedIds.size === 0}
+            disabled={selectedIds.size === 0 && dadLabEntries.length === 0}
           >
-            Export Portfolio Markdown ({selectedIds.size} artifacts)
+            {portfolioExportLabel(selectedIds.size, dadLabEntries.length)}
           </Button>
           </>}
         </Stack>
