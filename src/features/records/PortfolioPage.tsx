@@ -37,10 +37,14 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Artifact, DadLabReport } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import {
+  SHARED_ARTIFACT_LABEL,
+  emitsPortfolioMediaUrl,
   generatePortfolioMarkdown,
   getMonthLabel,
   getMonthRange,
+  isSharedArtifact,
   scoreArtifactsForPortfolio,
+  selectPortfolioArtifactsForChild,
 } from './records.logic'
 import {
   DAD_LAB_FAMILY_SCOPE_NOTE,
@@ -118,9 +122,14 @@ export default function PortfolioPage() {
   const [filterSubject, setFilterSubject] = useState<SubjectBucket | ''>('')
   const [filterType, setFilterType] = useState<EvidenceType | ''>('')
 
-  // Filter artifacts by active child
+  // The active child's artifacts — theirs, plus the family-shared ones.
+  // FEAT-123: this used to be an exact `childId` match, which dropped every
+  // `childId: 'both'` artifact (all Dad Lab beat captures, DATA-04) out of BOTH
+  // children's grids — unviewable, unselectable, never scored. The widened
+  // predicate matches what FEAT-120's export loader and the DATA-09 hours reads
+  // already do; the grid annotates shared work so it still reads as shared.
   const childArtifacts = useMemo(
-    () => activeChildId ? allArtifacts.filter((a) => a.childId === activeChildId) : allArtifacts,
+    () => selectPortfolioArtifactsForChild(allArtifacts, activeChildId),
     [allArtifacts, activeChildId],
   )
 
@@ -244,12 +253,19 @@ export default function PortfolioPage() {
       children.map((c) => ({ id: c.id, name: c.name })),
       monthStart,
       monthEnd,
-      // The selected ids are already written above, so the Dad Lab section
-      // skips them and emits only the lab evidence the file would otherwise
-      // claim but not carry (whole-family artifacts are never selectable here).
+      // The Dad Lab section skips whatever was already written above, so a lab
+      // photo the parent picked into Photos is written once, not twice —
+      // exactly what FEAT-123 needs, now that whole-family artifacts are
+      // selectable. The skip list is filtered by what the export ACTUALLY
+      // emits: selecting a lab *recording* renders only a table row (markdown
+      // has no audio embed), so passing its id would suppress the link in the
+      // Dad Lab section and drop the recording from the file entirely.
       buildDadLabMarkdownSection(
         dadLabEntries,
-        selected.map((a) => a.id).filter((id): id is string => id != null),
+        selected
+          .filter(emitsPortfolioMediaUrl)
+          .map((a) => a.id)
+          .filter((id): id is string => id != null),
       ),
     )
 
@@ -488,6 +504,15 @@ export default function PortfolioPage() {
                         </Typography>
                         {child && (
                           <Chip size="small" label={child.name} />
+                        )}
+                        {/*
+                          FEAT-123 — a whole-family artifact (`childId: 'both'`,
+                          DATA-04) now appears in both boys' grids, so it has to
+                          say so. Same annotation the Dad Lab section uses, so a
+                          shared capture is never mistaken for solo work.
+                        */}
+                        {!child && isSharedArtifact(artifact) && (
+                          <Chip size="small" variant="outlined" label={SHARED_ARTIFACT_LABEL} />
                         )}
                         <Chip size="small" variant="outlined" label={artifact.type} />
                         {artifact.tags?.engineStage && (
