@@ -91,13 +91,20 @@ export interface EvidenceRef {
   /** For an `attestation`: who overrode. Parent's word is durable (§6.3). */
   overriddenBy?: 'parent'
   /**
-   * For an `eval` ref (FEAT-66): the concept state that evaluation actually read.
-   * Stamped by `applyEvalFindingsToModel` on every eval ref it writes. It matters
-   * most on a ref that was **frozen behind a parent attestation** (`needsReconcile`):
-   * the stored state stays the parent's, so this is the only durable record of what
-   * the eval saw — and the Foundations tab's reconcile affordance needs it to offer
-   * "take the model's read" as a concrete, confirm-gated choice. Absent on refs
-   * written before FEAT-66 (those reconcile through the plain three-state override).
+   * The concept state **this ref itself asserted** (FEAT-66) — as distinct from
+   * `ConceptStateEntry.state`, which is where the concept landed after every
+   * writer had its say. Stamped on the two refs whose own read has to survive:
+   *
+   * - `eval` (`applyEvalFindingsToModel`) — on the attestation-frozen path the
+   *   stored state stays the parent's, so this is the only durable record of what
+   *   the eval saw, and the Foundations tab needs it to offer "take the model's
+   *   read" as a concrete, confirm-gated choice.
+   * - `attestation` (`applyReviewActionToModel`) — a later derived write (a quest
+   *   upgrade, a coverage claim) can move `entry.state` while a disagreement is
+   *   still standing, so without this the reconcile view would report a state the
+   *   parent never said, and "keep my word" would re-attest it.
+   *
+   * Absent on refs written before FEAT-66; readers fall back to `entry.state`.
    */
   readState?: ConceptStateKind
 }

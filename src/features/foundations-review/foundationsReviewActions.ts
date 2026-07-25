@@ -271,6 +271,11 @@ export function applyReviewActionToModel(
       note: action.note ?? 'You confirmed you have seen this.',
       observedAt: nowIso,
       overriddenBy: 'parent',
+      // What the parent actually said (FEAT-66). `entry.state` can be moved later
+      // by a derived writer (a quest upgrade, a coverage claim), so the reconcile
+      // view reads the parent's word off the ref rather than off the entry —
+      // otherwise it would report, and re-attest, a state they never chose.
+      readState: toState,
     }
     cause = attestCause(action.origin ?? 'reviewChat', kidName, toState)
   } else {

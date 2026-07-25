@@ -34,6 +34,7 @@ function flaggedEntry(over: Partial<ConceptStateEntry> = {}): ConceptStateEntry 
         note: 'He read cat, run, sit for me',
         observedAt: '2026-07-01T00:00:00.000Z',
         overriddenBy: 'parent',
+        readState: 'solid',
       },
       {
         kind: 'eval',
@@ -75,6 +76,22 @@ describe('buildReconcileView — the FEAT-76 flag, made visible', () => {
     expect(view?.theirs.line).toContain('The evaluation saw: Lincoln is coming along with this')
     expect(view?.theirs.line).toContain('2026-07-20')
     expect(view?.evalState).toBe('forming')
+  })
+
+  it('reports the state the parent attested, not later derived drift', () => {
+    // Parent attested `forming`; a quest upgrade later moved the entry to `solid`
+    // while the eval disagreement was still standing.
+    const entry = flaggedEntry({ state: 'solid' })
+    entry.evidence[0].readState = 'forming'
+    const view = buildReconcileView(entry, 'Lincoln')
+    expect(view?.yourState).toBe('forming')
+    expect(view?.yours.line).toContain('You recorded: Lincoln is coming along with this')
+  })
+
+  it('falls back to the entry state when the attestation predates FEAT-66', () => {
+    const entry = flaggedEntry()
+    delete entry.evidence[0].readState
+    expect(buildReconcileView(entry, 'Lincoln')?.yourState).toBe('solid')
   })
 
   it('falls back to "something different" when the eval ref predates FEAT-66 (no readState)', () => {

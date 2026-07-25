@@ -94,6 +94,14 @@ export interface ReconcileRead {
 export interface ReconcileView {
   /** What the parent recorded — the standing, still-in-force state. */
   yours: ReconcileRead
+  /**
+   * The state the parent **actually attested**, read off the attestation ref
+   * (`readState`) rather than off `entry.state` — a derived writer (a quest
+   * upgrade, a coverage claim) can move the entry while a disagreement stands, and
+   * "keep my word" must re-attest the parent's word, not that later drift. Falls
+   * back to `entry.state` for pre-FEAT-66 refs.
+   */
+  yourState: ConceptStateKind
   /** What the evaluation saw. */
   theirs: ReconcileRead
   /**
@@ -122,8 +130,10 @@ export function buildReconcileView(
   const attestation = latestEvidenceOfKind(entry, 'attestation')
   const evalRef = latestEvidenceOfKind(entry, 'eval')
 
+  // The parent's own word, not wherever the entry has since drifted to.
+  const yourState: ConceptStateKind = attestation?.readState ?? entry.state
   const yours: ReconcileRead = {
-    line: `You recorded: ${name} ${STATE_PHRASE[entry.state] ?? 'can do this'}${dateSuffix(attestation?.observedAt)}`,
+    line: `You recorded: ${name} ${STATE_PHRASE[yourState] ?? 'can do this'}${dateSuffix(attestation?.observedAt)}`,
     ...(attestation?.note ? { detail: scrubDisplayJargon(attestation.note) } : {}),
   }
 
@@ -135,7 +145,7 @@ export function buildReconcileView(
     ...(evalRef?.note ? { detail: scrubDisplayJargon(evalRef.note) } : {}),
   }
 
-  return { yours, theirs, ...(evalState ? { evalState } : {}) }
+  return { yours, yourState, theirs, ...(evalState ? { evalState } : {}) }
 }
 
 /** The note recorded when a parent reads the new take and stands by what they saw. */

@@ -23,6 +23,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { learnerModelsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useLearnerModel } from '../../core/hooks/useLearnerModel'
+import { useProfile } from '../../core/profile/useProfile'
 import type {
   ConceptStateKind,
   LearnerModel,
@@ -91,6 +92,11 @@ function stateColor(state: ConceptStateKind): string {
  */
 export default function FoundationsTab() {
   const familyId = useFamilyId()
+  // `/progress` is NOT behind `RequireParent` — a kid profile can navigate to it
+  // directly, and their own `activeChildId` is populated. So the override is gated
+  // on the same **capability** the route guard uses (`canEdit`), never on a name
+  // (ARCH-41/42/43): kids may read the terrain, they may not attest.
+  const { canEdit } = useProfile()
   const { activeChild, activeChildId, children, setActiveChildId, isLoading } =
     useActiveChild()
   const { model, loading } = useLearnerModel(familyId, activeChildId)
@@ -109,6 +115,12 @@ export default function FoundationsTab() {
   const handleConfirmOverride = useCallback(
     async (action: FoundationsReviewAction) => {
       if (saving) return
+      if (!canEdit) {
+        // Belt-and-braces: the controls are hidden for non-parent profiles, and
+        // the writer refuses one anyway.
+        console.warn('[foundations] rejected override — not a parent profile')
+        return
+      }
       if (!familyId || !activeChildId || !model) {
         setSaveError('Could not save that — try again.')
         return
@@ -147,7 +159,7 @@ export default function FoundationsTab() {
         setSaving(false)
       }
     },
-    [saving, familyId, activeChildId, model, openConcept, childName],
+    [saving, canEdit, familyId, activeChildId, model, openConcept, childName],
   )
 
   return (
@@ -189,6 +201,7 @@ export default function FoundationsTab() {
       <ConceptEvidenceDrawer
         concept={openConcept}
         childId={activeChildId}
+        canOverride={canEdit}
         childName={childName}
         onClose={() => setOpenConcept(null)}
         onConfirm={handleConfirmOverride}
@@ -447,6 +460,7 @@ function FoundationsBody({
 function ConceptEvidenceDrawer({
   concept,
   childId,
+  canOverride,
   childName,
   onClose,
   onConfirm,
@@ -455,6 +469,8 @@ function ConceptEvidenceDrawer({
 }: {
   concept: TerrainConcept | null
   childId: string | undefined
+  /** Parent capability — gates the override section and the confirm card. */
+  canOverride: boolean
   childName: string
   onClose: () => void
   onConfirm: (action: FoundationsReviewAction) => void
@@ -469,6 +485,7 @@ function ConceptEvidenceDrawer({
         <ConceptDrawerBody
           concept={concept}
           childId={childId}
+          canOverride={canOverride && Boolean(childId)}
           childName={childName}
           onConfirm={onConfirm}
           saving={saving}
@@ -491,6 +508,7 @@ function ConceptEvidenceDrawer({
 function ConceptDrawerBody({
   concept,
   childId,
+  canOverride,
   childName,
   onConfirm,
   saving,
@@ -498,52 +516,57 @@ function ConceptDrawerBody({
 }: {
   concept: TerrainConcept
   childId: string | undefined
+  /** Parent capability (never a child's name) — kids see the evidence, not the write. */
+  canOverride: boolean
   childName: string
   onConfirm: (action: FoundationsReviewAction) => void
   saving: boolean
   error: string | null
 }) {
   const [note, setNote] = useState('')
-  const [choice, setChoice] = useState<ReviewProposedState | null>(null)
-  const [staged, setStaged] = useState<FoundationsReviewAction | null>(null)
+  /**
+   * What the parent has *selected*, not what will be written. The action itself is
+   * derived below, so editing the note after picking a state can never leave a
+   * stale note baked into the staged proposal.
+   */
+  const [selection, setSelection] = useState<
+    | { route: 'override'; state: ReviewProposedState }
+    | { route: 'reconcileKeep' | 'reconcileTake'; state: ReviewProposedState }
+    | null
+  >(null)
 
   const reconcile = useMemo(
     () => buildReconcileView(concept.entry, childName),
     [concept.entry, childName],
   )
-  /** "Keep my word" re-attests the standing state; the eval's read is the other route. */
-  const keepState = proposableState(concept.entry.state)
+  /**
+   * "Keep my word" re-attests **the state the parent actually attested** — read off
+   * the attestation ref, not off `entry.state`, which a later derived writer (a
+   * quest upgrade, a coverage claim) may have moved while the disagreement stood.
+   */
+  const keepState = reconcile
+    ? proposableState(reconcile.yourState)
+    : proposableState(concept.entry.state)
   const evalState = reconcile?.evalState
 
-  /** Stage the parent's own read — the note rides along so the evidence line is honest. */
-  const stageChoice = (state: ReviewProposedState) => {
-    if (!childId) return
-    setChoice(state)
-    setStaged(
-      buildOverrideAction({
-        childId,
-        conceptId: concept.conceptId,
-        state,
-        note,
-        origin: 'foundationsTab',
-      }),
-    )
-  }
+  /** The single staged proposal, derived from the live selection + note. */
+  const staged = useMemo<FoundationsReviewAction | null>(() => {
+    if (!selection || !childId || !canOverride) return null
+    return buildOverrideAction({
+      childId,
+      conceptId: concept.conceptId,
+      state: selection.state,
+      note:
+        selection.route === 'override'
+          ? note
+          : selection.route === 'reconcileKeep'
+            ? KEEP_MY_WORD_NOTE
+            : TAKE_MODEL_READ_NOTE,
+      origin: selection.route === 'override' ? 'foundationsTab' : selection.route,
+    })
+  }, [selection, childId, canOverride, concept.conceptId, note])
 
-  /** Stage a reconcile resolution — both routes are the same confirm-gated attestation. */
-  const stageReconcile = (state: ReviewProposedState, keep: boolean) => {
-    if (!childId) return
-    setChoice(null)
-    setStaged(
-      buildOverrideAction({
-        childId,
-        conceptId: concept.conceptId,
-        state,
-        note: keep ? KEEP_MY_WORD_NOTE : TAKE_MODEL_READ_NOTE,
-        origin: keep ? 'reconcileKeep' : 'reconcileTake',
-      }),
-    )
-  }
+  const choice = selection?.route === 'override' ? selection.state : null
 
   return (
     <Box sx={{ p: 2, maxWidth: 640, mx: 'auto', width: '100%' }}>
@@ -584,14 +607,14 @@ function ConceptDrawerBody({
               {reconcile.theirs.detail}
             </Typography>
           )}
-          {childId && (
+          {canOverride && (
             <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', gap: 1 }}>
               {keepState && (
                 <Button
                   size="small"
                   variant="outlined"
                   disabled={saving}
-                  onClick={() => stageReconcile(keepState, true)}
+                  onClick={() => setSelection({ route: 'reconcileKeep', state: keepState })}
                   sx={{ textTransform: 'none' }}
                 >
                   Keep my word
@@ -602,7 +625,7 @@ function ConceptDrawerBody({
                   size="small"
                   variant="outlined"
                   disabled={saving}
-                  onClick={() => stageReconcile(evalState, false)}
+                  onClick={() => setSelection({ route: 'reconcileTake', state: evalState })}
                   sx={{ textTransform: 'none' }}
                 >
                   Take the model’s read
@@ -636,7 +659,7 @@ function ConceptDrawerBody({
 
       {/* A — the parent override. Your word is the strongest evidence the model
           has; this is where you give it. */}
-      {childId && (
+      {canOverride && (
         <>
           <Divider sx={{ my: 1.5 }} />
           <Typography variant="overline" sx={{ fontWeight: 700 }}>
@@ -661,7 +684,7 @@ function ConceptDrawerBody({
                 size="small"
                 variant={choice === state ? 'contained' : 'outlined'}
                 disabled={saving}
-                onClick={() => stageChoice(state)}
+                onClick={() => setSelection({ route: 'override', state })}
                 sx={{ textTransform: 'none' }}
               >
                 {stateChoiceLabel(state, childName)}
@@ -679,10 +702,7 @@ function ConceptDrawerBody({
             pending={[{ id: 'override', action: staged, status: 'pending' }]}
             childName={childName}
             onConfirm={onConfirm}
-            onDismiss={() => {
-              setStaged(null)
-              setChoice(null)
-            }}
+            onDismiss={() => setSelection(null)}
             onConfirmAll={() => onConfirm(staged)}
           />
         </Box>

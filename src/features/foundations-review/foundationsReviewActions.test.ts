@@ -86,6 +86,9 @@ describe('applyReviewActionToModel — attest', () => {
     expect(entry.state).toBe('solid')
     expect(entry.evidence[0].kind).toBe('attestation')
     expect(entry.evidence[0].overriddenBy).toBe('parent')
+    // The ref records what the parent said, so a later derived write moving
+    // `entry.state` can't be misreported back to them as their own word (FEAT-66).
+    expect(entry.evidence[0].readState).toBe('solid')
     expect(model.changeFeed.at(-1)).toMatchObject({ conceptId: CVC, from: 'not-yet', to: 'solid' })
     expect(model.changeFeed.at(-1)?.cause).toContain('reviewChat')
   })

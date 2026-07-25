@@ -13,6 +13,14 @@ vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => mockUseActiveChild(),
 }))
 
+// Parent capability (FEAT-66 gate). `/progress` is not behind `RequireParent`, so
+// a kid profile can land here — the override must be capability-gated, not hidden
+// by navigation alone.
+const mockCanEdit = vi.fn(() => true)
+vi.mock('../../core/profile/useProfile', () => ({
+  useProfile: () => ({ canEdit: mockCanEdit() }),
+}))
+
 const mockUseLearnerModel = vi.fn()
 vi.mock('../../core/hooks/useLearnerModel', () => ({
   useLearnerModel: () => mockUseLearnerModel(),
@@ -110,6 +118,7 @@ function fullModel(): LearnerModel {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockCanEdit.mockReturnValue(true)
   mockUseActiveChild.mockReturnValue({
     activeChild: { id: 'c1', name: 'Lincoln' },
     activeChildId: 'c1',
@@ -249,6 +258,40 @@ describe('FoundationsTab — parent concept override (FEAT-66 A)', () => {
     })
   })
 
+  it('rebuilds the staged proposal when the note is edited after choosing', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    // Choose first, then type — the note must still reach the durable evidence.
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+    await user.type(screen.getByLabelText(/What did you see/), 'read it aloud twice')
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedAction()).toMatchObject({
+      state: 'solid',
+      note: 'read it aloud twice',
+    })
+  })
+
+  it('hides the override and refuses the write for a non-parent profile', async () => {
+    mockCanEdit.mockReturnValue(false)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    // The evidence trail still reads — only the write is gated.
+    expect(screen.getByText('Evidence')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/What did you see/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Lincoln has this solid' }),
+    ).not.toBeInTheDocument()
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
   it('writes nothing when the proposal is dismissed', async () => {
     const user = userEvent.setup()
     render(<FoundationsTab />)
@@ -346,6 +389,28 @@ describe('FoundationsTab — reconcile the eval’s new take (FEAT-66 B / FEAT-7
     expect(confirmedAction()).toMatchObject({
       kind: 'attest', conceptId: CVC, state: 'forming', origin: 'reconcileTake',
     })
+  })
+
+  it('reports and re-attests the state the parent actually said, not later drift', async () => {
+    // A quest upgrade moved the entry to solid AFTER the parent attested `forming`
+    // and the eval disagreed — the standing disagreement is still flagged.
+    const m = modelWithReconcile()
+    const entry = m.conceptStates[CVC]
+    entry.evidence[0].readState = 'forming'
+    entry.state = 'solid'
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: m })
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    expect(
+      screen.getByText(/You recorded: Lincoln is coming along with this/),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Keep my word' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedAction()).toMatchObject({ state: 'forming', origin: 'reconcileKeep' })
   })
 
   it('does not offer the model’s read when the eval ref predates FEAT-66', async () => {
