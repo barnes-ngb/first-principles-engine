@@ -165,6 +165,11 @@ describe('applyEvalFindingsToModel', () => {
     expect(next.conceptStates[CVC].evidence.some((e) => e.kind === 'eval')).toBe(true)
     expect(next.conceptStates[CVC].evidence.some((e) => e.kind === 'attestation')).toBe(true)
     expect(next.conceptStates[CVC].needsReconcile).toBe(true)
+    // FEAT-66 — the frozen ref records what the eval actually read, since the
+    // stored state stays the parent's. Without it the Foundations tab could not
+    // offer "take the model's read" as a concrete choice.
+    const evalRef = next.conceptStates[CVC].evidence.find((e) => e.kind === 'eval')
+    expect(evalRef?.readState).toBe('frontier')
     // No state change ⇒ not counted, no change-feed state move.
     expect(changedConceptIds).toEqual([])
     expect(next.changeFeed).toHaveLength(0)

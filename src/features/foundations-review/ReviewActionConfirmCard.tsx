@@ -9,6 +9,9 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import { FOUNDATION_NODE_MAP } from '../../core/foundations'
+// Plain-language state phrases — NEVER a band number or percentage (§14). Shared
+// with the Foundations tab's override so the choice and the preview read alike.
+import { STATE_PHRASE } from './statePhrase'
 import type { FoundationsReviewAction } from './foundationsReviewActions'
 import type { PendingReviewAction } from './useFoundationsReview'
 
@@ -18,13 +21,6 @@ interface Props {
   onConfirm: (action: FoundationsReviewAction) => void
   onDismiss: (action: FoundationsReviewAction) => void
   onConfirmAll: () => void
-}
-
-/** Plain-language state phrase — NEVER a band number or percentage (§14). */
-const STATE_PHRASE: Record<string, string> = {
-  solid: 'has this solid',
-  forming: 'is coming along with this',
-  frontier: 'is working on this',
 }
 
 function kidNameOf(conceptId: string): string {

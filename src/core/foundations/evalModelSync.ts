@@ -186,6 +186,11 @@ export function applyEvalFindingsToModel(
       sourceId: sessionId,
       note: read.note,
       observedAt: nowIso,
+      // What this eval actually read (FEAT-66). On the attestation-frozen path
+      // below the stored state stays the parent's, so this ref is the only record
+      // of the eval's take — the Foundations tab reads it to offer "take the
+      // model's read" when surfacing `needsReconcile`.
+      readState: read.state,
     }
     const nextEvidence = [...(prev?.evidence ?? []), evidence]
 

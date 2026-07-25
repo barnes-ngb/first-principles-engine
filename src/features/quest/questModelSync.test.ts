@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // ── Mock Firestore ─────────────────────────────────────────────
 const mockGetDoc = vi.fn()
 const mockSetDoc = vi.fn()
-// Typed with an explicit rest signature so the `doc: (...args: unknown[]) =>
-// mockDoc(...args)` spread below has a rest parameter to land in (TS2556).
-const mockDoc = vi.fn<(...args: unknown[]) => string>(() => `mock-doc-ref`)
+// Typed as variadic so the `doc: (...args) => mockDoc(...args)` mock below type-checks.
+const mockDoc = vi.fn((...args: unknown[]) => {
+  void args
+  return `mock-doc-ref`
+})
 
 vi.mock('firebase/firestore', () => ({
   doc: (...args: unknown[]) => mockDoc(...args),
