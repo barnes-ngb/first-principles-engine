@@ -6,6 +6,7 @@ import {
   SHEET_GAP_MM,
   computeStickerSheetLayout,
   cellPosition,
+  stickerSheetFileName,
 } from './stickerSheetLayout'
 import type { StickerPageSize, StickerSizeId } from './stickerSheetLayout'
 
@@ -29,7 +30,8 @@ function fitInBox(imgW: number, imgH: number, boxW: number, boxH: number): { w: 
 export interface PrintStickerSheetOptions {
   pageSize: StickerPageSize
   stickerSize: StickerSizeId
-  /** Filename stem (no extension). Defaults to "stickers". */
+  /** Filename stem (no extension). Defaults to "stickers". The physical print
+   *  size token (`-2in`) and `.pdf` are appended by `stickerSheetFileName`. */
   fileName?: string
 }
 
@@ -89,11 +91,7 @@ export async function printStickerSheet(
     }
   }
 
-  const slug = (opts.fileName || 'stickers')
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase()
-  pdf.save(`${slug || 'stickers'}.pdf`)
+  pdf.save(stickerSheetFileName(opts.fileName || 'stickers', opts.stickerSize))
 
   return { skippedImageCount, pageCount: layout.pageCount }
 }
