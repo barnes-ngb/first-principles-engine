@@ -47,7 +47,9 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useScrollToHash } from '../../core/hooks/useScrollToHash'
 import ExplorerMap from './ExplorerMap'
 import KidExtraLogger from './KidExtraLogger'
-import KidMiningCard from './KidMiningCard'
+import KidRitualRow from './KidRitualRow'
+import { countRitualsToGo, isChapterDoneToday } from './kidRitualRows'
+import { useConundrumDoneToday } from './useConundrumDoneToday'
 import { useTodayMiningMinutes } from './useTodayMiningMinutes'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
@@ -428,6 +430,30 @@ export default function KidTodayView({
     [child, allChildren],
   )
 
+  // ── Ritual rows (UX-C2b-1 / FEAT-118) ──
+  // Each ritual's done flag is derived READ-ONLY from that ritual's own store.
+  // Nothing here writes, and none of it reaches `dayLog.checklist` — the
+  // unlock gate, per-item XP, rollover, and budget still read must-do checklist
+  // items alone (see kidRitualRows.ts). Derived above the armor-gate early
+  // return so hook order stays unconditional.
+  const chapterRowVisible = Boolean(
+    selectedBook && isReadAloudSectionVisible(true, bookProgress?.questionPool),
+  )
+  const chapterDone = useMemo(
+    () => isChapterDoneToday(bookProgress?.questionPool, today),
+    [bookProgress?.questionPool, today],
+  )
+  const conundrumVisible = Boolean(weekFocus?.conundrum)
+  const conundrumDone = useConundrumDoneToday(familyId, child.id, today, conundrumVisible)
+  const teachBackRowVisible = Boolean(showTeachBackSection && youngerSibling)
+  const ritualsToGo = countRitualsToGo({
+    chapterVisible: chapterRowVisible,
+    chapterDone,
+    conundrumVisible,
+    conundrumDone,
+    teachBackVisible: teachBackRowVisible,
+  })
+
   // ── Armor Gate early return (after all hooks) ──
   if (avatarProfile && showArmorGateBlocker && armorStatus) {
     return (
@@ -604,6 +630,44 @@ export default function KidTodayView({
         </Box>
       )}
 
+      {/* ── ONE LIST (UX-C2b-1 / FEAT-118) ──
+          Owner-set order: chapter → must-do checklist → conundrum → teach-back
+          → mining. Each ritual is a row of the same list, with a READ-ONLY done
+          flag derived from its own store; none of them is written into
+          `dayLog.checklist` (see kidRitualRows.ts). */}
+
+      {/* ── CHAPTER ROW ── */}
+      {chapterRowVisible && selectedBook && (
+        <SectionErrorBoundary section="chapter pool">
+          <KidRitualRow
+            icon="📖"
+            title={selectedBook.title}
+            subtitle={chapterDone ? 'Answered today' : "Talk about today's chapter"}
+            done={chapterDone}
+            isLincoln={isLincoln}
+            defaultExpanded={!chapterDone}
+            anchorId="chapter"
+          >
+            {bookProgress && isChapterPoolVisible(bookProgress.questionPool) ? (
+              <KidChapterPool
+                book={selectedBook}
+                bookProgress={bookProgress}
+                familyId={familyId}
+                childId={child.id}
+                dayLog={dayLog}
+                weekFocus={weekFocus}
+                onChapterAnswered={updateChapter}
+              />
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                This is today&apos;s read-aloud book. A grown-up will read it with
+                you and add questions to talk about.
+              </Typography>
+            )}
+          </KidRitualRow>
+        </SectionErrorBoundary>
+      )}
+
       {/* MVD warm message */}
       {isMvd && (
         <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
@@ -611,7 +675,7 @@ export default function KidTodayView({
         </Typography>
       )}
 
-      {/* ── CHECKLIST (Must-Do + Choose) — the spine, above the ritual cards ── */}
+      {/* ── CHECKLIST (Must-Do + Choose) — the spine of the one list ── */}
       <SectionErrorBoundary section="checklist">
         <KidChecklist
           mustDo={mustDo}
@@ -626,6 +690,7 @@ export default function KidTodayView({
           mustDoSkipped={mustDoSkipped}
           mustDoDone={mustDoDone}
           mustDoRemaining={mustDoRemaining}
+          ritualsRemaining={ritualsToGo}
           dailyXp={dailyXp}
           selectedChoices={selectedChoices}
           onToggleChoice={handleToggleChoice}
@@ -640,44 +705,82 @@ export default function KidTodayView({
         />
       </SectionErrorBoundary>
 
-      {/* ── KID READ-ALOUD SECTION (FUNC-09) ──
-          Mounts on the SHARED week book (selectedBook), independent of whether
-          this child has a populated per-child pool. With a per-child pool that
-          still has to-go chapters, the kid answers them (KidChapterPool). Without
-          a pool yet (e.g. a child with no plan), the shared book still reaches
-          their Today via a gentle placeholder; the per-child pool/answers fill in
-          independently. */}
-      {selectedBook && isReadAloudSectionVisible(true, bookProgress?.questionPool) && (
-        <SectionErrorBoundary section="chapter pool">
-          <Box id="chapter" />
-          {bookProgress && isChapterPoolVisible(bookProgress.questionPool) ? (
-            <KidChapterPool
-              book={selectedBook}
-              bookProgress={bookProgress}
+      {/* ── CONUNDRUM ROW ── */}
+      {weekFocus?.conundrum && (
+        <SectionErrorBoundary section="conundrum">
+          <KidRitualRow
+            icon="💭"
+            title={weekFocus.conundrum.title}
+            subtitle={conundrumDone ? 'Answered today' : 'Think about it'}
+            done={conundrumDone}
+            isLincoln={isLincoln}
+            defaultExpanded={!conundrumDone}
+            anchorId="conundrum"
+          >
+            <KidConundrumResponse
+              conundrum={weekFocus.conundrum}
+              isLincoln={isLincoln}
+              child={child}
               familyId={familyId}
-              childId={child.id}
-              dayLog={dayLog}
-              weekFocus={weekFocus}
-              onChapterAnswered={updateChapter}
             />
-          ) : (
-            <SectionCard title={`\u{1F4D6} ${selectedBook.title}`}>
-              <Typography variant="body2" color="text.secondary">
-                This is today&apos;s read-aloud book. A grown-up will read it with
-                you and add questions to talk about.
-              </Typography>
-            </SectionCard>
-          )}
+          </KidRitualRow>
         </SectionErrorBoundary>
       )}
 
-      {/* Knowledge Mine — always-available entry point with auto-tracked time */}
+      {/* ── TEACH-BACK ROW (older teaches younger) ── */}
+      {teachBackRowVisible && youngerSibling && (
+        <SectionErrorBoundary section="teach-back">
+          <KidRitualRow
+            icon="🗣️"
+            title={`Teach ${youngerSibling.name} something`}
+            subtitle="Tell them one thing you learned"
+            isLincoln={isLincoln}
+            defaultExpanded={false}
+          >
+            <KidTeachBack
+              child={child}
+              recipientName={youngerSibling.name}
+              familyId={familyId}
+              today={today}
+              dayLog={dayLog}
+              persistDayLogImmediate={persistDayLogImmediate}
+            />
+          </KidRitualRow>
+        </SectionErrorBoundary>
+      )}
+
+      {/* ── MINING ROW ──
+          Always open, no checkbox, and excluded from the finish-line count:
+          mining accrues minutes and has no "done" (owner decision #3). */}
       <SectionErrorBoundary section="knowledge-mine">
-        <KidMiningCard
-          todayMinedMinutes={todayMinedMinutes}
+        <KidRitualRow
+          icon="⛏️"
+          title="Knowledge Mine"
+          subtitle={todayMinedMinutes > 0 ? `${todayMinedMinutes} min today` : 'No mining yet today'}
           isLincoln={isLincoln}
-          onStart={() => navigate('/quest')}
-        />
+          alwaysOpen
+        >
+          <Button
+            fullWidth
+            size="large"
+            variant="contained"
+            onClick={() => navigate('/quest')}
+            sx={
+              isLincoln
+                ? {
+                    fontFamily: '"Press Start 2P", monospace',
+                    fontSize: '0.5rem',
+                    bgcolor: kidPalette.darkStone,
+                    color: kidPalette.diamond,
+                    minHeight: 48,
+                    '&:hover': { bgcolor: '#4C4C4C' },
+                  }
+                : { minHeight: 48 }
+            }
+          >
+            ⛏️ Start Mining
+          </Button>
+        </KidRitualRow>
       </SectionErrorBoundary>
 
       {/* Workshop game cards — gated behind must-do progress */}
@@ -732,31 +835,6 @@ export default function KidTodayView({
           activeChild={child}
         />
       </SectionErrorBoundary>
-
-      {/* ── CONUNDRUM RESPONSE ── */}
-      {weekFocus?.conundrum && <Box id="conundrum" />}
-      {weekFocus?.conundrum && (
-        <KidConundrumResponse
-          conundrum={weekFocus.conundrum}
-          isLincoln={isLincoln}
-          child={child}
-          familyId={familyId}
-        />
-      )}
-
-      {/* ── TEACH-BACK (older teaches younger) ── */}
-      {showTeachBackSection && youngerSibling && (
-        <SectionErrorBoundary section="teach-back">
-          <KidTeachBack
-            child={child}
-            recipientName={youngerSibling.name}
-            familyId={familyId}
-            today={today}
-            dayLog={dayLog}
-            persistDayLogImmediate={persistDayLogImmediate}
-          />
-        </SectionErrorBoundary>
-      )}
 
       {/* ── CONTINUE YOUR BOOK (gated) ── */}
       {draftBook && (

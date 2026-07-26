@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import Link from '@mui/material/Link'
@@ -14,6 +17,7 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
+import AddAPhotoIcon from '@mui/icons-material/AddAPhoto'
 import RemoveIcon from '@mui/icons-material/Remove'
 import { addDoc, doc, updateDoc } from 'firebase/firestore'
 import { Link as RouterLink } from 'react-router-dom'
@@ -146,6 +150,7 @@ export default function UnifiedCaptureCard({
   // Kid variant defaults the media row to no tab selected; parent stays on note.
   const [mediaTab, setMediaTab] = useState<MediaTab | null>(isKid ? null : 'note')
   const [mediaUploading, setMediaUploading] = useState(false)
+  const [photoDialogOpen, setPhotoDialogOpen] = useState(false)
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null)
   const [childId, setChildId] = useState(selectedChildId)
   const [activityName, setActivityName] = useState('')
@@ -489,6 +494,16 @@ export default function UnifiedCaptureCard({
     <>
       <SectionCard title="Capture">
         <Stack spacing={2}>
+          {!isKid && (
+            <Button
+              variant="outlined"
+              startIcon={<AddAPhotoIcon />}
+              fullWidth
+              onClick={() => setPhotoDialogOpen(true)}
+            >
+              Add photos of today's work
+            </Button>
+          )}
           <Box>
             <Typography
               variant="caption"
@@ -826,6 +841,30 @@ export default function UnifiedCaptureCard({
             )}
           </Stack>
         </SectionCard>
+      )}
+
+      {!isKid && (
+        <Dialog
+          fullWidth
+          maxWidth="xs"
+          open={photoDialogOpen}
+          onClose={() => setPhotoDialogOpen(false)}
+        >
+          <DialogTitle>Add photos</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Snap or upload several photos of today's work — they save together as one entry.
+            </Typography>
+            <PhotoCapture
+              multiple
+              uploading={mediaUploading}
+              onCaptureBatch={(files) => {
+                setPhotoDialogOpen(false)
+                if (files.length) void handlePhotoCapture(files)
+              }}
+            />
+          </DialogContent>
+        </Dialog>
       )}
     </>
   )

@@ -134,7 +134,7 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     expect(getActivityNameInput()).toBeInTheDocument()
     expect(getDurationInput()).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^note$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /photo/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '📷 Photo' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /audio/i })).toBeInTheDocument()
   })
 
@@ -317,7 +317,7 @@ describe('UnifiedCaptureCard (parent variant)', () => {
 
   it('renders the photo capture component when Photo tab is selected', () => {
     renderCard()
-    fireEvent.click(screen.getByRole('button', { name: /photo/i }))
+    fireEvent.click(screen.getByRole('button', { name: '📷 Photo' }))
     expect(screen.getByTestId('photo-capture')).toBeInTheDocument()
   })
 
@@ -329,7 +329,7 @@ describe('UnifiedCaptureCard (parent variant)', () => {
 
   it('multi-photo commits ONE artifact with mediaUrls[] and uri === mediaUrls[0]', async () => {
     renderCard()
-    fireEvent.click(screen.getByRole('button', { name: /photo/i }))
+    fireEvent.click(screen.getByRole('button', { name: '📷 Photo' }))
     fireEvent.click(screen.getByTestId('commit-multi-photos'))
 
     await waitFor(() => expect(updateDocCalls.length).toBe(1))
@@ -376,6 +376,22 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     })
   })
 
+  it('renders the prominent "Add photos of today\'s work" CTA', () => {
+    renderCard()
+    expect(
+      screen.getByRole('button', { name: /add photos of today's work/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('clicking the Add photos CTA opens a dialog with the photo staging surface', () => {
+    renderCard()
+    fireEvent.click(
+      screen.getByRole('button', { name: /add photos of today's work/i }),
+    )
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByTestId('photo-capture')).toBeInTheDocument()
+  })
+
   // Suppress unused import warning
   void within
 })
@@ -391,7 +407,7 @@ describe('UnifiedCaptureCard (kid variant)', () => {
     // Note media tab gone
     expect(screen.queryByRole('button', { name: /^note$/i })).not.toBeInTheDocument()
     // Photo + Audio remain
-    expect(screen.getByRole('button', { name: /photo/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '📷 Photo' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /audio/i })).toBeInTheDocument()
   })
 
@@ -462,7 +478,7 @@ describe('UnifiedCaptureCard (kid variant)', () => {
       expect(getKidDuration().textContent).toBe('0')
     })
     // No media tab should be selected after reset
-    const photoBtn = screen.getByRole('button', { name: /photo/i })
+    const photoBtn = screen.getByRole('button', { name: '📷 Photo' })
     expect(photoBtn.getAttribute('aria-pressed')).toBe('false')
   })
 
