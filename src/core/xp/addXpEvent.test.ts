@@ -3,12 +3,16 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 // ── Mock Firestore ─────────────────────────────────────────────
 const mockGetDoc = vi.fn()
 const mockSetDoc = vi.fn()
+const mockUpdateDoc = vi.fn().mockResolvedValue(undefined)
+const mockIncrement = vi.fn((n: number) => ({ __increment: n }))
 const mockDoc = vi.fn((..._args: unknown[]) => `mock-doc-${_args.join('-')}`)
 
 vi.mock('firebase/firestore', () => ({
   doc: (...args: unknown[]) => mockDoc(...args),
   getDoc: (...args: unknown[]) => mockGetDoc(...args),
   setDoc: (...args: unknown[]) => mockSetDoc(...args),
+  updateDoc: (...args: unknown[]) => mockUpdateDoc(...args),
+  increment: (n: number) => mockIncrement(n),
 }))
 
 vi.mock('../firebase/firestore', () => ({
@@ -316,5 +320,160 @@ describe('addXpEvent', () => {
     const cumulativeData = mockSetDoc.mock.calls[1][1]
     expect(cumulativeData.totalXp).toBe(115)
     expect(cumulativeData.sources.books).toBe(15) // 0 + 15
+  })
+
+  it('updates diamondBalance via updateDoc when diamond and profile exists', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false }) // dedup
+      // Profile exists
+      return Promise.resolve({ exists: () => true })
+    })
+
+    await addXpEvent(
+      'fam-1', 'child-1', 'QUEST_DIAMOND', 3, 'quest-diamond-3',
+      undefined,
+      { currencyType: 'diamond', category: 'earn' },
+    )
+
+    // Should have called updateDoc for the avatar profile
+    expect(mockUpdateDoc).toHaveBeenCalledTimes(1)
+    const updateArgs = mockUpdateDoc.mock.calls[0][1]
+    expect(updateArgs.diamondBalance).toEqual({ __increment: 3 })
+    expect(updateArgs.updatedAt).toBeDefined()
+  })
+
+  it('skips updateDoc for diamond when profile does not exist', async () => {
+    // All getDoc calls return non-existent
+    mockGetDoc.mockResolvedValue({ exists: () => false })
+
+    await addXpEvent(
+      'fam-1', 'child-1', 'QUEST_DIAMOND', 5, 'quest-diamond-no-profile',
+      undefined,
+      { currencyType: 'diamond' },
+    )
+
+    // Event doc is written, but updateDoc is NOT called
+    expect(mockSetDoc).toHaveBeenCalledTimes(1)
+    expect(mockUpdateDoc).not.toHaveBeenCalled()
+  })
+
+  it('maps QUEST_DIAMOND to quests source bucket', async () => {
+    mockGetDoc.mockResolvedValue({ exists: () => false })
+
+    await addXpEvent(
+      'fam-1', 'child-1', 'QUEST_DIAMOND', 1, 'quest-diamond-bucket',
+      undefined,
+      { currencyType: 'diamond' },
+    )
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.sources.quests).toBe(1)
+    expect(eventDocData.sources.routines).toBe(0)
+    expect(eventDocData.sources.books).toBe(0)
+  })
+
+  it('maps BOOK_COMPLETE to books source bucket', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'wood', totalXp: 0, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'BOOK_COMPLETE', 25, 'book-complete-1')
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.sources.books).toBe(25)
+    expect(eventDocData.sources.routines).toBe(0)
+  })
+
+  it('maps BOOK_PAGE_READ to books source bucket', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 10, sources: { routines: 0, quests: 0, books: 10 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'wood', totalXp: 10, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'BOOK_PAGE_READ', 2, 'page-read-1')
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.sources.books).toBe(2)
+
+    const cumulativeData = mockSetDoc.mock.calls[1][1]
+    expect(cumulativeData.sources.books).toBe(12) // 10 + 2
+    expect(cumulativeData.totalXp).toBe(12)
+  })
+
+  it('accumulates XP from multiple source types correctly', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 100, sources: { routines: 40, quests: 35, books: 25 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'stone', totalXp: 100, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'QUEST_COMPLETE', 30, 'quest-accum-1')
+
+    const cumulativeData = mockSetDoc.mock.calls[1][1]
+    expect(cumulativeData.totalXp).toBe(130)
+    expect(cumulativeData.sources.routines).toBe(40) // unchanged
+    expect(cumulativeData.sources.quests).toBe(65) // 35 + 30
+    expect(cumulativeData.sources.books).toBe(25) // unchanged
+  })
+
+  it('stores meta on event doc when provided', async () => {
+    await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 10, 'meta-test', {
+      reason: 'daily-checklist',
+      dayId: '2026-07-26',
+    })
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.meta).toEqual({ reason: 'daily-checklist', dayId: '2026-07-26' })
+  })
+
+  it('stores empty meta object when meta is not provided', async () => {
+    await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 10, 'no-meta-test')
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.meta).toEqual({})
   })
 })
