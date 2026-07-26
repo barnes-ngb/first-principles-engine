@@ -1,6 +1,22 @@
 import type { SubjectBucket } from './enums'
 
 /**
+ * Lifecycle of a curated video (FEAT-129).
+ *
+ * There is deliberately **no delete**. A planned watch item carries only a
+ * `watchVideoId` reference (FEAT-104), and Today resolves the playable video by
+ * that id — so hard-deleting a library entry would orphan every past week that
+ * planned it. Retiring keeps the entry resolvable forever while removing it
+ * from the planner picker, so it can never be planned again. Mirrors
+ * `CatalogProductStatus`'s retire-don't-delete convention.
+ */
+export const WatchVideoStatus = {
+  Active: 'active',
+  Retired: 'retired',
+} as const
+export type WatchVideoStatus = (typeof WatchVideoStatus)[keyof typeof WatchVideoStatus]
+
+/**
  * Watch Vehicle (FEAT-100 / design FEAT-86, slice 1).
  *
  * One Shelly-vetted, child-safe video, added to the curated library — the ONLY
@@ -32,6 +48,13 @@ export interface WatchVideo {
   vettedAt: string
   /** Optional: the candidate url this was promoted from, if the lessonVideo finder suggested it. */
   suggestedFromUrl?: string
+  /**
+   * Lifecycle (FEAT-129). **Optional, and absent means `active`** — every video
+   * vetted in before FEAT-129 predates the field, so an absent value must read
+   * as active rather than needing a backfill. Read it through
+   * `watchLibraryStatus.ts`, never by comparing the raw field.
+   */
+  status?: WatchVideoStatus
   createdAt: string
   updatedAt: string
 }

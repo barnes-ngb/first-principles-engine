@@ -3005,6 +3005,8 @@ ${dayPrompts}`
       <WatchLibraryPicker
         open={watchPickerDay !== null}
         onClose={() => setWatchPickerDay(null)}
+        /* The full in-scope library — the picker itself drops retired entries
+           (FEAT-129), so a retired video can never be planned from any caller. */
         videos={watchVideos}
         loading={watchLoading}
         error={watchError}
