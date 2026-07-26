@@ -1026,6 +1026,13 @@ export function generateComplianceReportHtml(
       : '<p class="muted">No evaluations recorded for this period.</p>'
 
   // Portfolio sample (top 10 artifacts)
+  //
+  // FEAT-125 (Codex P2): this report is headed with ONE student's name, and it
+  // now receives whole-family artifacts alongside that student's own work. With
+  // only date/title/type/subject, a family lab capture read as the student's
+  // solo work — the exact misattribution the "Family" chip and the `## Family`
+  // export heading exist to prevent. The Scope column carries the same label to
+  // this consumer, so shared evidence reads as shared on every surface.
   const topArtifacts = artifacts.slice(0, 10)
   const portfolioRows = topArtifacts
     .map(
@@ -1035,6 +1042,7 @@ export function generateComplianceReportHtml(
           <td>${art.title}</td>
           <td>${art.type}</td>
           <td>${art.tags?.subjectBucket ?? ''}</td>
+          <td>${isSharedArtifact(art) ? SHARED_ARTIFACT_LABEL : childName}</td>
         </tr>`,
     )
     .join('\n')
@@ -1137,7 +1145,7 @@ export function generateComplianceReportHtml(
   ${topArtifacts.length > 0
     ? `<table>
         <thead>
-          <tr><th>Date</th><th>Title</th><th>Type</th><th>Subject</th></tr>
+          <tr><th>Date</th><th>Title</th><th>Type</th><th>Subject</th><th>Scope</th></tr>
         </thead>
         <tbody>
           ${portfolioRows}

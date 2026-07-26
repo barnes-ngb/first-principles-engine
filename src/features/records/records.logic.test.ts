@@ -2405,4 +2405,56 @@ describe('generateComplianceReportHtml', () => {
     expect(html).toContain('% of Total')
     expect(html).toContain('&mdash;')
   })
+
+  // FEAT-125 (Codex P2). The printable report is headed with ONE student's
+  // name and now receives whole-family artifacts alongside their own work, so
+  // without a scope column a family lab capture reads as that student's solo
+  // work — the misattribution the grid's "Family" chip and the export's
+  // `## Family` heading exist to prevent.
+  it('marks a whole-family artifact as shared in the Portfolio Samples table', () => {
+    const solo: Artifact = {
+      id: 'lincoln-solo',
+      childId: 'lincoln',
+      title: 'Lincoln solo drawing',
+      type: EvidenceType.Photo,
+      createdAt: '2026-07-09T10:00:00',
+      uri: 'https://example.test/solo.jpg',
+      tags: {
+        engineStage: EngineStage.Build,
+        domain: 'art',
+        subjectBucket: SubjectBucket.Art,
+        location: 'Home',
+      },
+    }
+    const shared: Artifact = {
+      ...solo,
+      id: 'family-lab',
+      childId: BEAT_BOTH,
+      title: 'Dad Lab photo - Air is Real',
+    }
+
+    const html = generateComplianceReportHtml({
+      summary: computeHoursSummary(packLogs, [], []),
+      dayLogs: packLogs,
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: selectPortfolioArtifactsForChild([solo, shared], 'lincoln'),
+      children: [{ id: 'lincoln', name: 'Lincoln' }],
+      startDate: YEAR_START,
+      endDate: YEAR_END,
+      childName: 'Lincoln',
+    })
+
+    expect(html).toContain('<th>Scope</th>')
+    // The shared row says Family; the solo row still says the student's name.
+    const rowFor = (title: string) =>
+      html.split('<tr>').find((chunk) => chunk.includes(title)) ?? ''
+    expect(rowFor('Dad Lab photo - Air is Real')).toContain(
+      `<td>${SHARED_ARTIFACT_LABEL}</td>`,
+    )
+    expect(rowFor('Lincoln solo drawing')).toContain('<td>Lincoln</td>')
+    expect(rowFor('Lincoln solo drawing')).not.toContain(
+      `<td>${SHARED_ARTIFACT_LABEL}</td>`,
+    )
+  })
 })
