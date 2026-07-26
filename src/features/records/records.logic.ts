@@ -887,6 +887,22 @@ export type CompliancePackInput = {
   childName: string
   /** State whose compliance citation to render. Defaults to MO (DATA-12). */
   homeschoolState?: HomeschoolState
+  /**
+   * The range's Dad Lab section (FEAT-121), pre-rendered by
+   * `dadLabPortfolio.logic.ts` and forwarded to `generatePortfolioMarkdown`.
+   *
+   * FEAT-123: the pack never had one. A real export of Lincoln's school year
+   * (2026-07-01 → 2027-06-30) contained zero occurrences of "Dad Lab" and none
+   * of the July lab's six media ids, even though the month export of the same
+   * lab rendered all six — the audit artifact the state would actually read was
+   * the one missing the evidence. Passed in rather than built here for the same
+   * reason `generatePortfolioMarkdown` takes it: building it would import
+   * `dadLabPortfolio.logic.ts` → `dataReviewExport.logic.ts` → back to this
+   * module, closing a runtime cycle.
+   *
+   * Omit for the previous output, byte for byte.
+   */
+  dadLabSection?: string[]
 }
 
 export async function buildComplianceZip(
@@ -902,6 +918,7 @@ export async function buildComplianceZip(
     startDate,
     endDate,
     childName,
+    dadLabSection = [],
   } = input
 
   const zip = new JSZip()
@@ -924,10 +941,19 @@ export async function buildComplianceZip(
     )
   }
 
-  if (artifacts.length > 0) {
+  // FEAT-123: a range can hold Dad Labs and no selectable artifacts, and that
+  // portfolio is worth shipping — the labs ARE the science record. Same call the
+  // month export makes (`PortfolioPage`), so there is one renderer, not two.
+  if (artifacts.length > 0 || dadLabSection.length > 0) {
     zip.file(
       `${prefix}portfolio-${startDate}-to-${endDate}.md`,
-      generatePortfolioMarkdown(artifacts, children, startDate, endDate),
+      generatePortfolioMarkdown(
+        artifacts,
+        children,
+        startDate,
+        endDate,
+        dadLabSection,
+      ),
     )
   }
 
@@ -1000,6 +1026,13 @@ export function generateComplianceReportHtml(
       : '<p class="muted">No evaluations recorded for this period.</p>'
 
   // Portfolio sample (top 10 artifacts)
+  //
+  // FEAT-125 (Codex P2): this report is headed with ONE student's name, and it
+  // now receives whole-family artifacts alongside that student's own work. With
+  // only date/title/type/subject, a family lab capture read as the student's
+  // solo work — the exact misattribution the "Family" chip and the `## Family`
+  // export heading exist to prevent. The Scope column carries the same label to
+  // this consumer, so shared evidence reads as shared on every surface.
   const topArtifacts = artifacts.slice(0, 10)
   const portfolioRows = topArtifacts
     .map(
@@ -1009,6 +1042,7 @@ export function generateComplianceReportHtml(
           <td>${art.title}</td>
           <td>${art.type}</td>
           <td>${art.tags?.subjectBucket ?? ''}</td>
+          <td>${isSharedArtifact(art) ? SHARED_ARTIFACT_LABEL : childName}</td>
         </tr>`,
     )
     .join('\n')
@@ -1111,7 +1145,7 @@ export function generateComplianceReportHtml(
   ${topArtifacts.length > 0
     ? `<table>
         <thead>
-          <tr><th>Date</th><th>Title</th><th>Type</th><th>Subject</th></tr>
+          <tr><th>Date</th><th>Title</th><th>Type</th><th>Subject</th><th>Scope</th></tr>
         </thead>
         <tbody>
           ${portfolioRows}
