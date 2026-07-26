@@ -33,6 +33,13 @@ describe('parseMinutesFromLabel', () => {
   it('returns 0 when no hint', () => {
     expect(parseMinutesFromLabel('Reading')).toBe(0)
   })
+  it('parses one- and three-digit hints, not just two', () => {
+    expect(parseMinutesFromLabel('Quick Check (5m)')).toBe(5)
+    expect(parseMinutesFromLabel('Field Trip (120m)')).toBe(120)
+  })
+  it('returns 0 for an empty label', () => {
+    expect(parseMinutesFromLabel('')).toBe(0)
+  })
 })
 
 describe('itemMinutes', () => {
@@ -45,11 +52,23 @@ describe('itemMinutes', () => {
   it('falls back to label-parsed minutes', () => {
     expect(itemMinutes({ label: 'Math (45m)', completed: false })).toBe(45)
   })
+  it('returns 0 when no minutes are available anywhere', () => {
+    expect(itemMinutes({ label: 'Art Project', completed: false })).toBe(0)
+  })
 })
 
 describe('getPlannedAndLogged', () => {
   it('returns zero for null log', () => {
     expect(getPlannedAndLogged(null)).toEqual({ planned: 0, logged: 0, subjects: [] })
+  })
+
+  it('returns zero for an undefined log', () => {
+    expect(getPlannedAndLogged(undefined)).toEqual({ planned: 0, logged: 0, subjects: [] })
+  })
+
+  it('returns zero for a log with no checklist at all', () => {
+    const log: DayLog = { childId: 'kid-1', date: '2026-05-11', blocks: [] }
+    expect(getPlannedAndLogged(log)).toEqual({ planned: 0, logged: 0, subjects: [] })
   })
 
   it('sums minutes across mixed source items', () => {
@@ -116,6 +135,10 @@ describe('computeDayState', () => {
     ])
     expect(computeDayState('2026-05-12', log, today)).toBe('partial')
   })
+
+  it('returns empty for a past date with no log — an unplanned day is not a skipped one', () => {
+    expect(computeDayState('2026-05-12', null, today)).toBe('empty')
+  })
 })
 
 describe('buildWeekDates', () => {
@@ -128,6 +151,26 @@ describe('buildWeekDates', () => {
       '2026-05-15',
     ])
   })
+
+  it('crosses a month boundary', () => {
+    expect(buildWeekDates('2026-03-30')).toEqual([
+      '2026-03-30',
+      '2026-03-31',
+      '2026-04-01',
+      '2026-04-02',
+      '2026-04-03',
+    ])
+  })
+
+  it('crosses a year boundary', () => {
+    expect(buildWeekDates('2025-12-29')).toEqual([
+      '2025-12-29',
+      '2025-12-30',
+      '2025-12-31',
+      '2026-01-01',
+      '2026-01-02',
+    ])
+  })
 })
 
 describe('computeWeekStats', () => {
@@ -135,6 +178,24 @@ describe('computeWeekStats', () => {
     const dates = buildWeekDates('2026-05-11')
     const stats = computeWeekStats(dates, {}, '2026-05-14')
     expect(stats.map((s) => s.label)).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri'])
+  })
+
+  it('carries each day’s minutes, state and subjects through from logsByDate', () => {
+    const dates = buildWeekDates('2026-05-11')
+    const stats = computeWeekStats(
+      dates,
+      {
+        '2026-05-11': makeLog('2026-05-11', [
+          { label: 'Reading', completed: true, plannedMinutes: 30, subjectBucket: 'Reading' },
+        ]),
+      },
+      '2026-05-14',
+    )
+    const mon = stats[0]
+    expect(mon.plannedMinutes).toBe(30)
+    expect(mon.loggedMinutes).toBe(30)
+    expect(mon.state).toBe('done')
+    expect(mon.subjects).toContain('Reading')
   })
 })
 
@@ -170,5 +231,9 @@ describe('formatHoursChip', () => {
 
   it('reports fractional hours with one decimal', () => {
     expect(formatHoursChip(90, 150)).toBe('1.5/2.5 hrs')
+  })
+
+  it('reports an untouched day as minutes, not 0 hrs', () => {
+    expect(formatHoursChip(0, 0)).toBe('0/0 min')
   })
 })
