@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type {
   Artifact,
+  DadLabReport,
   DayLog,
   Evaluation,
   HoursAdjustment,
@@ -22,6 +23,7 @@ import {
   computeSubjectDistribution,
   dayLogMinuteContributions,
   deriveChildIdFromDocId,
+  emitsPortfolioMediaUrl,
   entryMinutes,
   generateComplianceReportHtml,
   generateDailyLogCsv,
@@ -36,6 +38,11 @@ import {
   SHARED_ARTIFACT_LABEL,
   selectPortfolioArtifactsForChild,
 } from './records.logic'
+import {
+  DAD_LAB_FAMILY_SCOPE_NOTE,
+  buildDadLabMarkdownSection,
+  selectDadLabPortfolioEntries,
+} from './dadLabPortfolio.logic'
 import { BEAT_BOTH } from '../../core/types/dadlab'
 
 // ─── entryMinutes ────────────────────────────────────────────────────────────
@@ -1879,6 +1886,265 @@ describe('buildComplianceZip', () => {
 
     expect(names).toContain('lincoln-evaluations-2026-01-01-to-2026-01-31.md')
     expect(names).toContain('lincoln-portfolio-2026-01-01-to-2026-01-31.md')
+  })
+})
+
+// ─── FEAT-123: the compliance pack carries the lab evidence ──────────────────
+//
+// Characterization of a REAL production gap. Nathan exported Lincoln's school
+// year (2026-07-01 → 2027-06-30) on 2026-07-25 and the pack's portfolio held
+// `# Portfolio Index` → `## Lincoln` → `### Photos` and **zero** occurrences of
+// "Dad Lab", while the July month export of the same lab rendered the narrative
+// and all six media. Two causes, both fixed here: the pack's artifact selection
+// was an exact `childId` match (every lab capture is `childId: 'both'`), and the
+// pack never received FEAT-121's Dad Lab section at all.
+//
+// The six ids below are the actual artifact ids that were missing from that
+// export. They are asserted by id on purpose — this test exists because those
+// exact documents did not reach the audit artifact the state would read.
+
+const JULY_LAB_ARTIFACT_IDS = [
+  'qzwMjSJ4MUh55XlYDiOL',
+  '2KITi7lKea0WUDlyIfEH',
+  'upzgS6a79JyEspDlLc7c',
+  'KQlGxNvv5ZEKuFfHMlHG',
+  'FNnhgDNDE0wJSNJ81GZz',
+  'vzbxMZU4bmz6T5Ajc1vi',
+] as const
+
+/** Four photos and two `.webm` recordings — the July capture's real mix. */
+const julyLabArtifacts = (): Artifact[] =>
+  JULY_LAB_ARTIFACT_IDS.map((id, i) => {
+    const isAudio = i >= 4
+    return {
+      id,
+      // Every three-beat capture writes 'both' (DATA-04) — the whole bug.
+      childId: BEAT_BOTH,
+      title: `Dad Lab ${isAudio ? 'recording' : 'photo'} - Air is Real`,
+      type: isAudio ? EvidenceType.Audio : EvidenceType.Photo,
+      createdAt: '2026-07-04T14:0' + i + ':00',
+      uri: `https://example.test/${id}.${isAudio ? 'webm' : 'jpg'}`,
+      labBeat: (['predict', 'try', 'saw'] as const)[i % 3],
+      tags: {
+        engineStage: EngineStage.Build,
+        domain: 'dad-lab',
+        subjectBucket: SubjectBucket.Science,
+        location: 'Home',
+      },
+    }
+  })
+
+const julyLabReport = (): DadLabReport =>
+  ({
+    id: 'lab-july-04',
+    date: '2026-07-04',
+    weekKey: '2026-W27',
+    title: 'Air is Real — Folded Flight Lab',
+    labType: 'science',
+    question: 'Does a paper plane fly farther with wider wings?',
+    description: '',
+    status: 'complete',
+    childReports: {},
+    subjectTags: [],
+    createdAt: '2026-07-04T14:00:00.000Z',
+    updatedAt: '2026-07-04T15:00:00.000Z',
+    beats: {
+      predict: {
+        text: 'Wide wings will glide the longest.',
+        items: JULY_LAB_ARTIFACT_IDS.slice(0, 2).map((artifactId) => ({
+          artifactId,
+          child: BEAT_BOTH,
+        })),
+      },
+      try: {
+        text: 'We folded three planes and threw each one twice.',
+        items: JULY_LAB_ARTIFACT_IDS.slice(2, 4).map((artifactId) => ({
+          artifactId,
+          child: BEAT_BOTH,
+        })),
+      },
+      saw: {
+        text: 'The wide one floated; the dart went fast and dropped.',
+        items: JULY_LAB_ARTIFACT_IDS.slice(4).map((artifactId) => ({
+          artifactId,
+          child: BEAT_BOTH,
+        })),
+      },
+    },
+  }) as DadLabReport
+
+const YEAR_START = '2026-07-01'
+const YEAR_END = '2027-06-30'
+
+/** The exact composition the page performs, end to end. */
+const buildPackPortfolio = (
+  allArtifacts: Artifact[],
+  reports: DadLabReport[],
+  startDate = YEAR_START,
+  endDate = YEAR_END,
+): { childArtifacts: Artifact[]; dadLabSection: string[]; markdown: string } => {
+  const childArtifacts = selectPortfolioArtifactsForChild(allArtifacts, 'lincoln')
+  const dadLabSection = buildDadLabMarkdownSection(
+    selectDadLabPortfolioEntries(reports, allArtifacts, startDate, endDate),
+    childArtifacts
+      .filter(emitsPortfolioMediaUrl)
+      .map((a) => a.id)
+      .filter((id): id is string => id != null),
+  )
+  return {
+    childArtifacts,
+    dadLabSection,
+    markdown: generatePortfolioMarkdown(
+      childArtifacts,
+      [{ id: 'lincoln', name: 'Lincoln' }],
+      startDate,
+      endDate,
+      dadLabSection,
+    ),
+  }
+}
+
+const packLogs: DayLog[] = [
+  {
+    childId: 'lincoln',
+    date: '2026-07-04',
+    blocks: [
+      {
+        type: DayBlockType.Project,
+        subjectBucket: SubjectBucket.Science,
+        actualMinutes: 60,
+        location: 'Home',
+      },
+    ],
+  },
+]
+
+const buildPack = async (over: Partial<Parameters<typeof buildComplianceZip>[0]> = {}) => {
+  const { default: JSZip } = await import('jszip')
+  const blob = await buildComplianceZip({
+    summary: computeHoursSummary(packLogs, [], []),
+    dayLogs: packLogs,
+    hoursEntries: [],
+    evaluations: [],
+    artifacts: [],
+    children: [{ id: 'lincoln', name: 'Lincoln' }],
+    startDate: YEAR_START,
+    endDate: YEAR_END,
+    childName: 'Lincoln',
+    ...over,
+  })
+  return JSZip.loadAsync(blob)
+}
+
+const PACK_PORTFOLIO = `lincoln-portfolio-${YEAR_START}-to-${YEAR_END}.md`
+const PACK_HOURS_CSV = `lincoln-hours-summary-${YEAR_START}-to-${YEAR_END}.csv`
+const PACK_DAILY_CSV = `lincoln-daily-logs-${YEAR_START}-to-${YEAR_END}.csv`
+
+describe('FEAT-123 — compliance pack lab evidence', () => {
+  it('carries all six July lab artifact ids that the real export dropped', async () => {
+    const { childArtifacts, dadLabSection } = buildPackPortfolio(
+      julyLabArtifacts(),
+      [julyLabReport()],
+    )
+    const zip = await buildPack({ artifacts: childArtifacts, dadLabSection })
+    const portfolio = await zip.files[PACK_PORTFOLIO].async('string')
+
+    for (const id of JULY_LAB_ARTIFACT_IDS) {
+      expect(portfolio, `artifact ${id} missing from the pack`).toContain(id)
+    }
+  })
+
+  it('renders the Dad Lab narrative section for a range containing a lab', async () => {
+    const { childArtifacts, dadLabSection } = buildPackPortfolio(
+      julyLabArtifacts(),
+      [julyLabReport()],
+    )
+    const zip = await buildPack({ artifacts: childArtifacts, dadLabSection })
+    const portfolio = await zip.files[PACK_PORTFOLIO].async('string')
+
+    expect(portfolio).toContain('## Dad Lab')
+    expect(portfolio).toContain('Air is Real — Folded Flight Lab')
+    expect(portfolio).toContain('Wide wings will glide the longest.')
+    expect(portfolio).toContain(DAD_LAB_FAMILY_SCOPE_NOTE)
+  })
+
+  it('renders no Dad Lab section for a range without one', async () => {
+    const { childArtifacts, dadLabSection } = buildPackPortfolio(julyLabArtifacts(), [])
+    expect(dadLabSection).toEqual([])
+
+    const zip = await buildPack({ artifacts: childArtifacts, dadLabSection })
+    const portfolio = await zip.files[PACK_PORTFOLIO].async('string')
+    expect(portfolio).not.toContain('Dad Lab section')
+    expect(portfolio).not.toContain('## Dad Lab')
+  })
+
+  it('writes a lab recording exactly once, and never repeats a rendered photo', async () => {
+    const { childArtifacts, dadLabSection } = buildPackPortfolio(
+      julyLabArtifacts(),
+      [julyLabReport()],
+    )
+    const zip = await buildPack({ artifacts: childArtifacts, dadLabSection })
+    const portfolio = await zip.files[PACK_PORTFOLIO].async('string')
+
+    const occurrences = (needle: string) => portfolio.split(needle).length - 1
+
+    // Photos are embedded by `### Photos`, so the Dad Lab section skips them:
+    // the URL is written once, the id twice (table row + embed).
+    for (const id of JULY_LAB_ARTIFACT_IDS.slice(0, 4)) {
+      expect(occurrences(`https://example.test/${id}.jpg`)).toBe(1)
+    }
+    // Recordings get no embed anywhere else, so the Dad Lab section is the only
+    // place their URL appears — present, and present once.
+    for (const id of JULY_LAB_ARTIFACT_IDS.slice(4)) {
+      expect(occurrences(`https://example.test/${id}.webm`)).toBe(1)
+    }
+  })
+
+  it('ships a portfolio for a lab-only range that holds no artifacts', async () => {
+    const { dadLabSection } = buildPackPortfolio([], [julyLabReport()])
+    const zip = await buildPack({ artifacts: [], dadLabSection })
+
+    expect(Object.keys(zip.files)).toContain(PACK_PORTFOLIO)
+    expect(await zip.files[PACK_PORTFOLIO].async('string')).toContain('## Dad Lab')
+  })
+
+  it('leaves the hours and daily-log CSVs byte-identical', async () => {
+    const { childArtifacts, dadLabSection } = buildPackPortfolio(
+      julyLabArtifacts(),
+      [julyLabReport()],
+    )
+    const withLabs = await buildPack({ artifacts: childArtifacts, dadLabSection })
+    const without = await buildPack({ artifacts: childArtifacts })
+
+    for (const name of [PACK_HOURS_CSV, PACK_DAILY_CSV]) {
+      expect(await withLabs.files[name].async('string')).toBe(
+        await without.files[name].async('string'),
+      )
+    }
+  })
+
+  it('adds exactly the shared artifacts to the pack, nothing else', () => {
+    const soloArt: Artifact = {
+      id: 'lincoln-solo',
+      childId: 'lincoln',
+      title: 'Solo note',
+      type: EvidenceType.Note,
+      createdAt: '2026-07-09T10:00:00',
+      tags: {
+        engineStage: EngineStage.Build,
+        domain: 'science',
+        subjectBucket: SubjectBucket.Science,
+        location: 'Home',
+      },
+    }
+    const londonArt: Artifact = { ...soloArt, id: 'london-solo', childId: 'london' }
+    const all = [soloArt, londonArt, ...julyLabArtifacts()]
+
+    const before = all.filter((a) => a.childId === 'lincoln').map((a) => a.id)
+    const after = selectPortfolioArtifactsForChild(all, 'lincoln').map((a) => a.id)
+
+    expect(after.filter((id) => !before.includes(id))).toEqual([...JULY_LAB_ARTIFACT_IDS])
+    expect(before.filter((id) => !after.includes(id))).toEqual([])
   })
 })
 

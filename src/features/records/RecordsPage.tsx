@@ -41,6 +41,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   db,
+  dadLabReportsCollection,
   daysCollection,
   evaluationsCollection,
   hoursAdjustmentsCollection,
@@ -50,6 +51,7 @@ import { migrateUnattributedAdjustments } from '../../core/firebase/migrateHours
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
   Artifact,
+  DadLabReport,
   DayLog,
   Evaluation,
   HoursAdjustment,
@@ -72,12 +74,18 @@ import {
   computeHoursSummary,
   computeSubjectDistribution,
   deriveChildIdFromDocId,
+  emitsPortfolioMediaUrl,
   generateComplianceReportHtml,
   generateDailyLogCsv,
   generateEvaluationMarkdown,
   generateHoursSummaryCsv,
   generatePortfolioMarkdown,
+  selectPortfolioArtifactsForChild,
 } from './records.logic'
+import {
+  buildDadLabMarkdownSection,
+  selectDadLabPortfolioEntries,
+} from './dadLabPortfolio.logic'
 
 const formatHours = (minutes: number) => (minutes / 60).toFixed(2)
 
@@ -149,6 +157,9 @@ function HoursComplianceTab() {
   const { activeChildId, activeChild, children } = useActiveChild()
   const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
   const [allEvaluations, setAllEvaluations] = useState<Evaluation[]>([])
+  // FEAT-123 — the range's Dad Lab reports, read-only, for the pack's narrative
+  // section. Reports carry no `childId` (DATA-04), so there is nothing to filter.
+  const [dadLabReports, setDadLabReports] = useState<DadLabReport[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
   const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
@@ -177,8 +188,14 @@ function HoursComplianceTab() {
     () => allAdjustments.filter((a) => a.childId === activeChildId || a.childId === 'both'),
     [allAdjustments, activeChildId],
   )
+  // FEAT-123: this child's artifacts, plus the family-shared ones. It was an
+  // exact `childId` match, which dropped every `childId: 'both'` artifact — and
+  // the three-beat Dad Lab capture writes ALL of its photos and recordings that
+  // way (DATA-04). A real export of Lincoln's school year carried none of the
+  // July lab's six media ids because of this one line. Same shared predicate the
+  // month grid, FEAT-120's export loader, and the DATA-09 hours reads use.
   const artifacts = useMemo(
-    () => allArtifacts.filter((a) => a.childId === activeChildId),
+    () => selectPortfolioArtifactsForChild(allArtifacts, activeChildId),
     [allArtifacts, activeChildId],
   )
   const evaluations = useMemo(
@@ -244,7 +261,15 @@ function HoursComplianceTab() {
       where('monthStart', '<=', endDate),
     )
 
-    const [hoursSnap, daysSnap, adjSnap, artSnap, evalSnap] =
+    // FEAT-123 — the range's Dad Lab reports for the pack's narrative section.
+    // A single-field range filter on `date`, so no new composite index.
+    const labsQuery = query(
+      dadLabReportsCollection(familyId),
+      where('date', '>=', startDate),
+      where('date', '<=', endDate),
+    )
+
+    const [hoursSnap, daysSnap, adjSnap, artSnap, evalSnap, labSnap] =
       await Promise.all([
         getDocs(hoursQuery),
         getDocs(daysQuery),
@@ -257,6 +282,7 @@ function HoursComplianceTab() {
           ),
         ),
         getDocs(evalsQuery),
+        getDocs(labsQuery),
       ])
 
     return {
@@ -286,6 +312,7 @@ function HoursComplianceTab() {
         const data = d.data() as Evaluation
         return { ...data, id: d.id }
       }),
+      dadLabReports: labSnap.docs.map((d) => ({ ...d.data(), id: d.id })),
     }
   }, [endDate, familyId, startDate])
 
@@ -295,6 +322,7 @@ function HoursComplianceTab() {
     setAllAdjustments(data.adjustments)
     setAllArtifacts(data.artifacts)
     setAllEvaluations(data.evaluations)
+    setDadLabReports(data.dadLabReports)
     setIsLoading(false)
   }, [])
 
@@ -522,6 +550,33 @@ function HoursComplianceTab() {
     }
   }, [activeChildId, estimateStartMonth, estimateEndMonth, estimateDailyHours, estimateDaysPerWeek, familyId, fetchRecords, applyRecords])
 
+  // FEAT-123 — the pack's Dad Lab section, built by FEAT-121's renderer over the
+  // pack's (wider) date range. Linked-artifact resolution runs against ALL of
+  // the range's artifacts, not this child's slice: the three-beat capture writes
+  // whole-family artifacts, so pre-filtering would under-report a lab's evidence.
+  const dadLabEntries = useMemo(
+    () => selectDadLabPortfolioEntries(dadLabReports, allArtifacts, startDate, endDate),
+    [dadLabReports, allArtifacts, startDate, endDate],
+  )
+
+  // The skip list is what the portfolio markdown ACTUALLY emits a URL for — the
+  // per-child `### Photos` blocks embed photos only, so passing a recording's id
+  // would suppress its link here while writing it nowhere else, dropping the
+  // recording from the file entirely (the Codex P1 that FEAT-121 fixed). The
+  // pack renders every artifact it holds, so there is no parent selection to
+  // narrow this by.
+  const dadLabSection = useMemo(
+    () =>
+      buildDadLabMarkdownSection(
+        dadLabEntries,
+        artifacts
+          .filter(emitsPortfolioMediaUrl)
+          .map((a) => a.id)
+          .filter((id): id is string => id != null),
+      ),
+    [dadLabEntries, artifacts],
+  )
+
   // Export handlers
   const filePrefix = childNameLower ? `${childNameLower}-` : ''
 
@@ -560,13 +615,14 @@ function HoursComplianceTab() {
       children.map((c) => ({ id: c.id, name: c.name })),
       startDate,
       endDate,
+      dadLabSection,
     )
     downloadFile(
       md,
       `${filePrefix}portfolio-${startDate}-to-${endDate}.md`,
       'text/markdown',
     )
-  }, [artifacts, children, filePrefix, startDate, endDate])
+  }, [artifacts, children, filePrefix, startDate, endDate, dadLabSection])
 
   const [isZipping, setIsZipping] = useState(false)
 
@@ -583,6 +639,7 @@ function HoursComplianceTab() {
         startDate,
         endDate,
         childName: activeChild?.name ?? '',
+        dadLabSection,
       })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -598,7 +655,7 @@ function HoursComplianceTab() {
     } finally {
       setIsZipping(false)
     }
-  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, filePrefix, startDate, endDate])
+  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, filePrefix, startDate, endDate, dadLabSection])
 
   const handlePrintComplianceReport = useCallback(() => {
     const html = generateComplianceReportHtml({
@@ -1154,7 +1211,9 @@ function HoursComplianceTab() {
               variant="outlined"
               size="small"
               onClick={handleExportPortfolioMd}
-              disabled={artifacts.length === 0}
+              // FEAT-123: a range can hold Dad Labs and no artifacts — that
+              // portfolio is worth downloading, so either side keeps it live.
+              disabled={artifacts.length === 0 && dadLabEntries.length === 0}
             >
               Portfolio Index Markdown
             </Button>
