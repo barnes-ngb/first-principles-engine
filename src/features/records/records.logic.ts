@@ -905,9 +905,41 @@ export type CompliancePackInput = {
   dadLabSection?: string[]
 }
 
-export async function buildComplianceZip(
+/**
+ * What each pack file *is*, independent of what it is called. The server-side
+ * archive (FEAT-126) rewrites the portfolio's media links and must not have to
+ * guess which entry that is by parsing a filename built from a child's name.
+ */
+export const CompliancePackFileRole = {
+  HoursSummary: 'hoursSummary',
+  DailyLogs: 'dailyLogs',
+  Evaluations: 'evaluations',
+  Portfolio: 'portfolio',
+} as const
+export type CompliancePackFileRole =
+  (typeof CompliancePackFileRole)[keyof typeof CompliancePackFileRole]
+
+export type CompliancePackFile = {
+  role: CompliancePackFileRole
+  name: string
+  content: string
+}
+
+/**
+ * The pack's text files, rendered — names and contents both.
+ *
+ * Split out of `buildComplianceZip` (FEAT-126) so the server-side full archive
+ * ships the **same bytes** as the fast client pack rather than a second
+ * implementation of the same four renderers. The archive Cloud Function
+ * receives this list already rendered and only embeds media around it, which is
+ * also what keeps compliance/hours math out of `functions/` entirely: nothing
+ * server-side recomputes an hour.
+ *
+ * Zipping this list in order reproduces the previous pack byte for byte.
+ */
+export function buildCompliancePackFiles(
   input: CompliancePackInput,
-): Promise<Blob> {
+): CompliancePackFile[] {
   const {
     summary,
     dayLogs,
@@ -921,42 +953,55 @@ export async function buildComplianceZip(
     dadLabSection = [],
   } = input
 
-  const zip = new JSZip()
   const prefix = childName ? `${childName.toLowerCase()}-` : ''
-
-  zip.file(
-    `${prefix}hours-summary-${startDate}-to-${endDate}.csv`,
-    generateHoursSummaryCsv(summary),
-  )
-
-  zip.file(
-    `${prefix}daily-logs-${startDate}-to-${endDate}.csv`,
-    generateDailyLogCsv(dayLogs, hoursEntries),
-  )
+  const files: CompliancePackFile[] = [
+    {
+      role: CompliancePackFileRole.HoursSummary,
+      name: `${prefix}hours-summary-${startDate}-to-${endDate}.csv`,
+      content: generateHoursSummaryCsv(summary),
+    },
+    {
+      role: CompliancePackFileRole.DailyLogs,
+      name: `${prefix}daily-logs-${startDate}-to-${endDate}.csv`,
+      content: generateDailyLogCsv(dayLogs, hoursEntries),
+    },
+  ]
 
   if (evaluations.length > 0) {
-    zip.file(
-      `${prefix}evaluations-${startDate}-to-${endDate}.md`,
-      generateEvaluationMarkdown(evaluations, children, artifacts),
-    )
+    files.push({
+      role: CompliancePackFileRole.Evaluations,
+      name: `${prefix}evaluations-${startDate}-to-${endDate}.md`,
+      content: generateEvaluationMarkdown(evaluations, children, artifacts),
+    })
   }
 
   // FEAT-123: a range can hold Dad Labs and no selectable artifacts, and that
   // portfolio is worth shipping — the labs ARE the science record. Same call the
   // month export makes (`PortfolioPage`), so there is one renderer, not two.
   if (artifacts.length > 0 || dadLabSection.length > 0) {
-    zip.file(
-      `${prefix}portfolio-${startDate}-to-${endDate}.md`,
-      generatePortfolioMarkdown(
+    files.push({
+      role: CompliancePackFileRole.Portfolio,
+      name: `${prefix}portfolio-${startDate}-to-${endDate}.md`,
+      content: generatePortfolioMarkdown(
         artifacts,
         children,
         startDate,
         endDate,
         dadLabSection,
       ),
-    )
+    })
   }
 
+  return files
+}
+
+export async function buildComplianceZip(
+  input: CompliancePackInput,
+): Promise<Blob> {
+  const zip = new JSZip()
+  for (const file of buildCompliancePackFiles(input)) {
+    zip.file(file.name, file.content)
+  }
   return zip.generateAsync({ type: 'blob' })
 }
 

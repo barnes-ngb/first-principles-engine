@@ -86,6 +86,10 @@ import {
   buildDadLabMarkdownSection,
   selectDadLabPortfolioEntries,
 } from './dadLabPortfolio.logic'
+import {
+  describeArchiveResult,
+  requestCompliancePackArchive,
+} from './compliancePackArchive'
 
 const formatHours = (minutes: number) => (minutes / 60).toFixed(2)
 
@@ -162,7 +166,9 @@ function HoursComplianceTab() {
   const [dadLabReports, setDadLabReports] = useState<DadLabReport[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+  // 'warning' carries the FEAT-126 archive-with-gaps case: the pack built, and
+  // some evidence is flagged rather than embedded. Neither success nor failure.
+  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' | 'warning' } | null>(null)
 
   const childNameLower = activeChild?.name.toLowerCase() ?? ''
 
@@ -626,21 +632,29 @@ function HoursComplianceTab() {
 
   const [isZipping, setIsZipping] = useState(false)
 
+  // One description of the pack, shared by the fast text-only zip, the full
+  // server-side archive (FEAT-126), and the printable report — so the archive
+  // can never describe a different range than the pack beside it.
+  const packInput = useMemo(
+    () => ({
+      summary,
+      dayLogs,
+      hoursEntries,
+      evaluations,
+      artifacts,
+      children: children.map((c) => ({ id: c.id, name: c.name })),
+      startDate,
+      endDate,
+      childName: activeChild?.name ?? '',
+      dadLabSection,
+    }),
+    [summary, dayLogs, hoursEntries, evaluations, artifacts, children, startDate, endDate, activeChild, dadLabSection],
+  )
+
   const handleDownloadZip = useCallback(async () => {
     setIsZipping(true)
     try {
-      const blob = await buildComplianceZip({
-        summary,
-        dayLogs,
-        hoursEntries,
-        evaluations,
-        artifacts,
-        children: children.map((c) => ({ id: c.id, name: c.name })),
-        startDate,
-        endDate,
-        childName: activeChild?.name ?? '',
-        dadLabSection,
-      })
+      const blob = await buildComplianceZip(packInput)
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -655,7 +669,44 @@ function HoursComplianceTab() {
     } finally {
       setIsZipping(false)
     }
-  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, filePrefix, startDate, endDate, dadLabSection])
+  }, [packInput, filePrefix, startDate, endDate])
+
+  // FEAT-126 — the full archive. The fast pack above stays exactly as it was;
+  // this one goes through a Cloud Function so the artifacts' actual bytes ride
+  // along and the portfolio's links point at `media/…` inside the zip instead
+  // of at revocable, publicly-fetchable storage URLs.
+  const [isArchiving, setIsArchiving] = useState(false)
+
+  const handleDownloadArchive = useCallback(async () => {
+    if (!activeChildId) return
+    setIsArchiving(true)
+    try {
+      const result = await requestCompliancePackArchive({
+        familyId,
+        childId: activeChildId,
+        pack: packInput,
+        artifacts,
+      })
+      const link = document.createElement('a')
+      link.href = result.downloadUrl
+      link.download = result.downloadName
+      link.rel = 'noopener'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setSnackMessage({
+        text: describeArchiveResult(result),
+        severity: result.hasGaps ? 'warning' : 'success',
+      })
+    } catch (err) {
+      setSnackMessage({
+        text: `Failed to build archive: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        severity: 'error',
+      })
+    } finally {
+      setIsArchiving(false)
+    }
+  }, [activeChildId, familyId, packInput, artifacts])
 
   const handlePrintComplianceReport = useCallback(() => {
     const html = generateComplianceReportHtml({
@@ -1159,16 +1210,27 @@ function HoursComplianceTab() {
       {activeChildId && <SectionCard title="Export Pack">
         <Stack spacing={2}>
           <Typography variant="body2" color="text.secondary">
-            Download a single zip with all compliance records, or use the
-            individual buttons below for a specific file.
+            <strong>Full Archive</strong> is the one to hand an evaluator or keep
+            for your files: the same records plus every photo and recording
+            embedded, so it opens with no internet and no expiring links. It
+            takes a minute to build and includes a <code>manifest.csv</code>
+            {' '}listing anything that could not be included, and why.{' '}
+            <strong>Records Only</strong> is the quick text export.
           </Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <Button
               variant="contained"
+              onClick={handleDownloadArchive}
+              disabled={!hasData || isArchiving}
+            >
+              {isArchiving ? 'Building archive\u2026' : 'Download Full Archive (.zip)'}
+            </Button>
+            <Button
+              variant="outlined"
               onClick={handleDownloadZip}
               disabled={!hasData || isZipping}
             >
-              {isZipping ? 'Building zip\u2026' : 'Download Compliance Pack (.zip)'}
+              {isZipping ? 'Building zip\u2026' : 'Records Only (.zip, fast)'}
             </Button>
             <Button
               variant="outlined"
