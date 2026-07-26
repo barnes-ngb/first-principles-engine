@@ -137,8 +137,9 @@ settled:
   starves rather than failing loudly.
 - **Lincoln does Knowledge Mine only ~weekly** — re-evaluation cadence is low, so the snapshot can lag his
   actual progress.
-- **Learning-map "shows missing things he's actually learned"** — coverage/derivation bug where the map under-
-  reports mastery (work captured elsewhere isn't reflected). Treat map gaps as suspect, not authoritative.
+- **Learning-map "shows missing things he's actually learned"** — **RESOLVED** (FEAT-35/FEAT-36,
+  2026-06-20): a re-derivation engine now folds working-level→implied-mastery and sight-word/snapshot
+  priority-skill inputs into the map. Kept here only as a still-recent regression watch, not a live gap.
 - **Knowledge Mine is too limited / needs more levels** — quest ceilings are principled (content runs out),
   but at 10 Lincoln is at/over several caps; depth + routing are the largest open content gaps (FEAT-08/10).
 - **State-labeling is MO-only** — work is saved but not yet TX-aware; this is a loop-integrity gap the moment
