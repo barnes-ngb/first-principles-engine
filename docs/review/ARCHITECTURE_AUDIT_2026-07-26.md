@@ -336,8 +336,9 @@ in recommendation: run the July dedupe pass against the post-DATA-09-migration s
 ### 4.3 DATA-13 — re-verified, still open, lines shifted again
 
 The hardcoded `"Missouri Homeschool Compliance Report"` title/heading in `records.logic.ts` is still
-present, now at **lines 1054 and 1081** (shifted again from the 07-19 row's noted 785/812, as
-`records.logic.ts` grew from FEAT-125's Dad Lab compliance-pack section). Still the same 3-line fix
+present, now at **lines 1099 and 1126** (shifted again from the 07-19 row's noted 785/812, as
+`records.logic.ts` grew from FEAT-125's Dad Lab compliance-pack section and then FEAT-126's archive
+file-set — see the merge-base addendum in Step 5). Still the same 3-line fix
 candidate: add `reportTitle` to `StateComplianceConfig` and use it at both sites. No new severity.
 
 ### 4.4 MO→TX lens — no new hardcoding found; one confirmed-deliberate exception
@@ -391,8 +392,37 @@ is compliant by construction.
 | FUNC-01 | RESOLVED-WITH-DECISION | unchanged, re-affirmed — no new competing authority introduced | |
 | DATA-01 | FIXED | FIXED, re-verified — invariant held on the newest surface (FEAT-120) | |
 | DATA-02 | NEEDS-DATA | NEEDS-DATA, now 25 days overdue (was 18) | |
-| DATA-13 | OPEN | OPEN, unchanged — lines shifted to 1054/1081 | |
+| DATA-13 | OPEN | OPEN, unchanged — lines shifted to 1099/1126 | re-measured at merge, see addendum |
 | DATA-12 | FIXED | FIXED, re-verified — TX defined-not-activated pattern holds | |
+
+### Merge-base addendum — re-verified against `main` @ `851a58d` (2026-07-26)
+
+This audit was cut from `main` @ `5e51074` (PR #1630, FEAT-121–125). Before merge, **FEAT-126**
+(PR #1631 — the compliance pack becomes a real evidence archive) landed on `main`. Every finding above
+was re-checked against the new base. **No finding is closed by FEAT-126 and no new finding is raised**
+— three measured claims are restated:
+
+- **DATA-13 line numbers moved again.** `records.logic.ts` grew 1,161L → 1,207L; the hardcoded MO
+  title/heading is now at `records.logic.ts:1099,1126` (was 1054/1081 at audit time). Finding
+  unchanged and still the easiest open `PROMPT_FIX` — corrected above and in §4.3 so a future run
+  doesn't chase a stale line.
+- **§1.1 largest-files table:** `RecordsPage.tsx` is **1,464L** on the merged base (+62L from
+  FEAT-126's archive wiring), not the 1,402L measured at audit time. It stays a watch-list entry, well
+  under any decomposition threshold. Every other row in the table is untouched by FEAT-126 —
+  **ARCH-02's `PlannerChatPage.tsx` is still 3,020L**, so the escalation stands exactly as written.
+- **§4.1 / §4.5 additive-hours invariant re-verified on FEAT-126.** It is the second hours-adjacent
+  surface added this cycle, so §4.5's "`dataReviewExport.logic.ts` is the only new hours-touching
+  view" now reads as of audit date only. The invariant **holds**: `generateCompliancePack` renders
+  nothing — the four text files arrive pre-rendered from the client's existing
+  `buildCompliancePackFiles`, and there is no `computeHoursSummary` / `computeMonthlyTrend` reference
+  anywhere under `functions/src/records/` or in `compliancePackArchive.ts`. One renderer, no second
+  hours path. **No new divergence.**
+
+Also re-confirmed still-true on the merged base: **ARCH-44** (`dataReviewExport.logic.ts` 1,713L) and
+**FUNC-15** (`KidLabView.tsx` — 5 `TextField`s, 0 voice imports). Findings the ledger records as closed
+by FEAT-122 (`?diag=1` parent-gating), FEAT-123/125 (`childId: 'both'` in portfolio + pack) and
+FEAT-124 (capability-not-name routing) were **already** in this audit's base and are correctly not
+raised as open anywhere above.
 
 ### 5-line summary
 
