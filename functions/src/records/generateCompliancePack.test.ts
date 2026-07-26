@@ -19,6 +19,10 @@ vi.mock("firebase-admin/firestore", () => ({
 
 vi.mock("firebase-admin/storage", () => ({ getStorage: () => ({ bucket: () => bucketForCallable }) }));
 
+vi.mock("firebase-functions/v2/scheduler", () => ({
+  onSchedule: (_opts: unknown, handler: unknown) => handler,
+}));
+
 vi.mock("firebase-functions/v2/https", () => ({
   onCall: (_opts: unknown, handler: unknown) => handler,
   HttpsError: class extends Error {
@@ -34,6 +38,7 @@ vi.mock("firebase-functions/v2/https", () => ({
 import {
   buildCompliancePackArchive,
   generateCompliancePack,
+  sweepAllCompliancePacks,
   type PackBucket,
 } from "./generateCompliancePack.js";
 import { PackFileRole, type PackRequest } from "./compliancePack.logic.js";
@@ -54,12 +59,14 @@ function makeBucket(
   options: { signingFails?: boolean; existing?: Array<{ name: string; updated?: string }> } = {},
 ) {
   const saved = new Map<string, Buffer>();
+  const savedMetadata = new Map<string, Record<string, string>>();
   const deleted: string[] = [];
   const existing = options.existing ?? [];
 
   const bucket = {
     name: "fpe.appspot.com",
     saved,
+    savedMetadata,
     deleted,
     file(path: string) {
       const object = objects[path];
@@ -75,12 +82,16 @@ function makeBucket(
           if (!object || "error" in object) throw { code: 500 };
           return [object.data] as [Buffer];
         },
-        async save(data: Buffer) {
+        async save(data: Buffer, saveOptions?: { metadata?: { metadata?: Record<string, string> } }) {
           saved.set(path, data);
+          savedMetadata.set(path, { ...(saveOptions?.metadata?.metadata ?? {}) });
         },
         async getSignedUrl() {
           if (options.signingFails) throw new Error("SignBlob permission denied");
           return [`https://storage.googleapis.com/signed/${encodeURIComponent(path)}`] as [string];
+        },
+        async setMetadata(update: { metadata: Record<string, string> }) {
+          savedMetadata.set(path, { ...(savedMetadata.get(path) ?? {}), ...update.metadata });
         },
       };
     },
@@ -296,6 +307,18 @@ describe("buildCompliancePackArchive", () => {
     expect(result.downloadName).toBe("lincoln-compliance-archive-2026-07-01-to-2027-06-30.zip");
   });
 
+  it("mints NO download token on the signed path", async () => {
+    // A `firebaseStorageDownloadTokens` value is an unauthenticated, permanently
+    // fetchable URL for as long as the object lives — never issued where a
+    // signed URL works (Codex P1, PR #1631).
+    const bucket = makeBucket({ [PHOTO_PATH]: { data: Buffer.from("x") }, [AUDIO_PATH]: { data: Buffer.from("y") } });
+    const result = await buildCompliancePackArchive(bucket, request(), { now: NOW });
+
+    expect(bucket.savedMetadata.get(result.objectPath)).not.toHaveProperty(
+      "firebaseStorageDownloadTokens",
+    );
+  });
+
   it("falls back to a token link when the runtime cannot sign, and reports it", async () => {
     const bucket = makeBucket(
       { [PHOTO_PATH]: { data: Buffer.from("x") }, [AUDIO_PATH]: { data: Buffer.from("y") } },
@@ -305,6 +328,10 @@ describe("buildCompliancePackArchive", () => {
 
     expect(result.urlKind).toBe("token");
     expect(result.downloadUrl).toContain("alt=media&token=");
+    // The token exists only on this path, and only after signing failed.
+    expect(bucket.savedMetadata.get(result.objectPath)).toHaveProperty(
+      "firebaseStorageDownloadTokens",
+    );
   });
 
   it("sweeps packs past retention and leaves fresh ones alone", async () => {
@@ -320,6 +347,49 @@ describe("buildCompliancePackArchive", () => {
     await buildCompliancePackArchive(bucket, request(), { now: NOW });
 
     expect(bucket.deleted).toEqual([`families/${FAMILY}/compliance-packs/old.zip`]);
+  });
+});
+
+// ── Retention without a later export ────────────────────────────────────────
+
+describe("sweepAllCompliancePacks", () => {
+  const db = (familyIds: string[]) => ({
+    collection: () => ({ get: async () => ({ docs: familyIds.map((id) => ({ id })) }) }),
+  });
+
+  it("deletes expired packs for every family, with no export involved", async () => {
+    // The P1 this closes: a family that generates one archive and never
+    // generates another would otherwise keep the object — and, on the
+    // token-fallback path, its unauthenticated URL — well past the advertised
+    // 24 hours, because the only sweep ran during a later export.
+    const bucket = makeBucket(
+      {},
+      {
+        existing: [
+          { name: "families/fam-1/compliance-packs/old.zip", updated: "2026-07-24T03:00:00.000Z" },
+          { name: "families/fam-1/compliance-packs/fresh.zip", updated: "2026-07-26T02:00:00.000Z" },
+        ],
+      },
+    );
+
+    const result = await sweepAllCompliancePacks(db(["fam-1", "fam-2"]), bucket, NOW.getTime());
+
+    expect(result.families).toBe(2);
+    // Both families list the same fake prefix, so the expired object goes once each.
+    expect(result.deleted).toBe(2);
+    expect(new Set(bucket.deleted)).toEqual(
+      new Set(["families/fam-1/compliance-packs/old.zip"]),
+    );
+  });
+
+  it("does nothing when every pack is inside the window", async () => {
+    const bucket = makeBucket(
+      {},
+      { existing: [{ name: "families/fam-1/compliance-packs/fresh.zip", updated: "2026-07-26T02:00:00.000Z" }] },
+    );
+    const result = await sweepAllCompliancePacks(db(["fam-1"]), bucket, NOW.getTime());
+    expect(result.deleted).toBe(0);
+    expect(bucket.deleted).toEqual([]);
   });
 });
 

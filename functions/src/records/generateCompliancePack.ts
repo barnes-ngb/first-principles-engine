@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import JSZip from "jszip";
 
 import { requireEmailAuth } from "../ai/authGuard.js";
@@ -58,6 +59,9 @@ export type PackStorageFile = {
     expires: number;
     version?: "v4";
   }): Promise<[string]>;
+  setMetadata(metadata: {
+    metadata: Record<string, string>;
+  }): Promise<unknown>;
 };
 
 export type PackStorageObject = {
@@ -154,17 +158,18 @@ async function fetchMediaEntry(
 }
 
 /**
- * Delete generated packs older than the retention window.
+ * Delete one family's generated packs older than the retention window.
  *
  * Packs are derived data — regenerable from Firestore and Storage at any time —
- * so they are swept on the next generation rather than kept. Best-effort: a
- * failed sweep never fails the pack the parent is waiting for.
+ * so they are deleted rather than kept. Returns how many went, so the scheduled
+ * beat can log it. Best-effort: a failed sweep never fails the pack the parent
+ * is waiting for.
  */
-async function sweepExpiredPacks(
+export async function sweepExpiredPacks(
   bucket: PackBucket,
   familyId: string,
   nowMs: number,
-): Promise<void> {
+): Promise<number> {
   try {
     const [objects] = await bucket.getFiles({
       prefix: `families/${familyId}/${PACK_STORAGE_PREFIX}/`,
@@ -176,14 +181,41 @@ async function sweepExpiredPacks(
         PACK_RETENTION_MS,
       ),
     );
-    await Promise.all(
-      objects
-        .filter((o) => expired.has(o.name))
-        .map((o) => o.delete().catch(() => undefined)),
-    );
+    const doomed = objects.filter((o) => expired.has(o.name));
+    await Promise.all(doomed.map((o) => o.delete().catch(() => undefined)));
+    return doomed.length;
   } catch (err) {
     console.warn("Compliance pack retention sweep failed (non-blocking):", err);
+    return 0;
   }
+}
+
+/** Just enough Firestore to enumerate families, so the sweep is fake-testable. */
+export type FamilyLister = {
+  collection(path: string): { get(): Promise<{ docs: Array<{ id: string }> }> };
+};
+
+/**
+ * Sweep every family's expired packs.
+ *
+ * Retention has to hold **without** a later export. A family that generates one
+ * archive and never generates another would otherwise keep that object — and,
+ * on the token-fallback path, its unauthenticated URL — long past the 24 h this
+ * feature advertises (Codex P1, PR #1631). Enumerating families the way the
+ * other scheduled functions do keeps this to one prefix listing per family
+ * rather than a scan of the whole bucket.
+ */
+export async function sweepAllCompliancePacks(
+  db: FamilyLister,
+  bucket: PackBucket,
+  nowMs: number,
+): Promise<{ families: number; deleted: number }> {
+  const familiesSnap = await db.collection("families").get();
+  let deleted = 0;
+  for (const family of familiesSnap.docs) {
+    deleted += await sweepExpiredPacks(bucket, family.id, nowMs);
+  }
+  return { families: familiesSnap.docs.length, deleted };
 }
 
 /**
@@ -266,8 +298,11 @@ export async function buildCompliancePackArchive(
     now.toISOString(),
   );
 
-  const { randomUUID } = await import("crypto");
-  const downloadToken = randomUUID();
+  // Saved with NO download token. A `firebaseStorageDownloadTokens` value is an
+  // unauthenticated, permanently-fetchable URL for as long as the object lives —
+  // exactly what this feature removes from the pack — so it is minted only on
+  // the path that has no alternative, and never on the signed-URL path (Codex
+  // P1, PR #1631).
   const packFile = bucket.file(objectPath);
   await packFile.save(archive, {
     metadata: {
@@ -275,7 +310,6 @@ export async function buildCompliancePackArchive(
       metadata: {
         generatedBy: "generateCompliancePack",
         childId: request.childId,
-        firebaseStorageDownloadTokens: downloadToken,
       },
     },
   });
@@ -294,14 +328,23 @@ export async function buildCompliancePackArchive(
   } catch (err) {
     // Signing needs the runtime service account to hold
     // `roles/iam.serviceAccountTokenCreator`. Where it does not, fall back to
-    // the tokenized download URL every image function already issues — the
-    // object is swept within the retention window either way, so the link dies
-    // with it. Reported back rather than hidden.
+    // the tokenized download URL every image function already issues. The
+    // object is deleted within the retention window — by `sweepCompliancePacks`
+    // on its daily beat, not merely by a later export — so the link dies with
+    // it. Reported back rather than hidden.
     console.warn("Signed URL unavailable, falling back to download token:", err);
+    const { randomUUID } = await import("crypto");
+    const downloadToken = randomUUID();
+    await packFile.setMetadata({
+      metadata: { firebaseStorageDownloadTokens: downloadToken },
+    });
     downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(objectPath)}?alt=media&token=${downloadToken}`;
     urlKind = "token";
   }
 
+  // Opportunistic: the scheduled sweep is what guarantees retention, but a
+  // family generating packs back to back should not wait a day for the last
+  // one to go.
   await sweepExpiredPacks(bucket, request.familyId, now.getTime());
 
   const counts = summarizePack(resolved);
@@ -372,5 +415,35 @@ export const generateCompliancePack = onCall(
         err instanceof Error ? err.message : "Failed to build compliance pack.",
       );
     }
+  },
+);
+
+// ── Retention beat ─────────────────────────────────────────────────────────
+
+/**
+ * Delete expired compliance packs daily, whether or not anyone exports again.
+ *
+ * The pack is the one object in this repo that embeds photos and recordings of
+ * the children into a single downloadable file, so "it goes away in 24 hours"
+ * has to be true on its own schedule rather than as a side effect of the next
+ * export. Reads nothing but family ids; writes nothing but deletes.
+ */
+export const sweepCompliancePacks = onSchedule(
+  {
+    schedule: "every day 04:00",
+    timeZone: "America/Chicago",
+    memory: "256MiB",
+    timeoutSeconds: 300,
+  },
+  async () => {
+    const bucket = getStorage().bucket() as unknown as PackBucket;
+    const result = await sweepAllCompliancePacks(
+      getFirestore() as unknown as FamilyLister,
+      bucket,
+      Date.now(),
+    );
+    console.log(
+      `[sweepCompliancePacks] ${result.families} family/families, ${result.deleted} expired pack(s) deleted`,
+    );
   },
 );

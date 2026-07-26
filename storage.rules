@@ -72,7 +72,8 @@ service firebase.storage {
     // needed. Read is owner-only: the zip embeds photos and recordings of the
     // children, which is precisely what the feature stops handing out as
     // permanent public links. Packs are derived data — regenerable at any time —
-    // and are swept after 24h by the next generation, so nothing accumulates.
+    // and are deleted after 24h by the daily `sweepCompliancePacks` function, so
+    // nothing accumulates and the expiry does not depend on a later export.
     match /families/{familyId}/compliance-packs/{allPaths=**} {
       allow read: if isOwner(familyId);
       // Write is server-side only (admin SDK) — no client write rule needed
