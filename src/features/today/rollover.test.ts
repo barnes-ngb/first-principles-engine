@@ -8,6 +8,7 @@ import {
   getPreviousSchoolDay,
   mergeRolledItems,
 } from './rollover'
+import { shouldSeedFromReviewNote } from './stuckRetestQueue'
 
 // ── getPreviousSchoolDay ────────────────────────────────────────────
 
@@ -207,6 +208,7 @@ describe('mergeRolledItems', () => {
         evidenceArtifactId: 'art-1',
         evidenceCollection: 'scans',
         gradeResult: 'good',
+        reviewFlaggedTricky: true,
         mastery: 'got-it',
         engagement: 'engaged',
         scanned: true,
@@ -220,9 +222,25 @@ describe('mergeRolledItems', () => {
     expect(result[0].evidenceArtifactId).toBeUndefined()
     expect(result[0].evidenceCollection).toBeUndefined()
     expect(result[0].gradeResult).toBeUndefined()
+    expect(result[0].reviewFlaggedTricky).toBeUndefined()
     expect(result[0].mastery).toBeUndefined()
     expect(result[0].engagement).toBeUndefined()
     expect(result[0].scanned).toBeUndefined()
+  })
+
+  it('clears reviewFlaggedTricky so tomorrow can seed a re-test again (FEAT-70)', () => {
+    // Codex P2, PR #1635. A stale `true` surviving rollover would fail the false→true
+    // guard in `shouldSeedFromReviewNote`, so flagging the re-rolled item as tricky
+    // tomorrow would SILENTLY queue nothing. The note is cleared, so the Quick Review
+    // affordance reappears (`!gradeResult`) — the flag has to be cleared with it.
+    const rolled = [
+      make({ label: 'Fast Phonics', completed: false, gradeResult: 'tricky', reviewFlaggedTricky: true }),
+    ]
+    const result = mergeRolledItems([], rolled, '2026-04-10')
+
+    expect(result[0].reviewFlaggedTricky).toBeUndefined()
+    // The guard now reads a fresh false→true transition tomorrow.
+    expect(shouldSeedFromReviewNote(result[0].reviewFlaggedTricky, true)).toBe(true)
   })
 
   it('preserves planning fields (subjectBucket, block, etc.)', () => {

@@ -1,8 +1,10 @@
 // ── Daily "stuck" signal → learner-model re-test enqueue (FEAT-68) ────────
 //
-// The thin async writer the Today mastery chip AND engagement flag call. When a
-// completed checklist item signals a struggle (a "stuck" mastery chip or an
-// `engagement:'struggled'` flag), `resolveStuckConcepts` (pure, core) turns the item
+// The thin async writer the Today mastery chip, the engagement flag AND the review
+// note's "tricky" toggle call (FEAT-70 adds the third caller shape — a fourth
+// call-site — WITHOUT forking the path). When a completed checklist item signals a
+// struggle (a "stuck" mastery chip, an `engagement:'struggled'` flag, or a
+// review-moment `reviewFlaggedTricky`), `resolveStuckConcepts` (pure, core) turns the item
 // into the frontier concept(s) the child is working on — via the bridged workbook
 // position (FEAT-68) UNIONED with the item's skillTags (FEAT-69), so a NON-workbook
 // item now resolves too. This writer enqueues an `openQuestion{ routedTo:'quest' }`
@@ -40,6 +42,36 @@ export const STUCK_RETEST_REASON = "Struggled during today's work"
  * regulation signal, not a concept miss.)
  */
 export const ENGAGEMENT_RETEST_REASON = "Flagged as a struggle during today's work"
+
+/**
+ * The `openQuestion.reason` stamped on a review-note re-test (FEAT-70). Distinct so
+ * the parent-facing ask reads honestly about WHICH daily signal seeded it. This one
+ * comes from a different MOMENT than the other two: the Quick Review affordance is
+ * gated on `evidenceArtifactId`, so it only appears AFTER work was captured and the
+ * parent actually looked at what came back — often when the in-the-moment chip
+ * already reads `got-it`. The free-text note itself is never parsed (no LLM, no
+ * machine read); only the parent's explicit toggle seeds anything.
+ */
+export const GRADE_NOTE_RETEST_REASON = "Flagged as tricky when reviewing today's work"
+
+/**
+ * FEAT-70: should saving a review note seed a re-test? Only on the false→true
+ * TRANSITION of the parent's "tricky" toggle.
+ *
+ * **This guard is required, not belt-and-braces.** `withOpenQuestion` dedups the
+ * `openQuestion`, but `applyReviewActionToModel`'s `queueTest` branch appends a
+ * `changeFeed` line UNCONDITIONALLY — so re-saving a note on an already-flagged item
+ * would stack duplicate change lines onto the learner model. Pure + exported so the
+ * transition is directly assertable: the Quick Review affordance is gated on
+ * `!item.gradeResult`, so a re-save is not reachable through today's UI and a
+ * render-level test could not prove this.
+ */
+export function shouldSeedFromReviewNote(
+  previouslyFlagged: boolean | undefined,
+  flagged: boolean,
+): boolean {
+  return flagged && !previouslyFlagged
+}
 
 /**
  * Enqueue a `routedTo:'quest'` re-test ask per resolved concept onto the child's

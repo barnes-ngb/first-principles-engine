@@ -326,6 +326,10 @@ export interface ChecklistItem {
   evidenceCollection?: 'scans' | 'artifacts'
   /** Manual or AI-generated review result for the captured work. */
   gradeResult?: string
+  /** FEAT-70: the parent flagged something tricky when reviewing captured work.
+   *  A REVIEW-moment struggle signal — distinct from `mastery` (in-the-moment chip)
+   *  and `engagement` (how the session went). Seeds the learner-model re-test queue. */
+  reviewFlaggedTricky?: boolean
   /** Mastery level observed by parent after completion */
   mastery?: 'got-it' | 'working' | 'stuck'
   /** Guidance note when an item is skipped. */

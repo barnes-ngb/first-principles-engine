@@ -48,6 +48,10 @@ function resetRolledItem(item: ChecklistItem, sourceDate: string): ChecklistItem
     evidenceArtifactId: undefined,
     evidenceCollection: undefined,
     gradeResult: undefined,
+    // FEAT-70: cleared with the rest of the review state. A stale `true` would fail the
+    // false→true guard in `shouldSeedFromReviewNote`, so flagging the re-rolled item as
+    // tricky tomorrow would silently queue nothing.
+    reviewFlaggedTricky: undefined,
     mastery: undefined,
     engagement: undefined,
     scanned: undefined,
