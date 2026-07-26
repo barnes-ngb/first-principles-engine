@@ -39,7 +39,7 @@ describe('isChapterDoneToday', () => {
 
   it('returns false when question is answered but on a different date', () => {
     const pool: ChapterQuestionPoolItem[] = [
-      { chapter: 3, questionType: 'reflection', question: 'How?', answered: true, answeredDate: '2026-07-20' },
+      { chapter: 3, questionType: 'opinion', question: 'How?', answered: true, answeredDate: '2026-07-20' },
     ]
     expect(isChapterDoneToday(pool, today)).toBe(false)
   })
