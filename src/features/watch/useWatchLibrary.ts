@@ -3,6 +3,7 @@ import { addDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/fires
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { watchLibraryCollection } from '../../core/firebase/firestore'
+import { WatchVideoStatus } from '../../core/types/watch'
 import type { WatchVideo } from '../../core/types'
 
 /**
@@ -21,6 +22,14 @@ export interface UseWatchLibraryResult {
   addVideo: (video: NewWatchVideo) => Promise<string>
   /** Patch a video in place (`updateDoc`). Re-stamps `updatedAt`. */
   updateVideo: (id: string, patch: Partial<Omit<WatchVideo, 'id'>>) => Promise<void>
+  /**
+   * Retire a video out of the pickable library (FEAT-129). This is what
+   * "remove" means here — the document is kept so an already-planned item in a
+   * past week still resolves and still plays. Never a `deleteDoc`.
+   */
+  retireVideo: (id: string) => Promise<void>
+  /** Undo a retire — put a video back in the pickable library. */
+  restoreVideo: (id: string) => Promise<void>
 }
 
 /**
@@ -112,5 +121,18 @@ export function useWatchLibrary(childId?: string | null): UseWatchLibraryResult 
     [familyId],
   )
 
-  return { videos, loading, error, addVideo, updateVideo }
+  // Retire / restore are `updateVideo` with a fixed patch rather than separate
+  // write paths — one merge-write, one `updatedAt` stamp, no second definition
+  // of what a library write looks like.
+  const retireVideo = useCallback(
+    (id: string) => updateVideo(id, { status: WatchVideoStatus.Retired }),
+    [updateVideo],
+  )
+
+  const restoreVideo = useCallback(
+    (id: string) => updateVideo(id, { status: WatchVideoStatus.Active }),
+    [updateVideo],
+  )
+
+  return { videos, loading, error, addVideo, updateVideo, retireVideo, restoreVideo }
 }

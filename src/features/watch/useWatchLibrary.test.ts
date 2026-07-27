@@ -153,9 +153,46 @@ describe('useWatchLibrary', () => {
     expect(patch.updatedAt).toBeTruthy()
   })
 
-  it('exposes no delete affordance (no retired flag this slice)', () => {
+  // ── FEAT-129: retire, never delete ──────────────────────────────
+
+  it('retires a video by patching status:retired — NEVER a delete', async () => {
+    const { result } = renderHook(() => useWatchLibrary('lincoln'))
+    await act(async () => {
+      await result.current.retireVideo('watch-1')
+    })
+
+    expect(updateDocMock).toHaveBeenCalledTimes(1)
+    const patch = updateDocMock.mock.calls[0][1] as Record<string, unknown>
+    expect(patch.status).toBe('retired')
+    expect(patch.updatedAt).toBeTruthy()
+    // The document survives: a past week that planned this video resolves it by
+    // id, so removing the doc would orphan that plan.
+    expect(updateDocMock.mock.calls[0][0]).toEqual({ __doc: 'watch-1' })
+  })
+
+  it('restores a retired video by patching status:active', async () => {
+    const { result } = renderHook(() => useWatchLibrary('lincoln'))
+    await act(async () => {
+      await result.current.restoreVideo('watch-1')
+    })
+    const patch = updateDocMock.mock.calls[0][1] as Record<string, unknown>
+    expect(patch.status).toBe('active')
+  })
+
+  it('retire touches ONLY status/updatedAt — never the curated fields', async () => {
+    const { result } = renderHook(() => useWatchLibrary('lincoln'))
+    await act(async () => {
+      await result.current.retireVideo('watch-1')
+    })
+    const patch = updateDocMock.mock.calls[0][1] as Record<string, unknown>
+    expect(Object.keys(patch).sort()).toEqual(['status', 'updatedAt'])
+  })
+
+  it('exposes no hard-delete affordance (retire is the only removal)', () => {
     const { result } = renderHook(() => useWatchLibrary('lincoln'))
     expect(result.current).not.toHaveProperty('deleteVideo')
     expect(result.current).not.toHaveProperty('removeVideo')
+    // The firebase mock above deliberately does not export `deleteDoc`; adding a
+    // real one to the hook would fail to resolve here.
   })
 })
