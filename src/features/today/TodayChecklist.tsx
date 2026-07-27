@@ -166,6 +166,18 @@ interface TodayChecklistProps {
   onTeachHelperOpen: (item: ChecklistItemType) => void
   /** Open the curated-video player for a planned watch item (FEAT-104). */
   onWatchOpen?: (item: ChecklistItemType, index: number) => void
+  /**
+   * Open the Watch Library picker to add a curated video to TODAY (FEAT-132) —
+   * the live-day sibling of the planner's "Add a video". The caller owns the
+   * picker and the write, so the row it creates is a real `itemType: 'watch'`
+   * item carrying `watchVideoId` (via the shared `watchDayItem` builder), not a
+   * free-text "Watch: …" row the player could never resolve.
+   *
+   * **Parent-gated by injection**: `TodayPage` (the parent shell) passes it;
+   * kids never reach this component at all — `KidTodayView`/`KidChecklist` is
+   * their surface and has no add affordance. Absent → no button renders.
+   */
+  onAddWatchItem?: () => void
   onUnifiedCapture: (file: File, index: number) => void
   /**
    * FEAT-108 (batch capture): save several photos of ONE item in one action.
@@ -225,6 +237,7 @@ export default function TodayChecklist({
   persistDayLogImmediate,
   onTeachHelperOpen,
   onWatchOpen,
+  onAddWatchItem,
   onUnifiedCapture,
   onUnifiedCaptureBatch,
   onBackfillWorkbookScan,
@@ -1353,16 +1366,28 @@ export default function TodayChecklist({
             </Box>
           )}
 
-          {/* Add Item (edit mode only) */}
+          {/* Add Item / Add a video (edit mode only). FEAT-132: the video path
+              sits beside the free-text one so a parent can put a vetted video on
+              a LIVE day — the planner is not the only way in. */}
           {editingPlan && !addingItem && (
-            <Button
-              size="small"
-              startIcon={<AddIcon />}
-              onClick={() => setAddingItem(true)}
-              sx={{ alignSelf: 'flex-start' }}
-            >
-              Add Item
-            </Button>
+            <Stack direction="row" spacing={1} sx={{ alignSelf: 'flex-start' }}>
+              <Button
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={() => setAddingItem(true)}
+              >
+                Add Item
+              </Button>
+              {onAddWatchItem && (
+                <Button
+                  size="small"
+                  startIcon={<OndemandVideoIcon />}
+                  onClick={onAddWatchItem}
+                >
+                  Add a video
+                </Button>
+              )}
+            </Stack>
           )}
           {editingPlan && addingItem && (
             <Stack spacing={1} sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>

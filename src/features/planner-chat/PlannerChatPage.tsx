@@ -125,6 +125,8 @@ import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
 import StickyApplyBar from './StickyApplyBar'
 import WatchLibraryPicker from '../watch/WatchLibraryPicker'
+import { buildWatchDraftItem } from '../watch/watchDayItem'
+import { writeWatchItemToDay } from '../watch/writeWatchItemToDay'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { clonePlanWithAdvancedLessons } from './repeatWeek.logic'
 import { consumePlanAdjustment } from '../shelly-chat/stagePlanAdjustment'
@@ -1822,27 +1824,66 @@ Generate a plan for Monday through Friday.`.trim()
   } = useWatchLibrary(activeChildId)
   const [watchPickerDay, setWatchPickerDay] = useState<number | null>(null)
 
-  const handleAddWatchItem = useCallback((dayIndex: number, video: WatchVideo) => {
+  /**
+   * Add a curated video to `dayIndex`.
+   *
+   * Two lanes, because the week has two states (FEAT-132):
+   *
+   *  - **Before Apply** — the draft IS the plan, so append to the draft and let
+   *    Apply do the checklist mapping. Unchanged FEAT-104 behaviour.
+   *  - **After Apply** — the draft is a mirror of days that already exist in
+   *    Firestore, and there is no reachable re-apply to flush it through (Apply
+   *    lives in the review phase; Redo clears the draft entirely). Appending to
+   *    the draft alone would put the video in a dead mirror and silently lose it,
+   *    so the row is written STRAIGHT INTO the saved day, and the draft is
+   *    updated only so the card the parent is looking at matches what was saved.
+   *
+   * The direct write is purely additive — one appended checklist row, through the
+   * FEAT-114 preservation guard — so it cannot disturb completed work, logged
+   * minutes, or evidence on a day the family may already be working through. Both
+   * lanes build the row from the shared `watchDayItem` builders, so the item is
+   * the same shape whichever way it arrives.
+   */
+  const handleAddWatchItem = useCallback(async (dayIndex: number, video: WatchVideo) => {
     if (!currentDraft) return
-    const newItem: DraftPlanItem = {
-      id: generateItemId(),
-      title: `Watch: ${video.title}`,
-      subjectBucket: video.subjectBucket,
-      estimatedMinutes: video.plannedMinutes, // planned = actual (D3)
-      skillTags: [], // non-curriculum — never a concept-graph input (C2/§6)
-      accepted: true,
-      category: 'choose',
-      itemType: 'watch',
-      watchVideoId: video.id,
-    }
-    setCurrentDraft({
+    const dayPlan = currentDraft.days[dayIndex]
+    if (!dayPlan) return
+
+    const newItem = buildWatchDraftItem(video, generateItemId())
+    const updatedDraft: DraftWeeklyPlan = {
       ...currentDraft,
       days: currentDraft.days.map((day, i) =>
         i === dayIndex ? { ...day, items: [...day.items, newItem] } : day,
       ),
-    })
-    setPlanDirty(true)
-  }, [currentDraft])
+    }
+    setCurrentDraft(updatedDraft)
+
+    if (!applied) {
+      // Pre-Apply: the sticky bar's "Plan changed — apply to save" hint owns it.
+      setPlanDirty(true)
+      return
+    }
+
+    // Post-Apply: land it in the saved day.
+    if (!activeChildId || !WEEK_DAYS.includes(dayPlan.day as typeof WEEK_DAYS[number])) return
+    try {
+      await writeWatchItemToDay({
+        familyId,
+        childId: activeChildId,
+        dateKey: dateKeyForDayPlan(weekRange.start, dayPlan.day as typeof WEEK_DAYS[number]),
+        video,
+      })
+      // Keep the persisted conversation in step with the day we just wrote, so
+      // reopening the planner doesn't show a week missing the video.
+      void persistConversation({ currentDraft: updatedDraft })
+      setSnack({ text: `Added to ${dayPlan.day}. It's on that day's checklist now.`, severity: 'success' })
+    } catch (err) {
+      console.error('[Watch] Failed to add video to the applied day', err)
+      // Roll the card back — the parent must not be shown a video that isn't saved.
+      setCurrentDraft(currentDraft)
+      setSnack({ text: "Couldn't add that video to the day. Try again.", severity: 'error' })
+    }
+  }, [currentDraft, applied, activeChildId, familyId, weekRange.start, persistConversation])
 
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
     if (!currentDraft) return
@@ -2841,6 +2882,27 @@ ${dayPrompts}`
                 </Typography>
               </Box>
 
+              {/* FEAT-132: the week's days stay visible AFTER Apply, so "Add a
+                  video" is still reachable once the week is live — device
+                  testing found the planner's add path disappeared at exactly the
+                  moment a parent reaches for it. Read-only here: `applied` gates
+                  move / remove / retime / generate off, and there is no Apply bar
+                  to re-write the week. The one live action is adding a video,
+                  which writes straight into the saved day. */}
+              {currentDraft && (
+                <PlanDayCards
+                  draft={currentDraft}
+                  hoursPerDay={hoursPerDay}
+                  masteryReviewLine={masteryReviewLine}
+                  readAloudBook={readAloudBook}
+                  weekStart={weekRange.start}
+                  snapshot={snapshot}
+                  onToggleItem={handleToggleItem}
+                  generatingItemId={generatingItemId}
+                  applied
+                  onAddWatchItem={(dayIndex) => setWatchPickerDay(dayIndex)}
+                />
+              )}
             </>
           )}
 
@@ -2999,9 +3061,9 @@ ${dayPrompts}`
       )}
 
       {/* Watch Vehicle — pick a vetted video to plan onto the chosen day (FEAT-104).
-          FEAT-107: parents can vet a new video in inline (no trip to Settings) and
-          jump to the full library for bulk curation. Both affordances are gated to
-          parents — omitting the handlers hides them for kids. */}
+          FEAT-107: parents can vet a new video in inline (no trip to the library)
+          and jump to the full library for bulk curation. Both affordances are
+          gated to parents — omitting the handlers hides them for kids. */}
       <WatchLibraryPicker
         open={watchPickerDay !== null}
         onClose={() => setWatchPickerDay(null)}
@@ -3011,11 +3073,11 @@ ${dayPrompts}`
         loading={watchLoading}
         error={watchError}
         onSelect={(video) => {
-          if (watchPickerDay !== null) handleAddWatchItem(watchPickerDay, video)
+          if (watchPickerDay !== null) void handleAddWatchItem(watchPickerDay, video)
           setWatchPickerDay(null)
         }}
         onAddVideo={isParent ? async (video) => { await addWatchVideo(video) } : undefined}
-        onManageLibrary={isParent ? () => navigate('/settings') : undefined}
+        onManageLibrary={isParent ? () => navigate('/watch') : undefined}
       />
     </Page>
   )

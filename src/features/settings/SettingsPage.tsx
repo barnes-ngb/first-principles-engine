@@ -37,7 +37,6 @@ import DiagnosticsTab from './DiagnosticsTab'
 import SoftProfileSection from './SoftProfileSection'
 import StickerLibraryTab from './StickerLibraryTab'
 import VoiceInputSection from './VoiceInputSection'
-import WatchLibraryTab from '../watch/WatchLibraryTab'
 
 /**
  * Nathan's Firebase Auth UID. The "Dev" admin tab in Settings is only
@@ -59,6 +58,19 @@ const defaultSnackbarState: SnackbarState = {
   message: '',
 }
 
+/**
+ * Settings tab identities (FEAT-132). Keyed, never index-compared — see the
+ * `tabs` array below for why.
+ */
+const SettingsTab = {
+  General: 'general',
+  Avatar: 'avatar',
+  Stickers: 'stickers',
+  Dev: 'dev',
+  Diagnostics: 'diagnostics',
+} as const
+type SettingsTab = (typeof SettingsTab)[keyof typeof SettingsTab]
+
 const themeModeLabels: Record<ThemeMode, string> = {
   [ThemeMode.Family]: 'Family',
   [ThemeMode.Lincoln]: 'Lincoln',
@@ -70,15 +82,28 @@ export default function SettingsPage() {
   const { themeMode, setThemeMode, profile } = useProfile()
   const { isEnabled, setEnabled } = useAIFeatureFlags()
   const [snackbar, setSnackbar] = useState<SnackbarState>(defaultSnackbarState)
-  const [activeTab, setActiveTab] = useState(0)
+  const [activeTab, setActiveTab] = useState<SettingsTab>(SettingsTab.General)
 
   const isParent = profile === UserProfile.Parents
   const isAdmin = familyId === ADMIN_UID
-  // Tab order (parent): General(0) · Avatar(1) · Sticker Library(2) ·
-  // Watch Library(3) · [Dev(4), admin only] · Diagnostics. Dev shifts the
-  // trailing tabs by one when present.
-  const devTabIndex = 4
-  const diagnosticsTabIndex = isAdmin ? 5 : 4
+
+  // Visible tabs, in order. `isAdmin` conditionally inserts Dev in the middle,
+  // so the tab list is variable-length — which is why selection is KEYED, not
+  // index-compared (FEAT-132). The old `activeTab === 3` / `isAdmin ? 5 : 4`
+  // arithmetic meant removing or reordering a tab silently re-pointed every tab
+  // after it at the wrong panel; removing the Watch Library tab was exactly that
+  // hazard. Keys can't shift.
+  const tabs = [
+    { key: SettingsTab.General, label: 'General' },
+    { key: SettingsTab.Avatar, label: 'Avatar & XP' },
+    { key: SettingsTab.Stickers, label: 'Sticker Library' },
+    ...(isAdmin ? [{ key: SettingsTab.Dev, label: 'Dev' }] : []),
+    { key: SettingsTab.Diagnostics, label: 'Diagnostics' },
+  ]
+  // Fall back to General if the selected tab isn't currently visible (e.g. the
+  // admin check resolves false after Dev was selected) — MUI would otherwise
+  // render a Tabs value matching no Tab.
+  const selectedTab = tabs.some((t) => t.key === activeTab) ? activeTab : SettingsTab.General
 
   const handleSeedDemoData = async () => {
     try {
@@ -118,24 +143,21 @@ export default function SettingsPage() {
       <SectionCard title="Settings">
         {isParent && (
           <Tabs
-            value={activeTab}
-            onChange={(_, v: number) => setActiveTab(v)}
+            value={selectedTab}
+            onChange={(_, v: SettingsTab) => setActiveTab(v)}
             variant="scrollable"
             scrollButtons="auto"
             allowScrollButtonsMobile
             sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
           >
-            <Tab label="General" />
-            <Tab label="Avatar & XP" />
-            <Tab label="Sticker Library" />
-            <Tab label="Watch Library" />
-            {isAdmin && <Tab label="Dev" />}
-            <Tab label="Diagnostics" />
+            {tabs.map((t) => (
+              <Tab key={t.key} value={t.key} label={t.label} />
+            ))}
           </Tabs>
         )}
 
         {/* ── General tab ─────────────────────────────────────── */}
-        {(!isParent || activeTab === 0) && (
+        {(!isParent || selectedTab === SettingsTab.General) && (
           <Stack spacing={3}>
             <Stack spacing={2}>
               <Typography variant="h6">Appearance</Typography>
@@ -212,19 +234,18 @@ export default function SettingsPage() {
         )}
 
         {/* ── Avatar & XP tab (parent only) ───────────────────── */}
-        {isParent && activeTab === 1 && <AvatarAdminTab />}
+        {isParent && selectedTab === SettingsTab.Avatar && <AvatarAdminTab />}
 
         {/* ── Sticker Library tab (parent only) ───────────────── */}
-        {isParent && activeTab === 2 && <StickerLibraryTab />}
+        {isParent && selectedTab === SettingsTab.Stickers && <StickerLibraryTab />}
 
-        {/* ── Watch Library tab (FEAT-100, parent only) ───────── */}
-        {isParent && activeTab === 3 && <WatchLibraryTab />}
+        {/* (The Watch Library moved out to its own `/watch` route in FEAT-132.) */}
 
         {/* ── Dev admin tab (admin UID only) ──────────────────── */}
-        {isAdmin && activeTab === devTabIndex && <DevAdminTab />}
+        {isAdmin && selectedTab === SettingsTab.Dev && <DevAdminTab />}
 
         {/* ── Diagnostics tab (ARCH-11, parent only, read-only) ─ */}
-        {isParent && activeTab === diagnosticsTabIndex && <DiagnosticsTab />}
+        {isParent && selectedTab === SettingsTab.Diagnostics && <DiagnosticsTab />}
       </SectionCard>
 
       <AIUsagePanel />
