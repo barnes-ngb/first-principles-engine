@@ -99,4 +99,12 @@ describe('KidChecklist — Watch Vehicle (FEAT-104)', () => {
     fireEvent.click(screen.getByRole('checkbox'))
     expect(addXpEventMock).toHaveBeenCalledTimes(1)
   })
+
+  // FEAT-132 added an "Add a video" path to the PARENT surface only. A kid
+  // watches what was vetted for them; they never curate or plan one.
+  it('gives a kid no way to add a video (or any item) to their own day', () => {
+    renderKid([makeItem({ label: 'Watch: History (12m)', itemType: 'watch', watchVideoId: 'v1' })])
+    expect(screen.queryByRole('button', { name: /add a video/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /add item/i })).toBeNull()
+  })
 })

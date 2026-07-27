@@ -371,3 +371,70 @@ describe('WatchPlayer', () => {
     expect(updateDocMock).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * FEAT-132: the completion panel lives inside a fixed 16:9 frame. With
+ * `completionExtra` present (the planned-Today "what we saw" note) its content
+ * is taller than the frame — on a real device that clipped the heading off the
+ * top and the action button off the bottom, leaving no way to finish. It must
+ * scroll instead, WITHOUT weakening the end-stop: still opaque, still covering
+ * the whole frame, still inside the frame so it stays above the video in
+ * app-owned fullscreen.
+ *
+ * jsdom does no layout, so "not clipped" is asserted as the CSS contract that
+ * makes overflowing content reachable, plus the cover invariants.
+ */
+describe('WatchPlayer — completion panel does not clip its content (FEAT-132)', () => {
+  const panel = () => screen.getByTestId('watch-completion-panel')
+
+  function renderPlannedAndEnd() {
+    render(
+      <WatchPlayer
+        video={VIDEO}
+        onDone={vi.fn()}
+        onComplete={vi.fn()}
+        doneLabel="Mark it done"
+        completionExtra={<div>what we saw</div>}
+      />,
+    )
+    emitState(0) // ENDED
+  }
+
+  it('scrolls its content rather than clipping it', () => {
+    renderPlannedAndEnd()
+    expect(getComputedStyle(panel()).overflowY).toBe('auto')
+  })
+
+  it('starts overflowing content at the top so the heading is reachable', () => {
+    renderPlannedAndEnd()
+    // A plain `center` would push the heading above the scroll origin, where it
+    // can never be scrolled back into view.
+    expect(getComputedStyle(panel()).justifyContent).toBe('safe center')
+  })
+
+  it('keeps the heading and the action button both in the panel', () => {
+    renderPlannedAndEnd()
+    expect(panel()).toContainElement(screen.getByText(/All done/))
+    expect(panel()).toContainElement(screen.getByRole('button', { name: /mark it done/i }))
+    expect(panel()).toContainElement(screen.getByText('what we saw'))
+  })
+
+  it('still covers the whole frame, opaquely, above the video', () => {
+    renderPlannedAndEnd()
+    const style = getComputedStyle(panel())
+    expect(style.position).toBe('absolute')
+    expect(style.inset).toBe('0')
+    expect(style.zIndex).toBe('3')
+    expect(style.backgroundColor).not.toBe('')
+    expect(style.backgroundColor).not.toBe('transparent')
+  })
+
+  it('stays INSIDE the fullscreen frame — outside it would fall below YouTube', () => {
+    renderPlannedAndEnd()
+    // The frame is the element app-owned fullscreen is requested on; only its
+    // subtree paints there, so the overlay must be a descendant of it.
+    const frame = playerIframe().closest('div')?.parentElement
+    expect(frame).not.toBeNull()
+    expect(frame).toContainElement(panel())
+  })
+})

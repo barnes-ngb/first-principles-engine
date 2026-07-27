@@ -25,6 +25,12 @@ const navItems = [
   { label: 'Progress', to: '/progress', parentOnly: true },
   { label: 'Records', to: '/records', parentOnly: true },
   { label: 'Books', to: '/books' },
+  // Watch Library (FEAT-132): a top-level PARENT entry, next to the other
+  // content-curation destinations rather than buried in Settings — curation is a
+  // recurring job, not a one-time setting. Deliberately no kid entry: the
+  // library is vetting, not watching (kids reach a vetted video only through a
+  // planned watch item on Today).
+  { label: 'Watch Library', to: '/watch', parentOnly: true },
   { label: 'Barnes Bros', to: '/business' },
   { label: 'Game Workshop', to: '/workshop' },
   { label: 'Dad Lab', to: '/dad-lab' },

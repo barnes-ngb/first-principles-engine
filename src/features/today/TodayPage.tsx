@@ -46,7 +46,7 @@ import {
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
+import type { Artifact, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -75,8 +75,10 @@ import TeachBackSection from './TeachBackSection'
 import { useLatestMineSession } from './useLatestMineSession'
 import TodayChecklist from './TodayChecklist'
 import WatchItemDialog from '../watch/WatchItemDialog'
+import WatchLibraryPicker from '../watch/WatchLibraryPicker'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
+import { appendWatchItemToDayLog } from '../watch/watchDayItem'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
@@ -220,6 +222,17 @@ export default function TodayPage() {
   // may *resolve*, or re-scoping an entry in the library editor would strand an
   // already-planned item.
   const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary()
+  // FEAT-132: adding a video to the LIVE day. Separate subscription from the
+  // resolution one above, and deliberately SCOPED to the child (D7) — scope
+  // decides what may be *planned*, so the picker sees only in-scope videos while
+  // resolution above stays unscoped so an already-planned item never strands.
+  const {
+    videos: scopedWatchVideos,
+    loading: scopedWatchLoading,
+    error: scopedWatchError,
+    addVideo: addWatchVideo,
+  } = useWatchLibrary(selectedChildId)
+  const [watchPickerOpen, setWatchPickerOpen] = useState(false)
   const watch = useWatchItemCompletion({
     familyId,
     childId: selectedChildId,
@@ -228,6 +241,27 @@ export default function TodayPage() {
     videos: watchVideos,
     dayLogId: today,
   })
+
+  /**
+   * FEAT-132: put a vetted video on the live day. Writes a REAL watch row —
+   * `itemType: 'watch'` + `watchVideoId`, built by the shared `watchDayItem`
+   * builder so it is indistinguishable from a planned one to the player, the
+   * completion path, and the hours math. A free-text "Watch: …" row would carry
+   * no video for the player to resolve.
+   *
+   * Purely additive to the checklist and routed through the same canonical
+   * `persistDayLogImmediate` lane every other Today edit uses, so no completion,
+   * logged minute, or evidence link can be disturbed. Writes no XP and no
+   * learner-model state — adding a row is not watching it.
+   */
+  const handleAddWatchToDay = useCallback(
+    (video: WatchVideo) => {
+      setWatchPickerOpen(false)
+      if (!dayLog) return
+      persistDayLogImmediate(appendWatchItemToDayLog(dayLog, video))
+    },
+    [dayLog, persistDayLogImmediate],
+  )
 
   // (Rollover is wired below, after dailyPlan is loaded so MVD/low-energy can halve the budget.)
 
@@ -1003,6 +1037,7 @@ export default function TodayPage() {
             setTeachHelperOpen(true)
           }}
           onWatchOpen={watch.openWatch}
+          onAddWatchItem={() => setWatchPickerOpen(true)}
           onUnifiedCapture={handleUnifiedCapture}
           onUnifiedCaptureBatch={handleUnifiedCaptureBatch}
           onBackfillWorkbookScan={handleBackfillWorkbookScan}
@@ -1122,6 +1157,21 @@ export default function TodayPage() {
           weekTheme={weekFocus?.theme}
         />
       )}
+
+      {/* Watch Vehicle — add a vetted video to the LIVE day (FEAT-132). Only
+          reachable from the parent shell's edit mode (kids render KidTodayView
+          and never get here), and the same picker the planner uses, so inline
+          vet-in and "Manage library" come along for free. */}
+      <WatchLibraryPicker
+        open={watchPickerOpen}
+        onClose={() => setWatchPickerOpen(false)}
+        videos={scopedWatchVideos}
+        loading={scopedWatchLoading}
+        error={scopedWatchError}
+        onSelect={handleAddWatchToDay}
+        onAddVideo={async (video) => { await addWatchVideo(video) }}
+        onManageLibrary={() => navigate('/watch')}
+      />
 
       {/* Watch Vehicle — planned curated-video player (FEAT-104). */}
       <WatchItemDialog

@@ -21,6 +21,18 @@ interface PlanDayCardsProps {
   onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
   onRemoveItem?: (dayIndex: number, itemIndex: number) => void
   onUpdateTime?: (dayIndex: number, itemIndex: number, newMinutes: number) => void
+  /**
+   * Open the Watch Library picker for `dayIndex`.
+   *
+   * FEAT-132: this one deliberately SURVIVES Apply, unlike the structural edits
+   * above (move / remove / retime / generate), which are gated off once the week
+   * is live because they'd have to reconcile against days the family may already
+   * be working through. Adding a video is purely additive, so the caller writes
+   * it straight into the saved day — see `handleAddWatchItem` in
+   * `PlannerChatPage`. Passing it unconditionally is the point: gating it on
+   * `!applied` is what made the planner's add path vanish the moment the week
+   * went live.
+   */
   onAddWatchItem?: (dayIndex: number) => void
 }
 
@@ -70,7 +82,7 @@ export default function PlanDayCards({
         onMoveItem={!applied ? onMoveItem : undefined}
         onRemoveItem={!applied ? onRemoveItem : undefined}
         onUpdateTime={!applied ? onUpdateTime : undefined}
-        onAddWatchItem={!applied ? onAddWatchItem : undefined}
+        onAddWatchItem={onAddWatchItem}
       />
     </Box>
   )

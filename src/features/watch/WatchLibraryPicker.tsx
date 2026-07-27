@@ -41,11 +41,11 @@ interface WatchLibraryPickerProps {
    * `WatchVetInForm` inline; on save the new video flows back through the
    * caller's `useWatchLibrary` subscription and appears selectable immediately.
    * **Parent-gated at the call site** — omit it (kid / non-parent) and no
-   * curation affordance renders. Reuses the Settings vet-in form; no duplicate
-   * form logic.
+   * curation affordance renders. Reuses the library's own vet-in form; no
+   * duplicate form logic.
    */
   onAddVideo?: (video: NewWatchVideo) => Promise<void>
-  /** Jump to the full Watch Library (Settings) for bulk curation. Shown next to
+  /** Jump to the full Watch Library (`/watch`) for bulk curation. Shown next to
    *  the inline add affordance; parent-gated with it. */
   onManageLibrary?: () => void
 }
@@ -57,7 +57,10 @@ interface WatchLibraryPickerProps {
  * the caller's `useWatchLibrary(childId)`, so only in-scope videos ever show.
  *
  * FEAT-107 (inline vet-in): a parent who thinks of a video mid-planning can vet
- * it in right here (see `onAddVideo`) instead of leaving for Settings and back.
+ * it in right here (see `onAddVideo`) instead of leaving for the library and back.
+ *
+ * FEAT-132: also the Today path — the same picker adds a video to a LIVE day
+ * from the parent shell's edit mode, so the two surfaces can't drift.
  */
 export default function WatchLibraryPicker({
   open,
@@ -163,8 +166,8 @@ export default function WatchLibraryPicker({
             title="No videos to plan yet"
             description={
               onAddVideo
-                ? 'Add one with “Add a new video” above, or vet a batch in the Watch Library (Settings).'
-                : 'Vet a video into the Watch Library (Settings) first, then plan it here.'
+                ? 'Add one with “Add a new video” above, or vet a batch in the Watch Library.'
+                : 'Vet a video into the Watch Library first, then plan it here.'
             }
           />
         ) : (
