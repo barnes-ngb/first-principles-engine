@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
+import { isForeignVideo } from './watchPlayerState'
+
+describe('isForeignVideo (FEAT-130 drift guard)', () => {
+  it('flags a video that is not the one the parent planned', () => {
+    expect(isForeignVideo('otherId', 'plannedId')).toBe(true)
+  })
+
+  it('leaves the planned video alone', () => {
+    expect(isForeignVideo('plannedId', 'plannedId')).toBe(false)
+  })
+
+  it('never claims drift on an unreadable id — a blind guard must not interrupt', () => {
+    expect(isForeignVideo(null, 'plannedId')).toBe(false)
+    expect(isForeignVideo(undefined, 'plannedId')).toBe(false)
+    expect(isForeignVideo('', 'plannedId')).toBe(false)
+    expect(isForeignVideo('otherId', '')).toBe(false)
+  })
+})
+
 import { WATCH_PLAYER_STATE, isEndedState, mapPlayerError } from './watchPlayerState'
 
 describe('isEndedState (the end-stop trigger)', () => {
