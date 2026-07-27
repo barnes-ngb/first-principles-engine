@@ -1843,8 +1843,17 @@ Generate a plan for Monday through Friday.`.trim()
    * minutes, or evidence on a day the family may already be working through. Both
    * lanes build the row from the shared `watchDayItem` builders, so the item is
    * the same shape whichever way it arrives.
+   *
+   * **Parent capability, checked here and not only in the UI** (FEAT-133, Codex
+   * P2 on PR #1640). `/planner/chat` sits OUTSIDE `RequireParent`, so a kid
+   * profile can reach this page directly; the picker gates only vet-in and
+   * library management on `isParent`, and its list of selectable videos would
+   * otherwise reach this writer. Planning — and now writing a row into a live
+   * day — is a parent job. The call sites also withhold the handler so no
+   * affordance renders; this is the guard on the write itself.
    */
   const handleAddWatchItem = useCallback(async (dayIndex: number, video: WatchVideo) => {
+    if (!isParent) return
     if (!currentDraft) return
     const dayPlan = currentDraft.days[dayIndex]
     if (!dayPlan) return
@@ -1883,7 +1892,7 @@ Generate a plan for Monday through Friday.`.trim()
       setCurrentDraft(currentDraft)
       setSnack({ text: "Couldn't add that video to the day. Try again.", severity: 'error' })
     }
-  }, [currentDraft, applied, activeChildId, familyId, weekRange.start, persistConversation])
+  }, [isParent, currentDraft, applied, activeChildId, familyId, weekRange.start, persistConversation])
 
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
     if (!currentDraft) return
@@ -2835,7 +2844,7 @@ ${dayPrompts}`
                 onMoveItem={handleMoveItem}
                 onRemoveItem={handleRemoveItem}
                 onUpdateTime={handleUpdateTime}
-                onAddWatchItem={(dayIndex) => setWatchPickerDay(dayIndex)}
+                onAddWatchItem={isParent ? (dayIndex) => setWatchPickerDay(dayIndex) : undefined}
               />
 
               {/* FEAT-111 P3: sticky/floating Apply bar — pinned to the viewport
@@ -2897,10 +2906,9 @@ ${dayPrompts}`
                   readAloudBook={readAloudBook}
                   weekStart={weekRange.start}
                   snapshot={snapshot}
-                  onToggleItem={handleToggleItem}
                   generatingItemId={generatingItemId}
                   applied
-                  onAddWatchItem={(dayIndex) => setWatchPickerDay(dayIndex)}
+                  onAddWatchItem={isParent ? (dayIndex) => setWatchPickerDay(dayIndex) : undefined}
                 />
               )}
             </>
