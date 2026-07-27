@@ -30,8 +30,17 @@ import KidBooksAboutMePage from '../features/monthly-review/KidBooksAboutMePage'
 import KidBookReaderPage from '../features/monthly-review/KidBookReaderPage'
 import UiPreviewPage from '../features/ui-preview/UiPreviewPage'
 import BusinessPage from '../features/business/BusinessPage'
+import WatchLibraryPage from '../features/watch/WatchLibraryPage'
 
-const routes = [
+/**
+ * Exported so route wiring — which paths sit inside which guard — is assertable
+ * in tests rather than only by reading (FEAT-132). The fast-refresh rule wants a
+ * component-only module; a route table has no HMR state to lose, and splitting
+ * it into a second file just to satisfy the lint would move the wiring away from
+ * the router it belongs to.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export const routes = [
   {
     element: (
       <AppShell>
@@ -53,6 +62,10 @@ const routes = [
         element: <RequireParent />,
         children: [
           { path: '/weekly-review', element: <WeeklyReviewPage /> },
+          // Watch Library's own home (FEAT-132) — curation is a parent job, so
+          // it is route-gated as well as component-gated (`WatchLibraryTab`
+          // carries its own `canEdit` check). Capability, never a name.
+          { path: '/watch', element: <WatchLibraryPage /> },
         ],
       },
       { path: '/planner/chat', element: <PlannerChatPage /> },

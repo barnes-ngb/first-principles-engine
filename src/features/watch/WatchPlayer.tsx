@@ -308,8 +308,37 @@ export default function WatchPlayer({
           <Stack
             spacing={2}
             alignItems="center"
-            justifyContent="center"
-            sx={{ position: 'absolute', inset: 0, bgcolor: 'background.paper', p: 3, zIndex: 3 }}
+            data-testid="watch-completion-panel"
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              bgcolor: 'background.paper',
+              p: 3,
+              zIndex: 3,
+              // FEAT-132: the panel SCROLLS rather than clipping. The frame is a
+              // fixed 16:9 box, so with `completionExtra` present (the planned-
+              // Today "what we saw" note) the panel's content is taller than the
+              // frame — on a real phone that clipped the heading off the top and
+              // the action button off the bottom, leaving no way to finish.
+              //
+              // Scrolling, rather than moving the overlay out of the frame or
+              // letting the frame grow: the end-stop's guarantee is that it is
+              // opaque, covers the WHOLE frame, and sits above the video —
+              // including in app-owned fullscreen, which only paints this frame's
+              // subtree. Anything outside the frame would render *below*
+              // YouTube's surface there. `inset: 0` + `overflow: auto` keeps the
+              // cover total and makes the content reachable.
+              overflowY: 'auto',
+              // Content taller than the frame must start at the top: a plain
+              // `center` would push the heading above the scroll origin, where it
+              // can't be scrolled back into view — the exact clip we're fixing.
+              // `safe center` degrades to flex-start on overflow; shorter content
+              // still centers.
+              justifyContent: 'safe center',
+              // Flex children shrink by default; in a scrolling column that
+              // squashes the heading and button instead of scrolling them.
+              '& > *': { flexShrink: 0 },
+            }}
           >
             <Typography variant="h5" component="p" textAlign="center">
               All done! 🌱
