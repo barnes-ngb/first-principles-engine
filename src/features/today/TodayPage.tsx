@@ -211,9 +211,15 @@ export default function TodayPage() {
     activeRoutineItems,
   })
 
-  // Watch Vehicle (FEAT-104): curated videos in scope for this child (D7) + the
-  // shared completion (credit hours + artifact, no XP/concept). Parent surface.
-  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary(selectedChildId)
+  // Watch Vehicle (FEAT-104): resolve the videos this child's plan already
+  // references + the shared completion (credit hours + artifact, no XP/concept).
+  // Parent surface.
+  //
+  // Deliberately the UNSCOPED library (FEAT-129) — see `KidTodayView` for the
+  // reasoning: D7 scope decides what may be *planned*, never what a planned item
+  // may *resolve*, or re-scoping an entry in the library editor would strand an
+  // already-planned item.
+  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary()
   const watch = useWatchItemCompletion({
     familyId,
     childId: selectedChildId,
