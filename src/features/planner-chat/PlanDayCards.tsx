@@ -14,7 +14,16 @@ interface PlanDayCardsProps {
    *  day card's concrete date (FEAT-112). */
   weekStart: string
   snapshot?: SkillSnapshot | null
-  onToggleItem: (dayIndex: number, itemId: string) => void
+  /**
+   * Toggle an item's `accepted` flag on the DRAFT. Gated off once `applied`
+   * (FEAT-133, Codex P2 on PR #1640): the applied view's cards are advertised as
+   * read-only, and a toggle there edits a draft that no longer has an Apply bar
+   * to flush it — so the card would silently disagree with the live checklist,
+   * and a subsequent "Add a video" would persist that divergence to the
+   * conversation. `PlanPreviewCard` renders a static icon when it is absent, so
+   * the control becomes genuinely inert rather than a dead-looking button.
+   */
+  onToggleItem?: (dayIndex: number, itemId: string) => void
   onGenerateActivity?: (item: DraftPlanItem) => void
   generatingItemId: string | null
   applied: boolean
@@ -76,7 +85,7 @@ export default function PlanDayCards({
         masteryReviewLine={masteryReviewLine}
         weekStart={weekStart}
         snapshot={snapshot ?? null}
-        onToggleItem={onToggleItem}
+        onToggleItem={!applied ? onToggleItem : undefined}
         onGenerateActivity={!applied ? onGenerateActivity : undefined}
         generatingItemId={generatingItemId ?? undefined}
         onMoveItem={!applied ? onMoveItem : undefined}
