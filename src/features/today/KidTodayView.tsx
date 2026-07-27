@@ -247,9 +247,19 @@ export default function KidTodayView({
 
   const todayMinedMinutes = useTodayMiningMinutes(familyId, child.id, today)
 
-  // Watch Vehicle (FEAT-104): curated videos in scope for this kid (D7) + shared
-  // completion (credit hours + artifact, no XP/concept). Kid surface.
-  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary(child.id)
+  // Watch Vehicle (FEAT-104): resolve the videos this kid's plan already
+  // references + shared completion (credit hours + artifact, no XP/concept).
+  //
+  // Deliberately the UNSCOPED library (FEAT-129). The D7 `childId | 'both'`
+  // scope governs what a parent may *plan*; it must not govern what a planned
+  // item can *resolve*. Re-scoping a video in the library editor (say `both` →
+  // London) would otherwise drop it out of Lincoln's filtered list and leave an
+  // already-planned item unplayable and uncompletable. Resolution is a
+  // by-id `find`, so an unscoped list is a strict superset: it resolves
+  // everything the filtered list did, and nothing extra is ever shown — only a
+  // video this kid's own plan points at reaches the player. Same reasoning that
+  // keeps retired videos resolvable here while dropping them from the picker.
+  const { videos: watchVideos, loading: watchLoading, error: watchError } = useWatchLibrary()
   const watch = useWatchItemCompletion({
     familyId,
     childId: child.id,

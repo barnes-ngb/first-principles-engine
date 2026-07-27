@@ -19,11 +19,17 @@ import { SubjectBucketLabel } from '../../core/types/enums'
 import type { WatchVideo } from '../../core/types'
 import WatchVetInForm from './WatchVetInForm'
 import type { NewWatchVideo } from './useWatchLibrary'
+import { activeVideos } from './watchLibraryStatus'
 
 interface WatchLibraryPickerProps {
   open: boolean
   onClose: () => void
-  /** Curated videos in scope for the child (D7 filter applied upstream). */
+  /**
+   * Curated videos in scope for the child (D7 filter applied upstream). Pass
+   * the whole in-scope library — the picker drops retired entries itself
+   * (FEAT-129), so the "a retired video is never plannable" rule holds for
+   * every caller rather than depending on each one remembering to filter.
+   */
   videos: WatchVideo[]
   loading?: boolean
   error?: string | null
@@ -64,6 +70,13 @@ export default function WatchLibraryPicker({
   onManageLibrary,
 }: WatchLibraryPickerProps) {
   const [adding, setAdding] = useState(false)
+
+  // FEAT-129: a retired video is off the shelf — it can never be planned into a
+  // NEW week. It is deliberately not deleted, so a week that already planned it
+  // still resolves and plays it on Today; only the ability to pick it again goes
+  // away. Filtering here rather than at the call site keeps that invariant with
+  // the component that could otherwise break it.
+  const plannable = activeVideos(videos)
 
   // The picker stays mounted across sessions (the caller only toggles `open`),
   // so collapse any expanded vet-in panel on the way out — otherwise the next
@@ -144,7 +157,7 @@ export default function WatchLibraryPicker({
           <LoadingState label="Loading library…" />
         ) : error ? (
           <ErrorState message={error} />
-        ) : videos.length === 0 ? (
+        ) : plannable.length === 0 ? (
           <EmptyState
             icon={<OndemandVideoIcon />}
             title="No videos to plan yet"
@@ -156,7 +169,7 @@ export default function WatchLibraryPicker({
           />
         ) : (
           <Stack spacing={1}>
-            {videos.map((v) => (
+            {plannable.map((v) => (
               <Box
                 key={v.id}
                 sx={{ p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1 }}

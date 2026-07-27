@@ -25,6 +25,36 @@ export type StickerSizeId = keyof typeof STICKER_SIZES
 export const SHEET_MARGIN_MM = 10
 export const SHEET_GAP_MM = 4
 
+const MM_PER_INCH = 25.4
+
+/**
+ * The sticker's physical print size as a filename token — `1.5in` / `2in` / `3in`
+ * (FEAT-130). **Derived from the same `cellMM` the sheet is laid out with**, so the
+ * name and the artwork can never disagree; never a separately-maintained number.
+ * Rounded to a tenth of an inch (38 / 51 / 76 mm land on 1.5" / 2" / 3").
+ */
+export function stickerSizeToken(stickerSize: StickerSizeId): string {
+  const inches = STICKER_SIZES[stickerSize].cellMM / MM_PER_INCH
+  // `${2}` → "2", `${1.5}` → "1.5" — no trailing ".0" to read past.
+  return `${Math.round(inches * 10) / 10}in`
+}
+
+/**
+ * Download filename for a printed sticker sheet, e.g. `green-dragon-2in.pdf`.
+ * Follows the repo's export-name convention (`dataReviewExportFilename`,
+ * `buildCompliancePackFiles`): slugged stem, `-`-joined tokens, extension last.
+ * The size token exists so the print dialog isn't guesswork — the download says
+ * how big the stickers are meant to come out on paper. Pure.
+ */
+export function stickerSheetFileName(stem: string, stickerSize: StickerSizeId): string {
+  const slug = (stem || '')
+    .replace(/\.(pdf|png|jpe?g)$/i, '') // never build "foo-pdf-2in.pdf" from an already-suffixed stem
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase()
+  return `${slug || 'stickers'}-${stickerSizeToken(stickerSize)}.pdf`
+}
+
 export interface StickerSheetLayout {
   /** Stickers per row. */
   cols: number

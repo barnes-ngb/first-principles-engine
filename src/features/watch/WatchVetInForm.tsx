@@ -10,6 +10,7 @@ import Typography from '@mui/material/Typography'
 import { useChildren } from '../../core/hooks/useChildren'
 import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import { extractYouTubeId } from '../../core/utils/youtubeId'
+import type { WatchVideo } from '../../core/types'
 import type { NewWatchVideo } from './useWatchLibrary'
 
 /**
@@ -34,6 +35,15 @@ const DEFAULT_MINUTES = 12
 
 interface WatchVetInFormProps {
   onSave: (video: NewWatchVideo) => Promise<void>
+  /**
+   * Edit an existing library entry instead of vetting a new one (FEAT-129).
+   * When supplied the form prefills from it, keeps its `addedBy` provenance,
+   * and does NOT reset after a successful save (the caller closes the editor).
+   * Absent ⇒ the original add-a-video form, unchanged.
+   */
+  initial?: WatchVideo
+  /** Shown next to Save in edit mode so a parent can back out. */
+  onCancel?: () => void
 }
 
 /**
@@ -42,16 +52,25 @@ interface WatchVetInFormProps {
  * (the library never stores an unvalidated string, §4) → parent authors the
  * kid-facing title (D4) → planned minutes (typed, no API fetch — §10/D5) →
  * subject (SocialStudies default) → scope (this child / both, D7) → optional
- * "why". Save writes one `WatchVideo`. No player, no planning — later slices.
+ * "why". Save writes one `WatchVideo`.
+ *
+ * FEAT-129 reuses this same form as the **editor** (`initial`) rather than
+ * standing up a second one, so the URL validation, the positive-integer minutes
+ * rule, and the subject/scope vocabularies have exactly one definition. An edit
+ * re-validates the link the same way an add does — a malformed URL can't be
+ * saved into an existing entry either.
  */
-export default function WatchVetInForm({ onSave }: WatchVetInFormProps) {
+export default function WatchVetInForm({ onSave, initial, onCancel }: WatchVetInFormProps) {
   const { children } = useChildren()
-  const [urlOrId, setUrlOrId] = useState('')
-  const [title, setTitle] = useState('')
-  const [minutes, setMinutes] = useState(String(DEFAULT_MINUTES))
-  const [subjectBucket, setSubjectBucket] = useState<SubjectBucket>(SubjectBucket.SocialStudies)
-  const [scope, setScope] = useState<string | 'both'>('both')
-  const [why, setWhy] = useState('')
+  const editing = initial != null
+  const [urlOrId, setUrlOrId] = useState(initial?.youtubeId ?? '')
+  const [title, setTitle] = useState(initial?.title ?? '')
+  const [minutes, setMinutes] = useState(String(initial?.plannedMinutes ?? DEFAULT_MINUTES))
+  const [subjectBucket, setSubjectBucket] = useState<SubjectBucket>(
+    initial?.subjectBucket ?? SubjectBucket.SocialStudies,
+  )
+  const [scope, setScope] = useState<string | 'both'>(initial?.childId ?? 'both')
+  const [why, setWhy] = useState(initial?.why ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -79,9 +98,14 @@ export default function WatchVetInForm({ onSave }: WatchVetInFormProps) {
         plannedMinutes: Math.round(minutesNum),
         subjectBucket,
         childId: scope,
-        addedBy: 'parent',
-        ...(why.trim() !== '' ? { why: why.trim() } : {}),
+        // Keep the original curator on an edit — provenance is an audit trail,
+        // not a last-toucher stamp.
+        addedBy: initial?.addedBy ?? 'parent',
+        // Add: omit an empty note (FEAT-100 shape). Edit: send `''` so clearing
+        // the note actually clears the stored one instead of silently keeping it.
+        ...(why.trim() !== '' ? { why: why.trim() } : editing ? { why: '' } : {}),
       })
+      if (editing) return // the caller closes the editor; don't blank the fields
       // Reset for the next vet-in.
       setUrlOrId('')
       setTitle('')
@@ -98,7 +122,7 @@ export default function WatchVetInForm({ onSave }: WatchVetInFormProps) {
 
   return (
     <Stack spacing={2}>
-      <Typography variant="h6">Vet a video in</Typography>
+      <Typography variant="h6">{editing ? 'Edit video' : 'Vet a video in'}</Typography>
 
       <TextField
         label="YouTube link or video id"
@@ -197,10 +221,15 @@ export default function WatchVetInForm({ onSave }: WatchVetInFormProps) {
         </Typography>
       )}
 
-      <Box>
+      <Box sx={{ display: 'flex', gap: 1 }}>
         <Button variant="contained" disabled={!canSave} onClick={handleSave}>
-          {saving ? 'Saving…' : 'Add to library'}
+          {saving ? 'Saving…' : editing ? 'Save changes' : 'Add to library'}
         </Button>
+        {onCancel && (
+          <Button variant="text" disabled={saving} onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
       </Box>
     </Stack>
   )

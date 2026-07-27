@@ -193,3 +193,51 @@ describe('WatchLibraryPicker — inline vet-in (FEAT-107)', () => {
     expect(onManageLibrary).toHaveBeenCalledTimes(1)
   })
 })
+
+// ── FEAT-129: a retired video is off the shelf ──────────────────────────────
+
+const retired = (id: string, title: string): WatchVideo => ({
+  ...video(id, title),
+  status: 'retired',
+})
+
+describe('WatchLibraryPicker — retired videos (FEAT-129)', () => {
+  it('never offers a retired video to plan', () => {
+    render(
+      <WatchLibraryPicker
+        open
+        onClose={onClose}
+        videos={[video('a', 'Ancient cities'), retired('r', 'Retired one')]}
+        onSelect={onSelect}
+      />,
+    )
+    expect(screen.getAllByRole('button', { name: /plan this/i })).toHaveLength(1)
+    expect(screen.getByText('Ancient cities')).toBeInTheDocument()
+    expect(screen.queryByText('Retired one')).not.toBeInTheDocument()
+  })
+
+  it('filters inside the picker, so a caller passing the whole library is safe', () => {
+    // The planner passes its full in-scope `useWatchLibrary` result; the
+    // invariant must not depend on the call site remembering to filter.
+    render(
+      <WatchLibraryPicker
+        open
+        onClose={onClose}
+        videos={[retired('r', 'Retired one')]}
+        onSelect={onSelect}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /plan this/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/no videos to plan yet/i)).toBeInTheDocument()
+  })
+
+  it('a video with NO status is plannable (pre-FEAT-129 entries keep working)', () => {
+    const legacy = video('legacy', 'Vetted before FEAT-129')
+    expect(legacy.status).toBeUndefined()
+    render(
+      <WatchLibraryPicker open onClose={onClose} videos={[legacy]} onSelect={onSelect} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /plan this/i }))
+    expect(onSelect.mock.calls[0][0].id).toBe('legacy')
+  })
+})

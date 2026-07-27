@@ -41,6 +41,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import {
   artifactsCollection,
   db,
+  dadLabReportsCollection,
   daysCollection,
   evaluationsCollection,
   hoursAdjustmentsCollection,
@@ -50,6 +51,7 @@ import { migrateUnattributedAdjustments } from '../../core/firebase/migrateHours
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
   Artifact,
+  DadLabReport,
   DayLog,
   Evaluation,
   HoursAdjustment,
@@ -72,12 +74,22 @@ import {
   computeHoursSummary,
   computeSubjectDistribution,
   deriveChildIdFromDocId,
+  emitsPortfolioMediaUrl,
   generateComplianceReportHtml,
   generateDailyLogCsv,
   generateEvaluationMarkdown,
   generateHoursSummaryCsv,
   generatePortfolioMarkdown,
+  selectPortfolioArtifactsForChild,
 } from './records.logic'
+import {
+  buildDadLabMarkdownSection,
+  selectDadLabPortfolioEntries,
+} from './dadLabPortfolio.logic'
+import {
+  describeArchiveResult,
+  requestCompliancePackArchive,
+} from './compliancePackArchive'
 
 const formatHours = (minutes: number) => (minutes / 60).toFixed(2)
 
@@ -149,9 +161,14 @@ function HoursComplianceTab() {
   const { activeChildId, activeChild, children } = useActiveChild()
   const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
   const [allEvaluations, setAllEvaluations] = useState<Evaluation[]>([])
+  // FEAT-123 — the range's Dad Lab reports, read-only, for the pack's narrative
+  // section. Reports carry no `childId` (DATA-04), so there is nothing to filter.
+  const [dadLabReports, setDadLabReports] = useState<DadLabReport[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+  // 'warning' carries the FEAT-126 archive-with-gaps case: the pack built, and
+  // some evidence is flagged rather than embedded. Neither success nor failure.
+  const [snackMessage, setSnackMessage] = useState<{ text: string; severity: 'success' | 'error' | 'warning' } | null>(null)
 
   const childNameLower = activeChild?.name.toLowerCase() ?? ''
 
@@ -177,8 +194,14 @@ function HoursComplianceTab() {
     () => allAdjustments.filter((a) => a.childId === activeChildId || a.childId === 'both'),
     [allAdjustments, activeChildId],
   )
+  // FEAT-123: this child's artifacts, plus the family-shared ones. It was an
+  // exact `childId` match, which dropped every `childId: 'both'` artifact — and
+  // the three-beat Dad Lab capture writes ALL of its photos and recordings that
+  // way (DATA-04). A real export of Lincoln's school year carried none of the
+  // July lab's six media ids because of this one line. Same shared predicate the
+  // month grid, FEAT-120's export loader, and the DATA-09 hours reads use.
   const artifacts = useMemo(
-    () => allArtifacts.filter((a) => a.childId === activeChildId),
+    () => selectPortfolioArtifactsForChild(allArtifacts, activeChildId),
     [allArtifacts, activeChildId],
   )
   const evaluations = useMemo(
@@ -244,7 +267,15 @@ function HoursComplianceTab() {
       where('monthStart', '<=', endDate),
     )
 
-    const [hoursSnap, daysSnap, adjSnap, artSnap, evalSnap] =
+    // FEAT-123 — the range's Dad Lab reports for the pack's narrative section.
+    // A single-field range filter on `date`, so no new composite index.
+    const labsQuery = query(
+      dadLabReportsCollection(familyId),
+      where('date', '>=', startDate),
+      where('date', '<=', endDate),
+    )
+
+    const [hoursSnap, daysSnap, adjSnap, artSnap, evalSnap, labSnap] =
       await Promise.all([
         getDocs(hoursQuery),
         getDocs(daysQuery),
@@ -257,6 +288,7 @@ function HoursComplianceTab() {
           ),
         ),
         getDocs(evalsQuery),
+        getDocs(labsQuery),
       ])
 
     return {
@@ -286,6 +318,7 @@ function HoursComplianceTab() {
         const data = d.data() as Evaluation
         return { ...data, id: d.id }
       }),
+      dadLabReports: labSnap.docs.map((d) => ({ ...d.data(), id: d.id })),
     }
   }, [endDate, familyId, startDate])
 
@@ -295,6 +328,7 @@ function HoursComplianceTab() {
     setAllAdjustments(data.adjustments)
     setAllArtifacts(data.artifacts)
     setAllEvaluations(data.evaluations)
+    setDadLabReports(data.dadLabReports)
     setIsLoading(false)
   }, [])
 
@@ -522,6 +556,33 @@ function HoursComplianceTab() {
     }
   }, [activeChildId, estimateStartMonth, estimateEndMonth, estimateDailyHours, estimateDaysPerWeek, familyId, fetchRecords, applyRecords])
 
+  // FEAT-123 — the pack's Dad Lab section, built by FEAT-121's renderer over the
+  // pack's (wider) date range. Linked-artifact resolution runs against ALL of
+  // the range's artifacts, not this child's slice: the three-beat capture writes
+  // whole-family artifacts, so pre-filtering would under-report a lab's evidence.
+  const dadLabEntries = useMemo(
+    () => selectDadLabPortfolioEntries(dadLabReports, allArtifacts, startDate, endDate),
+    [dadLabReports, allArtifacts, startDate, endDate],
+  )
+
+  // The skip list is what the portfolio markdown ACTUALLY emits a URL for — the
+  // per-child `### Photos` blocks embed photos only, so passing a recording's id
+  // would suppress its link here while writing it nowhere else, dropping the
+  // recording from the file entirely (the Codex P1 that FEAT-121 fixed). The
+  // pack renders every artifact it holds, so there is no parent selection to
+  // narrow this by.
+  const dadLabSection = useMemo(
+    () =>
+      buildDadLabMarkdownSection(
+        dadLabEntries,
+        artifacts
+          .filter(emitsPortfolioMediaUrl)
+          .map((a) => a.id)
+          .filter((id): id is string => id != null),
+      ),
+    [dadLabEntries, artifacts],
+  )
+
   // Export handlers
   const filePrefix = childNameLower ? `${childNameLower}-` : ''
 
@@ -560,30 +621,40 @@ function HoursComplianceTab() {
       children.map((c) => ({ id: c.id, name: c.name })),
       startDate,
       endDate,
+      dadLabSection,
     )
     downloadFile(
       md,
       `${filePrefix}portfolio-${startDate}-to-${endDate}.md`,
       'text/markdown',
     )
-  }, [artifacts, children, filePrefix, startDate, endDate])
+  }, [artifacts, children, filePrefix, startDate, endDate, dadLabSection])
 
   const [isZipping, setIsZipping] = useState(false)
+
+  // One description of the pack, shared by the fast text-only zip, the full
+  // server-side archive (FEAT-126), and the printable report — so the archive
+  // can never describe a different range than the pack beside it.
+  const packInput = useMemo(
+    () => ({
+      summary,
+      dayLogs,
+      hoursEntries,
+      evaluations,
+      artifacts,
+      children: children.map((c) => ({ id: c.id, name: c.name })),
+      startDate,
+      endDate,
+      childName: activeChild?.name ?? '',
+      dadLabSection,
+    }),
+    [summary, dayLogs, hoursEntries, evaluations, artifacts, children, startDate, endDate, activeChild, dadLabSection],
+  )
 
   const handleDownloadZip = useCallback(async () => {
     setIsZipping(true)
     try {
-      const blob = await buildComplianceZip({
-        summary,
-        dayLogs,
-        hoursEntries,
-        evaluations,
-        artifacts,
-        children: children.map((c) => ({ id: c.id, name: c.name })),
-        startDate,
-        endDate,
-        childName: activeChild?.name ?? '',
-      })
+      const blob = await buildComplianceZip(packInput)
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -598,7 +669,44 @@ function HoursComplianceTab() {
     } finally {
       setIsZipping(false)
     }
-  }, [summary, dayLogs, hoursEntries, evaluations, artifacts, children, activeChild, filePrefix, startDate, endDate])
+  }, [packInput, filePrefix, startDate, endDate])
+
+  // FEAT-126 — the full archive. The fast pack above stays exactly as it was;
+  // this one goes through a Cloud Function so the artifacts' actual bytes ride
+  // along and the portfolio's links point at `media/…` inside the zip instead
+  // of at revocable, publicly-fetchable storage URLs.
+  const [isArchiving, setIsArchiving] = useState(false)
+
+  const handleDownloadArchive = useCallback(async () => {
+    if (!activeChildId) return
+    setIsArchiving(true)
+    try {
+      const result = await requestCompliancePackArchive({
+        familyId,
+        childId: activeChildId,
+        pack: packInput,
+        artifacts,
+      })
+      const link = document.createElement('a')
+      link.href = result.downloadUrl
+      link.download = result.downloadName
+      link.rel = 'noopener'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setSnackMessage({
+        text: describeArchiveResult(result),
+        severity: result.hasGaps ? 'warning' : 'success',
+      })
+    } catch (err) {
+      setSnackMessage({
+        text: `Failed to build archive: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        severity: 'error',
+      })
+    } finally {
+      setIsArchiving(false)
+    }
+  }, [activeChildId, familyId, packInput, artifacts])
 
   const handlePrintComplianceReport = useCallback(() => {
     const html = generateComplianceReportHtml({
@@ -1102,16 +1210,27 @@ function HoursComplianceTab() {
       {activeChildId && <SectionCard title="Export Pack">
         <Stack spacing={2}>
           <Typography variant="body2" color="text.secondary">
-            Download a single zip with all compliance records, or use the
-            individual buttons below for a specific file.
+            <strong>Full Archive</strong> is the one to hand an evaluator or keep
+            for your files: the same records plus every photo and recording
+            embedded, so it opens with no internet and no expiring links. It
+            takes a minute to build and includes a <code>manifest.csv</code>
+            {' '}listing anything that could not be included, and why.{' '}
+            <strong>Records Only</strong> is the quick text export.
           </Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <Button
               variant="contained"
+              onClick={handleDownloadArchive}
+              disabled={!hasData || isArchiving}
+            >
+              {isArchiving ? 'Building archive\u2026' : 'Download Full Archive (.zip)'}
+            </Button>
+            <Button
+              variant="outlined"
               onClick={handleDownloadZip}
               disabled={!hasData || isZipping}
             >
-              {isZipping ? 'Building zip\u2026' : 'Download Compliance Pack (.zip)'}
+              {isZipping ? 'Building zip\u2026' : 'Records Only (.zip, fast)'}
             </Button>
             <Button
               variant="outlined"
@@ -1154,7 +1273,9 @@ function HoursComplianceTab() {
               variant="outlined"
               size="small"
               onClick={handleExportPortfolioMd}
-              disabled={artifacts.length === 0}
+              // FEAT-123: a range can hold Dad Labs and no artifacts — that
+              // portfolio is worth downloading, so either side keeps it live.
+              disabled={artifacts.length === 0 && dadLabEntries.length === 0}
             >
               Portfolio Index Markdown
             </Button>

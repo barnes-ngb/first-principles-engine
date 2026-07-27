@@ -65,6 +65,20 @@ service firebase.storage {
       // Write is server-side only (admin SDK) — no client write rule needed
     }
 
+    // Generated compliance packs (FEAT-126 — derived, server-written, owner-read).
+    //
+    // The full compliance archive is assembled by the `generateCompliancePack`
+    // callable and written here with the admin SDK, so no client write rule is
+    // needed. Read is owner-only: the zip embeds photos and recordings of the
+    // children, which is precisely what the feature stops handing out as
+    // permanent public links. Packs are derived data — regenerable at any time —
+    // and are deleted after 24h by the daily `sweepCompliancePacks` function, so
+    // nothing accumulates and the expiry does not depend on a later export.
+    match /families/{familyId}/compliance-packs/{allPaths=**} {
+      allow read: if isOwner(familyId);
+      // Write is server-side only (admin SDK) — no client write rule needed
+    }
+
     // Public catalog storefront (FEAT-84 — the ONLY world-readable path tree).
     //
     // A parent taps "Publish site" in the Barnes Bros → Catalog section, which

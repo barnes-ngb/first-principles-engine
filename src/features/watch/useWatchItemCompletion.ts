@@ -10,7 +10,13 @@ interface UseWatchItemCompletionParams {
   childId: string
   dayLog: DayLog | null
   persistDayLogImmediate: (updated: DayLog) => void
-  /** In-scope curated videos (from `useWatchLibrary(childId)`, D7 filtered). */
+  /**
+   * Curated videos to resolve a planned item against. Pass the **unscoped**
+   * library (`useWatchLibrary()`) — resolution is a by-id lookup, and a planned
+   * item must stay playable even if its library entry was later re-scoped to
+   * the sibling or retired (FEAT-129). The D7 `childId | 'both'` filter belongs
+   * on the planner picker, which decides what may be planned.
+   */
   videos: WatchVideo[]
   /** Date key for the day (stamped on the artifact's `dayLogId`). */
   dayLogId?: string

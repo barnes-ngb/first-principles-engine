@@ -24,6 +24,7 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
@@ -61,7 +62,12 @@ import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
-import { ENGAGEMENT_RETEST_REASON, enqueueStuckRetests } from './stuckRetestQueue'
+import {
+  ENGAGEMENT_RETEST_REASON,
+  GRADE_NOTE_RETEST_REASON,
+  enqueueStuckRetests,
+  shouldSeedFromReviewNote,
+} from './stuckRetestQueue'
 import { resolveDisplayPhotos } from './itemPhotos'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
@@ -246,7 +252,11 @@ export default function TodayChecklist({
   const [newItemTitle, setNewItemTitle] = useState('')
   const [newItemMinutes, setNewItemMinutes] = useState(15)
   const [newItemSubject, setNewItemSubject] = useState<SubjectBucket>(SubjectBucket.Other)
-  const [gradeNote, setGradeNote] = useState<{ index: number; text: string } | null>(null)
+  // `tricky` is the FEAT-70 review-moment struggle toggle — default off, and saving
+  // with it off behaves exactly as it did before the flag existed.
+  const [gradeNote, setGradeNote] = useState<
+    { index: number; text: string; tricky: boolean } | null
+  >(null)
   const [expandedCaptureIndex, setExpandedCaptureIndex] = useState<number | null>(null)
   // FEAT-109 (camera multi-shot): the checklist item whose "Add photo(s)" dialog
   // is open (null = closed). The dialog hosts PhotoCapture in staging mode so
@@ -518,13 +528,59 @@ export default function TodayChecklist({
     persistDayLogImmediate(withXp)
   }
 
-  const handleSaveGradeNote = (index: number, text: string) => {
+  const handleSaveGradeNote = (index: number, text: string, flagged: boolean) => {
     if (!dayLog?.checklist || !text.trim()) return
+    const current = (dayLog.checklist ?? [])[index]
+    // One write, not two — the flag rides along with the note.
     const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-      i === index ? { ...ci, gradeResult: text.trim() } : ci
+      i === index ? { ...ci, gradeResult: text.trim(), reviewFlaggedTricky: flagged } : ci
     )
     persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
     setGradeNote(null)
+
+    // FEAT-70: the review note's "tricky" toggle is the FOURTH daily struggle signal,
+    // and a distinct MOMENT — the Quick Review affordance is gated on
+    // `evidenceArtifactId`, so this fires only after work was captured and the parent
+    // looked at what came back (often when the in-the-moment chip already reads
+    // `got-it`). It rides the SAME item→concept bridge (workbook position ∪ skillTags)
+    // as the chip and the engagement flag; the writer resolves + gates (unmapped ⇒ no
+    // write, no guess) and is fire-and-forget, so it never blocks the note's save.
+    //
+    // The free-text note is NEVER parsed — no LLM, no machine read of `gradeResult`.
+    // Only this explicit parent toggle seeds anything, so nothing is ever inferred
+    // from prose the parent wrote under a deliberately no-judge placeholder.
+    //
+    // Guarded on the false→true TRANSITION, which is REQUIRED, not belt-and-braces:
+    // `withOpenQuestion` dedups the openQuestion, but the `queueTest` branch appends a
+    // `changeFeed` line UNCONDITIONALLY — so re-saving a note on an already-flagged
+    // item would stack duplicate change lines onto the learner model.
+    //
+    // No `skillSnapshots` write from this path: the parallel `conceptualBlocks` write
+    // stays exclusive to the mastery chip. And the toggle never sets `mastery` or
+    // `engagement` — three fields, three meanings.
+    if (
+      current &&
+      shouldSeedFromReviewNote(current.reviewFlaggedTricky, flagged) &&
+      familyId &&
+      selectedChildId
+    ) {
+      const config = current.workbookConfigId
+        ? configs.find((c) => c.id === current.workbookConfigId)
+        : undefined
+      // `.catch` rather than a bare `void`: the writer's own try/catch starts AFTER its
+      // model-free pre-resolve, so a throw out of `resolveStuckConcepts` would surface
+      // as an unhandled rejection. Fire-and-forget has to mean it here too.
+      void enqueueStuckRetests(
+        familyId,
+        selectedChildId,
+        current,
+        config,
+        new Date().toISOString(),
+        GRADE_NOTE_RETEST_REASON,
+      ).catch((err) => {
+        console.warn('[TodayChecklist] Review-note re-test enqueue failed', err)
+      })
+    }
   }
 
   // FEAT-20: open the in-context Lesson Video dialog scoped to this lesson. The
@@ -1171,7 +1227,7 @@ export default function TodayChecklist({
                   <Button
                     size="small"
                     variant="text"
-                    onClick={() => setGradeNote({ index, text: '' })}
+                    onClick={() => setGradeNote({ index, text: '', tricky: false })}
                     sx={{ ml: 5, mt: 0.5, textTransform: 'none' }}
                   >
                     Quick Review
@@ -1187,16 +1243,42 @@ export default function TodayChecklist({
                       // no-judge v1: was "e.g., 5/6 correct, missed regrouping on #4"
                       placeholder="e.g., 5/6 correct, noticed regrouping was tricky on #4"
                       value={gradeNote.text}
-                      onChange={(e) => setGradeNote({ index, text: e.target.value })}
+                      onChange={(e) =>
+                        setGradeNote({ index, text: e.target.value, tricky: gradeNote.tricky })
+                      }
                       multiline
                       rows={2}
                       autoFocus
+                    />
+                    {/* FEAT-70: optional review-moment struggle signal. Default off.
+                        Same register as the softened placeholder — a "tricky" note,
+                        not a grade. Seeds the learner-model re-test queue; the note
+                        text itself is never read by a machine. */}
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={gradeNote.tricky}
+                          onChange={(e) =>
+                            setGradeNote({
+                              index,
+                              text: gradeNote.text,
+                              tricky: e.target.checked,
+                            })
+                          }
+                        />
+                      }
+                      label={
+                        <Typography variant="body2">Was anything here tricky?</Typography>
+                      }
                     />
                     <Stack direction="row" spacing={1}>
                       <Button
                         size="small"
                         variant="outlined"
-                        onClick={() => handleSaveGradeNote(index, gradeNote.text)}
+                        onClick={() =>
+                          handleSaveGradeNote(index, gradeNote.text, gradeNote.tricky)
+                        }
                         disabled={!gradeNote.text.trim()}
                       >
                         Save
