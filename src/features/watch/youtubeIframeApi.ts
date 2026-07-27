@@ -29,6 +29,13 @@ export interface YTPlayer {
   loadVideoById(videoId: string): void
   destroy(): void
   getPlayerState?(): number
+  /**
+   * Which video is actually loaded right now. Drives the FEAT-130 drift guard —
+   * an in-frame suggestion tap swaps the video without any navigation we could
+   * otherwise observe. Optional because it is not part of the documented core
+   * surface; the guard treats an absent reader as "unknown", never as drift.
+   */
+  getVideoData?(): { video_id?: string } | undefined
 }
 
 export interface YTPlayerEvent {

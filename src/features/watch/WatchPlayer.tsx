@@ -10,7 +10,13 @@ import { ErrorState, LoadingState } from '../../components/states'
 import type { WatchVideo } from '../../core/types'
 import type { YTPlayer } from './youtubeIframeApi'
 import { useYouTubeIframeApi } from './youtubeIframeApi'
-import { isEndedState, mapPlayerError, type WatchErrorMessage } from './watchPlayerState'
+import { isEndedState, isForeignVideo, mapPlayerError, type WatchErrorMessage } from './watchPlayerState'
+import {
+  buildWatchEmbedUrl,
+  currentOrigin,
+  WATCH_IFRAME_ALLOW,
+  WATCH_IFRAME_SANDBOX,
+} from './watchEmbedUrl'
 import {
   currentFullscreenElement,
   exitFullscreenIfActive,
@@ -18,26 +24,15 @@ import {
   requestFrameFullscreen,
 } from './playerFullscreen'
 
-/**
- * Locked player params (design §4). Chrome-stripped and safety-first — no
- * autoplay, no cross-channel suggestions, no keyboard-less trap.
- */
-const PLAYER_VARS = {
-  autoplay: 0, // nothing plays until the kid presses play (T2)
-  rel: 0, // limit related videos to the same channel (no cross-channel rabbit hole)
-  modestbranding: 1, // strip YouTube branding
-  iv_load_policy: 3, // no video annotations
-  playsinline: 1, // play inline on iOS, never fullscreen-hijack
-  disablekb: 0, // keyboard controls remain (accessibility)
-  // fs=0 (design §4 showed fs=1). Fullscreen puts the iframe in the browser's
-  // top layer, ABOVE our sibling end-stop overlay — so YouTube's end screen
-  // would stay tappable at video end, defeating the C1 end-stop. C1 (the heart
-  // of the ask) wins: no fullscreen button, and without allowfullscreen the
-  // iframe's Fullscreen API is blocked too.
-  fs: 0,
-} as const
-
-const NOCOOKIE_HOST = 'https://www.youtube-nocookie.com'
+/** Read the id of the video actually loaded, or `null` when it can't be read. */
+function readLoadedVideoId(player: YTPlayer): string | null {
+  try {
+    return player.getVideoData?.()?.video_id ?? null
+  } catch {
+    // A destroyed or older player can throw — unknown, never treated as drift.
+    return null
+  }
+}
 
 interface WatchPlayerProps {
   video: WatchVideo
@@ -85,6 +80,7 @@ export default function WatchPlayer({
   const frameRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YTPlayer | null>(null)
   const [done, setDone] = useState(false)
+  const [drifted, setDrifted] = useState(false)
   const [playError, setPlayError] = useState<WatchErrorMessage | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const canFullscreen = fullscreenSupported()
@@ -128,25 +124,51 @@ export default function WatchPlayer({
     // WatchPlayerDialog — no state reset in this effect, so no cascading render.)
 
     // Mount into a FRESH attached child, not the ref'd container directly: the
-    // Player API *replaces* the node it's given with the iframe, so passing the
-    // ref would leave `containerRef.current` detached after `destroy()`. Under
-    // StrictMode's dev setup→cleanup→setup replay the second setup would then
-    // mount into detached DOM (a blank player). A per-setup host keeps the
-    // container stable and always attached.
+    // Player API tears down the node it drives on `destroy()`, so passing the
+    // ref would leave `containerRef.current` detached. Under StrictMode's dev
+    // setup→cleanup→setup replay the second setup would then mount into detached
+    // DOM (a blank player). A per-setup host keeps the container stable and
+    // always attached.
+    //
+    // FEAT-130: that host is now the **iframe itself**, built here rather than by
+    // the Player API, because the API offers no way to set `sandbox` on an iframe
+    // it creates — and `sandbox` is what removes the click-out to YouTube. We
+    // hand the finished element to `yt.Player`, which attaches to it (the src
+    // carries `enablejsapi=1`) instead of creating its own. Building it
+    // imperatively rather than in JSX also keeps React out of the node's
+    // lifecycle, so `destroy()` removing it can never race React's own cleanup.
     const container = containerRef.current
-    const host = document.createElement('div')
+    const host = document.createElement('iframe')
+    host.src = buildWatchEmbedUrl(video.youtubeId, currentOrigin())
+    host.title = video.title
+    host.setAttribute('sandbox', WATCH_IFRAME_SANDBOX)
+    host.setAttribute('allow', WATCH_IFRAME_ALLOW)
+    // No `allowfullscreen`: YouTube fullscreen would put the frame in the
+    // browser's top layer, ABOVE our end-stop overlay, leaving the end screen
+    // tappable. App-owned fullscreen on the wrapper covers the frame instead.
+    host.setAttribute('frameborder', '0')
     host.style.width = '100%'
     host.style.height = '100%'
+    host.style.border = '0'
     container.appendChild(host)
 
     const player = new yt.Player(host, {
-      host: NOCOOKIE_HOST,
-      videoId: video.youtubeId,
-      width: '100%',
-      height: '100%',
-      playerVars: { ...PLAYER_VARS },
       events: {
         onStateChange: (event) => {
+          // ── THE DRIFT GUARD ───────────────────────────────────────────
+          // Checked BEFORE the end-stop: if a suggestion tap swapped the video,
+          // an ENDED here belongs to the wrong one and must not read "All done!".
+          if (isForeignVideo(readLoadedVideoId(event.target), video.youtubeId)) {
+            try {
+              event.target.stopVideo()
+            } catch {
+              // A destroyed player can throw; the overlay still covers it.
+            }
+            exitFullscreenIfActive()
+            setDrifted(true)
+            return
+          }
+
           if (!isEndedState(event.data)) return
           // ── THE END-STOP ──────────────────────────────────────────────
           // Stop the player and load NOTHING. The app takes control back.
@@ -180,8 +202,10 @@ export default function WatchPlayer({
       host.remove()
       playerRef.current = null
     }
-    // Re-create only when the API becomes ready or the video changes.
-  }, [status, yt, video.youtubeId])
+    // Re-create only when the API becomes ready or the video changes. (`title`
+    // is the iframe's accessible name, so it belongs here too — in practice the
+    // dialog already remounts per video, so this never re-fires mid-watch.)
+  }, [status, yt, video.youtubeId, video.title])
 
   if (status === 'loading') {
     return <LoadingState label="Getting the video ready…" />
@@ -238,7 +262,7 @@ export default function WatchPlayer({
         {/* App-owned fullscreen toggle. Lives INSIDE the frame so it stays
             usable in fullscreen (only the frame subtree is visible then).
             Hidden once done/errored — the overlay owns the frame. */}
-        {canFullscreen && !done && !playError && (
+        {canFullscreen && !done && !drifted && !playError && (
           <Button
             size="small"
             variant="contained"
@@ -262,7 +286,25 @@ export default function WatchPlayer({
         {/* End-stop overlay: OPAQUE + covers the whole player so the (already
             stopped) YouTube end screen can never be tapped. Because it lives
             inside the frame, it renders above the video in fullscreen too. */}
-        {done && !playError && (
+        {/* Drift overlay: a suggestion tap swapped the video inside the frame.
+            Same opaque cover as the end-stop, no blame, one way forward. */}
+        {drifted && !playError && (
+          <Stack
+            spacing={2}
+            alignItems="center"
+            justifyContent="center"
+            sx={{ position: 'absolute', inset: 0, bgcolor: 'background.paper', p: 3, zIndex: 4 }}
+          >
+            <Typography variant="body1" textAlign="center">
+              That&apos;s a different video — let&apos;s stick with the one we planned.
+            </Typography>
+            <Button variant="contained" onClick={handleDone}>
+              Go back
+            </Button>
+          </Stack>
+        )}
+
+        {done && !drifted && !playError && (
           <Stack
             spacing={2}
             alignItems="center"

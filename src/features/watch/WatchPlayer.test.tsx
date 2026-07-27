@@ -10,11 +10,17 @@ interface FakePlayer {
   stopVideo: ReturnType<typeof vi.fn>
   loadVideoById: ReturnType<typeof vi.fn>
   destroy: ReturnType<typeof vi.fn>
+  getVideoData: ReturnType<typeof vi.fn>
 }
 
 // ── Hoisted capture + write spies ───────────────────────────────────────────
 const { capture, apiState, fsMock, addDocMock, setDocMock, updateDocMock } = vi.hoisted(() => ({
-  capture: { options: null as YTPlayerOptions | null, player: null as FakePlayer | null },
+  capture: {
+    options: null as YTPlayerOptions | null,
+    player: null as FakePlayer | null,
+    /** The element handed to `YT.Player` — FEAT-130 makes this our own iframe. */
+    element: null as unknown,
+  },
   apiState: {
     status: 'ready' as 'loading' | 'ready' | 'error',
     yt: null as YTNamespace | null,
@@ -60,13 +66,16 @@ function makeFakePlayer(): FakePlayer {
     stopVideo: vi.fn(),
     loadVideoById: vi.fn(),
     destroy: vi.fn(),
+    // Default: the planned video is what's loaded (no drift).
+    getVideoData: vi.fn(() => ({ video_id: VIDEO.youtubeId })),
   }
 }
 
-/** A fake `YT` whose Player constructor captures its options + instance. */
+/** A fake `YT` whose Player constructor captures its element, options + instance. */
 function fakeYT(): YTNamespace {
   return {
-    Player: vi.fn(function (_el: unknown, options: YTPlayerOptions) {
+    Player: vi.fn(function (el: unknown, options: YTPlayerOptions) {
+      capture.element = el
       capture.options = options
       const player = makeFakePlayer()
       capture.player = player
@@ -74,6 +83,13 @@ function fakeYT(): YTNamespace {
     }) as unknown as YTNamespace['Player'],
     PlayerState: { UNSTARTED: -1, ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 },
   }
+}
+
+/** The player iframe the component built and handed to the API. */
+function playerIframe(): HTMLIFrameElement {
+  const el = capture.element as HTMLIFrameElement | null
+  expect(el).toBeInstanceOf(HTMLIFrameElement)
+  return el!
 }
 
 const VIDEO: WatchVideo = {
@@ -99,6 +115,7 @@ function emitState(data: number) {
 beforeEach(() => {
   capture.options = null
   capture.player = null
+  capture.element = null
   apiState.status = 'ready'
   apiState.yt = fakeYT()
   apiState.error = null
@@ -112,21 +129,102 @@ beforeEach(() => {
 })
 
 describe('WatchPlayer', () => {
+  // FEAT-130: assert the ACTUAL rendered src, not the playerVars object we hand
+  // a third-party constructor — the src is what the browser loads.
   it('mounts the player on the nocookie host with the locked, child-safe params', () => {
     render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
 
-    expect(capture.options).not.toBeNull()
-    expect(capture.options!.host).toBe('https://www.youtube-nocookie.com')
-    expect(capture.options!.videoId).toBe('dQw4w9WgXcQ')
-    const vars = capture.options!.playerVars!
-    expect(vars.autoplay).toBe(0)
-    expect(vars.rel).toBe(0)
-    expect(vars.modestbranding).toBe(1)
-    expect(vars.iv_load_policy).toBe(3)
-    expect(vars.playsinline).toBe(1)
-    // fs=0: no fullscreen button — fullscreen would put the iframe above the
-    // end-stop overlay and defeat it (Codex P1).
-    expect(vars.fs).toBe(0)
+    const url = new URL(playerIframe().src)
+    expect(url.origin).toBe('https://www.youtube-nocookie.com')
+    expect(url.pathname).toBe('/embed/dQw4w9WgXcQ')
+
+    const p = url.searchParams
+    expect(p.get('autoplay')).toBe('0')
+    expect(p.get('rel')).toBe('0')
+    expect(p.get('modestbranding')).toBe('1')
+    expect(p.get('iv_load_policy')).toBe('3')
+    expect(p.get('playsinline')).toBe('1')
+    // fs=0: no fullscreen button — YouTube fullscreen would put the iframe above
+    // the end-stop overlay and defeat it (Codex P1).
+    expect(p.get('fs')).toBe('0')
+    // Required for the API to attach to an iframe we built ourselves.
+    expect(p.get('enablejsapi')).toBe('1')
+    // Bind the JS API handshake to our page.
+    expect(p.get('origin')).toBe(window.location.origin)
+  })
+
+  // ── FEAT-130 containment ──────────────────────────────────────────────────
+
+  it('sandboxes the frame so no YouTube chrome can open a way out', () => {
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+    const tokens = (playerIframe().getAttribute('sandbox') ?? '').split(/\s+/).filter(Boolean)
+
+    // Load-bearing: the player is JS, and the JS API handshake is origin-targeted.
+    expect(tokens).toContain('allow-scripts')
+    expect(tokens).toContain('allow-same-origin')
+
+    // The whole point. Every YouTube click-out (logo, title, channel avatar,
+    // share, "Watch on YouTube") is a popup; top-navigation would take the app
+    // itself to YouTube. Neither is granted.
+    expect(tokens).not.toContain('allow-popups')
+    expect(tokens).not.toContain('allow-popups-to-escape-sandbox')
+    expect(tokens).not.toContain('allow-top-navigation')
+    expect(tokens).not.toContain('allow-top-navigation-by-user-activation')
+  })
+
+  it('does not delegate fullscreen or the share sheet to the frame', () => {
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+    const iframe = playerIframe()
+    // No allowfullscreen: YouTube fullscreen would lift the frame above our overlay.
+    expect(iframe.hasAttribute('allowfullscreen')).toBe(false)
+    expect(iframe.getAttribute('allow') ?? '').not.toContain('web-share')
+  })
+
+  it('renders no click-out affordance of our own — the only link is the video', () => {
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+    expect(document.querySelectorAll('a').length).toBe(0)
+    expect(screen.queryByText(/watch on youtube/i)).not.toBeInTheDocument()
+  })
+
+  // THE DRIFT GUARD: the one hole sandbox can't close — a pause-screen
+  // suggestion tap swaps the video *inside* the frame (no popup, no navigation).
+  it('stops and covers the frame when a suggestion swaps in a different video', () => {
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+
+    capture.player!.getVideoData.mockReturnValue({ video_id: 'someOtherId' })
+    emitState(1) // PLAYING — but it's no longer the planned video
+
+    expect(capture.player!.stopVideo).toHaveBeenCalledTimes(1)
+    expect(screen.getByText(/stick with the one we planned/i)).toBeInTheDocument()
+    // Never "All done!" — a foreign video must not read as completion.
+    expect(screen.queryByText(/all done/i)).not.toBeInTheDocument()
+    expect(capture.player!.loadVideoById).not.toHaveBeenCalled()
+  })
+
+  it('a foreign video that ENDS does not complete the planned item', () => {
+    const onComplete = vi.fn()
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} onComplete={onComplete} />)
+
+    capture.player!.getVideoData.mockReturnValue({ video_id: 'someOtherId' })
+    emitState(0) // ENDED — for the wrong video
+
+    expect(screen.getByText(/stick with the one we planned/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /mark it done/i })).not.toBeInTheDocument()
+    expect(onComplete).not.toHaveBeenCalled()
+  })
+
+  it('never claims drift when the loaded id cannot be read (no false interruption)', () => {
+    render(<WatchPlayer video={VIDEO} onDone={vi.fn()} />)
+
+    capture.player!.getVideoData.mockReturnValue(undefined)
+    emitState(1) // PLAYING
+    expect(screen.queryByText(/stick with the one we planned/i)).not.toBeInTheDocument()
+
+    capture.player!.getVideoData.mockImplementation(() => {
+      throw new Error('destroyed')
+    })
+    emitState(0) // ENDED — the end-stop must still run
+    expect(screen.getByText(/all done/i)).toBeInTheDocument()
   })
 
   it('shows the PARENT-authored title, never the YouTube title (D4)', () => {
