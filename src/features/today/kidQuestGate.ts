@@ -1,36 +1,57 @@
 import type { ChecklistItem } from '../../core/types'
 
 /**
- * Split a day's checklist into the kid's "must-do" quests and "choose" items.
+ * Split a day's checklist into the kid's "must-do" quests, "choose" items, and
+ * "watch" rows.
  *
  * Prefers explicit `category` tags; falls back to "first 3 are must-do" when a
  * plan predates categorization.
+ *
+ * **Watch rows are pulled out first, on `itemType === 'watch'` and never on
+ * `category` (FEAT-134).** A planned video is optional: it is not a required
+ * quest, it does not feed the Workshop unlock gate, it earns no XP, and it is
+ * not one of the craft choices. Keying the bucket off `itemType` alone means a
+ * hand-made row that missed `category: 'choose'` still lands in `watch` rather
+ * than silently becoming a must-do — including on the uncategorized fallback
+ * path, where it would otherwise be swept up by the "first 3" slice.
  */
 export function categorizeItems(checklist: ChecklistItem[]): {
   mustDo: ChecklistItem[]
   choose: ChecklistItem[]
+  watch: ChecklistItem[]
 } {
-  const hasCategories = checklist.some((item) => item.category)
+  const watch = checklist.filter((item) => item.itemType === 'watch')
+  const rest = checklist.filter((item) => item.itemType !== 'watch')
+
+  const hasCategories = rest.some((item) => item.category)
 
   if (hasCategories) {
     return {
-      mustDo: checklist.filter(
+      mustDo: rest.filter(
         (item) => item.category === 'must-do' || (!item.category && item.mvdEssential),
       ),
-      choose: checklist.filter((item) => item.category === 'choose'),
+      choose: rest.filter((item) => item.category === 'choose'),
+      watch,
     }
   }
 
   // Fallback: first 3 items are must-do, rest are choose
   return {
-    mustDo: checklist.slice(0, Math.min(3, checklist.length)),
-    choose: checklist.slice(3),
+    mustDo: rest.slice(0, Math.min(3, rest.length)),
+    choose: rest.slice(3),
+    watch,
   }
 }
 
 export interface QuestProgress {
   mustDo: ChecklistItem[]
   choose: ChecklistItem[]
+  /**
+   * Planned curated videos (FEAT-100/104). Optional and always available — they
+   * are deliberately absent from both `mustDo` and `choose`, so they never move
+   * the quest count, the Workshop gate, or the craft-selection cap.
+   */
+  watch: ChecklistItem[]
   /** True when every must-do quest is completed (skips do NOT count). */
   mustDoDone: boolean
   /** Quests still open for the kid — neither completed nor parent-skipped. */
@@ -53,7 +74,7 @@ export interface QuestProgress {
  * advances the unlock gate, the "X of N done" count, or day completion.
  */
 export function computeQuestProgress(checklist: ChecklistItem[]): QuestProgress {
-  const { mustDo, choose } = categorizeItems(checklist)
+  const { mustDo, choose, watch } = categorizeItems(checklist)
 
   const mustDoDone = mustDo.length > 0 && mustDo.every((item) => item.completed)
   const mustDoRemaining = mustDo.filter((item) => !item.completed && !item.skipped).length
@@ -67,6 +88,7 @@ export function computeQuestProgress(checklist: ChecklistItem[]): QuestProgress 
   return {
     mustDo,
     choose,
+    watch,
     mustDoDone,
     mustDoRemaining,
     mustDoCompleted,
@@ -74,4 +96,26 @@ export function computeQuestProgress(checklist: ChecklistItem[]): QuestProgress 
     gateThreshold,
     gateUnlocked,
   }
+}
+
+/**
+ * The kid's "everything's done" flag — must-dos finished, plus the craft choices
+ * they picked (on a Normal Day; MVD has no craft section).
+ *
+ * Extracted from `KidTodayView` so the one behaviour FEAT-134 changes here is
+ * assertable: a planned video is **never** in `choose`, so an unwatched video
+ * can no longer hold the day open. That is the intended outcome for an optional
+ * item — a kid finishing every quest is not blocked by a video they skipped.
+ */
+export function isDayAllDone(args: {
+  mustDoDone: boolean
+  isMvd: boolean
+  choose: ChecklistItem[]
+  selectedChoiceItems: ChecklistItem[]
+}): boolean {
+  const { mustDoDone, isMvd, choose, selectedChoiceItems } = args
+  return (
+    mustDoDone &&
+    (isMvd || choose.length === 0 || selectedChoiceItems.every((item) => item.completed))
+  )
 }
