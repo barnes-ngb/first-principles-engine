@@ -23,7 +23,13 @@ export function categorizeItems(checklist: ChecklistItem[]): {
   const watch = checklist.filter((item) => item.itemType === 'watch')
   const rest = checklist.filter((item) => item.itemType !== 'watch')
 
-  const hasCategories = rest.some((item) => item.category)
+  // Probe the FULL checklist, not `rest`. Extracting watch rows must not change
+  // which bucketing branch a day takes. A watch row always carries
+  // `category: 'choose'`, so on a legacy uncategorized day it is the one thing
+  // flipping this true — probing `rest` would drop that day into the "first 3
+  // are must-do" fallback and silently reshuffle which items are quests (and
+  // with them the Workshop gate). Pinned by the mixed-shape test.
+  const hasCategories = checklist.some((item) => item.category)
 
   if (hasCategories) {
     return {

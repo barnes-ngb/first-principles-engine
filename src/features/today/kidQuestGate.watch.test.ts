@@ -52,6 +52,28 @@ describe('categorizeItems — a planned video gets its own bucket (FEAT-134)', (
     expect(choose).toHaveLength(0)
   })
 
+  it('a legacy uncategorized day with a watch row keeps its categorized bucketing', () => {
+    // The mixed shape: non-watch items predate categorization, but the video
+    // carries `category: 'choose'` (watchDayItem.ts always stamps it). That tag
+    // is what flips `hasCategories` true, so the day takes the categorized
+    // branch and mvdEssential still decides the quests. Probing only the
+    // non-watch items would drop this day into the "first 3 are must-do"
+    // fallback — the two essentials would lose must-do status and A/B/C would
+    // gain it, moving the quest count and the Workshop gate with them.
+    const { mustDo, choose, watch } = categorizeItems([
+      quest({ label: 'A', category: undefined }),
+      quest({ label: 'B', category: undefined }),
+      quest({ label: 'C', category: undefined }),
+      quest({ label: 'D-essential', category: undefined, mvdEssential: true }),
+      quest({ label: 'E-essential', category: undefined, mvdEssential: true }),
+      quest({ label: 'F', category: undefined }),
+      watchRow(),
+    ])
+    expect(mustDo.map((i) => i.label)).toEqual(['D-essential', 'E-essential'])
+    expect(choose).toHaveLength(0)
+    expect(watch.map((i) => i.label)).toEqual(['Watch: Revolution war (12m)'])
+  })
+
   it('on the uncategorized fallback path a watch row is still not swept into the first-3 must-dos', () => {
     // No `category` anywhere → the "first 3 are must-do" fallback. The video sits
     // at index 1, so pre-FEAT-134 it would have become a required quest.
