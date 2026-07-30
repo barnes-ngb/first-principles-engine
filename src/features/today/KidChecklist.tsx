@@ -362,8 +362,14 @@ export default function KidChecklist({
           moment the day opens. No `mustDoDone` lock (that was the reported
           bug — the row was buried in a locked Craft section), no `!isMvd`
           wrapper, no craft-slot accounting, and no XP. Reuses the same
-          `onWatchOpen` player as every other watch affordance. */}
-      {watch.length > 0 && (
+          `onWatchOpen` player as every other watch affordance.
+
+          A parent-skipped video is rendered as the same inert struck-through
+          row the must-do list uses (never playable), and the section hides
+          entirely once every video on the day is skipped — "You Can Watch"
+          must not head a card with nothing watchable in it. Skip is a
+          parent-only action (FUNC-08) and applies to any row, watch included. */}
+      {watch.some((item) => !item.skipped) && (
         <SectionCard title="🎬 You Can Watch">
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             {isLincoln
@@ -373,6 +379,17 @@ export default function KidChecklist({
           <Stack spacing={1}>
             {watch.map((item) => {
               const absIndex = checklist.indexOf(item)
+
+              if (item.skipped) {
+                return (
+                  <Box key={absIndex} sx={{ p: 1, borderRadius: 2, bgcolor: 'action.hover', minHeight: 56, display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ textDecoration: 'line-through', opacity: 0.4, flex: 1 }}>
+                      {item.label} — skipped
+                    </Typography>
+                  </Box>
+                )
+              }
+
               return (
                 <Box key={absIndex}>
                   <Stack

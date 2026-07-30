@@ -145,6 +145,36 @@ describe('KidChecklist — a planned video is visible and playable (FEAT-134)', 
     expect(screen.getByRole('button', { name: /watch/i })).toBeTruthy()
   })
 
+  // Skip is a parent-only action (FUNC-08) and the Today edit-mode toggle has no
+  // itemType guard, so it applies to a watch row too. The always-open section
+  // must not hand back a video the parent removed — newly reachable, since the
+  // old choose section was locked or hidden when this could bite (Codex P2).
+  it('a parent-skipped video is inert — struck through, no Watch button, no player', () => {
+    const { onWatchOpen } = renderKid([
+      quest({ label: 'Prayer' }),
+      watchRow({ label: 'Watch: Skipped one (12m)', skipped: true }),
+      watchRow({ label: 'Watch: Live one (8m)', watchVideoId: 'vid-live' }),
+    ])
+    expect(screen.getByText('Watch: Skipped one (12m) — skipped')).toBeTruthy()
+
+    // Only the un-skipped video offers a player, and tapping the skipped row
+    // does nothing at all.
+    const buttons = screen.getAllByRole('button', { name: /watch/i })
+    expect(buttons).toHaveLength(1)
+    fireEvent.click(screen.getByText('Watch: Skipped one (12m) — skipped'))
+    expect(onWatchOpen).not.toHaveBeenCalled()
+
+    fireEvent.click(buttons[0])
+    expect(onWatchOpen).toHaveBeenCalledTimes(1)
+    expect(onWatchOpen.mock.calls[0][0].watchVideoId).toBe('vid-live')
+  })
+
+  it('hides the whole section when every planned video is skipped', () => {
+    renderKid([quest({ label: 'Prayer' }), watchRow({ skipped: true })])
+    expect(screen.queryByText(/You Can Watch/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /watch/i })).toBeNull()
+  })
+
   it('renders no watch section on a day with no planned video', () => {
     renderKid([quest({ label: 'Prayer' }), quest({ label: 'Math' })])
     expect(screen.queryByText(/You Can Watch/i)).toBeNull()
