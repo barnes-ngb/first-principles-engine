@@ -35,6 +35,13 @@ function isBookItem(item: ChecklistItem): boolean {
 interface KidChecklistProps {
   mustDo: ChecklistItem[]
   choose: ChecklistItem[]
+  /**
+   * Planned curated videos (FEAT-134). Rendered in their own always-open
+   * section: a video is optional, so it is visible and playable at any time —
+   * it does not wait on the must-do list, it shows on an MVD day, it never
+   * consumes a craft slot, and it earns no XP.
+   */
+  watch?: ChecklistItem[]
   checklist: ChecklistItem[]
   maxChoices: number
   isLincoln: boolean
@@ -72,6 +79,7 @@ interface KidChecklistProps {
 export default function KidChecklist({
   mustDo,
   choose,
+  watch = [],
   checklist,
   maxChoices,
   isLincoln,
@@ -347,6 +355,106 @@ export default function KidChecklist({
           </Typography>
         )}
       </SectionCard>
+
+      {/* ── WATCH SECTION (FEAT-134) ──
+          Deliberately outside both the must-do card and the "Craft" card: a
+          planned video is optional, so it is visible and playable from the
+          moment the day opens. No `mustDoDone` lock (that was the reported
+          bug — the row was buried in a locked Craft section), no `!isMvd`
+          wrapper, no craft-slot accounting, and no XP. Reuses the same
+          `onWatchOpen` player as every other watch affordance.
+
+          A parent-skipped video is rendered as the same inert struck-through
+          row the must-do list uses (never playable), and the section hides
+          entirely once every video on the day is skipped — "You Can Watch"
+          must not head a card with nothing watchable in it. Skip is a
+          parent-only action (FUNC-08) and applies to any row, watch included. */}
+      {watch.some((item) => !item.skipped) && (
+        <SectionCard title="🎬 You Can Watch">
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            {isLincoln
+              ? 'Picked just for you. Watch it whenever you like — it’s not a quest.'
+              : 'Watch it whenever you like — it’s not a must-do.'}
+          </Typography>
+          <Stack spacing={1}>
+            {watch.map((item) => {
+              const absIndex = checklist.indexOf(item)
+
+              if (item.skipped) {
+                return (
+                  <Box key={absIndex} sx={{ p: 1, borderRadius: 2, bgcolor: 'action.hover', minHeight: 56, display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ textDecoration: 'line-through', opacity: 0.4, flex: 1 }}>
+                      {item.label} — skipped
+                    </Typography>
+                  </Box>
+                )
+              }
+
+              return (
+                <Box key={absIndex}>
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    spacing={1}
+                    sx={{
+                      p: 1,
+                      borderRadius: 2,
+                      bgcolor: item.completed ? 'success.50' : 'background.paper',
+                      border: '1px solid',
+                      borderColor: item.completed ? 'success.200' : 'divider',
+                      minHeight: 56,
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => handleToggleItem(absIndex)}
+                  >
+                    <Checkbox
+                      checked={item.completed}
+                      sx={{ '& .MuiSvgIcon-root': { fontSize: 28 }, p: 0.5 }}
+                      color="success"
+                      tabIndex={-1}
+                    />
+                    <Typography
+                      variant="body1"
+                      sx={{
+                        flex: 1,
+                        textDecoration: item.completed ? 'line-through' : 'none',
+                        color: item.completed ? 'text.secondary' : 'text.primary',
+                        fontWeight: 500,
+                      }}
+                    >
+                      <OndemandVideoIcon sx={{ fontSize: 18, mr: 0.5, verticalAlign: 'text-bottom' }} />
+                      {item.label}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {item.completed ? '✓' : getTimeLabel(item.estimatedMinutes ?? item.plannedMinutes)}
+                    </Typography>
+                  </Stack>
+                  {/* A completed watch row shows no Watch button (unchanged). */}
+                  {onWatchOpen && !item.completed && (
+                    <Box sx={{ ml: 5, mt: 1 }}>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="secondary"
+                        startIcon={<OndemandVideoIcon />}
+                        onClick={(e) => { e.stopPropagation(); onWatchOpen(item, absIndex) }}
+                        sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                      >
+                        ▶ Watch
+                      </Button>
+                    </Box>
+                  )}
+                  {item.evidenceArtifactId && (
+                    <Typography variant="caption" color="success.main" sx={{ ml: 5, display: 'block' }}>
+                      Work captured!
+                    </Typography>
+                  )}
+                </Box>
+              )
+            })}
+          </Stack>
+        </SectionCard>
+      )}
 
       {/* ── CHOOSE SECTION ── */}
       {!isMvd && choose.length > 0 && (
