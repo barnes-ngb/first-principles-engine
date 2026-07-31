@@ -57,7 +57,7 @@ import KidChecklist from './KidChecklist'
 import WatchItemDialog from '../watch/WatchItemDialog'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
-import { computeQuestProgress } from './kidQuestGate'
+import { computeQuestProgress, isDayAllDone } from './kidQuestGate'
 import KidCelebration from './KidCelebration'
 import KidChapterPool from './KidChapterPool'
 import { isChapterPoolVisible, isReadAloudSectionVisible } from './chapterPool.logic'
@@ -219,6 +219,9 @@ export default function KidTodayView({
   const {
     mustDo,
     choose,
+    // Planned curated videos — their own bucket (FEAT-134), so they render in
+    // their own always-open section instead of being locked inside "Craft 2".
+    watch: watchItems,
     mustDoDone,
     mustDoRemaining,
     mustDoCompleted,
@@ -235,9 +238,14 @@ export default function KidTodayView({
     [choose, selectedChoices],
   )
 
-  const allDone =
-    mustDoDone &&
-    (isMvd || choose.length === 0 || selectedChoiceItems.every((item) => item.completed))
+  // `choose` no longer carries watch rows, so an unwatched video can't hold the
+  // day open — correct for an optional item (FEAT-134).
+  const allDone = isDayAllDone({
+    mustDoDone,
+    isMvd: !!isMvd,
+    choose,
+    selectedChoiceItems,
+  })
 
   const isLincoln = child.name.toLowerCase() === 'lincoln'
   const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])
@@ -685,11 +693,12 @@ export default function KidTodayView({
         </Typography>
       )}
 
-      {/* ── CHECKLIST (Must-Do + Choose) — the spine of the one list ── */}
+      {/* ── CHECKLIST (Must-Do + Watch + Choose) — the spine of the one list ── */}
       <SectionErrorBoundary section="checklist">
         <KidChecklist
           mustDo={mustDo}
           choose={choose}
+          watch={watchItems}
           checklist={checklist}
           maxChoices={maxChoices}
           isLincoln={isLincoln}
