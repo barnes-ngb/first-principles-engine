@@ -179,4 +179,173 @@ describe('syncChecklistToRoutine', () => {
     const result = syncChecklistToRoutine(baseDayLog, item, true)
     expect(result).toEqual(baseDayLog)
   })
+
+  it('un-syncs reading sub-item back to false', () => {
+    const withReading: DayLog = {
+      ...baseDayLog,
+      reading: {
+        ...baseDayLog.reading!,
+        readingEggs: { done: true },
+      },
+    }
+    const item = makeItem('Reading Eggs (45m)', SubjectBucket.Reading)
+    const result = syncChecklistToRoutine(withReading, item, false)
+    expect(result.reading?.readingEggs?.done).toBe(false)
+  })
+
+  it('un-syncs speech back to false', () => {
+    const withSpeech: DayLog = { ...baseDayLog, speech: { done: true } }
+    const item = makeItem('Speech Routine (10m)', SubjectBucket.LanguageArts)
+    const result = syncChecklistToRoutine(withSpeech, item, false)
+    expect(result.speech?.done).toBe(false)
+  })
+
+  it('un-syncs workshop back to false', () => {
+    const withWorkshop: DayLog = { ...baseDayLog, workshop: { done: true } }
+    const item = makeItem('Workshop Game (20m)')
+    const result = syncChecklistToRoutine(withWorkshop, item, false)
+    expect(result.workshop?.done).toBe(false)
+  })
+
+  it('passes activeRoutineItems through to inferRoutineKeys', () => {
+    const activeItems = [RoutineItemKey.Math, RoutineItemKey.Speech]
+    const item = makeItem('Read Aloud (15m)', SubjectBucket.Reading)
+    const result = syncChecklistToRoutine(baseDayLog, item, true, activeItems)
+    expect(result).toEqual(baseDayLog)
+  })
+
+  it('does not modify for Science items', () => {
+    const item = makeItem('Science experiment (30m)', SubjectBucket.Science)
+    const result = syncChecklistToRoutine(baseDayLog, item, true)
+    expect(result).toEqual(baseDayLog)
+  })
+
+  it('does not modify for SocialStudies items', () => {
+    const item = makeItem('History reading (20m)', SubjectBucket.SocialStudies)
+    const result = syncChecklistToRoutine(baseDayLog, item, true)
+    expect(result).toEqual(baseDayLog)
+  })
+})
+
+// ─── Untested label patterns ─────────────────────────────────────────────────
+
+describe('inferRoutineKeys — additional patterns', () => {
+  it('maps "Decodable reading" to decodableReading', () => {
+    expect(inferRoutineKeys(makeItem('Decodable Reading Practice (15m)'))).toEqual([RoutineItemKey.DecodableReading])
+  })
+
+  it('maps "Narration practice" to narrationOrSoundReps', () => {
+    expect(inferRoutineKeys(makeItem('Narration Practice (10m)'))).toEqual([RoutineItemKey.NarrationOrSoundReps])
+  })
+
+  it('returns empty for Other subjectBucket with no label match', () => {
+    expect(inferRoutineKeys(makeItem('Free play time', SubjectBucket.Other))).toEqual([])
+  })
+
+  it('returns empty for Reading subjectBucket when label has no reading keyword', () => {
+    expect(inferRoutineKeys(makeItem('Some activity', SubjectBucket.Reading))).toEqual([])
+  })
+})
+
+// ─── Untested applyRoutineToggle paths ───────────────────────────────────────
+
+describe('applyRoutineToggle — additional paths', () => {
+  const baseDayLog: DayLog = {
+    childId: 'child1',
+    date: '2026-03-23',
+    blocks: [],
+    reading: {
+      handwriting: { done: false },
+      spelling: { done: false },
+      sightWords: { done: false },
+      minecraft: { done: false },
+      readingEggs: { done: false },
+    },
+    math: { done: false },
+    speech: { done: false },
+  }
+
+  it('toggles math.wordProblems sub-item', () => {
+    const result = applyRoutineToggle(baseDayLog, RoutineItemKey.WordProblemsModeled, true)
+    expect(result.math?.wordProblems?.done).toBe(true)
+    expect(result.math?.done).toBe(false)
+  })
+
+  it('toggles speech.narrationReps sub-item', () => {
+    const result = applyRoutineToggle(baseDayLog, RoutineItemKey.NarrationOrSoundReps, true)
+    expect(result.speech?.narrationReps?.done).toBe(true)
+    expect(result.speech?.done).toBe(false)
+  })
+
+  it('un-toggles math.numberSense back to false', () => {
+    const withNumberSense: DayLog = {
+      ...baseDayLog,
+      math: { done: false, numberSense: { done: true } },
+    }
+    const result = applyRoutineToggle(withNumberSense, RoutineItemKey.NumberSenseOrFacts, false)
+    expect(result.math?.numberSense?.done).toBe(false)
+  })
+
+  it('un-toggles speech.narrationReps back to false', () => {
+    const withNarration: DayLog = {
+      ...baseDayLog,
+      speech: { done: false, narrationReps: { done: true } },
+    }
+    const result = applyRoutineToggle(withNarration, RoutineItemKey.NarrationOrSoundReps, false)
+    expect(result.speech?.narrationReps?.done).toBe(false)
+  })
+
+  it('initializes math if missing when toggling sub-item', () => {
+    const noMath: DayLog = { childId: 'c', date: 'd', blocks: [] }
+    const result = applyRoutineToggle(noMath, RoutineItemKey.NumberSenseOrFacts, true)
+    expect(result.math?.numberSense?.done).toBe(true)
+    expect(result.math?.done).toBe(false)
+  })
+
+  it('initializes speech if missing when toggling sub-item', () => {
+    const noSpeech: DayLog = { childId: 'c', date: 'd', blocks: [] }
+    const result = applyRoutineToggle(noSpeech, RoutineItemKey.NarrationOrSoundReps, true)
+    expect(result.speech?.narrationReps?.done).toBe(true)
+    expect(result.speech?.done).toBe(false)
+  })
+
+  it('preserves existing reading sub-fields when toggling another', () => {
+    const withExisting: DayLog = {
+      ...baseDayLog,
+      reading: {
+        ...baseDayLog.reading!,
+        handwriting: { done: true },
+        spelling: { done: true },
+      },
+    }
+    const result = applyRoutineToggle(withExisting, RoutineItemKey.SightWords, true)
+    expect(result.reading?.sightWords?.done).toBe(true)
+    expect(result.reading?.handwriting?.done).toBe(true)
+    expect(result.reading?.spelling?.done).toBe(true)
+  })
+
+  it('returns dayLog unchanged for unrecognized key', () => {
+    const result = applyRoutineToggle(baseDayLog, 'unknownKey' as RoutineItemKey, true)
+    expect(result).toEqual(baseDayLog)
+  })
+
+  it('toggles decodableReading reading sub-item', () => {
+    const result = applyRoutineToggle(baseDayLog, RoutineItemKey.DecodableReading, true)
+    expect(result.reading?.decodableReading?.done).toBe(true)
+  })
+
+  it('toggles spellingDictation reading sub-item', () => {
+    const result = applyRoutineToggle(baseDayLog, RoutineItemKey.SpellingDictation, true)
+    expect(result.reading?.spellingDictation?.done).toBe(true)
+  })
+
+  it('toggles phonemicAwareness reading sub-item', () => {
+    const result = applyRoutineToggle(baseDayLog, RoutineItemKey.PhonemicAwareness, true)
+    expect(result.reading?.phonemicAwareness?.done).toBe(true)
+  })
+
+  it('toggles phonicsLesson reading sub-item', () => {
+    const result = applyRoutineToggle(baseDayLog, RoutineItemKey.PhonicsLesson, true)
+    expect(result.reading?.phonicsLesson?.done).toBe(true)
+  })
 })
