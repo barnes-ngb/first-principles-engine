@@ -1,8 +1,9 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import type { AssignmentCandidate, DraftWeeklyPlan, SkillSnapshot } from '../../core/types'
+import type { ActivityConfig, AssignmentCandidate, DraftWeeklyPlan, SkillSnapshot } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { AssignmentAction, MasteryGate, SkillLevel, SubjectBucket } from '../../core/types/enums'
 import {
+  activityConfigsToRoutineText,
   AdjustmentType,
   applySnapshotSuggestions,
   buildMinimumWinText,
@@ -10,12 +11,15 @@ import {
   buildShiftedWeekPlan,
   dateKeyForDayPlan,
   dayTotalMinutes,
+  ensureEvaluationItems,
   fillMissingDaysFromRoutine,
+  filterRoutineForCompletedPrograms,
   formatDayCardLabel,
   formatPlanningWeekLabel,
   isPlanningWeekPast,
   generateDraftPlanFromInputs,
   parseAIResponse,
+  parseRoutineTotalMinutes,
   planTotalMinutes,
   resetIdCounter,
   resolveSuggestedTags,
@@ -1556,5 +1560,325 @@ describe('parseAIResponse — watch items (FEAT-104)', () => {
     expect(bookItem.itemType).toBeUndefined()
     // An unknown itemType is still dropped by the whitelist — watch didn't widen it.
     expect(bogus.itemType).toBeUndefined()
+  })
+})
+
+// ─── activityConfigsToRoutineText ────────────────────────────────────────────
+
+describe('activityConfigsToRoutineText', () => {
+  const makeConfig = (overrides: Partial<ActivityConfig>): ActivityConfig => ({
+    id: 'cfg-1',
+    name: 'Reading',
+    type: 'workbook' as const,
+    subjectBucket: SubjectBucket.Reading,
+    defaultMinutes: 30,
+    frequency: 'daily' as const,
+    childId: 'child-1',
+    sortOrder: 1,
+    completed: false,
+    scannable: false,
+    ...overrides,
+  })
+
+  it('converts active configs to routine text sorted by sortOrder', () => {
+    const configs = [
+      makeConfig({ id: 'c2', name: 'Math workbook', subjectBucket: SubjectBucket.Math, defaultMinutes: 25, sortOrder: 2 }),
+      makeConfig({ id: 'c1', name: 'Handwriting', subjectBucket: SubjectBucket.LanguageArts, defaultMinutes: 15, sortOrder: 1 }),
+    ]
+    const text = activityConfigsToRoutineText(configs)
+    const lines = text.split('\n')
+    expect(lines[0]).toBe('Handwriting — 15 min — LanguageArts')
+    expect(lines[1]).toBe('Math workbook — 25 min — Math')
+  })
+
+  it('filters out completed configs', () => {
+    const configs = [
+      makeConfig({ id: 'c1', name: 'Done Program', completed: true, sortOrder: 1 }),
+      makeConfig({ id: 'c2', name: 'Active Program', completed: false, sortOrder: 2 }),
+    ]
+    const text = activityConfigsToRoutineText(configs)
+    expect(text).not.toContain('Done Program')
+    expect(text).toContain('Active Program')
+  })
+
+  it('includes position/totalUnits when present', () => {
+    const configs = [
+      makeConfig({
+        name: 'GATB Reading',
+        currentPosition: 45,
+        totalUnits: 160,
+        unitLabel: 'lesson',
+      }),
+    ]
+    const text = activityConfigsToRoutineText(configs)
+    expect(text).toContain('(at lesson 45 of 160)')
+  })
+
+  it('defaults unit label to "lesson" when unitLabel is absent', () => {
+    const configs = [
+      makeConfig({
+        name: 'GATB Reading',
+        currentPosition: 10,
+        totalUnits: 50,
+      }),
+    ]
+    const text = activityConfigsToRoutineText(configs)
+    expect(text).toContain('(at lesson 10 of 50)')
+  })
+
+  it('returns empty string for empty array', () => {
+    expect(activityConfigsToRoutineText([])).toBe('')
+  })
+
+  it('returns empty string when all configs are completed', () => {
+    const configs = [
+      makeConfig({ completed: true }),
+    ]
+    expect(activityConfigsToRoutineText(configs)).toBe('')
+  })
+})
+
+// ─── parseRoutineTotalMinutes ────────────────────────────────────────────────
+
+describe('parseRoutineTotalMinutes', () => {
+  it('sums minutes from dash-separated lines', () => {
+    const routine = 'Handwriting — 20 min — LanguageArts\nMath — 30 min — Math'
+    expect(parseRoutineTotalMinutes(routine)).toBe(50)
+  })
+
+  it('sums minutes from paren-format lines', () => {
+    const routine = 'Handwriting (20 min)\nMath (30 min)'
+    expect(parseRoutineTotalMinutes(routine)).toBe(50)
+  })
+
+  it('defaults to 15 minutes for unparseable lines', () => {
+    const routine = 'Handwriting — 20 min — LanguageArts\nFree play time'
+    expect(parseRoutineTotalMinutes(routine)).toBe(35) // 20 + 15
+  })
+
+  it('returns 0 for empty string', () => {
+    expect(parseRoutineTotalMinutes('')).toBe(0)
+  })
+
+  it('skips blank lines', () => {
+    const routine = 'Handwriting — 20 min\n\n\nMath — 30 min'
+    expect(parseRoutineTotalMinutes(routine)).toBe(50)
+  })
+})
+
+// ─── filterRoutineForCompletedPrograms ───────────────────────────────────────
+
+describe('filterRoutineForCompletedPrograms', () => {
+  const routine = 'Reading Eggs — 45 min — Reading\nMath app — 15 min — Math\nHandwriting — 20 min — LanguageArts'
+
+  it('returns routine unchanged when no completed programs', () => {
+    expect(filterRoutineForCompletedPrograms(routine, [])).toBe(routine)
+  })
+
+  it('removes lines matching a completed program (case-insensitive)', () => {
+    const result = filterRoutineForCompletedPrograms(routine, ['reading eggs'])
+    expect(result).not.toContain('Reading Eggs')
+    expect(result).toContain('Math app')
+    expect(result).toContain('Handwriting')
+  })
+
+  it('handles multiple completed programs', () => {
+    const result = filterRoutineForCompletedPrograms(routine, ['reading eggs', 'math app'])
+    expect(result).not.toContain('Reading Eggs')
+    expect(result).not.toContain('Math app')
+    expect(result).toContain('Handwriting')
+  })
+
+  it('returns routine unchanged when completedPrograms is undefined-ish', () => {
+    expect(filterRoutineForCompletedPrograms(routine, undefined as unknown as string[])).toBe(routine)
+  })
+
+  it('matches ignoring non-alphanumeric characters', () => {
+    const routineWithSpecial = 'Good & the Beautiful — 30 min — Reading'
+    const result = filterRoutineForCompletedPrograms(routineWithSpecial, ['Good the Beautiful'])
+    expect(result).not.toContain('Good & the Beautiful')
+  })
+})
+
+// ─── ensureEvaluationItems ───────────────────────────────────────────────────
+
+describe('ensureEvaluationItems', () => {
+  it('returns plan unchanged when fluency item already exists', () => {
+    const plan: DraftWeeklyPlan = {
+      days: [
+        {
+          day: 'Monday',
+          timeBudgetMinutes: 150,
+          items: [{
+            id: 'f1',
+            title: 'Fluency Practice',
+            estimatedMinutes: 10,
+            subjectBucket: SubjectBucket.Reading,
+            skillTags: [],
+            accepted: true,
+            evaluationMode: 'fluency',
+          }],
+        },
+        { day: 'Tuesday', timeBudgetMinutes: 150, items: [] },
+        { day: 'Wednesday', timeBudgetMinutes: 150, items: [] },
+      ],
+    }
+
+    const result = ensureEvaluationItems(plan)
+    expect(result).toBe(plan)
+  })
+
+  it('injects fluency items on Monday and Wednesday when missing', () => {
+    const plan: DraftWeeklyPlan = {
+      days: [
+        { day: 'Monday', timeBudgetMinutes: 150, items: [{ id: 'a1', title: 'Math', estimatedMinutes: 30, subjectBucket: SubjectBucket.Math, skillTags: [], accepted: true }] },
+        { day: 'Tuesday', timeBudgetMinutes: 150, items: [] },
+        { day: 'Wednesday', timeBudgetMinutes: 150, items: [] },
+        { day: 'Thursday', timeBudgetMinutes: 150, items: [] },
+        { day: 'Friday', timeBudgetMinutes: 150, items: [] },
+      ],
+    }
+
+    const result = ensureEvaluationItems(plan)
+    const mondayFluency = result.days[0].items.find(i => i.evaluationMode === 'fluency')
+    const wedFluency = result.days[2].items.find(i => i.evaluationMode === 'fluency')
+    expect(mondayFluency).toBeDefined()
+    expect(wedFluency).toBeDefined()
+    expect(mondayFluency!.title).toBe('Fluency Practice')
+    expect(mondayFluency!.subjectBucket).toBe(SubjectBucket.Reading)
+    expect(mondayFluency!.estimatedMinutes).toBe(10)
+  })
+
+  it('returns plan unchanged when days array is empty', () => {
+    const plan: DraftWeeklyPlan = { days: [] }
+    expect(ensureEvaluationItems(plan)).toBe(plan)
+  })
+
+  it('detects fluency by evaluationMode', () => {
+    const plan: DraftWeeklyPlan = {
+      days: [
+        {
+          day: 'Monday',
+          timeBudgetMinutes: 150,
+          items: [{
+            id: 'x1',
+            title: 'Reading Assessment',
+            estimatedMinutes: 10,
+            subjectBucket: SubjectBucket.Reading,
+            skillTags: [],
+            accepted: true,
+            evaluationMode: 'fluency',
+          }],
+        },
+      ],
+    }
+
+    const result = ensureEvaluationItems(plan)
+    expect(result).toBe(plan)
+  })
+
+  it('detects fluency by title keyword', () => {
+    const plan: DraftWeeklyPlan = {
+      days: [
+        {
+          day: 'Monday',
+          timeBudgetMinutes: 150,
+          items: [{
+            id: 'x1',
+            title: 'Fluency check',
+            estimatedMinutes: 10,
+            subjectBucket: SubjectBucket.Reading,
+            skillTags: [],
+            accepted: true,
+          }],
+        },
+      ],
+    }
+
+    const result = ensureEvaluationItems(plan)
+    expect(result).toBe(plan)
+  })
+
+  it('injects on Monday only when plan has fewer than 3 days', () => {
+    const plan: DraftWeeklyPlan = {
+      days: [
+        { day: 'Monday', timeBudgetMinutes: 150, items: [] },
+        { day: 'Tuesday', timeBudgetMinutes: 150, items: [] },
+      ],
+    }
+
+    const result = ensureEvaluationItems(plan)
+    const mondayFluency = result.days[0].items.find(i => i.evaluationMode === 'fluency')
+    expect(mondayFluency).toBeDefined()
+    expect(result.days[1].items).toHaveLength(0)
+  })
+})
+
+// ─── ReduceSubject adjustment ────────────────────────────────────────────────
+
+describe('generateDraftPlanFromInputs — ReduceSubject adjustment', () => {
+  it('multiplies estimatedMinutes by factor for matching subject', () => {
+    const assignments: AssignmentCandidate[] = [
+      {
+        id: 'a1',
+        workbookName: 'GATB Reading',
+        lessonName: 'Lesson 5',
+        subjectBucket: SubjectBucket.Reading,
+        estimatedMinutes: 20,
+        action: AssignmentAction.Keep,
+        difficultyCues: [],
+      },
+      {
+        id: 'a2',
+        workbookName: 'Math Book',
+        lessonName: 'Ch 3',
+        subjectBucket: SubjectBucket.Math,
+        estimatedMinutes: 20,
+        action: AssignmentAction.Keep,
+        difficultyCues: [],
+      },
+    ]
+
+    const result = generateDraftPlanFromInputs({
+      snapshot: null,
+      hoursPerDay: 4,
+      appBlocks: [],
+      assignments,
+      adjustments: [
+        { type: AdjustmentType.ReduceSubject, subject: SubjectBucket.Reading, factor: 0.5 },
+      ],
+    })
+
+    const allItems = result.days.flatMap(d => d.items)
+    const readingItem = allItems.find(i => i.subjectBucket === SubjectBucket.Reading && i.assignmentId === 'a1')
+    const mathItem = allItems.find(i => i.subjectBucket === SubjectBucket.Math && i.assignmentId === 'a2')
+
+    expect(readingItem!.estimatedMinutes).toBe(10) // Math.ceil(20 * 0.5)
+    expect(mathItem!.estimatedMinutes).toBe(20)
+  })
+})
+
+// ─── Daily time budget overflow trimming ─────────────────────────────────────
+
+describe('generateDraftPlanFromInputs — budget overflow', () => {
+  it('removes excess choose items when day exceeds budget', () => {
+    const routine = 'Handwriting — 50 min — LanguageArts'
+    const result = generateDraftPlanFromInputs({
+      snapshot: null,
+      hoursPerDay: 1, // 60 min budget
+      appBlocks: [
+        { label: 'Reading Eggs', defaultMinutes: 20 },
+        { label: 'Math App', defaultMinutes: 20 },
+      ],
+      assignments: [],
+      dailyRoutine: routine,
+    })
+
+    for (const day of result.days) {
+      const acceptedMinutes = day.items
+        .filter(i => i.accepted)
+        .reduce((sum, i) => sum + i.estimatedMinutes, 0)
+      expect(acceptedMinutes).toBeLessThanOrEqual(60)
+    }
   })
 })
