@@ -16,8 +16,10 @@ import {
 } from '../../core/types/enums'
 import {
   assertAttributed,
+  buildCompliancePackFiles,
   buildComplianceZip,
   collectHoursContributions,
+  CompliancePackFileRole,
   computeHoursSummary,
   computeMonthlyTrend,
   computeSubjectDistribution,
@@ -2456,5 +2458,298 @@ describe('generateComplianceReportHtml', () => {
     expect(rowFor('Lincoln solo drawing')).not.toContain(
       `<td>${SHARED_ARTIFACT_LABEL}</td>`,
     )
+  })
+})
+
+// ─── entryMinutes — fractional hours rounding ────────────────────────────────
+
+describe('entryMinutes — fractional rounding', () => {
+  it('rounds fractional hours via Math.round', () => {
+    const entry = { date: '2026-01-01', hours: 1.3 } as HoursEntry
+    expect(entryMinutes(entry)).toBe(78) // Math.round(1.3 * 60) = 78
+  })
+
+  it('rounds .5 hours up', () => {
+    const entry = { date: '2026-01-01', hours: 0.75 } as HoursEntry
+    expect(entryMinutes(entry)).toBe(45) // 0.75 * 60 = 45, exact
+  })
+})
+
+// ─── Core vs non-core subject bucketing completeness ─────────────────────────
+
+describe('computeHoursSummary — core subject completeness', () => {
+  it('counts LanguageArts as a core subject', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-02-10',
+        blocks: [
+          {
+            type: DayBlockType.Formation,
+            subjectBucket: SubjectBucket.LanguageArts,
+            actualMinutes: 25,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+    expect(summary.coreMinutes).toBe(25)
+    expect(summary.totalMinutes).toBe(25)
+  })
+
+  it('counts SocialStudies as a core subject', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-02-10',
+        blocks: [
+          {
+            type: DayBlockType.Together,
+            subjectBucket: SubjectBucket.SocialStudies,
+            actualMinutes: 20,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+    expect(summary.coreMinutes).toBe(20)
+    expect(summary.totalMinutes).toBe(20)
+  })
+
+  it('Art stays non-core even with other core subjects', () => {
+    const logs: DayLog[] = [
+      {
+        childId: 'child-a',
+        date: '2026-02-10',
+        blocks: [
+          {
+            type: DayBlockType.Reading,
+            subjectBucket: SubjectBucket.Reading,
+            actualMinutes: 30,
+            location: 'Home',
+          },
+          {
+            type: DayBlockType.Together,
+            subjectBucket: SubjectBucket.Art,
+            actualMinutes: 20,
+            location: 'Home',
+          },
+        ],
+      },
+    ]
+
+    const summary = computeHoursSummary(logs, [], [])
+    expect(summary.coreMinutes).toBe(30)
+    expect(summary.totalMinutes).toBe(50)
+  })
+})
+
+// ─── checklistItemCountedMinutes — plannedMinutes fallback ───────────────────
+
+describe('dayLogMinuteContributions — plannedMinutes fallback chain', () => {
+  it('uses plannedMinutes when estimatedMinutes is absent', () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-03-15',
+      blocks: [],
+      checklist: [
+        {
+          label: 'Reading time',
+          completed: true,
+          subjectBucket: SubjectBucket.Reading,
+          plannedMinutes: 20,
+        },
+      ],
+    }
+
+    const contributions = dayLogMinuteContributions(log)
+    expect(contributions).toEqual([
+      { subjectBucket: 'Reading', minutes: 20, location: 'Home' },
+    ])
+  })
+
+  it('prefers estimatedMinutes over plannedMinutes', () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-03-15',
+      blocks: [],
+      checklist: [
+        {
+          label: 'Math (30m)',
+          completed: true,
+          subjectBucket: SubjectBucket.Math,
+          estimatedMinutes: 25,
+          plannedMinutes: 30,
+        },
+      ],
+    }
+
+    const contributions = dayLogMinuteContributions(log)
+    expect(contributions[0].minutes).toBe(25)
+  })
+
+  it('falls back to label parse when both estimatedMinutes and plannedMinutes are absent', () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-03-15',
+      blocks: [],
+      checklist: [
+        {
+          label: 'Science project (40m)',
+          completed: true,
+          subjectBucket: SubjectBucket.Science,
+        },
+      ],
+    }
+
+    const contributions = dayLogMinuteContributions(log)
+    expect(contributions[0].minutes).toBe(40)
+  })
+
+  it('returns 0 for a label with no parseable minutes and no planned/estimated', () => {
+    const log: DayLog = {
+      childId: 'child-a',
+      date: '2026-03-15',
+      blocks: [],
+      checklist: [
+        {
+          label: 'Free play',
+          completed: true,
+          subjectBucket: SubjectBucket.Other,
+        },
+      ],
+    }
+
+    const contributions = dayLogMinuteContributions(log)
+    expect(contributions).toEqual([])
+  })
+})
+
+// ─── buildCompliancePackFiles ────────────────────────────────────────────────
+
+describe('buildCompliancePackFiles', () => {
+  const baseSummary = computeHoursSummary([], [], [])
+
+  it('always includes hours-summary and daily-logs files', () => {
+    const files = buildCompliancePackFiles({
+      summary: baseSummary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [],
+      startDate: '2026-01-01',
+      endDate: '2026-06-30',
+    })
+
+    expect(files).toHaveLength(2)
+    expect(files[0].role).toBe(CompliancePackFileRole.HoursSummary)
+    expect(files[1].role).toBe(CompliancePackFileRole.DailyLogs)
+  })
+
+  it('adds evaluations file when evaluations exist', () => {
+    const eval1: Evaluation = {
+      childId: 'child-a',
+      date: '2026-03-15',
+      evaluator: 'Dad',
+      wins: ['reading fluency'],
+      struggles: [],
+      nextSteps: [],
+      sampleArtifactIds: [],
+    }
+
+    const files = buildCompliancePackFiles({
+      summary: baseSummary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations: [eval1],
+      artifacts: [],
+      children: [{ id: 'child-a', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-06-30',
+      childName: 'Lincoln',
+    })
+
+    expect(files).toHaveLength(3)
+    expect(files[2].role).toBe(CompliancePackFileRole.Evaluations)
+    expect(files[2].name).toContain('lincoln-')
+  })
+
+  it('adds portfolio file when artifacts exist', () => {
+    const artifact: Artifact = {
+      id: 'a1',
+      childId: 'child-a',
+      type: EvidenceType.Photo,
+      date: '2026-03-15',
+      label: 'Math work',
+      subjectBucket: SubjectBucket.Math,
+    }
+
+    const files = buildCompliancePackFiles({
+      summary: baseSummary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [artifact],
+      children: [{ id: 'child-a', name: 'Lincoln' }],
+      startDate: '2026-01-01',
+      endDate: '2026-06-30',
+    })
+
+    expect(files).toHaveLength(3)
+    expect(files[2].role).toBe(CompliancePackFileRole.Portfolio)
+  })
+
+  it('adds portfolio file when dadLabSection is non-empty (even with no artifacts)', () => {
+    const files = buildCompliancePackFiles({
+      summary: baseSummary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [],
+      startDate: '2026-01-01',
+      endDate: '2026-06-30',
+      dadLabSection: ['## Dad Lab\n\nAir is Real'],
+    })
+
+    expect(files).toHaveLength(3)
+    expect(files[2].role).toBe(CompliancePackFileRole.Portfolio)
+  })
+
+  it('prefixes filenames with childName when provided', () => {
+    const files = buildCompliancePackFiles({
+      summary: baseSummary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [],
+      startDate: '2026-01-01',
+      endDate: '2026-06-30',
+      childName: 'Lincoln',
+    })
+
+    expect(files[0].name).toBe('lincoln-hours-summary-2026-01-01-to-2026-06-30.csv')
+    expect(files[1].name).toBe('lincoln-daily-logs-2026-01-01-to-2026-06-30.csv')
+  })
+
+  it('omits prefix when childName is absent', () => {
+    const files = buildCompliancePackFiles({
+      summary: baseSummary,
+      dayLogs: [],
+      hoursEntries: [],
+      evaluations: [],
+      artifacts: [],
+      children: [],
+      startDate: '2026-01-01',
+      endDate: '2026-06-30',
+    })
+
+    expect(files[0].name).toBe('hours-summary-2026-01-01-to-2026-06-30.csv')
   })
 })
