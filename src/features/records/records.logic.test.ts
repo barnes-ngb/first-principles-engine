@@ -2644,6 +2644,7 @@ describe('buildCompliancePackFiles', () => {
       children: [],
       startDate: '2026-01-01',
       endDate: '2026-06-30',
+      childName: '',
     })
 
     expect(files).toHaveLength(2)
@@ -2654,8 +2655,8 @@ describe('buildCompliancePackFiles', () => {
   it('adds evaluations file when evaluations exist', () => {
     const eval1: Evaluation = {
       childId: 'child-a',
-      date: '2026-03-15',
-      evaluator: 'Dad',
+      monthStart: '2026-03-01',
+      monthEnd: '2026-03-31',
       wins: ['reading fluency'],
       struggles: [],
       nextSteps: [],
@@ -2683,10 +2684,15 @@ describe('buildCompliancePackFiles', () => {
     const artifact: Artifact = {
       id: 'a1',
       childId: 'child-a',
+      title: 'Math work',
       type: EvidenceType.Photo,
-      date: '2026-03-15',
-      label: 'Math work',
-      subjectBucket: SubjectBucket.Math,
+      createdAt: '2026-03-15T10:00:00',
+      tags: {
+        engineStage: EngineStage.Build,
+        domain: 'math',
+        subjectBucket: SubjectBucket.Math,
+        location: 'Home',
+      },
     }
 
     const files = buildCompliancePackFiles({
@@ -2698,6 +2704,7 @@ describe('buildCompliancePackFiles', () => {
       children: [{ id: 'child-a', name: 'Lincoln' }],
       startDate: '2026-01-01',
       endDate: '2026-06-30',
+      childName: 'Lincoln',
     })
 
     expect(files).toHaveLength(3)
@@ -2714,6 +2721,7 @@ describe('buildCompliancePackFiles', () => {
       children: [],
       startDate: '2026-01-01',
       endDate: '2026-06-30',
+      childName: '',
       dadLabSection: ['## Dad Lab\n\nAir is Real'],
     })
 
@@ -2738,7 +2746,7 @@ describe('buildCompliancePackFiles', () => {
     expect(files[1].name).toBe('lincoln-daily-logs-2026-01-01-to-2026-06-30.csv')
   })
 
-  it('omits prefix when childName is absent', () => {
+  it('omits prefix when childName is empty', () => {
     const files = buildCompliancePackFiles({
       summary: baseSummary,
       dayLogs: [],
@@ -2748,6 +2756,7 @@ describe('buildCompliancePackFiles', () => {
       children: [],
       startDate: '2026-01-01',
       endDate: '2026-06-30',
+      childName: '',
     })
 
     expect(files[0].name).toBe('hours-summary-2026-01-01-to-2026-06-30.csv')

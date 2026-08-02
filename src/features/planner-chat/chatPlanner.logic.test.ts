@@ -1577,6 +1577,8 @@ describe('activityConfigsToRoutineText', () => {
     sortOrder: 1,
     completed: false,
     scannable: false,
+    createdAt: '2026-01-01T00:00:00',
+    updatedAt: '2026-01-01T00:00:00',
     ...overrides,
   })
 
@@ -1705,6 +1707,8 @@ describe('filterRoutineForCompletedPrograms', () => {
 describe('ensureEvaluationItems', () => {
   it('returns plan unchanged when fluency item already exists', () => {
     const plan: DraftWeeklyPlan = {
+      skipSuggestions: [],
+      minimumWin: '',
       days: [
         {
           day: 'Monday',
@@ -1730,6 +1734,8 @@ describe('ensureEvaluationItems', () => {
 
   it('injects fluency items on Monday and Wednesday when missing', () => {
     const plan: DraftWeeklyPlan = {
+      skipSuggestions: [],
+      minimumWin: '',
       days: [
         { day: 'Monday', timeBudgetMinutes: 150, items: [{ id: 'a1', title: 'Math', estimatedMinutes: 30, subjectBucket: SubjectBucket.Math, skillTags: [], accepted: true }] },
         { day: 'Tuesday', timeBudgetMinutes: 150, items: [] },
@@ -1750,12 +1756,14 @@ describe('ensureEvaluationItems', () => {
   })
 
   it('returns plan unchanged when days array is empty', () => {
-    const plan: DraftWeeklyPlan = { days: [] }
+    const plan: DraftWeeklyPlan = { days: [], skipSuggestions: [], minimumWin: '' }
     expect(ensureEvaluationItems(plan)).toBe(plan)
   })
 
   it('detects fluency by evaluationMode', () => {
     const plan: DraftWeeklyPlan = {
+      skipSuggestions: [],
+      minimumWin: '',
       days: [
         {
           day: 'Monday',
@@ -1779,6 +1787,8 @@ describe('ensureEvaluationItems', () => {
 
   it('detects fluency by title keyword', () => {
     const plan: DraftWeeklyPlan = {
+      skipSuggestions: [],
+      minimumWin: '',
       days: [
         {
           day: 'Monday',
@@ -1801,6 +1811,8 @@ describe('ensureEvaluationItems', () => {
 
   it('injects on Monday only when plan has fewer than 3 days', () => {
     const plan: DraftWeeklyPlan = {
+      skipSuggestions: [],
+      minimumWin: '',
       days: [
         { day: 'Monday', timeBudgetMinutes: 150, items: [] },
         { day: 'Tuesday', timeBudgetMinutes: 150, items: [] },
