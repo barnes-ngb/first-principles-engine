@@ -476,4 +476,99 @@ describe('addXpEvent', () => {
     const eventDocData = mockSetDoc.mock.calls[0][1]
     expect(eventDocData.meta).toEqual({})
   })
+
+  it('calls checkAndUnlockArmor with the correct new total', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 200, sources: { routines: 200, quests: 0, books: 0 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'stone', totalXp: 200, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 50, 'tier-check')
+
+    expect(mockCheckAndUnlockArmor).toHaveBeenCalledWith('fam-1', 'child-1', 250)
+  })
+
+  it('maps MANUAL_AWARD to routines source bucket (default fallback)', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'wood', totalXp: 0, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'MANUAL_AWARD', 10, 'manual-award-1')
+
+    const eventDocData = mockSetDoc.mock.calls[0][1]
+    expect(eventDocData.sources.routines).toBe(10)
+    expect(eventDocData.sources.quests).toBe(0)
+    expect(eventDocData.sources.books).toBe(0)
+  })
+
+  it('diamond entry updates diamondBalance with negative amount (forge spend)', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      return Promise.resolve({ exists: () => true })
+    })
+
+    await addXpEvent(
+      'fam-1', 'child-1', 'MANUAL_AWARD', -5, 'forge-spend-1',
+      undefined,
+      { currencyType: 'diamond', category: 'forge' },
+    )
+
+    expect(mockUpdateDoc).toHaveBeenCalledTimes(1)
+    const updateArgs = mockUpdateDoc.mock.calls[0][1]
+    expect(updateArgs.diamondBalance).toEqual({ __increment: -5 })
+  })
+
+  it('XP cumulative doc accumulates from a fresh (non-existent) ledger', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => false,
+          data: () => null,
+        })
+      }
+      return Promise.resolve({ exists: () => false, data: () => null })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'QUEST_COMPLETE', 25, 'fresh-ledger')
+
+    const cumulativeData = mockSetDoc.mock.calls[1][1]
+    expect(cumulativeData.totalXp).toBe(25)
+    expect(cumulativeData.sources.quests).toBe(25)
+    expect(cumulativeData.sources.routines).toBe(0)
+    expect(cumulativeData.sources.books).toBe(0)
+  })
 })
