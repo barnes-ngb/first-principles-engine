@@ -52,9 +52,12 @@ that list appears in `git diff --stat ec784df..HEAD`.
 
 **This is the quietest window recorded in this audit series, more so than 08-02's "flattest week."**
 `git diff --stat ec784df..HEAD` (the entire window) touches exactly 8 files: the 08-02 audit's own
-report + ledger update, one `CLAUDE.md` line, `docs/DOCUMENT_INDEX.md`, and four test files. **Zero
-files under `src/` or `functions/src/` changed.** Every Step 1–4 largest-file, writer-location, and
-name-literal measurement below is therefore re-verification against an unchanged tree, not new
+report + ledger update, one `CLAUDE.md` line, `docs/DOCUMENT_INDEX.md`, and four test files
+(`addXpEvent.test.ts`, `chatPlanner.logic.test.ts`, `records.logic.test.ts`,
+`checklistRoutineSync.test.ts` — all under `src/`, all test-only). **Zero product/implementation files
+changed** — the four `src/` diffs are entirely test additions from the sanctioned test-builder lane;
+**zero files under `functions/src/` changed at all.** Every Step 1–4 largest-file, writer-location, and
+name-literal measurement below is therefore re-verification against an unchanged product tree, not new
 investigation — the only place this cycle found real drift was the **ledger itself** (Step 5).
 
 ---
@@ -149,10 +152,17 @@ here for the record. **Band 1, ARCH-43, OPEN — unchanged in substance, count p
 
 ### 1.6 ARCH-06 (WorkbookConfig → ActivityConfig) — exact pattern unchanged
 
-Exact case-sensitive `WorkbookConfig\b` grep (non-test): **30 refs / 10 files — unchanged** from 08-02
-and 07-26. No new investigation into the broader case-insensitive methodology gap this cycle (nothing
-in the affected files changed) — the standing recommendation (pin one exact grep pattern for this row
-via a future `PROMPT_FIX` or health-audit pass) still applies. **Band 1, ARCH-06, OPEN — unchanged.**
+Exact case-sensitive, whole-word `WorkbookConfig` count (non-test, `rg -o -w 'WorkbookConfig' src
+functions/src -g '!*.test.*'`): **28 refs / 10 files.** The prior cycles' "30 refs" figure (repeated at
+07-26 and 08-02) was itself a small methodology bug, not real drift: the grep pattern used in those
+runs (`"WorkbookConfig\b"`, no *left* word boundary) double-counted two lines in
+`PlannerChatPage.tsx`'s sibling `PhotoLabelForm.tsx` where `WorkbookConfig` appears only as a **suffix**
+of an unrelated identifier (`matchWorkbookConfig(...)`, the function, not the type). The file set is
+identical (same 10 files) and no product file changed this window, so this is a **measurement
+correction, not new drift** — same file count, corrected occurrence count. Recommendation unchanged:
+pin this exact `rg -o -w ... -g '!*.test.*'` invocation as the row's canonical grep for future cycles,
+closing the "measurement-methodology gap" this row has carried since 07-26. **Band 1, ARCH-06, OPEN —
+count corrected, no new drift.**
 
 ### 1.7 ARCH-17 (Node.js runtime) — watch window narrowing further
 
@@ -246,7 +256,7 @@ No compliance-adjacent file changed. `stateCompliance.ts` untouched. No new Lens
 
 ## Step 5 — Ledger Hygiene: the ledger-hygiene fix itself had a gap, closed this cycle
 
-### 5.1 DOC-12 (new) — 28 more stale "PR open" / "do not merge" statuses found and corrected
+### 5.1 DOC-12 (new) — 30 more stale "PR open" / "do not merge" statuses found and corrected
 
 The 08-02 audit's own **DOC-11** finding fixed 25 rows and explicitly named its own limits: it caught
 only rows matching `PR open|do not merge` verbatim in the *July 2026* window, and separately noted that
@@ -260,7 +270,8 @@ verified each against GitHub (via `search_pull_requests`, direct merge-commit lo
 `git fetch --unshallow` — the repo's working clone was shallow, the same trap PR #1634's own body warns
 about), and corrected all that were genuinely stale:
 
-**28 rows corrected** (all confirmed `MERGED` on `main`, none currently open — cross-checked against the
+**28 code/build rows corrected** (30 total including the two design-doc rows below; all confirmed
+`MERGED` on `main`, none currently open — cross-checked against the
 repo's single currently-open PR, #1649, which matches none of them): `ARCH-26` (#1370, 06-07),
 `ARCH-27` (#1371, 06-07), `ARCH-28` (#1372, 06-08), `ARCH-29` (#1375, 06-08), `ARCH-30` (#1376, 06-08),
 `ARCH-31` (#1377, 06-08), `ARCH-32` (#1378, 06-08), `ARCH-33` (#1379, 06-08), `ARCH-34` (#1380, 06-08),
@@ -276,7 +287,7 @@ docs being live on `main` since 2026-07-03 (`#1491`, `#1492`) — corrected alon
 they're the identical defect (the "do not merge" phrase written into the PR body at build time, never
 updated on merge), just on doc-only rows rather than code rows.
 
-**All 28 verified independently, not by trusting #1634's un-acted-upon sample:** PRs #1370–1382 were
+**All 30 verified independently, not by trusting #1634's un-acted-upon sample:** PRs #1370–1382 were
 confirmed via a title search (`"UI Batch 3b" in:title is:merged`, 11/11 merged) plus first-parent
 merge-commit dates off the now-unshallowed clone; the remainder via `search_pull_requests` by ID/title
 plus merge-commit date lookup. **Zero rows left in a worse state than found** — every row's status cell
@@ -291,9 +302,10 @@ historical work, not a live status-cell claim, and `ARCH-15`'s actual status is 
 reads the neutral `DESIGN (doc only, no build assigned)`). Neither was touched — out of the pattern this
 sweep exists to fix.
 
-**Ledger diff for this row:** 28 status cells corrected in place, **0 rows added, 0 removed, 0
-reordered, 0 reopened** (plus the 1 new `DOC-12` row itself) — same additive discipline as DOC-11.
-`grep -c '^| \*\*' docs/review/REVIEW_HOME_BASE.md` reads 238 before and after this cycle's edits.
+**Ledger diff for this row:** 30 status cells corrected in place, **0 rows removed, 0 reordered, 0
+reopened**, plus **1 row added** (`DOC-12` itself) — same additive discipline as DOC-11.
+`grep -c '^| \*\*' docs/review/REVIEW_HOME_BASE.md` reads **238 before, 239 after** this cycle's edits
+(+1, matching the single new `DOC-12` row).
 
 **Systemic observation, carried forward again:** this is the *third* time this exact class of drift has
 been found (PR #1634 → DOC-11 → this cycle) and the *second* time a sweep explicitly named rows it
@@ -330,9 +342,9 @@ above.
 
 - `docs/review/REVIEW_HOME_BASE.md` header: bump "Last audit" to 2026-08-09, add this report to the
   audit chain.
-- `docs/review/REVIEW_HOME_BASE.md` ledger: 28 status-cell corrections (stale `PR open`/`do not merge`
+- `docs/review/REVIEW_HOME_BASE.md` ledger: 30 status-cell corrections (stale `PR open`/`do not merge`
   → `MERGED (PR #N, merged DATE — verified 2026-08-09, monthly audit)`), one new row (`DOC-12`). Ledger
-  diff: **+1 row / −0 rows** net content, 28 status cells edited in place — no row reordered, deleted,
+  diff: **+1 row / −0 rows** net content, 30 status cells edited in place — no row reordered, deleted,
   or reopened.
 
 ### 5-line summary
@@ -341,7 +353,7 @@ above.
 functions: clean lint/tsc, 682/682 tests; build clean, bundle 4,276.73 kB/1,273.33 kB gzip, **+0.00 kB —
 the flattest week recorded in this series, surpassing 08-02's own record**). **Top 3 findings by
 leverage:** (1) a ledger-hygiene defect that has now survived **three** independent sweeps (PR #1634 →
-DOC-11 → this cycle's `DOC-12`) because each one fixed what it found and deferred the rest — 28 more
+DOC-11 → this cycle's `DOC-12`) because each one fixed what it found and deferred the rest — 30 more
 rows corrected this cycle, and the scripted continuous check first proposed at DOC-11 is now the
 clearest highest-leverage `PROMPT_FIX` in the ledger precisely because doing it once is cheaper than a
 4th manual sweep; (2) `PlannerChatPage.tsx` has now held flat at 3,092L for two consecutive cycles after
