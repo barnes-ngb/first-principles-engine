@@ -170,6 +170,32 @@ export function buildWorkbookScanReport(outcomes: WorkbookPageOutcome[]): Captur
   const failed = total - registered.length
   const last = registered.at(-1)?.registration ?? null
 
+  // A page can register WITHOUT advancing anything: the scan read it, named the
+  // subject, but found no lesson number, so `syncScanToConfig` reports
+  // `action: 'updated'` with `position: null` and the workbook stays put. That
+  // is the common shape for a blurry / angled / two-page-spread photo (the scan
+  // prompt always fills `subject`, so the `no-curriculum-detected` branch below
+  // is rare in the field). Calling it "Registered to GATB Math" is a non-event
+  // dressed as a success — the mirror of the failure-dressed-as-error bug this
+  // module fixes — so when NOT ONE page produced a lesson, say so.
+  // Reporting only: the checklist stamp and every write are unchanged; whether
+  // this should stop registering at all is FEAT-136, deliberately not decided here.
+  const anyAdvanced = registered.some((o) => o.registration.position != null)
+  if (last && !anyAdvanced) {
+    const read =
+      failed === 0
+        ? registered.length > 1
+          ? `Read ${registered.length} pages, but couldn't tell which lesson`
+          : "Read the page, but couldn't tell which lesson"
+        : `${registered.length} of ${total} ${pages(total)} read, but couldn't tell which lesson`
+    const tail =
+      failed === 0 ? '' : `; ${partialFailureTail(dominantFailure(outcomes) ?? 'error', failed)}`
+    return {
+      text: `${read} — nothing advanced in ${last.configName}${tail}. The photo is saved — try one page, flat and straight on, in good light.`,
+      severity: 'warning',
+    }
+  }
+
   if (failed === 0 && last) {
     return {
       text:

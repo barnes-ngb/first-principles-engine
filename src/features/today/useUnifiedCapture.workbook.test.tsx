@@ -612,6 +612,37 @@ describe('useUnifiedCapture — FEAT-135: a failed analyze says what actually we
     vi.unstubAllGlobals()
   })
 
+  it('reads the page but finds no lesson → says nothing advanced, while the write stays exactly as before (Codex P1, PR #1652)', async () => {
+    stubPhotoFetch()
+    // The real shape of a blurry / angled / two-page-spread photo: the scan
+    // prompt always fills `subject`, so the page DOES register — with no lesson
+    // number, so the workbook never moves.
+    runScanMock.mockResolvedValue({ id: 'scan-nl', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({
+      action: 'updated',
+      configId: 'wb-math',
+      configName: 'GATB Math',
+      position: null,
+    })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/spread.jpg'])
+    })
+
+    const msg = onMessage.mock.calls.at(-1)![0] as { text: string; severity: string }
+    expect(msg.text).toContain('nothing advanced in GATB Math')
+    expect(msg.text).toContain('one page, flat and straight on, in good light')
+    expect(msg.text).not.toContain('Registered')
+    expect(msg.severity).toBe('warning')
+    // Reporting only — the stamp is byte-identical to pre-FEAT-135 behaviour.
+    // Whether this should stop registering at all is FEAT-136, not decided here.
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: null })
+    expect(stamped.scanned).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
   it('a failed read on capture still saves the photo and never advances the workbook', async () => {
     // The capture path's own message is deliberately unchanged (the photo saving
     // IS what the parent asked for), but the rail still holds.

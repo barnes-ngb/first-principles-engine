@@ -24,8 +24,14 @@ describe('buildWorkbookScanReport — success lines are unchanged', () => {
     })
   })
 
-  it('drops the lesson suffix when the position is unknown', () => {
-    expect(buildWorkbookScanReport([ok(null)])?.text).toBe('Registered to GATB Math')
+  it('keeps the lesson-less success line when at least one page did advance', () => {
+    // Page 2 named no lesson, but page 1 advanced — so the workbook did move
+    // and the existing (suffix-less, because the last page is what gets
+    // stamped) success line stands, exactly as before FEAT-135.
+    expect(buildWorkbookScanReport([ok(12), ok(null)])).toEqual({
+      text: 'Registered 2 pages to GATB Math',
+      severity: 'success',
+    })
   })
 
   it('returns null for an empty batch — nothing happened, so say nothing', () => {
@@ -86,6 +92,35 @@ describe('buildWorkbookScanReport — each failure kind says something different
     for (const { reason } of cases.filter((c) => c.reason !== 'no-curriculum-detected')) {
       expect(buildWorkbookScanReport([bad(reason)])!.text).not.toContain('good light')
     }
+  })
+})
+
+describe('buildWorkbookScanReport — a page that registers without advancing anything', () => {
+  // Codex P1 (PR #1652): the scan prompt always fills `subject`, so a blurry /
+  // angled / two-page-spread photo comes back as a registered scan with NO
+  // lesson number — `position: null`, nothing advanced. Reporting that as
+  // "Registered to GATB Math" is a non-event dressed as a success.
+  it('one page, no lesson → says nothing advanced, with the photo hint', () => {
+    const report = buildWorkbookScanReport([ok(null)])!
+    expect(report.text).toBe(
+      "Read the page, but couldn't tell which lesson — nothing advanced in GATB Math. The photo is saved — try one page, flat and straight on, in good light.",
+    )
+    expect(report.severity).toBe('warning')
+    expect(report.text).not.toContain('Registered')
+  })
+
+  it('several pages, none with a lesson → the count, and still no false success', () => {
+    const report = buildWorkbookScanReport([ok(null), ok(null), ok(null)])!
+    expect(report.text).toContain("Read 3 pages, but couldn't tell which lesson")
+    expect(report.text).toContain('nothing advanced in GATB Math')
+    expect(report.severity).toBe('warning')
+  })
+
+  it('some pages read without a lesson and others failed outright → both are named', () => {
+    const report = buildWorkbookScanReport([ok(null), ok(null), bad('timeout')])!
+    expect(report.text).toContain("2 of 3 pages read, but couldn't tell which lesson")
+    expect(report.text).toContain('1 page took too long to scan')
+    expect(report.severity).toBe('warning')
   })
 })
 
