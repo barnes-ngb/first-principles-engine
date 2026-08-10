@@ -360,9 +360,44 @@ Two distinct chat-shaped tasks exist; do not conflate them. (This bit Chat-Link 
 | Task type | Where it's invoked | Slice list | Notes |
 |---|---|---|---|
 | `chat` | `src/features/books/StoryGuidePage.tsx:90` (kid story-shaping prompt) and `src/features/books/useComprehensionQuestions.ts:68` (comprehension Q generation). Lightweight, kid-facing utility. | `["charter", "childProfile"]` only (`functions/src/ai/contextSlices.ts:52`). Model: Haiku. `maxTokens: 1024`. | Must NOT gain Lincoln's eval / disposition / teach-back context — would dump heavy data into kid prompts. Pinned by a cross-task isolation test in `contextSlices.test.ts`. |
-| `shellyChat` | `src/features/shelly-chat/ShellyChatPage.tsx:523`. Shelly's main chat UI. | 14 shared slices via `buildContextForTask("shellyChat", …)` (`contextSlices.ts:65-70`) plus 8 supplemental queries in `tasks/shellyChat.ts`. Model: Sonnet. `maxTokens: 2000`. | Supplemental block includes disposition profile (from `child.dispositionCache.result.dispositions` with `dispositionOverrides` applied), 5-row weekly review strip, conundrum title, completion patterns, conundrum/chapter response counts, and recent teach-backs (last 14 days, limit 10). Child-scoped `PLANNING-PARTNER MODE` addendum in the role section. |
+| `shellyChat` | `src/features/shelly-chat/ShellyChatPage.tsx:523`. Shelly's main chat UI. | 14 shared slices via `buildContextForTask("shellyChat", …)` (`contextSlices.ts:65-70`) plus 9 supplemental queries in `tasks/shellyChat.ts` (the 9th is FEAT-135's `activityConfigs` read behind the `ACTIVITIES` section). Model: Sonnet. `maxTokens: 2000`. | Supplemental block includes disposition profile (from `child.dispositionCache.result.dispositions` with `dispositionOverrides` applied), 5-row weekly review strip, conundrum title, completion patterns, conundrum/chapter response counts, and recent teach-backs (last 14 days, limit 10). Child-scoped `PLANNING-PARTNER MODE` addendum in the role section. |
 
 Other chat-dispatched task types (21 total in `tasks/index.ts` registry) are independent: `plan`, `generate`, `evaluate`, `quest`, `generateStory`, `reviseStory`, `revisePage`, `workshop`, `analyzeWorkbook`, `disposition`, `conundrum`, `weeklyFocus`, `scan`, `shellyChat`, `foundationsReview`, `chapterQuestions`, `bookLookup`, `lessonVideo`, `helpCard`, `monthlyReview`, `chat`. `analyzeEvaluationPatterns` is exported separately.
+
+### What Ask AI can change directly — and what it can't (FEAT-135)
+
+Every one of these is **propose → confirm → write**: the assistant emits an `<action>` block, the parent
+sees a plain-language card, and the write happens only on her tap. Nothing auto-writes.
+
+| The parent says | What happens | Where it lands |
+|---|---|---|
+| "add *because* to his sight words" | `addSightWord` / `removeSightWord` | `sightWordProgress` |
+| "he's really into dinosaurs now" | `editProfileField` (motivators / interests / strengths only) | `children` |
+| "let's add inference to his list" / "stop the lesson if he melts down" | additive snapshot edits (`addPrioritySkill` / `addSupport` / `addStopRule` / `markSkillProgress`) — **additive only**, never a removal or downgrade | `skillSnapshots`, via `skillSnapshotWrites.ts` |
+| **"math should be 30 minutes from now on"** | **`setActivityMinutes` (FEAT-135)** — one field, `defaultMinutes`, on one activity config, via `updateActivityConfigMinutes`. Integer 5–120, rejected outright outside that band. The id must resolve to a real config the acting child owns, or no card is offered. Parent-only at the component *and* the write layer. | `activityConfigs` |
+| "next week needs to be lighter" | `proposePlanAdjustment` — a **handoff**, not a write: stages a brief and opens Plan My Week, where she reviews and locks in | `settings/pendingPlanAdjustment_{childId}` |
+
+**`setActivityMinutes` changes a default for FUTURE plans and nothing else.** No `dayLog` is touched — not
+today's, not this week's, not a past one. No applied week is re-planned and no `plannedMinutes` on an
+existing block moves. Hours already recorded are a child's school record; a forward-looking preference
+must never restate history. That is the same line the live-week editing work holds when it keeps
+`onUpdateTime` locked on an applied week: a default for next time is not an edit to what happened.
+
+**What the chat still can't do.** It cannot edit this week's applied plan or today's checklist; it cannot
+remove or downgrade anything on a skill snapshot (the future Option 3); it cannot change an activity's
+frequency, subject, order, or position; it cannot delete an activity or create one. For all of those it
+says so plainly — and under the **navigation-honesty rule** it may only name a screen it has been told
+exists, or say the thing isn't in the app yet. It must never invent a location. The true map for
+durations is **Progress → Curriculum** (`CurriculumTab` / `EditRoutinesDialog` / `AddActivityDialog`);
+Settings holds no schedule, subject-duration, or time-block screen and never has.
+
+**Context that makes it possible:** an `ACTIVITIES` section in the `shellyChat` supplemental block
+(`formatChatActivities`) listing each non-completed config's doc id, name, subject, current default
+minutes and frequency, with shared (`childId: 'both'`) configs marked by the names of every child they
+cover. `loadWorkbookPaces` was deliberately **not** widened to carry this — it filters to workbooks and
+feeds pace reasoning for `plan` and `quest` too, so the ACTIVITIES read is a sibling and nothing existing
+shifts.
+
 
 ### Known Technical Debt
 - **AvatarThumbnail WebGL instances** — Console warns "many active instances — consider static mode." The `forceContextLoss()` fix from the Crash Cascade sprint resolved the hard crash, but multiple active `WebGLRenderer` instances still get created when several thumbnails mount (N thumbnails = N renderers). Consider: single shared renderer with static snapshots, or CSS/canvas 2D fallback for thumbnails where 3D isn't needed. Not blocking but worth addressing before avatar features expand.
