@@ -809,7 +809,7 @@ export default function TodayPage() {
   }, [])
 
   const handleSnackMessage = useCallback(
-    (msg: { text: string; severity: 'success' | 'error' }) => setSnackMessage(msg),
+    (msg: { text: string; severity: 'success' | 'error' | 'warning' }) => setSnackMessage(msg),
     [setSnackMessage],
   )
 

@@ -14,11 +14,27 @@ import {
 } from '../../features/quest/workingLevels'
 import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
 
+/**
+ * Why a sync registered nothing. FEAT-135: `action: 'none'` had three distinct
+ * causes and the caller could not tell them apart, so a scan that simply failed
+ * to identify a curriculum was reported to the parent as "the workbook is gone".
+ * Reporting-only — no behaviour depends on this field.
+ */
+export type ScanConfigNoneReason =
+  /** No family in scope (unauthenticated / mid-load). */
+  | 'no-family'
+  /** The page read fine but named no curriculum and no subject — nothing to register against. */
+  | 'no-curriculum-detected'
+  /** A `targetConfigId` was pinned but that activity config no longer exists. */
+  | 'target-missing'
+
 export interface ScanConfigResult {
   action: 'created' | 'updated' | 'none'
   configId?: string
   configName?: string
   position?: number | null
+  /** Set only when `action === 'none'`. See `ScanConfigNoneReason`. */
+  reason?: ScanConfigNoneReason
 }
 
 export interface SyncScanOptions {
@@ -42,10 +58,12 @@ export function useScanToActivityConfig() {
       scanResult: WorksheetScanResult,
       options: SyncScanOptions = {},
     ): Promise<ScanConfigResult> => {
-      if (!familyId) return { action: 'none' }
+      if (!familyId) return { action: 'none', reason: 'no-family' }
 
       const detected = scanResult.curriculumDetected
-      if (!detected?.name && !scanResult.subject) return { action: 'none' }
+      if (!detected?.name && !scanResult.subject) {
+        return { action: 'none', reason: 'no-curriculum-detected' }
+      }
 
       const curriculumName = detected?.name || scanResult.subject || 'Unknown'
       const lessonNumber = detected?.lessonNumber ?? detected?.pageNumber ?? null
@@ -143,7 +161,7 @@ export function useScanToActivityConfig() {
       // If a target config ID was provided but the doc didn't exist, bail.
       // Don't create a new doc — that would defeat the purpose of targeting.
       if (options.targetConfigId) {
-        return { action: 'none' }
+        return { action: 'none', reason: 'target-missing' }
       }
 
       // CREATE new activity config from scan
