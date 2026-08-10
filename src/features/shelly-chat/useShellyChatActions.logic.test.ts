@@ -39,6 +39,13 @@ vi.mock('./stagePlanAdjustment', () => ({
   stagePlanAdjustment: (...args: unknown[]) => stagePlanAdjustment(...args),
 }))
 
+// The narrow single-field activity write (FEAT-135). Mocked so the resolution
+// gate ("a hallucinated id never reaches a write") is assertable directly.
+const updateActivityConfigMinutes = vi.fn()
+vi.mock('../../core/firebase/updateActivityMinutes', () => ({
+  updateActivityConfigMinutes: (...args: unknown[]) => updateActivityConfigMinutes(...args),
+}))
+
 const updateDoc = vi.fn()
 const arrayUnion = vi.fn((...v: unknown[]) => ({ __arrayUnion: v[0] }))
 const doc = vi.fn((...args: unknown[]) => ({ __doc: args.length }))
@@ -52,7 +59,19 @@ vi.mock('../../core/firebase/firestore', () => ({
   shellyChatMessagesCollection: vi.fn(() => ({ __collection: true })),
 }))
 
-import { useShellyChatActions } from './useShellyChatActions'
+import {
+  resolveActivityConfig,
+  useShellyChatActions,
+  type ActivityMinutesAction,
+  type ChatActivityConfig,
+} from './useShellyChatActions'
+
+/** Lincoln's own math activity, plus a shared read-aloud both boys do. */
+const CONFIGS: ChatActivityConfig[] = [
+  { id: 'cfg_math', name: 'Math Lesson', childId: 'lincoln1', defaultMinutes: 15 },
+  { id: 'cfg_read', name: 'Read Aloud', childId: 'both', defaultMinutes: 20 },
+  { id: 'cfg_london', name: "London's Letters", childId: 'london1', defaultMinutes: 10 },
+]
 
 const CHILDREN: Child[] = [
   { id: 'lincoln1', name: 'Lincoln' } as Child,
@@ -61,7 +80,11 @@ const CHILDREN: Child[] = [
 
 const navigateToPlanner = vi.fn()
 
-function setup(activeChildId = 'lincoln1', activeThreadId: string | null = 'thread1') {
+function setup(
+  activeChildId = 'lincoln1',
+  activeThreadId: string | null = 'thread1',
+  opts: { activityConfigs?: ChatActivityConfig[]; canEditActivityConfigs?: boolean } = {},
+) {
   return renderHook(() =>
     useShellyChatActions({
       familyId: 'fam1',
@@ -69,6 +92,8 @@ function setup(activeChildId = 'lincoln1', activeThreadId: string | null = 'thre
       activeChildId,
       activeThreadId,
       navigateToPlanner,
+      activityConfigs: opts.activityConfigs ?? CONFIGS,
+      canEditActivityConfigs: opts.canEditActivityConfigs ?? true,
     }),
   )
 }
@@ -80,7 +105,144 @@ beforeEach(() => {
   updateChildSoftProfile.mockResolvedValue(undefined)
   writeSnapshotUpdate.mockResolvedValue({ changed: true })
   stagePlanAdjustment.mockResolvedValue(undefined)
+  updateActivityConfigMinutes.mockResolvedValue(undefined)
   updateDoc.mockResolvedValue(undefined)
+})
+
+// ── setActivityMinutes (FEAT-135) ───────────────────────────────────
+// Two contracts under test: a hallucinated id never reaches the write, and a
+// confirmed write moves exactly one number forward — no dayLog, no plan, no
+// child record, nothing retroactive.
+
+const MINUTES_ACTION: ActivityMinutesAction = {
+  kind: 'setActivityMinutes',
+  childId: 'lincoln1',
+  activityConfigId: 'cfg_math',
+  minutes: 30,
+}
+
+describe('resolveActivityConfig (FEAT-135)', () => {
+  it('resolves a config the acting child owns', () => {
+    expect(resolveActivityConfig(CONFIGS, MINUTES_ACTION)?.name).toBe('Math Lesson')
+  })
+
+  it("resolves a shared ('both') config for either child", () => {
+    const shared = { ...MINUTES_ACTION, activityConfigId: 'cfg_read' }
+    expect(resolveActivityConfig(CONFIGS, shared)?.name).toBe('Read Aloud')
+    expect(
+      resolveActivityConfig(CONFIGS, { ...shared, childId: 'london1' })?.name,
+    ).toBe('Read Aloud')
+  })
+
+  it('refuses an id that names no config at all', () => {
+    const bogus = { ...MINUTES_ACTION, activityConfigId: 'cfg_hallucinated' }
+    expect(resolveActivityConfig(CONFIGS, bogus)).toBeNull()
+  })
+
+  it("refuses a real config that belongs to a different child", () => {
+    const sibling = { ...MINUTES_ACTION, activityConfigId: 'cfg_london' }
+    expect(resolveActivityConfig(CONFIGS, sibling)).toBeNull()
+  })
+})
+
+describe('useShellyChatActions — setActivityMinutes (FEAT-135)', () => {
+  it('writes only defaultMinutes on the one named config, through the narrow helper', async () => {
+    const { result } = setup()
+
+    act(() => result.current.stagePendingActions('msg1', [MINUTES_ACTION]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(MINUTES_ACTION)
+    })
+
+    expect(ok).toBe(true)
+    expect(updateActivityConfigMinutes).toHaveBeenCalledTimes(1)
+    expect(updateActivityConfigMinutes).toHaveBeenCalledWith('fam1', 'cfg_math', 30)
+    expect(result.current.pending[0].status).toBe('applied')
+  })
+
+  it('touches no day log, no plan, and no child record on a confirmed write', async () => {
+    const { result } = setup()
+
+    act(() => result.current.stagePendingActions('msg1', [MINUTES_ACTION]))
+    await act(async () => {
+      await result.current.applyChatAction(MINUTES_ACTION)
+    })
+
+    // Nothing retroactive: hours already recorded are a child's school record.
+    expect(stagePlanAdjustment).not.toHaveBeenCalled()
+    expect(addSightWord).not.toHaveBeenCalled()
+    expect(removeSightWord).not.toHaveBeenCalled()
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+    expect(navigateToPlanner).not.toHaveBeenCalled()
+    // The ONLY Firestore doc write is the inline confirm audit on the source
+    // chat message — the day-log persist path is never reached.
+    expect(updateDoc).toHaveBeenCalledTimes(1)
+    const [, payload] = updateDoc.mock.calls[0] as [unknown, Record<string, unknown>]
+    expect(Object.keys(payload)).toEqual(['appliedActions'])
+  })
+
+  it('never offers a card for an id that resolves to no real config', () => {
+    const { result } = setup()
+    const bogus: ChatAction = { ...MINUTES_ACTION, activityConfigId: 'cfg_hallucinated' }
+
+    act(() => result.current.stagePendingActions('msg1', [bogus]))
+
+    expect(result.current.pending).toHaveLength(0)
+  })
+
+  it('never writes for a hallucinated id even if apply is called directly', async () => {
+    const { result } = setup()
+    const bogus: ChatAction = { ...MINUTES_ACTION, activityConfigId: 'cfg_hallucinated' }
+
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(bogus)
+    })
+
+    expect(ok).toBe(false)
+    expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it("never writes against another child's config", async () => {
+    const { result } = setup()
+    const sibling: ChatAction = { ...MINUTES_ACTION, activityConfigId: 'cfg_london' }
+
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(sibling)
+    })
+
+    expect(ok).toBe(false)
+    expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
+  })
+
+  it('is parent-only — a non-parent profile neither stages nor writes', async () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+
+    act(() => result.current.stagePendingActions('msg1', [MINUTES_ACTION]))
+    expect(result.current.pending).toHaveLength(0)
+
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(MINUTES_ACTION)
+    })
+    expect(ok).toBe(false)
+    expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
+  })
+
+  it('still stages other action kinds alongside a dropped activity proposal', () => {
+    const { result } = setup()
+    const bogus: ChatAction = { ...MINUTES_ACTION, activityConfigId: 'nope' }
+    const word: ChatAction = { kind: 'addSightWord', childId: 'lincoln1', word: 'because' }
+
+    act(() => result.current.stagePendingActions('msg1', [bogus, word]))
+
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.pending[0].action).toEqual(word)
+  })
 })
 
 describe('useShellyChatActions', () => {

@@ -27,11 +27,17 @@
 //     a brief to the planner's per-child inbox (`stagePlanAdjustment`) and
 //     navigates to Plan My Week. shelly-chat NEVER writes the weekly plan — the
 //     planner owns plan writes and applies via its existing lock-in path.
+//   - `setActivityMinutes` (FEAT-135) writes ONE field — `defaultMinutes` — on
+//     ONE activity config, the number every FUTURE plan reads. It is resolved
+//     against the family's live configs BEFORE the card is offered (a
+//     hallucinated id never reaches the write) and it touches no `dayLog`,
+//     re-plans no applied week, and moves no already-recorded minute.
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
 
 import { shellyChatMessagesCollection } from '../../core/firebase/firestore'
+import { updateActivityConfigMinutes } from '../../core/firebase/updateActivityMinutes'
 import { updateChildSoftProfile } from '../../core/family/updateChildSoftProfile'
 import type { ChatAction, Child } from '../../core/types'
 import { todayKey } from '../../core/utils/dateKey'
@@ -48,11 +54,64 @@ export interface PendingAction {
   status: ActionStatus
 }
 
+/**
+ * The slice of an `ActivityConfig` the portal needs to resolve, preview, and
+ * write a `setActivityMinutes` action (FEAT-135). Structurally satisfied by a
+ * full `ActivityConfig`; kept narrow so the hook doesn't depend on the whole
+ * planning type surface.
+ */
+export interface ChatActivityConfig {
+  id: string
+  name: string
+  childId: string | 'both'
+  defaultMinutes: number
+}
+
+/** A `setActivityMinutes` proposal, narrowed off the `ChatAction` union. */
+export type ActivityMinutesAction = Extract<ChatAction, { kind: 'setActivityMinutes' }>
+
+/**
+ * Resolve a proposed `setActivityMinutes` action to a REAL config (FEAT-135).
+ *
+ * This is the guard that keeps a hallucinated id off the write path. A model
+ * can emit any string it likes; only an id that names a config the family
+ * actually owns — and that belongs to the acting child (or is shared, `'both'`)
+ * — resolves. Everything else returns null, which both suppresses the confirm
+ * card and rejects the write if one is somehow attempted.
+ *
+ * Pure, so the "never reaches a write" contract is testable without Firestore.
+ */
+export function resolveActivityConfig(
+  configs: ChatActivityConfig[],
+  action: ActivityMinutesAction,
+): ChatActivityConfig | null {
+  const match = configs.find((c) => c.id === action.activityConfigId)
+  if (!match) return null
+  // A config the acting child doesn't own is as invalid as one that doesn't
+  // exist — `'both'` is shared and legitimately owned by every child.
+  if (match.childId !== 'both' && match.childId !== action.childId) return null
+  return match
+}
+
 export interface ShellyChatActionsDeps {
   familyId: string
   children: Child[]
   /** The active chat context's childId. Actions must match this. */
   activeChildId: string
+  /**
+   * The family's live activity configs for the active child (including shared
+   * `'both'` ones). Used to resolve a `setActivityMinutes` proposal to a real
+   * config before its confirm card is offered. Defaults to empty, which simply
+   * means no `setActivityMinutes` action can be staged.
+   */
+  activityConfigs?: ChatActivityConfig[]
+  /**
+   * Whether the signed-in profile is a parent. `setActivityMinutes` is
+   * parent-only, and `/chat` is nav-gated rather than route-gated, so the write
+   * layer states the gate itself instead of trusting the route. Defaults to
+   * false — fail closed.
+   */
+  canEditActivityConfigs?: boolean
   /** Thread the pending actions came from, so applies can annotate the message. */
   activeThreadId: string | null
   /**
@@ -118,6 +177,9 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
   }
 }
 
+/** Stable empty default so an omitted `activityConfigs` dep doesn't churn refs. */
+const EMPTY_CONFIGS: ChatActivityConfig[] = []
+
 /**
  * Owns the propose → human-confirm → write loop for `<action>` blocks. The page
  * stages actions parsed from the latest assistant message via
@@ -125,22 +187,63 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
  * or {@link dismissAction} on a tap.
  */
 export function useShellyChatActions(deps: ShellyChatActionsDeps) {
-  const { familyId, children, activeChildId, activeThreadId, navigateToPlanner } = deps
+  const {
+    familyId,
+    children,
+    activeChildId,
+    activityConfigs = EMPTY_CONFIGS,
+    canEditActivityConfigs = false,
+    activeThreadId,
+    navigateToPlanner,
+  } = deps
 
   const [pending, setPending] = useState<PendingAction[]>([])
   // The assistant message the current `pending` set was parsed from — applied
   // actions are recorded back onto it for inline audit.
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null)
 
+  // Latest configs + capability, read at stage/apply time rather than captured
+  // in a closure, so a snapshot that lands between renders is the one we
+  // validate against — and so `stagePendingActions` keeps a stable identity
+  // (the page threads it into useShellyChatFlows). Synced in an effect, which
+  // runs before any confirm tap can reach these callbacks.
+  const configsRef = useRef<ChatActivityConfig[]>(activityConfigs)
+  const parentRef = useRef<boolean>(canEditActivityConfigs)
+  useEffect(() => {
+    configsRef.current = activityConfigs
+    parentRef.current = canEditActivityConfigs
+  }, [activityConfigs, canEditActivityConfigs])
+
   /**
    * Stage the actions parsed from an assistant message, awaiting a confirm tap.
    * This NEVER writes — it only moves the proposals into confirm-card state.
+   *
+   * A `setActivityMinutes` proposal is resolved against the family's live
+   * configs HERE, so an unresolvable (hallucinated, or wrong-child) id never
+   * becomes a card the parent could tap. `applyChatAction` re-checks anyway —
+   * this is the gate, that is the backstop.
    */
   const stagePendingActions = useCallback(
     (messageId: string, actions: ChatAction[]) => {
       setPendingMessageId(messageId)
+      const offerable = actions.filter((action) => {
+        if (action.kind !== 'setActivityMinutes') return true
+        if (!parentRef.current) {
+          console.warn('[shellyChat] dropped setActivityMinutes — parent-only action')
+          return false
+        }
+        const config = resolveActivityConfig(configsRef.current, action)
+        if (!config) {
+          console.warn(
+            '[shellyChat] dropped setActivityMinutes — unknown activity config',
+            action.activityConfigId,
+          )
+          return false
+        }
+        return true
+      })
       setPending(
-        actions.map((action, i) => ({
+        offerable.map((action, i) => ({
           id: `${messageId}_${i}`,
           action,
           status: 'pending' as const,
@@ -167,6 +270,15 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       }
       if (activeChildId && action.childId !== activeChildId) {
         return 'child mismatch with active context'
+      }
+      // FEAT-135 backstop: even if a card were somehow offered, the action must
+      // still be parent-initiated AND name a real config the acting child owns
+      // before we write.
+      if (action.kind === 'setActivityMinutes') {
+        if (!parentRef.current) return 'activity minutes are parent-only'
+        if (!resolveActivityConfig(configsRef.current, action)) {
+          return 'unknown activity config'
+        }
       }
       return null
     },
@@ -200,6 +312,12 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         await updateChildSoftProfile(familyId, action.childId, {
           [action.field]: action.value,
         })
+      } else if (action.kind === 'setActivityMinutes') {
+        // FEAT-135 — the narrowest write in the portal: one field
+        // (`defaultMinutes`) on one activity config, the number every FUTURE
+        // plan reads. Nothing retroactive: no dayLog is touched, no applied
+        // week is re-planned, and no already-recorded minute moves.
+        await updateActivityConfigMinutes(familyId, action.activityConfigId, action.minutes)
       } else if (action.kind === 'proposePlanAdjustment') {
         // HANDOFF, not a write (chunk 2A/2): stage the brief to the planner's
         // per-child inbox. shelly-chat NEVER writes the plan — the planner owns
