@@ -50,6 +50,13 @@ vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({ activeChildId: '', children: STABLE_CHILDREN }),
 }))
 
+// The page reads the profile to gate the parent-only setActivityMinutes
+// capability (FEAT-135). The smoke test renders outside ProfileProvider, so
+// stub the hook — parent, matching the real /chat audience.
+vi.mock('../../core/profile/useProfile', () => ({
+  useProfile: () => ({ profile: 'parents' }),
+}))
+
 vi.mock('../../core/ai/useAI', () => ({
   TaskType: { ShellyChat: 'shellyChat' },
   useAI: () => ({
