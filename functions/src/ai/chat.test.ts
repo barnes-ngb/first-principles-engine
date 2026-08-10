@@ -11,6 +11,7 @@ import {
   buildReviseStoryPrompt,
   buildStoryPrompt,
   getWeekMonday,
+  loadWorkbookPaces,
 } from "./chat.js";
 import type { ReviseStoryInput, RevisePageInput } from "./chat.js";
 import { MATH_CONCEPT_BANDS } from "./levelDefinitions.js";
@@ -1004,5 +1005,97 @@ describe("buildRevisePagePrompt", () => {
     const p = buildRevisePagePrompt(baseLondon);
     expect(p).toContain("CHARACTER NAMES");
     expect(p).toContain("Ember");
+  });
+});
+
+// ── loadWorkbookPaces — characterization (FEAT-135) ─────────────
+//
+// FEAT-135 needed activity DOC IDS and non-workbook rows in the chat's context.
+// The obvious move — widen this loader — was deliberately NOT taken: it feeds
+// pace/coverage reasoning for `plan`, `quest` and `shellyChat` alike, so
+// widening it would silently reshape context for tasks the change has nothing
+// to do with. The new ACTIVITIES read is a sibling. This test pins what this
+// loader returns so that stays true.
+
+type PaceDoc = Record<string, unknown>;
+
+function makePacesDb(docs: PaceDoc[]) {
+  const captured: { path: string | null; wheres: unknown[][] } = { path: null, wheres: [] };
+  const q: Record<string, unknown> = {
+    where: (...args: unknown[]) => {
+      captured.wheres.push(args);
+      return q;
+    },
+    get: async () => ({ docs: docs.map((d) => ({ data: () => d })) }),
+  };
+  const db = {
+    collection: (path: string) => {
+      captured.path = path;
+      return q;
+    },
+  };
+  return { db: db as never, captured };
+}
+
+const WORKBOOK_DOC: PaceDoc = {
+  name: "GATB Math 3",
+  curriculum: "GATB",
+  unitLabel: "lesson",
+  currentPosition: 42,
+  totalUnits: 120,
+  subjectBucket: "Math",
+  defaultMinutes: 15,
+  frequency: "daily",
+  completed: false,
+};
+
+describe("loadWorkbookPaces — unchanged by FEAT-135", () => {
+  it("returns exactly the coverage fields, with no doc id and no defaultMinutes", async () => {
+    const { db } = makePacesDb([WORKBOOK_DOC]);
+    const paces = await loadWorkbookPaces(db, "fam1", "lincoln1");
+
+    expect(paces).toEqual([
+      {
+        name: "GATB Math 3",
+        unitLabel: "lesson",
+        currentPosition: 42,
+        totalUnits: 120,
+        subjectBucket: "Math",
+        curriculum: undefined,
+      },
+    ]);
+    // The two fields FEAT-135 needed and pointedly did NOT add here.
+    expect(Object.keys(paces[0])).not.toContain("id");
+    expect(Object.keys(paces[0])).not.toContain("defaultMinutes");
+  });
+
+  it("still filters to workbook-type configs for the child plus shared", async () => {
+    const { db, captured } = makePacesDb([WORKBOOK_DOC]);
+    await loadWorkbookPaces(db, "fam1", "lincoln1");
+
+    expect(captured.path).toBe("families/fam1/activityConfigs");
+    expect(captured.wheres).toEqual([
+      ["childId", "in", ["lincoln1", "both"]],
+      ["type", "==", "workbook"],
+    ]);
+  });
+
+  it("still drops completed programs", async () => {
+    const { db } = makePacesDb([
+      { ...WORKBOOK_DOC, completed: true },
+      { ...WORKBOOK_DOC, name: "Other", curriculumMeta: { completed: true } },
+    ]);
+    expect(await loadWorkbookPaces(db, "fam1", "lincoln1")).toEqual([]);
+  });
+
+  it("still falls back to curriculum then a generic name, and defaults positions", async () => {
+    const { db } = makePacesDb([{ curriculum: "Explode the Code" }, {}]);
+    const paces = await loadWorkbookPaces(db, "fam1", "lincoln1");
+
+    expect(paces[0].name).toBe("Explode the Code");
+    expect(paces[1].name).toBe("Workbook");
+    expect(paces[1].unitLabel).toBe("lesson");
+    expect(paces[1].currentPosition).toBe(0);
+    expect(paces[1].totalUnits).toBe(0);
   });
 });
