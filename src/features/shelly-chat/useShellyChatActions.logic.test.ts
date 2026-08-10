@@ -219,6 +219,60 @@ describe('useShellyChatActions — setActivityMinutes (FEAT-135)', () => {
     expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
   })
 
+  // Codex P2 (PR #1653): the CF prompt is not profile-aware and always signs
+  // off with "confirm with a tap", so a SILENTLY dropped proposal leaves the
+  // reply promising a card that never renders. Dropping must be visible.
+  it('explains a parent-only drop instead of dropping it silently', () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+
+    act(() => result.current.stagePendingActions('msg1', [MINUTES_ACTION]))
+
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed).toHaveLength(1)
+    expect(result.current.suppressed[0]).toMatch(/grown-up/)
+    expect(result.current.suppressed[0]).toMatch(/nothing was changed/)
+  })
+
+  it('explains an unmatched-activity drop, and points at the real screen', () => {
+    const { result } = setup()
+    const bogus: ChatAction = { ...MINUTES_ACTION, activityConfigId: 'nope' }
+
+    act(() => result.current.stagePendingActions('msg1', [bogus]))
+
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed[0]).toMatch(/didn't match one of your activities/)
+    expect(result.current.suppressed[0]).toContain('Progress → Curriculum')
+  })
+
+  it('leaves no notice when every proposal is offerable', () => {
+    const { result } = setup()
+
+    act(() => result.current.stagePendingActions('msg1', [MINUTES_ACTION]))
+
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('does not stack the same sentence for two bad proposals in one turn', () => {
+    const { result } = setup()
+    const a: ChatAction = { ...MINUTES_ACTION, activityConfigId: 'nope1' }
+    const b: ChatAction = { ...MINUTES_ACTION, activityConfigId: 'nope2' }
+
+    act(() => result.current.stagePendingActions('msg1', [a, b]))
+
+    expect(result.current.suppressed).toHaveLength(1)
+  })
+
+  it('clears notices with the rest of the pending state', () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+
+    act(() => result.current.stagePendingActions('msg1', [MINUTES_ACTION]))
+    expect(result.current.suppressed).toHaveLength(1)
+
+    act(() => result.current.clearPending())
+    expect(result.current.suppressed).toEqual([])
+  })
+
   it('is parent-only — a non-parent profile neither stages nor writes', async () => {
     const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
 

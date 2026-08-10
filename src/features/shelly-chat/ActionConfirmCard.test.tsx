@@ -34,12 +34,13 @@ function pendingFor(activityConfigId: string, minutes = 30): PendingAction[] {
   ]
 }
 
-function renderCard(pending: PendingAction[], configs = CONFIGS) {
+function renderCard(pending: PendingAction[], configs = CONFIGS, suppressed: string[] = []) {
   return render(
     <ActionConfirmCard
       pending={pending}
       familyChildren={CHILDREN}
       activityConfigs={configs}
+      suppressed={suppressed}
       onConfirm={vi.fn()}
       onDismiss={vi.fn()}
       onConfirmAll={vi.fn()}
@@ -98,6 +99,33 @@ describe('ActionConfirmCard — setActivityMinutes (FEAT-135)', () => {
     ])
 
     expect(screen.getByText('Add sight word "because" for Lincoln')).toBeInTheDocument()
+  })
+})
+
+describe('ActionConfirmCard — suppressed-proposal notices (PR #1653 Codex P2)', () => {
+  it('shows why a proposal produced no card, so the reply is not left dangling', () => {
+    renderCard([], CONFIGS, ['Changing how long an activity takes is something a grown-up does — nothing was changed.'])
+
+    expect(
+      screen.getByText(
+        'Changing how long an activity takes is something a grown-up does — nothing was changed.',
+      ),
+    ).toBeInTheDocument()
+    // A notice is not a card: nothing to confirm or dismiss.
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument()
+  })
+
+  it('renders notices alongside a real card when a turn has both', () => {
+    renderCard(pendingFor('cfg_math'), CONFIGS, ['Nothing was changed.'])
+
+    expect(screen.getByText('Nothing was changed.')).toBeInTheDocument()
+    expect(screen.getByText('Math Lesson: 15m → 30m')).toBeInTheDocument()
+  })
+
+  it('renders nothing at all when there is neither a card nor a notice', () => {
+    const { container } = renderCard([], CONFIGS, [])
+    expect(container).toBeEmptyDOMElement()
   })
 })
 

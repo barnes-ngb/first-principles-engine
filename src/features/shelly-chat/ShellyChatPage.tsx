@@ -140,6 +140,7 @@ export default function ShellyChatPage() {
   )
   const {
     pending: pendingActions,
+    suppressed: suppressedActionNotices,
     stagePendingActions,
     applyChatAction,
     dismissAction,
@@ -510,6 +511,7 @@ export default function ShellyChatPage() {
           pending={pendingActions}
           familyChildren={children}
           activityConfigs={activityConfigs}
+          suppressed={suppressedActionNotices}
           onConfirm={applyChatAction}
           onDismiss={dismissAction}
           onConfirmAll={confirmAll}

@@ -5,6 +5,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
 import TimerOutlinedIcon from '@mui/icons-material/TimerOutlined'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
@@ -24,6 +25,13 @@ interface ActionConfirmCardProps {
    * a `setActivityMinutes` card by NAME with a real old → new diff (FEAT-135).
    */
   activityConfigs?: ChatActivityConfig[]
+  /**
+   * Plain-language reasons a proposal was dropped before it became a card.
+   * Rendered in the card's place so a reply that says "confirm with a tap"
+   * never leaves the parent (or a kid who reached /chat directly) waiting on a
+   * card that will never appear.
+   */
+  suppressed?: string[]
   onConfirm: (action: ChatAction) => void
   onDismiss: (action: ChatAction) => void
   onConfirmAll: () => void
@@ -235,11 +243,12 @@ export default function ActionConfirmCard({
   pending,
   familyChildren,
   activityConfigs = [],
+  suppressed = [],
   onConfirm,
   onDismiss,
   onConfirmAll,
 }: ActionConfirmCardProps) {
-  if (pending.length === 0) return null
+  if (pending.length === 0 && suppressed.length === 0) return null
 
   const childFor = (childId: string): Child | undefined =>
     familyChildren.find((c) => c.id === childId)
@@ -252,6 +261,18 @@ export default function ActionConfirmCard({
   return (
     <Box sx={{ px: 1, pb: 1 }}>
       <Stack spacing={1}>
+        {suppressed.map((note) => (
+          <Paper
+            key={note}
+            variant="outlined"
+            sx={{ p: 1.25, borderRadius: 2, display: 'flex', alignItems: 'flex-start', gap: 1 }}
+          >
+            <InfoOutlinedIcon fontSize="small" color="action" />
+            <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+              {note}
+            </Typography>
+          </Paper>
+        ))}
         {pending.map((item) => {
           const { action } = item
           const isProfileEdit = action.kind === 'editProfileField'

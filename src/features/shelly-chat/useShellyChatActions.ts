@@ -201,6 +201,11 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // The assistant message the current `pending` set was parsed from — applied
   // actions are recorded back onto it for inline audit.
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null)
+  // Why a proposal was dropped before it became a card. The model's prose says
+  // "confirm with a tap", so a SILENTLY dropped action leaves the app promising
+  // a card that never appears — the same "tells you something untrue" failure
+  // this feature exists to fix. Surfaced instead.
+  const [suppressed, setSuppressed] = useState<string[]>([])
 
   // Latest configs + capability, read at stage/apply time rather than captured
   // in a closure, so a snapshot that lands between renders is the one we
@@ -222,14 +227,26 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
    * configs HERE, so an unresolvable (hallucinated, or wrong-child) id never
    * becomes a card the parent could tap. `applyChatAction` re-checks anyway —
    * this is the gate, that is the backstop.
+   *
+   * A dropped proposal is never dropped *silently*. The prompt is not
+   * profile-aware and the model always signs off with "confirm with a tap", so
+   * a silent drop leaves the reply promising a card that never renders — for a
+   * kid who reached `/chat` directly (the route is nav-gated, not
+   * route-gated), and equally for a parent whose activity the model failed to
+   * match. Each drop records a plain-language reason the UI shows in the card's
+   * place, so the app never claims something it didn't do.
    */
   const stagePendingActions = useCallback(
     (messageId: string, actions: ChatAction[]) => {
       setPendingMessageId(messageId)
+      const notices: string[] = []
       const offerable = actions.filter((action) => {
         if (action.kind !== 'setActivityMinutes') return true
         if (!parentRef.current) {
           console.warn('[shellyChat] dropped setActivityMinutes — parent-only action')
+          notices.push(
+            'Changing how long an activity takes is something a grown-up does — nothing was changed.',
+          )
           return false
         }
         const config = resolveActivityConfig(configsRef.current, action)
@@ -238,10 +255,15 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
             '[shellyChat] dropped setActivityMinutes — unknown activity config',
             action.activityConfigId,
           )
+          notices.push(
+            "That didn't match one of your activities, so nothing was changed. Try naming it as it appears in Progress → Curriculum.",
+          )
           return false
         }
         return true
       })
+      // Dedupe: two bad proposals in one turn shouldn't stack the same sentence.
+      setSuppressed([...new Set(notices)])
       setPending(
         offerable.map((action, i) => ({
           id: `${messageId}_${i}`,
@@ -256,6 +278,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   const clearPending = useCallback(() => {
     setPending([])
     setPendingMessageId(null)
+    setSuppressed([])
   }, [])
 
   /**
@@ -387,6 +410,8 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
 
   return {
     pending,
+    /** Plain-language reasons a proposal was dropped before becoming a card. */
+    suppressed,
     stagePendingActions,
     clearPending,
     applyChatAction,
