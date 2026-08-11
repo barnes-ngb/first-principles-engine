@@ -84,6 +84,73 @@ export function parseLedgerIds(md) {
 }
 
 /**
+ * Parse the ledger's rows into their ID + STATUS cell. `parseLedgerIds` above
+ * reads the ID column only; this reads the status too, for the [ledger-status]
+ * invariant.
+ *
+ * Column layout differs per table and is easy to get wrong: the review ledger is
+ * `| ID | Band | Status | Title | Evidence |` so the status is cells[3], while
+ * DOCUMENT_INDEX's Repo Docs table is `| Document | Status |` so its status is
+ * cells[2] (see parseIndexRows). Row bodies routinely contain raw `|` inside
+ * backticks (e.g. `childId | 'both'`), which is harmless here because every cell
+ * we read sits to the LEFT of the body.
+ *
+ * @returns {{ id: string, status: string, line: number }[]}
+ */
+export function parseLedgerStatusCells(md) {
+  const lines = md.split(/\r?\n/)
+  const out = []
+  const rowRe = /^\|\s*\*\*([A-Z]+-\d+)\*\*\s*\|/
+  lines.forEach((line, i) => {
+    const m = line.match(rowRe)
+    if (!m) return
+    const cells = line.split('|').map((c) => c.trim())
+    // cells[0] is '' (leading pipe); [1] ID, [2] Band, [3] Status.
+    if (cells.length < 4) return
+    out.push({ id: m[1], status: cells[3], line: i + 1 })
+  })
+  return out
+}
+
+/**
+ * Ledger rows whose STATUS CELL still claims an open, unmerged PR.
+ *
+ * Deliberately status-cell-only: row *bodies* quote "PR open" / "do not merge"
+ * as prose while narrating history (DOC-11 and DOC-12 are entirely about this
+ * drift class, and FEAT-139's own body ends "**Do not merge** — Nathan reviews
+ * and merges"). Matching bodies would fire on rows whose status cells are
+ * already correct — false positives that get a rule deleted rather than fixed.
+ *
+ * @returns {{ id: string, status: string, line: number }[]}
+ */
+export function findOpenPrStatusRows(md) {
+  return parseLedgerStatusCells(md).filter((r) =>
+    /PR open|do not merge/i.test(r.status),
+  )
+}
+
+/**
+ * Is the [ledger-status] rule HARD for this run? HARD only when the checker is
+ * running against `main`; SOFT (warn) everywhere else.
+ *
+ * WHY THE SPLIT EXISTS — do not "simplify" this to always-HARD: the house
+ * convention is that a run's own new row *correctly* reads "BUILT (PR open) —
+ * do not merge" while its PR is open, and CI runs `docs:check` on PRs into
+ * `main`/`deploy` as well as on push to `main`, so an always-HARD rule would
+ * turn every future feature PR red on its own correct row. The invariant only
+ * holds on `main`, where a row's mere presence proves its PR merged — which is
+ * why the stale cell survived three separate episodes (the 08-10 pair → cleanup
+ * PR #1657, FEAT-138 → flipped by the next run's Step 0.5, FEAT-139 → still
+ * stale on `main` on 2026-08-11) before becoming checkable.
+ *
+ * `GITHUB_REF_NAME` is `main` on the push-to-main job and `<pr>/merge` on
+ * pull_request runs. `DOCS_CHECK_BRANCH` forces it locally.
+ */
+export function ledgerStatusIsHard(env = process.env) {
+  return (env.DOCS_CHECK_BRANCH || env.GITHUB_REF_NAME || '') === 'main'
+}
+
+/**
  * Extract every `Ledger anchor: X-N` reference from a doc body. Bold markers
  * around the ID are tolerated (`Ledger anchor: **FEAT-46**`).
  * @returns {{ id: string, line: number }[]}
@@ -773,6 +840,48 @@ export function runChecks({ fix = false } = {}) {
     for (const m of dayWriteProblems) {
       log(`        ${m}`)
       hard.push({ check: 'day-write-routing', message: m })
+    }
+  }
+  log('')
+
+  // ── Check 11: ledger status can't claim an open PR on `main` (HARD on main,
+  //     SOFT elsewhere) ─────────────────────────────────────────────────────
+  // A status cell reading "PR open" / "do not merge" *on `main`* is a
+  // contradiction by construction: the row only reaches `main` when its PR
+  // merges. No network, no GitHub API, no dates — the text is the bug.
+  // See ledgerStatusIsHard() for why this is branch-aware rather than
+  // always-HARD; an always-HARD rule would redden every feature PR's own row.
+  const openPrRows = findOpenPrStatusRows(ledgerMd)
+  const ledgerStatusHard = ledgerStatusIsHard()
+  if (openPrRows.length === 0) {
+    log(paint(GREEN, `PASS  [ledger-status] no ledger row claims an open PR`))
+  } else {
+    const msgs = openPrRows.map(
+      (r) =>
+        `${r.id} (line ${r.line}) status still reads "${r.status}" — flip it to the MERGED form once the PR merges`,
+    )
+    if (ledgerStatusHard) {
+      log(
+        paint(
+          RED,
+          `FAIL  [ledger-status] row(s) on \`main\` still claiming an open PR (a merged row cannot be open):`,
+        ),
+      )
+      for (const m of msgs) {
+        log(`        ${m}`)
+        hard.push({ check: 'ledger-status', message: m })
+      }
+    } else {
+      log(
+        paint(
+          YELLOW,
+          `WARN  [ledger-status] (SOFT off \`main\` — correct while your PR is genuinely open; HARD once merged to \`main\`):`,
+        ),
+      )
+      for (const m of msgs) {
+        log(`        ${m}`)
+        soft.push({ check: 'ledger-status', message: m })
+      }
     }
   }
   log('')
