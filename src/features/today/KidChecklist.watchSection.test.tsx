@@ -181,3 +181,21 @@ describe('KidChecklist — a planned video is visible and playable (FEAT-134)', 
     expect(screen.queryByRole('button', { name: /watch/i })).toBeNull()
   })
 })
+
+/**
+ * FEAT-138 — the live-week edits are a parent job, and the kid surface has none
+ * of them. `KidTodayView` renders this component, which has no edit mode at all;
+ * a kid deep-linking to the planner is stopped by the write layer's capability
+ * argument (`liveDayEdit`, `canEdit`), not by this surface. This pins the half
+ * the kid view owns.
+ */
+describe('KidChecklist — no live-week editing on the kid surface (FEAT-138)', () => {
+  it('offers no move, remove or change-video affordance on a planned video', () => {
+    renderKid([quest({ label: 'Prayer' }), watchRow()])
+    expect(screen.queryByRole('button', { name: /move to another day/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /change video/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /remove from today/i })).toBeNull()
+    // …and the one thing a kid CAN do is still there.
+    expect(screen.getAllByRole('button', { name: /watch/i })).toHaveLength(1)
+  })
+})
