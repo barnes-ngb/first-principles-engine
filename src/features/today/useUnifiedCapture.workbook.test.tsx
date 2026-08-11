@@ -53,6 +53,20 @@ vi.mock('../../core/curriculum/updateSkillMapFromFindings', () => ({
 }))
 vi.mock('./scanBlocker', () => ({ detectBlockersFromScan: vi.fn(() => []) }))
 
+// FEAT-135: let a test force the scan-analysis timeout branch without waiting
+// out the real 120s ceiling. Off by default — `withTimeout` stays the real one.
+let timeoutScans = false
+vi.mock('../foundations-review/uploadTimeout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../foundations-review/uploadTimeout')>()
+  return {
+    ...actual,
+    withTimeout: <T,>(work: (signal: AbortSignal) => Promise<T>, ms: number) =>
+      timeoutScans
+        ? Promise.reject(new actual.UploadTimeoutError())
+        : actual.withTimeout(work, ms),
+  }
+})
+
 // ── Scan hooks ──────────────────────────────────────────────────────────────
 const runScanMock = vi.fn()
 const syncScanToConfigMock = vi.fn()
@@ -128,6 +142,7 @@ beforeEach(() => {
   updateDocCalls.length = 0
   addDocShouldThrow = false
   addDocThrowFirst = 0
+  timeoutScans = false
   runScanMock.mockReset()
   syncScanToConfigMock.mockReset()
   clearScanMock.mockReset()
@@ -266,9 +281,13 @@ describe('useUnifiedCapture — FEAT-62 workbook routing', () => {
     })
 
     expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    // FEAT-135: was the generic "Couldn't read the workbook page. The photo is
+    // still saved." at severity 'error'. `runScan` resolving null means the scan
+    // never produced results at all, so the message now says so and retrying is
+    // the right advice — and a saved photo is a warning, not an error.
     expect(onMessage).toHaveBeenCalledWith({
-      text: "Couldn't read the workbook page. The photo is still saved.",
-      severity: 'error',
+      text: "Couldn't read the workbook page. The photo is saved — try again.",
+      severity: 'warning',
     })
     vi.unstubAllGlobals()
   })
@@ -415,14 +434,231 @@ describe('useUnifiedCapture — FEAT-62 polish: display-parity backfill (owner c
       await result.current.handleBackfillWorkbookScan(0, ['https://x/orphan.jpg'])
     })
 
-    // Nothing registered → no stamp, honest error, photo untouched.
+    // Nothing registered → no stamp, honest message, photo untouched.
     expect(persistDayLogImmediate).not.toHaveBeenCalled()
     expect(addDocCalls.some((c) => c.key === 'artifacts')).toBe(false)
+    // FEAT-135: same assertion change as above — reason-specific text, warning.
     expect(onMessage).toHaveBeenCalledWith({
-      text: "Couldn't read the workbook page. The photo is still saved.",
-      severity: 'error',
+      text: "Couldn't read the workbook page. The photo is saved — try again.",
+      severity: 'warning',
     })
     vi.unstubAllGlobals()
+  })
+})
+
+describe('useUnifiedCapture — FEAT-135: a failed analyze says what actually went wrong', () => {
+  /** Stub `fetch` so the backfill loop can pull each page's photo back. */
+  function stubPhotoFetch() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob(['img'], { type: 'image/jpeg' })) }),
+    )
+  }
+
+  it('timeout → says the scan took too long, not the generic sentence', async () => {
+    stubPhotoFetch()
+    timeoutScans = true
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/p1.jpg'])
+    })
+
+    expect(onMessage).toHaveBeenCalledWith({
+      text: 'The scan took too long. The photo is saved — try again.',
+      severity: 'warning',
+    })
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('not-a-worksheet → names the certificate, and never reaches the position writer', async () => {
+    stubPhotoFetch()
+    // `isWorksheetScan` is false only for a certificate page.
+    runScanMock.mockResolvedValue({ id: 'scan-c', results: { pageType: 'certificate' } })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/p1.jpg'])
+    })
+
+    expect(onMessage).toHaveBeenCalledWith({
+      text: 'That looks like a certificate, not a workbook page. The photo is saved.',
+      severity: 'warning',
+    })
+    // A failed read must never advance a workbook: `syncScanToConfig` is the
+    // ONLY path that writes `currentPosition`, and it is not reached.
+    expect(syncScanToConfigMock).not.toHaveBeenCalled()
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('no curriculum detected → says it found no workbook page, with the photo hint', async () => {
+    stubPhotoFetch()
+    runScanMock.mockResolvedValue({ id: 'scan-n', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({ action: 'none', reason: 'no-curriculum-detected' })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/p1.jpg'])
+    })
+
+    expect(onMessage).toHaveBeenCalledWith({
+      text: "Couldn't find a workbook page in the photo. The photo is saved — try one page, flat and straight on, in good light.",
+      severity: 'warning',
+    })
+    // Nothing registered → no stamp, no position advance.
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('config-missing → says the row lost its workbook, and never suggests retaking the photo', async () => {
+    stubPhotoFetch()
+    runScanMock.mockResolvedValue({ id: 'scan-m', results: worksheetResults })
+    // The pinned activity config no longer exists.
+    syncScanToConfigMock.mockResolvedValue({ action: 'none', reason: 'target-missing' })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-gone' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/p1.jpg'])
+    })
+
+    const msg = onMessage.mock.calls.at(-1)![0] as { text: string; severity: string }
+    expect(msg.text).toContain("isn't linked to a workbook any more")
+    expect(msg.severity).toBe('warning')
+    // Sending her back to re-shoot a photo would be useless work — no photo of
+    // any quality can register against a workbook that is gone.
+    expect(msg.text.toLowerCase()).not.toMatch(/try again|retake|good light|straight on/)
+    // And it is NOT reported as the same thing as an unreadable photo.
+    expect(msg.text).not.toContain("Couldn't read the workbook page")
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('3 pages, 2 read → the count, and the day log records the last successful registration', async () => {
+    stubPhotoFetch()
+    runScanMock.mockResolvedValue({ id: 'scan-p', results: worksheetResults })
+    syncScanToConfigMock
+      .mockResolvedValueOnce({ action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12 })
+      .mockResolvedValueOnce({ action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 13 })
+      .mockResolvedValueOnce({ action: 'none', reason: 'no-curriculum-detected' })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, [
+        'https://x/p1.jpg',
+        'https://x/p2.jpg',
+        'https://x/p3.jpg',
+      ])
+    })
+
+    const msg = onMessage.mock.calls.at(-1)![0] as { text: string; severity: string }
+    // The count was already being computed and thrown away before FEAT-135.
+    expect(msg.text).toContain('2 of 3 pages read')
+    expect(msg.text).toContain('GATB Math · Lesson 13')
+    expect(msg.text).toContain("1 page couldn't be matched to a lesson")
+    expect(msg.severity).toBe('warning')
+    // Existing behaviour, now asserted: the last success is what gets stamped.
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: 13 })
+    expect(stamped.scanned).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
+  it('3 pages, 0 read → no day-log write, photo untouched, and a warning that leads with the count', async () => {
+    stubPhotoFetch()
+    runScanMock.mockResolvedValue(null)
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, [
+        'https://x/p1.jpg',
+        'https://x/p2.jpg',
+        'https://x/p3.jpg',
+      ])
+    })
+
+    expect(persistDayLogImmediate).not.toHaveBeenCalled()
+    // Backfill never creates or removes an artifact — the photo is untouched.
+    expect(addDocCalls).toHaveLength(0)
+    expect(updateDocCalls).toHaveLength(0)
+    const msg = onMessage.mock.calls.at(-1)![0] as { text: string; severity: string }
+    expect(msg.text).toContain('None of the 3 pages read.')
+    expect(msg.severity).toBe('warning')
+    vi.unstubAllGlobals()
+  })
+
+  it('one banner, not three, when the pages fail for different reasons', async () => {
+    stubPhotoFetch()
+    runScanMock
+      .mockResolvedValueOnce(null) // no-result
+      .mockResolvedValueOnce({ id: 's', results: { pageType: 'certificate' } }) // not-a-worksheet
+      .mockResolvedValueOnce(null) // no-result (dominant)
+
+    const { result, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, [
+        'https://x/p1.jpg',
+        'https://x/p2.jpg',
+        'https://x/p3.jpg',
+      ])
+    })
+
+    expect(onMessage).toHaveBeenCalledTimes(1)
+    const msg = onMessage.mock.calls.at(-1)![0] as { text: string }
+    expect(msg.text).toContain('None of the 3 pages read.')
+    expect(msg.text).toContain("Couldn't read the workbook page")
+    expect(msg.text).not.toContain('certificate')
+    vi.unstubAllGlobals()
+  })
+
+  it('reads the page but finds no lesson → says nothing advanced, while the write stays exactly as before (Codex P1, PR #1652)', async () => {
+    stubPhotoFetch()
+    // The real shape of a blurry / angled / two-page-spread photo: the scan
+    // prompt always fills `subject`, so the page DOES register — with no lesson
+    // number, so the workbook never moves.
+    runScanMock.mockResolvedValue({ id: 'scan-nl', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({
+      action: 'updated',
+      configId: 'wb-math',
+      configName: 'GATB Math',
+      position: null,
+    })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/spread.jpg'])
+    })
+
+    const msg = onMessage.mock.calls.at(-1)![0] as { text: string; severity: string }
+    expect(msg.text).toContain('nothing advanced in GATB Math')
+    expect(msg.text).toContain('one page, flat and straight on, in good light')
+    expect(msg.text).not.toContain('Registered')
+    expect(msg.severity).toBe('warning')
+    // Reporting only — the stamp is byte-identical to pre-FEAT-135 behaviour.
+    // Whether this should stop registering at all is FEAT-136, not decided here.
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: null })
+    expect(stamped.scanned).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
+  it('a failed read on capture still saves the photo and never advances the workbook', async () => {
+    // The capture path's own message is deliberately unchanged (the photo saving
+    // IS what the parent asked for), but the rail still holds.
+    runScanMock.mockResolvedValue({ id: 'scan-x', results: { pageType: 'certificate' } })
+
+    const { result, persistDayLogImmediate, onMessage } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    expect(addDocCalls.some((c) => c.key === 'artifacts')).toBe(true)
+    expect(syncScanToConfigMock).not.toHaveBeenCalled()
+    const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
+    expect(stamped.workbookScanRegistration).toBeUndefined()
+    expect(stamped.scanned).toBeUndefined()
+    expect(onMessage).toHaveBeenCalledWith({ text: 'Work captured!', severity: 'success' })
   })
 })
 
