@@ -111,12 +111,12 @@ buttons unchanged. **Scan → learner-model evidence** (feeding a routed workboo
 
 ---
 
-## Addendum 2026-08-10 — what a failed workbook read tells the parent (FEAT-135), and the two-page spread (FEAT-136)
+## Addendum 2026-08-10 — what a failed workbook read tells the parent (FEAT-136), and the two-page spread (FEAT-137)
 
 **Trigger.** Three photos captured against Lincoln's *GATB Math (15m)* row, **"Analyze all 3 pages"** tapped, one red
 banner back: *"Couldn't read the workbook page. The photo is still saved."*
 
-### The reporting defect (fixed — FEAT-135)
+### The reporting defect (fixed — FEAT-136)
 
 `analyzeWorkbookPage` collapsed **six** distinguishable failures into a single `null`, and the multi-page loop
 collapsed the batch into one generic red sentence while discarding the `registeredCount` it had already computed.
@@ -141,7 +141,7 @@ Two findings worth keeping:
   photo" case is really `no-curriculum-detected`, and that is where the *one page, flat, straight on, good light*
   hint lives — not on the literal `not-a-worksheet` branch, which means "you photographed a certificate."
 
-### Is a two-page spread *expected* to fail? (filed — FEAT-136, not fixed here)
+### Is a two-page spread *expected* to fail? (filed — FEAT-137, not fixed here)
 
 **No — and that is worse than a clean failure.** Nothing in the pipeline rejects a spread; it just has one slot for
 two answers:
@@ -152,10 +152,10 @@ two answers:
   lesson, the wrong one, or nothing at all;
 - when `lessonNumber` is `null` but a subject was detected, the sync still returns `action: 'updated'` with
   `position: null` — nothing advances and the parent is told **"Registered to GATB Math"**. That is the mirror of the
-  FEAT-135 bug: a non-event dressed as a success.
+  FEAT-136 bug: a non-event dressed as a success.
 
 The parent's model ("a page is what I photograph") and the data model (one workbook page per photo — see FEAT-108's
-batch rules above) genuinely disagree. **Filed as FEAT-136, deliberately unfixed by the reporting run:** every
+batch rules above) genuinely disagree. **Filed as FEAT-137, deliberately unfixed by the reporting run:** every
 candidate fix — teaching the prompt to report multiple visible lessons, detecting a spread and asking for one page,
 or treating `position: null` as a real "read it, couldn't tell which lesson" outcome — changes what the app
 **writes**, not just what it says.

@@ -15,7 +15,7 @@ import {
 import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
 
 /**
- * Why a sync registered nothing. FEAT-135: `action: 'none'` had three distinct
+ * Why a sync registered nothing. FEAT-136: `action: 'none'` had three distinct
  * causes and the caller could not tell them apart, so a scan that simply failed
  * to identify a curriculum was reported to the parent as "the workbook is gone".
  * Reporting-only — no behaviour depends on this field.

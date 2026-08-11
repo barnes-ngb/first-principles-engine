@@ -1,5 +1,5 @@
 /**
- * FEAT-135: what a parent is told when a workbook page doesn't register.
+ * FEAT-136: what a parent is told when a workbook page doesn't register.
  *
  * Reporting only. Nothing here scans, writes, or advances anything — it turns a
  * list of per-page outcomes into ONE honest line. It exists because the old
@@ -57,7 +57,7 @@ export type WorkbookPageOutcome =
   | { ok: false; reason: WorkbookScanFailure }
 
 /**
- * A capture/analysis toast. `warning` is the new member (FEAT-135): a failed
+ * A capture/analysis toast. `warning` is the new member (FEAT-136): a failed
  * read whose photo is safely saved is not an error.
  */
 export interface CaptureMessage {
@@ -179,7 +179,7 @@ export function buildWorkbookScanReport(outcomes: WorkbookPageOutcome[]): Captur
   // dressed as a success — the mirror of the failure-dressed-as-error bug this
   // module fixes — so when NOT ONE page produced a lesson, say so.
   // Reporting only: the checklist stamp and every write are unchanged; whether
-  // this should stop registering at all is FEAT-136, deliberately not decided here.
+  // this should stop registering at all is FEAT-137, deliberately not decided here.
   const anyAdvanced = registered.some((o) => o.registration.position != null)
   if (last && !anyAdvanced) {
     const read =
