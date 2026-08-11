@@ -32,7 +32,7 @@ export interface UseUnifiedCaptureOptions {
   dayLog: DayLog | null
   persistDayLogImmediate: (updated: DayLog) => void
   /**
-   * Callback when a snack/toast message should be shown. `warning` (FEAT-135)
+   * Callback when a snack/toast message should be shown. `warning` (FEAT-136)
    * is the severity for a failed workbook read whose photo is safely saved —
    * red argued against the message's own "the photo is saved" half.
    */
@@ -126,7 +126,7 @@ export function useUnifiedCapture({
    * classification gate). Best-effort and timeout-guarded: never throws.
    * Mirrors the Progress per-card scan.
    *
-   * FEAT-135: returns a DISCRIMINATED outcome instead of `null`. The old `null`
+   * FEAT-136: returns a DISCRIMINATED outcome instead of `null`. The old `null`
    * folded six different failures into one, and the caller then reported all of
    * them with one red sentence — including `config-missing`, where retaking the
    * photo can never help. Still pure-ish: no throwing across this boundary, the
@@ -160,7 +160,7 @@ export function useUnifiedCapture({
           { targetConfigId: configId },
         )
         if (configResult.action === 'none') {
-          // 'none' has more than one cause (FEAT-135): the target config really
+          // 'none' has more than one cause (FEAT-136): the target config really
           // being gone is only one of them, and it's the only one where telling
           // the parent to retake the photo would be useless work.
           return {
@@ -220,7 +220,7 @@ export function useUnifiedCapture({
           // Analysis first (best-effort, timeout-guarded) so its lesson/name can
           // stamp the visibility line in the same single checklist write.
           //
-          // FEAT-135 scope note: this path's messages are deliberately UNCHANGED.
+          // FEAT-136 scope note: this path's messages are deliberately UNCHANGED.
           // The parent tapped "take a photo", not "analyze"; the photo saving IS
           // the outcome they asked for, and "Work captured!" is true. The honesty
           // fix lands on the explicit analyze/backfill action below, where the
@@ -559,7 +559,7 @@ export function useUnifiedCapture({
         // a page that fails to read is skipped; the last success advances the
         // position we stamp. No artifact is ever created or removed here.
         //
-        // FEAT-135: every page's outcome is KEPT, not counted-and-discarded, so
+        // FEAT-136: every page's outcome is KEPT, not counted-and-discarded, so
         // the report can say "2 of 3 pages read" and name what happened to the
         // third instead of collapsing the batch into one generic red sentence.
         const outcomes: WorkbookPageOutcome[] = []

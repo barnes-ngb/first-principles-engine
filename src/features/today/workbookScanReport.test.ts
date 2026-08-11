@@ -27,7 +27,7 @@ describe('buildWorkbookScanReport — success lines are unchanged', () => {
   it('keeps the lesson-less success line when at least one page did advance', () => {
     // Page 2 named no lesson, but page 1 advanced — so the workbook did move
     // and the existing (suffix-less, because the last page is what gets
-    // stamped) success line stands, exactly as before FEAT-135.
+    // stamped) success line stands, exactly as before FEAT-136.
     expect(buildWorkbookScanReport([ok(12), ok(null)])).toEqual({
       text: 'Registered 2 pages to GATB Math',
       severity: 'success',

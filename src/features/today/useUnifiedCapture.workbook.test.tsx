@@ -53,7 +53,7 @@ vi.mock('../../core/curriculum/updateSkillMapFromFindings', () => ({
 }))
 vi.mock('./scanBlocker', () => ({ detectBlockersFromScan: vi.fn(() => []) }))
 
-// FEAT-135: let a test force the scan-analysis timeout branch without waiting
+// FEAT-136: let a test force the scan-analysis timeout branch without waiting
 // out the real 120s ceiling. Off by default — `withTimeout` stays the real one.
 let timeoutScans = false
 vi.mock('../foundations-review/uploadTimeout', async (importOriginal) => {
@@ -281,7 +281,7 @@ describe('useUnifiedCapture — FEAT-62 workbook routing', () => {
     })
 
     expect(persistDayLogImmediate).not.toHaveBeenCalled()
-    // FEAT-135: was the generic "Couldn't read the workbook page. The photo is
+    // FEAT-136: was the generic "Couldn't read the workbook page. The photo is
     // still saved." at severity 'error'. `runScan` resolving null means the scan
     // never produced results at all, so the message now says so and retrying is
     // the right advice — and a saved photo is a warning, not an error.
@@ -437,7 +437,7 @@ describe('useUnifiedCapture — FEAT-62 polish: display-parity backfill (owner c
     // Nothing registered → no stamp, honest message, photo untouched.
     expect(persistDayLogImmediate).not.toHaveBeenCalled()
     expect(addDocCalls.some((c) => c.key === 'artifacts')).toBe(false)
-    // FEAT-135: same assertion change as above — reason-specific text, warning.
+    // FEAT-136: same assertion change as above — reason-specific text, warning.
     expect(onMessage).toHaveBeenCalledWith({
       text: "Couldn't read the workbook page. The photo is saved — try again.",
       severity: 'warning',
@@ -446,7 +446,7 @@ describe('useUnifiedCapture — FEAT-62 polish: display-parity backfill (owner c
   })
 })
 
-describe('useUnifiedCapture — FEAT-135: a failed analyze says what actually went wrong', () => {
+describe('useUnifiedCapture — FEAT-136: a failed analyze says what actually went wrong', () => {
   /** Stub `fetch` so the backfill loop can pull each page's photo back. */
   function stubPhotoFetch() {
     vi.stubGlobal(
@@ -553,7 +553,7 @@ describe('useUnifiedCapture — FEAT-135: a failed analyze says what actually we
     })
 
     const msg = onMessage.mock.calls.at(-1)![0] as { text: string; severity: string }
-    // The count was already being computed and thrown away before FEAT-135.
+    // The count was already being computed and thrown away before FEAT-136.
     expect(msg.text).toContain('2 of 3 pages read')
     expect(msg.text).toContain('GATB Math · Lesson 13')
     expect(msg.text).toContain("1 page couldn't be matched to a lesson")
@@ -635,8 +635,8 @@ describe('useUnifiedCapture — FEAT-135: a failed analyze says what actually we
     expect(msg.text).toContain('one page, flat and straight on, in good light')
     expect(msg.text).not.toContain('Registered')
     expect(msg.severity).toBe('warning')
-    // Reporting only — the stamp is byte-identical to pre-FEAT-135 behaviour.
-    // Whether this should stop registering at all is FEAT-136, not decided here.
+    // Reporting only — the stamp is byte-identical to pre-FEAT-136 behaviour.
+    // Whether this should stop registering at all is FEAT-137, not decided here.
     const stamped = (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0]
     expect(stamped.workbookScanRegistration).toEqual({ configName: 'GATB Math', position: null })
     expect(stamped.scanned).toBe(true)
