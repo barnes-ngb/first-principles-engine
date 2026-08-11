@@ -91,7 +91,18 @@ import {
 } from '../today/applyChapterPoolForChild'
 import { dayLogDocId } from '../today/daylog.model'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
-import { setDayLogGuarded, updateDayLogGuarded } from '../today/dayWriteGuard'
+import { checklistItemKey, setDayLogGuarded, updateDayLogGuarded } from '../today/dayWriteGuard'
+import {
+  checklistItemEditLock,
+  draftItemChecklistLabel,
+  findChecklistItemByLabel,
+  liveDayEditLockReason,
+  moveItemToLiveDay,
+  removeItemFromLiveDay,
+  swapWatchVideoOnLiveDay,
+} from '../today/liveDayEdit'
+import MoveToDayDialog from '../today/MoveToDayDialog'
+import { useAppliedWeekDays } from './useAppliedWeekDays'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
@@ -1894,8 +1905,117 @@ Generate a plan for Monday through Friday.`.trim()
     }
   }, [isParent, currentDraft, applied, activeChildId, familyId, weekRange.start, persistConversation])
 
+  // ── The live week is editable (FEAT-138) ───────────────────────────────────
+  //
+  // Post-Apply the day cards are a MIRROR of saved documents, so a structural
+  // edit has to reach the day itself — `handleRemoveItem` below used to edit
+  // only `currentDraft`, which nothing would flush once the Apply bar is gone.
+  // Every post-Apply write goes through `liveDayEdit`, which owns the
+  // completed-row refusal, the row-by-identity resolution and the block rule.
+  //
+  // **Parent capability, checked at the write and not only in the UI**
+  // (FEAT-133's lesson): `/planner/chat` sits OUTSIDE `RequireParent`, so a kid
+  // profile can reach this page by URL. The call sites withhold the handlers so
+  // nothing renders; these guards are the gate on the writes themselves.
+  const { days: appliedWeekDays, loaded: appliedWeekDaysLoaded } = useAppliedWeekDays({
+    familyId,
+    childId: activeChildId,
+    weekStart: weekRange.start,
+    enabled: applied && isParent,
+  })
+
+  /**
+   * The saved row a draft card row corresponds to, resolved through the
+   * deterministic apply-time label join. `null` whenever the live week can't be
+   * edited (pre-Apply, non-parent) or the day no longer holds the row.
+   */
+  const resolveLiveRow = useCallback(
+    (dayIndex: number, itemIndex: number) => {
+      if (!applied || !isParent || !currentDraft || !activeChildId) return null
+      const dayPlan = currentDraft.days[dayIndex]
+      const item = dayPlan?.items[itemIndex]
+      if (!dayPlan || !item) return null
+      if (!WEEK_DAYS.includes(dayPlan.day as typeof WEEK_DAYS[number])) return null
+      const dateKey = dateKeyForDayPlan(weekRange.start, dayPlan.day as typeof WEEK_DAYS[number])
+      const saved = findChecklistItemByLabel(
+        appliedWeekDays.get(dateKey)?.checklist,
+        draftItemChecklistLabel(item),
+      )
+      if (!saved) return null
+      return { dateKey, saved, itemKey: checklistItemKey(saved), dayLabel: dayPlan.day }
+    },
+    [applied, isParent, currentDraft, activeChildId, weekRange.start, appliedWeekDays],
+  )
+
+  /**
+   * Why a row's structural edits are locked, or `null`. Pre-Apply nothing is
+   * locked (the draft isn't anyone's record yet). Post-Apply a row whose saved
+   * counterpart is completed refuses move / remove / swap — and the card says so
+   * instead of offering a button that would fail on tap.
+   */
+  const itemEditLockReason = useCallback(
+    (dayIndex: number, itemIndex: number): string | null => {
+      if (!applied || !isParent) return null
+      // Not-yet-loaded is NOT "editable" (Codex P2 on PR #1658). Until the first
+      // snapshot lands — and after a subscription error, which leaves `loaded`
+      // false — no row can be resolved, so every handler would silently return
+      // and the remove confirmation would even open onto a no-op. Lock and say so.
+      if (!appliedWeekDaysLoaded) return 'Checking this week’s days…'
+      const row = resolveLiveRow(dayIndex, itemIndex)
+      // Loaded, but the day doesn't hold this row: an item that was never
+      // accepted at Apply, or one already removed elsewhere. Also locked, with
+      // the reason, rather than an enabled button that does nothing.
+      if (!row) return liveDayEditLockReason('not-found', activeChild?.name)
+      const lock = checklistItemEditLock(row.saved)
+      return lock ? liveDayEditLockReason(lock, activeChild?.name) : null
+    },
+    [applied, isParent, appliedWeekDaysLoaded, resolveLiveRow, activeChild?.name],
+  )
+
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
     if (!currentDraft) return
+
+    // Post-Apply: the removal has to land in the saved day. Do that FIRST and
+    // only mirror the card on success, so the parent is never shown a week the
+    // child's checklist disagrees with.
+    if (applied) {
+      if (!isParent) return
+      const row = resolveLiveRow(dayIndex, itemIndex)
+      if (!row) return
+      void (async () => {
+        const outcome = await removeItemFromLiveDay({
+          canEdit: isParent,
+          familyId,
+          childId: activeChildId!,
+          dateKey: row.dateKey,
+          itemKey: row.itemKey,
+        }).catch((err) => {
+          console.error('[Planner] Failed to remove the item from the applied day', err)
+          return null
+        })
+        if (!outcome || outcome.status !== 'done') {
+          setSnack({
+            text:
+              outcome?.status === 'refused'
+                ? liveDayEditLockReason(outcome.refusal, activeChild?.name)
+                : "Couldn't remove that from the day. Try again.",
+            severity: outcome?.status === 'refused' ? 'warning' : 'error',
+          })
+          return
+        }
+        const mirrored: DraftWeeklyPlan = {
+          ...currentDraft,
+          days: currentDraft.days.map((day, i) =>
+            i === dayIndex ? { ...day, items: day.items.filter((_, idx) => idx !== itemIndex) } : day,
+          ),
+        }
+        setCurrentDraft(mirrored)
+        void persistConversation({ currentDraft: mirrored })
+        setSnack({ text: `Removed from ${row.dayLabel}.`, severity: 'success' })
+      })()
+      return
+    }
+
     const updated: DraftWeeklyPlan = {
       ...currentDraft,
       days: currentDraft.days.map((day, i) => {
@@ -1906,7 +2026,147 @@ Generate a plan for Monday through Friday.`.trim()
     }
     setCurrentDraft(updated)
     setPlanDirty(true)
-  }, [currentDraft])
+  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation])
+
+  /**
+   * Move a row to another day of the week — the edit this run exists for
+   * (*"sometimes the video changes the day it will be watched"*).
+   *
+   * Pre-Apply it is a draft edit that Apply flushes. Post-Apply it is two
+   * documents, ordered append-then-remove by `moveItemToLiveDay`; a `duplicated`
+   * outcome means the row reached the target but the source removal failed, and
+   * the parent is told plainly rather than left with a silent divergence.
+   */
+  const [moveTarget, setMoveTarget] = useState<{ dayIndex: number; itemIndex: number } | null>(null)
+
+  const handleMoveItemToDay = useCallback(
+    (dayIndex: number, itemIndex: number, toDay: typeof WEEK_DAYS[number]) => {
+      if (!currentDraft) return
+      const toDayIndex = currentDraft.days.findIndex((d) => d.day === toDay)
+      if (toDayIndex < 0 || toDayIndex === dayIndex) return
+      const item = currentDraft.days[dayIndex]?.items[itemIndex]
+      if (!item) return
+
+      const mirrored: DraftWeeklyPlan = {
+        ...currentDraft,
+        days: currentDraft.days.map((day, i) => {
+          if (i === dayIndex) return { ...day, items: day.items.filter((_, idx) => idx !== itemIndex) }
+          if (i === toDayIndex) return { ...day, items: [...day.items, item] }
+          return day
+        }),
+      }
+
+      if (!applied) {
+        setCurrentDraft(mirrored)
+        setPlanDirty(true)
+        return
+      }
+
+      if (!isParent) return
+      const row = resolveLiveRow(dayIndex, itemIndex)
+      if (!row) return
+      void (async () => {
+        const outcome = await moveItemToLiveDay({
+          canEdit: isParent,
+          familyId,
+          childId: activeChildId!,
+          fromDateKey: row.dateKey,
+          toDateKey: dateKeyForDayPlan(weekRange.start, toDay),
+          itemKey: row.itemKey,
+        }).catch((err) => {
+          console.error('[Planner] Failed to move the item to another day', err)
+          return null
+        })
+        if (!outcome) {
+          setSnack({ text: "Couldn't move that. It's still on its original day.", severity: 'error' })
+          return
+        }
+        if (outcome.status === 'refused') {
+          setSnack({
+            text: liveDayEditLockReason(outcome.refusal, activeChild?.name),
+            severity: 'warning',
+          })
+          return
+        }
+        setCurrentDraft(mirrored)
+        void persistConversation({ currentDraft: mirrored })
+        if (outcome.status === 'duplicated') {
+          // Deliberately survivable: the row is on BOTH days. Say so — a warning,
+          // not an error, and never a silent half-move.
+          setSnack({
+            text: `Added to ${toDay}, but it's still showing on ${row.dayLabel} too — remove it there.`,
+            severity: 'warning',
+          })
+          return
+        }
+        setSnack({ text: `Moved to ${toDay}.`, severity: 'success' })
+      })()
+    },
+    [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, weekRange.start, activeChild?.name, persistConversation],
+  )
+
+  /**
+   * Change which video a planned watch row points at — a swap in place, so the
+   * row keeps its day, its position and its incomplete state. Watch rows only;
+   * the picker offers `activeVideos` alone, so a retired video can never come
+   * back onto a week.
+   */
+  const [swapTarget, setSwapTarget] = useState<{ dayIndex: number; itemIndex: number } | null>(null)
+
+  const handleSwapWatchItem = useCallback(
+    (dayIndex: number, itemIndex: number, video: WatchVideo) => {
+      if (!currentDraft) return
+      const item = currentDraft.days[dayIndex]?.items[itemIndex]
+      if (!item || item.itemType !== 'watch') return
+
+      const swappedDraft = buildWatchDraftItem(video, item.id)
+      const mirrored: DraftWeeklyPlan = {
+        ...currentDraft,
+        days: currentDraft.days.map((day, i) =>
+          i === dayIndex
+            ? { ...day, items: day.items.map((it, idx) => (idx === itemIndex ? swappedDraft : it)) }
+            : day,
+        ),
+      }
+
+      if (!applied) {
+        setCurrentDraft(mirrored)
+        setPlanDirty(true)
+        return
+      }
+
+      if (!isParent) return
+      const row = resolveLiveRow(dayIndex, itemIndex)
+      if (!row) return
+      void (async () => {
+        const outcome = await swapWatchVideoOnLiveDay({
+          canEdit: isParent,
+          familyId,
+          childId: activeChildId!,
+          dateKey: row.dateKey,
+          itemKey: row.itemKey,
+          video,
+        }).catch((err) => {
+          console.error('[Planner] Failed to swap the video on the applied day', err)
+          return null
+        })
+        if (!outcome || outcome.status !== 'done') {
+          setSnack({
+            text:
+              outcome?.status === 'refused'
+                ? liveDayEditLockReason(outcome.refusal, activeChild?.name)
+                : "Couldn't change that video. Try again.",
+            severity: outcome?.status === 'refused' ? 'warning' : 'error',
+          })
+          return
+        }
+        setCurrentDraft(mirrored)
+        void persistConversation({ currentDraft: mirrored })
+        setSnack({ text: `Now watching “${video.title}” on ${row.dayLabel}.`, severity: 'success' })
+      })()
+    },
+    [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation],
+  )
 
   const handleUpdateTime = useCallback((dayIndex: number, itemIndex: number, newMinutes: number) => {
     if (!currentDraft) return
@@ -2845,6 +3105,9 @@ ${dayPrompts}`
                 onRemoveItem={handleRemoveItem}
                 onUpdateTime={handleUpdateTime}
                 onAddWatchItem={isParent ? (dayIndex) => setWatchPickerDay(dayIndex) : undefined}
+                onMoveItemToDay={isParent ? (dayIndex, itemIndex) => setMoveTarget({ dayIndex, itemIndex }) : undefined}
+                onSwapWatchItem={isParent ? (dayIndex, itemIndex) => setSwapTarget({ dayIndex, itemIndex }) : undefined}
+                itemEditLockReason={itemEditLockReason}
               />
 
               {/* FEAT-111 P3: sticky/floating Apply bar — pinned to the viewport
@@ -2894,10 +3157,14 @@ ${dayPrompts}`
               {/* FEAT-132: the week's days stay visible AFTER Apply, so "Add a
                   video" is still reachable once the week is live — device
                   testing found the planner's add path disappeared at exactly the
-                  moment a parent reaches for it. Read-only here: `applied` gates
-                  move / remove / retime / generate off, and there is no Apply bar
-                  to re-write the week. The one live action is adding a video,
-                  which writes straight into the saved day. */}
+                  moment a parent reaches for it.
+                  FEAT-138: this view is no longer read-only. Remove, move-to-
+                  another-day and change-video are live here, each written
+                  straight into the saved day (there is no Apply bar to flush a
+                  draft edit, which is exactly why they used to be gated off).
+                  Still gated: the acceptance toggle, activity generation, the
+                  within-day reorder, and — deliberately — planned minutes. A row
+                  the child has already finished refuses all of it and says so. */}
               {currentDraft && (
                 <PlanDayCards
                   draft={currentDraft}
@@ -2909,6 +3176,10 @@ ${dayPrompts}`
                   generatingItemId={generatingItemId}
                   applied
                   onAddWatchItem={isParent ? (dayIndex) => setWatchPickerDay(dayIndex) : undefined}
+                  onRemoveItem={isParent ? handleRemoveItem : undefined}
+                  onMoveItemToDay={isParent ? (dayIndex, itemIndex) => setMoveTarget({ dayIndex, itemIndex }) : undefined}
+                  onSwapWatchItem={isParent ? (dayIndex, itemIndex) => setSwapTarget({ dayIndex, itemIndex }) : undefined}
+                  itemEditLockReason={itemEditLockReason}
                 />
               )}
             </>
@@ -3086,6 +3357,55 @@ ${dayPrompts}`
         }}
         onAddVideo={isParent ? async (video) => { await addWatchVideo(video) } : undefined}
         onManageLibrary={isParent ? () => navigate('/watch') : undefined}
+      />
+
+      {/* FEAT-138: change which video a planned row points at. The SAME picker
+          as the add path, so the retired-video filter (FEAT-129) comes along —
+          a retired video must never become plannable again, on either path. */}
+      <WatchLibraryPicker
+        open={swapTarget !== null}
+        onClose={() => setSwapTarget(null)}
+        videos={watchVideos}
+        loading={watchLoading}
+        error={watchError}
+        onSelect={(video) => {
+          if (swapTarget) handleSwapWatchItem(swapTarget.dayIndex, swapTarget.itemIndex, video)
+          setSwapTarget(null)
+        }}
+        onAddVideo={isParent ? async (video) => { await addWatchVideo(video) } : undefined}
+        onManageLibrary={isParent ? () => navigate('/watch') : undefined}
+      />
+
+      {/* FEAT-138: "it's happening Thursday now". */}
+      <MoveToDayDialog
+        open={moveTarget !== null}
+        itemLabel={
+          moveTarget && currentDraft
+            ? currentDraft.days[moveTarget.dayIndex]?.items[moveTarget.itemIndex]?.title ?? ''
+            : ''
+        }
+        options={WEEK_DAYS.map((day) => ({
+          dateKey: dateKeyForDayPlan(weekRange.start, day),
+          label: day,
+        }))}
+        currentDateKey={
+          moveTarget && currentDraft
+            ? (() => {
+                const day = currentDraft.days[moveTarget.dayIndex]?.day
+                return day && WEEK_DAYS.includes(day as typeof WEEK_DAYS[number])
+                  ? dateKeyForDayPlan(weekRange.start, day as typeof WEEK_DAYS[number])
+                  : ''
+              })()
+            : ''
+        }
+        onClose={() => setMoveTarget(null)}
+        onPick={(dateKey) => {
+          const day = WEEK_DAYS.find(
+            (d) => dateKeyForDayPlan(weekRange.start, d) === dateKey,
+          )
+          if (moveTarget && day) handleMoveItemToDay(moveTarget.dayIndex, moveTarget.itemIndex, day)
+          setMoveTarget(null)
+        }}
       />
     </Page>
   )

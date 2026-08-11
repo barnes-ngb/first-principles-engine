@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import OndemandVideoIcon from '@mui/icons-material/OndemandVideo'
+import SwitchVideoIcon from '@mui/icons-material/SwitchVideo'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CloseIcon from '@mui/icons-material/Close'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
@@ -52,6 +54,22 @@ interface PlanPreviewCardProps {
   onUpdateTime?: (dayIndex: number, itemIndex: number, newMinutes: number) => void
   /** Open the curated-video picker to plan a watch item onto this day (FEAT-104). */
   onAddWatchItem?: (dayIndex: number) => void
+  /**
+   * Move a row to a different day of the week (FEAT-138). Unlike the up/down
+   * arrows — which reorder WITHIN a day and edit the draft — this is the "it's
+   * happening Thursday now" edit, and it survives Apply because the caller
+   * writes it into the saved days.
+   */
+  onMoveItemToDay?: (dayIndex: number, itemIndex: number) => void
+  /** Change which video a watch row points at (FEAT-138). Watch rows only. */
+  onSwapWatchItem?: (dayIndex: number, itemIndex: number) => void
+  /**
+   * Why this row's structural edits are locked, or `null` when it is freely
+   * editable (FEAT-138). A completed row has credited minutes and may carry
+   * evidence, so it refuses move / remove / swap — and the card SAYS so rather
+   * than rendering a button that fails on tap.
+   */
+  itemEditLockReason?: (dayIndex: number, itemIndex: number) => string | null
 }
 
 const TIME_PRESETS = [5, 10, 15, 20, 30, 45, 60]
@@ -111,7 +129,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
   )
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, weekStart, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, weekStart, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem, onMoveItemToDay, onSwapWatchItem, itemEditLockReason }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const [removeConfirm, setRemoveConfirm] = useState<{ dayIndex: number; itemIndex: number; title: string } | null>(null)
 
@@ -163,6 +181,15 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
 
         const renderItem = (item: DraftPlanItem, isRoutine: boolean) => {
           const itemIndex = day.items.indexOf(item)
+          // FEAT-138: null when the row is freely editable. A locked row keeps
+          // its buttons visible but disabled, and states the reason below —
+          // tooltips don't open on a phone, and a silently inert button beside
+          // an advertised action is the lie this run exists to stop telling.
+          const lockReason = itemEditLockReason?.(dayIndex, itemIndex) ?? null
+          const locked = lockReason !== null
+          const canSwapWatch = onSwapWatchItem && item.itemType === 'watch'
+          const showActions =
+            !!onMoveItem || !!onRemoveItem || !!onMoveItemToDay || !!canSwapWatch
 
           return (
             <Box key={item.id}>
@@ -249,34 +276,87 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                     </IconButton>
                   </Tooltip>
                 )}
-                {onMoveItem && onRemoveItem && (
+                {showActions && (
                   <Box sx={{ display: 'flex', gap: 0, ml: 0.5, opacity: 0.6 }}>
-                    <IconButton
-                      size="small"
-                      onClick={() => onMoveItem(dayIndex, itemIndex, -1)}
-                      disabled={itemIndex === 0}
-                      sx={{ p: 0.25 }}
-                    >
-                      <KeyboardArrowUpIcon sx={{ fontSize: 16 }} />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => onMoveItem(dayIndex, itemIndex, 1)}
-                      disabled={itemIndex === totalItems - 1}
-                      sx={{ p: 0.25 }}
-                    >
-                      <KeyboardArrowDownIcon sx={{ fontSize: 16 }} />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => setRemoveConfirm({ dayIndex, itemIndex, title: item.title })}
-                      sx={{ p: 0.25 }}
-                    >
-                      <CloseIcon sx={{ fontSize: 14 }} />
-                    </IconButton>
+                    {onMoveItem && (
+                      <>
+                        <IconButton
+                          size="small"
+                          onClick={() => onMoveItem(dayIndex, itemIndex, -1)}
+                          disabled={itemIndex === 0}
+                          sx={{ p: 0.25 }}
+                          aria-label="Move up"
+                        >
+                          <KeyboardArrowUpIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => onMoveItem(dayIndex, itemIndex, 1)}
+                          disabled={itemIndex === totalItems - 1}
+                          sx={{ p: 0.25 }}
+                          aria-label="Move down"
+                        >
+                          <KeyboardArrowDownIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </>
+                    )}
+                    {canSwapWatch && (
+                      <Tooltip title={lockReason ?? 'Change video'} arrow>
+                        <span>
+                          <IconButton
+                            size="small"
+                            disabled={locked}
+                            onClick={() => onSwapWatchItem(dayIndex, itemIndex)}
+                            sx={{ p: 0.25 }}
+                            aria-label="Change video"
+                          >
+                            <SwitchVideoIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                    {onMoveItemToDay && (
+                      <Tooltip title={lockReason ?? 'Move to another day'} arrow>
+                        <span>
+                          <IconButton
+                            size="small"
+                            disabled={locked}
+                            onClick={() => onMoveItemToDay(dayIndex, itemIndex)}
+                            sx={{ p: 0.25 }}
+                            aria-label="Move to another day"
+                          >
+                            <CalendarMonthIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                    {onRemoveItem && (
+                      <Tooltip title={lockReason ?? 'Remove from this day'} arrow>
+                        <span>
+                          <IconButton
+                            size="small"
+                            disabled={locked}
+                            onClick={() => setRemoveConfirm({ dayIndex, itemIndex, title: item.title })}
+                            sx={{ p: 0.25 }}
+                            aria-label="Remove from this day"
+                          >
+                            <CloseIcon sx={{ fontSize: 14 }} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
                   </Box>
                 )}
               </Stack>
+              {showActions && locked && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', pl: 3.5, mt: -0.25, mb: 0.25 }}
+                >
+                  {lockReason}
+                </Typography>
+              )}
             </Box>
           )
         }

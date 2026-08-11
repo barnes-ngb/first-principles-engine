@@ -95,6 +95,36 @@ export function buildWatchChecklistItem(video: WatchVideo): ChecklistItem {
 }
 
 /**
+ * Point an existing watch row at a DIFFERENT video, in place (FEAT-138).
+ *
+ * "I decide I need a new one" is a swap, not a delete-and-re-add: the row keeps
+ * its identity as a row — its day, its position in the checklist, and its
+ * incomplete state — and only the video changes. So exactly the fields that
+ * describe the video are replaced, from the same `watchRowFields` every other
+ * builder here uses, and nothing else on the row is touched (`source`,
+ * `category`, `mvdEssential`, and any parent notes on it survive).
+ *
+ * Deliberately does NOT clear completion: the write layer refuses a swap on a
+ * completed row outright (`liveDayEdit`), because a watched video is credited
+ * work. Silently un-completing it here would be the quiet version of the thing
+ * that refusal exists to prevent.
+ */
+export function swapWatchVideoOnItem(
+  item: ChecklistItem,
+  video: WatchVideo,
+): ChecklistItem {
+  const fields = watchRowFields(video)
+  return {
+    ...item,
+    label: `${fields.title} (${fields.estimatedMinutes}m)`,
+    estimatedMinutes: fields.estimatedMinutes,
+    subjectBucket: fields.subjectBucket,
+    itemType: fields.itemType,
+    watchVideoId: fields.watchVideoId,
+  }
+}
+
+/**
  * Append a watch row to a day log's checklist. Purely additive — nothing
  * existing is touched, so no completion, logged minute, or evidence link can be
  * disturbed by adding a video to a live day. Returns a new `DayLog`; never

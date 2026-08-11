@@ -27,8 +27,29 @@ interface PlanDayCardsProps {
   onGenerateActivity?: (item: DraftPlanItem) => void
   generatingItemId: string | null
   applied: boolean
+  /**
+   * Reorder an item WITHIN its day, on the draft. Still `!applied`-gated
+   * (FEAT-138): position is the one edit whose draft and saved-day meanings
+   * diverge — the saved checklist also holds manual rows and completed work the
+   * draft never had, so a reorder of the mirror would write an order the parent
+   * never saw. Changing which DAY something happens on is
+   * {@link PlanDayCardsProps.onMoveItemToDay}, which is well-defined by row
+   * identity and does survive Apply.
+   */
   onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
+  /**
+   * Remove an item from its day. **Survives Apply** (FEAT-138) — the caller
+   * branches on `applied` and writes the removal into the saved day rather than
+   * into a draft nothing would flush.
+   */
   onRemoveItem?: (dayIndex: number, itemIndex: number) => void
+  /**
+   * Edit an item's planned minutes. **Deliberately still `!applied`-gated**
+   * (owner decision, held twice): planned minutes are compliance hours, and
+   * editing them on a live week moves a child's record. The sanctioned way a
+   * duration changes is the confirm-gated activity default (FEAT-135), which is
+   * forward-only.
+   */
   onUpdateTime?: (dayIndex: number, itemIndex: number, newMinutes: number) => void
   /**
    * Open the Watch Library picker for `dayIndex`.
@@ -43,6 +64,17 @@ interface PlanDayCardsProps {
    * went live.
    */
   onAddWatchItem?: (dayIndex: number) => void
+  /**
+   * Move an item to a different day of the week. **Survives Apply** (FEAT-138)
+   * — this is the edit the whole run exists for (*"sometimes the video changes
+   * the day it will be watched"*), so gating it off once the week is live would
+   * withhold it exactly when it is wanted.
+   */
+  onMoveItemToDay?: (dayIndex: number, itemIndex: number) => void
+  /** Change a watch row's video. **Survives Apply** (FEAT-138). */
+  onSwapWatchItem?: (dayIndex: number, itemIndex: number) => void
+  /** Per-row lock reason for the post-Apply structural edits (FEAT-138). */
+  itemEditLockReason?: (dayIndex: number, itemIndex: number) => string | null
 }
 
 export default function PlanDayCards({
@@ -59,6 +91,9 @@ export default function PlanDayCards({
   onRemoveItem,
   onUpdateTime,
   onAddWatchItem,
+  onMoveItemToDay,
+  onSwapWatchItem,
+  itemEditLockReason,
 }: PlanDayCardsProps) {
   const weekLabel = formatPlanningWeekLabel(weekStart)
   return (
@@ -79,6 +114,13 @@ export default function PlanDayCards({
           {weekLabel}
         </Typography>
       )}
+      {/* What stays gated once the week is live, and what no longer does
+          (FEAT-138). Gated: the acceptance toggle and activity generation
+          (draft-only concepts), the within-day reorder, and — deliberately,
+          held twice — planned minutes. Ungated: remove, move-to-another-day,
+          swap-video and add-video, each of which the caller writes straight
+          into the saved day. The gate lives here rather than at the call site
+          because that is where FEAT-133 put it and where a reader looks. */}
       <PlanPreviewCard
         plan={draft}
         hoursPerDay={hoursPerDay}
@@ -89,9 +131,12 @@ export default function PlanDayCards({
         onGenerateActivity={!applied ? onGenerateActivity : undefined}
         generatingItemId={generatingItemId ?? undefined}
         onMoveItem={!applied ? onMoveItem : undefined}
-        onRemoveItem={!applied ? onRemoveItem : undefined}
+        onRemoveItem={onRemoveItem}
         onUpdateTime={!applied ? onUpdateTime : undefined}
         onAddWatchItem={onAddWatchItem}
+        onMoveItemToDay={onMoveItemToDay}
+        onSwapWatchItem={onSwapWatchItem}
+        itemEditLockReason={itemEditLockReason}
       />
     </Box>
   )

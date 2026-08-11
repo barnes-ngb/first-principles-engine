@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DayLog, WatchVideo } from '../../core/types'
+import type { ChecklistItem, DayLog, WatchVideo } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 import {
   appendWatchItemToDayLog,
   buildWatchChecklistItem,
   buildWatchDraftItem,
+  swapWatchVideoOnItem,
   watchItemTitle,
 } from './watchDayItem'
 import { retainChecklistForApply } from '../today/applyReset'
@@ -91,5 +92,43 @@ describe('watchDayItem — shared watch-row shape (FEAT-132)', () => {
   it('appends onto a day log with no checklist yet', () => {
     const empty: DayLog = { childId: 'lincoln', date: '2026-07-27', blocks: [] }
     expect(appendWatchItemToDayLog(empty, video).checklist).toHaveLength(1)
+  })
+  // ── FEAT-138: changing your mind about which video ────────────────────────
+  it('swaps the video in place — label, minutes, subject and id follow it', () => {
+    const planned = buildWatchChecklistItem(video)
+    const replacement: WatchVideo = {
+      ...video,
+      id: 'vid-2',
+      youtubeId: 'zyxwvutsrqp',
+      title: 'How glaciers move',
+      plannedMinutes: 8,
+      subjectBucket: SubjectBucket.SocialStudies,
+    }
+    const swapped = swapWatchVideoOnItem(planned, replacement)
+    expect(swapped.watchVideoId).toBe('vid-2')
+    expect(swapped.label).toBe('Watch: How glaciers move (8m)')
+    expect(swapped.estimatedMinutes).toBe(8)
+    expect(swapped.subjectBucket).toBe(SubjectBucket.SocialStudies)
+    expect(swapped.itemType).toBe('watch')
+  })
+
+  it('a swap is not a re-add — everything that is not the video survives', () => {
+    const planned: ChecklistItem = {
+      ...buildWatchChecklistItem(video),
+      source: 'planner',
+      category: 'must-do',
+      mvdEssential: true,
+      gradeResult: 'a parent note',
+    }
+    const swapped = swapWatchVideoOnItem(planned, { ...video, id: 'vid-2' })
+    expect(swapped.source).toBe('planner')
+    expect(swapped.category).toBe('must-do')
+    expect(swapped.mvdEssential).toBe(true)
+    expect(swapped.gradeResult).toBe('a parent note')
+  })
+
+  it('never quietly un-completes a row — the refusal lives in the write layer', () => {
+    const done: ChecklistItem = { ...buildWatchChecklistItem(video), completed: true }
+    expect(swapWatchVideoOnItem(done, { ...video, id: 'vid-2' }).completed).toBe(true)
   })
 })
