@@ -23,6 +23,15 @@ export interface ArtifactTags {
   ladderRef?: { ladderId: string; rungId: string }
   planItem?: string
   note?: string
+  /**
+   * Links a watch-vehicle capture back to its `watchLibrary` entry (FEAT-139).
+   *
+   * Additive and **optional** — captures written before FEAT-139 carry only the
+   * title-derived `planItem` string, and a library title is editable (FEAT-129),
+   * so title-matching was never a reliable join. Every reader must treat this as
+   * absent-able rather than assuming it on a `domain: 'watch-vehicle'` artifact.
+   */
+  watchVideoId?: string
 }
 
 export interface Artifact {

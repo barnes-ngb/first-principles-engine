@@ -128,3 +128,46 @@ describe('buildWatchArtifact — portfolio artifact only (C2)', () => {
     }
   })
 })
+
+// ── FEAT-139: the artifact joins back to the library by id ──────────────────
+
+describe('buildWatchArtifact — watchVideoId tag (FEAT-139)', () => {
+  it('stamps the library id so the artifact is joinable, not title-matchable', () => {
+    const artifact = buildWatchArtifact({
+      childId: 'lincoln',
+      video,
+      createdAt: '2026-07-19T12:00:00.000Z',
+    })
+    expect(artifact.tags.watchVideoId).toBe(video.id)
+  })
+
+  it('survives a title edit — the id is the stable join, the title is not', () => {
+    // FEAT-129 lets a parent rename a library entry after the fact, which is
+    // exactly why `planItem` was never a reliable key.
+    const renamed = { ...video, title: 'Renamed by a parent' }
+    const artifact = buildWatchArtifact({ childId: 'l', video: renamed, createdAt: 'x' })
+
+    expect(artifact.tags.planItem).toBe('Watch: Renamed by a parent')
+    expect(artifact.tags.watchVideoId).toBe(video.id)
+  })
+
+  it('is purely additive — every pre-FEAT-139 tag is still present and unchanged', () => {
+    const artifact = buildWatchArtifact({ childId: 'l', video, createdAt: 'x' })
+    // A reader that predates the field reads exactly what it always did.
+    expect(artifact.tags.planItem).toBe(`Watch: ${video.title}`)
+    expect(artifact.tags.domain).toBe(WATCH_ARTIFACT_DOMAIN)
+    expect(artifact.tags.subjectBucket).toBe(SubjectBucket.SocialStudies)
+    expect(artifact.tags.engineStage).toBe(EngineStage.Build)
+    expect(artifact.tags.location).toBe('Home')
+  })
+
+  it('an artifact WITHOUT the tag is still a well-formed artifact (old records)', () => {
+    // Simulate a record written before FEAT-139: dropping the field leaves every
+    // required tag intact, so no reader can depend on its presence.
+    const legacyTags = { ...buildWatchArtifact({ childId: 'l', video, createdAt: 'x' }).tags }
+    delete legacyTags.watchVideoId
+    expect(legacyTags.domain).toBe(WATCH_ARTIFACT_DOMAIN)
+    expect(legacyTags.planItem).toBe(`Watch: ${video.title}`)
+    expect('watchVideoId' in legacyTags).toBe(false)
+  })
+})
