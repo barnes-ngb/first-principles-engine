@@ -1917,7 +1917,7 @@ Generate a plan for Monday through Friday.`.trim()
   // (FEAT-133's lesson): `/planner/chat` sits OUTSIDE `RequireParent`, so a kid
   // profile can reach this page by URL. The call sites withhold the handlers so
   // nothing renders; these guards are the gate on the writes themselves.
-  const appliedWeekDays = useAppliedWeekDays({
+  const { days: appliedWeekDays, loaded: appliedWeekDaysLoaded } = useAppliedWeekDays({
     familyId,
     childId: activeChildId,
     weekStart: weekRange.start,
@@ -1956,12 +1956,20 @@ Generate a plan for Monday through Friday.`.trim()
   const itemEditLockReason = useCallback(
     (dayIndex: number, itemIndex: number): string | null => {
       if (!applied || !isParent) return null
+      // Not-yet-loaded is NOT "editable" (Codex P2 on PR #1658). Until the first
+      // snapshot lands — and after a subscription error, which leaves `loaded`
+      // false — no row can be resolved, so every handler would silently return
+      // and the remove confirmation would even open onto a no-op. Lock and say so.
+      if (!appliedWeekDaysLoaded) return 'Checking this week’s days…'
       const row = resolveLiveRow(dayIndex, itemIndex)
-      if (!row) return null
+      // Loaded, but the day doesn't hold this row: an item that was never
+      // accepted at Apply, or one already removed elsewhere. Also locked, with
+      // the reason, rather than an enabled button that does nothing.
+      if (!row) return liveDayEditLockReason('not-found', activeChild?.name)
       const lock = checklistItemEditLock(row.saved)
       return lock ? liveDayEditLockReason(lock, activeChild?.name) : null
     },
-    [applied, isParent, resolveLiveRow, activeChild?.name],
+    [applied, isParent, appliedWeekDaysLoaded, resolveLiveRow, activeChild?.name],
   )
 
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {

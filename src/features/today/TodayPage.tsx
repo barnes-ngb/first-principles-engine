@@ -81,10 +81,9 @@ import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
 import { appendWatchItemToDayLog } from '../watch/watchDayItem'
 import { checklistItemKey } from './dayWriteGuard'
 import {
-  checklistItemEditLock,
   liveDayEditLockReason,
   moveItemToLiveDay,
-  swapWatchVideoInDayLog,
+  swapWatchVideoOnLiveDay,
 } from './liveDayEdit'
 import MoveToDayDialog from './MoveToDayDialog'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
@@ -328,23 +327,56 @@ export default function TodayPage() {
     [canEditLiveDay, dayLog, selectedChildId, familyId, today, activeChild?.name, setSnackMessage],
   )
 
+  /**
+   * Swap the video on a row of the live day.
+   *
+   * Goes through `liveDayEdit.swapWatchVideoOnLiveDay` rather than the pure
+   * transform + `persistDayLogImmediate` (Codex P1 on PR #1658). The difference
+   * is not stylistic: `persistDayLogImmediate` writes the WHOLE document from
+   * this component's in-memory `dayLog`, on the observe-only (`enforce: false`)
+   * manual-edit lane. If a boy completes a row on the other device between this
+   * snapshot rendering and the parent choosing a replacement, that write would
+   * clobber the completion, its credited minutes and its evidence link — and the
+   * local `checklistItemEditLock` check could not see it, because it is reading
+   * the same stale snapshot. The writer re-reads the saved document, re-checks
+   * the completed-row rule against what is actually there, and enforces
+   * preservation. Today's `onSnapshot` brings the result back into view.
+   *
+   * The planner's swap already used this writer; now both surfaces do.
+   */
   const handleSwapWatchOnDay = useCallback(
     (video: WatchVideo) => {
       const index = swapTargetIndex
       setSwapTargetIndex(null)
-      if (!canEditLiveDay || index === null || !dayLog) return
+      if (!canEditLiveDay || index === null || !dayLog || !selectedChildId) return
       const item = dayLog.checklist?.[index]
       if (!item || item.itemType !== 'watch') return
-      if (checklistItemEditLock(item)) {
-        setSnackMessage({
-          text: liveDayEditLockReason('completed', activeChild?.name),
-          severity: 'warning',
+      void (async () => {
+        const outcome = await swapWatchVideoOnLiveDay({
+          canEdit: canEditLiveDay,
+          familyId,
+          childId: selectedChildId,
+          dateKey: today,
+          itemKey: checklistItemKey(item),
+          video,
+        }).catch((err) => {
+          console.error('[Today] Failed to change the video on this row', err)
+          return null
         })
-        return
-      }
-      persistDayLogImmediate(swapWatchVideoInDayLog(dayLog, index, video))
+        if (!outcome || outcome.status !== 'done') {
+          setSnackMessage({
+            text:
+              outcome?.status === 'refused'
+                ? liveDayEditLockReason(outcome.refusal, activeChild?.name)
+                : "Couldn't change that video. Try again.",
+            severity: outcome?.status === 'refused' ? 'warning' : 'error',
+          })
+          return
+        }
+        setSnackMessage({ text: `Now watching “${video.title}”.`, severity: 'success' })
+      })()
     },
-    [canEditLiveDay, swapTargetIndex, dayLog, persistDayLogImmediate, activeChild?.name, setSnackMessage],
+    [canEditLiveDay, swapTargetIndex, dayLog, selectedChildId, familyId, today, activeChild?.name, setSnackMessage],
   )
 
   // (Rollover is wired below, after dailyPlan is loaded so MVD/low-energy can halve the budget.)

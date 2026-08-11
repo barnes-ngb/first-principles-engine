@@ -126,6 +126,29 @@ describe('PlanDayCards — a completed row refuses, and says why (FEAT-138)', ()
   })
 })
 
+describe('PlanDayCards — an unresolvable row is locked, never a silent no-op (FEAT-138)', () => {
+  // Codex P2 on PR #1658: while the live day query is loading — and after a
+  // subscription error, and for a draft row the day never held — the caller
+  // cannot resolve the saved row, so every handler returns immediately. An
+  // ENABLED button there is a control that does nothing. The caller now returns
+  // a reason instead of null, and this is the half the card owns.
+  const LOADING = 'Checking this week’s days…'
+
+  it('disables every structural affordance and shows the reason', () => {
+    renderApplied({ itemEditLockReason: () => LOADING })
+    expect(moveButtons()[0]).toBeDisabled()
+    expect(removeButtons()[0]).toBeDisabled()
+    expect(swapButtons()[0]).toBeDisabled()
+    expect(screen.getAllByText(LOADING).length).toBeGreaterThan(0)
+  })
+
+  it('never opens the remove confirmation for an unresolvable row', () => {
+    renderApplied({ itemEditLockReason: () => LOADING })
+    fireEvent.click(removeButtons()[0])
+    expect(screen.queryByText(/remove item\?/i)).toBeNull()
+  })
+})
+
 describe('PlanDayCards — what stays locked on a live week (FEAT-138)', () => {
   it('planned minutes are still NOT editable once applied', () => {
     // Owner decision, held twice: editing planned minutes on a live week moves

@@ -33,7 +33,6 @@ import {
   moveItemToLiveDay,
   removeChecklistItemFromDayLog,
   removeItemFromLiveDay,
-  swapWatchVideoInDayLog,
   swapWatchVideoOnLiveDay,
 } from './liveDayEdit'
 import { categorizeItems } from './kidQuestGate'
@@ -184,6 +183,50 @@ describe('liveDayEdit — parent capability is enforced at the WRITE', () => {
   it('says so without blaming anyone', () => {
     expect(liveDayEditLockReason('not-permitted')).toContain('grown-up')
     expect(liveDayEditLockReason('not-permitted')).toContain('nothing was changed')
+  })
+})
+
+/**
+ * Codex P2 on PR #1658. Two rows can share an identity, and the common way is
+ * not a parent planning the same thing twice: `retainChecklistForApply` keeps a
+ * completed row and Apply appends the freshly-planned one with the same title
+ * and duration. Taking the first match resolved every live edit to the completed
+ * row — so the row the child had NOT done yet read as locked.
+ */
+describe('liveDayEdit — duplicate labels resolve to the editable row', () => {
+  const doneCopy = plannerRow({ completed: true, actualMinutes: 30 })
+  const freshCopy = plannerRow()
+
+  it('finds the fresh row, not the retained completed one, by label', () => {
+    const found = findChecklistItemByLabel([doneCopy, freshCopy], 'GATB Math (30m)')
+    expect(found).toEqual(freshCopy)
+    expect(found!.completed).toBe(false)
+  })
+
+  it('removes the fresh row and leaves the completed one standing', async () => {
+    seedDays({ '2026-08-11_c1': day({ checklist: [doneCopy, freshCopy] }) })
+    const outcome = await removeItemFromLiveDay({
+      canEdit: true,
+      familyId: 'f1',
+      childId: 'c1',
+      dateKey: '2026-08-11',
+      itemKey: 'GATB Math (30m)::Math',
+    })
+    expect(outcome).toEqual({ status: 'done' })
+    expect(payloadFor('2026-08-11_c1')!.checklist).toEqual([doneCopy])
+  })
+
+  it('still refuses when EVERY row of that identity is completed', async () => {
+    seedDays({ '2026-08-11_c1': day({ checklist: [doneCopy, doneCopy] }) })
+    const outcome = await removeItemFromLiveDay({
+      canEdit: true,
+      familyId: 'f1',
+      childId: 'c1',
+      dateKey: '2026-08-11',
+      itemKey: 'GATB Math (30m)::Math',
+    })
+    expect(outcome).toEqual({ status: 'refused', refusal: 'completed' })
+    expect(setDayLogGuardedMock).not.toHaveBeenCalled()
   })
 })
 
@@ -450,15 +493,5 @@ describe('swapWatchVideoOnLiveDay', () => {
     })
     expect(outcome.status).toBe('refused')
     expect(setDayLogGuardedMock).not.toHaveBeenCalled()
-  })
-
-  it('keeps the row’s position when swapping in place (pure)', () => {
-    const source = day({ checklist: [plannerRow(), watchRow(), plannerRow({ label: 'Reading (20m)' })] })
-    const result = swapWatchVideoInDayLog(source, 1, replacement)
-    expect(result.checklist!.map((i) => i.label)).toEqual([
-      'GATB Math (30m)',
-      'Watch: How glaciers move (8m)',
-      'Reading (20m)',
-    ])
   })
 })

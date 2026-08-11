@@ -29,9 +29,14 @@ export function useAppliedWeekDays(params: {
   weekStart: string
   /** Subscribe only when the week is live AND the viewer may edit it. */
   enabled: boolean
-}): Map<string, DayLog> {
+}): { days: Map<string, DayLog>; loaded: boolean } {
   const { familyId, childId, weekStart, enabled } = params
   const [days, setDays] = useState<Map<string, DayLog>>(new Map())
+  // `false` until the first snapshot lands. Callers MUST NOT read an empty map
+  // as "the row isn't there" — while loading, and after a subscription error,
+  // every row is unresolvable and must read as locked rather than as editable
+  // (Codex P2 on PR #1658: an enabled button whose handler silently returns).
+  const [loaded, setLoaded] = useState(false)
 
   const range = useMemo(() => {
     const keys = WEEK_DAYS.map((day) => dateKeyForDayPlan(weekStart, day))
@@ -47,6 +52,7 @@ export function useAppliedWeekDays(params: {
   if (loadedKey !== subscriptionKey) {
     setLoadedKey(subscriptionKey)
     setDays(new Map())
+    setLoaded(false)
   }
 
   useEffect(() => {
@@ -66,16 +72,18 @@ export function useAppliedWeekDays(params: {
           next.set(day.date, day)
         }
         setDays(next)
+        setLoaded(true)
       },
       (err) => {
         // Non-fatal: without the days the cards simply stay conservative — every
         // edit affordance locks rather than guessing a row is safe to move.
         console.error('[Planner] Could not watch the applied week’s days', err)
         setDays(new Map())
+        setLoaded(false)
       },
     )
     return unsubscribe
   }, [subscriptionKey, familyId, childId, range.start, range.end])
 
-  return days
+  return { days, loaded }
 }

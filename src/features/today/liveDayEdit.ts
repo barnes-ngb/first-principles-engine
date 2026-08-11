@@ -90,12 +90,39 @@ export function liveDayEditLockReason(
 
 // ── Pure day-log transforms ──────────────────────────────────────────────────
 
-/** Index of the row with this identity, or `-1`. */
+/**
+ * Resolve ONE row out of possibly-several matches — the shared tie-break used by
+ * both lookups below (Codex P2 on PR #1658).
+ *
+ * A saved day really can hold two rows with the same identity, and the common
+ * way is not a parent planning the same video twice: `retainChecklistForApply`
+ * KEEPS a completed row and Apply then appends the freshly-planned one with the
+ * same title and duration. Taking the first match then resolves the live row to
+ * the *completed* one, so the fresh, editable row reads as locked and every edit
+ * is refused for work the child has not done yet.
+ *
+ * So: **prefer the first row that is still editable**, and fall back to the
+ * first match overall when every match is completed — which is not a loophole,
+ * because that fallback lands on a completed row and the completed-row rule then
+ * refuses it, exactly as it should. Where two *incomplete* duplicates exist they
+ * are byte-identical by construction (same label, subject, minutes, type), so
+ * either one is the row the parent pointed at.
+ */
+function resolveIndex(
+  checklist: ChecklistItem[] | undefined,
+  matches: (item: ChecklistItem) => boolean,
+): number {
+  const rows = checklist ?? []
+  const editable = rows.findIndex((item) => matches(item) && !item.completed)
+  return editable >= 0 ? editable : rows.findIndex(matches)
+}
+
+/** Index of the row with this identity, or `-1`. Ties broken by {@link resolveIndex}. */
 export function findChecklistIndexByKey(
   checklist: ChecklistItem[] | undefined,
   itemKey: string,
 ): number {
-  return (checklist ?? []).findIndex((item) => checklistItemKey(item) === itemKey)
+  return resolveIndex(checklist, (item) => checklistItemKey(item) === itemKey)
 }
 
 /**
@@ -120,12 +147,17 @@ export function draftItemChecklistLabel(item: {
  * Callers resolve the row this way and then take its `checklistItemKey`, rather
  * than synthesising a key from the draft: the SAVED row is the authority on its
  * own identity (it may carry an `id` the draft never had).
+ *
+ * Duplicate labels are resolved by {@link resolveIndex} — the editable row wins,
+ * so an Apply that retained a completed row of the same name cannot make the
+ * freshly-planned one read as locked.
  */
 export function findChecklistItemByLabel(
   checklist: ChecklistItem[] | undefined,
   label: string,
 ): ChecklistItem | undefined {
-  return (checklist ?? []).find((item) => item.label === label)
+  const index = resolveIndex(checklist, (item) => item.label === label)
+  return index >= 0 ? (checklist ?? [])[index] : undefined
 }
 
 /**
@@ -217,8 +249,17 @@ export function appendChecklistItemToDayLog(
  * detached rather than rewritten, for the reason in {@link detachBlocksForItem}:
  * rewriting it would mean writing a new `plannedMinutes`, and a block left
  * behind would claim planned time for a video that is no longer on the day.
+ *
+ * **Deliberately NOT exported** (Codex P1 on PR #1658). Today's swap originally
+ * called this transform and handed the result to `persistDayLogImmediate` — a
+ * whole-document write from a possibly-stale in-memory snapshot, on the
+ * observe-only manual-edit lane, which could clobber a completion a boy had just
+ * made on the other device. Keeping it module-private means the ONLY way to
+ * swap a video is {@link swapWatchVideoOnLiveDay}, which re-reads the saved
+ * document and re-checks the completed-row rule against what is actually there.
+ * The compiler now enforces what a convention would not.
  */
-export function swapWatchVideoInDayLog(
+function swapWatchVideoInDayLog(
   dayLog: DayLog,
   index: number,
   video: WatchVideo,
