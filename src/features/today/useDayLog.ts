@@ -101,7 +101,7 @@ export function useDayLog({
   } | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
-  // FEAT-135: 'warning' — a workbook read that failed while the photo saved
+  // FEAT-136: 'warning' — a workbook read that failed while the photo saved
   // safely is not an error.
   const [snackMessage, setSnackMessage] = useState<{
     text: string
