@@ -79,6 +79,13 @@ import WatchLibraryPicker from '../watch/WatchLibraryPicker'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
 import { appendWatchItemToDayLog } from '../watch/watchDayItem'
+import { checklistItemKey } from './dayWriteGuard'
+import {
+  liveDayEditLockReason,
+  moveItemToLiveDay,
+  swapWatchVideoOnLiveDay,
+} from './liveDayEdit'
+import MoveToDayDialog from './MoveToDayDialog'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
@@ -261,6 +268,115 @@ export default function TodayPage() {
       persistDayLogImmediate(appendWatchItemToDayLog(dayLog, video))
     },
     [dayLog, persistDayLogImmediate],
+  )
+
+  // ── Live-day structural edits (FEAT-138) ───────────────────────────────────
+  //
+  // Move and swap for today's rows (remove already lived in `TodayChecklist`).
+  // Both are parent capability, checked HERE as well as by withholding the
+  // affordance — kids render `KidTodayView`, which has no edit mode, but the
+  // guard does not assume the surface is the only gate.
+  //
+  // Move is the one that can't use `persistDayLogImmediate`: the target day is a
+  // DIFFERENT document, so it goes through `liveDayEdit.moveItemToLiveDay`
+  // (append-to-target then remove-from-source, both via the preservation guard).
+  // Today's own `onSnapshot` brings the source-day change back into view.
+  const canEditLiveDay = profile === UserProfile.Parents
+  const [moveTargetIndex, setMoveTargetIndex] = useState<number | null>(null)
+  const [swapTargetIndex, setSwapTargetIndex] = useState<number | null>(null)
+
+  const handleMoveItemToDay = useCallback(
+    (index: number, toDateKey: string) => {
+      if (!canEditLiveDay || !dayLog || !selectedChildId) return
+      const item = dayLog.checklist?.[index]
+      if (!item) return
+      void (async () => {
+        const outcome = await moveItemToLiveDay({
+          canEdit: canEditLiveDay,
+          familyId,
+          childId: selectedChildId,
+          fromDateKey: today,
+          toDateKey,
+          itemKey: checklistItemKey(item),
+        }).catch((err) => {
+          console.error('[Today] Failed to move the item to another day', err)
+          return null
+        })
+        if (!outcome) {
+          setSnackMessage({ text: "Couldn't move that. It's still on today.", severity: 'error' })
+          return
+        }
+        if (outcome.status === 'refused') {
+          setSnackMessage({
+            text: liveDayEditLockReason(outcome.refusal, activeChild?.name),
+            severity: 'warning',
+          })
+          return
+        }
+        if (outcome.status === 'duplicated') {
+          // Survivable by design: it reached the other day but is still here.
+          setSnackMessage({
+            text: "Added to the other day, but it's still on today too — remove it here.",
+            severity: 'warning',
+          })
+          return
+        }
+        setSnackMessage({ text: 'Moved.', severity: 'success' })
+      })()
+    },
+    [canEditLiveDay, dayLog, selectedChildId, familyId, today, activeChild?.name, setSnackMessage],
+  )
+
+  /**
+   * Swap the video on a row of the live day.
+   *
+   * Goes through `liveDayEdit.swapWatchVideoOnLiveDay` rather than the pure
+   * transform + `persistDayLogImmediate` (Codex P1 on PR #1658). The difference
+   * is not stylistic: `persistDayLogImmediate` writes the WHOLE document from
+   * this component's in-memory `dayLog`, on the observe-only (`enforce: false`)
+   * manual-edit lane. If a boy completes a row on the other device between this
+   * snapshot rendering and the parent choosing a replacement, that write would
+   * clobber the completion, its credited minutes and its evidence link — and the
+   * local `checklistItemEditLock` check could not see it, because it is reading
+   * the same stale snapshot. The writer re-reads the saved document, re-checks
+   * the completed-row rule against what is actually there, and enforces
+   * preservation. Today's `onSnapshot` brings the result back into view.
+   *
+   * The planner's swap already used this writer; now both surfaces do.
+   */
+  const handleSwapWatchOnDay = useCallback(
+    (video: WatchVideo) => {
+      const index = swapTargetIndex
+      setSwapTargetIndex(null)
+      if (!canEditLiveDay || index === null || !dayLog || !selectedChildId) return
+      const item = dayLog.checklist?.[index]
+      if (!item || item.itemType !== 'watch') return
+      void (async () => {
+        const outcome = await swapWatchVideoOnLiveDay({
+          canEdit: canEditLiveDay,
+          familyId,
+          childId: selectedChildId,
+          dateKey: today,
+          itemKey: checklistItemKey(item),
+          video,
+        }).catch((err) => {
+          console.error('[Today] Failed to change the video on this row', err)
+          return null
+        })
+        if (!outcome || outcome.status !== 'done') {
+          setSnackMessage({
+            text:
+              outcome?.status === 'refused'
+                ? liveDayEditLockReason(outcome.refusal, activeChild?.name)
+                : "Couldn't change that video. Try again.",
+            severity: outcome?.status === 'refused' ? 'warning' : 'error',
+          })
+          return
+        }
+        setSnackMessage({ text: `Now watching “${video.title}”.`, severity: 'success' })
+      })()
+    },
+    [canEditLiveDay, swapTargetIndex, dayLog, selectedChildId, familyId, today, activeChild?.name, setSnackMessage],
   )
 
   // (Rollover is wired below, after dailyPlan is loaded so MVD/low-energy can halve the budget.)
@@ -1038,6 +1154,8 @@ export default function TodayPage() {
           }}
           onWatchOpen={watch.openWatch}
           onAddWatchItem={() => setWatchPickerOpen(true)}
+          onMoveItemToDay={canEditLiveDay ? (index) => setMoveTargetIndex(index) : undefined}
+          onSwapWatchItem={canEditLiveDay ? (index) => setSwapTargetIndex(index) : undefined}
           onUnifiedCapture={handleUnifiedCapture}
           onUnifiedCaptureBatch={handleUnifiedCaptureBatch}
           onBackfillWorkbookScan={handleBackfillWorkbookScan}
@@ -1171,6 +1289,35 @@ export default function TodayPage() {
         onSelect={handleAddWatchToDay}
         onAddVideo={async (video) => { await addWatchVideo(video) }}
         onManageLibrary={() => navigate('/watch')}
+      />
+
+      {/* FEAT-138 — change which video a row on the LIVE day points at. Same
+          picker as the add path, so the retired-video filter (FEAT-129) holds
+          here too: a retired video can never come back onto a day. */}
+      <WatchLibraryPicker
+        open={swapTargetIndex !== null}
+        onClose={() => setSwapTargetIndex(null)}
+        videos={scopedWatchVideos}
+        loading={scopedWatchLoading}
+        error={scopedWatchError}
+        onSelect={handleSwapWatchOnDay}
+        onAddVideo={async (video) => { await addWatchVideo(video) }}
+        onManageLibrary={() => navigate('/watch')}
+      />
+
+      {/* FEAT-138 — move a row to another day of this week. */}
+      <MoveToDayDialog
+        open={moveTargetIndex !== null}
+        itemLabel={
+          moveTargetIndex !== null ? dayLog?.checklist?.[moveTargetIndex]?.label ?? '' : ''
+        }
+        options={weekDayDates.map((d) => ({ dateKey: d.dateKey, label: d.label }))}
+        currentDateKey={today}
+        onClose={() => setMoveTargetIndex(null)}
+        onPick={(dateKey) => {
+          if (moveTargetIndex !== null) handleMoveItemToDay(moveTargetIndex, dateKey)
+          setMoveTargetIndex(null)
+        }}
       />
 
       {/* Watch Vehicle — planned curated-video player (FEAT-104). */}

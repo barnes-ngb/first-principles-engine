@@ -8,7 +8,9 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
 import DocumentScannerIcon from '@mui/icons-material/DocumentScanner'
 import CheckIcon from '@mui/icons-material/Check'
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import DeleteIcon from '@mui/icons-material/Delete'
+import SwitchVideoIcon from '@mui/icons-material/SwitchVideo'
 import EditIcon from '@mui/icons-material/Edit'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import OndemandVideoIcon from '@mui/icons-material/OndemandVideo'
@@ -70,6 +72,11 @@ import {
 } from './stuckRetestQueue'
 import { resolveDisplayPhotos } from './itemPhotos'
 import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
+import {
+  checklistItemEditLock,
+  liveDayEditLockReason,
+  removeChecklistItemFromDayLog,
+} from './liveDayEdit'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
 import { kidPalette } from '../../app/tokens'
 
@@ -178,6 +185,20 @@ interface TodayChecklistProps {
    * their surface and has no add affordance. Absent → no button renders.
    */
   onAddWatchItem?: () => void
+  /**
+   * Move a row to another day of the week (FEAT-138) — *"sometimes the video
+   * changes the day it will be watched"*. The caller owns the day picker and the
+   * two-document write (`liveDayEdit.moveItemToLiveDay`), because the target day
+   * is a different document than the one this component holds.
+   *
+   * **Parent-gated by injection**, like `onAddWatchItem`: `TodayPage` (the parent
+   * shell) passes it and kids render `KidTodayView`, which has no edit mode at
+   * all. Absent → no affordance renders.
+   */
+  onMoveItemToDay?: (index: number) => void
+  /** Change which video a watch row points at (FEAT-138). Parent-gated the same
+   *  way; the caller opens the picker, which offers active videos only. */
+  onSwapWatchItem?: (index: number) => void
   onUnifiedCapture: (file: File, index: number) => void
   /**
    * FEAT-108 (batch capture): save several photos of ONE item in one action.
@@ -238,6 +259,8 @@ export default function TodayChecklist({
   onTeachHelperOpen,
   onWatchOpen,
   onAddWatchItem,
+  onMoveItemToDay,
+  onSwapWatchItem,
   onUnifiedCapture,
   onUnifiedCaptureBatch,
   onBackfillWorkbookScan,
@@ -395,6 +418,16 @@ export default function TodayChecklist({
     return acc
   }, {} as Record<string, number>)
 
+  /**
+   * Why a row's structural edits (move / remove / swap) are locked, or `null`.
+   * FEAT-138: finished work stays on its day — see `liveDayEdit`, which owns
+   * both the rule and its wording so every surface says the same sentence.
+   */
+  const editLockReason = (item: ChecklistItemType): string | null => {
+    const lock = checklistItemEditLock(item)
+    return lock ? liveDayEditLockReason(lock, selectedChild?.name) : null
+  }
+
   const handleReorder = (fromIndex: number, direction: 'up' | 'down') => {
     const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
     if (toIndex < 0 || toIndex >= rawChecklist.length) return
@@ -405,18 +438,29 @@ export default function TodayChecklist({
     persistDayLogImmediate({ ...dayLog, checklist: updated })
   }
 
+  /**
+   * Remove a row from today.
+   *
+   * FEAT-138 changed two things here. **(1) A completed row now refuses.** It has
+   * credited minutes into the day's hours and may carry an `evidenceArtifactId`
+   * pointing at real work — deleting that quietly edits a child's school record.
+   * The affordance is disabled with a plain reason rather than hidden, and a
+   * parent who genuinely needs to undo a completion un-checks it first. This is
+   * belt-and-braces with the same refusal in `liveDayEdit`, which guards the
+   * planner's remove and both surfaces' move.
+   *
+   * **(2) The block pairing is now the shared rule.** This used to hand-roll
+   * half of it (`block.checklist?.some(...)`), which planner-APPLIED blocks
+   * never populate — so the block a removed planner row was paired with was in
+   * practice left orphaned on the day. `detachBlocksForItem` uses the repo's
+   * canonical `itemMatchesBlock`, so removal here and removal from the planner
+   * mean the same thing. It never drops a block carrying logged `actualMinutes`,
+   * and never one another remaining row still claims, so no counted minute can
+   * move: a block's `plannedMinutes` are not part of the hours math at all.
+   */
   const handleDeleteItem = (index: number) => {
-    const item = rawChecklist[index]
-    const updatedChecklist = rawChecklist.filter((_, i) => i !== index)
-    // If planner-sourced, also remove matching block
-    let updatedBlocks = dayLog.blocks ?? []
-    if (item.source === 'planner') {
-      updatedBlocks = (dayLog.blocks ?? []).filter((block) => {
-        const matchesLabel = block.checklist?.some((ci) => ci.label === item.label)
-        return !matchesLabel
-      })
-    }
-    persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist, blocks: updatedBlocks })
+    if (checklistItemEditLock(rawChecklist[index])) return
+    persistDayLogImmediate(removeChecklistItemFromDayLog(dayLog, index))
   }
 
   // Skipping is a parent-only action (FUNC-08): mark an item the kid shouldn't
@@ -740,11 +784,60 @@ export default function TodayChecklist({
                       {item.skipped ? <UndoIcon fontSize="small" /> : <SkipNextIcon fontSize="small" />}
                     </IconButton>
                   </Tooltip>
-                  {/* Delete button */}
-                  <IconButton size="small" onClick={() => handleDeleteItem(index)} color="error">
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
+                  {/* FEAT-138: change which video a planned watch row points at.
+                      A swap in place — the row keeps its day, its position and
+                      its incomplete state; only the video changes. */}
+                  {onSwapWatchItem && item.itemType === 'watch' && (
+                    <Tooltip title={editLockReason(item) ?? 'Change video'}>
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={!!editLockReason(item)}
+                          onClick={() => onSwapWatchItem(index)}
+                          aria-label="Change video"
+                        >
+                          <SwitchVideoIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  )}
+                  {/* FEAT-138: move this row to another day of the week. */}
+                  {onMoveItemToDay && (
+                    <Tooltip title={editLockReason(item) ?? 'Move to another day'}>
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={!!editLockReason(item)}
+                          onClick={() => onMoveItemToDay(index)}
+                          aria-label="Move to another day"
+                        >
+                          <CalendarMonthIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  )}
+                  {/* Delete button — refuses a completed row (FEAT-138). */}
+                  <Tooltip title={editLockReason(item) ?? 'Remove from today'}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        disabled={!!editLockReason(item)}
+                        onClick={() => handleDeleteItem(index)}
+                        color="error"
+                        aria-label="Remove from today"
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
                 </Stack>
+                {/* Say why, rather than leaving three inert buttons next to a
+                    row (FEAT-135's lesson) — a tooltip never opens on a phone. */}
+                {editLockReason(item) && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', pl: 4.5 }}>
+                    {editLockReason(item)}
+                  </Typography>
+                )}
                 </Box>
               )
             }

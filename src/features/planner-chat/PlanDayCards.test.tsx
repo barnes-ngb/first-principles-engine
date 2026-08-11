@@ -116,11 +116,14 @@ describe('PlanDayCards — "Add a video" after Apply (FEAT-132)', () => {
     expect(onAddWatchItem).toHaveBeenCalledWith(0)
   })
 
-  // Remove/move/retime would have to reconcile against days the family may
-  // already be working through — only the additive action survives Apply.
-  it('still gates the STRUCTURAL edits off once applied (unchanged)', () => {
+  // FEAT-138 changed this: remove now SURVIVES Apply, because the caller writes
+  // it into the saved day instead of into a draft nothing would flush. What
+  // stays gated is the WITHIN-DAY reorder (whose draft and saved-day positions
+  // diverge) and planned minutes (compliance hours) — see the FEAT-138 block
+  // below, which pins both.
+  it('offers remove on an applied week (FEAT-138)', () => {
     const { container } = renderCards(true)
-    expect(container.querySelector('[data-testid="CloseIcon"]')).toBeNull()
+    expect(container.querySelector('[data-testid="CloseIcon"]')).not.toBeNull()
   })
 
   it('still offers the structural edits before Apply (characterization)', () => {

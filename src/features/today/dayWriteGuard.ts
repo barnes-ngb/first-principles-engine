@@ -82,8 +82,16 @@ export class DayPreservationError extends Error {
 // so identity falls back to a content key. Multiset counting below tolerates the
 // rare same-key collision without ever *under*-counting a preserved entity.
 
-const checklistKey = (item: ChecklistItem): string =>
+/**
+ * A checklist row's identity. Exported (FEAT-138) so the live-day edit lane
+ * resolves a row against the freshly-read day doc by the SAME notion of identity
+ * the guard uses to decide whether that row survived a write — one definition,
+ * so "the row I meant" and "the row the guard is watching" cannot drift.
+ */
+export const checklistItemKey = (item: ChecklistItem): string =>
   item.id ?? `${item.label}::${item.subjectBucket ?? ''}`
+
+const checklistKey = checklistItemKey
 
 const blockKey = (block: DayBlock): string =>
   block.id ?? `${block.type}::${block.title ?? ''}`

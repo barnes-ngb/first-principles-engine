@@ -231,6 +231,25 @@ describe('WatchLibraryPicker — retired videos (FEAT-129)', () => {
     expect(screen.getByText(/no videos to plan yet/i)).toBeInTheDocument()
   })
 
+  it('the SWAP path inherits the filter — a retired video cannot come back (FEAT-138)', () => {
+    // "Change video" opens this same component, so a retired entry is no more
+    // reachable when replacing a planned video than when planning a fresh one.
+    // Pinned here rather than at the two call sites, because that is where the
+    // invariant actually lives.
+    const onSwapSelect = vi.fn()
+    render(
+      <WatchLibraryPicker
+        open
+        onClose={onClose}
+        videos={[video('a', 'Ancient cities'), retired('r', 'Retired one')]}
+        onSelect={onSwapSelect}
+      />,
+    )
+    expect(screen.queryByText('Retired one')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /plan this/i }))
+    expect(onSwapSelect.mock.calls[0][0].id).toBe('a')
+  })
+
   it('a video with NO status is plannable (pre-FEAT-129 entries keep working)', () => {
     const legacy = video('legacy', 'Vetted before FEAT-129')
     expect(legacy.status).toBeUndefined()
