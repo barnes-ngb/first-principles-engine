@@ -63,6 +63,73 @@ export interface WeeklyReviewRow {
   createdAt?: string;
 }
 
+/**
+ * An `activityConfigs` doc as the ACTIVITIES section reads it (FEAT-135).
+ *
+ * Deliberately a SEPARATE shape from `loadWorkbookPaces`' `WorkbookPace`: that
+ * loader feeds pace/coverage reasoning for several tasks and filters to
+ * `type == "workbook"`, so widening it to carry doc ids and non-workbook rows
+ * would shift context under `plan`/`quest` too. This is the sibling read — it
+ * changes nothing existing.
+ */
+export interface ChatActivityRow {
+  id: string;
+  name?: string;
+  subjectBucket?: string;
+  defaultMinutes?: number;
+  frequency?: string;
+  childId?: string;
+  completed?: boolean;
+}
+
+/**
+ * Format the ACTIVITIES section for a child-scoped chat (FEAT-135).
+ *
+ * This is what lets the assistant NAME an activity and address a
+ * `setActivityMinutes` action at a real doc — without it the model has nothing
+ * valid to put in a payload, which is precisely why the capability didn't exist
+ * before. Each row carries the doc id, name, subject, current default minutes,
+ * and frequency.
+ *
+ * Shared (`childId: 'both'`) configs are marked plainly with the names of every
+ * child they cover, because changing one changes the number for all of them —
+ * the parent has to be told that BEFORE she taps confirm, and the model can
+ * only tell her if it can see it here.
+ *
+ * Completed activities are excluded, matching `loadWorkbookPaces`. Returns ""
+ * when nothing survives, so the section is omitted rather than rendered empty.
+ */
+export function formatChatActivities(
+  rows: ChatActivityRow[],
+  allChildNames: string[],
+): string {
+  const active = rows.filter((r) => !r.completed);
+  if (active.length === 0) return "";
+
+  const names = allChildNames.filter((n) => n.trim().length > 0);
+  const sharedLabel =
+    names.length >= 2
+      ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+      : names[0] || "every child";
+
+  const lines = active.map((r) => {
+    const parts = [`- ${r.name || "Untitled activity"}`];
+    parts.push(`${r.defaultMinutes ?? 0} min`);
+    if (r.frequency) parts.push(r.frequency);
+    if (r.subjectBucket) parts.push(r.subjectBucket);
+    let line = `${parts[0]} — ${parts.slice(1).join(", ")} (id: ${r.id})`;
+    if (r.childId === "both") line += ` — shared: ${sharedLabel}`;
+    return line;
+  });
+
+  return [
+    "ACTIVITIES (the structured activities that build every plan — the minutes below are the DEFAULT each FUTURE plan uses):",
+    ...lines,
+    "",
+    'Use the "id" exactly as written when you propose a setActivityMinutes action. An activity marked "shared" belongs to more than one child — changing its minutes changes it for all of them, so say so before proposing.',
+  ].join("\n");
+}
+
 /** Raw artifact shape consumed by the teach-backs formatter. */
 export interface TeachBackArtifactInput {
   title?: string;
@@ -211,6 +278,31 @@ export function formatRecentTeachBacks(rawArtifacts: TeachBackArtifactInput[]): 
  * BY DOMAIN, DISPOSITION PROFILE, RECENT WEEKLY REVIEWS, RECENT TEACH-BACKS)
  * so the model can ground claims rather than confabulate.
  */
+/**
+ * The navigation-honesty rule (FEAT-135), shared by both role branches.
+ *
+ * The bug this exists to stop: asked to change how long math takes, the
+ * assistant said it couldn't and sent the parent to "the app's schedule/settings
+ * screen, usually under the child's subject or time-block settings". No such
+ * screen exists. Settings holds account, soft profile, voice input, sticker
+ * library, avatar admin and dev tools — nothing about durations. An invented
+ * destination is worse than "I can't do that": it sends a parent hunting through
+ * an app for something that was never there.
+ *
+ * So: name only screens listed here, or say it isn't in the app yet. The true
+ * map for the thing that triggered this — activity durations — is Progress →
+ * Curriculum, and the chat can now change that number directly anyway.
+ */
+const NAVIGATION_HONESTY_RULE = `
+NAVIGATION HONESTY (hard rule): NEVER describe a screen, tab, setting, or menu you have not been told exists. If you can't do something, say so plainly and then either name a REAL screen from the map below or say it isn't in the app yet — those are the only two endings. Inventing a plausible-sounding location ("check the schedule settings screen") is worse than admitting the gap, because the parent will go looking for something that isn't there. If you are not certain a screen exists, do not name it.
+
+The real map, for the things parents most often ask to change:
+- Activities and how many minutes each one takes by default: Progress → Curriculum. (You can also change an activity's default minutes yourself, right here — see ACTIVITY TIME ACTIONS below, if that section is present.)
+- The weekly plan itself: Plan My Week.
+- Today's checklist: Today.
+- Hours, compliance records, evaluations and the portfolio: Records.
+- Account, profiles, voice input, stickers: Settings. Settings does NOT contain any schedule, subject-duration, or time-block screen — never send anyone there for one.`;
+
 export function buildShellyChatRoleSection(childName: string | undefined): string {
   if (childName) {
     return `ROLE: You are the family's homeschool assistant. The ${childName} tab is selected, so prioritize ${childName}'s data and needs in your responses. Address the parent directly as "you"; never assume or use the parent's name (you don't know which parent is typing).
@@ -225,6 +317,7 @@ GUIDELINES:
 - Keep responses concise unless you're asked for detail.
 - If you're asked to generate an image, say to tap the image button.
 - For printable activities, format them clearly for screenshot or print.
+${NAVIGATION_HONESTY_RULE}
 
 PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the year-to-date instructional-hours total against the reporting target (see HOURS PROGRESS), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE, and "are we on track for our hours" answers in HOURS PROGRESS, rather than guessing. For any question about ${childName}'s LEVEL, what to WORK ON next, or what curriculum/materials to BUY, ground the answer in the LEARNER MODEL section and SAY which evidence supports the level claim ("two sources agree — Fast Phonics and his June check"); the Learner Model covers reading & math only, so for any other subject (science, handwriting, etc.) say plainly that the model doesn't cover it rather than guessing. Use them to help the parent see patterns over time — what is shifting, what is steady, what connects across signals they have not linked. When the parent shares an observation about ${childName} mid-conversation, treat it as evidence they have earned the right to add to the picture — don't argue with it, build on it.`;
   }
@@ -237,7 +330,8 @@ GUIDELINES:
 - Homeschooling is heroic, tiring work. If you sense the parent is frustrated or tired, acknowledge it genuinely.
 - Keep responses concise unless you're asked for detail.
 - If you're asked to generate an image, say to tap the image button.
-- For printable activities, format them clearly for screenshot or print.`;
+- For printable activities, format them clearly for screenshot or print.
+${NAVIGATION_HONESTY_RULE}`;
 }
 
 /**
@@ -345,16 +439,63 @@ Rules:
 }
 
 /**
+ * Build the `setActivityMinutes` grammar addendum (FEAT-135).
+ *
+ * The chat's answer to "make math 30 minutes". Taught from the ACTIVITIES
+ * section above it: the model picks a REAL doc id off that list and proposes a
+ * single-field change to that activity's default duration, which every future
+ * plan then reads. Confirmed by a tap, like every other portal write.
+ *
+ * Kept explicitly distinct from `proposePlanAdjustment`: a standing default for
+ * ONE activity is this write; a shape change to next week (drop / repace /
+ * reorder a subject) is the handoff. Without that line the model reaches for the
+ * bigger tool when the parent just wants a number changed.
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like the other action
+ * grammars. Returns "" on the general (no-child) branch.
+ */
+export function buildActivityMinutesActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+ACTIVITY TIME ACTIONS (you CAN change how long an activity is by default): When the parent says an activity should take a different amount of time from now on — "math should be 30 minutes", "make reading 45 from now on", "we only ever do 20 minutes of handwriting, set it to that" — propose ONE setActivityMinutes action using the real id from the ACTIVITIES section above.
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}") and an activity id copied exactly from the ACTIVITIES list:
+<action>{"kind":"setActivityMinutes","childId":"${childId}","activityConfigId":"<id from ACTIVITIES>","minutes":30}</action>
+
+Rules:
+- "activityConfigId" MUST be copied exactly from the ACTIVITIES section. NEVER invent, guess, or reconstruct an id. If you can't find the activity the parent means in that list, ask which one they mean — do NOT emit an action.
+- "minutes" must be a whole number between 5 and 120. A value outside that range is rejected outright, so don't propose one — say what the limits are instead.
+- This sets the DEFAULT for FUTURE plans. It does not change this week's plan, today's checklist, or any hours already recorded. Say that plainly, and never imply that today or a past day changed.
+- If the activity is marked "shared" in ACTIVITIES, TELL the parent it changes the time for both boys before you propose it.
+- One activity per action. If the parent names two ("30 for math and 20 for reading"), emit two separate action blocks.
+- NEVER say it's done. Say you've proposed it and it takes effect once they confirm — they see the activity name and the old → new time on a card first.
+- This is for a STANDING default. If what they want is a change to next week's plan SHAPE — drop a subject, repace it, shift toward a lighter week, change the week's focus — use the plan-adjustment handoff below instead. Changing a number = this action; changing the week = the handoff. Discussion is not a write.`;
+}
+
+/**
  * Build the `proposePlanAdjustment` HANDOFF grammar addendum (chunk 2A/2).
  *
- * When the parent voices frustration that warrants a **next-week plan change** —
- * drop/reduce/repace a subject, shift toward an MVD week, change the focus —
- * the model proposes ONE `proposePlanAdjustment` action instead of a snapshot
- * action. This is a HANDOFF, not a write: on the parent's tap the chat stages a
- * brief and opens Plan My Week, where they review and lock in via the existing
- * flow. The chat never writes the plan. Snapshot-level tweaks (add a priority
- * skill / support / stop rule, mark a skill) still use the additive `add*`
- * actions; silent friction capture is untouched.
+ * When the parent wants a **next-week plan change** — drop/reduce/repace a
+ * subject, shift toward an MVD week, change the focus — the model proposes ONE
+ * `proposePlanAdjustment` action instead of a snapshot action. This is a
+ * HANDOFF, not a write: on the parent's tap the chat stages a brief and opens
+ * Plan My Week, where they review and lock in via the existing flow. The chat
+ * never writes the plan. Snapshot-level tweaks (add a priority skill / support /
+ * stop rule, mark a skill) still use the additive `add*` actions; silent
+ * friction capture is untouched.
+ *
+ * FEAT-135 widened the TRIGGER only. The original wording scoped this to a
+ * parent "voicing frustration", so a calm, specific "can we do 30-45 minutes
+ * instead" read as out of scope — and the model, having no in-scope tool,
+ * invented a settings screen to send her to. Frustration was never the point:
+ * a calm request to repace or resize a subject next week is exactly what this
+ * handoff is for. Everything else — the handoff framing, "never claim the plan
+ * is changed", the grounding requirement — is unchanged.
  *
  * Only emitted on a child-scoped tab (a real `childId`), like the other action
  * grammars, since the brief binds to a specific child. Returns "" on the
@@ -368,7 +509,9 @@ export function buildPlanAdjustmentActionAddendum(
   const who = childName || "this child";
   return `
 
-PLAN-ADJUSTMENT HANDOFF (next-week plan change — NOT a snapshot edit, NOT a write): When the parent voices frustration that warrants changing ${who}'s NEXT WEEK plan — drop or reduce a subject, repace it, shift toward a lighter / Minimum Viable week, or change the week's focus (e.g. "math is melting him down, let's pull way back next week", "reading isn't landing — can we do less and lean on read-alouds", "next week needs to be a survival week") — propose ONE plan-adjustment action. Ground it in the state you can see above (evaluation history, disposition signals, hours progress, coverage), not a guess.
+PLAN-ADJUSTMENT HANDOFF (next-week plan change — NOT a snapshot edit, NOT a write): When the parent wants ${who}'s NEXT WEEK plan changed — drop or reduce a subject, repace it, shift toward a lighter / Minimum Viable week, or change the week's focus (e.g. "math is melting him down, let's pull way back next week", "reading isn't landing — can we do less and lean on read-alouds", "next week needs to be a survival week", "let's make next week lighter across the board") — propose ONE plan-adjustment action. Ground it in the state you can see above (evaluation history, disposition signals, hours progress, coverage), not a guess.
+
+The parent does NOT have to be upset for this to apply. A calm, specific request to repace or resize a subject next week is exactly what this handoff is for — treat "can we do less math next week" the same as a frustrated version of it.
 
 Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
 <action>{"kind":"proposePlanAdjustment","childId":"${childId}","summary":"Reduce math to 10 min/day and lead with a hands-on warm-up","rationale":"Frustration is spiking in math and his disposition signals show persistence dropping this week"}</action>
@@ -376,7 +519,7 @@ Grammar — one JSON object per <action> block, after your prose, using ${who}'s
 Rules:
 - This is a HANDOFF. Confirming it opens Plan My Week with your brief preloaded — the parent reviews and locks in the actual plan there. You do NOT write the plan, and you must NEVER claim the plan is changed or done.
 - "summary" is the one-line change the parent will see in the planner; "rationale" is the grounded WHY (cite the signal). You may add "scope" or "targetWeek" as short optional hints, but they're not required.
-- Use this ONLY for next-week plan changes. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions instead. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when the parent clearly wants the plan to change.`;
+- Use this for a change to the SHAPE of next week. To change how long ONE activity runs by default from now on, use setActivityMinutes above instead — that's a real write and it sticks. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when the parent clearly wants the plan to change.`;
 }
 
 /**
@@ -464,7 +607,7 @@ export const handleShellyChat = async (
   fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
   const reflectionStartDate = fourteenDaysAgo.toISOString().slice(0, 10);
 
-  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult] =
+  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult] =
     await Promise.allSettled([
       db.collection(`families/${familyId}/children`).get(),
       childId
@@ -511,11 +654,23 @@ export const handleShellyChat = async (
             .limit(10)
             .get()
         : Promise.resolve(null),
+      // Activity configs (FEAT-135) — the ACTIVITIES section. A sibling read,
+      // NOT a widening of loadWorkbookPaces: that loader filters to workbooks
+      // and feeds pace reasoning for plan/quest too, so it stays exactly as it
+      // is. Child-scoped only; the general branch emits no actions.
+      childId
+        ? db.collection(`families/${familyId}/activityConfigs`)
+            .where("childId", "in", [childId, "both"])
+            .get()
+        : Promise.resolve(null),
     ]);
 
   // Format supplemental context
   let supplementalContext = "";
   let childName = ctx.childData?.name || "";
+  // Every child's name, so the ACTIVITIES section (FEAT-135) can spell out who
+  // a shared ('both') activity actually covers.
+  const allChildNames: string[] = [];
 
   // All children list
   if (allChildrenResult.status === "fulfilled" && allChildrenResult.value) {
@@ -532,6 +687,7 @@ export const handleShellyChat = async (
         if (childId && doc.id === childId && !childName) {
           childName = c.name || "";
         }
+        if (c.name) allChildNames.push(c.name);
         const parts = [c.name || "Unknown"];
         if (c.age) parts.push(`age ${c.age}`);
         if (c.description) parts.push(`— ${c.description}`);
@@ -597,6 +753,22 @@ export const handleShellyChat = async (
     if (!snap.empty) {
       const rows = snap.docs.map((d) => d.data() as TeachBackArtifactInput);
       supplementalContext += formatRecentTeachBacks(rows);
+    }
+  }
+
+  // ACTIVITIES (FEAT-135) — the doc ids + current default minutes the
+  // setActivityMinutes action addresses. Without this section the model has no
+  // valid id to put in a payload, which is exactly why it previously had to
+  // deflect (and invented a settings screen doing so).
+  if (activityConfigResult.status === "fulfilled" && activityConfigResult.value) {
+    const snap = activityConfigResult.value as { empty: boolean; docs: Array<{ id: string; data: () => Record<string, unknown> }> };
+    if (!snap.empty) {
+      const rows: ChatActivityRow[] = snap.docs.map((d) => ({
+        ...(d.data() as Omit<ChatActivityRow, "id">),
+        id: d.id,
+      }));
+      const section = formatChatActivities(rows, allChildNames);
+      if (section) supplementalContext += `\n\n${section}`;
     }
   }
 
@@ -683,6 +855,7 @@ Example: If the parent says "Lincoln seems bored with reading" and the data show
   const roleSection = buildShellyChatRoleSection(childId && childName ? childName : undefined);
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
+  const activityMinutesActionAddendum = buildActivityMinutesActionAddendum(childId || undefined, childName || undefined);
   const planAdjustmentActionAddendum = buildPlanAdjustmentActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
   const webSearchAddendum = buildWebSearchAddendum(childId && childName ? childName : undefined);
@@ -694,6 +867,7 @@ ${supplementalContext}
 ${roleSection}
 ${sightWordActionAddendum}
 ${snapshotActionAddendum}
+${activityMinutesActionAddendum}
 ${planAdjustmentActionAddendum}
 ${frictionCaptureAddendum}
 ${webSearchAddendum}

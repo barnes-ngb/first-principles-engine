@@ -26,6 +26,19 @@ export interface ParsedChatActions {
 const SOFT_PROFILE_FIELDS = ['motivators', 'interests', 'strengths'] as const
 
 /**
+ * The accepted band for `setActivityMinutes` (FEAT-135), inclusive.
+ *
+ * Deliberately narrow: a default block shorter than 5 minutes isn't a real
+ * activity and one longer than 2 hours isn't a block, it's a day. Values
+ * outside the band are **rejected as malformed** (the action returns null), not
+ * clamped — clamping would silently write a number the parent never saw on the
+ * confirm card. If a legitimate activity ever needs a value outside this band,
+ * that's a deliberate widening decision, not something to work around here.
+ */
+export const MIN_ACTIVITY_MINUTES = 5
+export const MAX_ACTIVITY_MINUTES = 120
+
+/**
  * Validate an arbitrary parsed payload against the `ChatAction` allowlist.
  *
  * Returns a typed `ChatAction` only for the recognized kinds:
@@ -35,6 +48,10 @@ const SOFT_PROFILE_FIELDS = ['motivators', 'interests', 'strengths'] as const
  * - Tier C Option 2 additive snapshot edits: `addPrioritySkill` (+`skill`),
  *   `addSupport` (+`support`), `addStopRule` (+`rule`), `markSkillProgress`
  *   (+`skill`, optional boolean `mastered`).
+ * - `setActivityMinutes` (FEAT-135): string `childId` + non-empty string
+ *   `activityConfigId` + integer `minutes` in [5, 120]. Sets the default
+ *   duration future plans use for ONE activity; out-of-band or non-integer
+ *   minutes are rejected as malformed, never clamped.
  * - `proposePlanAdjustment` (chunk 2A/2): a HANDOFF, not a write — string
  *   `childId` + non-empty `summary` + non-empty `rationale`, optional string
  *   `scope` / `targetWeek`. On confirm it stages a planner brief and navigates;
@@ -105,6 +122,33 @@ function toChatAction(payload: unknown): ChatAction | null {
     return mastered === undefined
       ? { kind: 'markSkillProgress', childId: obj.childId, skill: obj.skill.trim() }
       : { kind: 'markSkillProgress', childId: obj.childId, skill: obj.skill.trim(), mastered }
+  }
+
+  // ── setActivityMinutes — one field on one activity config (FEAT-135) ─
+  // The narrowest write in the union: `defaultMinutes` on a single
+  // `activityConfigs` doc, the number every FUTURE plan reads. Two strict
+  // gates here, and a third outside this module:
+  //   1. `activityConfigId` must be a non-empty string (shape only — this
+  //      module is pure and has no family data to resolve it against).
+  //   2. `minutes` must be a real INTEGER inside [5, 120]. `0`, `4`, `121`,
+  //      `30.5`, `"30"`, `NaN`, and `Infinity` are all malformed → null. We
+  //      reject rather than clamp so a confirmed write is always exactly the
+  //      number the parent saw on the card.
+  //   3. (outside this file) `useShellyChatActions` resolves the id against
+  //      the family's live configs before a confirm card is offered, so a
+  //      hallucinated id never reaches the write helper.
+  if (obj.kind === 'setActivityMinutes') {
+    if (typeof obj.activityConfigId !== 'string' || obj.activityConfigId.trim().length === 0) {
+      return null
+    }
+    if (typeof obj.minutes !== 'number' || !Number.isInteger(obj.minutes)) return null
+    if (obj.minutes < MIN_ACTIVITY_MINUTES || obj.minutes > MAX_ACTIVITY_MINUTES) return null
+    return {
+      kind: 'setActivityMinutes',
+      childId: obj.childId,
+      activityConfigId: obj.activityConfigId.trim(),
+      minutes: obj.minutes,
+    }
   }
 
   // ── proposePlanAdjustment — a HANDOFF, never a write (chunk 2A/2) ───

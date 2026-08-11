@@ -73,6 +73,23 @@ export interface ShellyChatMessage {
  * snapshot-explicit (`addSupport`, not `addProfileSupport`) so the
  * authoritative target stays unambiguous.
  *
+ * **`setActivityMinutes` (FEAT-135)** writes ONE field — `defaultMinutes` — on
+ * ONE `activityConfigs` doc. That number is the default every FUTURE plan reads
+ * (via `activityConfigsToRoutineText` / the planner's config load); it is a
+ * standing preference, NOT an edit to anything already recorded. Confirming it
+ * touches no `dayLog`, re-plans no applied week, and moves no `plannedMinutes`
+ * on an existing block — hours already logged are a child's school record and a
+ * forward-looking preference must never restate history. `activityConfigId` is
+ * validated as a non-empty string here, but the id being *real* is not a
+ * type-level guarantee: the app resolves it against the family's live configs
+ * before a confirm card is ever offered, so a hallucinated id cannot reach the
+ * write. `minutes` is an integer in [5, 120] — outside that band the action is
+ * rejected as malformed, never clamped.
+ *
+ * `setActivityMinutes` and `proposePlanAdjustment` are deliberately distinct: a
+ * **standing default** for one activity is this write; a **shape change to next
+ * week** (drop/repace/reorder a subject) stays the handoff below.
+ *
  * **`proposePlanAdjustment` is a HANDOFF, not a write** (chunk 2A/2). It is the
  * one kind that touches **no** child record at all: on confirm it stages a brief
  * to the planner's per-child inbox (`settings/pendingPlanAdjustment_{childId}`)
@@ -95,6 +112,14 @@ export type ChatAction =
   | { kind: 'addSupport'; childId: string; support: string }
   | { kind: 'addStopRule'; childId: string; rule: string }
   | { kind: 'markSkillProgress'; childId: string; skill: string; mastered?: boolean }
+  | {
+      kind: 'setActivityMinutes'
+      childId: string
+      /** Doc id of the `activityConfigs` doc whose `defaultMinutes` changes. */
+      activityConfigId: string
+      /** New default duration. Integer, 5–120 (enforced by `parseChatActions`). */
+      minutes: number
+    }
   | {
       kind: 'proposePlanAdjustment'
       childId: string
