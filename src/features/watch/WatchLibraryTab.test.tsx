@@ -20,6 +20,7 @@ const {
   canEditRef,
   childrenRef,
   historyRef,
+  historyStateRef,
   addVideoMock,
   updateVideoMock,
   retireVideoMock,
@@ -36,6 +37,7 @@ const {
   canEditRef: { current: true },
   childrenRef: { current: [{ id: 'lincoln', name: 'Lincoln' }] as { id: string; name: string }[] },
   historyRef: { current: {} as Record<string, unknown> },
+  historyStateRef: { current: { loading: false, error: null as string | null } },
   addVideoMock: vi.fn(),
   updateVideoMock: vi.fn(async () => undefined),
   retireVideoMock: vi.fn(async () => undefined),
@@ -87,7 +89,13 @@ vi.mock('../../core/hooks/useChildren', () => ({
 vi.mock('./useWatchHistory', () => ({
   useWatchHistory: (...args: unknown[]) => {
     useWatchHistoryMock(...args)
-    return { history: historyRef.current, loading: false, error: null, windowDays: 90, since: '2026-05-13' }
+    return {
+      history: historyRef.current,
+      loading: historyStateRef.current.loading,
+      error: historyStateRef.current.error,
+      windowDays: 90,
+      since: '2026-05-13',
+    }
   },
 }))
 
@@ -148,6 +156,7 @@ beforeEach(() => {
   canEditRef.current = true
   childrenRef.current = [{ id: 'lincoln', name: 'Lincoln' }]
   historyRef.current = {}
+  historyStateRef.current = { loading: false, error: null }
   dialogProps.current = null
   addDocMock.mockClear()
   updateDocMock.mockClear()
@@ -601,6 +610,37 @@ describe('WatchLibraryTab watch history (FEAT-139)', () => {
     expect(addDocMock).not.toHaveBeenCalled()
     expect(updateDocMock).not.toHaveBeenCalled()
     expect(updateVideoMock).not.toHaveBeenCalled()
+  })
+
+  // Codex P2 (PR #1660): a failed read yields the same empty index a successful
+  // read that found nothing does, so without carrying the error the negative
+  // wording would present a broken lookup as a confident negative.
+  it('claims NOTHING when the look-back failed — a broken read is not a negative', () => {
+    historyStateRef.current = { loading: false, error: 'permission-denied' }
+    historyRef.current = {}
+    render(<WatchLibraryTab />)
+
+    expect(screen.queryByText(/not watched in the last/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/watched by/i)).not.toBeInTheDocument()
+    // The shelf itself stays fully usable — history failing is not fatal.
+    expect(screen.getByText('Ancient cities')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^watch$/i })).toHaveLength(2)
+  })
+
+  it('claims nothing while the look-back is still loading either', () => {
+    historyStateRef.current = { loading: true, error: null }
+    render(<WatchLibraryTab />)
+
+    expect(screen.queryByText(/not watched in the last/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Ancient cities')).toBeInTheDocument()
+  })
+
+  it('a successful read that found nothing DOES say so (the guard is not vacuous)', () => {
+    historyStateRef.current = { loading: false, error: null }
+    historyRef.current = {}
+    render(<WatchLibraryTab />)
+
+    expect(screen.getAllByText('Not watched in the last 90 days')).toHaveLength(2)
   })
 
   it('carries into the archive too', () => {

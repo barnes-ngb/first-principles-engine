@@ -3,6 +3,7 @@ import { getDocs, orderBy, query, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../../core/auth/useAuth'
 import { daysCollection } from '../../core/firebase/firestore'
+import { formatDateYmd } from '../../core/utils/format'
 import type { DayLog } from '../../core/types/planning'
 import { buildWatchHistory, type WatchHistoryIndex } from './watchHistory'
 
@@ -30,11 +31,20 @@ import { buildWatchHistory, type WatchHistoryIndex } from './watchHistory'
  */
 export const WATCH_HISTORY_WINDOW_DAYS = 90
 
-/** First date (inclusive) in the window, as `YYYY-MM-DD`. */
+/**
+ * First date (inclusive) in the window, as a **local** `YYYY-MM-DD`.
+ *
+ * Formatted with the shared `formatDateYmd`, never `toISOString()`. Day-log doc
+ * keys are local date strings (`todayKey`), and `setDate` subtracts in local
+ * time — so serialising the result in UTC would mix the two calendars and shift
+ * the boundary by a day for any evening west of Greenwich (8 PM on Aug 11 in Los
+ * Angeles would yield May 14 instead of May 13), silently dropping the real
+ * boundary day's watches out of the window.
+ */
 export function watchHistoryWindowStart(days = WATCH_HISTORY_WINDOW_DAYS, now: Date = new Date()): string {
   const start = new Date(now)
   start.setDate(start.getDate() - days)
-  return start.toISOString().slice(0, 10)
+  return formatDateYmd(start)
 }
 
 export interface UseWatchHistoryResult {

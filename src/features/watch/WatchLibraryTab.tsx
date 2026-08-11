@@ -73,7 +73,17 @@ function WatchLibraryTabInner() {
   const { children } = useChildren()
   // Watch history is a bounded, one-shot look-back over day logs — see
   // `useWatchHistory` for the window and what it hides. Read-only.
-  const { history, loading: historyLoading, windowDays } = useWatchHistory()
+  const {
+    history,
+    loading: historyLoading,
+    error: historyError,
+    windowDays,
+  } = useWatchHistory()
+  // A failed read yields the SAME empty index as a successful one that found
+  // nothing, so the error has to be carried here — otherwise every card would
+  // render the confident "Not watched in the last N days" for a lookup that
+  // never actually answered. Loading and failure both mean "no claim".
+  const historyUnavailable = historyLoading || historyError !== null
 
   const names = Object.fromEntries(children.map((c) => [c.id, c.name])) as Record<string, string>
   const childName = (id: string) => names[id] ?? id
@@ -106,7 +116,7 @@ function WatchLibraryTabInner() {
       scopeLabel={scopeLabel(v.childId, names)}
       historyLine={summarizeWatchEntry(history[v.id], childName)}
       historyWindowDays={windowDays}
-      historyLoading={historyLoading}
+      historyUnavailable={historyUnavailable}
       editing={editingId === v.id}
       confirmingRetire={confirmRetireId === v.id}
       onWatch={() => setPlaying(v)}

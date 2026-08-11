@@ -22,8 +22,18 @@ export interface WatchVideoCardProps {
   historyLine: string | null
   /** The window the history covers, so "not watched" can name its own limit. */
   historyWindowDays: number
-  /** Suppress the history line entirely while the look-back is still loading. */
-  historyLoading: boolean
+  /**
+   * `true` when the look-back has not produced an answer — still loading, or it
+   * failed. The card then renders **no** history line at all.
+   *
+   * Loading and failure are one flag on purpose: the negative wording ("not
+   * watched in the last N days") is a *claim*, and an empty history index means
+   * "nothing found" only when the read actually succeeded. A failed read (offline,
+   * permission) also yields an empty index, so rendering the negative there would
+   * present a failed lookup as a confident negative result — the exact overclaim
+   * the windowed wording exists to prevent.
+   */
+  historyUnavailable: boolean
   editing: boolean
   confirmingRetire: boolean
   onWatch: () => void
@@ -52,7 +62,7 @@ export default function WatchVideoCard({
   scopeLabel,
   historyLine,
   historyWindowDays,
-  historyLoading,
+  historyUnavailable,
   editing,
   confirmingRetire,
   onWatch,
@@ -99,8 +109,10 @@ export default function WatchVideoCard({
           </Box>
 
           {/* Watch history (FEAT-139). Both wordings name the window: a video
-              last watched before it is "not in the last N days", never "never". */}
-          {!historyLoading && (
+              last watched before it is "not in the last N days", never "never".
+              Rendered only once the look-back has actually answered — see
+              `historyUnavailable`. */}
+          {!historyUnavailable && (
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
               {historyLine ?? `Not watched in the last ${historyWindowDays} days`}
             </Typography>
