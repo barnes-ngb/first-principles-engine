@@ -69,7 +69,9 @@ export function applyWatchCompletion(
  * video has no photo) — the optional "what we saw" note lands in `content`.
  * All required artifact tags are present (`engineStage`, `domain`,
  * `subjectBucket`, `location`); `skillTags` are absent by design (a watch item
- * is non-curriculum). Returns an artifact WITHOUT `id` — the caller `addDoc`s it.
+ * is non-curriculum). Since FEAT-139 the tags also carry `watchVideoId`, so the
+ * artifact joins back to the library entry by id rather than by a mutable title.
+ * Returns an artifact WITHOUT `id` — the caller `addDoc`s it.
  */
 export function buildWatchArtifact(params: {
   childId: string
@@ -93,6 +95,13 @@ export function buildWatchArtifact(params: {
       subjectBucket: video.subjectBucket,
       location: 'Home',
       planItem: `Watch: ${video.title}`,
+      // FEAT-139: stamp the library id so the portfolio artifact is *joinable*
+      // to the library entry. `planItem` carries a copy of the title taken at
+      // capture time, and FEAT-129 lets a parent edit a title afterwards — so
+      // matching on it was always brittle. Additive: readers that don't know
+      // the field are unaffected, and artifacts written before this have only
+      // the title.
+      watchVideoId: video.id,
     },
   }
 }

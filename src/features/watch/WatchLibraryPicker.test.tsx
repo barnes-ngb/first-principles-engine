@@ -250,6 +250,19 @@ describe('WatchLibraryPicker — retired videos (FEAT-129)', () => {
     expect(onSwapSelect.mock.calls[0][0].id).toBe('a')
   })
 
+  it('un-retiring puts a video back on the shelf (FEAT-139 archive → picker)', () => {
+    // "Put back" in the FEAT-139 archive writes `status: 'active'`. `activeVideos`
+    // is the single predicate the library list and the picker both use, so a
+    // restored entry is plannable — and swappable — again with no second rule.
+    const restored: WatchVideo = { ...video('r', 'Retired one'), status: 'active' }
+    render(
+      <WatchLibraryPicker open onClose={onClose} videos={[restored]} onSelect={onSelect} />,
+    )
+    expect(screen.getByText('Retired one')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /plan this/i }))
+    expect(onSelect.mock.calls[0][0].id).toBe('r')
+  })
+
   it('a video with NO status is plannable (pre-FEAT-129 entries keep working)', () => {
     const legacy = video('legacy', 'Vetted before FEAT-129')
     expect(legacy.status).toBeUndefined()
