@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractImageUrls,
+  buildActivityMinutesActionAddendum,
   buildAllChildrenLearnerModels,
   buildFrictionCaptureAddendum,
   buildPlanAdjustmentActionAddendum,
@@ -8,12 +9,14 @@ import {
   buildSightWordActionAddendum,
   buildSnapshotActionAddendum,
   buildWebSearchAddendum,
+  formatChatActivities,
   formatConundrumTitle,
   formatDispositionProfile,
   formatRecentTeachBacks,
   formatRecentWeeklyReviews,
 } from "./shellyChat.js";
 import type {
+  ChatActivityRow,
   DispositionCacheDoc,
   DispositionOverridesDoc,
   TeachBackArtifactInput,
@@ -717,5 +720,193 @@ describe("extractImageUrls — multi-image vision parity (FEAT-59)", () => {
     const r = extractImageUrls("just a question, no image");
     expect(r.urls).toEqual([]);
     expect(r.text).toBe("just a question, no image");
+  });
+});
+
+// ── FEAT-135. The chat can set an activity's default minutes ────────
+//
+// Nathan asked the chat to make his subjects match the ~30-45 minutes they
+// actually spend. The assistant said it couldn't, and then sent him to a
+// "schedule/settings screen" that does not exist. Three things had to change:
+// the model can now SEE the activities (ACTIVITIES section), it has a real
+// action to propose (setActivityMinutes), and it is forbidden from inventing a
+// destination when it still can't do something.
+
+describe("formatChatActivities (FEAT-135) — the section that makes an id proposable", () => {
+  const ROWS: ChatActivityRow[] = [
+    {
+      id: "cfg_math",
+      name: "Math Lesson",
+      subjectBucket: "Math",
+      defaultMinutes: 15,
+      frequency: "daily",
+      childId: "lincoln1",
+    },
+    {
+      id: "cfg_read",
+      name: "Read Aloud",
+      subjectBucket: "LanguageArts",
+      defaultMinutes: 20,
+      frequency: "daily",
+      childId: "both",
+    },
+    {
+      id: "cfg_done",
+      name: "Finished Workbook",
+      subjectBucket: "Math",
+      defaultMinutes: 10,
+      frequency: "3x",
+      childId: "lincoln1",
+      completed: true,
+    },
+  ];
+
+  it("carries the doc id, name, current minutes, frequency and subject for each activity", () => {
+    const out = formatChatActivities(ROWS, ["Lincoln", "London"]);
+    expect(out).toContain("ACTIVITIES");
+    expect(out).toContain("Math Lesson");
+    expect(out).toContain("15 min");
+    expect(out).toContain("daily");
+    expect(out).toContain("Math");
+    // The id is the whole point — without it the model has nothing valid to
+    // put in a setActivityMinutes payload.
+    expect(out).toContain("(id: cfg_math)");
+    expect(out).toContain("(id: cfg_read)");
+  });
+
+  it("marks a shared config plainly, by the names of the children it covers", () => {
+    const out = formatChatActivities(ROWS, ["Lincoln", "London"]);
+    expect(out).toContain("shared: Lincoln and London");
+    // ...and the non-shared row is NOT marked.
+    const mathLine = out.split("\n").find((l) => l.includes("cfg_math")) ?? "";
+    expect(mathLine).not.toContain("shared");
+  });
+
+  it("excludes completed activities, as loadWorkbookPaces already does", () => {
+    const out = formatChatActivities(ROWS, ["Lincoln", "London"]);
+    expect(out).not.toContain("Finished Workbook");
+    expect(out).not.toContain("cfg_done");
+  });
+
+  it("tells the model to copy ids exactly and to flag a shared change first", () => {
+    const out = formatChatActivities(ROWS, ["Lincoln", "London"]);
+    expect(out).toContain("exactly");
+    expect(out).toContain("changing its minutes changes it for all of them");
+  });
+
+  it("omits the section entirely when nothing survives the completed filter", () => {
+    expect(formatChatActivities([], ["Lincoln"])).toBe("");
+    expect(formatChatActivities([ROWS[2]], ["Lincoln"])).toBe("");
+  });
+
+  it("degrades gracefully when child names are unknown", () => {
+    const out = formatChatActivities([ROWS[1]], []);
+    expect(out).toContain("shared: every child");
+  });
+});
+
+describe("buildActivityMinutesActionAddendum (FEAT-135)", () => {
+  it("returns empty string on the general (no-child) tab", () => {
+    expect(buildActivityMinutesActionAddendum(undefined, "Lincoln")).toBe("");
+    expect(buildActivityMinutesActionAddendum("", "")).toBe("");
+  });
+
+  it("emits the setActivityMinutes grammar bound to the active childId", () => {
+    const out = buildActivityMinutesActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain('"kind":"setActivityMinutes"');
+    expect(out).toContain('"childId":"lincoln123"');
+    expect(out).toContain('"activityConfigId"');
+    expect(out).toContain('"minutes"');
+    expect(out).not.toContain("${");
+  });
+
+  it("forbids inventing an activity id and points at the ACTIVITIES section", () => {
+    const out = buildActivityMinutesActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("ACTIVITIES");
+    expect(out).toContain("NEVER invent");
+    expect(out).toContain("ask which one they mean");
+  });
+
+  it("states the 5–120 band the parser enforces", () => {
+    const out = buildActivityMinutesActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("between 5 and 120");
+  });
+
+  it("says the change is forward-looking and never retroactive", () => {
+    const out = buildActivityMinutesActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("FUTURE plans");
+    expect(out).toContain("hours already recorded");
+    expect(out).toContain("NEVER say it's done");
+  });
+
+  it("requires flagging a shared activity before proposing", () => {
+    const out = buildActivityMinutesActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("shared");
+    expect(out).toContain("both boys");
+  });
+
+  it("keeps itself distinct from the plan-adjustment handoff", () => {
+    const out = buildActivityMinutesActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("STANDING default");
+    expect(out).toContain("Changing a number = this action; changing the week = the handoff");
+  });
+
+  it("falls back to a generic noun when childName is absent", () => {
+    const out = buildActivityMinutesActionAddendum("london456", undefined);
+    expect(out).toContain('"childId":"london456"');
+    expect(out).toContain("this child");
+  });
+});
+
+describe("navigation honesty (FEAT-135) — stop inventing screens", () => {
+  it("forbids naming a screen the model was not told exists, on the child tab", () => {
+    const out = buildShellyChatRoleSection("Lincoln");
+    expect(out).toContain("NAVIGATION HONESTY");
+    expect(out).toContain("NEVER describe a screen");
+    expect(out).toContain("isn't in the app yet");
+  });
+
+  it("applies the same rule on the general tab", () => {
+    const out = buildShellyChatRoleSection(undefined);
+    expect(out).toContain("NAVIGATION HONESTY");
+    expect(out).toContain("NEVER describe a screen");
+  });
+
+  it("gives the TRUE location for activity durations — Progress → Curriculum", () => {
+    for (const out of [buildShellyChatRoleSection("Lincoln"), buildShellyChatRoleSection(undefined)]) {
+      expect(out).toContain("Progress → Curriculum");
+    }
+  });
+
+  it("explicitly denies that Settings holds a schedule or duration screen", () => {
+    // The exact confabulation from the live report: "the app's schedule/settings
+    // screen ... where you can set a target duration per subject".
+    const out = buildShellyChatRoleSection("Lincoln");
+    expect(out).toContain(
+      "Settings does NOT contain any schedule, subject-duration, or time-block screen",
+    );
+  });
+});
+
+describe("plan-adjustment trigger widening (FEAT-135)", () => {
+  it("no longer requires the parent to be frustrated", () => {
+    const out = buildPlanAdjustmentActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("does NOT have to be upset");
+    expect(out).toContain("calm, specific request");
+    // The old gate read "When the parent voices frustration that warrants
+    // changing ..." — a calm request fell outside it.
+    expect(out).not.toContain("When the parent voices frustration");
+  });
+
+  it("still frames itself as a handoff that never writes the plan", () => {
+    const out = buildPlanAdjustmentActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("HANDOFF");
+    expect(out).toContain("NEVER claim the plan is changed");
+  });
+
+  it("routes a standing per-activity default to setActivityMinutes instead", () => {
+    const out = buildPlanAdjustmentActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("setActivityMinutes");
+    expect(out).toContain("SHAPE of next week");
   });
 });

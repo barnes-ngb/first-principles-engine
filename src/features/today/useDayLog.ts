@@ -50,9 +50,9 @@ interface UseDayLogResult {
     }
   } | null
   readAloudBookId: string | undefined
-  snackMessage: { text: string; severity: 'success' | 'error' } | null
+  snackMessage: { text: string; severity: 'success' | 'error' | 'warning' } | null
   setSnackMessage: React.Dispatch<
-    React.SetStateAction<{ text: string; severity: 'success' | 'error' } | null>
+    React.SetStateAction<{ text: string; severity: 'success' | 'error' | 'warning' } | null>
   >
   persistDayLog: (updated: DayLog) => void
   persistDayLogImmediate: (updated: DayLog) => void
@@ -101,9 +101,11 @@ export function useDayLog({
   } | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  // FEAT-136: 'warning' — a workbook read that failed while the photo saved
+  // safely is not an error.
   const [snackMessage, setSnackMessage] = useState<{
     text: string
-    severity: 'success' | 'error'
+    severity: 'success' | 'error' | 'warning'
   } | null>(null)
 
   const currentDocId = useMemo(

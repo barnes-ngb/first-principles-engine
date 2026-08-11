@@ -18,6 +18,8 @@ import { withTimeout, UploadTimeoutError } from '../foundations-review/uploadTim
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 import { batchExtraSummary } from './unifiedCaptureBatch'
+import { buildWorkbookScanReport } from './workbookScanReport'
+import type { CaptureMessage, WorkbookPageOutcome } from './workbookScanReport'
 
 /** Hard ceiling on the workbook-scan analysis so the spinner never hangs (FEAT-62, mirrors FEAT-61). */
 const WORKBOOK_SCAN_TIMEOUT_MS = 120_000
@@ -29,8 +31,12 @@ export interface UseUnifiedCaptureOptions {
   today: string
   dayLog: DayLog | null
   persistDayLogImmediate: (updated: DayLog) => void
-  /** Callback when a snack/toast message should be shown. */
-  onMessage?: (msg: { text: string; severity: 'success' | 'error' }) => void
+  /**
+   * Callback when a snack/toast message should be shown. `warning` (FEAT-136)
+   * is the severity for a failed workbook read whose photo is safely saved —
+   * red argued against the message's own "the photo is saved" half.
+   */
+  onMessage?: (msg: CaptureMessage) => void
   /** Callback when a new artifact is created (for updating local artifact lists). */
   onArtifactCreated?: (artifact: Artifact) => void
   /**
@@ -117,15 +123,21 @@ export function useUnifiedCapture({
    * FEAT-62: analyze a workbook page against a KNOWN config and advance its
    * position — the deterministic route. Writes a `scans` doc (via runScan) and
    * pins the position update with `targetConfigId` (no fuzzy match, no
-   * classification gate). Best-effort and timeout-guarded: never throws, returns
-   * the registration (name + lesson) on success or null on any failure so the
-   * caller's capture always succeeds. Mirrors the Progress per-card scan.
+   * classification gate). Best-effort and timeout-guarded: never throws.
+   * Mirrors the Progress per-card scan.
+   *
+   * FEAT-136: returns a DISCRIMINATED outcome instead of `null`. The old `null`
+   * folded six different failures into one, and the caller then reported all of
+   * them with one red sentence — including `config-missing`, where retaking the
+   * photo can never help. Still pure-ish: no throwing across this boundary, the
+   * caller decides what to say (`buildWorkbookScanReport`).
+   *
+   * A failed outcome writes NOTHING: `syncScanToConfig` — the only path that can
+   * touch `currentPosition` — is not reached unless the page read as a worksheet,
+   * so a failed read can never advance a workbook.
    */
   const analyzeWorkbookPage = useCallback(
-    async (
-      scanFile: File,
-      configId: string,
-    ): Promise<{ configName: string; position: number | null } | null> => {
+    async (scanFile: File, configId: string): Promise<WorkbookPageOutcome> => {
       try {
         const shrunk = await downscaleImage(scanFile, 1600, 0.85)
         const scanImage =
@@ -136,25 +148,45 @@ export function useUnifiedCapture({
           () => runScan(scanImage, familyId, childId),
           WORKBOOK_SCAN_TIMEOUT_MS,
         )
-        if (!record?.results || !isWorksheetScan(record.results)) return null
+        // No parsed results at all — the scan itself failed (upload/CF error, or
+        // the model returned non-JSON). Distinct from "read it, wasn't a page".
+        if (!record?.results) return { ok: false, reason: 'no-result' }
+        // `isWorksheetScan` only excludes `pageType: 'certificate'`, so this
+        // branch is literally "that's a certificate", not "that's unreadable".
+        if (!isWorksheetScan(record.results)) return { ok: false, reason: 'not-a-worksheet' }
         const configResult = await syncScanToConfig(
           childId,
           record.results as WorksheetScanResult,
           { targetConfigId: configId },
         )
-        // action 'none' = the target config vanished — nothing registered.
-        if (configResult.action === 'none') return null
+        if (configResult.action === 'none') {
+          // 'none' has more than one cause (FEAT-136): the target config really
+          // being gone is only one of them, and it's the only one where telling
+          // the parent to retake the photo would be useless work.
+          return {
+            ok: false,
+            reason:
+              configResult.reason === 'target-missing'
+                ? 'config-missing'
+                : configResult.reason === 'no-curriculum-detected'
+                  ? 'no-curriculum-detected'
+                  : 'error',
+          }
+        }
         return {
-          configName: configResult.configName ?? 'workbook',
-          position: configResult.position ?? null,
+          ok: true,
+          registration: {
+            configName: configResult.configName ?? 'workbook',
+            position: configResult.position ?? null,
+          },
         }
       } catch (err) {
         if (err instanceof UploadTimeoutError) {
           console.warn('[UnifiedCapture] Workbook scan timed out (non-blocking):', err)
-        } else {
-          console.warn('[UnifiedCapture] Workbook scan analysis failed (non-blocking):', err)
+          return { ok: false, reason: 'timeout' }
         }
-        return null
+        console.warn('[UnifiedCapture] Workbook scan analysis failed (non-blocking):', err)
+        return { ok: false, reason: 'error' }
       } finally {
         // Never surface the interactive add-to-plan panel for the routed capture;
         // the quiet "registered to…" line stands in for it.
@@ -187,7 +219,14 @@ export function useUnifiedCapture({
         try {
           // Analysis first (best-effort, timeout-guarded) so its lesson/name can
           // stamp the visibility line in the same single checklist write.
-          const registration = await analyzeWorkbookPage(file, resolvedConfigId)
+          //
+          // FEAT-136 scope note: this path's messages are deliberately UNCHANGED.
+          // The parent tapped "take a photo", not "analyze"; the photo saving IS
+          // the outcome they asked for, and "Work captured!" is true. The honesty
+          // fix lands on the explicit analyze/backfill action below, where the
+          // parent asked a question and got a red non-answer.
+          const outcome = await analyzeWorkbookPage(file, resolvedConfigId)
+          const registration = outcome.ok ? outcome.registration : null
 
           // Artifact (evidence) — always, mirrors the plain artifacts path.
           const artifact = {
@@ -519,38 +558,39 @@ export function useUnifiedCapture({
         // Analyze each page in turn (one workbook page per photo). Best-effort:
         // a page that fails to read is skipped; the last success advances the
         // position we stamp. No artifact is ever created or removed here.
-        let lastRegistration: { configName: string; position: number | null } | null = null
-        let registeredCount = 0
+        //
+        // FEAT-136: every page's outcome is KEPT, not counted-and-discarded, so
+        // the report can say "2 of 3 pages read" and name what happened to the
+        // third instead of collapsing the batch into one generic red sentence.
+        const outcomes: WorkbookPageOutcome[] = []
         for (const uri of uris) {
           const resp = await fetch(uri)
           const blob = await resp.blob()
           const scanFile = new File([blob], 'workbook-page.jpg', { type: blob.type || 'image/jpeg' })
-          const registration = await analyzeWorkbookPage(scanFile, resolvedConfigId)
-          if (registration) {
-            lastRegistration = registration
-            registeredCount += 1
-          }
+          outcomes.push(await analyzeWorkbookPage(scanFile, resolvedConfigId))
         }
 
+        const lastRegistration =
+          outcomes
+            .filter((o): o is Extract<WorkbookPageOutcome, { ok: true }> => o.ok)
+            .at(-1)?.registration ?? null
+        const report = buildWorkbookScanReport(outcomes)
+
         if (!lastRegistration) {
-          onMessage?.({ text: "Couldn't read the workbook page. The photo is still saved.", severity: 'error' })
+          // Nothing registered: no dayLog write, no stamp, photo untouched — and
+          // a warning, not an error, because the photo really is safe.
+          if (report) onMessage?.(report)
           return
         }
         const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-          i === index ? { ...ci, ...stampConfigId, workbookScanRegistration: lastRegistration!, scanned: true } : ci,
+          i === index ? { ...ci, ...stampConfigId, workbookScanRegistration: lastRegistration, scanned: true } : ci,
         )
         persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        const lessonSuffix = lastRegistration.position != null ? ` · Lesson ${lastRegistration.position}` : ''
-        onMessage?.({
-          text:
-            registeredCount > 1
-              ? `Registered ${registeredCount} pages to ${lastRegistration.configName}${lessonSuffix}`
-              : `Registered to ${lastRegistration.configName}${lessonSuffix}`,
-          severity: 'success',
-        })
+        if (report) onMessage?.(report)
       } catch (err) {
         console.error('[UnifiedCapture] Backfill workbook scan failed:', err)
-        onMessage?.({ text: 'Analysis failed. The photo is still saved.', severity: 'error' })
+        // The photo is untouched by this path, so this is a warning too.
+        onMessage?.({ text: 'Analysis failed. The photo is still saved.', severity: 'warning' })
       } finally {
         setScanItemIndex(null)
       }

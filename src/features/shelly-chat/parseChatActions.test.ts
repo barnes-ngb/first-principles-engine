@@ -306,6 +306,84 @@ describe('parseChatActions', () => {
     expect(actions).toEqual([])
   })
 
+  // ── setActivityMinutes (FEAT-135) ───────────────────────────────
+  // The allowlist is the only thing standing between a model's free-text
+  // guess and a write, so the band + integer rules are asserted exhaustively.
+
+  it('extracts a valid setActivityMinutes block and strips the tag', () => {
+    const raw =
+      'Got it — I will set math to 30.\n' +
+      '<action>{"kind": "setActivityMinutes", "childId": "lincoln", "activityConfigId": "cfg_math", "minutes": 30}</action>'
+    const { actions, cleanText } = parseChatActions(raw)
+    expect(actions).toEqual([
+      {
+        kind: 'setActivityMinutes',
+        childId: 'lincoln',
+        activityConfigId: 'cfg_math',
+        minutes: 30,
+      },
+    ])
+    expect(cleanText).toBe('Got it — I will set math to 30.')
+  })
+
+  it('accepts both ends of the 5–120 band', () => {
+    const raw =
+      '<action>{"kind": "setActivityMinutes", "childId": "lincoln", "activityConfigId": "a", "minutes": 5}</action>' +
+      '<action>{"kind": "setActivityMinutes", "childId": "lincoln", "activityConfigId": "b", "minutes": 120}</action>'
+    const { actions } = parseChatActions(raw)
+    expect(actions.map((a) => (a as { minutes: number }).minutes)).toEqual([5, 120])
+  })
+
+  it('rejects a setActivityMinutes with a missing activityConfigId', () => {
+    const raw =
+      '<action>{"kind": "setActivityMinutes", "childId": "lincoln", "minutes": 30}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
+  it('rejects a setActivityMinutes with an empty activityConfigId', () => {
+    const raw =
+      '<action>{"kind": "setActivityMinutes", "childId": "lincoln", "activityConfigId": "   ", "minutes": 30}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
+  it('rejects a setActivityMinutes with a missing childId', () => {
+    const raw =
+      '<action>{"kind": "setActivityMinutes", "activityConfigId": "cfg_math", "minutes": 30}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
+  it('rejects non-integer minutes rather than rounding them', () => {
+    const raw =
+      '<action>{"kind": "setActivityMinutes", "childId": "lincoln", "activityConfigId": "cfg", "minutes": 30.5}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
+  it('rejects a stringified number for minutes', () => {
+    const raw =
+      '<action>{"kind": "setActivityMinutes", "childId": "lincoln", "activityConfigId": "cfg", "minutes": "30"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
+  it('rejects out-of-band minutes (0, 4, 121) rather than clamping them', () => {
+    for (const minutes of [0, 4, 121]) {
+      const raw = `<action>{"kind": "setActivityMinutes", "childId": "lincoln", "activityConfigId": "cfg", "minutes": ${minutes}}</action>`
+      const { actions } = parseChatActions(raw)
+      expect(actions, `minutes=${minutes} must be rejected, not clamped`).toEqual([])
+    }
+  })
+
+  it('rejects a negative minutes value', () => {
+    const raw =
+      '<action>{"kind": "setActivityMinutes", "childId": "lincoln", "activityConfigId": "cfg", "minutes": -30}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
+  it('rejects an unknown activity-shaped kind', () => {
+    const raw =
+      '<action>{"kind": "setActivityFrequency", "childId": "lincoln", "activityConfigId": "cfg", "frequency": "daily"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
   it('returns no actions and unchanged clean text when there are no blocks', () => {
     const raw = 'Just a normal reply with no actions.'
     const { actions, cleanText } = parseChatActions(raw)

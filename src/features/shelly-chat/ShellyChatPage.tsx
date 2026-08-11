@@ -34,8 +34,11 @@ import Typography from '@mui/material/Typography'
 import { useAI } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useProfile } from '../../core/profile/useProfile'
 import type { ChatContext } from '../../core/types'
+import { UserProfile } from '../../core/types/enums'
 import ActionConfirmCard from './ActionConfirmCard'
+import { useChatActivityConfigs } from './useChatActivityConfigs'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 import { formatRelativeTime } from './formatRelativeTime'
@@ -124,8 +127,20 @@ export default function ShellyChatPage() {
   const contextChildId = chatContext === 'general'
     ? ''
     : children.find((c) => c.name.toLowerCase() === chatContext)?.id ?? ''
+
+  // FEAT-135 — the child's live activity configs, read-only. They resolve a
+  // proposed `setActivityMinutes` id to a real config before its confirm card
+  // is offered, and give the card a name + a true old → new diff. Parent-only,
+  // stated here at the component as well as in the write layer: `/chat` is
+  // nav-gated, not route-gated, so neither layer assumes the other.
+  const isParent = useProfile().profile === UserProfile.Parents
+  const activityConfigs = useChatActivityConfigs(
+    familyId,
+    isParent ? contextChildId : '',
+  )
   const {
     pending: pendingActions,
+    suppressed: suppressedActionNotices,
     stagePendingActions,
     applyChatAction,
     dismissAction,
@@ -134,6 +149,8 @@ export default function ShellyChatPage() {
     familyId,
     children,
     activeChildId: contextChildId,
+    activityConfigs,
+    canEditActivityConfigs: isParent,
     activeThreadId,
     // A confirmed proposePlanAdjustment HANDOFF stages its brief, then navigates
     // here to Plan My Week — the chat never writes the plan itself.
@@ -493,6 +510,8 @@ export default function ShellyChatPage() {
         <ActionConfirmCard
           pending={pendingActions}
           familyChildren={children}
+          activityConfigs={activityConfigs}
+          suppressed={suppressedActionNotices}
           onConfirm={applyChatAction}
           onDismiss={dismissAction}
           onConfirmAll={confirmAll}

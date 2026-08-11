@@ -4,6 +4,8 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
+import TimerOutlinedIcon from '@mui/icons-material/TimerOutlined'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
@@ -11,11 +13,25 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import type { ChatAction, Child } from '../../core/types'
-import type { PendingAction } from './useShellyChatActions'
+import { describeActivityAudience } from './activityMinutesView'
+import type { ActivityMinutesAction, ChatActivityConfig, PendingAction } from './useShellyChatActions'
+import { resolveActivityConfig } from './useShellyChatActions'
 
 interface ActionConfirmCardProps {
   pending: PendingAction[]
   familyChildren: Child[]
+  /**
+   * The family's live activity configs for the active child — needed to render
+   * a `setActivityMinutes` card by NAME with a real old → new diff (FEAT-135).
+   */
+  activityConfigs?: ChatActivityConfig[]
+  /**
+   * Plain-language reasons a proposal was dropped before it became a card.
+   * Rendered in the card's place so a reply that says "confirm with a tap"
+   * never leaves the parent (or a kid who reached /chat directly) waiting on a
+   * card that will never appear.
+   */
+  suppressed?: string[]
   onConfirm: (action: ChatAction) => void
   onDismiss: (action: ChatAction) => void
   onConfirmAll: () => void
@@ -128,6 +144,55 @@ function PlanAdjustmentPreview({
 }
 
 /**
+ * Preview for a `setActivityMinutes` write (FEAT-135).
+ *
+ * Shows, before the tap: the activity's NAME (never its id), the real old → new
+ * minutes read off the live config, who it affects (loudly, for a shared
+ * `'both'` config), and that it applies to FUTURE plans only — not this week,
+ * not anything already recorded. This card is the parent's whole view of the
+ * write, so everything the write does has to be legible here.
+ */
+function ActivityMinutesPreview({
+  action,
+  config,
+  allChildNames,
+  actingChildName,
+}: {
+  action: ActivityMinutesAction
+  config: ChatActivityConfig
+  allChildNames: string[]
+  actingChildName: string
+}) {
+  const shared = config.childId === 'both'
+  return (
+    <Stack spacing={0.25}>
+      <Typography
+        variant="caption"
+        sx={{ display: 'block', fontWeight: 700, color: 'warning.main', letterSpacing: 0.2 }}
+      >
+        Changes the default time for future plans
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {config.name}: {config.defaultMinutes}m → {action.minutes}m
+      </Typography>
+      <Typography
+        variant="caption"
+        sx={{
+          display: 'block',
+          fontWeight: shared ? 700 : 400,
+          color: shared ? 'warning.main' : 'text.secondary',
+        }}
+      >
+        {describeActivityAudience(config.childId, allChildNames, actingChildName)}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+        Applies to future plans — this week and anything already recorded stay as they are.
+      </Typography>
+    </Stack>
+  )
+}
+
+/**
  * Before → after preview for an `editProfileField` action. These are
  * replace-writes on freeform text, so Shelly must see exactly what changes
  * before she taps: the current value and the proposed new value.
@@ -167,34 +232,62 @@ function ProfileEditPreview({
  * snapshot" label) since they write the authoritative learning record, and the
  * `proposePlanAdjustment` HANDOFF (chunk 2A/2) framed distinctly (info accent +
  * a "Review in Plan My Week" CTA) since confirming it opens the planner rather
- * than writing a child's record. A batch "Confirm all" appears when 2+ are
+ * than writing a child's record, and `setActivityMinutes` (FEAT-135) as a named
+ * old → new time diff carrying who it affects (loudly, when the activity is
+ * shared) and the fact that it applies to future plans only. A batch
+ * "Confirm all" appears when 2+ are
  * still pending. Nothing here writes — taps call back into
  * `useShellyChatActions`. Mobile-first: large tap targets.
  */
 export default function ActionConfirmCard({
   pending,
   familyChildren,
+  activityConfigs = [],
+  suppressed = [],
   onConfirm,
   onDismiss,
   onConfirmAll,
 }: ActionConfirmCardProps) {
-  if (pending.length === 0) return null
+  if (pending.length === 0 && suppressed.length === 0) return null
 
   const childFor = (childId: string): Child | undefined =>
     familyChildren.find((c) => c.id === childId)
   const childName = (childId: string): string =>
     childFor(childId)?.name ?? 'this child'
+  const allChildNames = familyChildren.map((c) => c.name)
 
   const stillPending = pending.filter((p) => p.status === 'pending')
 
   return (
     <Box sx={{ px: 1, pb: 1 }}>
       <Stack spacing={1}>
+        {suppressed.map((note) => (
+          <Paper
+            key={note}
+            variant="outlined"
+            sx={{ p: 1.25, borderRadius: 2, display: 'flex', alignItems: 'flex-start', gap: 1 }}
+          >
+            <InfoOutlinedIcon fontSize="small" color="action" />
+            <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+              {note}
+            </Typography>
+          </Paper>
+        ))}
         {pending.map((item) => {
           const { action } = item
           const isProfileEdit = action.kind === 'editProfileField'
           const isSnapshotEdit = isSnapshotAction(action)
           const isPlanAdjustment = action.kind === 'proposePlanAdjustment'
+          // FEAT-135 — resolve the proposal to a live config so the card can
+          // show a NAME and a real old → new diff. An unresolvable id is
+          // already filtered out at stage time; if one somehow reaches here we
+          // render no card rather than a card with no diff.
+          const activityConfig =
+            action.kind === 'setActivityMinutes'
+              ? resolveActivityConfig(activityConfigs, action)
+              : null
+          const isActivityMinutes = action.kind === 'setActivityMinutes'
+          if (isActivityMinutes && !activityConfig) return null
           const icon =
             action.kind === 'addSightWord' ? (
               <AddCircleOutlineIcon fontSize="small" color="action" />
@@ -204,6 +297,8 @@ export default function ActionConfirmCard({
               <SchoolOutlinedIcon fontSize="small" color="warning" />
             ) : isPlanAdjustment ? (
               <EventNoteOutlinedIcon fontSize="small" color="info" />
+            ) : isActivityMinutes ? (
+              <TimerOutlinedIcon fontSize="small" color="warning" />
             ) : (
               <EditOutlinedIcon fontSize="small" color="action" />
             )
@@ -216,14 +311,16 @@ export default function ActionConfirmCard({
                 borderRadius: 2,
                 display: 'flex',
                 alignItems:
-                  isProfileEdit || isSnapshotEdit || isPlanAdjustment ? 'flex-start' : 'center',
+                  isProfileEdit || isSnapshotEdit || isPlanAdjustment || isActivityMinutes
+                    ? 'flex-start'
+                    : 'center',
                 gap: 1,
                 opacity: item.status === 'dismissed' ? 0.5 : 1,
                 // Higher-stakes framing for snapshot edits: a left accent + a
                 // slightly stronger border so they read weightier than a
                 // sight-word card. The plan-adjustment handoff gets its own
                 // (info) accent so it reads as "opens the planner", not a write.
-                ...(isSnapshotEdit
+                ...(isSnapshotEdit || isActivityMinutes
                   ? { borderColor: 'warning.main', borderLeftWidth: 3 }
                   : isPlanAdjustment
                     ? { borderColor: 'info.main', borderLeftWidth: 3 }
@@ -232,7 +329,14 @@ export default function ActionConfirmCard({
             >
               {icon}
               <Box sx={{ flex: 1 }}>
-                {isSnapshotEdit ? (
+                {action.kind === 'setActivityMinutes' && activityConfig ? (
+                  <ActivityMinutesPreview
+                    action={action}
+                    config={activityConfig}
+                    allChildNames={allChildNames}
+                    actingChildName={childName(action.childId)}
+                  />
+                ) : isSnapshotEdit ? (
                   <SnapshotEditPreview action={action} childName={childName(action.childId)} />
                 ) : isPlanAdjustment ? (
                   <PlanAdjustmentPreview action={action} childName={childName(action.childId)} />
@@ -244,11 +348,11 @@ export default function ActionConfirmCard({
                       (childFor(action.childId)?.[action.field] ?? '').trim()
                     }
                   />
-                ) : (
+                ) : action.kind === 'addSightWord' || action.kind === 'removeSightWord' ? (
                   <Typography variant="body2">
                     {describeSightWord(action, childName(action.childId))}
                   </Typography>
-                )}
+                ) : null}
               </Box>
 
               {item.status === 'pending' && (

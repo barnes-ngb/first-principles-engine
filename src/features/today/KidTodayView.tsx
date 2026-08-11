@@ -166,7 +166,7 @@ export default function KidTodayView({
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
-  const [captureMessage, setCaptureMessage] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+  const [captureMessage, setCaptureMessage] = useState<{ text: string; severity: 'success' | 'error' | 'warning' } | null>(null)
 
   // Unified capture hook — same pipeline as parent view (AI scan → curriculum/artifact routing)
   const {

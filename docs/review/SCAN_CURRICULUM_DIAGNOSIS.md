@@ -108,3 +108,54 @@ merged Jun 20) *did* run a scan — but routing it to the curriculum was **doubl
 buttons unchanged. **Scan → learner-model evidence** (feeding a routed workbook scan into `learnerModels`) stays the
 **named workbook-positions wiring follow-up** — this run only advances the `activityConfigs` position + writes the
 `scans` doc, exactly as the Progress scan button does.
+
+---
+
+## Addendum 2026-08-10 — what a failed workbook read tells the parent (FEAT-136), and the two-page spread (FEAT-137)
+
+**Trigger.** Three photos captured against Lincoln's *GATB Math (15m)* row, **"Analyze all 3 pages"** tapped, one red
+banner back: *"Couldn't read the workbook page. The photo is still saved."*
+
+### The reporting defect (fixed — FEAT-136)
+
+`analyzeWorkbookPage` collapsed **six** distinguishable failures into a single `null`, and the multi-page loop
+collapsed the batch into one generic red sentence while discarding the `registeredCount` it had already computed.
+
+| Cause | What it actually means | What the parent used to be told |
+|---|---|---|
+| `timeout` | scan exceeded the 120s ceiling | "Couldn't read the workbook page." |
+| `no-result` | `runScan` returned nothing (upload/CF error, non-JSON reply) | same sentence |
+| `not-a-worksheet` | `isWorksheetScan` false — which only means **`pageType: 'certificate'`** | same sentence |
+| `no-curriculum-detected` | the page read fine but named no curriculum/subject | same sentence |
+| `config-missing` | the row's `activityConfig` is **gone** — no photo can ever register | same sentence |
+| `error` | anything else thrown | same sentence |
+
+Two findings worth keeping:
+
+- **`syncScanToConfig`'s `action: 'none'` was mis-commented.** The code read *"action 'none' = the target config
+  vanished"*, but `'none'` also covers *no family* and *no curriculum detected* — and in the field the last of those
+  is far and away the common one. Reporting it as "your workbook link is gone" would have replaced one wrong
+  sentence with a differently wrong one, so `ScanConfigResult` now carries a reporting-only `reason`.
+- **`isWorksheetScan` is not a worksheet check.** It is `pageType !== 'certificate'`. A blurry or unrecognisable
+  photo comes back as `pageType: 'other'` and passes it. So the parent-facing "couldn't find a workbook page in the
+  photo" case is really `no-curriculum-detected`, and that is where the *one page, flat, straight on, good light*
+  hint lives — not on the literal `not-a-worksheet` branch, which means "you photographed a certificate."
+
+### Is a two-page spread *expected* to fail? (filed — FEAT-137, not fixed here)
+
+**No — and that is worse than a clean failure.** Nothing in the pipeline rejects a spread; it just has one slot for
+two answers:
+
+- the `scan` CF prompt asks for *"a photo of a workbook page"* (singular) and `curriculumDetected.lessonNumber` is a
+  **single** number — a spread of Lessons 73/74 may yield 73, or 74, or `null`;
+- `syncScanToConfig` advances only when `lessonNumber > currentPosition`, so the same photo can advance the right
+  lesson, the wrong one, or nothing at all;
+- when `lessonNumber` is `null` but a subject was detected, the sync still returns `action: 'updated'` with
+  `position: null` — nothing advances and the parent is told **"Registered to GATB Math"**. That is the mirror of the
+  FEAT-136 bug: a non-event dressed as a success.
+
+The parent's model ("a page is what I photograph") and the data model (one workbook page per photo — see FEAT-108's
+batch rules above) genuinely disagree. **Filed as FEAT-137, deliberately unfixed by the reporting run:** every
+candidate fix — teaching the prompt to report multiple visible lessons, detecting a spread and asking for one page,
+or treating `position: null` as a real "read it, couldn't tell which lesson" outcome — changes what the app
+**writes**, not just what it says.
