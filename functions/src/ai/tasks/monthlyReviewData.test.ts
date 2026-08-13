@@ -4,6 +4,7 @@ import {
   getMonthBounds,
   getPreviousMonth,
   loadDadLabReportsInMonth,
+  loadDayLogsForMonth,
   loadPhotosForMonth,
   loadReadingForMonth,
   type DadLabEntry,
@@ -569,5 +570,230 @@ describe("loadReadingForMonth", () => {
     expect(result.totalChaptersAnswered).toBe(0);
     expect(result.totalQuestionsAnswered).toBe(0);
     expect(result.totalQuestionsSkipped).toBe(0);
+  });
+});
+
+// ── FEAT-141: capture-time content notes reach the loader ───────────────────
+describe("loadPhotosForMonth — FEAT-141 content notes", () => {
+  it("carries the note from a scan doc and from an artifact doc", async () => {
+    const db = makeFakeDb({
+      "families/fam/scans": [
+        {
+          id: "scan-1",
+          data: {
+            childId: "child-1",
+            storagePath: "scans/1.jpg",
+            createdAt: "2026-07-05T10:00:00",
+            contentNote: "GATB Math 3 p.73 — elapsed time",
+            results: { subject: "math" },
+          },
+        },
+      ],
+      "families/fam/artifacts": [
+        {
+          id: "art-1",
+          data: {
+            childId: "child-1",
+            type: "Photo",
+            storagePath: "artifacts/1.jpg",
+            createdAt: "2026-07-06T10:00:00",
+            contentNote: "Lego castle with a working drawbridge",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      "child-1",
+      "2026-07-01",
+      "2026-07-31",
+    );
+
+    const byId = Object.fromEntries(result.photos.map((p) => [p.id, p]));
+    expect(byId["scan:scan-1"].contentNote).toBe("GATB Math 3 p.73 — elapsed time");
+    expect(byId["artifact:art-1"].contentNote).toBe(
+      "Lego castle with a working drawbridge",
+    );
+  });
+
+  it("leaves the field absent on photos captured before notes existed", async () => {
+    const db = makeFakeDb({
+      "families/fam/artifacts": [
+        {
+          id: "art-old",
+          data: {
+            childId: "child-1",
+            type: "Photo",
+            storagePath: "artifacts/old.jpg",
+            createdAt: "2026-07-06T10:00:00",
+          },
+        },
+        {
+          id: "art-blank",
+          data: {
+            childId: "child-1",
+            type: "Photo",
+            storagePath: "artifacts/blank.jpg",
+            createdAt: "2026-07-07T10:00:00",
+            contentNote: "   ",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      "child-1",
+      "2026-07-01",
+      "2026-07-31",
+    );
+
+    for (const p of result.photos) {
+      expect(p.contentNote).toBeUndefined();
+    }
+    expect(result.photos).toHaveLength(2);
+  });
+
+  it("carries the note on a Dad Lab photo reached through the report", async () => {
+    const db = makeFakeDb({
+      "families/fam/artifacts": [
+        {
+          id: "lab-art",
+          data: {
+            childId: "lincoln",
+            type: "Photo",
+            storagePath: "artifacts/lab.jpg",
+            createdAt: "2026-07-08T10:00:00",
+            contentNote: "Baking-soda volcano mid-eruption",
+          },
+        },
+      ],
+    });
+
+    const reports: DadLabEntry[] = [
+      {
+        id: "lab-1",
+        title: "The Bridge Test",
+        completedAt: "2026-07-08",
+        hasPrediction: true,
+        hasExplanation: true,
+        artifactIds: ["lab-art"],
+      } as DadLabEntry,
+    ];
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      "child-1",
+      "2026-07-01",
+      "2026-07-31",
+      reports,
+    );
+
+    const labPhoto = result.photos.find((p) => p.id === "artifact:lab-art");
+    expect(labPhoto?.contentNote).toBe("Baking-soda volcano mid-eruption");
+  });
+});
+
+// ── FEAT-141 Codex round (PR #1666) ─────────────────────────────────────────
+describe("loadDayLogsForMonth — FEAT-141 curation joins", () => {
+  function dayDoc(id: string, checklist: unknown[]) {
+    return {
+      id,
+      data: { childId: "child-1", date: id, checklist },
+    };
+  }
+
+  it("indexes engagement by the item's evidence id, not just id/label (Codex P2)", async () => {
+    // Curation matches a photo to its item by the photo's SOURCE DOC ID — a
+    // scan id or an artifact id. Indexing only by item id/label meant the
+    // engagement signal never matched a photo in production.
+    const db = makeFakeDb({
+      "families/fam/days": [
+        dayDoc("2026-07-10", [
+          {
+            id: "item-1",
+            label: "GATB Math (30m)",
+            completed: true,
+            engagement: "engaged",
+            evidenceArtifactId: "scan-abc",
+          },
+        ]),
+      ],
+    });
+
+    const logs = await loadDayLogsForMonth(db, "fam", "child-1", "2026-07-01", "2026-07-31");
+    expect(logs[0].itemEngagement["scan-abc"]).toBe("engaged");
+    // The original keys are kept — nothing that read them before breaks.
+    expect(logs[0].itemEngagement["item-1"]).toBe("engaged");
+  });
+
+  it("collects the evidence ids and labels of workbook-linked items (Codex P1)", async () => {
+    const db = makeFakeDb({
+      "families/fam/days": [
+        dayDoc("2026-07-10", [
+          {
+            id: "item-1",
+            label: "GATB Math (30m)",
+            completed: true,
+            workbookConfigId: "wb-math",
+            evidenceArtifactId: "art-workbook",
+          },
+          {
+            id: "item-2",
+            label: "Reading Eggs",
+            completed: true,
+            workbookScanRegistration: { configName: "Reading Eggs", position: 4 },
+            evidenceArtifactId: "art-eggs",
+          },
+          {
+            id: "item-3",
+            label: "Build something",
+            completed: true,
+            evidenceArtifactId: "art-creative",
+          },
+        ]),
+      ],
+    });
+
+    const logs = await loadDayLogsForMonth(db, "fam", "child-1", "2026-07-01", "2026-07-31");
+    expect(logs[0].workbookEvidenceIds).toEqual(["art-workbook", "art-eggs"]);
+    expect(logs[0].workbookItemLabels).toEqual(["GATB Math (30m)", "Reading Eggs"]);
+    // The creative item is not swept in.
+    expect(logs[0].workbookEvidenceIds).not.toContain("art-creative");
+  });
+});
+
+describe("loadPhotosForMonth — FEAT-141 planItem index (Codex P1)", () => {
+  it("records each artifact's planItem tag so batch pages can be recognized", async () => {
+    const db = makeFakeDb({
+      "families/fam/artifacts": [
+        {
+          id: "art-1",
+          data: {
+            childId: "child-1",
+            type: "Photo",
+            storagePath: "artifacts/1.jpg",
+            createdAt: "2026-07-06T10:00:00",
+            tags: { planItem: "GATB Math (30m)" },
+          },
+        },
+        {
+          id: "art-2",
+          data: {
+            childId: "child-1",
+            type: "Photo",
+            storagePath: "artifacts/2.jpg",
+            createdAt: "2026-07-07T10:00:00",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(db, "fam", "child-1", "2026-07-01", "2026-07-31");
+    expect(result.artifactPlanItems).toEqual({ "art-1": "GATB Math (30m)" });
   });
 });

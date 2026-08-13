@@ -5,6 +5,8 @@ import {
   pickHeroForMode,
   hasPositiveKidModeSignal,
   assignPhotosToSections,
+  isBigStepCurriculumPhoto,
+  MAX_CURRICULUM_PHOTOS_IN_BOOK,
   type PhotoCurationContext,
   type ScoredPhoto,
 } from "./monthlyReviewCuration.js";
@@ -273,7 +275,11 @@ describe("assignPhotosToSections", () => {
     expect(placement.workedThrough.kid).toEqual([]);
   });
 
-  it("parent mode allows workbook scans on workedThrough only", () => {
+  // FEAT-141 supersedes the old "parent mode allows workbook scans on
+  // workedThrough" rule: an ungated curriculum image no longer reaches ANY
+  // section. The parent evidence page is still the only section one can reach
+  // — but only the single big-step exception (see the FEAT-141 block below).
+  it("parent mode no longer places an ungated workbook scan anywhere", () => {
     const ctx = emptyContext();
     const photos: PhotoRef[] = [
       photo({ id: "wb1", source: "scan", sourceDocId: "scan-x" }),
@@ -285,8 +291,10 @@ describe("assignPhotosToSections", () => {
       hasBookCompletions: false,
       hasDadLab: false,
     });
-    expect(placement.workedThrough.parent.map((p) => p.id)).toContain("wb1");
+    expect(placement.workedThrough.parent.map((p) => p.id)).not.toContain("wb1");
     expect(placement.whatYouLoved.parent.map((p) => p.id)).not.toContain("wb1");
+    // The creative artifact is untouched by the policy.
+    expect(placement.whatYouLoved.parent.map((p) => p.id)).toContain("art1");
   });
 
   it("prefers resolved-blocker evidence for workedThrough (both modes)", () => {
@@ -552,8 +560,9 @@ describe("artifact-default kid-mode placement (v1.4)", () => {
     expect(placement.whatYouLoved.kid).toEqual([]);
     expect(placement.workedThrough.kid).toEqual([]);
     expect(placement.moreFromMonth.kid).toEqual([]);
-    // Parent mode still uses the scan as worked-through evidence.
-    expect(placement.workedThrough.parent.map((p) => p.id)).toContain("wb1");
+    // FEAT-141: and from parent mode too, unless it is the one big-step
+    // exception — this scan carries no signal, so it is not.
+    expect(placement.workedThrough.parent.map((p) => p.id)).not.toContain("wb1");
   });
 
   it("overflow goes to moreFromMonth when whatYouLoved + workedThrough are full", () => {
@@ -690,5 +699,226 @@ describe("cover hero allowlist — broadened pool", () => {
       ctx,
     );
     expect(pickHeroForMode("kid", scored, new Set(), ctx)).toBeUndefined();
+  });
+});
+
+// ── FEAT-141: the book stops printing workbook pages ────────────
+//
+// Nathan, 2026-08-13: "a picture of a page doesn't really have any bearing when
+// reviewing… probably doesn't want any curriculum images. If it does, very few
+// and only ones where he made big steps."
+//
+// These cases hold with ZERO content notes present — the policy is the half of
+// FEAT-141 that works on an already-captured month.
+describe("FEAT-141 curriculum-image policy", () => {
+  it("a month of mostly workbook scans produces a book whose pages are artifacts", () => {
+    const ctx = emptyContext();
+    // 10 scans, all successfully classified (the exact photos that leaked into
+    // Lincoln's book before this policy), plus 2 real artifacts.
+    const photos: PhotoRef[] = [];
+    for (let i = 0; i < 10; i++) {
+      ctx.classifiedScanIds!.add(`scan-${i}`);
+      photos.push(
+        photo({
+          id: `s${i}`,
+          source: "scan",
+          sourceDocId: `scan-${i}`,
+          capturedAt: `2026-07-${String(i + 1).padStart(2, "0")}T12:00:00Z`,
+        }),
+      );
+    }
+    ctx.allArtifactIds = new Set(["art-a", "art-b"]);
+    photos.push(photo({ id: "a1", sourceDocId: "art-a" }));
+    photos.push(photo({ id: "a2", sourceDocId: "art-b" }));
+
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+
+    const placedIds = [
+      ...placement.cover.kid,
+      ...placement.cover.parent,
+      ...placement.whatYouLoved.kid,
+      ...placement.whatYouLoved.parent,
+      ...placement.workedThrough.kid,
+      ...placement.workedThrough.parent,
+      ...placement.moreFromMonth.kid,
+    ].map((p) => p.id);
+
+    // Not one of the ten curriculum pages made the book.
+    for (let i = 0; i < 10; i++) {
+      expect(placedIds).not.toContain(`s${i}`);
+    }
+    expect(placedIds).toContain("a1");
+    expect(placedIds).toContain("a2");
+  });
+
+  it("a classified scan is a curriculum image (the pre-FEAT-141 exemption is gone)", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-class"]);
+    const scored = scorePhotos(
+      [photo({ id: "sc", source: "scan", sourceDocId: "scan-class" })],
+      ctx,
+    );
+    expect(scored[0].isWorkbookScan).toBe(true);
+  });
+
+  it("allows ONE big-step curriculum image on the parent evidence page", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-big", "scan-plain"]);
+    ctx.dayLogEngagement["2026-07-10"] = { "scan-big": "engaged" };
+    const photos: PhotoRef[] = [
+      photo({
+        id: "big",
+        source: "scan",
+        sourceDocId: "scan-big",
+        capturedAt: "2026-07-10T12:00:00Z",
+      }),
+      photo({
+        id: "plain",
+        source: "scan",
+        sourceDocId: "scan-plain",
+        capturedAt: "2026-07-11T12:00:00Z",
+      }),
+    ];
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+
+    expect(placement.workedThrough.parent.map((p) => p.id)).toEqual(["big"]);
+    // The kid's book stays curriculum-free even for the big-step page.
+    expect(placement.workedThrough.kid).toEqual([]);
+    expect(placement.whatYouLoved.kid).toEqual([]);
+    expect(placement.cover.kid).toEqual([]);
+  });
+
+  it("never places more than MAX_CURRICULUM_PHOTOS_IN_BOOK of them", () => {
+    const ctx = emptyContext();
+    const photos: PhotoRef[] = [];
+    ctx.dayLogEngagement["2026-07-10"] = {};
+    for (let i = 0; i < 5; i++) {
+      ctx.classifiedScanIds!.add(`scan-${i}`);
+      ctx.dayLogEngagement["2026-07-10"][`scan-${i}`] = "engaged";
+      photos.push(
+        photo({
+          id: `big${i}`,
+          source: "scan",
+          sourceDocId: `scan-${i}`,
+          capturedAt: "2026-07-10T12:00:00Z",
+        }),
+      );
+    }
+    const scored = scorePhotos(photos, ctx);
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.workedThrough.parent.length).toBe(
+      MAX_CURRICULUM_PHOTOS_IN_BOOK,
+    );
+  });
+
+  it("resolved-blocker evidence qualifies a Worksheet artifact as a big step", () => {
+    const ctx = emptyContext();
+    ctx.workbookArtifactIds = new Set(["wb-doc"]);
+    ctx.resolvedBlockerEvidenceIds.add("wb");
+    const scored = scorePhotos(
+      [photo({ id: "wb", sourceDocId: "wb-doc" })],
+      ctx,
+    );
+    expect(isBigStepCurriculumPhoto(scored[0], ctx)).toBe(true);
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.workedThrough.parent.map((p) => p.id)).toEqual(["wb"]);
+  });
+
+  it("classification alone is not a big step — the parent's 😊 is required", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-x"]);
+    const scored = scorePhotos(
+      [photo({ id: "sc", source: "scan", sourceDocId: "scan-x" })],
+      ctx,
+    );
+    expect(isBigStepCurriculumPhoto(scored[0], ctx)).toBe(false);
+
+    // …and engagement alone, on an unclassified scan, is not one either.
+    const ctx2 = emptyContext();
+    ctx2.dayLogEngagement["2026-04-10"] = { "scan-y": "engaged" };
+    const scored2 = scorePhotos(
+      [photo({ id: "sc2", source: "scan", sourceDocId: "scan-y" })],
+      ctx2,
+    );
+    expect(isBigStepCurriculumPhoto(scored2[0], ctx2)).toBe(false);
+  });
+
+  it("a struggled-through page is not a big step", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-x"]);
+    ctx.dayLogEngagement["2026-04-10"] = { "scan-x": "struggled" };
+    const scored = scorePhotos(
+      [photo({ id: "sc", source: "scan", sourceDocId: "scan-x" })],
+      ctx,
+    );
+    expect(isBigStepCurriculumPhoto(scored[0], ctx)).toBe(false);
+  });
+
+  it("cover behaviour is unchanged — a big-step page is still never the hero", () => {
+    const ctx = emptyContext();
+    ctx.classifiedScanIds = new Set(["scan-big"]);
+    ctx.dayLogEngagement["2026-07-10"] = { "scan-big": "engaged" };
+    const scored = scorePhotos(
+      [
+        photo({
+          id: "big",
+          source: "scan",
+          sourceDocId: "scan-big",
+          capturedAt: "2026-07-10T12:00:00Z",
+        }),
+      ],
+      ctx,
+    );
+    expect(pickHeroForMode("kid", scored, new Set(), ctx)).toBeUndefined();
+    expect(pickHeroForMode("parent", scored, new Set(), ctx)).toBeUndefined();
+  });
+
+  it("a month with no photos at all still produces an (empty) placement", () => {
+    const placement = assignPhotosToSections([], {
+      ...emptyContext(),
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    expect(placement.cover.parent).toEqual([]);
+    expect(placement.whatYouLoved.parent).toEqual([]);
+    expect(placement.workedThrough.parent).toEqual([]);
+    expect(placement.more).toEqual([]);
+  });
+
+  it("carries no content note into a placed ref (parent-side metadata stays out of the book)", () => {
+    const ctx = emptyContext();
+    ctx.allArtifactIds = new Set(["art-a"]);
+    const scored = scorePhotos(
+      [photo({ id: "a1", sourceDocId: "art-a", contentNote: "Lego castle" })],
+      ctx,
+    );
+    const placement = assignPhotosToSections(scored, {
+      ...ctx,
+      hasBookCompletions: false,
+      hasDadLab: false,
+    });
+    const placed = [...placement.cover.parent, ...placement.whatYouLoved.parent];
+    expect(placed.length).toBeGreaterThan(0);
+    for (const p of placed) {
+      expect(p.contentNote).toBeUndefined();
+    }
   });
 });
