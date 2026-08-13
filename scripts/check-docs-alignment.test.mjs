@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseLedgerIds,
+  parseLedgerStatusCells,
+  findOpenPrStatusRows,
+  ledgerStatusIsHard,
   parseLedgerAnchors,
   parseIndexRows,
   collectBacktickTokens,
@@ -53,6 +56,61 @@ describe('parseLedgerIds', () => {
     const doc = gaps.find((g) => g.lane === 'DOC')
     expect(doc.missing).toEqual([3, 4, 5])
     expect(gaps.find((g) => g.lane === 'ARCH')).toBeUndefined()
+  })
+})
+
+describe('ledger-status invariant (a merged row cannot claim an open PR)', () => {
+  const md = [
+    '| ID | Band | Status | Title | Evidence |',
+    '|---|---|---|---|---|',
+    '| **FEAT-01** | 2 | **MERGED** (PR #1, merged 2026-08-01) | done | x |',
+    '| **FEAT-02** | 2 | **BUILT (PR open) — do not merge** | still open | y |',
+    // A correct status cell whose BODY narrates the phrase — must NOT match.
+    '| **DOC-11** | 1 | **FIXED (2026-08-02 audit)** | swept stale "PR open" / "do not merge" cells; a video is `childId | \'both\'` | z |',
+  ].join('\n')
+
+  it('reads the status from cells[3] (ID | Band | Status | …), not the body', () => {
+    const rows = parseLedgerStatusCells(md)
+    expect(rows.map((r) => r.id)).toEqual(['FEAT-01', 'FEAT-02', 'DOC-11'])
+    expect(rows[0].status).toBe('**MERGED** (PR #1, merged 2026-08-01)')
+    expect(rows[1].line).toBe(4)
+  })
+
+  it('flags only the status cell that claims an open PR', () => {
+    const hits = findOpenPrStatusRows(md)
+    expect(hits.map((r) => r.id)).toEqual(['FEAT-02'])
+  })
+
+  it('does not fire on a row body quoting the phrase as prose', () => {
+    expect(findOpenPrStatusRows(md).some((r) => r.id === 'DOC-11')).toBe(false)
+  })
+
+  it('matches "do not merge" even without the "PR open" wording', () => {
+    const variant = [
+      '| ID | Band | Status | Title | Evidence |',
+      '|---|---|---|---|---|',
+      '| **ARCH-99** | 1 | **DONE — do not merge** | v | w |',
+    ].join('\n')
+    expect(findOpenPrStatusRows(variant).map((r) => r.id)).toEqual(['ARCH-99'])
+  })
+
+  it('passes clean when every status cell has been flipped', () => {
+    const clean = [
+      '| ID | Band | Status | Title | Evidence |',
+      '|---|---|---|---|---|',
+      '| **FEAT-02** | 2 | **MERGED** (PR #2, merged 2026-08-11, commit `abc1234`) | t | e |',
+    ].join('\n')
+    expect(findOpenPrStatusRows(clean)).toEqual([])
+  })
+
+  // The branch split is the load-bearing part: HARD on main, SOFT on PR runs.
+  it('is HARD only against main, SOFT on PR runs and unforced local runs', () => {
+    expect(ledgerStatusIsHard({ GITHUB_REF_NAME: 'main' })).toBe(true)
+    expect(ledgerStatusIsHard({ DOCS_CHECK_BRANCH: 'main' })).toBe(true)
+    // pull_request runs report `<pr-number>/merge`, never `main`.
+    expect(ledgerStatusIsHard({ GITHUB_REF_NAME: '1661/merge' })).toBe(false)
+    expect(ledgerStatusIsHard({ GITHUB_REF_NAME: 'claude/some-branch' })).toBe(false)
+    expect(ledgerStatusIsHard({})).toBe(false)
   })
 })
 
