@@ -1,3 +1,5 @@
+import type { SubjectBucket } from './enums'
+
 export type ChatContext = 'lincoln' | 'london' | 'general'
 
 export interface ChatThread {
@@ -90,6 +92,36 @@ export interface ShellyChatMessage {
  * **standing default** for one activity is this write; a **shape change to next
  * week** (drop/repace/reorder a subject) stays the handoff below.
  *
+ * **The live-day kinds (FEAT-142)** — `removeItemFromDay`, `moveItemToDay`,
+ * `addItemToDay` — are the chat's half of FEAT-138's live-week edit lane. They
+ * change what is on a day of the CURRENT week: a row comes off, a row moves to
+ * another weekday, or a new row is added. Each is confirm-gated, parent-only,
+ * and routed through `today/liveDayEdit.ts` — the chat opens no second write
+ * path to a day document.
+ *
+ * Three properties hold across all three, and none of them is a type-level
+ * guarantee, so each is enforced where the live day is actually readable
+ * (`useShellyChatActions` at stage time, then the lane itself at the write):
+ *  1. **`itemKey` naming a row that is really on the day.** It is validated as a
+ *     non-empty string here; a hallucinated key resolves to nothing and no card
+ *     is offered.
+ *  2. **Dates inside the current week.** `dateKey` is validated as a real
+ *     `YYYY-MM-DD` calendar date here; *which* week it belongs to is not this
+ *     module's to know. A move's target must be a weekday of the same week (the
+ *     five-weekday rule `MoveToDayDialog` established).
+ *  3. **Completed work is immovable.** A finished row has credited minutes and
+ *     may carry evidence, so remove and move refuse it — at stage time with the
+ *     reason shown, and again at the write. There is no override, and no kind
+ *     here can un-complete a row.
+ *
+ * `addItemToDay` carries `estimatedMinutes` as an integer in [5, 120] — the same
+ * band, rejected-never-clamped, as `setActivityMinutes` — and lands as
+ * `source: 'manual'`, never `'planner'`: `retainChecklistForApply` drops
+ * incomplete planner residue, so a fake planner row would be silently deleted by
+ * a later re-apply (the same reasoning as `buildWatchChecklistItem`). It writes
+ * one checklist row and no block, so no `plannedMinutes` is created on a live
+ * week — minutes on an applied week stay locked exactly as FEAT-138 left them.
+ *
  * **`proposePlanAdjustment` is a HANDOFF, not a write** (chunk 2A/2). It is the
  * one kind that touches **no** child record at all: on confirm it stages a brief
  * to the planner's per-child inbox (`settings/pendingPlanAdjustment_{childId}`)
@@ -127,6 +159,35 @@ export type ChatAction =
       rationale: string
       scope?: string
       targetWeek?: string
+    }
+  | {
+      kind: 'removeItemFromDay'
+      childId: string
+      /** `YYYY-MM-DD` of the day the row is on. Must be in the current week. */
+      dateKey: string
+      /** `checklistItemKey` of the row — the guard's own notion of identity. */
+      itemKey: string
+    }
+  | {
+      kind: 'moveItemToDay'
+      childId: string
+      /** `YYYY-MM-DD` the row is on now. */
+      fromDateKey: string
+      /** `YYYY-MM-DD` it moves to. Same week only (Mon–Fri). */
+      toDateKey: string
+      itemKey: string
+    }
+  | {
+      kind: 'addItemToDay'
+      childId: string
+      /** `YYYY-MM-DD` of the day the row is added to. Current week only. */
+      dateKey: string
+      /** Kid-facing title, without a minutes suffix. */
+      label: string
+      /** Integer, 5–120 (enforced by `parseChatActions`). */
+      estimatedMinutes: number
+      /** Optional subject bucket; omitted rather than guessed. */
+      subjectBucket?: SubjectBucket
     }
 
 /**

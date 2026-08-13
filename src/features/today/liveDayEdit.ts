@@ -25,6 +25,13 @@ import { checklistItemKey, setDayLogGuarded } from './dayWriteGuard'
  * ANY checklist row and to the two subtractive operations, through the SAME
  * `setDayLogGuarded` lane — there is no second write path to day docs.
  *
+ * FEAT-142 gave Ask AI a confirm-gated way to reach these same three edits (plus
+ * a generic {@link addItemToLiveDay}, the watch writer's shapeless sibling). The
+ * chat calls THESE writers; it does not reimplement them, which is why the
+ * completed-row rule and the capability gate below hold identically whether the
+ * edit came from a tap on Today, a tap on a planner day card, or a tap on a
+ * confirm card in the chat.
+ *
  * ── The completed-row rule (HARD) ───────────────────────────────────────────
  * A completed row has credited `actualMinutes` into the day's hours and may
  * carry an `evidenceArtifactId` pointing at real work a boy did. **Move, remove
@@ -360,6 +367,43 @@ export async function removeItemFromLiveDay(
     ref,
     { ...removeChecklistItemFromDayLog(day, index), updatedAt: new Date().toISOString() },
     'remove-item-from-live-day',
+  )
+  return { status: 'done' }
+}
+
+/**
+ * Add one row to a saved day (FEAT-142).
+ *
+ * The generic sibling of `writeWatchItemToDay` — same discipline, no watch
+ * shape: **purely additive**, so a day the family is already working through
+ * cannot lose a completion, a logged minute or an evidence link; routed through
+ * `setDayLogGuarded`, so the FEAT-114 guard verifies that rather than trusting
+ * this function's care; and it creates the day document when the day has none
+ * (a plannable day with no plan is a normal state).
+ *
+ * Writes **no block**, exactly like every other post-Apply add here — see
+ * `manualDayItem.ts` and the module header. Hours are unaffected
+ * until someone completes the row, and then DATA-14 counts a completed
+ * checklist item that has no matching block.
+ *
+ * Takes the finished `ChecklistItem` rather than its parts, so the shape has one
+ * definition (`manualDayItem.ts` / `watchDayItem.ts`) and this stays the write.
+ */
+export async function addItemToLiveDay(
+  params: DayTarget & Capability & { item: ChecklistItem },
+): Promise<LiveDayEditOutcome> {
+  const { familyId, childId, dateKey, item, canEdit } = params
+  if (!canEdit) return { status: 'refused', refusal: 'not-permitted' }
+
+  const ref = dayRef(familyId, childId, dateKey)
+  const snap = await getDoc(ref)
+  const now = new Date().toISOString()
+  const day: DayLog = snap.exists() ? snap.data() : emptyDay(childId, dateKey, now)
+
+  await setDayLogGuarded(
+    ref,
+    { ...appendChecklistItemToDayLog(day, item), updatedAt: now },
+    'add-item-to-live-day',
   )
   return { status: 'done' }
 }

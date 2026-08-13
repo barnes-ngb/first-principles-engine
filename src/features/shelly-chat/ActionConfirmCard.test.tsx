@@ -12,6 +12,7 @@ import { render, screen } from '@testing-library/react'
 import type { Child } from '../../core/types'
 import ActionConfirmCard from './ActionConfirmCard'
 import { describeActivityAudience } from './activityMinutesView'
+import type { ChatWeekDay } from './dayItemActions'
 import type { ChatActivityConfig, PendingAction } from './useShellyChatActions'
 
 const CHILDREN: Child[] = [
@@ -152,5 +153,137 @@ describe('describeActivityAudience', () => {
     expect(describeActivityAudience('lincoln1', ['Lincoln', 'London'], 'Lincoln')).toBe(
       'Affects Lincoln only.',
     )
+  })
+})
+
+// ── Live-day edit cards (FEAT-142) ───────────────────────────────────────────
+//
+// Same standard as the FEAT-135 card above: this is the parent's entire view of
+// the write before she taps, so what it changes has to be legible — the child,
+// the weekday in words, and the row by its title. Never an itemKey, never a raw
+// date, and never a card at all for a proposal that resolves to nothing.
+
+const WEEK: ChatWeekDay[] = [
+  {
+    dateKey: '2026-08-10',
+    label: 'Monday',
+    items: [
+      { itemKey: 'Reading Eggs (30m)::Reading', label: 'Reading Eggs (30m)', completed: true },
+      { itemKey: 'Math Facts (10m)::Math', label: 'Math Facts (10m)', completed: false },
+    ],
+  },
+  { dateKey: '2026-08-13', label: 'Thursday', items: [] },
+]
+
+function renderDayCard(action: PendingAction['action'], week = WEEK) {
+  return render(
+    <ActionConfirmCard
+      pending={[{ id: 'msg1_0', status: 'pending', action }]}
+      familyChildren={CHILDREN}
+      activityConfigs={CONFIGS}
+      weekDays={week}
+      onConfirm={vi.fn()}
+      onDismiss={vi.fn()}
+      onConfirmAll={vi.fn()}
+    />,
+  )
+}
+
+describe('ActionConfirmCard — live-day edits (FEAT-142)', () => {
+  it('previews a removal by row title and weekday, naming the child', () => {
+    renderDayCard({
+      kind: 'removeItemFromDay',
+      childId: 'lincoln1',
+      dateKey: '2026-08-10',
+      itemKey: 'Math Facts (10m)::Math',
+    })
+    expect(screen.getByText(`Remove "Math Facts" from Lincoln's Monday`)).toBeInTheDocument()
+    expect(screen.getByText("Changes Lincoln's week")).toBeInTheDocument()
+  })
+
+  it('previews a move naming both weekdays', () => {
+    renderDayCard({
+      kind: 'moveItemToDay',
+      childId: 'lincoln1',
+      fromDateKey: '2026-08-10',
+      toDateKey: '2026-08-13',
+      itemKey: 'Math Facts (10m)::Math',
+    })
+    expect(
+      screen.getByText(`Move "Math Facts" from Lincoln's Monday to Thursday`),
+    ).toBeInTheDocument()
+  })
+
+  it('previews an add with its minutes and the day it lands on', () => {
+    renderDayCard({
+      kind: 'addItemToDay',
+      childId: 'lincoln1',
+      dateKey: '2026-08-13',
+      label: 'Sight word games',
+      estimatedMinutes: 15,
+    })
+    expect(
+      screen.getByText(`Add "Sight word games" (15m) to Lincoln's Thursday`),
+    ).toBeInTheDocument()
+    expect(screen.getByText("Adds to Lincoln's week")).toBeInTheDocument()
+    expect(screen.getByText('Adds one row to that day. Nothing already on it changes.'))
+      .toBeInTheDocument()
+  })
+
+  it('says finished work is not in play, on the subtractive cards', () => {
+    renderDayCard({
+      kind: 'removeItemFromDay',
+      childId: 'lincoln1',
+      dateKey: '2026-08-10',
+      itemKey: 'Math Facts (10m)::Math',
+    })
+    expect(
+      screen.getByText('Finished work stays put — only what has not been done yet can move.'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows no itemKey and no raw date anywhere on the card', () => {
+    const { container } = renderDayCard({
+      kind: 'removeItemFromDay',
+      childId: 'lincoln1',
+      dateKey: '2026-08-10',
+      itemKey: 'Math Facts (10m)::Math',
+    })
+    expect(container.textContent).not.toContain('::')
+    expect(container.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+  })
+
+  it('renders NO card for a row the live week does not hold', () => {
+    const { container } = renderDayCard({
+      kind: 'removeItemFromDay',
+      childId: 'lincoln1',
+      dateKey: '2026-08-10',
+      itemKey: 'Handwriting (20m)::LanguageArts',
+    })
+    expect(container.querySelector('button')).toBeNull()
+  })
+
+  it('renders NO card for a completed row, rather than one whose Confirm would fail', () => {
+    const { container } = renderDayCard({
+      kind: 'removeItemFromDay',
+      childId: 'lincoln1',
+      dateKey: '2026-08-10',
+      itemKey: 'Reading Eggs (30m)::Reading',
+    })
+    expect(container.querySelector('button')).toBeNull()
+  })
+
+  it('renders NO card when no week is loaded at all', () => {
+    const { container } = renderDayCard(
+      {
+        kind: 'addItemToDay',
+        childId: 'lincoln1',
+        dateKey: '2026-08-13',
+        label: 'Sight word games',
+        estimatedMinutes: 15,
+      },
+      [],
+    )
+    expect(container.querySelector('button')).toBeNull()
   })
 })

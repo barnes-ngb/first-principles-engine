@@ -14,6 +14,7 @@
 // 3a is pure plumbing: nothing wires this into `sendToAI` yet, and there is no
 // write path — `applyChatAction` lands in 3b.
 
+import { SubjectBucket } from '../../core/types/enums'
 import type { ChatAction } from '../../core/types/shellyChat'
 import { sanitizeAndParseJson } from '../../core/utils/sanitizeJson'
 
@@ -39,6 +40,49 @@ export const MIN_ACTIVITY_MINUTES = 5
 export const MAX_ACTIVITY_MINUTES = 120
 
 /**
+ * Shape gate for a `YYYY-MM-DD` day key (FEAT-142).
+ *
+ * Strict on both halves: the string must LOOK like a date key, and the date it
+ * names must really exist — `2026-02-31` and `2026-13-01` match the pattern and
+ * are still not days, and `new Date('2026-02-31')` would helpfully roll them
+ * forward rather than fail. The round-trip through `toISOString()` catches that.
+ *
+ * Deliberately says nothing about WHICH week the date belongs to: this module is
+ * pure and has no clock and no family data. Week membership is resolved against
+ * the live week at stage time (`dayItemActions`), the same division of labour
+ * `setActivityMinutes` uses for its config id.
+ */
+export function isValidDateKey(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+/** Non-empty trimmed string, or null. */
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+/**
+ * Minutes gate shared by `setActivityMinutes` and `addItemToDay` — a real
+ * integer inside [5, 120]. Out-of-band, fractional, string, `NaN` and `Infinity`
+ * values are all **rejected as malformed**, never clamped: a clamped value is a
+ * number the parent never saw on the confirm card.
+ */
+function isValidMinutes(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_ACTIVITY_MINUTES &&
+    value <= MAX_ACTIVITY_MINUTES
+  )
+}
+
+const SUBJECT_BUCKETS = Object.values(SubjectBucket) as readonly string[]
+
+/**
  * Validate an arbitrary parsed payload against the `ChatAction` allowlist.
  *
  * Returns a typed `ChatAction` only for the recognized kinds:
@@ -52,6 +96,11 @@ export const MAX_ACTIVITY_MINUTES = 120
  *   `activityConfigId` + integer `minutes` in [5, 120]. Sets the default
  *   duration future plans use for ONE activity; out-of-band or non-integer
  *   minutes are rejected as malformed, never clamped.
+ * - Live-day edits (FEAT-142): `removeItemFromDay` (+`dateKey`, `itemKey`),
+ *   `moveItemToDay` (+`fromDateKey`, `toDateKey` — must differ, `itemKey`),
+ *   `addItemToDay` (+`dateKey`, non-empty `label`, integer `estimatedMinutes`
+ *   in [5, 120], optional real `subjectBucket`). Date keys must be real
+ *   calendar days; week membership and row existence are resolved later.
  * - `proposePlanAdjustment` (chunk 2A/2): a HANDOFF, not a write — string
  *   `childId` + non-empty `summary` + non-empty `rationale`, optional string
  *   `scope` / `targetWeek`. On confirm it stages a planner brief and navigates;
@@ -141,8 +190,7 @@ function toChatAction(payload: unknown): ChatAction | null {
     if (typeof obj.activityConfigId !== 'string' || obj.activityConfigId.trim().length === 0) {
       return null
     }
-    if (typeof obj.minutes !== 'number' || !Number.isInteger(obj.minutes)) return null
-    if (obj.minutes < MIN_ACTIVITY_MINUTES || obj.minutes > MAX_ACTIVITY_MINUTES) return null
+    if (!isValidMinutes(obj.minutes)) return null
     return {
       kind: 'setActivityMinutes',
       childId: obj.childId,
@@ -169,6 +217,65 @@ function toChatAction(payload: unknown): ChatAction | null {
       rationale: obj.rationale.trim(),
       ...(scope ? { scope } : {}),
       ...(targetWeek ? { targetWeek } : {}),
+    }
+  }
+
+  // ── Live-day edits — remove / move / add on THIS week (FEAT-142) ────
+  // The chat's half of FEAT-138's live-week edit lane. Validated here exactly as
+  // strictly as `setActivityMinutes`, and — like it — every claim this module
+  // CANNOT check is checked where the live day is readable:
+  //   1. (here) shape only — a real `YYYY-MM-DD`, a non-empty `itemKey`, a
+  //      non-empty label, integer minutes in band.
+  //   2. (`dayItemActions`, at stage time) the date is a weekday of the CURRENT
+  //      week, the `itemKey` names a row really on that day, and the row is not
+  //      completed — each drop carrying a plain-language reason.
+  //   3. (`liveDayEdit`, at the write) the row is re-resolved against the
+  //      freshly-read document and a completed row is refused again.
+  // A model can emit any string it likes; none of them reaches a day document
+  // without surviving all three.
+  if (obj.kind === 'removeItemFromDay') {
+    if (!isValidDateKey(obj.dateKey)) return null
+    const itemKey = nonEmptyString(obj.itemKey)
+    if (!itemKey) return null
+    return { kind: 'removeItemFromDay', childId: obj.childId, dateKey: obj.dateKey, itemKey }
+  }
+
+  if (obj.kind === 'moveItemToDay') {
+    if (!isValidDateKey(obj.fromDateKey) || !isValidDateKey(obj.toDateKey)) return null
+    // A move onto the day the row already sits on is not a change. Rejecting it
+    // here means it never becomes a card promising something it wouldn't do.
+    if (obj.fromDateKey === obj.toDateKey) return null
+    const itemKey = nonEmptyString(obj.itemKey)
+    if (!itemKey) return null
+    return {
+      kind: 'moveItemToDay',
+      childId: obj.childId,
+      fromDateKey: obj.fromDateKey,
+      toDateKey: obj.toDateKey,
+      itemKey,
+    }
+  }
+
+  if (obj.kind === 'addItemToDay') {
+    if (!isValidDateKey(obj.dateKey)) return null
+    const label = nonEmptyString(obj.label)
+    if (!label) return null
+    if (!isValidMinutes(obj.estimatedMinutes)) return null
+    // `subjectBucket` is optional and must be a real bucket when present. An
+    // unrecognised bucket drops the FIELD, not the action — a subject is a
+    // colour-coding hint, and refusing the whole add over one would fail the
+    // parent for something that costs nothing to omit.
+    const subjectBucket =
+      typeof obj.subjectBucket === 'string' && SUBJECT_BUCKETS.includes(obj.subjectBucket)
+        ? (obj.subjectBucket as SubjectBucket)
+        : undefined
+    return {
+      kind: 'addItemToDay',
+      childId: obj.childId,
+      dateKey: obj.dateKey,
+      label,
+      estimatedMinutes: obj.estimatedMinutes,
+      ...(subjectBucket ? { subjectBucket } : {}),
     }
   }
 

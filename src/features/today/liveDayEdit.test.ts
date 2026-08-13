@@ -24,6 +24,7 @@ vi.mock('./dayWriteGuard', async () => {
 })
 
 import {
+  addItemToLiveDay,
   appendChecklistItemToDayLog,
   checklistItemEditLock,
   detachBlocksForItem,
@@ -492,6 +493,98 @@ describe('swapWatchVideoOnLiveDay', () => {
       video: replacement,
     })
     expect(outcome.status).toBe('refused')
+    expect(setDayLogGuardedMock).not.toHaveBeenCalled()
+  })
+})
+
+// ── addItemToLiveDay (FEAT-142) ──────────────────────────────────────────────
+
+describe('addItemToLiveDay', () => {
+  const newRow = (): ChecklistItem => ({
+    label: 'Sight word games (15m)',
+    completed: false,
+    source: 'manual',
+    estimatedMinutes: 15,
+    subjectBucket: SubjectBucket.Reading,
+  })
+
+  it('appends the row to the SAVED day and leaves everything else alone', async () => {
+    seedDays({
+      '2026-08-11_c1': day({
+        checklist: [plannerRow({ completed: true, actualMinutes: 30 })],
+        blocks: [plannerBlock({ actualMinutes: 30 })],
+      }),
+    })
+    const outcome = await addItemToLiveDay({
+      canEdit: true,
+      familyId: 'f1',
+      childId: 'c1',
+      dateKey: '2026-08-11',
+      item: newRow(),
+    })
+    expect(outcome).toEqual({ status: 'done' })
+    const payload = payloadFor('2026-08-11_c1')!
+    expect(payload.checklist).toEqual([
+      plannerRow({ completed: true, actualMinutes: 30 }),
+      newRow(),
+    ])
+    // Purely additive: the completed row, its minutes and the day's blocks all
+    // survive untouched.
+    expect(payload.blocks).toEqual([plannerBlock({ actualMinutes: 30 })])
+  })
+
+  it('routes through the preservation guard', async () => {
+    seedDays({ '2026-08-11_c1': day() })
+    await addItemToLiveDay({
+      canEdit: true,
+      familyId: 'f1',
+      childId: 'c1',
+      dateKey: '2026-08-11',
+      item: newRow(),
+    })
+    expect(setDayLogGuardedMock.mock.calls[0][2]).toBe('add-item-to-live-day')
+  })
+
+  it('creates the day document when the weekday has none', async () => {
+    // A plannable day with no plan is a normal state — the add must not need a
+    // day to already exist.
+    seedDays({})
+    const outcome = await addItemToLiveDay({
+      canEdit: true,
+      familyId: 'f1',
+      childId: 'c1',
+      dateKey: '2026-08-13',
+      item: newRow(),
+    })
+    expect(outcome).toEqual({ status: 'done' })
+    const payload = payloadFor('2026-08-13_c1')!
+    expect(payload.childId).toBe('c1')
+    expect(payload.date).toBe('2026-08-13')
+    expect(payload.checklist).toEqual([newRow()])
+  })
+
+  it('writes NO block — minutes on a live week stay locked', async () => {
+    seedDays({ '2026-08-11_c1': day() })
+    await addItemToLiveDay({
+      canEdit: true,
+      familyId: 'f1',
+      childId: 'c1',
+      dateKey: '2026-08-11',
+      item: newRow(),
+    })
+    expect(payloadFor('2026-08-11_c1')!.blocks).toEqual([])
+  })
+
+  it('REFUSES without the parent capability and writes nothing', async () => {
+    seedDays({ '2026-08-11_c1': day() })
+    const outcome = await addItemToLiveDay({
+      canEdit: false,
+      familyId: 'f1',
+      childId: 'c1',
+      dateKey: '2026-08-11',
+      item: newRow(),
+    })
+    expect(outcome).toEqual({ status: 'refused', refusal: 'not-permitted' })
     expect(setDayLogGuardedMock).not.toHaveBeenCalled()
   })
 })
