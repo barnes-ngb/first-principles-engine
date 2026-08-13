@@ -81,6 +81,14 @@ export interface PhotoRef {
    * via `dadLabReports[*].childReports[name].artifacts`.
    */
   sourceMetadata?: PhotoSourceMetadata;
+  /**
+   * FEAT-141: the short content note written on the source doc at capture time,
+   * when it has one. Read-only grounding for the generator (it tells the model
+   * what a photo actually shows before it writes a caption). Absent on every
+   * pre-FEAT-141 photo, and stripped before the ref reaches the composed book
+   * document — see `strip()` in monthlyReviewCuration.ts.
+   */
+  contentNote?: string;
 }
 
 export interface DayLogEntry {
@@ -94,6 +102,20 @@ export interface DayLogEntry {
   evidenceCount: number;
   /** Artifact IDs linked to checklist items on this day. */
   evidenceArtifactIds: string[];
+  /**
+   * FEAT-141: evidence doc IDs belonging to WORKBOOK-linked checklist items
+   * (the item carries a `workbookConfigId` or a scan registration). The
+   * workbook capture path saves the page as a plain `Photo` artifact as well
+   * as a scan, and nothing on that artifact doc says "workbook" — this is the
+   * retroactive join that marks it as a curriculum image.
+   */
+  workbookEvidenceIds: string[];
+  /**
+   * FEAT-141: labels of those same workbook-linked items. Batch pages 2..N are
+   * saved as artifacts with no checklist link at all, carrying only
+   * `tags.planItem` — this is how those are recognized.
+   */
+  workbookItemLabels: string[];
   hasTeachBack: boolean;
 }
 
@@ -226,6 +248,12 @@ export interface MonthAggregate {
    * of the `artifacts` collection for this child/month.
    */
   allArtifactIds: Set<string>;
+  /**
+   * FEAT-141: artifact doc id → `tags.planItem`. Joined with each day log's
+   * `workbookItemLabels` in `buildCurationContext` to catch workbook photos
+   * that carry no checklist link and no "Worksheet" type.
+   */
+  artifactPlanItems: Record<string, string>;
   conundrums: ConundrumEntry[];
   teachBacks: TeachBackEntry[];
   hours: HoursSummary;
@@ -291,12 +319,16 @@ export async function loadDayLogsForMonth(
       plannedMinutes?: number;
       evidenceArtifactId?: string;
       teachBackDone?: boolean;
+      workbookConfigId?: string;
+      workbookScanRegistration?: unknown;
     }>;
 
     const itemEngagement: Record<string, string> = {};
     const engagementCounts: Record<string, number> = {};
     const minutesBySubject: Record<string, number> = {};
     const evidenceArtifactIds: string[] = [];
+    const workbookEvidenceIds: string[] = [];
+    const workbookItemLabels: string[] = [];
     let evidenceCount = 0;
     let hasTeachBack = false;
 
@@ -306,6 +338,25 @@ export async function loadDayLogsForMonth(
           (engagementCounts[item.engagement] ?? 0) + 1;
         const key = item.id ?? item.label;
         if (key) itemEngagement[key] = item.engagement;
+        // FEAT-141 (Codex P2, PR #1666): curation matches a PHOTO to its item
+        // by the photo's source doc id — a scan id or an artifact id — so an
+        // engagement indexed only by item id/label never matched a photo and
+        // the signal was silently dead. Index the evidence id too, which is
+        // exactly the key `scorePhotos` and the big-step gate look up.
+        if (item.evidenceArtifactId) {
+          itemEngagement[item.evidenceArtifactId] = item.engagement;
+        }
+      }
+
+      // FEAT-141 (Codex P1, PR #1666): a workbook-routed capture writes the
+      // page BOTH as a scan and as a plain `Photo` artifact, so the artifact
+      // twin escaped the curriculum-image predicate (which only knew the
+      // "Worksheet" type) and the same page could still be printed. The day
+      // log is the authoritative, RETROACTIVE link — it works on months that
+      // were captured long before this policy existed.
+      if (item.workbookConfigId || item.workbookScanRegistration) {
+        if (item.evidenceArtifactId) workbookEvidenceIds.push(item.evidenceArtifactId);
+        if (item.label) workbookItemLabels.push(item.label);
       }
       if (item.completed) {
         const mins = item.estimatedMinutes ?? item.plannedMinutes ?? 0;
@@ -328,6 +379,8 @@ export async function loadDayLogsForMonth(
       minutesBySubject,
       evidenceCount,
       evidenceArtifactIds,
+      workbookEvidenceIds,
+      workbookItemLabels,
       hasTeachBack,
     });
   }
@@ -549,12 +602,20 @@ export async function loadPhotosForMonth(
   workbookArtifactIds: Set<string>;
   classifiedScanIds: Set<string>;
   allArtifactIds: Set<string>;
+  /**
+   * FEAT-141: artifact doc id → its `tags.planItem`, for the artifacts that
+   * carry one. Joined against each day log's `workbookItemLabels` so a photo
+   * saved against a workbook activity is recognized as a curriculum image even
+   * when nothing links it to a checklist row (batch pages 2..N).
+   */
+  artifactPlanItems: Record<string, string>;
 }> {
   const endIso = end + "T23:59:59";
   const photos: PhotoRef[] = [];
   const workbookArtifactIds = new Set<string>();
   const classifiedScanIds = new Set<string>();
   const allArtifactIds = new Set<string>();
+  const artifactPlanItems: Record<string, string> = {};
 
   // Scans
   try {
@@ -578,6 +639,8 @@ export async function loadPhotosForMonth(
         sourceDocId: doc.id,
         capturedAt: (d.createdAt as string) ?? "",
       };
+      const contentNote = readContentNote(d);
+      if (contentNote) ref.contentNote = contentNote;
       if (subjectTag) ref.subjectTag = subjectTag;
       photos.push(ref);
     }
@@ -602,7 +665,10 @@ export async function loadPhotosForMonth(
       const type = (d.type as string) ?? "";
       // Only image-bearing artifacts (Photo, Worksheet); skip Audio/Note
       if (type !== "Photo" && type !== "Worksheet" && type !== "Video") continue;
-      const tags = (d.tags ?? {}) as { subjectBucket?: string };
+      const tags = (d.tags ?? {}) as { subjectBucket?: string; planItem?: string };
+      if (typeof tags.planItem === "string" && tags.planItem.trim()) {
+        artifactPlanItems[doc.id] = tags.planItem.trim();
+      }
       if (type === "Worksheet") {
         workbookArtifactIds.add(doc.id);
       } else {
@@ -617,6 +683,8 @@ export async function loadPhotosForMonth(
         sourceDocId: doc.id,
         capturedAt: (d.createdAt as string) ?? "",
       };
+      const contentNote = readContentNote(d);
+      if (contentNote) ref.contentNote = contentNote;
       if (tags.subjectBucket) ref.subjectTag = tags.subjectBucket;
       photos.push(ref);
       seenArtifactIds.add(doc.id);
@@ -679,6 +747,8 @@ export async function loadPhotosForMonth(
             reportTitle: meta.reportTitle,
           },
         };
+        const contentNote = readContentNote(d);
+        if (contentNote) ref.contentNote = contentNote;
         if (tags.subjectBucket) ref.subjectTag = tags.subjectBucket;
         photos.push(ref);
       }
@@ -687,7 +757,27 @@ export async function loadPhotosForMonth(
     console.warn("[monthlyReview] loadPhotosForMonth dadLab failed:", err);
   }
 
-  return { photos, workbookArtifactIds, classifiedScanIds, allArtifactIds };
+  return {
+    photos,
+    workbookArtifactIds,
+    classifiedScanIds,
+    allArtifactIds,
+    artifactPlanItems,
+  };
+}
+
+/**
+ * FEAT-141: read the capture-time content note off a scan or artifact doc.
+ * Defensive — the field is optional, never backfilled, and this loader must
+ * treat a missing or non-string value exactly like a photo that has none.
+ * The 140-char cap is enforced at WRITE; this trims only, so an older
+ * over-long value still reads rather than being silently dropped.
+ */
+function readContentNote(d: Record<string, unknown>): string | undefined {
+  const raw = d.contentNote;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function extractScanSubject(d: Record<string, unknown>): string | undefined {
@@ -1021,6 +1111,7 @@ export async function aggregateMonthData(
     workbookArtifactIds: photosResult.workbookArtifactIds,
     classifiedScanIds: photosResult.classifiedScanIds,
     allArtifactIds: photosResult.allArtifactIds,
+    artifactPlanItems: photosResult.artifactPlanItems,
     conundrums,
     teachBacks,
     hours,

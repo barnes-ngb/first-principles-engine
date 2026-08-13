@@ -3,6 +3,12 @@ import {
   extractImageUrls,
   buildActivityMinutesActionAddendum,
   buildAllChildrenLearnerModels,
+  buildDayItemActionAddendum,
+  chatChecklistItemKey,
+  civilDateInZone,
+  currentWeekDays,
+  DEFAULT_FAMILY_TIME_ZONE,
+  formatChatWeekDays,
   buildFrictionCaptureAddendum,
   buildPlanAdjustmentActionAddendum,
   buildShellyChatRoleSection,
@@ -489,6 +495,10 @@ describe("no-writes-from-general guard (FEAT-60)", () => {
     expect(buildSightWordActionAddendum(undefined, undefined)).toBe("");
     expect(buildSnapshotActionAddendum(undefined, undefined)).toBe("");
     expect(buildPlanAdjustmentActionAddendum(undefined, undefined)).toBe("");
+    expect(buildActivityMinutesActionAddendum(undefined, undefined)).toBe("");
+    // FEAT-142 — the live-day grammar is child-scoped too: no THIS WEEK section
+    // is loaded on the general branch, so there is nothing valid to propose.
+    expect(buildDayItemActionAddendum(undefined, undefined)).toBe("");
     // The general role section teaches comparison but no write grammar.
     const general = buildShellyChatRoleSection(undefined);
     expect(general).not.toContain("<action>");
@@ -908,5 +918,271 @@ describe("plan-adjustment trigger widening (FEAT-135)", () => {
     const out = buildPlanAdjustmentActionAddendum("lincoln123", "Lincoln");
     expect(out).toContain("setActivityMinutes");
     expect(out).toContain("SHAPE of next week");
+  });
+});
+
+// ── FEAT-142 — THIS WEEK section + live-day action grammar ────────
+
+describe("currentWeekDays (FEAT-142)", () => {
+  it("returns exactly the five weekdays of the week containing the date", () => {
+    // Wednesday 2026-08-12.
+    const week = currentWeekDays(new Date("2026-08-12T12:00:00Z"), "America/Chicago");
+    expect(week.map((d) => d.label)).toEqual([
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+    ]);
+    expect(week.map((d) => d.dateKey)).toEqual([
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+    ]);
+  });
+
+  it("treats Sunday as belonging to the week that is ending, not the next one", () => {
+    // Sunday 2026-08-16 → the Mon-Fri that just finished.
+    const week = currentWeekDays(new Date("2026-08-16T12:00:00Z"), "America/Chicago");
+    expect(week[0].dateKey).toBe("2026-08-10");
+    expect(week[4].dateKey).toBe("2026-08-14");
+  });
+
+  it("derives from the FAMILY's civil date, not the runtime's (Codex P2, PR #1667)", () => {
+    // Superseded the original assertion here, which pinned formatting from the
+    // runtime's LOCAL components — that was the runtime-zone assumption the
+    // timezone fix exists to remove. The contract now: an instant that is
+    // Monday 00:00 UTC is still SUNDAY in Chicago, so the family's week is the
+    // one that is ending.
+    const mondayUtcMidnight = new Date("2026-08-10T00:00:00Z");
+    expect(currentWeekDays(mondayUtcMidnight, "America/Chicago")[0].dateKey).toBe("2026-08-03");
+    // Once it is genuinely Monday for the family, the week turns over.
+    const mondayMorningCt = new Date("2026-08-10T13:00:00Z");
+    expect(currentWeekDays(mondayMorningCt, "America/Chicago")[0].dateKey).toBe("2026-08-10");
+  });
+});
+
+describe("chatChecklistItemKey (FEAT-142) — parity with the client's identity", () => {
+  // This MUST match src/features/today/dayWriteGuard.ts's checklistItemKey. The
+  // string emitted here is the string the model copies into a payload and the
+  // client resolves by comparing against its own function's output.
+  it("prefers an explicit id", () => {
+    expect(chatChecklistItemKey({ id: "row-1", label: "Math (15m)" })).toBe("row-1");
+  });
+
+  it("falls back to label::subjectBucket", () => {
+    expect(
+      chatChecklistItemKey({ label: "Reading Eggs (30m)", subjectBucket: "Reading" }),
+    ).toBe("Reading Eggs (30m)::Reading");
+  });
+
+  it("uses an empty subject segment when the row carries no bucket", () => {
+    expect(chatChecklistItemKey({ label: "Copywork (10m)" })).toBe("Copywork (10m)::");
+  });
+});
+
+describe("formatChatWeekDays (FEAT-142) — the section that makes a row proposable", () => {
+  const week = (): Parameters<typeof formatChatWeekDays>[0] => [
+    {
+      dateKey: "2026-08-10",
+      label: "Monday",
+      checklist: [
+        { label: "Reading Eggs (30m)", subjectBucket: "Reading", completed: true },
+        { label: "Math Facts (10m)", subjectBucket: "Math", completed: false },
+      ],
+    },
+    { dateKey: "2026-08-11", label: "Tuesday", checklist: [] },
+    {
+      dateKey: "2026-08-12",
+      label: "Wednesday",
+      checklist: [{ id: "row-9", label: "Watch: Volcanoes (12m)", skipped: true }],
+    },
+  ];
+
+  it("emits each row's identity key so the model has something valid to propose", () => {
+    const out = formatChatWeekDays(week(), "Lincoln");
+    expect(out).toContain("itemKey: Math Facts (10m)::Math");
+    expect(out).toContain("itemKey: row-9");
+  });
+
+  it("marks a completed row as immovable, in the row itself", () => {
+    const out = formatChatWeekDays(week(), "Lincoln");
+    // The model must know BEFORE it proposes, or it spends the parent's tap on
+    // a card the write layer will refuse.
+    expect(out).toContain("Reading Eggs (30m) [DONE — cannot be moved or removed]");
+    expect(out).not.toContain("Math Facts (10m) [DONE");
+  });
+
+  it("marks a skipped row as skipped, not as done — it is still removable", () => {
+    const out = formatChatWeekDays(week(), "Lincoln");
+    expect(out).toContain("Watch: Volcanoes (12m) [skipped]");
+  });
+
+  it("lists an empty weekday rather than omitting it", () => {
+    // A day with nothing on it is still a day a row can be moved onto; a gap
+    // would read as "that day doesn't exist".
+    const out = formatChatWeekDays(week(), "Lincoln");
+    expect(out).toContain("Tuesday (2026-08-11):");
+    expect(out).toContain("(nothing on this day yet)");
+  });
+
+  it("scopes itself to the current Monday–Friday and says so", () => {
+    const out = formatChatWeekDays(week(), "Lincoln");
+    expect(out).toContain("Monday–Friday of the CURRENT week");
+    expect(out).toContain("Lincoln");
+  });
+
+  it("returns '' when there is no week at all, so the section is omitted", () => {
+    expect(formatChatWeekDays([], "Lincoln")).toBe("");
+  });
+});
+
+describe("buildDayItemActionAddendum (FEAT-142)", () => {
+  it("teaches all three kinds with the child's real id baked in", () => {
+    const out = buildDayItemActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain('"kind":"removeItemFromDay"');
+    expect(out).toContain('"kind":"moveItemToDay"');
+    expect(out).toContain('"kind":"addItemToDay"');
+    expect(out).toContain('"childId":"lincoln123"');
+  });
+
+  it("forbids inventing an itemKey or a date", () => {
+    const out = buildDayItemActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("MUST be copied exactly from the THIS WEEK section");
+    expect(out).toContain("NEVER invent, guess, or reconstruct");
+  });
+
+  it("states the completed-row rule as hard, with no override", () => {
+    const out = buildDayItemActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("FINISHED WORK IS NEVER EDITABLE");
+    expect(out).toContain("There is no override");
+  });
+
+  it("bounds moves to a different weekday of the SAME week", () => {
+    const out = buildDayItemActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("Only days in THIS WEEK");
+    expect(out).toContain("different weekday of the same week");
+  });
+
+  it("states the minutes band and says a value outside it is rejected, not clamped", () => {
+    const out = buildDayItemActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("whole number between 5 and 120");
+    expect(out).toContain("rejected outright");
+  });
+
+  it("keeps itself distinct from setActivityMinutes and the next-week handoff", () => {
+    const out = buildDayItemActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("setActivityMinutes");
+    expect(out).toContain("plan-adjustment handoff");
+  });
+
+  it("never claims the change is already made", () => {
+    const out = buildDayItemActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("NEVER say it's done");
+  });
+
+  it("emits nothing on the general (no-child) branch", () => {
+    expect(buildDayItemActionAddendum(undefined, undefined)).toBe("");
+  });
+});
+
+describe("navigation honesty after FEAT-142 — 'coming' is a real ending, invented screens are not", () => {
+  it("names the live-week edits among what the chat CAN change", () => {
+    const out = buildShellyChatRoleSection("Lincoln");
+    expect(out).toContain("what is on a day of THIS week");
+  });
+
+  it("names the three coming slices with the REAL screen that does each today", () => {
+    const out = buildShellyChatRoleSection("Lincoln");
+    expect(out).toContain("Progress → Curriculum");
+    expect(out).toContain("Watch Library");
+    expect(out).toContain("Plan My Week");
+    expect(out).toContain("coming");
+  });
+
+  it("bounds the promise — 'coming' applies to those three and nothing else", () => {
+    const out = buildShellyChatRoleSection("Lincoln");
+    expect(out).toContain("do not promise anything else is on the way");
+  });
+
+  it("still forbids naming a screen it was not told exists, and still denies Settings", () => {
+    const out = buildShellyChatRoleSection("Lincoln");
+    expect(out).toContain("NEVER describe a screen");
+    expect(out).toContain(
+      "Settings does NOT contain any schedule, subject-duration, or time-block screen",
+    );
+    // The Watch Library is NOT in Settings any more (FEAT-132) — the map must
+    // not send anyone there for it.
+    expect(out).toContain("it is NOT inside Settings");
+  });
+});
+
+describe("currentWeekDays in the family's zone (Codex P2, PR #1667)", () => {
+  it("defaults to the zone every scheduled function in this repo runs on", () => {
+    expect(DEFAULT_FAMILY_TIME_ZONE).toBe("America/Chicago");
+  });
+
+  it("uses the FAMILY's Sunday, not the runtime's already-Monday", () => {
+    // Sunday 2026-08-16, 21:00 America/Chicago = Monday 2026-08-17 02:00 UTC.
+    // Deriving from the runtime clock would select the week the family has not
+    // started yet, and every action emitted from it would be refused by the
+    // client gate as out-of-week. Sunday evening is when a homeschool parent
+    // plans, so this is the wrong hour to be an hour off.
+    const sundayEvening = new Date("2026-08-17T02:00:00Z");
+    const week = currentWeekDays(sundayEvening, "America/Chicago");
+    expect(week[0].dateKey).toBe("2026-08-10");
+    expect(week[4].dateKey).toBe("2026-08-14");
+  });
+
+  it("moves to the new week once the family's Monday actually arrives", () => {
+    // Monday 2026-08-17, 08:00 America/Chicago = 13:00 UTC.
+    const mondayMorning = new Date("2026-08-17T13:00:00Z");
+    const week = currentWeekDays(mondayMorning, "America/Chicago");
+    expect(week[0].dateKey).toBe("2026-08-17");
+  });
+
+  it("honours a family in a different zone", () => {
+    // 2026-08-17T02:00Z is already Monday in London and still Sunday in Chicago.
+    const t = new Date("2026-08-17T02:00:00Z");
+    expect(currentWeekDays(t, "Europe/London")[0].dateKey).toBe("2026-08-17");
+    expect(currentWeekDays(t, "America/Chicago")[0].dateKey).toBe("2026-08-10");
+  });
+
+  it("still returns exactly five labelled weekdays", () => {
+    const week = currentWeekDays(new Date("2026-08-12T12:00:00Z"), "America/Chicago");
+    expect(week.map((d) => d.label)).toEqual([
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+    ]);
+    expect(week.map((d) => d.dateKey)).toEqual([
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+    ]);
+  });
+});
+
+describe("civilDateInZone (Codex P2, PR #1667)", () => {
+  it("returns the civil date in the named zone, YYYY-MM-DD", () => {
+    expect(civilDateInZone(new Date("2026-08-17T02:00:00Z"), "America/Chicago")).toBe(
+      "2026-08-16",
+    );
+    expect(civilDateInZone(new Date("2026-08-17T02:00:00Z"), "Europe/London")).toBe(
+      "2026-08-17",
+    );
+  });
+
+  it("falls back instead of throwing on a bad profile value", () => {
+    // A malformed timeZone on the family doc must not take the whole chat down.
+    expect(civilDateInZone(new Date("2026-08-12T12:00:00Z"), "Not/AZone")).toMatch(
+      /^\d{4}-\d{2}-\d{2}$/,
+    );
   });
 });

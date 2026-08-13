@@ -255,6 +255,47 @@ export const handleMonthlyReview = async (
 
 // ── Curation context assembly ─────────────────────────────────
 
+/**
+ * FEAT-141 (Codex P1, PR #1666): every artifact that is really a workbook page.
+ *
+ * The "Worksheet" artifact type is not the only way a curriculum page reaches
+ * the `artifacts` collection — in fact it is the rare one. The workbook capture
+ * path writes the page as a plain `Photo` artifact AND as a scan, so excluding
+ * only the scan left an identical twin eligible for the cover and every content
+ * section: the book would still print the page this policy exists to keep out.
+ *
+ * Two retroactive joins through the day log, so this works on months captured
+ * long before the policy existed (July included):
+ *  1. the artifact is the evidence of a workbook-linked checklist item, and
+ *  2. the artifact's `tags.planItem` names a workbook-linked item that month —
+ *     which is how batch pages 2..N are caught (they are saved with no
+ *     checklist link at all).
+ *
+ * Over-inclusion here is the safe direction: a photo taken against a workbook
+ * activity is exactly what Nathan does not want printed.
+ */
+export function collectWorkbookArtifactIds(data: MonthAggregate): Set<string> {
+  const ids = new Set<string>(data.workbookArtifactIds);
+
+  const workbookLabels = new Set<string>();
+  for (const day of data.dayLogs) {
+    for (const id of day.workbookEvidenceIds ?? []) ids.add(id);
+    for (const label of day.workbookItemLabels ?? []) {
+      if (label) workbookLabels.add(label);
+    }
+  }
+
+  if (workbookLabels.size > 0) {
+    for (const [artifactId, planItem] of Object.entries(
+      data.artifactPlanItems ?? {},
+    )) {
+      if (workbookLabels.has(planItem)) ids.add(artifactId);
+    }
+  }
+
+  return ids;
+}
+
 function buildCurationContext(data: MonthAggregate): PhotoCurationContext {
   const dayLogEngagement: Record<string, Record<string, string>> = {};
   for (const d of data.dayLogs) {
@@ -292,7 +333,8 @@ function buildCurationContext(data: MonthAggregate): PhotoCurationContext {
     sketchArtifactIds: new Set(),
     dadLabArtifactIds,
     resolvedBlockerEvidenceIds,
-    workbookArtifactIds: data.workbookArtifactIds,
+    // FEAT-141: not just `type: "Worksheet"` — see collectWorkbookArtifactIds.
+    workbookArtifactIds: collectWorkbookArtifactIds(data),
     classifiedScanIds: data.classifiedScanIds,
     allArtifactIds: data.allArtifactIds,
   };
@@ -582,7 +624,10 @@ function buildMonthlyReviewUserPrompt(input: PromptInputs): string {
     )
     .join("\n");
 
-  const photoSection = formatPhotoSection(hero, placement);
+  // FEAT-141: placement refs are stripped of their content notes (the composed
+  // book document must not carry parent-side metadata), so the notes are looked
+  // up here from the loaded photos, by photoId.
+  const photoSection = formatPhotoSection(hero, placement, buildNoteIndex(data.photos));
 
   const totalHours = Math.round((data.hours.totalMinutes / 60) * 10) / 10;
   const daysWithActivity = data.dayLogs.length;
@@ -667,16 +712,55 @@ specific. Captions follow the same length pattern. Apply this ratio across
 every section.
 
 Generate the JSON exactly per the schema in the system prompt. Use the photoId
-values listed above when adding captions; do not invent photo IDs.`;
+values listed above when adding captions; do not invent photo IDs.
+
+Where a photo line carries \`shows="…"\`, that is a short note recorded when the
+photo was taken, describing what is actually in it. Use it to write a caption
+that names the real thing in the picture. It is a parent-side note, not kid
+copy — never paste it in verbatim, and never quote it in a kid-mode caption.
+Photos with no \`shows="…"\` were captured before notes existed; caption those
+from the surrounding month data as before.`;
 }
 
-function formatPhotoSection(
+/**
+ * FEAT-141: photoId → the short content note captured with that image, for the
+ * photos that have one. Photos without a note are simply absent from the index
+ * and their prompt lines read exactly as they did before this feature.
+ */
+export function buildNoteIndex(photos: PhotoRef[]): Record<string, string> {
+  const index: Record<string, string> = {};
+  for (const p of photos) {
+    if (p.contentNote) index[p.id] = p.contentNote;
+  }
+  return index;
+}
+
+/** One photo's prompt line, with its content note appended when it has one. */
+function photoLine(p: PhotoRef, notes: Record<string, string>): string {
+  const note = notes[p.id];
+  return (
+    `  - photoId="${p.id}", subject=${p.subjectTag ?? "?"}, captured=${p.capturedAt.slice(0, 10)}` +
+    (note ? `, shows="${note.replace(/"/g, "'")}"` : "")
+  );
+}
+
+/**
+ * Exported for test (FEAT-141): the notes-present / notes-absent split is the
+ * whole of Step 3, and the absent case must stay byte-identical to the prompt
+ * the generator has been reading all along.
+ */
+export function formatPhotoSection(
   hero: PhotoRef | undefined,
   placement: SectionPlacement,
+  notes: Record<string, string> = {},
 ): string {
   const lines: string[] = ["## Photos placed in sections"];
   if (hero) {
-    lines.push(`Hero (cover): photoId="${hero.id}"`);
+    const heroNote = notes[hero.id];
+    lines.push(
+      `Hero (cover): photoId="${hero.id}"` +
+        (heroNote ? `, shows="${heroNote.replace(/"/g, "'")}"` : ""),
+    );
   } else {
     lines.push("Hero (cover): none — write a text-only cover.");
   }
@@ -695,17 +779,13 @@ function formatPhotoSection(
   if (loved.length) {
     lines.push("whatYouLoved section photos:");
     for (const p of loved) {
-      lines.push(
-        `  - photoId="${p.id}", subject=${p.subjectTag ?? "?"}, captured=${p.capturedAt.slice(0, 10)}`,
-      );
+      lines.push(photoLine(p, notes));
     }
   }
   if (worked.length) {
     lines.push("workedThrough section photos:");
     for (const p of worked) {
-      lines.push(
-        `  - photoId="${p.id}", subject=${p.subjectTag ?? "?"}, captured=${p.capturedAt.slice(0, 10)}`,
-      );
+      lines.push(photoLine(p, notes));
     }
   }
   if (!loved.length && !worked.length && !hero) {

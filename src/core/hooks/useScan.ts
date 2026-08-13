@@ -6,11 +6,25 @@ import { useAI, TaskType } from '../ai/useAI'
 import { compressIfNeeded } from '../utils/compressImage'
 import { scansCollection } from '../firebase/firestore'
 import { storage } from '../firebase/storage'
+import { deriveScanContentNote } from '../utils/contentNote'
+import type { CaptureContext } from '../utils/contentNote'
 import type { ScanRecord, ScanResult } from '../types'
 
 export interface UseScanResult {
-  /** Trigger a scan: upload image, call AI, save record. */
-  scan: (file: File, familyId: string, childId: string) => Promise<ScanRecord | null>
+  /**
+   * Trigger a scan: upload image, call AI, save record.
+   *
+   * `captureContext` (FEAT-141, optional) is what the app already knows about
+   * this photo — the checklist item it was taken against, its subject. It rides
+   * along on the SAME analysis call to ground the one-line content note; a
+   * caller that has none behaves exactly as before.
+   */
+  scan: (
+    file: File,
+    familyId: string,
+    childId: string,
+    captureContext?: CaptureContext,
+  ) => Promise<ScanRecord | null>
   /** Save the user's action (added/skipped) to the scan record. */
   recordAction: (
     familyId: string,
@@ -57,7 +71,12 @@ export function useScan(): UseScanResult {
   const [scanResult, setScanResult] = useState<ScanRecord | null>(null)
 
   const scan = useCallback(
-    async (file: File, familyId: string, childId: string): Promise<ScanRecord | null> => {
+    async (
+      file: File,
+      familyId: string,
+      childId: string,
+      captureContext?: CaptureContext,
+    ): Promise<ScanRecord | null> => {
       setScanning(true)
       setError(null)
       setScanResult(null)
@@ -96,7 +115,14 @@ export function useScan(): UseScanResult {
             messages: [
               {
                 role: 'user',
-                content: JSON.stringify({ imageBase64, mediaType }),
+                content: JSON.stringify({
+                  imageBase64,
+                  mediaType,
+                  // FEAT-141: additive; omitted entirely when the caller has none.
+                  ...(captureContext && (captureContext.itemLabel || captureContext.subjectBucket)
+                    ? { captureContext }
+                    : {}),
+                }),
               },
             ],
           })
@@ -122,6 +148,12 @@ export function useScan(): UseScanResult {
         }
 
         // 6. Save to Firestore
+        //
+        // FEAT-141: the content note is DERIVED from the analysis we already
+        // have — no second AI call, no extra latency. Absent stays absent: a
+        // scan whose analysis identified nothing writes no field.
+        const contentNote = deriveScanContentNote(results)
+
         const record: ScanRecord = {
           childId,
           imageUrl,
@@ -130,6 +162,7 @@ export function useScan(): UseScanResult {
           action: 'pending',
           error: parseError,
           createdAt: new Date().toISOString(),
+          ...(contentNote ? { contentNote } : {}),
         }
 
         const docRef = await addDoc(scansCollection(familyId), {
@@ -139,6 +172,7 @@ export function useScan(): UseScanResult {
           results: record.results ?? null,
           action: record.action,
           ...(record.error ? { error: record.error } : {}),
+          ...(contentNote ? { contentNote } : {}),
           createdAt: serverTimestamp(),
         } as unknown as ScanRecord)
         record.id = docRef.id

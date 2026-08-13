@@ -391,3 +391,177 @@ describe('parseChatActions', () => {
     expect(cleanText).toBe('Just a normal reply with no actions.')
   })
 })
+
+// ── FEAT-142 — live-day edits (remove / move / add on THIS week) ──────────────
+
+describe('parseChatActions — removeItemFromDay (FEAT-142)', () => {
+  it('extracts a well-formed removal', () => {
+    const raw =
+      '<action>{"kind": "removeItemFromDay", "childId": "lincoln", "dateKey": "2026-08-12", "itemKey": "Reading Eggs (30m)::Reading"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([
+      {
+        kind: 'removeItemFromDay',
+        childId: 'lincoln',
+        dateKey: '2026-08-12',
+        itemKey: 'Reading Eggs (30m)::Reading',
+      },
+    ])
+  })
+
+  it('rejects a malformed date key', () => {
+    for (const dateKey of ['2026-8-12', '08/12/2026', 'Wednesday', '2026-08-12T00:00:00', '']) {
+      const raw = `<action>{"kind": "removeItemFromDay", "childId": "lincoln", "dateKey": "${dateKey}", "itemKey": "k"}</action>`
+      expect(parseChatActions(raw).actions, `dateKey=${dateKey}`).toEqual([])
+    }
+  })
+
+  it('rejects a date that matches the pattern but is not a real day', () => {
+    // `new Date('2026-02-31')` rolls forward rather than failing, so the shape
+    // check alone is not enough.
+    for (const dateKey of ['2026-02-31', '2026-13-01', '2026-00-10']) {
+      const raw = `<action>{"kind": "removeItemFromDay", "childId": "lincoln", "dateKey": "${dateKey}", "itemKey": "k"}</action>`
+      expect(parseChatActions(raw).actions, `dateKey=${dateKey}`).toEqual([])
+    }
+  })
+
+  it('rejects a missing or empty itemKey', () => {
+    const missing =
+      '<action>{"kind": "removeItemFromDay", "childId": "lincoln", "dateKey": "2026-08-12"}</action>'
+    const blank =
+      '<action>{"kind": "removeItemFromDay", "childId": "lincoln", "dateKey": "2026-08-12", "itemKey": "   "}</action>'
+    expect(parseChatActions(missing).actions).toEqual([])
+    expect(parseChatActions(blank).actions).toEqual([])
+  })
+
+  it('rejects a missing childId', () => {
+    const raw =
+      '<action>{"kind": "removeItemFromDay", "dateKey": "2026-08-12", "itemKey": "k"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+})
+
+describe('parseChatActions — moveItemToDay (FEAT-142)', () => {
+  it('extracts a well-formed move', () => {
+    const raw =
+      '<action>{"kind": "moveItemToDay", "childId": "lincoln", "fromDateKey": "2026-08-12", "toDateKey": "2026-08-13", "itemKey": "row-9"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([
+      {
+        kind: 'moveItemToDay',
+        childId: 'lincoln',
+        fromDateKey: '2026-08-12',
+        toDateKey: '2026-08-13',
+        itemKey: 'row-9',
+      },
+    ])
+  })
+
+  it('rejects a move onto the day the row is already on', () => {
+    // Not a change — a card for it would promise something it would not do.
+    const raw =
+      '<action>{"kind": "moveItemToDay", "childId": "lincoln", "fromDateKey": "2026-08-12", "toDateKey": "2026-08-12", "itemKey": "row-9"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
+  it('rejects a malformed date on either side', () => {
+    const badFrom =
+      '<action>{"kind": "moveItemToDay", "childId": "lincoln", "fromDateKey": "Wednesday", "toDateKey": "2026-08-13", "itemKey": "k"}</action>'
+    const badTo =
+      '<action>{"kind": "moveItemToDay", "childId": "lincoln", "fromDateKey": "2026-08-12", "toDateKey": "next Friday", "itemKey": "k"}</action>'
+    expect(parseChatActions(badFrom).actions).toEqual([])
+    expect(parseChatActions(badTo).actions).toEqual([])
+  })
+
+  it('rejects a missing itemKey', () => {
+    const raw =
+      '<action>{"kind": "moveItemToDay", "childId": "lincoln", "fromDateKey": "2026-08-12", "toDateKey": "2026-08-13"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+})
+
+describe('parseChatActions — addItemToDay (FEAT-142)', () => {
+  it('extracts a well-formed add with a subject', () => {
+    const raw =
+      '<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "Sight word games", "estimatedMinutes": 15, "subjectBucket": "Reading"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([
+      {
+        kind: 'addItemToDay',
+        childId: 'lincoln',
+        dateKey: '2026-08-12',
+        label: 'Sight word games',
+        estimatedMinutes: 15,
+        subjectBucket: 'Reading',
+      },
+    ])
+  })
+
+  it('accepts an add with no subject at all', () => {
+    const raw =
+      '<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "Nature walk", "estimatedMinutes": 30}</action>'
+    const [action] = parseChatActions(raw).actions
+    expect(action).toEqual({
+      kind: 'addItemToDay',
+      childId: 'lincoln',
+      dateKey: '2026-08-12',
+      label: 'Nature walk',
+      estimatedMinutes: 30,
+    })
+    expect(action).not.toHaveProperty('subjectBucket')
+  })
+
+  it('drops an unrecognised subject bucket without dropping the action', () => {
+    // A subject is a colour-coding hint; refusing the whole add over one would
+    // fail the parent for something that costs nothing to omit.
+    const raw =
+      '<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "Nature walk", "estimatedMinutes": 30, "subjectBucket": "Outdoors"}</action>'
+    const [action] = parseChatActions(raw).actions
+    expect(action).toBeDefined()
+    expect(action).not.toHaveProperty('subjectBucket')
+  })
+
+  it('rejects out-of-band minutes rather than clamping them', () => {
+    for (const minutes of [0, 4, 121, 240, -15]) {
+      const raw = `<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "Thing", "estimatedMinutes": ${minutes}}</action>`
+      expect(
+        parseChatActions(raw).actions,
+        `estimatedMinutes=${minutes} must be rejected, not clamped`,
+      ).toEqual([])
+    }
+  })
+
+  it('rejects non-integer, string and non-finite minutes', () => {
+    for (const raw of [
+      '<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "T", "estimatedMinutes": 30.5}</action>',
+      '<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "T", "estimatedMinutes": "30"}</action>',
+      '<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "T"}</action>',
+    ]) {
+      expect(parseChatActions(raw).actions).toEqual([])
+    }
+  })
+
+  it('rejects an empty label', () => {
+    const raw =
+      '<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "   ", "estimatedMinutes": 15}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+
+  it('trims the label rather than storing the whitespace', () => {
+    const raw =
+      '<action>{"kind": "addItemToDay", "childId": "lincoln", "dateKey": "2026-08-12", "label": "  Copywork  ", "estimatedMinutes": 15}</action>'
+    expect(parseChatActions(raw).actions[0]).toMatchObject({ label: 'Copywork' })
+  })
+})
+
+describe('parseChatActions — unknown live-day-shaped kinds stay unrepresentable', () => {
+  it('rejects kinds the union does not carry', () => {
+    for (const kind of [
+      'completeItemOnDay',
+      'uncompleteItemOnDay',
+      'reorderItemOnDay',
+      'setItemMinutesOnDay',
+      'clearDay',
+    ]) {
+      const raw = `<action>{"kind": "${kind}", "childId": "lincoln", "dateKey": "2026-08-12", "itemKey": "k"}</action>`
+      expect(parseChatActions(raw).actions, `kind=${kind}`).toEqual([])
+    }
+  })
+})

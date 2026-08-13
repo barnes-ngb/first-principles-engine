@@ -9,18 +9,41 @@ import { buildContextForTask } from "../contextSlices.js";
  * Model: Sonnet (vision)
  */
 
-function buildScanSystemPrompt(
+/**
+ * FEAT-141: what the app already knew at the moment the photo was taken. Passed
+ * through the SAME scan call (never a second round-trip) so the one-line
+ * `contentNote` is grounded in the day's context — which checklist item, which
+ * subject — instead of guessed from pixels alone. Absent for scan callers that
+ * have no checklist item (Progress per-card scan, certificate upload).
+ */
+export interface ScanCaptureContext {
+  itemLabel?: string;
+  subjectBucket?: string;
+}
+
+export function formatCaptureContext(ctx: ScanCaptureContext | undefined): string {
+  if (!ctx) return "";
+  const lines: string[] = [];
+  if (ctx.itemLabel) lines.push(`- Planned activity: ${ctx.itemLabel}`);
+  if (ctx.subjectBucket) lines.push(`- Subject: ${ctx.subjectBucket}`);
+  if (!lines.length) return "";
+  return `CAPTURE CONTEXT (what the app knows about this photo — use it to ground contentNote):\n${lines.join("\n")}`;
+}
+
+export function buildScanSystemPrompt(
   childName: string,
   childGrade: string | undefined,
   contextSections: string[],
+  captureContext?: ScanCaptureContext,
 ): string {
   const childLine = `Student: ${childName}${childGrade ? `, grade ${childGrade}` : ""}`;
+  const captureSection = formatCaptureContext(captureContext);
 
   return `You are analyzing a photo of a workbook page, worksheet, certificate, or progress document for a homeschool student.
 
 ${childLine}
 
-${contextSections.join("\n\n")}
+${contextSections.join("\n\n")}${captureSection ? `\n\n${captureSection}` : ""}
 
 Analyze this page and respond ONLY with valid JSON (no markdown fences, no commentary):
 
@@ -40,6 +63,7 @@ Analyze this page and respond ONLY with valid JSON (no markdown fences, no comme
   "recommendationReason": "string — why this recommendation based on student's current level",
   "estimatedMinutes": number,
   "teacherNotes": "string — tips for the parent on how to present this page",
+  "contentNote": "string — ONE line, 140 characters MAX, plainly describing what is actually in this photo",
   "curriculumDetected": {
     "provider": "gatb|reading-eggs|other|null",
     "name": "string — full curriculum name if identifiable (e.g., 'The Good and the Beautiful Language Arts Level 1'), or null",
@@ -96,6 +120,7 @@ If the image is NOT a workbook page but IS a curriculum certificate, progress re
     "recommendedStartLevel": number | null,
     "notes": "string — what this means for the child's current level"
   },
+  "contentNote": "string — ONE line, 140 characters MAX, plainly describing what is in this photo",
   "curriculumDetected": {
     "provider": "gatb|reading-eggs|other|null",
     "name": "string — full curriculum name, or null",
@@ -118,6 +143,20 @@ If you can identify the curriculum, fill in the curriculumDetected object.
 The lessonNumber is the most important field — look for "Lesson 47", "L47", page headers with lesson numbers, etc.
 If you can only identify the curriculum but not the exact lesson, set lessonNumber to null.
 If you cannot identify any curriculum, set all curriculumDetected fields to null.
+
+CONTENT NOTE (always include it):
+Every image gets a "contentNote" — one short line saying what the photo actually
+shows, so a parent scrolling months later knows what they are looking at.
+- 140 characters MAX. One line. No sentence-final period needed.
+- Describe what IS there, not what it means. "Lego castle with a working
+  drawbridge" — not "shows persistence and spatial reasoning."
+- Many photos are NOT workbook pages: a finished build, a drawing, a science
+  setup, a kid holding a book. Describe those on their own terms and set
+  pageType to "other" — do not force them into curriculum language.
+- Where a capture-context block appears above, use it to help name what you
+  see; do not repeat it back when the image plainly disagrees with it.
+- No praise, no evaluation, no grade, no child's name. This line is parent-side
+  metadata and is never shown to the child.
 
 RULES:
 - Be specific about skills. Don't say "math" — say "two-digit addition with regrouping" or "consonant blends: bl, cl, fl."
@@ -142,11 +181,13 @@ export const handleScan = async (
 
   let imageBase64: string;
   let mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp" = "image/jpeg";
+  let captureContext: ScanCaptureContext | undefined;
 
   try {
     const parsed = JSON.parse(firstMsg.content) as {
       imageBase64?: string;
       mediaType?: string;
+      captureContext?: ScanCaptureContext;
     };
     if (!parsed.imageBase64) {
       return {
@@ -158,6 +199,18 @@ export const handleScan = async (
     imageBase64 = parsed.imageBase64;
     if (parsed.mediaType) {
       mediaType = parsed.mediaType as typeof mediaType;
+    }
+    // FEAT-141: optional, additive. A caller that sends none gets exactly the
+    // pre-FEAT-141 prompt.
+    if (parsed.captureContext && typeof parsed.captureContext === "object") {
+      captureContext = {
+        ...(typeof parsed.captureContext.itemLabel === "string"
+          ? { itemLabel: parsed.captureContext.itemLabel }
+          : {}),
+        ...(typeof parsed.captureContext.subjectBucket === "string"
+          ? { subjectBucket: parsed.captureContext.subjectBucket }
+          : {}),
+      };
     }
   } catch {
     return {
@@ -181,6 +234,7 @@ export const handleScan = async (
     childData.name,
     childData.grade,
     contextSections,
+    captureContext,
   );
 
   const result = await callClaudeWithVision({

@@ -51,10 +51,17 @@ export interface WorkbookRegistration {
   position: number | null
 }
 
-/** The discriminated result of analyzing ONE workbook page. Replaces the old `null`. */
+/**
+ * The discriminated result of analyzing ONE workbook page. Replaces the old `null`.
+ *
+ * FEAT-141 adds `contentNote` to BOTH arms, optional: the page was read (so the
+ * analysis exists) in more cases than it registered — a certificate photographed
+ * onto a workbook row still describes itself. It is carried, never reported:
+ * `buildWorkbookScanReport` does not read it and the parent's toast is unchanged.
+ */
 export type WorkbookPageOutcome =
-  | { ok: true; registration: WorkbookRegistration }
-  | { ok: false; reason: WorkbookScanFailure }
+  | { ok: true; registration: WorkbookRegistration; contentNote?: string }
+  | { ok: false; reason: WorkbookScanFailure; contentNote?: string }
 
 /**
  * A capture/analysis toast. `warning` is the new member (FEAT-136): a failed
