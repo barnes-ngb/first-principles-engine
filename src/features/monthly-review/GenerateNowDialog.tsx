@@ -21,9 +21,12 @@ import { app } from '../../core/firebase/firebase'
 import { useMonthlyReview } from '../../core/hooks/useMonthlyReviews'
 import type { Child } from '../../core/types'
 import {
+  fingerprintDraft,
   isDeadlineExceeded,
   isDraftReady,
   monthlyReviewDocId,
+  WAIT_GRACE_MS,
+  type DraftFingerprint,
 } from './monthlyDraftWatch'
 
 /**
@@ -89,18 +92,17 @@ export function GenerateNowDialog({
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /**
-   * Set when the client gave up before the server did. The call is gone, but
-   * the function is still running and will write the doc — so we watch for it
-   * rather than telling the parent their book failed.
+   * Set when the client gave up on the call. The call is gone, but the function
+   * may still be running and will write the doc — so we watch for it rather
+   * than telling the parent their book failed.
    */
-  const [waiting, setWaiting] = useState<{
-    reviewId: string
-    tappedAt: string
-  } | null>(null)
-  /** `generatedAt` on the first snapshot after `waiting` was set. */
+  const [waiting, setWaiting] = useState<{ reviewId: string } | null>(null)
+  /** Set when the bounded wait ran out without the book landing. */
+  const [gaveUpWaiting, setGaveUpWaiting] = useState(false)
+  /** Fingerprint of the first snapshot after `waiting` was set. */
   const baselineRef = useRef<{
     reviewId: string
-    generatedAt: string | null
+    fingerprint: DraftFingerprint
   } | null>(null)
 
   const {
@@ -128,17 +130,11 @@ export function GenerateNowDialog({
     }
     if (watchLoading) return
 
-    const current = watchedReview?.generatedAt ?? null
+    const current = fingerprintDraft(watchedReview)
     if (baselineRef.current?.reviewId !== waiting.reviewId) {
-      baselineRef.current = { reviewId: waiting.reviewId, generatedAt: current }
+      baselineRef.current = { reviewId: waiting.reviewId, fingerprint: current }
     }
-    if (
-      isDraftReady({
-        baseline: baselineRef.current.generatedAt,
-        current,
-        tappedAt: waiting.tappedAt,
-      })
-    ) {
+    if (isDraftReady({ baseline: baselineRef.current.fingerprint, current })) {
       const { reviewId } = waiting
       baselineRef.current = null
       setWaiting(null)
@@ -148,11 +144,27 @@ export function GenerateNowDialog({
   }, [waiting, watchedReview, watchLoading, watchError, onGenerated])
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Bound the wait. The client's 540s and the function's own `timeoutSeconds:
+  // 540` are the same budget, so a `deadline-exceeded` can mean the server hit
+  // its wall and was killed — in which case no doc write and no subscription
+  // error will ever arrive to end this. Better to stop and say so.
+  useEffect(() => {
+    if (!waiting) return
+    const timer = setTimeout(() => {
+      baselineRef.current = null
+      setWaiting(null)
+      setGenerating(false)
+      setGaveUpWaiting(true)
+    }, WAIT_GRACE_MS)
+    return () => clearTimeout(timer)
+  }, [waiting])
+
   // Reset state when the dialog opens.
   const [lastOpen, setLastOpen] = useState(open)
   if (open && !lastOpen) {
     setLastOpen(true)
     setError(null)
+    setGaveUpWaiting(false)
     if (defaultChildId) setChildId(defaultChildId)
   } else if (!open && lastOpen) {
     setLastOpen(false)
@@ -160,9 +172,9 @@ export function GenerateNowDialog({
 
   const handleGenerate = async () => {
     if (!childId || !month) return
-    const tappedAt = new Date().toISOString()
     setGenerating(true)
     setError(null)
+    setGaveUpWaiting(false)
     try {
       const res = await generateFn({ familyId, childId, month })
       const { reviewId, skipped, reason } = res.data
@@ -177,10 +189,10 @@ export function GenerateNowDialog({
       }
       onGenerated(reviewId)
     } catch (err) {
-      // Only the client timed out — the function has its own 540s and is very
-      // likely still writing. Watch the doc instead of rendering a red failure.
+      // The client gave up, which is not proof the server did. Watch the doc
+      // for a bounded grace period instead of rendering a red failure.
       if (isDeadlineExceeded(err)) {
-        setWaiting({ reviewId: monthlyReviewDocId(childId, month), tappedAt })
+        setWaiting({ reviewId: monthlyReviewDocId(childId, month) })
         return
       }
       const msg = err instanceof Error ? err.message : 'Generation failed'
@@ -196,6 +208,7 @@ export function GenerateNowDialog({
     baselineRef.current = null
     setWaiting(null)
     setGenerating(false)
+    setGaveUpWaiting(false)
     onClose()
   }
 
@@ -259,6 +272,16 @@ export function GenerateNowDialog({
 
           {generating && <LinearProgress />}
 
+          {/* Not red: we stopped watching, which is not the same as knowing
+              the book failed. Say exactly that, and point somewhere useful. */}
+          {gaveUpWaiting && (
+            <Alert severity="warning" onClose={() => setGaveUpWaiting(false)}>
+              We stopped waiting — this one is taking longer than we watch for.
+              It may still finish on its own; check the list of books below in a
+              few minutes before generating again.
+            </Alert>
+          )}
+
           {error && (
             <Alert severity="error" onClose={() => setError(null)}>
               {error}
@@ -279,7 +302,7 @@ export function GenerateNowDialog({
             ? 'Still working…'
             : generating
               ? 'Generating…'
-              : error
+              : error || gaveUpWaiting
                 ? 'Try again'
                 : 'Generate'}
         </Button>

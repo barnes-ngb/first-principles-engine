@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Child, MonthlyReview } from '../../core/types'
+import { WAIT_GRACE_MS } from './monthlyDraftWatch'
 
 // ── Mocks at the boundaries ────────────────────────────────────────────────
 const { httpsCallableMock, callableMock, useMonthlyReviewMock } = vi.hoisted(
@@ -105,6 +106,10 @@ beforeEach(() => {
   })
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('GenerateNowDialog — the client waits as long as the server does', () => {
   it('gives the callable the server’s full 540s budget', () => {
     // The SDK default is 70s; the function is configured `timeoutSeconds: 540`.
@@ -169,6 +174,77 @@ describe('GenerateNowDialog — the client waits as long as the server does', ()
     expect(onGenerated).not.toHaveBeenCalled()
     // Nothing to watch — a real error is a real error.
     expect(subscribedTo.every((id) => id === undefined)).toBe(true)
+  })
+
+  it('never resolves onto a pre-existing draft that did not change', async () => {
+    // Codex P2: the readiness rule used to accept an unchanged doc whose
+    // `generatedAt` looked later than the tap. Device clocks and server clocks
+    // are not the same clock — a phone running slow would open the STALE book
+    // while the regenerate it just asked for was still running.
+    const user = userEvent.setup()
+    callableMock.mockRejectedValue(deadlineError())
+    // A draft already exists, stamped far in the future relative to the tap.
+    watched = {
+      review: reviewDoc('2099-01-01T00:00:00.000Z'),
+      loading: false,
+      error: null,
+    }
+    const { rerender, onGenerated } = renderDialog()
+
+    await tapGenerate(user)
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Still working — the book will open/i),
+      ).toBeInTheDocument()
+    })
+    rerender() // another snapshot of the same unchanged doc
+    expect(onGenerated).not.toHaveBeenCalled()
+
+    // Only an actual rewrite counts.
+    watched = {
+      review: reviewDoc('2099-01-02T00:00:00.000Z'),
+      loading: false,
+      error: null,
+    }
+    rerender()
+    await waitFor(() => {
+      expect(onGenerated).toHaveBeenCalledWith(EXPECTED_REVIEW_ID)
+    })
+  })
+
+  it('stops waiting instead of hanging, and does not call it a failure', async () => {
+    // Codex P2: the client's 540s and the function's own `timeoutSeconds: 540`
+    // are the same budget, so `deadline-exceeded` can mean the server was
+    // killed — no doc write, no subscription error, nothing to end the wait.
+    // Only `setTimeout` is faked, and the tap goes through `fireEvent` rather
+    // than `userEvent`, so nothing but the grace timer depends on our clock.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    callableMock.mockRejectedValue(deadlineError())
+    const { onGenerated } = renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Generate$/i }))
+    // Flush the rejection directly — RTL's `waitFor` polls on timers we own here.
+    await act(async () => {})
+    expect(
+      screen.getByText(/Still working — the book will open/i),
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(WAIT_GRACE_MS + 1)
+    })
+
+    const notice = screen.getByRole('alert')
+    expect(notice).toHaveTextContent(/We stopped waiting/i)
+    // Not red — we stopped watching, we did not observe a failure.
+    expect(notice.className).toMatch(/Warning/i)
+    expect(notice.className).not.toMatch(/Error/i)
+    expect(onGenerated).not.toHaveBeenCalled()
+    expect(
+      screen.queryByText(/Still working — the book will open/i),
+    ).not.toBeInTheDocument()
+    // And the parent can retry.
+    expect(screen.getByRole('button', { name: /Try again/i })).toBeEnabled()
   })
 
   it('opens the book normally when the call returns in time', async () => {
