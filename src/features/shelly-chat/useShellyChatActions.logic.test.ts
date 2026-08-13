@@ -46,6 +46,25 @@ vi.mock('../../core/firebase/updateActivityMinutes', () => ({
   updateActivityConfigMinutes: (...args: unknown[]) => updateActivityConfigMinutes(...args),
 }))
 
+// The FEAT-138 live-day edit lane (FEAT-142). Spied — NOT reimplemented — so
+// these tests assert the chat calls the REAL lane. Everything else in the module
+// (the completed-row rule, the identity lookup, the preservation guard) is left
+// actual, and is covered by liveDayEdit.test.ts.
+const removeItemFromLiveDay = vi.fn()
+const moveItemToLiveDay = vi.fn()
+const addItemToLiveDay = vi.fn()
+vi.mock('../today/liveDayEdit', async () => {
+  const actual = await vi.importActual<typeof import('../today/liveDayEdit')>(
+    '../today/liveDayEdit',
+  )
+  return {
+    ...actual,
+    removeItemFromLiveDay: (...args: unknown[]) => removeItemFromLiveDay(...args),
+    moveItemToLiveDay: (...args: unknown[]) => moveItemToLiveDay(...args),
+    addItemToLiveDay: (...args: unknown[]) => addItemToLiveDay(...args),
+  }
+})
+
 const updateDoc = vi.fn()
 const arrayUnion = vi.fn((...v: unknown[]) => ({ __arrayUnion: v[0] }))
 const doc = vi.fn((...args: unknown[]) => ({ __doc: args.length }))
@@ -65,6 +84,23 @@ import {
   type ActivityMinutesAction,
   type ChatActivityConfig,
 } from './useShellyChatActions'
+import type { ChatWeekDay } from './dayItemActions'
+
+/** Lincoln's live week: a finished row, an ordinary one, and empty weekdays. */
+const WEEK: ChatWeekDay[] = [
+  {
+    dateKey: '2026-08-10',
+    label: 'Monday',
+    items: [
+      { itemKey: 'Reading Eggs (30m)::Reading', label: 'Reading Eggs (30m)', completed: true },
+      { itemKey: 'Math Facts (10m)::Math', label: 'Math Facts (10m)', completed: false },
+    ],
+  },
+  { dateKey: '2026-08-11', label: 'Tuesday', items: [] },
+  { dateKey: '2026-08-12', label: 'Wednesday', items: [] },
+  { dateKey: '2026-08-13', label: 'Thursday', items: [] },
+  { dateKey: '2026-08-14', label: 'Friday', items: [] },
+]
 
 /** Lincoln's own math activity, plus a shared read-aloud both boys do. */
 const CONFIGS: ChatActivityConfig[] = [
@@ -83,7 +119,11 @@ const navigateToPlanner = vi.fn()
 function setup(
   activeChildId = 'lincoln1',
   activeThreadId: string | null = 'thread1',
-  opts: { activityConfigs?: ChatActivityConfig[]; canEditActivityConfigs?: boolean } = {},
+  opts: {
+    activityConfigs?: ChatActivityConfig[]
+    canEditActivityConfigs?: boolean
+    weekDays?: ChatWeekDay[]
+  } = {},
 ) {
   return renderHook(() =>
     useShellyChatActions({
@@ -93,6 +133,7 @@ function setup(
       activeThreadId,
       navigateToPlanner,
       activityConfigs: opts.activityConfigs ?? CONFIGS,
+      weekDays: opts.weekDays ?? WEEK,
       canEditActivityConfigs: opts.canEditActivityConfigs ?? true,
     }),
   )
@@ -106,6 +147,9 @@ beforeEach(() => {
   writeSnapshotUpdate.mockResolvedValue({ changed: true })
   stagePlanAdjustment.mockResolvedValue(undefined)
   updateActivityConfigMinutes.mockResolvedValue(undefined)
+  removeItemFromLiveDay.mockResolvedValue({ status: 'done' })
+  moveItemToLiveDay.mockResolvedValue({ status: 'done' })
+  addItemToLiveDay.mockResolvedValue({ status: 'done' })
   updateDoc.mockResolvedValue(undefined)
 })
 
@@ -754,5 +798,214 @@ describe('useShellyChatActions', () => {
 
     expect(addSightWord).toHaveBeenCalledTimes(2)
     expect(result.current.pending.every((p) => p.status === 'applied')).toBe(true)
+  })
+})
+
+// ── Live-day edits (FEAT-142) ───────────────────────────────────────
+// Three contracts under test: a hallucinated row or an out-of-week date never
+// reaches a write (and the parent is TOLD why no card appeared), a completed row
+// is refused at the stage as well as at the write, and every confirmed edit goes
+// through the REAL FEAT-138 lane rather than a second write path of the chat's
+// own.
+
+const REMOVE_ACTION: ChatAction = {
+  kind: 'removeItemFromDay',
+  childId: 'lincoln1',
+  dateKey: '2026-08-10',
+  itemKey: 'Math Facts (10m)::Math',
+}
+
+const MOVE_ACTION: ChatAction = {
+  kind: 'moveItemToDay',
+  childId: 'lincoln1',
+  fromDateKey: '2026-08-10',
+  toDateKey: '2026-08-13',
+  itemKey: 'Math Facts (10m)::Math',
+}
+
+const ADD_ACTION: ChatAction = {
+  kind: 'addItemToDay',
+  childId: 'lincoln1',
+  dateKey: '2026-08-11',
+  label: 'Sight word games',
+  estimatedMinutes: 15,
+  subjectBucket: 'Reading',
+}
+
+describe('live-day edits — the staging gate (FEAT-142)', () => {
+  it('stages a proposal that resolves against the live week', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [REMOVE_ACTION]))
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('never lets a hallucinated itemKey become a card — and says why', () => {
+    const { result } = setup()
+    const bogus: ChatAction = { ...REMOVE_ACTION, itemKey: 'Handwriting (20m)::LanguageArts' }
+    act(() => result.current.stagePendingActions('msg1', [bogus]))
+    expect(result.current.pending).toHaveLength(0)
+    // FEAT-135's lesson, asserted: a dropped proposal is never dropped silently.
+    expect(result.current.suppressed[0]).toContain("couldn't find that item on Monday")
+  })
+
+  it('never lets an out-of-week date become a card — and says why', () => {
+    const { result } = setup()
+    const nextWeek: ChatAction = { ...REMOVE_ACTION, dateKey: '2026-08-17' }
+    act(() => result.current.stagePendingActions('msg1', [nextWeek]))
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed[0]).toContain('current week')
+  })
+
+  it('REFUSES a completed row at the stage, naming the child and the un-check path', () => {
+    const { result } = setup()
+    const finished: ChatAction = { ...REMOVE_ACTION, itemKey: 'Reading Eggs (30m)::Reading' }
+    act(() => result.current.stagePendingActions('msg1', [finished]))
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed[0]).toContain('Lincoln already did this one')
+    expect(result.current.suppressed[0].toLowerCase()).toContain('un-check')
+  })
+
+  it('drops every live-day proposal for a non-parent profile, with a reason', () => {
+    // `/chat` is nav-gated, not route-gated: a kid can reach it by URL.
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+    act(() => result.current.stagePendingActions('msg1', [REMOVE_ACTION, MOVE_ACTION, ADD_ACTION]))
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed[0]).toContain('grown-up')
+  })
+
+  it('offers no live-day card at all when there is no week loaded', () => {
+    // General/kid-scoped chat passes no week — fail closed, and say so.
+    const { result } = setup('lincoln1', 'thread1', { weekDays: [] })
+    act(() => result.current.stagePendingActions('msg1', [ADD_ACTION]))
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed).toHaveLength(1)
+  })
+})
+
+describe('live-day edits — the write goes through the FEAT-138 lane (FEAT-142)', () => {
+  it('a confirmed removal calls removeItemFromLiveDay with the capability', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [REMOVE_ACTION]))
+    let ok = false
+    await act(async () => {
+      ok = await result.current.applyChatAction(REMOVE_ACTION)
+    })
+    expect(ok).toBe(true)
+    expect(removeItemFromLiveDay).toHaveBeenCalledWith({
+      familyId: 'fam1',
+      childId: 'lincoln1',
+      dateKey: '2026-08-10',
+      itemKey: 'Math Facts (10m)::Math',
+      canEdit: true,
+    })
+    // No second write path: nothing else in the portal was touched.
+    expect(moveItemToLiveDay).not.toHaveBeenCalled()
+    expect(addItemToLiveDay).not.toHaveBeenCalled()
+    expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+  })
+
+  it('a confirmed move calls moveItemToLiveDay with both days', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [MOVE_ACTION]))
+    await act(async () => {
+      await result.current.applyChatAction(MOVE_ACTION)
+    })
+    expect(moveItemToLiveDay).toHaveBeenCalledWith({
+      familyId: 'fam1',
+      childId: 'lincoln1',
+      fromDateKey: '2026-08-10',
+      toDateKey: '2026-08-13',
+      itemKey: 'Math Facts (10m)::Math',
+      canEdit: true,
+    })
+  })
+
+  it("marks a move done on the lane's survivable 'duplicated' half-failure", async () => {
+    // The row DID reach the target day; the source removal failed and the lane
+    // already logged it. Marking the card done is honest — the move happened.
+    moveItemToLiveDay.mockResolvedValue({ status: 'duplicated' })
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [MOVE_ACTION]))
+    let ok = false
+    await act(async () => {
+      ok = await result.current.applyChatAction(MOVE_ACTION)
+    })
+    expect(ok).toBe(true)
+  })
+
+  it('a confirmed add writes a source: manual row through the guarded lane', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [ADD_ACTION]))
+    await act(async () => {
+      await result.current.applyChatAction(ADD_ACTION)
+    })
+    expect(addItemToLiveDay).toHaveBeenCalledTimes(1)
+    const call = addItemToLiveDay.mock.calls[0][0] as {
+      familyId: string
+      childId: string
+      dateKey: string
+      canEdit: boolean
+      item: Record<string, unknown>
+    }
+    expect(call.familyId).toBe('fam1')
+    expect(call.dateKey).toBe('2026-08-11')
+    expect(call.canEdit).toBe(true)
+    // `'planner'` would let a later re-apply silently delete the row.
+    expect(call.item.source).toBe('manual')
+    expect(call.item.label).toBe('Sight word games (15m)')
+    expect(call.item.estimatedMinutes).toBe(15)
+    expect(call.item.completed).toBe(false)
+    // No plannedMinutes anywhere — minutes on a live week stay locked.
+    expect(call.item).not.toHaveProperty('plannedMinutes')
+  })
+
+  it('leaves the card pending when the lane REFUSES the write', async () => {
+    // A completion landing between the card rendering and the tap: the lane
+    // re-checks against the freshly-read document and refuses. The card must not
+    // claim "Done" over a write that did not happen.
+    removeItemFromLiveDay.mockResolvedValue({ status: 'refused', refusal: 'completed' })
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [REMOVE_ACTION]))
+    let ok = true
+    await act(async () => {
+      ok = await result.current.applyChatAction(REMOVE_ACTION)
+    })
+    expect(ok).toBe(false)
+    expect(result.current.pending[0].status).toBe('pending')
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('rejects a live-day edit for a child other than the active one', async () => {
+    const { result } = setup()
+    const wrongChild: ChatAction = { ...REMOVE_ACTION, childId: 'london1' }
+    let ok = true
+    await act(async () => {
+      ok = await result.current.applyChatAction(wrongChild)
+    })
+    expect(ok).toBe(false)
+    expect(removeItemFromLiveDay).not.toHaveBeenCalled()
+  })
+
+  it('backstops a stale card: an apply is re-resolved and refused before any call', async () => {
+    const { result } = setup()
+    const finished: ChatAction = { ...REMOVE_ACTION, itemKey: 'Reading Eggs (30m)::Reading' }
+    let ok = true
+    await act(async () => {
+      ok = await result.current.applyChatAction(finished)
+    })
+    expect(ok).toBe(false)
+    expect(removeItemFromLiveDay).not.toHaveBeenCalled()
+  })
+
+  it('never writes without the parent capability, even if a card were somehow offered', async () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+    let ok = true
+    await act(async () => {
+      ok = await result.current.applyChatAction(ADD_ACTION)
+    })
+    expect(ok).toBe(false)
+    expect(addItemToLiveDay).not.toHaveBeenCalled()
   })
 })

@@ -130,6 +130,126 @@ export function formatChatActivities(
   ].join("\n");
 }
 
+/** A saved day's checklist row, as the THIS WEEK section reads it (FEAT-142). */
+export interface ChatWeekChecklistRow {
+  label?: string;
+  completed?: boolean;
+  skipped?: boolean;
+  subjectBucket?: string;
+  id?: string;
+}
+
+/** One weekday of the current week, for the THIS WEEK section (FEAT-142). */
+export interface ChatWeekDayRow {
+  /** `YYYY-MM-DD`. */
+  dateKey: string;
+  /** Weekday name — "Monday". */
+  label: string;
+  checklist?: ChatWeekChecklistRow[];
+}
+
+/**
+ * A row's identity, as the app computes it (FEAT-142).
+ *
+ * This MUST stay byte-identical to the client's `checklistItemKey`
+ * (`src/features/today/dayWriteGuard.ts`), because the string this emits is the
+ * string the model copies into an action payload, and the client resolves that
+ * payload by comparing it against the same function's output. A divergence here
+ * doesn't corrupt anything — it makes every proposal fail to resolve, and the
+ * parent sees "I couldn't find that item" for rows plainly in front of her.
+ *
+ * Duplicated rather than shared because `functions/` is a separate TypeScript
+ * project with no import path into `src/` (the same deliberate duplication
+ * `sanitizeJson` carries). Two lines, pinned by a test on each side.
+ */
+export function chatChecklistItemKey(item: ChatWeekChecklistRow): string {
+  return item.id ?? `${item.label ?? ""}::${item.subjectBucket ?? ""}`;
+}
+
+const WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+/**
+ * The Mon–Fri date keys of the current week, with their weekday names
+ * (FEAT-142).
+ *
+ * Five weekdays, not seven and not a range: the same rule the client's
+ * `MoveToDayDialog` / `buildWeekDates` encode, and the same rule the chat's
+ * resolution gate applies. Reuses `getWeekMonday`, so "which week is current"
+ * has one definition on this side.
+ *
+ * Formats from the date's own components rather than `toISOString()`: the doc
+ * ids these build are the CLIENT's local-date ids, and a UTC round-trip through
+ * a local-midnight Date can land on the previous day wherever the offset is
+ * positive. A one-day slip would silently read the wrong week.
+ */
+export function currentWeekDays(now: Date = new Date()): {
+  dateKey: string;
+  label: string;
+}[] {
+  const monday = getWeekMonday(now);
+  return WEEKDAY_LABELS.map((label, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return { dateKey: `${yyyy}-${mm}-${dd}`, label };
+  });
+}
+
+/**
+ * Format the THIS WEEK section for a child-scoped chat (FEAT-142).
+ *
+ * This is what lets the assistant name a row on a day and address a
+ * `removeItemFromDay` / `moveItemToDay` action at a real one — without it the
+ * model has nothing valid to put in a payload, which is exactly why the chat
+ * could only ever talk about the week it could not touch.
+ *
+ * Each row carries its label and its identity key. **Completed and skipped rows
+ * are marked plainly**, because the completed-row rule is hard: finished work
+ * has credited minutes into the day's hours and may point at real work a boy
+ * did, so it can never be moved or removed. The model has to know that BEFORE it
+ * proposes, or it spends the parent's tap on a card the write layer will refuse.
+ *
+ * Empty days are listed rather than omitted — a weekday with nothing on it is
+ * still a day a row can be moved onto or added to, and a gap in the list would
+ * read as "that day doesn't exist". Returns "" only when the whole week is
+ * missing, so the section is omitted rather than rendered empty.
+ */
+export function formatChatWeekDays(
+  days: ChatWeekDayRow[],
+  childName: string,
+): string {
+  if (days.length === 0) return "";
+
+  const lines: string[] = [];
+  for (const day of days) {
+    const rows = day.checklist ?? [];
+    lines.push(`${day.label} (${day.dateKey}):`);
+    if (rows.length === 0) {
+      lines.push("  (nothing on this day yet)");
+      continue;
+    }
+    for (const row of rows) {
+      const marks: string[] = [];
+      if (row.completed) marks.push("DONE — cannot be moved or removed");
+      else if (row.skipped) marks.push("skipped");
+      const suffix = marks.length > 0 ? ` [${marks.join(", ")}]` : "";
+      lines.push(
+        `  - ${row.label || "Untitled"}${suffix} (itemKey: ${chatChecklistItemKey(row)})`,
+      );
+    }
+  }
+
+  const who = childName || "this child";
+  return [
+    `THIS WEEK (${who}'s live checklist, Monday–Friday of the CURRENT week — this is what is actually saved on each day right now):`,
+    ...lines,
+    "",
+    'Use an "itemKey" exactly as written when you propose a live-day action, and only for the day it is listed under. A row marked DONE is finished work: it has already counted toward the week\'s hours and may point at something the child made, so it can never be moved or removed — say so instead of proposing.',
+  ].join("\n");
+}
+
 /** Raw artifact shape consumed by the teach-backs formatter. */
 export interface TeachBackArtifactInput {
   title?: string;
@@ -292,16 +412,28 @@ export function formatRecentTeachBacks(rawArtifacts: TeachBackArtifactInput[]): 
  * So: name only screens listed here, or say it isn't in the app yet. The true
  * map for the thing that triggered this — activity durations — is Progress →
  * Curriculum, and the chat can now change that number directly anyway.
+ *
+ * FEAT-142 adds a third permitted ending, for the same honesty reason. "It isn't
+ * in the app yet" is true of a curriculum edit or a video search *from the chat*
+ * and false of the app as a whole — the screens exist, the chat just can't drive
+ * them. Saying "coming; for now: Progress → Curriculum" is the accurate answer,
+ * and it still names only a real screen. What stays forbidden is unchanged: a
+ * screen nobody has been told exists.
  */
 const NAVIGATION_HONESTY_RULE = `
-NAVIGATION HONESTY (hard rule): NEVER describe a screen, tab, setting, or menu you have not been told exists. If you can't do something, say so plainly and then either name a REAL screen from the map below or say it isn't in the app yet — those are the only two endings. Inventing a plausible-sounding location ("check the schedule settings screen") is worse than admitting the gap, because the parent will go looking for something that isn't there. If you are not certain a screen exists, do not name it.
+NAVIGATION HONESTY (hard rule): NEVER describe a screen, tab, setting, or menu you have not been told exists. If you can't do something, say so plainly and then end in one of exactly three ways: name a REAL screen from the map below, say the capability is coming and name the real screen that does it today, or say it isn't in the app yet. Inventing a plausible-sounding location ("check the schedule settings screen") is worse than admitting the gap, because the parent will go looking for something that isn't there. If you are not certain a screen exists, do not name it.
 
 The real map, for the things parents most often ask to change:
 - Activities and how many minutes each one takes by default: Progress → Curriculum. (You can also change an activity's default minutes yourself, right here — see ACTIVITY TIME ACTIONS below, if that section is present.)
 - The weekly plan itself: Plan My Week.
-- Today's checklist: Today.
+- Today's checklist: Today. (You can also change what is on a day of THIS week yourself, right here — see TODAY / THIS WEEK ACTIONS below, if that section is present.)
 - Hours, compliance records, evaluations and the portfolio: Records.
-- Account, profiles, voice input, stickers: Settings. Settings does NOT contain any schedule, subject-duration, or time-block screen — never send anyone there for one.`;
+- The curated video library: Watch Library (its own entry in the parent nav — it is NOT inside Settings).
+- Account, profiles, voice input, stickers: Settings. Settings does NOT contain any schedule, subject-duration, or time-block screen — never send anyone there for one.
+
+What you can change from this chat, and what you can't (say this accurately, never more):
+- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, and what is on a day of THIS week (remove / move / add) — each one confirmed by a tap.
+- NOT YET, and these are coming: adding or completing a curriculum activity or changing its position (for now: Progress → Curriculum); finding videos on the web and planning them (for now: vet one in at Watch Library, then plan it in Plan My Week); reshaping NEXT week from here (for now: the plan-adjustment handoff opens Plan My Week with your brief). Say "that's coming" only for these three — do not promise anything else is on the way.`;
 
 export function buildShellyChatRoleSection(childName: string | undefined): string {
   if (childName) {
@@ -478,6 +610,49 @@ Rules:
 }
 
 /**
+ * Build the live-day `<action>` grammar addendum (FEAT-142).
+ *
+ * The chat's answer to "drop reading on Wednesday", "move the video to Friday",
+ * "add 15 minutes of sight words to today". Taught from the THIS WEEK section
+ * above it: the model picks a REAL `itemKey` off that list and a REAL weekday,
+ * and proposes a single change to a single day. Confirmed by a tap, like every
+ * other portal write.
+ *
+ * Kept explicitly distinct from the two neighbouring capabilities, because the
+ * failure mode is reaching for the wrong one: a change to what is on a day of
+ * THIS week is this action; a standing default for how long an activity runs is
+ * `setActivityMinutes`; a reshape of NEXT week is the handoff.
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like the other action
+ * grammars. Returns "" on the general (no-child) branch.
+ */
+export function buildDayItemActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+TODAY / THIS WEEK ACTIONS (you CAN change what is on a day of the CURRENT week): When the parent wants a row taken off a day, moved to a different day of this week, or a new row added — "drop the handwriting today", "we're not getting to Reading Eggs, take it off Wednesday", "move the video to Friday", "add 15 minutes of sight words to today" — propose ONE action per change, using the real itemKey and dates from the THIS WEEK section above.
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}") and an itemKey / dates copied exactly from THIS WEEK:
+<action>{"kind":"removeItemFromDay","childId":"${childId}","dateKey":"<YYYY-MM-DD from THIS WEEK>","itemKey":"<itemKey from THIS WEEK>"}</action>
+<action>{"kind":"moveItemToDay","childId":"${childId}","fromDateKey":"<YYYY-MM-DD>","toDateKey":"<YYYY-MM-DD>","itemKey":"<itemKey from THIS WEEK>"}</action>
+<action>{"kind":"addItemToDay","childId":"${childId}","dateKey":"<YYYY-MM-DD>","label":"Sight word games","estimatedMinutes":15,"subjectBucket":"Reading"}</action>
+
+Rules:
+- "itemKey" and "dateKey" MUST be copied exactly from the THIS WEEK section, and the itemKey must be listed under the day you name. NEVER invent, guess, or reconstruct one. If you can't find the row the parent means, ask which one — do NOT emit an action.
+- FINISHED WORK IS NEVER EDITABLE. A row marked DONE has already counted toward the week's hours and may point at something the child made. Do not propose moving or removing one — say plainly that it's already done and that un-checking it on Today comes first. There is no override.
+- Only days in THIS WEEK (Monday–Friday, listed above). A move's target must be a different weekday of the same week. For anything about NEXT week, use the plan-adjustment handoff below instead.
+- For "add": "label" is the kid-facing title WITHOUT a minutes suffix (the app adds it), "estimatedMinutes" is a whole number between 5 and 120 — a value outside that range is rejected outright, so don't propose one — and "subjectBucket" is optional (one of Reading, LanguageArts, Math, Science, SocialStudies, Music, Art, PracticalArts, PE, Other). Leave it out rather than guessing.
+- ONE change per action block. If the parent names two ("drop math and move reading to Thursday"), emit two separate blocks.
+- This changes the day's checklist only. It does not change how long an activity takes by default (that's setActivityMinutes), it does not re-plan the week, and it never touches hours already recorded.
+- NEVER say it's done. Say you've proposed it and it takes effect once they confirm — they see the row and the day on a card first.
+- Be conservative: only propose when the parent clearly wants the day changed. Talking about the week is not a change to it.`;
+}
+
+/**
  * Build the `proposePlanAdjustment` HANDOFF grammar addendum (chunk 2A/2).
  *
  * When the parent wants a **next-week plan change** — drop/reduce/repace a
@@ -607,7 +782,7 @@ export const handleShellyChat = async (
   fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
   const reflectionStartDate = fourteenDaysAgo.toISOString().slice(0, 10);
 
-  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult] =
+  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult, weekDaysResult] =
     await Promise.allSettled([
       db.collection(`families/${familyId}/children`).get(),
       childId
@@ -662,6 +837,20 @@ export const handleShellyChat = async (
         ? db.collection(`families/${familyId}/activityConfigs`)
             .where("childId", "in", [childId, "both"])
             .get()
+        : Promise.resolve(null),
+      // THIS WEEK (FEAT-142) — the current week's five weekday documents, read
+      // by canonical id (`{date}_{childId}`), which is exactly what the client's
+      // write lane resolves. So what the model can see and what a confirmed
+      // action can reach are the same documents by construction, with no index
+      // and one round-trip. Child-scoped only; the general branch emits no
+      // actions. `getAll` tolerates missing days — an unwritten weekday comes
+      // back as a non-existent snapshot and is rendered as an empty day.
+      childId
+        ? db.getAll(
+            ...currentWeekDays().map((d) =>
+              db.doc(`families/${familyId}/days/${d.dateKey}_${childId}`),
+            ),
+          )
         : Promise.resolve(null),
     ]);
 
@@ -772,6 +961,29 @@ export const handleShellyChat = async (
     }
   }
 
+  // THIS WEEK (FEAT-142) — the live checklist of each weekday, with each row's
+  // identity key and whether it is finished. Without this section the model has
+  // no valid row to name in a payload, which is exactly why the chat could only
+  // ever talk about the week rather than change it.
+  if (weekDaysResult.status === "fulfilled" && weekDaysResult.value) {
+    const snaps = weekDaysResult.value as Array<{
+      exists: boolean;
+      data: () => Record<string, unknown> | undefined;
+    }>;
+    const week = currentWeekDays();
+    const rows: ChatWeekDayRow[] = week.map((d, i) => {
+      const snap = snaps[i];
+      const data = snap?.exists ? snap.data() : undefined;
+      return {
+        dateKey: d.dateKey,
+        label: d.label,
+        checklist: (data?.checklist ?? []) as ChatWeekChecklistRow[],
+      };
+    });
+    const section = formatChatWeekDays(rows, childName);
+    if (section) supplementalContext += `\n\n${section}`;
+  }
+
   // ── Teaching Reflection Data ──────────────────────────────────
   const reflectionLines: string[] = [];
 
@@ -856,6 +1068,7 @@ Example: If the parent says "Lincoln seems bored with reading" and the data show
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
   const activityMinutesActionAddendum = buildActivityMinutesActionAddendum(childId || undefined, childName || undefined);
+  const dayItemActionAddendum = buildDayItemActionAddendum(childId || undefined, childName || undefined);
   const planAdjustmentActionAddendum = buildPlanAdjustmentActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
   const webSearchAddendum = buildWebSearchAddendum(childId && childName ? childName : undefined);
@@ -868,6 +1081,7 @@ ${roleSection}
 ${sightWordActionAddendum}
 ${snapshotActionAddendum}
 ${activityMinutesActionAddendum}
+${dayItemActionAddendum}
 ${planAdjustmentActionAddendum}
 ${frictionCaptureAddendum}
 ${webSearchAddendum}

@@ -27,6 +27,15 @@
 //     a brief to the planner's per-child inbox (`stagePlanAdjustment`) and
 //     navigates to Plan My Week. shelly-chat NEVER writes the weekly plan — the
 //     planner owns plan writes and applies via its existing lock-in path.
+//   - The live-day edits (FEAT-142) — `removeItemFromDay` / `moveItemToDay` /
+//     `addItemToDay` — change what is on a day of the CURRENT week. They are
+//     routed through `today/liveDayEdit.ts`, the FEAT-138 lane, and are NOT
+//     reimplemented here: the chat opens no second write path to a day document,
+//     so the completed-row rule, the identity lookup and the FEAT-114
+//     preservation guard hold exactly as they do for a tap on Today. Resolved
+//     against the live week BEFORE a card is offered (`dayItemActions`), so a
+//     hallucinated `itemKey` or an out-of-week date never reaches a write — and
+//     the parent is told, in words, why no card appeared.
 //   - `setActivityMinutes` (FEAT-135) writes ONE field — `defaultMinutes` — on
 //     ONE activity config, the number every FUTURE plan reads. It is resolved
 //     against the family's live configs BEFORE the card is offered (a
@@ -43,6 +52,14 @@ import type { ChatAction, Child } from '../../core/types'
 import { todayKey } from '../../core/utils/dateKey'
 import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import { addSightWord, removeSightWord } from '../books/useSightWordProgress'
+import {
+  addItemToLiveDay,
+  moveItemToLiveDay,
+  removeItemFromLiveDay,
+} from '../today/liveDayEdit'
+import { buildManualChecklistItem } from '../today/manualDayItem'
+import type { ChatWeekDay, DayItemAction } from './dayItemActions'
+import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
 import { stagePlanAdjustment } from './stagePlanAdjustment'
 
 export type ActionStatus = 'pending' | 'applied' | 'dismissed'
@@ -106,10 +123,17 @@ export interface ShellyChatActionsDeps {
    */
   activityConfigs?: ChatActivityConfig[]
   /**
-   * Whether the signed-in profile is a parent. `setActivityMinutes` is
-   * parent-only, and `/chat` is nav-gated rather than route-gated, so the write
-   * layer states the gate itself instead of trusting the route. Defaults to
-   * false — fail closed.
+   * The current week's five weekdays for the active child, with each day's rows
+   * (FEAT-142). Used to resolve a proposed live-day edit — remove / move / add —
+   * against a real day and a real row before its confirm card is offered.
+   * Defaults to empty, which simply means no live-day action can be staged.
+   */
+  weekDays?: ChatWeekDay[]
+  /**
+   * Whether the signed-in profile is a parent. `setActivityMinutes` and the
+   * live-day edits are parent-only, and `/chat` is nav-gated rather than
+   * route-gated, so the write layer states the gate itself instead of trusting
+   * the route. Defaults to false — fail closed.
    */
   canEditActivityConfigs?: boolean
   /** Thread the pending actions came from, so applies can annotate the message. */
@@ -179,6 +203,71 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
 
 /** Stable empty default so an omitted `activityConfigs` dep doesn't churn refs. */
 const EMPTY_CONFIGS: ChatActivityConfig[] = []
+/** Same, for an omitted `weekDays` dep. */
+const EMPTY_WEEK: ChatWeekDay[] = []
+
+/**
+ * Perform a confirmed live-day edit through the FEAT-138 lane (FEAT-142).
+ *
+ * **This is a router, not a writer.** Every branch calls `today/liveDayEdit.ts`,
+ * which re-reads the day, resolves the row by `checklistItemKey` against what is
+ * actually saved, refuses a completed row, and writes through the FEAT-114
+ * preservation guard. The chat opens no second path to a day document, so a row
+ * removed from a confirm card and a row removed by a tap on Today are the same
+ * write with the same refusals.
+ *
+ * `canEdit` is threaded through explicitly because the lane requires it as an
+ * argument — the gate cannot be forgotten by a new call site the way a
+ * page-local `if` can.
+ *
+ * Returns false when the lane refused, so the caller can leave the card pending
+ * rather than stamping "Done" over a write that did not happen.
+ */
+async function applyDayItemAction(
+  familyId: string,
+  action: DayItemAction,
+  canEdit: boolean,
+): Promise<boolean> {
+  if (action.kind === 'removeItemFromDay') {
+    const outcome = await removeItemFromLiveDay({
+      familyId,
+      childId: action.childId,
+      dateKey: action.dateKey,
+      itemKey: action.itemKey,
+      canEdit,
+    })
+    return outcome.status === 'done'
+  }
+
+  if (action.kind === 'moveItemToDay') {
+    const outcome = await moveItemToLiveDay({
+      familyId,
+      childId: action.childId,
+      fromDateKey: action.fromDateKey,
+      toDateKey: action.toDateKey,
+      itemKey: action.itemKey,
+      canEdit,
+    })
+    // `'duplicated'` is the lane's deliberately-survivable half-failure: the row
+    // reached the target day but the source removal failed, so it is on BOTH.
+    // The move DID happen, so the card is honest to mark done; the lane has
+    // already logged the anomaly for the parent's next look at the week.
+    return outcome.status === 'done' || outcome.status === 'duplicated'
+  }
+
+  const outcome = await addItemToLiveDay({
+    familyId,
+    childId: action.childId,
+    dateKey: action.dateKey,
+    item: buildManualChecklistItem({
+      title: action.label,
+      estimatedMinutes: action.estimatedMinutes,
+      subjectBucket: action.subjectBucket,
+    }),
+    canEdit,
+  })
+  return outcome.status === 'done'
+}
 
 /**
  * Owns the propose → human-confirm → write loop for `<action>` blocks. The page
@@ -192,6 +281,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     children,
     activeChildId,
     activityConfigs = EMPTY_CONFIGS,
+    weekDays = EMPTY_WEEK,
     canEditActivityConfigs = false,
     activeThreadId,
     navigateToPlanner,
@@ -213,11 +303,18 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // (the page threads it into useShellyChatFlows). Synced in an effect, which
   // runs before any confirm tap can reach these callbacks.
   const configsRef = useRef<ChatActivityConfig[]>(activityConfigs)
+  const weekRef = useRef<ChatWeekDay[]>(weekDays)
   const parentRef = useRef<boolean>(canEditActivityConfigs)
+  // The acting child's NAME, for the refusal sentences a dropped live-day edit
+  // shows ("Lincoln already did this one — …"). A ref for the same reason as the
+  // others: `stagePendingActions` must keep a stable identity.
+  const childNameRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     configsRef.current = activityConfigs
+    weekRef.current = weekDays
     parentRef.current = canEditActivityConfigs
-  }, [activityConfigs, canEditActivityConfigs])
+    childNameRef.current = children.find((c) => c.id === activeChildId)?.name
+  }, [activityConfigs, weekDays, canEditActivityConfigs, children, activeChildId])
 
   /**
    * Stage the actions parsed from an assistant message, awaiting a confirm tap.
@@ -241,6 +338,24 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       setPendingMessageId(messageId)
       const notices: string[] = []
       const offerable = actions.filter((action) => {
+        // FEAT-142 — a live-day edit is resolved against THIS WEEK before it can
+        // become a card: the day must be a weekday of the current week, the row
+        // must really be on it, and a finished row is refused here with the
+        // reason shown (and refused again by the lane at the write).
+        if (isDayItemAction(action)) {
+          const resolution = resolveDayItemAction(
+            action,
+            weekRef.current,
+            parentRef.current,
+            childNameRef.current,
+          )
+          if (!resolution.ok) {
+            console.warn('[shellyChat] dropped live-day edit —', resolution.notice, action)
+            notices.push(resolution.notice)
+            return false
+          }
+          return true
+        }
         if (action.kind !== 'setActivityMinutes') return true
         if (!parentRef.current) {
           console.warn('[shellyChat] dropped setActivityMinutes — parent-only action')
@@ -303,6 +418,20 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
           return 'unknown activity config'
         }
       }
+      // FEAT-142 backstop: even if a card were somehow offered, a live-day edit
+      // must still be parent-initiated and still resolve against this week
+      // before we call the lane. (The lane refuses a third time on the
+      // freshly-read document — this check is not what makes it safe, it is
+      // what keeps a stale card from getting as far as a network round-trip.)
+      if (isDayItemAction(action)) {
+        const resolution = resolveDayItemAction(
+          action,
+          weekRef.current,
+          parentRef.current,
+          childNameRef.current,
+        )
+        if (!resolution.ok) return resolution.notice
+      }
       return null
     },
     [children, activeChildId],
@@ -341,6 +470,17 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         // plan reads. Nothing retroactive: no dayLog is touched, no applied
         // week is re-planned, and no already-recorded minute moves.
         await updateActivityConfigMinutes(familyId, action.activityConfigId, action.minutes)
+      } else if (isDayItemAction(action)) {
+        // FEAT-142 — remove / move / add on a day of THIS week, routed through
+        // the FEAT-138 lane. If the lane refuses (a completion landed between
+        // the card rendering and the tap, the row is gone, the capability is
+        // missing), the card stays pending rather than claiming a write that
+        // did not happen.
+        const done = await applyDayItemAction(familyId, action, parentRef.current)
+        if (!done) {
+          console.warn('[shellyChat] live-day edit refused by the write lane', action)
+          return false
+        }
       } else if (action.kind === 'proposePlanAdjustment') {
         // HANDOFF, not a write (chunk 2A/2): stage the brief to the planner's
         // per-child inbox. shelly-chat NEVER writes the plan — the planner owns

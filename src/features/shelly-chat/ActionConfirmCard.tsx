@@ -14,6 +14,13 @@ import Typography from '@mui/material/Typography'
 
 import type { ChatAction, Child } from '../../core/types'
 import { describeActivityAudience } from './activityMinutesView'
+import type { ChatWeekDay, ResolvedDayItemAction } from './dayItemActions'
+import {
+  dayItemActionFootnote,
+  describeDayItemAction,
+  isDayItemAction,
+  resolveDayItemAction,
+} from './dayItemActions'
 import type { ActivityMinutesAction, ChatActivityConfig, PendingAction } from './useShellyChatActions'
 import { resolveActivityConfig } from './useShellyChatActions'
 
@@ -25,6 +32,12 @@ interface ActionConfirmCardProps {
    * a `setActivityMinutes` card by NAME with a real old → new diff (FEAT-135).
    */
   activityConfigs?: ChatActivityConfig[]
+  /**
+   * The current week's weekdays for the active child — needed to render a
+   * live-day card in words: the row's title and the weekday name, never an
+   * `itemKey` or a raw date (FEAT-142).
+   */
+  weekDays?: ChatWeekDay[]
   /**
    * Plain-language reasons a proposal was dropped before it became a card.
    * Rendered in the card's place so a reply that says "confirm with a tap"
@@ -193,6 +206,44 @@ function ActivityMinutesPreview({
 }
 
 /**
+ * Preview for a live-day edit (FEAT-142) — remove / move / add on a day of this
+ * week.
+ *
+ * Framed like the other write cards that change something already in play: a
+ * warning accent and a label naming what is about to change. The body names the
+ * child, the weekday **in words**, and the row by its title — never an
+ * `itemKey`, a document id, or a bare date, because an id on a confirm card is
+ * not something a parent can check the proposal against. The footnote states the
+ * one thing she most needs to know before changing a live week: finished work
+ * and recorded hours are not in play.
+ */
+function DayItemPreview({
+  resolved,
+  childName,
+}: {
+  resolved: ResolvedDayItemAction
+  childName: string
+}) {
+  const isAdd = resolved.action.kind === 'addItemToDay'
+  return (
+    <Stack spacing={0.25}>
+      <Typography
+        variant="caption"
+        sx={{ display: 'block', fontWeight: 700, color: 'warning.main', letterSpacing: 0.2 }}
+      >
+        {isAdd ? `Adds to ${childName}'s week` : `Changes ${childName}'s week`}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {describeDayItemAction(resolved, childName)}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+        {dayItemActionFootnote(resolved.action)}
+      </Typography>
+    </Stack>
+  )
+}
+
+/**
  * Before → after preview for an `editProfileField` action. These are
  * replace-writes on freeform text, so Shelly must see exactly what changes
  * before she taps: the current value and the proposed new value.
@@ -234,7 +285,10 @@ function ProfileEditPreview({
  * a "Review in Plan My Week" CTA) since confirming it opens the planner rather
  * than writing a child's record, and `setActivityMinutes` (FEAT-135) as a named
  * old → new time diff carrying who it affects (loudly, when the activity is
- * shared) and the fact that it applies to future plans only. A batch
+ * shared) and the fact that it applies to future plans only, and the live-day
+ * edits (FEAT-142) as a sentence naming the child, the weekday in words and the
+ * row by its title — never an id — with a footnote that finished work stays
+ * put. A batch
  * "Confirm all" appears when 2+ are
  * still pending. Nothing here writes — taps call back into
  * `useShellyChatActions`. Mobile-first: large tap targets.
@@ -243,6 +297,7 @@ export default function ActionConfirmCard({
   pending,
   familyChildren,
   activityConfigs = [],
+  weekDays = [],
   suppressed = [],
   onConfirm,
   onDismiss,
@@ -288,6 +343,18 @@ export default function ActionConfirmCard({
               : null
           const isActivityMinutes = action.kind === 'setActivityMinutes'
           if (isActivityMinutes && !activityConfig) return null
+          // FEAT-142 — resolve the proposal against the live week so the card
+          // can name the row and the weekday. Unresolvable proposals are
+          // already filtered out at stage time (with a reason shown in the
+          // card's place); if one somehow reaches here we render no card rather
+          // than a card that names nothing. `canEdit` is true at this point by
+          // construction — a non-parent's proposal never becomes a `pending`
+          // entry — and the write layer checks it again regardless.
+          const dayResolution = isDayItemAction(action)
+            ? resolveDayItemAction(action, weekDays, true, childName(action.childId))
+            : null
+          const isDayItem = isDayItemAction(action)
+          if (isDayItem && !dayResolution?.ok) return null
           const icon =
             action.kind === 'addSightWord' ? (
               <AddCircleOutlineIcon fontSize="small" color="action" />
@@ -299,6 +366,8 @@ export default function ActionConfirmCard({
               <EventNoteOutlinedIcon fontSize="small" color="info" />
             ) : isActivityMinutes ? (
               <TimerOutlinedIcon fontSize="small" color="warning" />
+            ) : isDayItem ? (
+              <EventNoteOutlinedIcon fontSize="small" color="warning" />
             ) : (
               <EditOutlinedIcon fontSize="small" color="action" />
             )
@@ -311,7 +380,11 @@ export default function ActionConfirmCard({
                 borderRadius: 2,
                 display: 'flex',
                 alignItems:
-                  isProfileEdit || isSnapshotEdit || isPlanAdjustment || isActivityMinutes
+                  isProfileEdit ||
+                  isSnapshotEdit ||
+                  isPlanAdjustment ||
+                  isActivityMinutes ||
+                  isDayItem
                     ? 'flex-start'
                     : 'center',
                 gap: 1,
@@ -320,7 +393,7 @@ export default function ActionConfirmCard({
                 // slightly stronger border so they read weightier than a
                 // sight-word card. The plan-adjustment handoff gets its own
                 // (info) accent so it reads as "opens the planner", not a write.
-                ...(isSnapshotEdit || isActivityMinutes
+                ...(isSnapshotEdit || isActivityMinutes || isDayItem
                   ? { borderColor: 'warning.main', borderLeftWidth: 3 }
                   : isPlanAdjustment
                     ? { borderColor: 'info.main', borderLeftWidth: 3 }
@@ -335,6 +408,11 @@ export default function ActionConfirmCard({
                     config={activityConfig}
                     allChildNames={allChildNames}
                     actingChildName={childName(action.childId)}
+                  />
+                ) : dayResolution?.ok ? (
+                  <DayItemPreview
+                    resolved={dayResolution.resolved}
+                    childName={childName(action.childId)}
                   />
                 ) : isSnapshotEdit ? (
                   <SnapshotEditPreview action={action} childName={childName(action.childId)} />

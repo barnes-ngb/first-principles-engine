@@ -39,6 +39,7 @@ import type { ChatContext } from '../../core/types'
 import { UserProfile } from '../../core/types/enums'
 import ActionConfirmCard from './ActionConfirmCard'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
+import { useChatWeekDays } from './useChatWeekDays'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 import { formatRelativeTime } from './formatRelativeTime'
@@ -138,6 +139,12 @@ export default function ShellyChatPage() {
     familyId,
     isParent ? contextChildId : '',
   )
+  // FEAT-142 — this week's five weekdays for the active child, read-only. They
+  // resolve a proposed live-day edit (remove / move / add) against a real day
+  // and a real row before its card is offered, and give the card the row's title
+  // and the weekday name instead of an id. Parent-gated the same way, and at the
+  // same two layers, as the configs above — passing '' costs zero reads.
+  const weekDays = useChatWeekDays(familyId, isParent ? contextChildId : '')
   const {
     pending: pendingActions,
     suppressed: suppressedActionNotices,
@@ -150,6 +157,7 @@ export default function ShellyChatPage() {
     children,
     activeChildId: contextChildId,
     activityConfigs,
+    weekDays,
     canEditActivityConfigs: isParent,
     activeThreadId,
     // A confirmed proposePlanAdjustment HANDOFF stages its brief, then navigates
@@ -511,6 +519,7 @@ export default function ShellyChatPage() {
           pending={pendingActions}
           familyChildren={children}
           activityConfigs={activityConfigs}
+          weekDays={weekDays}
           suppressed={suppressedActionNotices}
           onConfirm={applyChatAction}
           onDismiss={dismissAction}
