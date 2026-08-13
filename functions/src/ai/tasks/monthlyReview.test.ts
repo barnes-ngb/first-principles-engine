@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildNoteIndex,
+  collectWorkbookArtifactIds,
   composeMonthlyReview,
   formatPhotoSection,
   type ComposeInput,
@@ -23,6 +24,7 @@ function emptyAggregate(): MonthAggregate {
     workbookArtifactIds: new Set(),
     classifiedScanIds: new Set(),
     allArtifactIds: new Set(),
+    artifactPlanItems: {},
     conundrums: [],
     teachBacks: [],
     hours: { totalMinutes: 0, minutesBySubject: {} },
@@ -303,5 +305,76 @@ describe("FEAT-141 — content notes in the generator prompt", () => {
       'artifact:a1': 'page titled "Elapsed Time"',
     });
     expect(text).toContain("shows=\"page titled 'Elapsed Time'\"");
+  });
+});
+
+// ── FEAT-141 Codex round (PR #1666): the workbook page's artifact twin ──────
+//
+// The workbook capture path writes the SAME page as a scan and as a plain
+// `Photo` artifact. Excluding only the scan left the twin free to be printed —
+// including as the cover hero — so the policy leaked exactly the photo it
+// exists to keep out.
+describe("collectWorkbookArtifactIds — FEAT-141 (Codex P1)", () => {
+  function dayLog(over: Partial<MonthAggregate["dayLogs"][number]>) {
+    return {
+      date: "2026-07-10",
+      totalItems: 1,
+      completedItems: 1,
+      itemEngagement: {},
+      engagementCounts: {},
+      minutesBySubject: {},
+      evidenceCount: 0,
+      evidenceArtifactIds: [],
+      workbookEvidenceIds: [],
+      workbookItemLabels: [],
+      hasTeachBack: false,
+      ...over,
+    };
+  }
+
+  it("keeps the Worksheet-type artifacts it already knew about", () => {
+    const data = emptyAggregate();
+    data.workbookArtifactIds = new Set(["wb-typed"]);
+    expect(collectWorkbookArtifactIds(data).has("wb-typed")).toBe(true);
+  });
+
+  it("adds the artifact twin of a workbook-linked checklist item", () => {
+    const data = emptyAggregate();
+    data.dayLogs = [dayLog({ workbookEvidenceIds: ["art-workbook"] })];
+    expect(collectWorkbookArtifactIds(data).has("art-workbook")).toBe(true);
+  });
+
+  it("adds a batch page that carries only the workbook item's planItem tag", () => {
+    const data = emptyAggregate();
+    data.dayLogs = [dayLog({ workbookItemLabels: ["GATB Math (30m)"] })];
+    data.artifactPlanItems = {
+      "art-extra": "GATB Math (30m)",
+      "art-creative": "Build something",
+    };
+    const ids = collectWorkbookArtifactIds(data);
+    expect(ids.has("art-extra")).toBe(true);
+    // A photo taken against a non-workbook activity is untouched.
+    expect(ids.has("art-creative")).toBe(false);
+  });
+
+  it("returns only what it was given when no day log names a workbook", () => {
+    const data = emptyAggregate();
+    data.artifactPlanItems = { "art-1": "Build something" };
+    expect(collectWorkbookArtifactIds(data).size).toBe(0);
+  });
+
+  it("tolerates day logs written before these fields existed", () => {
+    const data = emptyAggregate();
+    // Pre-FEAT-141 shape: neither array present.
+    data.dayLogs = [
+      dayLog({}) as MonthAggregate["dayLogs"][number],
+    ].map((d) => {
+      const { workbookEvidenceIds, workbookItemLabels, ...rest } = d;
+      void workbookEvidenceIds;
+      void workbookItemLabels;
+      return rest as MonthAggregate["dayLogs"][number];
+    });
+    expect(() => collectWorkbookArtifactIds(data)).not.toThrow();
+    expect(collectWorkbookArtifactIds(data).size).toBe(0);
   });
 });

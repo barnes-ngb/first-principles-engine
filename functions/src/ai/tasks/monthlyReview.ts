@@ -255,6 +255,47 @@ export const handleMonthlyReview = async (
 
 // ── Curation context assembly ─────────────────────────────────
 
+/**
+ * FEAT-141 (Codex P1, PR #1666): every artifact that is really a workbook page.
+ *
+ * The "Worksheet" artifact type is not the only way a curriculum page reaches
+ * the `artifacts` collection — in fact it is the rare one. The workbook capture
+ * path writes the page as a plain `Photo` artifact AND as a scan, so excluding
+ * only the scan left an identical twin eligible for the cover and every content
+ * section: the book would still print the page this policy exists to keep out.
+ *
+ * Two retroactive joins through the day log, so this works on months captured
+ * long before the policy existed (July included):
+ *  1. the artifact is the evidence of a workbook-linked checklist item, and
+ *  2. the artifact's `tags.planItem` names a workbook-linked item that month —
+ *     which is how batch pages 2..N are caught (they are saved with no
+ *     checklist link at all).
+ *
+ * Over-inclusion here is the safe direction: a photo taken against a workbook
+ * activity is exactly what Nathan does not want printed.
+ */
+export function collectWorkbookArtifactIds(data: MonthAggregate): Set<string> {
+  const ids = new Set<string>(data.workbookArtifactIds);
+
+  const workbookLabels = new Set<string>();
+  for (const day of data.dayLogs) {
+    for (const id of day.workbookEvidenceIds ?? []) ids.add(id);
+    for (const label of day.workbookItemLabels ?? []) {
+      if (label) workbookLabels.add(label);
+    }
+  }
+
+  if (workbookLabels.size > 0) {
+    for (const [artifactId, planItem] of Object.entries(
+      data.artifactPlanItems ?? {},
+    )) {
+      if (workbookLabels.has(planItem)) ids.add(artifactId);
+    }
+  }
+
+  return ids;
+}
+
 function buildCurationContext(data: MonthAggregate): PhotoCurationContext {
   const dayLogEngagement: Record<string, Record<string, string>> = {};
   for (const d of data.dayLogs) {
@@ -292,7 +333,8 @@ function buildCurationContext(data: MonthAggregate): PhotoCurationContext {
     sketchArtifactIds: new Set(),
     dadLabArtifactIds,
     resolvedBlockerEvidenceIds,
-    workbookArtifactIds: data.workbookArtifactIds,
+    // FEAT-141: not just `type: "Worksheet"` — see collectWorkbookArtifactIds.
+    workbookArtifactIds: collectWorkbookArtifactIds(data),
     classifiedScanIds: data.classifiedScanIds,
     allArtifactIds: data.allArtifactIds,
   };
