@@ -44,10 +44,15 @@ export interface ScoredPhoto extends PhotoRef {
   /** True when this photo is force-included (book/sketch). */
   autoInclude: boolean;
   /**
-   * True when this photo represents workbook/curriculum content rather than
-   * creative work. Heuristic: `source === "scan"` or the source artifact has
-   * type "Worksheet" (tracked via `workbookArtifactIds`). Workbook scans are
-   * excluded from the cover and deprioritized on celebration sections.
+   * True when this photo is a CURRICULUM IMAGE rather than creative work: any
+   * photo from the `scans` collection, or an artifact uploaded with type
+   * "Worksheet" (tracked via `workbookArtifactIds`).
+   *
+   * FEAT-141 widened this: it used to exempt *classified* scans (a scan the AI
+   * successfully read), which is how pages of workbooks ended up filling
+   * Lincoln's book. A classified scan is the MOST workbook-y photo there is —
+   * the classification proves it is a curriculum page. See
+   * `MAX_CURRICULUM_PHOTOS_IN_BOOK` for the policy that now governs them.
    */
   isWorkbookScan: boolean;
 }
@@ -123,14 +128,11 @@ export function scorePhotos(
       score += 2;
     }
 
-    // A scan is treated as a workbook capture unless it was successfully
-    // classified by the scan pipeline (subject recognized). Classified scans
-    // are real curriculum evidence — they pass the kid-mode filter and can
-    // qualify as cover heroes. An artifact uploaded with type "Worksheet"
-    // is always a workbook capture.
+    // Every scan is a curriculum image, classified or not (FEAT-141) — see
+    // MAX_CURRICULUM_PHOTOS_IN_BOOK. An artifact uploaded with type "Worksheet"
+    // is a curriculum image too.
     const isWorkbookScan =
-      (photo.source === "scan" &&
-        !context.classifiedScanIds?.has(photo.sourceDocId)) ||
+      photo.source === "scan" ||
       (photo.source === "artifact" &&
         !!context.workbookArtifactIds?.has(photo.sourceDocId));
 
@@ -269,9 +271,13 @@ export function pickHeroPhoto(scored: ScoredPhoto[]): PhotoRef | undefined {
 }
 
 function strip(p: ScoredPhoto): PhotoRef {
-  const { autoInclude, isWorkbookScan, ...rest } = p;
+  // `contentNote` is dropped alongside the curation-only flags (FEAT-141): it is
+  // parent-side metadata that grounds the GENERATOR, and the composed book doc
+  // is read by the kid reader. It stays on the artifact/scan doc it belongs to.
+  const { autoInclude, isWorkbookScan, contentNote, ...rest } = p;
   void autoInclude;
   void isWorkbookScan;
+  void contentNote;
   return rest;
 }
 
@@ -396,10 +402,76 @@ export const PARENT_MODE_WORKBOOK_POLICY = {
   cover: "exclude",
   monthInSentence: "exclude",
   whatYouLoved: "exclude",
-  workedThrough: "allow",
+  // FEAT-141: was "allow" (unbounded, up to the section cap). Now capped at
+  // MAX_CURRICULUM_PHOTOS_IN_BOOK and gated on a big-step signal.
+  workedThrough: "allow_one_big_step",
   byTheNumbers: "exclude",
   moreFromMonth: "exclude",
 } as const;
+
+/**
+ * FEAT-141 — the book stops printing workbook pages.
+ *
+ * Nathan, 2026-08-13: *"a picture of a page doesn't really have any bearing
+ * when reviewing."* The monthly book is a record of a month of a kid's life,
+ * and a photographed worksheet documents the curriculum, not the child.
+ *
+ * The policy, stated plainly:
+ *  - **Curriculum images are excluded from the book by default** — every scan
+ *    and every "Worksheet" artifact, in BOTH modes, in every section. Kid mode
+ *    already claimed this rail; before FEAT-141 a *classified* scan slipped
+ *    through it, which is exactly the photo Nathan is objecting to.
+ *  - **At most ONE may appear in the whole book**, and only when it carries a
+ *    big-step signal (`isBigStepCurriculumPhoto`). It goes on the parent's
+ *    "What He Worked Through" evidence page and nowhere else — the kid's book
+ *    stays curriculum-free.
+ *
+ * This holds with zero content notes present, so it works on July's book today.
+ */
+export const MAX_CURRICULUM_PHOTOS_IN_BOOK = 1;
+
+/**
+ * Does this curriculum image mark a big step — the narrow exception the policy
+ * above allows exactly one of?
+ *
+ * Two signals, deliberately narrow, and both mean something happened rather
+ * than "a page was photographed":
+ *  1. **Resolved-blocker evidence** — this photo is the evidence attached to a
+ *     conceptual block that got resolved. It is the page where something broke
+ *     open, which is the definition of a big step.
+ *  2. **A classified scan the parent marked `engaged`** on that day's checklist
+ *     item. Classification alone is not a signal (it only proves the AI could
+ *     read the page); the parent's 😊 on the item is the human judgement, and
+ *     both are required together.
+ *
+ * A "Worksheet" ARTIFACT can only qualify via (1) — nothing classifies it, so
+ * there is no page for signal (2) to be about.
+ */
+export function isBigStepCurriculumPhoto(
+  photo: ScoredPhoto,
+  context: PhotoCurationContext,
+): boolean {
+  if (!photo.isWorkbookScan) return false;
+  if (context.resolvedBlockerEvidenceIds.has(photo.id)) return true;
+  const classified =
+    photo.source === "scan" &&
+    !!context.classifiedScanIds?.has(photo.sourceDocId);
+  if (!classified) return false;
+  const day = context.dayLogEngagement[dateKey(photo.capturedAt)];
+  return day?.[photo.sourceDocId] === "engaged";
+}
+
+/**
+ * The single curriculum image (at most) allowed into the book, or `undefined`.
+ * Highest-scoring qualifying photo wins; `scored` is already sorted by score.
+ */
+export function pickBigStepCurriculumPhotos(
+  scored: ScoredPhoto[],
+  context: PhotoCurationContext,
+): ScoredPhoto[] {
+  const qualified = scored.filter((p) => isBigStepCurriculumPhoto(p, context));
+  return qualified.slice(0, MAX_CURRICULUM_PHOTOS_IN_BOOK);
+}
 
 export function assignPhotosToSections(
   scored: ScoredPhoto[],
@@ -419,6 +491,11 @@ export function assignPhotosToSections(
   // excluded from kid mode everywhere.
   const kidEligible = scored.filter((p) => !p.isWorkbookScan);
   const parentLovedEligible = scored.filter((p) => !p.isWorkbookScan);
+
+  // FEAT-141: the whole book gets at most MAX_CURRICULUM_PHOTOS_IN_BOOK
+  // curriculum images, and only big-step ones. This is the ONLY place a photo
+  // with `isWorkbookScan` re-enters any pool.
+  const bigStepCurriculum = pickBigStepCurriculumPhotos(scored, context);
 
   // Resolved-blocker evidence is reserved for workedThrough — it's the
   // evidence-of-effort photo, not the celebration photo. Keeping it out of
@@ -481,7 +558,10 @@ export function assignPhotosToSections(
   kidSelected.push(...workedKid);
 
   const workedParent = pickWorkedThrough({
-    eligible: scored, // parent worked-through allows workbook scans
+    // FEAT-141: the parent evidence page is the one section a curriculum image
+    // can reach, and only the single big-step exception — never the month's
+    // whole stack of scans.
+    eligible: [...parentLovedEligible, ...bigStepCurriculum],
     alreadySelected: parentSelected,
     alreadyPlacedIds: parentPlacedIds,
     resolvedIds,
