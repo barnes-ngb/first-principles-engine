@@ -90,6 +90,33 @@ export function itemNotFoundNotice(dayLabel: string): string {
 }
 
 /**
+ * Resolve ONE row out of possibly-several matches — the SAME editable-first
+ * tie-break the write lane uses (`liveDayEdit`'s `resolveIndex`, Codex P2 on
+ * PR #1658, and Codex P1 on PR #1667 for this gate).
+ *
+ * A saved day really can hold two rows with the same identity, and the common
+ * way is not a parent planning the same thing twice: `retainChecklistForApply`
+ * KEEPS a completed row and Apply then appends the freshly-planned one with the
+ * same label and subject. Taking the first match resolves to the *completed*
+ * one, so a legitimate edit of the fresh, untouched row is refused as finished
+ * work — and refused HERE, at the gate, for a row the write lane would happily
+ * have edited. A gate that is stricter than the lane it fronts is a bug in the
+ * gate: the parent is told "he already did this one" about work he has not done.
+ *
+ * So: **prefer the first row that is still editable**, falling back to the first
+ * match when every match is completed — which is not a loophole, because that
+ * fallback lands on a completed row and the completed-row rule then refuses it,
+ * exactly as it should.
+ */
+function resolveWeekItem(
+  items: ChatWeekItem[],
+  itemKey: string,
+): ChatWeekItem | undefined {
+  const editable = items.find((i) => i.itemKey === itemKey && !i.completed)
+  return editable ?? items.find((i) => i.itemKey === itemKey)
+}
+
+/**
  * Resolve a proposed live-day edit against the current week.
  *
  * Returns the resolved action (day, target day, row) or a single plain-language
@@ -131,7 +158,7 @@ export function resolveDayItemAction(
     if (!targetDay) return { ok: false, notice: DAY_ITEM_NOTICES.notThisWeek }
   }
 
-  const item = day.items.find((i) => i.itemKey === action.itemKey)
+  const item = resolveWeekItem(day.items, action.itemKey)
   if (!item) return { ok: false, notice: itemNotFoundNotice(day.label) }
   if (item.completed) {
     return { ok: false, notice: liveDayEditLockReason('completed', childName) }

@@ -274,3 +274,67 @@ describe('dayItemActionFootnote', () => {
     expect(dayItemActionFootnote(add('2026-08-10'))).toContain('Nothing already on it changes')
   })
 })
+
+describe('resolveDayItemAction — duplicate identities (Codex P1, PR #1667)', () => {
+  // `retainChecklistForApply` KEEPS a completed row and Apply then appends the
+  // freshly-planned one with the same label and subject — so a day really can
+  // hold two rows of one identity, completed one FIRST.
+  const dupWeek = (): ChatWeekDay[] => [
+    {
+      dateKey: '2026-08-10',
+      label: 'Monday',
+      items: [
+        { itemKey: 'GATB Math (30m)::Math', label: 'GATB Math (30m)', completed: true },
+        { itemKey: 'GATB Math (30m)::Math', label: 'GATB Math (30m)', completed: false },
+      ],
+    },
+    { dateKey: '2026-08-13', label: 'Thursday', items: [] },
+  ]
+
+  it('resolves the EDITABLE duplicate, matching the write lane exactly', () => {
+    // Taking the first match would refuse a legitimate edit of the fresh row as
+    // finished work — a gate stricter than the lane it fronts, telling the
+    // parent "he already did this one" about work he has not done.
+    const result = resolveDayItemAction(
+      remove('2026-08-10', 'GATB Math (30m)::Math'),
+      dupWeek(),
+      true,
+      'Lincoln',
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.resolved.item?.completed).toBe(false)
+  })
+
+  it('applies the same tie-break to a move', () => {
+    const result = resolveDayItemAction(
+      move('2026-08-10', '2026-08-13', 'GATB Math (30m)::Math'),
+      dupWeek(),
+      true,
+      'Lincoln',
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  it('still refuses when EVERY duplicate is completed — the fallback is not a loophole', () => {
+    const allDone: ChatWeekDay[] = [
+      {
+        dateKey: '2026-08-10',
+        label: 'Monday',
+        items: [
+          { itemKey: 'GATB Math (30m)::Math', label: 'GATB Math (30m)', completed: true },
+          { itemKey: 'GATB Math (30m)::Math', label: 'GATB Math (30m)', completed: true },
+        ],
+      },
+    ]
+    const result = resolveDayItemAction(
+      remove('2026-08-10', 'GATB Math (30m)::Math'),
+      allDone,
+      true,
+      'Lincoln',
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.notice).toContain('Lincoln already did this one')
+  })
+})

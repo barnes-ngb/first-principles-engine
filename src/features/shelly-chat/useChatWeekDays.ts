@@ -107,7 +107,18 @@ export function toChatWeekDay(
  * creates the document), it just has nothing on it yet.
  */
 export function useChatWeekDays(familyId: string, childId: string): ChatWeekDay[] {
-  const week = useMemo(() => currentWeekDayKeys(), [])
+  // Recomputed EVERY render, deliberately — five `Date` allocations, and the
+  // alternative is wrong. A `useMemo(..., [])` here would pin the week at mount,
+  // so a chat page left open across a Sunday→Monday rollover would keep
+  // subscribing to last week's documents: every new proposal would be refused as
+  // out-of-week, and a card left on screen from before the boundary could still
+  // pass the stale gate and edit the PREVIOUS week (Codex P2 on PR #1667). The
+  // memo below keys on the resulting dates, so the subscription still only
+  // re-runs when the week actually turns over.
+  const weekNow = currentWeekDayKeys()
+  const weekKey = weekNow.map((d) => d.dateKey).join(',')
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- weekKey IS weekNow's identity
+  const week = useMemo(() => weekNow, [weekKey])
   // Keyed by the subscription's identity so a child/family switch reads as empty
   // immediately. Another child's rows must never be visible to the gate.
   const key = chatWeekDaysCacheKey(familyId, childId)

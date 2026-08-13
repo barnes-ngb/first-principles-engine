@@ -5,7 +5,9 @@ import {
   buildAllChildrenLearnerModels,
   buildDayItemActionAddendum,
   chatChecklistItemKey,
+  civilDateInZone,
   currentWeekDays,
+  DEFAULT_FAMILY_TIME_ZONE,
   formatChatWeekDays,
   buildFrictionCaptureAddendum,
   buildPlanAdjustmentActionAddendum,
@@ -924,7 +926,7 @@ describe("plan-adjustment trigger widening (FEAT-135)", () => {
 describe("currentWeekDays (FEAT-142)", () => {
   it("returns exactly the five weekdays of the week containing the date", () => {
     // Wednesday 2026-08-12.
-    const week = currentWeekDays(new Date("2026-08-12T12:00:00"));
+    const week = currentWeekDays(new Date("2026-08-12T12:00:00Z"), "America/Chicago");
     expect(week.map((d) => d.label)).toEqual([
       "Monday",
       "Tuesday",
@@ -943,17 +945,22 @@ describe("currentWeekDays (FEAT-142)", () => {
 
   it("treats Sunday as belonging to the week that is ending, not the next one", () => {
     // Sunday 2026-08-16 → the Mon-Fri that just finished.
-    const week = currentWeekDays(new Date("2026-08-16T12:00:00"));
+    const week = currentWeekDays(new Date("2026-08-16T12:00:00Z"), "America/Chicago");
     expect(week[0].dateKey).toBe("2026-08-10");
     expect(week[4].dateKey).toBe("2026-08-14");
   });
 
-  it("formats from local date components, never a UTC round-trip", () => {
-    // A local-midnight Date pushed through toISOString() lands on the previous
-    // day wherever the offset is positive — a one-day slip that would silently
-    // read the wrong week. Monday itself must come back as Monday.
-    const week = currentWeekDays(new Date("2026-08-10T00:00:00"));
-    expect(week[0].dateKey).toBe("2026-08-10");
+  it("derives from the FAMILY's civil date, not the runtime's (Codex P2, PR #1667)", () => {
+    // Superseded the original assertion here, which pinned formatting from the
+    // runtime's LOCAL components — that was the runtime-zone assumption the
+    // timezone fix exists to remove. The contract now: an instant that is
+    // Monday 00:00 UTC is still SUNDAY in Chicago, so the family's week is the
+    // one that is ending.
+    const mondayUtcMidnight = new Date("2026-08-10T00:00:00Z");
+    expect(currentWeekDays(mondayUtcMidnight, "America/Chicago")[0].dateKey).toBe("2026-08-03");
+    // Once it is genuinely Monday for the family, the week turns over.
+    const mondayMorningCt = new Date("2026-08-10T13:00:00Z");
+    expect(currentWeekDays(mondayMorningCt, "America/Chicago")[0].dateKey).toBe("2026-08-10");
   });
 });
 
@@ -1109,5 +1116,73 @@ describe("navigation honesty after FEAT-142 — 'coming' is a real ending, inven
     // The Watch Library is NOT in Settings any more (FEAT-132) — the map must
     // not send anyone there for it.
     expect(out).toContain("it is NOT inside Settings");
+  });
+});
+
+describe("currentWeekDays in the family's zone (Codex P2, PR #1667)", () => {
+  it("defaults to the zone every scheduled function in this repo runs on", () => {
+    expect(DEFAULT_FAMILY_TIME_ZONE).toBe("America/Chicago");
+  });
+
+  it("uses the FAMILY's Sunday, not the runtime's already-Monday", () => {
+    // Sunday 2026-08-16, 21:00 America/Chicago = Monday 2026-08-17 02:00 UTC.
+    // Deriving from the runtime clock would select the week the family has not
+    // started yet, and every action emitted from it would be refused by the
+    // client gate as out-of-week. Sunday evening is when a homeschool parent
+    // plans, so this is the wrong hour to be an hour off.
+    const sundayEvening = new Date("2026-08-17T02:00:00Z");
+    const week = currentWeekDays(sundayEvening, "America/Chicago");
+    expect(week[0].dateKey).toBe("2026-08-10");
+    expect(week[4].dateKey).toBe("2026-08-14");
+  });
+
+  it("moves to the new week once the family's Monday actually arrives", () => {
+    // Monday 2026-08-17, 08:00 America/Chicago = 13:00 UTC.
+    const mondayMorning = new Date("2026-08-17T13:00:00Z");
+    const week = currentWeekDays(mondayMorning, "America/Chicago");
+    expect(week[0].dateKey).toBe("2026-08-17");
+  });
+
+  it("honours a family in a different zone", () => {
+    // 2026-08-17T02:00Z is already Monday in London and still Sunday in Chicago.
+    const t = new Date("2026-08-17T02:00:00Z");
+    expect(currentWeekDays(t, "Europe/London")[0].dateKey).toBe("2026-08-17");
+    expect(currentWeekDays(t, "America/Chicago")[0].dateKey).toBe("2026-08-10");
+  });
+
+  it("still returns exactly five labelled weekdays", () => {
+    const week = currentWeekDays(new Date("2026-08-12T12:00:00Z"), "America/Chicago");
+    expect(week.map((d) => d.label)).toEqual([
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+    ]);
+    expect(week.map((d) => d.dateKey)).toEqual([
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+    ]);
+  });
+});
+
+describe("civilDateInZone (Codex P2, PR #1667)", () => {
+  it("returns the civil date in the named zone, YYYY-MM-DD", () => {
+    expect(civilDateInZone(new Date("2026-08-17T02:00:00Z"), "America/Chicago")).toBe(
+      "2026-08-16",
+    );
+    expect(civilDateInZone(new Date("2026-08-17T02:00:00Z"), "Europe/London")).toBe(
+      "2026-08-17",
+    );
+  });
+
+  it("falls back instead of throwing on a bad profile value", () => {
+    // A malformed timeZone on the family doc must not take the whole chat down.
+    expect(civilDateInZone(new Date("2026-08-12T12:00:00Z"), "Not/AZone")).toMatch(
+      /^\d{4}-\d{2}-\d{2}$/,
+    );
   });
 });

@@ -169,31 +169,72 @@ export function chatChecklistItemKey(item: ChatWeekChecklistRow): string {
 const WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
 /**
- * The Mon–Fri date keys of the current week, with their weekday names
+ * The family's timezone when they haven't set one — the same zone every
+ * scheduled function in this repo already runs on (`evaluate`, `monthlyReview`,
+ * `fileFeatureRequests`, `sweepCompliancePacks`). `Family.timeZone` overrides it.
+ */
+export const DEFAULT_FAMILY_TIME_ZONE = "America/Chicago";
+
+/**
+ * `now` as the CIVIL date (`YYYY-MM-DD`) in a given zone (Codex P2, PR #1667).
+ *
+ * Day documents are keyed by the **client's local** date (`{date}_{childId}`,
+ * built from a browser `Date`). A Cloud Function runs in the runtime's zone —
+ * UTC by default — so on a Sunday evening in the US, `new Date()` on the server
+ * is already Monday, and deriving the week from it selects the week the family
+ * has not started yet. The THIS WEEK section would then read five documents that
+ * are not the family's week at all, and every action emitted from it would be
+ * refused by the client gate as out-of-week. Sunday evening is exactly when a
+ * homeschool parent plans, so this is the wrong hour to be an hour off.
+ *
+ * `en-CA` because its short date format IS `YYYY-MM-DD`. An unknown zone makes
+ * `Intl` throw; we fall back to the runtime's own civil date rather than take
+ * the whole chat down over a bad profile field.
+ */
+export function civilDateInZone(now: Date, timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+  } catch {
+    console.warn(`[shellyChat] unknown timeZone ${timeZone} — falling back to runtime local`);
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+}
+
+/**
+ * The Mon–Fri date keys of the family's current week, with their weekday names
  * (FEAT-142).
  *
  * Five weekdays, not seven and not a range: the same rule the client's
  * `MoveToDayDialog` / `buildWeekDates` encode, and the same rule the chat's
- * resolution gate applies. Reuses `getWeekMonday`, so "which week is current"
- * has one definition on this side.
+ * resolution gate applies.
  *
- * Formats from the date's own components rather than `toISOString()`: the doc
- * ids these build are the CLIENT's local-date ids, and a UTC round-trip through
- * a local-midnight Date can land on the previous day wherever the offset is
- * positive. A one-day slip would silently read the wrong week.
+ * The arithmetic runs on the **civil** date in the family's zone, held in UTC
+ * so it stays pure calendar maths with no second timezone shift on top of the
+ * first — `getUTCDay` / `setUTCDate` / `toISOString().slice(0, 10)` on a date
+ * that was constructed at UTC midnight is exact. `getWeekMonday` is deliberately
+ * not reused: it operates on a `Date`'s LOCAL components, which is precisely the
+ * runtime-zone assumption this function exists to remove.
  */
-export function currentWeekDays(now: Date = new Date()): {
-  dateKey: string;
-  label: string;
-}[] {
-  const monday = getWeekMonday(now);
+export function currentWeekDays(
+  now: Date = new Date(),
+  timeZone: string = DEFAULT_FAMILY_TIME_ZONE,
+): { dateKey: string; label: string }[] {
+  const civil = new Date(`${civilDateInZone(now, timeZone)}T00:00:00Z`);
+  const day = civil.getUTCDay(); // 0=Sun, 1=Mon, …, 6=Sat
+  // Sunday belongs to the week that is ENDING, matching the client.
+  civil.setUTCDate(civil.getUTCDate() + (day === 0 ? -6 : 1 - day));
   return WEEKDAY_LABELS.map((label, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return { dateKey: `${yyyy}-${mm}-${dd}`, label };
+    const d = new Date(civil);
+    d.setUTCDate(civil.getUTCDate() + i);
+    return { dateKey: d.toISOString().slice(0, 10), label };
   });
 }
 
@@ -782,7 +823,7 @@ export const handleShellyChat = async (
   fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
   const reflectionStartDate = fourteenDaysAgo.toISOString().slice(0, 10);
 
-  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult, weekDaysResult] =
+  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult, familyResult] =
     await Promise.allSettled([
       db.collection(`families/${familyId}/children`).get(),
       childId
@@ -838,21 +879,41 @@ export const handleShellyChat = async (
             .where("childId", "in", [childId, "both"])
             .get()
         : Promise.resolve(null),
-      // THIS WEEK (FEAT-142) — the current week's five weekday documents, read
-      // by canonical id (`{date}_{childId}`), which is exactly what the client's
-      // write lane resolves. So what the model can see and what a confirmed
-      // action can reach are the same documents by construction, with no index
-      // and one round-trip. Child-scoped only; the general branch emits no
-      // actions. `getAll` tolerates missing days — an unwritten weekday comes
-      // back as a non-existent snapshot and is rendered as an empty day.
-      childId
-        ? db.getAll(
-            ...currentWeekDays().map((d) =>
-              db.doc(`families/${familyId}/days/${d.dateKey}_${childId}`),
-            ),
-          )
-        : Promise.resolve(null),
+      // The family doc, for its `timeZone` (FEAT-142 / Codex P2 on PR #1667).
+      // Day ids are the CLIENT's local dates, so the week has to be derived in
+      // the family's zone rather than the runtime's — see `civilDateInZone`.
+      db.doc(`families/${familyId}`).get(),
     ]);
+
+  // The family's zone, defaulting to the one every scheduled function here
+  // already runs on. Read before the week query below, which depends on it.
+  let familyTimeZone = DEFAULT_FAMILY_TIME_ZONE;
+  if (familyResult.status === "fulfilled" && familyResult.value) {
+    const snap = familyResult.value as { exists: boolean; data: () => Record<string, unknown> | undefined };
+    const tz = snap.exists ? (snap.data()?.timeZone as string | undefined) : undefined;
+    if (typeof tz === "string" && tz.trim().length > 0) familyTimeZone = tz.trim();
+  }
+
+  // THIS WEEK (FEAT-142) — the family's current five weekday documents, read by
+  // canonical id (`{date}_{childId}`), which is exactly what the client's write
+  // lane resolves. So what the model can see and what a confirmed action can
+  // reach are the same documents by construction, with no index and one
+  // round-trip. Child-scoped only; the general branch emits no actions.
+  // `getAll` tolerates missing days — an unwritten weekday comes back as a
+  // non-existent snapshot and is rendered as an empty day.
+  const weekDayKeys = currentWeekDays(new Date(), familyTimeZone);
+  const weekDaySnaps = childId
+    ? await db
+        .getAll(
+          ...weekDayKeys.map((d) =>
+            db.doc(`families/${familyId}/days/${d.dateKey}_${childId}`),
+          ),
+        )
+        .catch((err: unknown) => {
+          console.warn("[shellyChat] THIS WEEK read failed:", err);
+          return null;
+        })
+    : null;
 
   // Format supplemental context
   let supplementalContext = "";
@@ -965,15 +1026,10 @@ export const handleShellyChat = async (
   // identity key and whether it is finished. Without this section the model has
   // no valid row to name in a payload, which is exactly why the chat could only
   // ever talk about the week rather than change it.
-  if (weekDaysResult.status === "fulfilled" && weekDaysResult.value) {
-    const snaps = weekDaysResult.value as Array<{
-      exists: boolean;
-      data: () => Record<string, unknown> | undefined;
-    }>;
-    const week = currentWeekDays();
-    const rows: ChatWeekDayRow[] = week.map((d, i) => {
-      const snap = snaps[i];
-      const data = snap?.exists ? snap.data() : undefined;
+  if (weekDaySnaps) {
+    const rows: ChatWeekDayRow[] = weekDayKeys.map((d, i) => {
+      const snap = weekDaySnaps[i];
+      const data = snap?.exists ? (snap.data() as Record<string, unknown> | undefined) : undefined;
       return {
         dateKey: d.dateKey,
         label: d.label,

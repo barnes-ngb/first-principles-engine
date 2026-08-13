@@ -85,22 +85,32 @@ import {
   type ChatActivityConfig,
 } from './useShellyChatActions'
 import type { ChatWeekDay } from './dayItemActions'
+import { currentWeekDayKeys } from './useChatWeekDays'
+
+// The hook re-reads the CLOCK to bound proposals to the current week, so these
+// fixtures are built from the real current week rather than hardcoded dates —
+// hardcoded ones would pass this week and fail every week after.
+const WEEK_KEYS = currentWeekDayKeys()
+const MONDAY = WEEK_KEYS[0].dateKey
+const THURSDAY = WEEK_KEYS[3].dateKey
+const TUESDAY = WEEK_KEYS[1].dateKey
 
 /** Lincoln's live week: a finished row, an ordinary one, and empty weekdays. */
-const WEEK: ChatWeekDay[] = [
-  {
-    dateKey: '2026-08-10',
-    label: 'Monday',
-    items: [
-      { itemKey: 'Reading Eggs (30m)::Reading', label: 'Reading Eggs (30m)', completed: true },
-      { itemKey: 'Math Facts (10m)::Math', label: 'Math Facts (10m)', completed: false },
-    ],
-  },
-  { dateKey: '2026-08-11', label: 'Tuesday', items: [] },
-  { dateKey: '2026-08-12', label: 'Wednesday', items: [] },
-  { dateKey: '2026-08-13', label: 'Thursday', items: [] },
-  { dateKey: '2026-08-14', label: 'Friday', items: [] },
-]
+const WEEK: ChatWeekDay[] = WEEK_KEYS.map((d, i) => ({
+  dateKey: d.dateKey,
+  label: d.label,
+  items:
+    i === 0
+      ? [
+          {
+            itemKey: 'Reading Eggs (30m)::Reading',
+            label: 'Reading Eggs (30m)',
+            completed: true,
+          },
+          { itemKey: 'Math Facts (10m)::Math', label: 'Math Facts (10m)', completed: false },
+        ]
+      : [],
+}))
 
 /** Lincoln's own math activity, plus a shared read-aloud both boys do. */
 const CONFIGS: ChatActivityConfig[] = [
@@ -811,22 +821,22 @@ describe('useShellyChatActions', () => {
 const REMOVE_ACTION: ChatAction = {
   kind: 'removeItemFromDay',
   childId: 'lincoln1',
-  dateKey: '2026-08-10',
+  dateKey: MONDAY,
   itemKey: 'Math Facts (10m)::Math',
 }
 
 const MOVE_ACTION: ChatAction = {
   kind: 'moveItemToDay',
   childId: 'lincoln1',
-  fromDateKey: '2026-08-10',
-  toDateKey: '2026-08-13',
+  fromDateKey: MONDAY,
+  toDateKey: THURSDAY,
   itemKey: 'Math Facts (10m)::Math',
 }
 
 const ADD_ACTION: ChatAction = {
   kind: 'addItemToDay',
   childId: 'lincoln1',
-  dateKey: '2026-08-11',
+  dateKey: TUESDAY,
   label: 'Sight word games',
   estimatedMinutes: 15,
   subjectBucket: 'Reading',
@@ -851,7 +861,7 @@ describe('live-day edits — the staging gate (FEAT-142)', () => {
 
   it('never lets an out-of-week date become a card — and says why', () => {
     const { result } = setup()
-    const nextWeek: ChatAction = { ...REMOVE_ACTION, dateKey: '2026-08-17' }
+    const nextWeek: ChatAction = { ...REMOVE_ACTION, dateKey: '2099-08-17' }
     act(() => result.current.stagePendingActions('msg1', [nextWeek]))
     expect(result.current.pending).toHaveLength(0)
     expect(result.current.suppressed[0]).toContain('current week')
@@ -895,7 +905,7 @@ describe('live-day edits — the write goes through the FEAT-138 lane (FEAT-142)
     expect(removeItemFromLiveDay).toHaveBeenCalledWith({
       familyId: 'fam1',
       childId: 'lincoln1',
-      dateKey: '2026-08-10',
+      dateKey: MONDAY,
       itemKey: 'Math Facts (10m)::Math',
       canEdit: true,
     })
@@ -915,8 +925,8 @@ describe('live-day edits — the write goes through the FEAT-138 lane (FEAT-142)
     expect(moveItemToLiveDay).toHaveBeenCalledWith({
       familyId: 'fam1',
       childId: 'lincoln1',
-      fromDateKey: '2026-08-10',
-      toDateKey: '2026-08-13',
+      fromDateKey: MONDAY,
+      toDateKey: THURSDAY,
       itemKey: 'Math Facts (10m)::Math',
       canEdit: true,
     })
@@ -950,7 +960,7 @@ describe('live-day edits — the write goes through the FEAT-138 lane (FEAT-142)
       item: Record<string, unknown>
     }
     expect(call.familyId).toBe('fam1')
-    expect(call.dateKey).toBe('2026-08-11')
+    expect(call.dateKey).toBe(TUESDAY)
     expect(call.canEdit).toBe(true)
     // `'planner'` would let a later re-apply silently delete the row.
     expect(call.item.source).toBe('manual')
@@ -1007,5 +1017,45 @@ describe('live-day edits — the write goes through the FEAT-138 lane (FEAT-142)
     })
     expect(ok).toBe(false)
     expect(addItemToLiveDay).not.toHaveBeenCalled()
+  })
+})
+
+describe('live-day edits — the week is re-read from the clock (Codex P2, PR #1667)', () => {
+  // A chat page left open across a Sunday->Monday rollover holds a week that has
+  // stopped being this week. The whole capability is scoped to THIS week, so the
+  // clock is re-read at the moment it matters — a card proposed before the
+  // boundary must not apply against last week's days.
+  const LAST_WEEK: ChatWeekDay[] = [
+    {
+      dateKey: '2020-01-06',
+      label: 'Monday',
+      items: [
+        { itemKey: 'Math Facts (10m)::Math', label: 'Math Facts (10m)', completed: false },
+      ],
+    },
+  ]
+
+  const STALE_ACTION: ChatAction = {
+    kind: 'removeItemFromDay',
+    childId: 'lincoln1',
+    dateKey: '2020-01-06',
+    itemKey: 'Math Facts (10m)::Math',
+  }
+
+  it('never stages a proposal for a week that is no longer current', () => {
+    const { result } = setup('lincoln1', 'thread1', { weekDays: LAST_WEEK })
+    act(() => result.current.stagePendingActions('msg1', [STALE_ACTION]))
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed[0]).toContain('current week')
+  })
+
+  it('never applies one either, even with no re-render between the card and the tap', async () => {
+    const { result } = setup('lincoln1', 'thread1', { weekDays: LAST_WEEK })
+    let ok = true
+    await act(async () => {
+      ok = await result.current.applyChatAction(STALE_ACTION)
+    })
+    expect(ok).toBe(false)
+    expect(removeItemFromLiveDay).not.toHaveBeenCalled()
   })
 })

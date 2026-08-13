@@ -60,6 +60,7 @@ import {
 import { buildManualChecklistItem } from '../today/manualDayItem'
 import type { ChatWeekDay, DayItemAction } from './dayItemActions'
 import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
+import { currentWeekDayKeys } from './useChatWeekDays'
 import { stagePlanAdjustment } from './stagePlanAdjustment'
 
 export type ActionStatus = 'pending' | 'applied' | 'dismissed'
@@ -207,6 +208,23 @@ const EMPTY_CONFIGS: ChatActivityConfig[] = []
 const EMPTY_WEEK: ChatWeekDay[] = []
 
 /**
+ * Narrow the subscribed week to the week it is RIGHT NOW (Codex P2 on PR #1667).
+ *
+ * `useChatWeekDays` recomputes its week on every render, so in practice the
+ * array handed in is current. But a tap does not require an intervening render:
+ * a chat page left open across a Sunday→Monday rollover could hold a card
+ * proposed before the boundary and apply it against last week's days. The whole
+ * capability is scoped to THIS week, so the clock is re-read at the moment it
+ * matters and anything that is no longer this week simply is not there to
+ * resolve against — the proposal then drops with the ordinary out-of-week
+ * reason, which is the true one.
+ */
+function thisWeekOnly(weekDays: ChatWeekDay[]): ChatWeekDay[] {
+  const allowed = new Set(currentWeekDayKeys().map((d) => d.dateKey))
+  return weekDays.filter((d) => allowed.has(d.dateKey))
+}
+
+/**
  * Perform a confirmed live-day edit through the FEAT-138 lane (FEAT-142).
  *
  * **This is a router, not a writer.** Every branch calls `today/liveDayEdit.ts`,
@@ -345,7 +363,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         if (isDayItemAction(action)) {
           const resolution = resolveDayItemAction(
             action,
-            weekRef.current,
+            thisWeekOnly(weekRef.current),
             parentRef.current,
             childNameRef.current,
           )
@@ -426,7 +444,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       if (isDayItemAction(action)) {
         const resolution = resolveDayItemAction(
           action,
-          weekRef.current,
+          thisWeekOnly(weekRef.current),
           parentRef.current,
           childNameRef.current,
         )
