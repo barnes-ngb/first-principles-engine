@@ -720,3 +720,126 @@ describe('useUnifiedCapture — FEAT-108 batch photo capture', () => {
     )
   })
 })
+
+// ── FEAT-141: every captured image keeps a short content note ────────────────
+//
+// Nathan, 2026-08-13: "We need to analyze every image and keep that
+// description… the image analysis should include the other information at
+// capture for context."
+//
+// The rail these cases exist to hold: the note rides on the analysis pass that
+// ALREADY ran on this path. A capture must never fail, block, or change shape
+// because a note could not be produced.
+describe('useUnifiedCapture — FEAT-141 content notes at capture', () => {
+  /** The artifacts branch: a photo the scan pass read but did not classify as curriculum. */
+  const nonCurriculumResults = {
+    pageType: 'other',
+    subject: '',
+    specificTopic: '',
+    skillsTargeted: [],
+    estimatedDifficulty: 'appropriate',
+    recommendation: 'do',
+    recommendationReason: '',
+    estimatedMinutes: 0,
+    teacherNotes: '',
+    contentNote: 'Lego castle with a working drawbridge',
+  }
+
+  it('stores the note the classification pass returned on the artifact', async () => {
+    runScanMock.mockResolvedValue({ id: 'scan-1', results: nonCurriculumResults })
+
+    const { result } = setup({ /* no workbookConfigId → artifacts path */ })
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    const artifact = addDocCalls.find((c) => c.key === 'artifacts')!
+    expect(artifact.data.contentNote).toBe('Lego castle with a working drawbridge')
+  })
+
+  it('hands the capture context to the same analysis call — no second round-trip', async () => {
+    runScanMock.mockResolvedValue({ id: 'scan-1', results: nonCurriculumResults })
+
+    const { result } = setup({ subjectBucket: 'Math' } as Partial<ChecklistItem>)
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    expect(runScanMock).toHaveBeenCalledTimes(1)
+    expect(runScanMock).toHaveBeenCalledWith(
+      expect.any(File),
+      'fam-1',
+      'child-1',
+      { itemLabel: 'GATB Math', subjectBucket: 'Math' },
+    )
+  })
+
+  it('clamps an over-long note at write (≤140 chars, ellipsis)', async () => {
+    runScanMock.mockResolvedValue({
+      id: 'scan-1',
+      results: { ...nonCurriculumResults, contentNote: 'word '.repeat(60) },
+    })
+
+    const { result } = setup({})
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    const note = addDocCalls.find((c) => c.key === 'artifacts')!.data.contentNote as string
+    expect(note.length).toBeLessThanOrEqual(140)
+    expect(note.endsWith('…')).toBe(true)
+  })
+
+  it('a failed analysis pass leaves the capture intact and simply note-less', async () => {
+    runScanMock.mockResolvedValue(null) // pass failed / unreadable
+
+    const { result, persistDayLogImmediate, onMessage } = setup({})
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    // The capture write still happened — that is the whole rail.
+    const artifact = addDocCalls.find((c) => c.key === 'artifacts')!
+    expect(artifact).toBeDefined()
+    expect(artifact.data.contentNote).toBeUndefined()
+    expect(
+      (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0].evidenceArtifactId,
+    ).toBe('artifact-1')
+    expect(onMessage).toHaveBeenCalledWith({ text: 'Work captured!', severity: 'success' })
+  })
+
+  it('a timed-out workbook analysis still saves the photo, with no note', async () => {
+    timeoutScans = true
+
+    const { result, persistDayLogImmediate } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    const artifact = addDocCalls.find((c) => c.key === 'artifacts')!
+    expect(artifact).toBeDefined()
+    expect(artifact.data.contentNote).toBeUndefined()
+    expect(
+      (persistDayLogImmediate.mock.calls.at(-1)![0] as DayLog).checklist![0].evidenceArtifactId,
+    ).toBe('artifact-1')
+  })
+
+  it('the workbook path derives its note from the analysis it already ran', async () => {
+    runScanMock.mockResolvedValue({ id: 'scan-1', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({
+      action: 'updated',
+      configId: 'wb-math',
+      configName: 'GATB Math',
+      position: 12,
+    })
+
+    const { result } = setup({ workbookConfigId: 'wb-math' })
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    expect(runScanMock).toHaveBeenCalledTimes(1) // no extra AI call for the note
+    const artifact = addDocCalls.find((c) => c.key === 'artifacts')!
+    expect(artifact.data.contentNote).toBe('GATB Math Lesson 12 — addition')
+  })
+})

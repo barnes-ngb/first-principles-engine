@@ -571,3 +571,128 @@ describe("loadReadingForMonth", () => {
     expect(result.totalQuestionsSkipped).toBe(0);
   });
 });
+
+// ── FEAT-141: capture-time content notes reach the loader ───────────────────
+describe("loadPhotosForMonth — FEAT-141 content notes", () => {
+  it("carries the note from a scan doc and from an artifact doc", async () => {
+    const db = makeFakeDb({
+      "families/fam/scans": [
+        {
+          id: "scan-1",
+          data: {
+            childId: "child-1",
+            storagePath: "scans/1.jpg",
+            createdAt: "2026-07-05T10:00:00",
+            contentNote: "GATB Math 3 p.73 — elapsed time",
+            results: { subject: "math" },
+          },
+        },
+      ],
+      "families/fam/artifacts": [
+        {
+          id: "art-1",
+          data: {
+            childId: "child-1",
+            type: "Photo",
+            storagePath: "artifacts/1.jpg",
+            createdAt: "2026-07-06T10:00:00",
+            contentNote: "Lego castle with a working drawbridge",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      "child-1",
+      "2026-07-01",
+      "2026-07-31",
+    );
+
+    const byId = Object.fromEntries(result.photos.map((p) => [p.id, p]));
+    expect(byId["scan:scan-1"].contentNote).toBe("GATB Math 3 p.73 — elapsed time");
+    expect(byId["artifact:art-1"].contentNote).toBe(
+      "Lego castle with a working drawbridge",
+    );
+  });
+
+  it("leaves the field absent on photos captured before notes existed", async () => {
+    const db = makeFakeDb({
+      "families/fam/artifacts": [
+        {
+          id: "art-old",
+          data: {
+            childId: "child-1",
+            type: "Photo",
+            storagePath: "artifacts/old.jpg",
+            createdAt: "2026-07-06T10:00:00",
+          },
+        },
+        {
+          id: "art-blank",
+          data: {
+            childId: "child-1",
+            type: "Photo",
+            storagePath: "artifacts/blank.jpg",
+            createdAt: "2026-07-07T10:00:00",
+            contentNote: "   ",
+          },
+        },
+      ],
+    });
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      "child-1",
+      "2026-07-01",
+      "2026-07-31",
+    );
+
+    for (const p of result.photos) {
+      expect(p.contentNote).toBeUndefined();
+    }
+    expect(result.photos).toHaveLength(2);
+  });
+
+  it("carries the note on a Dad Lab photo reached through the report", async () => {
+    const db = makeFakeDb({
+      "families/fam/artifacts": [
+        {
+          id: "lab-art",
+          data: {
+            childId: "lincoln",
+            type: "Photo",
+            storagePath: "artifacts/lab.jpg",
+            createdAt: "2026-07-08T10:00:00",
+            contentNote: "Baking-soda volcano mid-eruption",
+          },
+        },
+      ],
+    });
+
+    const reports: DadLabEntry[] = [
+      {
+        id: "lab-1",
+        title: "The Bridge Test",
+        completedAt: "2026-07-08",
+        hasPrediction: true,
+        hasExplanation: true,
+        artifactIds: ["lab-art"],
+      } as DadLabEntry,
+    ];
+
+    const result = await loadPhotosForMonth(
+      db,
+      "fam",
+      "child-1",
+      "2026-07-01",
+      "2026-07-31",
+      reports,
+    );
+
+    const labPhoto = result.photos.find((p) => p.id === "artifact:lab-art");
+    expect(labPhoto?.contentNote).toBe("Baking-soda volcano mid-eruption");
+  });
+});

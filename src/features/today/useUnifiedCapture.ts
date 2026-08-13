@@ -14,6 +14,8 @@ import { autoCompleteBypassedItems } from './scanAdvance'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { detectBlockersFromScan } from './scanBlocker'
 import { downscaleImage } from '../../core/utils/downscaleImage'
+import { deriveScanContentNote, pickArtifactContentNote } from '../../core/utils/contentNote'
+import type { CaptureContext } from '../../core/utils/contentNote'
 import { withTimeout, UploadTimeoutError } from '../foundations-review/uploadTimeout'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
@@ -137,7 +139,11 @@ export function useUnifiedCapture({
    * so a failed read can never advance a workbook.
    */
   const analyzeWorkbookPage = useCallback(
-    async (scanFile: File, configId: string): Promise<WorkbookPageOutcome> => {
+    async (
+      scanFile: File,
+      configId: string,
+      captureContext?: CaptureContext,
+    ): Promise<WorkbookPageOutcome> => {
       try {
         const shrunk = await downscaleImage(scanFile, 1600, 0.85)
         const scanImage =
@@ -145,15 +151,20 @@ export function useUnifiedCapture({
             ? shrunk
             : new File([shrunk], scanFile.name || 'scan.jpg', { type: 'image/jpeg' })
         const record = await withTimeout(
-          () => runScan(scanImage, familyId, childId),
+          () => runScan(scanImage, familyId, childId, captureContext),
           WORKBOOK_SCAN_TIMEOUT_MS,
         )
         // No parsed results at all — the scan itself failed (upload/CF error, or
         // the model returned non-JSON). Distinct from "read it, wasn't a page".
         if (!record?.results) return { ok: false, reason: 'no-result' }
+        // FEAT-141: derived from the analysis this call already produced, so the
+        // artifact saved alongside the scan carries the same one-line note.
+        const contentNote = deriveScanContentNote(record.results)
         // `isWorksheetScan` only excludes `pageType: 'certificate'`, so this
         // branch is literally "that's a certificate", not "that's unreadable".
-        if (!isWorksheetScan(record.results)) return { ok: false, reason: 'not-a-worksheet' }
+        if (!isWorksheetScan(record.results)) {
+          return { ok: false, reason: 'not-a-worksheet', ...(contentNote ? { contentNote } : {}) }
+        }
         const configResult = await syncScanToConfig(
           childId,
           record.results as WorksheetScanResult,
@@ -171,6 +182,7 @@ export function useUnifiedCapture({
                 : configResult.reason === 'no-curriculum-detected'
                   ? 'no-curriculum-detected'
                   : 'error',
+            ...(contentNote ? { contentNote } : {}),
           }
         }
         return {
@@ -179,6 +191,7 @@ export function useUnifiedCapture({
             configName: configResult.configName ?? 'workbook',
             position: configResult.position ?? null,
           },
+          ...(contentNote ? { contentNote } : {}),
         }
       } catch (err) {
         if (err instanceof UploadTimeoutError) {
@@ -214,6 +227,12 @@ export function useUnifiedCapture({
       // permanent — exactly what lock-in would have done.
       const resolvedConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
       const stampConfigId = !item.workbookConfigId && resolvedConfigId ? { workbookConfigId: resolvedConfigId } : {}
+      // FEAT-141: what the app already knows at capture time, handed to the same
+      // analysis call that was going to run anyway (never a second one).
+      const captureContext: CaptureContext = {
+        itemLabel: item.label.replace(/\s*\(\d+m\)/, ''),
+        ...(item.subjectBucket ? { subjectBucket: item.subjectBucket } : {}),
+      }
       if (resolvedConfigId) {
         let ok = false
         try {
@@ -225,16 +244,20 @@ export function useUnifiedCapture({
           // the outcome they asked for, and "Work captured!" is true. The honesty
           // fix lands on the explicit analyze/backfill action below, where the
           // parent asked a question and got a red non-answer.
-          const outcome = await analyzeWorkbookPage(file, resolvedConfigId)
+          const outcome = await analyzeWorkbookPage(file, resolvedConfigId, captureContext)
           const registration = outcome.ok ? outcome.registration : null
 
           // Artifact (evidence) — always, mirrors the plain artifacts path.
+          // FEAT-141: the note rides on whatever the analysis above already
+          // learned; when it learned nothing the field is simply absent, and
+          // the capture is otherwise identical.
           const artifact = {
             childId,
             title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${childName}'s work`,
             type: EvidenceType.Photo,
             dayLogId: today,
             createdAt: new Date().toISOString(),
+            ...(outcome.contentNote ? { contentNote: outcome.contentNote } : {}),
             tags: {
               engineStage: EngineStage.Build,
               domain: '',
@@ -289,7 +312,7 @@ export function useUnifiedCapture({
 
       try {
         // 1. Try the scan pipeline (AI vision analysis)
-        const record = await runScan(file, familyId, childId)
+        const record = await runScan(file, familyId, childId, captureContext)
         if (!record) {
           clearScan()
         }
@@ -382,12 +405,20 @@ export function useUnifiedCapture({
           persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
         } else {
           // ── ARTIFACTS path: non-curriculum or scan failed ──
+          //
+          // FEAT-141: this is the pass Nathan's "analyze every image" rides on.
+          // It already ran above; all that is new is KEEPING its one-line
+          // description. A failed/timed-out/unreadable pass leaves `record`
+          // (or its results) empty, `contentNote` undefined, and the artifact
+          // write below completely unchanged — the capture never depends on it.
+          const contentNote = pickArtifactContentNote(record?.results)
           const artifact = {
             childId,
             title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${childName}'s work`,
             type: EvidenceType.Photo,
             dayLogId: today,
             createdAt: new Date().toISOString(),
+            ...(contentNote ? { contentNote } : {}),
             tags: {
               engineStage: EngineStage.Build,
               domain: '',
@@ -567,7 +598,12 @@ export function useUnifiedCapture({
           const resp = await fetch(uri)
           const blob = await resp.blob()
           const scanFile = new File([blob], 'workbook-page.jpg', { type: blob.type || 'image/jpeg' })
-          outcomes.push(await analyzeWorkbookPage(scanFile, resolvedConfigId))
+          outcomes.push(
+            await analyzeWorkbookPage(scanFile, resolvedConfigId, {
+              itemLabel: item.label.replace(/\s*\(\d+m\)/, ''),
+              ...(item.subjectBucket ? { subjectBucket: item.subjectBucket } : {}),
+            }),
+          )
         }
 
         const lastRegistration =

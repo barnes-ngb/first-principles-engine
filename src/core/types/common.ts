@@ -63,6 +63,14 @@ export interface Artifact {
   weekKey?: string
   /** Multiple media URLs (e.g. voice recordings) */
   mediaUrls?: string[]
+  /**
+   * FEAT-141: short (≤140 chars) plain-language description of what the image
+   * shows, produced by the capture-time classification pass that already runs
+   * on this path (no second AI call) and clamped at write. Parent-side metadata
+   * for curation / portfolio / compliance — never rendered to a child. Optional
+   * and never backfilled: absent stays absent.
+   */
+  contentNote?: string
 }
 
 // ── Lincoln's Ladders (card-based) ──────────────────────────────

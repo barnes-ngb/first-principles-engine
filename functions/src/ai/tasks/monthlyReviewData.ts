@@ -81,6 +81,14 @@ export interface PhotoRef {
    * via `dadLabReports[*].childReports[name].artifacts`.
    */
   sourceMetadata?: PhotoSourceMetadata;
+  /**
+   * FEAT-141: the short content note written on the source doc at capture time,
+   * when it has one. Read-only grounding for the generator (it tells the model
+   * what a photo actually shows before it writes a caption). Absent on every
+   * pre-FEAT-141 photo, and stripped before the ref reaches the composed book
+   * document — see `strip()` in monthlyReviewCuration.ts.
+   */
+  contentNote?: string;
 }
 
 export interface DayLogEntry {
@@ -578,6 +586,8 @@ export async function loadPhotosForMonth(
         sourceDocId: doc.id,
         capturedAt: (d.createdAt as string) ?? "",
       };
+      const contentNote = readContentNote(d);
+      if (contentNote) ref.contentNote = contentNote;
       if (subjectTag) ref.subjectTag = subjectTag;
       photos.push(ref);
     }
@@ -617,6 +627,8 @@ export async function loadPhotosForMonth(
         sourceDocId: doc.id,
         capturedAt: (d.createdAt as string) ?? "",
       };
+      const contentNote = readContentNote(d);
+      if (contentNote) ref.contentNote = contentNote;
       if (tags.subjectBucket) ref.subjectTag = tags.subjectBucket;
       photos.push(ref);
       seenArtifactIds.add(doc.id);
@@ -679,6 +691,8 @@ export async function loadPhotosForMonth(
             reportTitle: meta.reportTitle,
           },
         };
+        const contentNote = readContentNote(d);
+        if (contentNote) ref.contentNote = contentNote;
         if (tags.subjectBucket) ref.subjectTag = tags.subjectBucket;
         photos.push(ref);
       }
@@ -688,6 +702,20 @@ export async function loadPhotosForMonth(
   }
 
   return { photos, workbookArtifactIds, classifiedScanIds, allArtifactIds };
+}
+
+/**
+ * FEAT-141: read the capture-time content note off a scan or artifact doc.
+ * Defensive — the field is optional, never backfilled, and this loader must
+ * treat a missing or non-string value exactly like a photo that has none.
+ * The 140-char cap is enforced at WRITE; this trims only, so an older
+ * over-long value still reads rather than being silently dropped.
+ */
+function readContentNote(d: Record<string, unknown>): string | undefined {
+  const raw = d.contentNote;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function extractScanSubject(d: Record<string, unknown>): string | undefined {

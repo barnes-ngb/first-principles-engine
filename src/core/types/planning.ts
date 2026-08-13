@@ -830,6 +830,12 @@ export interface WorksheetScanResult {
   estimatedMinutes: number
   teacherNotes: string
   curriculumDetected?: CurriculumDetected
+  /**
+   * FEAT-141: a ≤140-char plain-language line describing what is actually in
+   * the photo, emitted by the same classification call (no extra round-trip).
+   * Optional — pre-FEAT-141 scans have none, and the model may omit it.
+   */
+  contentNote?: string
 }
 
 export interface CertificateScanResult {
@@ -849,6 +855,8 @@ export interface CertificateScanResult {
     notes: string
   }
   curriculumDetected?: CurriculumDetected
+  /** FEAT-141 — see `WorksheetScanResult.contentNote`. */
+  contentNote?: string
 }
 
 export type ScanResult = WorksheetScanResult | CertificateScanResult
@@ -885,6 +893,14 @@ export interface ScanRecord {
   createdAt?: string
   /** Parent override — if present, takes precedence over AI recommendation. */
   parentOverride?: ParentOverride
+  /**
+   * FEAT-141: short (≤140 chars) plain-language description of what this image
+   * is, DERIVED from `results` at write time (`deriveScanContentNote`) — no
+   * second AI call. Parent-side metadata for curation / portfolio / compliance;
+   * never rendered to a child. Absent on pre-FEAT-141 scans and on scans whose
+   * analysis identified nothing.
+   */
+  contentNote?: string
 }
 
 /**
