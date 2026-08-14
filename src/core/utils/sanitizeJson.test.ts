@@ -103,4 +103,105 @@ describe('sanitizeAndParseJson', () => {
   it('throws on completely invalid content', () => {
     expect(() => sanitizeAndParseJson('not json at all')).toThrow()
   })
+
+  // ── Interior quotes (FEAT-146) ──────────────────────────────
+  //
+  // Mirror of the server suite in `functions/src/ai/sanitizeJson.test.ts` — the
+  // two sanitizer copies are a deliberate duplication, so they get the same
+  // cases and must stay in step.
+  describe('interior quotes', () => {
+    it('escapes an interior quote so a later raw newline still parses', () => {
+      const input = `{
+  "caption": "He said "done!" and grinned",
+  "body": "First line
+second line"
+}`
+      const result = sanitizeAndParseJson<{ caption: string; body: string }>(
+        input,
+      )
+      expect(result.caption).toBe('He said "done!" and grinned')
+      expect(result.body).toBe('First line\nsecond line')
+    })
+
+    it('escapes an interior quote inside an array item', () => {
+      const result = sanitizeAndParseJson<{ highlights: string[] }>(
+        '{"highlights": ["You read "Papa Hut" twice", "You built a world"]}',
+      )
+      expect(result.highlights).toEqual([
+        'You read "Papa Hut" twice',
+        'You built a world',
+      ])
+    })
+
+    it('recovers the whole document from one stray quote near the top', () => {
+      const input = `{
+  "theme": "The "Big" Month",
+  "sections": {
+    "cover": { "headline": "Stories You Built", "body": "" },
+    "monthInSentence": { "body": "You read a lot
+and you built a lot"
+    }
+  }
+}`
+      const result = sanitizeAndParseJson<{
+        theme: string
+        sections: Record<string, { body?: string; headline?: string }>
+      }>(input)
+      expect(result.theme).toBe('The "Big" Month')
+      expect(result.sections.monthInSentence.body).toBe(
+        'You read a lot\nand you built a lot',
+      )
+    })
+  })
+
+  // Characterization: the repair must NOT fire on text that is already valid.
+  describe('valid JSON is untouched by the interior-quote repair', () => {
+    it('leaves already-escaped quotes alone', () => {
+      const result = sanitizeAndParseJson<{ quote: string }>(
+        '{"quote": "She said \\"hello\\" softly"}',
+      )
+      expect(result.quote).toBe('She said "hello" softly')
+    })
+
+    it('handles quotes immediately before commas and closers', () => {
+      const result = sanitizeAndParseJson<{ a: string; b: string[] }>(
+        '{"a": "one", "b": ["two", "three"]}',
+      )
+      expect(result).toEqual({ a: 'one', b: ['two', 'three'] })
+    })
+
+    it('handles empty strings', () => {
+      const result = sanitizeAndParseJson<{ a: string; b: string }>(
+        '{"a": "", "b": ""}',
+      )
+      expect(result).toEqual({ a: '', b: '' })
+    })
+
+    it('handles nested objects with whitespace between tokens', () => {
+      const input = `{
+  "outer": {
+    "inner": {
+      "deep": "value"
+    },
+    "list": [
+      "a",
+      "b"
+    ]
+  }
+}`
+      const result = sanitizeAndParseJson<{
+        outer: { inner: { deep: string }; list: string[] }
+      }>(input)
+      expect(result.outer.inner.deep).toBe('value')
+      expect(result.outer.list).toEqual(['a', 'b'])
+    })
+
+    it('keeps a string that ends in an escaped quote', () => {
+      const result = sanitizeAndParseJson<{ a: string; b: number }>(
+        '{"a": "ends with a quote \\"", "b": 1}',
+      )
+      expect(result.a).toBe('ends with a quote "')
+      expect(result.b).toBe(1)
+    })
+  })
 })
