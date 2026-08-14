@@ -565,3 +565,222 @@ describe('parseChatActions — unknown live-day-shaped kinds stay unrepresentabl
     }
   })
 })
+
+// ── Curriculum edits — add / complete / reposition (FEAT-143) ───────────────
+//
+// The chat's half of Progress → Curriculum. Validated here exactly as strictly
+// as the kinds above: real enum members, real integer bands, non-empty ids, and
+// the DATA-08 owner rule where it is decidable from the payload alone. Rejected,
+// never clamped — a clamped number is one the parent never saw on the card.
+
+describe('parseChatActions — addActivity (FEAT-143)', () => {
+  const base = {
+    kind: 'addActivity',
+    childId: 'lincoln',
+    name: 'Khan Academy math',
+    type: 'app',
+    subjectBucket: 'Math',
+    defaultMinutes: 20,
+    frequency: 'daily',
+  }
+  const block = (overrides: Record<string, unknown> = {}) =>
+    `<action>${JSON.stringify({ ...base, ...overrides })}</action>`
+
+  it('accepts a well-formed add', () => {
+    expect(parseChatActions(block()).actions).toEqual([
+      {
+        kind: 'addActivity',
+        childId: 'lincoln',
+        name: 'Khan Academy math',
+        type: 'app',
+        subjectBucket: 'Math',
+        defaultMinutes: 20,
+        frequency: 'daily',
+      },
+    ])
+  })
+
+  it('trims the name and rejects an empty one', () => {
+    expect(parseChatActions(block({ name: '  Handwriting  ' })).actions[0]).toMatchObject({
+      name: 'Handwriting',
+    })
+    expect(parseChatActions(block({ name: '   ' })).actions).toEqual([])
+    expect(parseChatActions(block({ name: 42 })).actions).toEqual([])
+  })
+
+  it('rejects a type outside the real ActivityType union', () => {
+    for (const type of ['tablet', 'Workbook', 'video', '', 7]) {
+      expect(parseChatActions(block({ type })).actions, `type=${String(type)}`).toEqual([])
+    }
+  })
+
+  it('accepts every real ActivityType', () => {
+    for (const type of ['formation', 'workbook', 'routine', 'activity', 'app', 'evaluation']) {
+      expect(parseChatActions(block({ type })).actions, `type=${type}`).toHaveLength(1)
+    }
+  })
+
+  it('rejects a frequency outside the real ActivityFrequency union', () => {
+    for (const frequency of ['weekly', '4x', 'Daily', 'as needed', 3]) {
+      expect(
+        parseChatActions(block({ frequency })).actions,
+        `frequency=${String(frequency)}`,
+      ).toEqual([])
+    }
+  })
+
+  it('accepts every real ActivityFrequency', () => {
+    for (const frequency of ['daily', '3x', '2x', '1x', 'as-needed']) {
+      expect(parseChatActions(block({ frequency })).actions, `frequency=${frequency}`).toHaveLength(
+        1,
+      )
+    }
+  })
+
+  it('rejects an unknown subject bucket', () => {
+    expect(parseChatActions(block({ subjectBucket: 'Coding' })).actions).toEqual([])
+  })
+
+  it('rejects out-of-band, non-integer and non-numeric minutes rather than clamping', () => {
+    for (const defaultMinutes of [0, 4, 121, 30.5, '20', NaN, Infinity]) {
+      expect(
+        parseChatActions(block({ defaultMinutes })).actions,
+        `defaultMinutes=${String(defaultMinutes)} must be rejected, not clamped`,
+      ).toEqual([])
+    }
+    expect(parseChatActions(block({ defaultMinutes: 5 })).actions).toHaveLength(1)
+    expect(parseChatActions(block({ defaultMinutes: 120 })).actions).toHaveLength(1)
+  })
+
+  // DATA-08: a workbook is the same book at a different page per child, so a
+  // shared workbook is malformed rather than merely unwise.
+  it('rejects a SHARED WORKBOOK — the DATA-08 owner rule', () => {
+    expect(
+      parseChatActions(block({ type: 'workbook', shared: true })).actions,
+    ).toEqual([])
+  })
+
+  it('allows a shared non-workbook, and an unshared workbook', () => {
+    expect(parseChatActions(block({ type: 'routine', shared: true })).actions[0]).toMatchObject({
+      shared: true,
+    })
+    expect(parseChatActions(block({ type: 'workbook' })).actions).toHaveLength(1)
+    expect(
+      parseChatActions(block({ type: 'workbook', shared: false })).actions,
+    ).toHaveLength(1)
+  })
+
+  it('drops the whole action when `shared` is not a real boolean', () => {
+    for (const shared of ['true', 1, null]) {
+      expect(parseChatActions(block({ shared })).actions, `shared=${String(shared)}`).toEqual([])
+    }
+  })
+
+  it('omits `shared` entirely when it is false, rather than storing it', () => {
+    expect(parseChatActions(block({ shared: false })).actions[0]).not.toHaveProperty('shared')
+  })
+
+  it('rejects a non-positive or fractional totalUnits / currentPosition', () => {
+    for (const bad of [0, -1, 2.5, '10']) {
+      expect(parseChatActions(block({ totalUnits: bad })).actions, `total=${String(bad)}`).toEqual(
+        [],
+      )
+      expect(
+        parseChatActions(block({ currentPosition: bad })).actions,
+        `position=${String(bad)}`,
+      ).toEqual([])
+    }
+  })
+
+  it('rejects a starting position past the end of the book', () => {
+    expect(
+      parseChatActions(block({ totalUnits: 140, currentPosition: 141 })).actions,
+    ).toEqual([])
+    expect(
+      parseChatActions(block({ totalUnits: 140, currentPosition: 140 })).actions,
+    ).toHaveLength(1)
+  })
+
+  it('carries totalUnits and currentPosition through when both are sound', () => {
+    expect(
+      parseChatActions(block({ totalUnits: 140, currentPosition: 98 })).actions[0],
+    ).toMatchObject({ totalUnits: 140, currentPosition: 98 })
+  })
+})
+
+describe('parseChatActions — markActivityComplete (FEAT-143)', () => {
+  it('accepts a well-formed completion', () => {
+    const raw =
+      '<action>{"kind":"markActivityComplete","childId":"lincoln","activityConfigId":"cfg1"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([
+      { kind: 'markActivityComplete', childId: 'lincoln', activityConfigId: 'cfg1' },
+    ])
+  })
+
+  it('rejects a missing, empty or non-string activityConfigId', () => {
+    for (const id of ['""', '"   "', '7', 'null']) {
+      const raw = `<action>{"kind":"markActivityComplete","childId":"lincoln","activityConfigId":${id}}</action>`
+      expect(parseChatActions(raw).actions, `id=${id}`).toEqual([])
+    }
+    expect(
+      parseChatActions('<action>{"kind":"markActivityComplete","childId":"lincoln"}</action>')
+        .actions,
+    ).toEqual([])
+  })
+
+  it('rejects a missing childId', () => {
+    const raw = '<action>{"kind":"markActivityComplete","activityConfigId":"cfg1"}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+})
+
+describe('parseChatActions — setActivityPosition (FEAT-143)', () => {
+  const block = (position: unknown) =>
+    `<action>{"kind":"setActivityPosition","childId":"lincoln","activityConfigId":"cfg1","position":${JSON.stringify(position)}}</action>`
+
+  it('accepts a well-formed position', () => {
+    expect(parseChatActions(block(107)).actions).toEqual([
+      {
+        kind: 'setActivityPosition',
+        childId: 'lincoln',
+        activityConfigId: 'cfg1',
+        position: 107,
+      },
+    ])
+  })
+
+  it('rejects position 0, negatives, fractions and strings', () => {
+    for (const position of [0, -3, 1.5, '107', null]) {
+      expect(parseChatActions(block(position)).actions, `position=${String(position)}`).toEqual([])
+    }
+  })
+
+  it('accepts position 1 — the first lesson is a real position', () => {
+    expect(parseChatActions(block(1)).actions).toHaveLength(1)
+  })
+
+  it('rejects an empty activityConfigId', () => {
+    const raw =
+      '<action>{"kind":"setActivityPosition","childId":"lincoln","activityConfigId":"  ","position":5}</action>'
+    expect(parseChatActions(raw).actions).toEqual([])
+  })
+})
+
+describe('parseChatActions — curriculum removals stay unrepresentable (FEAT-143)', () => {
+  // Completion is the chat's ONLY removal — retire, don't delete. Every
+  // delete/undo-shaped kind falls through to null by construction, the same
+  // structural guarantee the snapshot kinds carry for downgrades.
+  it('rejects delete-shaped and un-finish-shaped kinds', () => {
+    for (const kind of [
+      'deleteActivity',
+      'removeActivity',
+      'unmarkActivityComplete',
+      'uncompleteActivity',
+      'reorderActivities',
+      'setActivityTotalUnits',
+    ]) {
+      const raw = `<action>{"kind":"${kind}","childId":"lincoln","activityConfigId":"cfg1"}</action>`
+      expect(parseChatActions(raw).actions, `kind=${kind}`).toEqual([])
+    }
+  })
+})
