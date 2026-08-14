@@ -168,17 +168,42 @@ export async function runMonthlyReview(
 
   // 4 + 5. Call Sonnet and parse, with one automatic retry on a malformed or
   // truncated response (FEAT-144).
-  const result = await generateBookJsonWithRetry(
-    (prompt) =>
-      callClaude({
-        apiKey,
+  //
+  // Every attempt that returns is charged, so its usage is accumulated as it
+  // happens rather than read off the result — on the throw path there is no
+  // result to read, and an unlogged charge is an unhonest cost total.
+  const charged = { inputTokens: 0, outputTokens: 0 };
+  let result: BookJsonResult;
+  try {
+    result = await generateBookJsonWithRetry(
+      (prompt) =>
+        callClaude({
+          apiKey,
+          model,
+          maxTokens: MONTHLY_REVIEW_MAX_TOKENS,
+          systemPrompt,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      userPrompt,
+      (usage) => {
+        charged.inputTokens += usage.inputTokens;
+        charged.outputTokens += usage.outputTokens;
+      },
+    );
+  } catch (err) {
+    if (charged.inputTokens > 0 || charged.outputTokens > 0) {
+      // `logAiUsage` never throws, so this cannot mask the real failure.
+      await logAiUsage(db, familyId, {
+        childId,
+        taskType: "monthlyReview",
         model,
-        maxTokens: MONTHLY_REVIEW_MAX_TOKENS,
-        systemPrompt,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    userPrompt,
-  );
+        inputTokens: charged.inputTokens,
+        outputTokens: charged.outputTokens,
+        outcome: "failed",
+      });
+    }
+    throw err;
+  }
   const parsed = result.parsed;
 
   // 6. Compose final document
@@ -947,13 +972,27 @@ export interface BookJsonResult {
  *
  * A parsed result is never thrown away. If the retry fails but the first
  * attempt parsed (a book cut off right at its closing brace, say), the first
- * attempt's book is returned rather than failing a generation we already have.
+ * attempt's book is returned rather than failing a generation we already have
+ * — and that holds whether the retry came back unreadable or never came back
+ * at all (timeout, rate limit, transient provider error).
+ *
+ * `onAttemptUsage` fires once per attempt that actually returned, the moment it
+ * returns. Every attempt is charged whether or not its text parses, so the
+ * caller can record the real cost even on the paths that end in a throw.
  */
 export async function generateBookJsonWithRetry(
   call: BookJsonCall,
   userPrompt: string,
+  onAttemptUsage?: (usage: {
+    inputTokens: number;
+    outputTokens: number;
+  }) => void,
 ): Promise<BookJsonResult> {
   const first = await call(userPrompt);
+  onAttemptUsage?.({
+    inputTokens: first.inputTokens,
+    outputTokens: first.outputTokens,
+  });
   let firstParsed: ParsedMonthlyReview | undefined;
   let firstDiagnostics: ParseFailureDiagnostics | undefined;
 
@@ -983,7 +1022,32 @@ export async function generateBookJsonWithRetry(
     `[monthlyReview] retrying book generation once (stop_reason=${first.stopReason}, parsed=${firstParsed !== undefined})`,
   );
 
-  const second = await call(`${userPrompt}\n\n${STRICT_JSON_RETRY_REMINDER}`);
+  let second: Awaited<ReturnType<BookJsonCall>>;
+  try {
+    second = await call(`${userPrompt}\n\n${STRICT_JSON_RETRY_REMINDER}`);
+  } catch (err) {
+    // The retry never came back (timeout, rate limit, transient provider
+    // error). If attempt 1 gave us a readable book, that book is still good —
+    // losing it to a failed *retry* would be worse than the truncation the
+    // retry was trying to improve on.
+    if (firstParsed !== undefined) {
+      console.warn(
+        "[monthlyReview] retry call failed; keeping the first attempt's book",
+        err,
+      );
+      return {
+        parsed: firstParsed,
+        inputTokens: first.inputTokens,
+        outputTokens: first.outputTokens,
+        retried: true,
+      };
+    }
+    throw err;
+  }
+  onAttemptUsage?.({
+    inputTokens: second.inputTokens,
+    outputTokens: second.outputTokens,
+  });
   const inputTokens = first.inputTokens + second.inputTokens;
   const outputTokens = first.outputTokens + second.outputTokens;
 

@@ -390,11 +390,6 @@ describe("collectWorkbookArtifactIds — FEAT-141 (Codex P1)", () => {
 // ── FEAT-144: parse diagnostics + one automatic retry ─────────
 
 describe("book JSON parse diagnostics", () => {
-  const goodBook = JSON.stringify({
-    theme: "Stories You Built",
-    sections: { cover: { kidMode: { headline: "Stories You Built" } } },
-  });
-
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -627,6 +622,87 @@ describe("generateBookJsonWithRetry", () => {
     expect(call).toHaveBeenCalledTimes(2);
     expect(result.parsed.theme).toBe("Stories You Built");
     expect(result.retried).toBe(true);
+  });
+
+  it("keeps the first attempt's book when the retry call itself rejects", async () => {
+    // Codex P2: the retry is mandatory after a max_tokens cut, so a rejecting
+    // retry (timeout, rate limit, transient provider error) must not destroy a
+    // book attempt 1 already gave us.
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 100,
+        outputTokens: 6000,
+        stopReason: "max_tokens",
+      })
+      .mockRejectedValueOnce(new Error("socket hang up"));
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(result.parsed.theme).toBe("Stories You Built");
+    expect(result.retried).toBe(true);
+    // Only attempt 1 returned, so only attempt 1's usage is counted.
+    expect(result.inputTokens).toBe(100);
+    expect(result.outputTokens).toBe(6000);
+  });
+
+  it("propagates a rejecting retry when there is no first book to keep", async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: brokenBook,
+        inputTokens: 100,
+        outputTokens: 50,
+        stopReason: "end_turn",
+      })
+      .mockRejectedValueOnce(new Error("socket hang up"));
+
+    await expect(generateBookJsonWithRetry(call, "USER PROMPT")).rejects.toThrow(
+      "socket hang up",
+    );
+  });
+
+  it("reports usage for every charged attempt, including on the throw path", async () => {
+    // Codex P2: both attempts are billed even when neither parses. The caller
+    // logs what it is told here, so cost totals stay honest on the failure path.
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: brokenBook,
+        inputTokens: 100,
+        outputTokens: 50,
+        stopReason: "end_turn",
+      })
+      .mockResolvedValueOnce({
+        text: brokenBook,
+        inputTokens: 110,
+        outputTokens: 60,
+        stopReason: "end_turn",
+      });
+    const seen: Array<{ inputTokens: number; outputTokens: number }> = [];
+
+    await expect(
+      generateBookJsonWithRetry(call, "USER PROMPT", (u) => seen.push(u)),
+    ).rejects.toThrow(MALFORMED_MESSAGE);
+
+    expect(seen).toEqual([
+      { inputTokens: 100, outputTokens: 50 },
+      { inputTokens: 110, outputTokens: 60 },
+    ]);
+  });
+
+  it("reports usage once when the first response is clean", async () => {
+    const call = vi.fn().mockResolvedValue({
+      text: goodBook,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+    const seen: Array<{ inputTokens: number; outputTokens: number }> = [];
+
+    await generateBookJsonWithRetry(call, "USER PROMPT", (u) => seen.push(u));
+    expect(seen).toEqual([{ inputTokens: 100, outputTokens: 50 }]);
   });
 
   it("parses a first response whose only flaw is an interior quote — no retry", async () => {
