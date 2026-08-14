@@ -452,3 +452,89 @@ describe('ActionConfirmCard — addActivity (FEAT-143)', () => {
     expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
   })
 })
+
+// ── A confirmed card survives its own write (Codex P2, PR #1669) ─────
+//
+// Confirming a write CHANGES the state the card resolves against, and the
+// subscription delivers that change at once. `markActivityComplete` is the sharp
+// case: the config becomes `completed: true`, the resolver correctly refuses it
+// as already finished — and the card would disappear, taking with it the
+// "Done ✓" that is the parent's only confirmation of an IRREVERSIBLE write.
+
+describe('ActionConfirmCard — an applied card outlives its own write (FEAT-143)', () => {
+  const COMPLETE: PendingAction['action'] = {
+    kind: 'markActivityComplete',
+    childId: 'lincoln1',
+    activityConfigId: 'cfg_gatb',
+  }
+  /** The post-write world: the very config that was just finished. */
+  const AFTER_WRITE: ChatActivityConfig[] = CURRICULUM_CONFIGS.map((c) =>
+    c.id === 'cfg_gatb' ? { ...c, completed: true } : c,
+  )
+
+  it('keeps rendering, with Done, after the config turns completed', () => {
+    renderCard(
+      [{ id: 'msg1_0', status: 'applied', action: COMPLETE }],
+      AFTER_WRITE,
+    )
+    expect(screen.getByText('Mark "GATB Math 3" finished for Lincoln')).toBeInTheDocument()
+    expect(screen.getByText('Done')).toBeInTheDocument()
+  })
+
+  // The gate still means something while the card is undecided: an activity
+  // finished in another tab must stop OFFERING a card here.
+  it('still hides a PENDING card once the config turns completed', () => {
+    renderCard(
+      [{ id: 'msg1_0', status: 'pending', action: COMPLETE }],
+      AFTER_WRITE,
+    )
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/GATB Math 3/)).not.toBeInTheDocument()
+  })
+
+  it('keeps a dismissed card rendering too', () => {
+    renderCard(
+      [{ id: 'msg1_0', status: 'dismissed', action: COMPLETE }],
+      AFTER_WRITE,
+    )
+    expect(screen.getByText('Dismissed')).toBeInTheDocument()
+  })
+
+  it('renders nothing when the config is gone entirely, whatever the status', () => {
+    renderCard([{ id: 'msg1_0', status: 'applied', action: COMPLETE }], [])
+    expect(screen.queryByText('Done')).not.toBeInTheDocument()
+  })
+
+  it('shows Saving… while the write is in flight, with no buttons to tap again', () => {
+    renderCard(
+      [{ id: 'msg1_0', status: 'applying', action: COMPLETE }],
+      CURRICULUM_CONFIGS,
+    )
+    expect(screen.getByText('Saving…')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+  })
+
+  // An applied position card reads the config's NEW number on both sides; the
+  // arrow is dropped rather than rendering "lesson 107 → 107".
+  it('drops the arrow on an applied position card', () => {
+    const applied: ChatActivityConfig[] = CURRICULUM_CONFIGS.map((c) =>
+      c.id === 'cfg_gatb' ? { ...c, currentPosition: 107 } : c,
+    )
+    renderCard(
+      [
+        {
+          id: 'msg1_0',
+          status: 'applied',
+          action: {
+            kind: 'setActivityPosition',
+            childId: 'lincoln1',
+            activityConfigId: 'cfg_gatb',
+            position: 107,
+          },
+        },
+      ],
+      applied,
+    )
+    expect(screen.getByText('GATB Math 3: lesson 107')).toBeInTheDocument()
+  })
+})
