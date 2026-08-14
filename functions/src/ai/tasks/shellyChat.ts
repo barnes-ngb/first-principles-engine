@@ -80,6 +80,22 @@ export interface ChatActivityRow {
   frequency?: string;
   childId?: string;
   completed?: boolean;
+  /**
+   * FEAT-143 widening. The section had id / name / subject / minutes /
+   * frequency, which is everything `setActivityMinutes` needs and nothing the
+   * "where is Lincoln in this topic" conversation needs. These three are what
+   * make that conversation possible: `type` carries the DATA-08 owner rule
+   * (a workbook is per-child, never shared), and the position pair is the whole
+   * subject of "he's on lesson 107 now".
+   *
+   * Widened in place rather than beside: a parallel section would give the model
+   * two lists of the same activities and a way to disagree with itself about
+   * which id is which.
+   */
+  type?: string;
+  currentPosition?: number;
+  totalUnits?: number;
+  unitLabel?: string;
 }
 
 /**
@@ -96,8 +112,20 @@ export interface ChatActivityRow {
  * the parent has to be told that BEFORE she taps confirm, and the model can
  * only tell her if it can see it here.
  *
- * Completed activities are excluded, matching `loadWorkbookPaces`. Returns ""
- * when nothing survives, so the section is omitted rather than rendered empty.
+ * FEAT-143 widens each row with `type` and the position pair
+ * (`currentPosition` / `totalUnits`), because "where is Lincoln in this topic"
+ * is unanswerable without them and `setActivityPosition` has nothing to bump.
+ * Position is rendered in the config's own unit noun ("lesson 98 of 140") so the
+ * model reads the number the way the parent says it.
+ *
+ * Completed activities stay excluded, matching `loadWorkbookPaces` — nothing can
+ * be proposed against a finished program, so giving it an id would only invite a
+ * proposal the app refuses. (The client keeps completed configs in view so a
+ * proposal that races a completion can be refused BY NAME; the prompt does not
+ * need them, and the exclusion here is a pinned invariant.)
+ *
+ * Returns "" when nothing survives, so the section is omitted rather than
+ * rendered empty.
  */
 export function formatChatActivities(
   rows: ChatActivityRow[],
@@ -117,16 +145,27 @@ export function formatChatActivities(
     parts.push(`${r.defaultMinutes ?? 0} min`);
     if (r.frequency) parts.push(r.frequency);
     if (r.subjectBucket) parts.push(r.subjectBucket);
+    if (r.type) parts.push(r.type);
+    const unit = (r.unitLabel || "lesson").trim() || "lesson";
+    if (r.currentPosition != null && r.totalUnits != null) {
+      parts.push(`on ${unit} ${r.currentPosition} of ${r.totalUnits}`);
+    } else if (r.currentPosition != null) {
+      parts.push(`on ${unit} ${r.currentPosition}`);
+    } else if (r.totalUnits != null) {
+      parts.push(`${r.totalUnits} ${unit}s, position not set`);
+    } else {
+      parts.push("no position tracked");
+    }
     let line = `${parts[0]} — ${parts.slice(1).join(", ")} (id: ${r.id})`;
     if (r.childId === "both") line += ` — shared: ${sharedLabel}`;
     return line;
   });
 
   return [
-    "ACTIVITIES (the structured activities that build every plan — the minutes below are the DEFAULT each FUTURE plan uses):",
+    "ACTIVITIES (the structured activities that build every plan — the minutes below are the DEFAULT each FUTURE plan uses, and the position is where the next plan picks up):",
     ...lines,
     "",
-    'Use the "id" exactly as written when you propose a setActivityMinutes action. An activity marked "shared" belongs to more than one child — changing its minutes changes it for all of them, so say so before proposing.',
+    'Use the "id" exactly as written when you propose an action against one of these. An activity marked "shared" belongs to more than one child — changing its minutes changes it for all of them, so say so before proposing. An activity marked "no position tracked" has no lesson number to set.',
   ].join("\n");
 }
 
@@ -465,7 +504,7 @@ const NAVIGATION_HONESTY_RULE = `
 NAVIGATION HONESTY (hard rule): NEVER describe a screen, tab, setting, or menu you have not been told exists. If you can't do something, say so plainly and then end in one of exactly three ways: name a REAL screen from the map below, say the capability is coming and name the real screen that does it today, or say it isn't in the app yet. Inventing a plausible-sounding location ("check the schedule settings screen") is worse than admitting the gap, because the parent will go looking for something that isn't there. If you are not certain a screen exists, do not name it.
 
 The real map, for the things parents most often ask to change:
-- Activities and how many minutes each one takes by default: Progress → Curriculum. (You can also change an activity's default minutes yourself, right here — see ACTIVITY TIME ACTIONS below, if that section is present.)
+- Activities, how many minutes each one takes by default, and where the child is in each one: Progress → Curriculum. (You can also change an activity's default minutes yourself, right here — see ACTIVITY TIME ACTIONS below — and add an activity, mark one finished, or set its position — see CURRICULUM ACTIONS below, if those sections are present.)
 - The weekly plan itself: Plan My Week.
 - Today's checklist: Today. (You can also change what is on a day of THIS week yourself, right here — see TODAY / THIS WEEK ACTIONS below, if that section is present.)
 - Hours, compliance records, evaluations and the portfolio: Records.
@@ -473,8 +512,9 @@ The real map, for the things parents most often ask to change:
 - Account, profiles, voice input, stickers: Settings. Settings does NOT contain any schedule, subject-duration, or time-block screen — never send anyone there for one.
 
 What you can change from this chat, and what you can't (say this accurately, never more):
-- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, and what is on a day of THIS week (remove / move / add) — each one confirmed by a tap.
-- NOT YET, and these are coming: adding or completing a curriculum activity or changing its position (for now: Progress → Curriculum); finding videos on the web and planning them (for now: vet one in at Watch Library, then plan it in Plan My Week); reshaping NEXT week from here (for now: the plan-adjustment handoff opens Plan My Week with your brief). Say "that's coming" only for these three — do not promise anything else is on the way.`;
+- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, what is on a day of THIS week (remove / move / add), and the curriculum itself — adding an activity, marking one finished, and setting where the child is in it — each one confirmed by a tap.
+- You still CANNOT DELETE an activity. The app retires programs (mark finished) rather than deleting them, and a finished program cannot be un-finished — not from here, and not from Progress → Curriculum. Never offer a way to undo it.
+- NOT YET, and these are coming: finding videos on the web and planning them (for now: vet one in at Watch Library, then plan it in Plan My Week); reshaping NEXT week from here (for now: the plan-adjustment handoff opens Plan My Week with your brief). Say "that's coming" only for these two — do not promise anything else is on the way.`;
 
 export function buildShellyChatRoleSection(childName: string | undefined): string {
   if (childName) {
@@ -648,6 +688,70 @@ Rules:
 - One activity per action. If the parent names two ("30 for math and 20 for reading"), emit two separate action blocks.
 - NEVER say it's done. Say you've proposed it and it takes effect once they confirm — they see the activity name and the old → new time on a card first.
 - This is for a STANDING default. If what they want is a change to next week's plan SHAPE — drop a subject, repace it, shift toward a lighter week, change the week's focus — use the plan-adjustment handoff below instead. Changing a number = this action; changing the week = the handoff. Discussion is not a write.`;
+}
+
+/**
+ * Build the curriculum `<action>` grammar addendum (FEAT-143).
+ *
+ * The chat's answer to "let's add this one for Lincoln on the tablet", "we
+ * finished that book", "he's on lesson 107 now". Taught from the ACTIVITIES
+ * section above it: the model picks a REAL doc id off that list to finish or
+ * reposition, or describes a whole new activity to add. Confirmed by a tap, like
+ * every other portal write.
+ *
+ * Two rules carry most of the weight here, and both exist because the app
+ * refuses the payload anyway — telling the model up front turns a silent refusal
+ * into a useful sentence:
+ *  - **A workbook is per-child, never shared** (DATA-08). A shared workbook is
+ *    rejected as malformed, so the model must not offer one.
+ *  - **There is no delete, and no un-finish.** Completion is the only removal,
+ *    and nothing in the app reverses it. The model must say so before proposing.
+ *
+ * Kept explicitly distinct from its three neighbours, because the failure mode
+ * is reaching for the wrong one: changing WHAT curriculum exists is this action;
+ * changing how long one runs is `setActivityMinutes`; changing what is on a day
+ * of this week is the live-day actions; reshaping next week is the handoff.
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like the other action
+ * grammars. Returns "" on the general (no-child) branch.
+ */
+export function buildCurriculumActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+CURRICULUM ACTIONS (you CAN add an activity, mark one finished, and set where ${who} is in it): When the parent wants a new activity in the rotation — "let's add Khan Academy math for ${who}, 20 minutes a day", "add handwriting practice twice a week" — or says a program is done — "we finished Explode the Code 3" — or tells you where ${who} is now — "he's on lesson 107 of GATB Math 3" — propose ONE action per change.
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}") and, for the last two, an activity id copied exactly from the ACTIVITIES list:
+<action>{"kind":"addActivity","childId":"${childId}","name":"Khan Academy math","type":"app","subjectBucket":"Math","defaultMinutes":20,"frequency":"daily","totalUnits":140,"currentPosition":1}</action>
+<action>{"kind":"markActivityComplete","childId":"${childId}","activityConfigId":"<id from ACTIVITIES>"}</action>
+<action>{"kind":"setActivityPosition","childId":"${childId}","activityConfigId":"<id from ACTIVITIES>","position":107}</action>
+
+Rules for addActivity:
+- "type" must be exactly one of: workbook, routine, app, activity, formation, evaluation. "subjectBucket" must be one of Reading, LanguageArts, Math, Science, SocialStudies, Music, Art, PracticalArts, PE, Other. "frequency" must be one of: daily, 3x, 2x, 1x, as-needed. "defaultMinutes" is a whole number between 5 and 120. A value outside any of these is rejected outright — ask rather than guess.
+- WORKBOOKS BELONG TO ONE CHILD. A workbook is the same book at a different page for each child, so "shared":true with "type":"workbook" is rejected outright. Add a separate workbook per child instead. "shared":true is fine for a routine or an activity both boys genuinely do together — and TELL the parent it lands on both boys' lists before you propose it.
+- "totalUnits" and "currentPosition" are optional whole numbers of at least 1, and the position can't be past the total. Include them only when the parent gives you real numbers — never invent a book's length.
+- Do NOT pick an ordering; the app puts a new activity at the end of the list.
+
+Rules for markActivityComplete:
+- This RETIRES the program: it stops appearing in future plans. Everything already logged against it stays exactly where it is — no hours move, no day changes.
+- THERE IS NO UNDO, from this chat or from Progress → Curriculum. Say that plainly before you propose it, and only propose it when the parent clearly says the program is finished.
+
+Rules for setActivityPosition:
+- "position" is a whole number of at least 1 and cannot be past that activity's total — a value past the end is rejected outright rather than trimmed, so if the parent's number looks past the end, say so and ask.
+- Only for an activity that tracks a position. An activity shown as "no position tracked" in ACTIVITIES has no lesson number to set — say so instead of proposing.
+- This sets where FUTURE plans pick up. It does not change this week's plan, today's checklist, or any hours already recorded.
+
+Rules for all three:
+- The activity id MUST be copied exactly from the ACTIVITIES section. NEVER invent, guess, or reconstruct one. If you can't find the activity the parent means, ask which one — do NOT emit an action.
+- You CANNOT delete an activity. If the parent asks to remove or delete one, say the app retires programs rather than deleting them, and offer to mark it finished instead — do NOT emit any delete-shaped action.
+- ONE change per action block. If the parent names two, emit two separate blocks.
+- NEVER say it's done. Say you've proposed it and it takes effect once they confirm — they see the activity by name on a card first.
+- This is for WHAT curriculum exists and where ${who} is in it. Changing how LONG an existing activity runs by default is setActivityMinutes above — "make math 30 minutes" is that action, not this one. Changing what is on a day of THIS week is the today/this-week actions below. Reshaping NEXT week is the plan-adjustment handoff below.
+- Be conservative in exactly the way the activity-time rules are: TALKING about where ${who} is in a topic is NOT a write. Answer the question from the ACTIVITIES section and stop. Only propose when the parent clearly wants the curriculum changed.`;
 }
 
 /**
@@ -1124,6 +1228,7 @@ Example: If the parent says "Lincoln seems bored with reading" and the data show
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
   const activityMinutesActionAddendum = buildActivityMinutesActionAddendum(childId || undefined, childName || undefined);
+  const curriculumActionAddendum = buildCurriculumActionAddendum(childId || undefined, childName || undefined);
   const dayItemActionAddendum = buildDayItemActionAddendum(childId || undefined, childName || undefined);
   const planAdjustmentActionAddendum = buildPlanAdjustmentActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
@@ -1137,6 +1242,7 @@ ${roleSection}
 ${sightWordActionAddendum}
 ${snapshotActionAddendum}
 ${activityMinutesActionAddendum}
+${curriculumActionAddendum}
 ${dayItemActionAddendum}
 ${planAdjustmentActionAddendum}
 ${frictionCaptureAddendum}

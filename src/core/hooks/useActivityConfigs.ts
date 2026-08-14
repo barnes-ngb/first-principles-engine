@@ -10,11 +10,17 @@ import {
 } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
+import {
+  addActivityConfig,
+  assertWorkbookOwner,
+  completeActivityConfig,
+  setActivityConfigPosition,
+  syncActivityPositionToModel,
+} from '../firebase/activityConfigWrites'
 import { activityConfigsCollection, db } from '../firebase/firestore'
 import { ensureDefaultActivityConfigs, migrateToActivityConfigs } from '../firebase/migrateActivityConfigs'
-import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
+import type { NewActivityConfig } from '../firebase/activityConfigWrites'
 import type { ActivityConfig } from '../types'
-import type { ActivityFrequency, ActivityType, SubjectBucket } from '../types/enums'
 
 export interface UseActivityConfigsResult {
   configs: ActivityConfig[]
@@ -28,47 +34,17 @@ export interface UseActivityConfigsResult {
   reorder: (configs: ActivityConfig[]) => Promise<void>
 }
 
-export interface NewActivityConfig {
-  name: string
-  type: ActivityType
-  subjectBucket: SubjectBucket
-  defaultMinutes: number
-  frequency: ActivityFrequency
-  childId: string | 'both'
-  sortOrder: number
-  scannable: boolean
-  curriculum?: string
-  totalUnits?: number
-  currentPosition?: number
-  unitLabel?: string
-  notes?: string
-}
-
-/**
- * DATA-08: workbooks are per-child (same curriculum, different lessons → a
- * separate config per child), so a workbook-type config may never be owned by
- * `'both'`. `'both'` stays legitimate for shared *routines*. A `'both'` workbook
- * surfaces to every child through the `in [childId,'both']` reader, which is how
- * London ended up seeing Lincoln's GATB workbooks.
- */
-export function isWorkbookOwnerInvalid(
-  type: ActivityType | undefined,
-  childId: string | undefined,
-): boolean {
-  return type === 'workbook' && childId === 'both'
-}
-
-/** Throws if a workbook-type config would be saved as `childId: 'both'`. */
-export function assertWorkbookOwner(
-  type: ActivityType | undefined,
-  childId: string | undefined,
-): void {
-  if (isWorkbookOwnerInvalid(type, childId)) {
-    throw new Error(
-      'Workbook activities must belong to a specific child, not "both". Assign it to a child.',
-    )
-  }
-}
+// The writes themselves — and the DATA-08 owner rule they enforce — live in
+// `core/firebase/activityConfigWrites`, so a non-component caller (the Shelly
+// portal's confirm cards, FEAT-143) performs the SAME write rather than a second
+// one that looks alike. Re-exported here because this module was their original
+// home and every existing importer names it.
+export type { NewActivityConfig } from '../firebase/activityConfigWrites'
+export {
+  assertWorkbookOwner,
+  isWorkbookOwnerInvalid,
+  WORKBOOK_OWNER_REASON,
+} from '../firebase/activityConfigWrites'
 
 export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const familyId = useFamilyId()
@@ -123,21 +99,20 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   }, [familyId, childId, migrationDone])
 
   /** Fire the FEAT-63 learner-model position sync for a manual config edit.
-   *  Resolves the workbook name + owning child from the merged config. No-ops for
-   *  a shared ('both') config — workbooks are per-child (DATA-08). */
+   *  Resolves the workbook name + owning child from the merged config, then
+   *  delegates to the shared writer's sync (no-ops for a shared ('both') config —
+   *  workbooks are per-child, DATA-08). */
   const maybeSyncPosition = useCallback(
     (existing: ActivityConfig | undefined, updates: Partial<ActivityConfig>, position: number) => {
       if (!familyId) return
-      const childId = updates.childId ?? existing?.childId
-      if (!childId || childId === 'both') return
-      const workbookName =
-        updates.name ?? existing?.name ?? updates.curriculum ?? existing?.curriculum
-      if (!workbookName) return
-      void syncWorkbookPositionToModel(
+      syncActivityPositionToModel(
         familyId,
-        childId,
-        { workbookName, position, via: 'manual' },
-        new Date().toISOString(),
+        {
+          childId: updates.childId ?? existing?.childId,
+          name: updates.name ?? existing?.name,
+          curriculum: updates.curriculum ?? existing?.curriculum,
+        },
+        position,
       )
     },
     [familyId],
@@ -146,18 +121,7 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const addConfig = useCallback(
     async (data: NewActivityConfig) => {
       if (!familyId) return
-      assertWorkbookOwner(data.type, data.childId)
-      const now = new Date().toISOString()
-      const ref = doc(activityConfigsCollection(familyId))
-      const batch = writeBatch(db)
-      batch.set(ref, {
-        ...data,
-        id: ref.id,
-        completed: false,
-        createdAt: now,
-        updatedAt: now,
-      })
-      await batch.commit()
+      await addActivityConfig(familyId, data)
     },
     [familyId],
   )
@@ -198,13 +162,7 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const markComplete = useCallback(
     async (id: string) => {
       if (!familyId) return
-      const now = new Date().toISOString()
-      const ref = doc(activityConfigsCollection(familyId), id)
-      await updateDoc(ref, {
-        completed: true,
-        completedDate: now,
-        updatedAt: now,
-      })
+      await completeActivityConfig(familyId, id)
     },
     [familyId],
   )
@@ -212,15 +170,17 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const updatePosition = useCallback(
     async (id: string, position: number) => {
       if (!familyId) return
-      const ref = doc(activityConfigsCollection(familyId), id)
-      await updateDoc(ref, {
-        currentPosition: position,
-        updatedAt: new Date().toISOString(),
-      })
-      // FEAT-63 trigger 1b: fold the manual position into the learner model.
-      maybeSyncPosition(configsRef.current.find((c) => c.id === id), {}, position)
+      // The shared writer performs the update AND fires the FEAT-63 trigger-1b
+      // learner-model sync, so a position set here and one set from a chat
+      // confirm card fold into the model identically.
+      await setActivityConfigPosition(
+        familyId,
+        id,
+        position,
+        configsRef.current.find((c) => c.id === id),
+      )
     },
-    [familyId, maybeSyncPosition],
+    [familyId],
   )
 
   const reorder = useCallback(
