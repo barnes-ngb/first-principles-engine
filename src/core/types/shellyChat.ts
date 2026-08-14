@@ -1,4 +1,4 @@
-import type { SubjectBucket } from './enums'
+import type { ActivityFrequency, ActivityType, SubjectBucket } from './enums'
 
 export type ChatContext = 'lincoln' | 'london' | 'general'
 
@@ -92,6 +92,37 @@ export interface ShellyChatMessage {
  * **standing default** for one activity is this write; a **shape change to next
  * week** (drop/repace/reorder a subject) stays the handoff below.
  *
+ * **The curriculum kinds (FEAT-143)** — `addActivity`, `markActivityComplete`,
+ * `setActivityPosition` — are the writes Shelly makes by hand at Progress →
+ * Curriculum, reachable from a confirm card. They are what "chat with it on
+ * where Lincoln is in a topic … what curriculum to add for Lincoln on the
+ * tablet" asks for. All three route through the shared
+ * `core/firebase/activityConfigWrites` core the Curriculum surface itself calls,
+ * so there is no second write lane to `activityConfigs`.
+ *
+ * Four properties hold across them:
+ *  1. **Forward-looking only.** An add, a completion, and a position set all
+ *     change what FUTURE plans read. No `dayLog` is touched, no applied week is
+ *     re-planned, and no logged minute moves.
+ *  2. **No delete.** Completion is the only removal — retire, don't delete. The
+ *     union has no `deleteActivity` kind, so it is unrepresentable here, exactly
+ *     as removals are unrepresentable among the snapshot kinds.
+ *  3. **The DATA-08 owner rule holds.** A workbook belongs to ONE child, never
+ *     `'both'` — so `addActivity` with `type: 'workbook'` and `shared: true` is
+ *     rejected as malformed at parse, refused again at resolution with the
+ *     rule's own sentence, and would throw at the writer. `shared` (rather than
+ *     a `'both'` `childId`) keeps `childId` meaning what it means in every other
+ *     kind: the acting child the action is bound to.
+ *  4. **Ids must be real.** `activityConfigId` is a non-empty string here;
+ *     whether it names a config the family owns is resolved against the live
+ *     configs before a card is offered, so a hallucinated id never reaches a
+ *     write — the `setActivityMinutes` division of labour exactly.
+ *
+ * `currentPosition` has a second writer — the scan pipeline sets it from a
+ * workbook photo. A chat position-set and a scan can race and **last writer
+ * wins**; see `activityConfigWrites.setActivityConfigPosition` for why no lock
+ * is wanted.
+ *
  * **The live-day kinds (FEAT-142)** — `removeItemFromDay`, `moveItemToDay`,
  * `addItemToDay` — are the chat's half of FEAT-138's live-week edit lane. They
  * change what is on a day of the CURRENT week: a row comes off, a row moves to
@@ -159,6 +190,45 @@ export type ChatAction =
       rationale: string
       scope?: string
       targetWeek?: string
+    }
+  | {
+      kind: 'addActivity'
+      /** The acting child. `shared` decides whether the doc lands as `'both'`. */
+      childId: string
+      /** Display name, trimmed and non-empty. */
+      name: string
+      type: ActivityType
+      subjectBucket: SubjectBucket
+      /** Default duration. Integer, 5–120 (enforced by `parseChatActions`). */
+      defaultMinutes: number
+      frequency: ActivityFrequency
+      /**
+       * True → the config is written with `childId: 'both'` and every child sees
+       * it. Never valid for a workbook (DATA-08) — that combination is rejected
+       * as malformed rather than silently narrowed.
+       */
+      shared?: boolean
+      /** Positive integer. Total lessons/units, when the parent names one. */
+      totalUnits?: number
+      /** Positive integer, ≤ `totalUnits` when both are present. */
+      currentPosition?: number
+    }
+  | {
+      kind: 'markActivityComplete'
+      childId: string
+      /** Doc id of the `activityConfigs` doc being retired. */
+      activityConfigId: string
+    }
+  | {
+      kind: 'setActivityPosition'
+      childId: string
+      activityConfigId: string
+      /**
+       * Integer ≥ 1, and ≤ the config's `totalUnits` when it has one. Past the
+       * end is rejected as malformed, never clamped — a clamped position is a
+       * number the parent never saw on the card.
+       */
+      position: number
     }
   | {
       kind: 'removeItemFromDay'

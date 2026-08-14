@@ -367,7 +367,7 @@ Two distinct chat-shaped tasks exist; do not conflate them. (This bit Chat-Link 
 
 Other chat-dispatched task types (21 total in `tasks/index.ts` registry) are independent: `plan`, `generate`, `evaluate`, `quest`, `generateStory`, `reviseStory`, `revisePage`, `workshop`, `analyzeWorkbook`, `disposition`, `conundrum`, `weeklyFocus`, `scan`, `shellyChat`, `foundationsReview`, `chapterQuestions`, `bookLookup`, `lessonVideo`, `helpCard`, `monthlyReview`, `chat`. `analyzeEvaluationPatterns` is exported separately.
 
-### What Ask AI can change directly — and what it can't (FEAT-135 · FEAT-142)
+### What Ask AI can change directly — and what it can't (FEAT-135 · FEAT-142 · FEAT-143)
 
 Every one of these is **propose → confirm → write**: the assistant emits an `<action>` block, the parent
 sees a plain-language card, and the write happens only on her tap. Nothing auto-writes.
@@ -379,6 +379,7 @@ sees a plain-language card, and the write happens only on her tap. Nothing auto-
 | "let's add inference to his list" / "stop the lesson if he melts down" | additive snapshot edits (`addPrioritySkill` / `addSupport` / `addStopRule` / `markSkillProgress`) — **additive only**, never a removal or downgrade | `skillSnapshots`, via `skillSnapshotWrites.ts` |
 | **"math should be 30 minutes from now on"** | **`setActivityMinutes` (FEAT-135)** — one field, `defaultMinutes`, on one activity config, via `updateActivityConfigMinutes`. Integer 5–120, rejected outright outside that band. The id must resolve to a real config the acting child owns, or no card is offered. Parent-only at the component *and* the write layer. | `activityConfigs` |
 | **"take Reading Eggs off Wednesday" / "move the video to Friday" / "add 15 minutes of sight words to today"** | **`removeItemFromDay` / `moveItemToDay` / `addItemToDay` (FEAT-142)** — the chat's half of FEAT-138's live-week edit lane, calling **those** writers rather than reimplementing them. Current week only (Mon–Fri); a completed row is refused; an add is `source: 'manual'` with integer minutes 5–120, rejected outright outside that band. Parent-only at the component *and* the write layer. | `days` (the saved day log), via `today/liveDayEdit.ts` |
+| **"add Khan Academy math, 20 minutes a day" / "we finished Explode the Code 3" / "he's on lesson 107 now"** | **`addActivity` / `markActivityComplete` / `setActivityPosition` (FEAT-143)** — the writes Shelly makes by hand at Progress → Curriculum, routed through the **shared** `core/firebase/activityConfigWrites` core that surface itself calls. **No delete:** completion is the only removal (retire, don't delete), and no `ChatAction` kind names one. A workbook may never be shared (DATA-08), refused at parse, at resolution, and at the writer. Ids must resolve to a **running** config the acting child owns; a position past `totalUnits` is rejected outright, never clamped. Parent-only at the component *and* the write layer. | `activityConfigs` |
 | "next week needs to be lighter" | `proposePlanAdjustment` — a **handoff**, not a write: stages a brief and opens Plan My Week, where she reviews and locks in | `settings/pendingPlanAdjustment_{childId}` |
 
 **`setActivityMinutes` changes a default for FUTURE plans and nothing else.** No `dayLog` is touched — not
@@ -406,15 +407,27 @@ supplemental block (`formatChatWeekDays`) listing each weekday, each row's label
 completed rows marked as immovable in the row itself; it is read by canonical doc id, exactly the
 documents the write lane resolves.
 
-**What the chat still can't do.** It cannot add, complete, or reposition a curriculum activity, or
-delete or create one; it cannot find videos on the web and plan them; it cannot reshape next week
-wholesale (the plan-adjustment handoff opens Plan My Week instead); it cannot remove or downgrade
-anything on a skill snapshot (the future Option 3); it cannot change a live week's planned minutes. For
-all of those it says so plainly — and under the **navigation-honesty rule** it may end in exactly three
-ways: name a REAL screen, say the capability is **coming** and name the real screen that does it today,
-or say it isn't in the app yet. It must never invent a location. The "coming" ending is bounded to the
-three named slices (curriculum edits → Progress → Curriculum; video search → Watch Library then Plan My
-Week; next week → Plan My Week) and the prompt says outright not to promise anything else. The true map
+**What the chat can now do to the curriculum, and what stays out of reach (FEAT-143).** It can **add** an
+activity, **mark one finished**, and **set where the child is in it** — the three writes Progress →
+Curriculum offers, reachable from a confirm card. It does this by calling the **extracted** write core
+(`core/firebase/activityConfigWrites`) that `useActivityConfigs` itself delegates to, not by opening a
+second lane: one definition of each write, so the DATA-08 owner rule and the FEAT-63 position sync hold
+whichever surface the tap came from. Two things stay impossible **by construction**: it cannot **delete**
+an activity — completion is the only removal (retire, don't delete), and no `ChatAction` kind names a
+delete — and a finished program cannot be **un-finished**, because nothing in the app writes
+`completed: false` back onto an existing config. The card says both before the tap rather than promising
+an undo that does not exist. `currentPosition` has a second writer (the scan pipeline) and the two can
+race: **last writer wins, no lock** — the field is a bookmark a human corrects when it is wrong.
+
+**What the chat still can't do.** It cannot delete or un-finish a curriculum activity (above); it cannot
+find videos on the web and plan them; it cannot reshape next week wholesale (the plan-adjustment handoff
+opens Plan My Week instead); it cannot remove or downgrade anything on a skill snapshot (the future
+Option 3); it cannot change a live week's planned minutes. For all of those it says so plainly — and
+under the **navigation-honesty rule** it may end in exactly three ways: name a REAL screen, say the
+capability is **coming** and name the real screen that does it today, or say it isn't in the app yet. It
+must never invent a location. The "coming" ending is bounded to the **two** remaining slices (video
+search → Watch Library then Plan My Week; next week → Plan My Week) and the prompt says outright not to
+promise anything else. The true map
 for durations is **Progress → Curriculum** (`CurriculumTab` / `EditRoutinesDialog` / `AddActivityDialog`);
 the **Watch Library** is its own top-level parent nav entry, **not** inside Settings (FEAT-132); and
 Settings holds no schedule, subject-duration, or time-block screen and never has.
@@ -424,7 +437,13 @@ Settings holds no schedule, subject-duration, or time-block screen and never has
 minutes and frequency, with shared (`childId: 'both'`) configs marked by the names of every child they
 cover. `loadWorkbookPaces` was deliberately **not** widened to carry this — it filters to workbooks and
 feeds pace reasoning for `plan` and `quest` too, so the ACTIVITIES read is a sibling and nothing existing
-shifts.
+shifts. **FEAT-143 widened that section in place** — never beside it, because two lists of the same
+activities would give the model a way to disagree with itself about which id is which — adding each
+config's `type` and its position pair, rendered in the config's own unit noun (`on lesson 98 of 140`) or
+marked `no position tracked`. Without those, "where is Lincoln in this topic" was unanswerable and
+`setActivityPosition` had nothing to bump. Completed configs stay excluded from the prompt (a pinned
+invariant); the **client** keeps them in view instead, so a proposal that races a completion is refused
+**by name** rather than as "no such activity".
 
 
 ### Known Technical Debt

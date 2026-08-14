@@ -14,7 +14,8 @@
 // 3a is pure plumbing: nothing wires this into `sendToAI` yet, and there is no
 // write path — `applyChatAction` lands in 3b.
 
-import { SubjectBucket } from '../../core/types/enums'
+import { isWorkbookOwnerInvalid } from '../../core/firebase/activityConfigWrites'
+import { ActivityFrequency, ActivityType, SubjectBucket } from '../../core/types/enums'
 import type { ChatAction } from '../../core/types/shellyChat'
 import { sanitizeAndParseJson } from '../../core/utils/sanitizeJson'
 
@@ -81,6 +82,17 @@ function isValidMinutes(value: unknown): value is number {
 }
 
 const SUBJECT_BUCKETS = Object.values(SubjectBucket) as readonly string[]
+const ACTIVITY_TYPES = Object.values(ActivityType) as readonly string[]
+const ACTIVITY_FREQUENCIES = Object.values(ActivityFrequency) as readonly string[]
+
+/**
+ * A count gate for `totalUnits` / `currentPosition` (FEAT-143) — a real integer
+ * of at least 1. Lesson 0 does not exist, a half-lesson does not exist, and
+ * `"107"` is a string. All rejected as malformed, never coerced.
+ */
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1
+}
 
 /**
  * Validate an arbitrary parsed payload against the `ChatAction` allowlist.
@@ -105,6 +117,15 @@ const SUBJECT_BUCKETS = Object.values(SubjectBucket) as readonly string[]
  *   `childId` + non-empty `summary` + non-empty `rationale`, optional string
  *   `scope` / `targetWeek`. On confirm it stages a planner brief and navigates;
  *   it never touches a child record or the plan.
+ * - Curriculum edits (FEAT-143): `addActivity` (+ non-empty `name`, a real
+ *   `ActivityType`, a real `SubjectBucket`, integer `defaultMinutes` in
+ *   [5, 120], a real `ActivityFrequency`, optional boolean `shared` and
+ *   positive-integer `totalUnits` / `currentPosition` with position ≤ total),
+ *   `markActivityComplete` (+ non-empty `activityConfigId`), and
+ *   `setActivityPosition` (+ non-empty `activityConfigId`, integer `position`
+ *   ≥ 1). A **shared workbook** is rejected outright (DATA-08). Whether an id
+ *   names a real config, whether that config is already finished, and whether a
+ *   position is past the end are resolved later, against the live configs.
  *
  * Everything else — including a well-formed JSON object carrying an unknown
  * `kind`, an `editProfileField` targeting a disallowed field like
@@ -276,6 +297,97 @@ function toChatAction(payload: unknown): ChatAction | null {
       label,
       estimatedMinutes: obj.estimatedMinutes,
       ...(subjectBucket ? { subjectBucket } : {}),
+    }
+  }
+
+  // ── Curriculum edits — add / complete / reposition (FEAT-143) ───────
+  // The writes Shelly makes by hand at Progress → Curriculum. Validated here
+  // exactly as strictly as the kinds above, and — like them — every claim this
+  // pure module CANNOT check is checked where the live configs are readable:
+  //   1. (here) shape only — real enum members, a real integer band, a
+  //      non-empty id, and the DATA-08 owner rule where it is decidable.
+  //   2. (`curriculumActions`, at stage time) the id names a config the family
+  //      owns and the acting child can touch, the config is not already
+  //      finished, and it tracks position at all — each drop carrying a
+  //      plain-language reason.
+  //   3. (`activityConfigWrites`, at the write) `assertWorkbookOwner` throws.
+  if (obj.kind === 'addActivity') {
+    const name = nonEmptyString(obj.name)
+    if (!name) return null
+    if (typeof obj.type !== 'string' || !ACTIVITY_TYPES.includes(obj.type)) return null
+    if (
+      typeof obj.subjectBucket !== 'string' ||
+      !SUBJECT_BUCKETS.includes(obj.subjectBucket)
+    ) {
+      return null
+    }
+    if (!isValidMinutes(obj.defaultMinutes)) return null
+    if (
+      typeof obj.frequency !== 'string' ||
+      !ACTIVITY_FREQUENCIES.includes(obj.frequency)
+    ) {
+      return null
+    }
+    const type = obj.type as ActivityType
+    // `shared` is optional and must be a real boolean. Unlike `addItemToDay`'s
+    // `subjectBucket`, a junk value here drops the ACTION rather than the field:
+    // "who is this for" is the one thing about an add a parent cannot recover
+    // from being guessed wrong, and the whole owner rule below hangs off it.
+    if (obj.shared !== undefined && typeof obj.shared !== 'boolean') return null
+    const shared = obj.shared === true
+    // DATA-08, decided here because it IS decidable from the payload alone: a
+    // workbook is per-child (same curriculum, different lessons), so a shared
+    // workbook is malformed, not merely unwise. The resolver refuses it again
+    // with the rule's own sentence and the writer throws — three layers, and
+    // the grammar tells the model the rule up front so it never emits one.
+    if (isWorkbookOwnerInvalid(type, shared ? 'both' : obj.childId)) return null
+    if (obj.totalUnits !== undefined && !isPositiveInteger(obj.totalUnits)) return null
+    if (obj.currentPosition !== undefined && !isPositiveInteger(obj.currentPosition)) {
+      return null
+    }
+    // A starting position past the end of the book is not a position. Rejected,
+    // never clamped — the same rail the minutes band holds.
+    if (
+      typeof obj.totalUnits === 'number' &&
+      typeof obj.currentPosition === 'number' &&
+      obj.currentPosition > obj.totalUnits
+    ) {
+      return null
+    }
+    return {
+      kind: 'addActivity',
+      childId: obj.childId,
+      name,
+      type,
+      subjectBucket: obj.subjectBucket as SubjectBucket,
+      defaultMinutes: obj.defaultMinutes,
+      frequency: obj.frequency as ActivityFrequency,
+      ...(shared ? { shared: true as const } : {}),
+      ...(obj.totalUnits !== undefined ? { totalUnits: obj.totalUnits as number } : {}),
+      ...(obj.currentPosition !== undefined
+        ? { currentPosition: obj.currentPosition as number }
+        : {}),
+    }
+  }
+
+  if (obj.kind === 'markActivityComplete') {
+    const activityConfigId = nonEmptyString(obj.activityConfigId)
+    if (!activityConfigId) return null
+    return { kind: 'markActivityComplete', childId: obj.childId, activityConfigId }
+  }
+
+  if (obj.kind === 'setActivityPosition') {
+    const activityConfigId = nonEmptyString(obj.activityConfigId)
+    if (!activityConfigId) return null
+    // Position 0, 3.5, "107", NaN and Infinity are all malformed. The upper
+    // bound is the config's own `totalUnits`, which this module cannot see —
+    // the resolver enforces it against the live config (rejected, not clamped).
+    if (!isPositiveInteger(obj.position)) return null
+    return {
+      kind: 'setActivityPosition',
+      childId: obj.childId,
+      activityConfigId,
+      position: obj.position,
     }
   }
 

@@ -287,3 +287,254 @@ describe('ActionConfirmCard — live-day edits (FEAT-142)', () => {
     expect(container.querySelector('button')).toBeNull()
   })
 })
+
+// ── ActionConfirmCard — curriculum previews (FEAT-143) ───────────────
+//
+// Same rule as the minutes card: this card is the parent's ENTIRE view of the
+// write before she taps. An add creates something from nothing, so the whole
+// shape has to be on it — including who it lands on, loudly, when it is shared.
+// A position bump has to show the number she already knows, changing.
+
+const CURRICULUM_CONFIGS: ChatActivityConfig[] = [
+  {
+    id: 'cfg_gatb',
+    name: 'GATB Math 3',
+    childId: 'lincoln1',
+    defaultMinutes: 20,
+    type: 'workbook',
+    currentPosition: 98,
+    totalUnits: 140,
+    unitLabel: 'lesson',
+    sortOrder: 2,
+  },
+  {
+    id: 'cfg_done',
+    name: 'Explode the Code 3',
+    childId: 'lincoln1',
+    defaultMinutes: 15,
+    type: 'workbook',
+    currentPosition: 60,
+    totalUnits: 60,
+    completed: true,
+    sortOrder: 3,
+  },
+]
+
+const curriculumPending = (action: PendingAction['action']): PendingAction[] => [
+  { id: 'msg1_0', status: 'pending', action },
+]
+
+const ADD: PendingAction['action'] = {
+  kind: 'addActivity',
+  childId: 'lincoln1',
+  name: 'Khan Academy math',
+  type: 'app',
+  subjectBucket: 'Math',
+  defaultMinutes: 20,
+  frequency: 'daily',
+}
+
+describe('ActionConfirmCard — setActivityPosition (FEAT-143)', () => {
+  it('shows the real old → new position, never the raw id', () => {
+    renderCard(
+      curriculumPending({
+        kind: 'setActivityPosition',
+        childId: 'lincoln1',
+        activityConfigId: 'cfg_gatb',
+        position: 107,
+      }),
+      CURRICULUM_CONFIGS,
+    )
+    expect(screen.getByText('GATB Math 3: lesson 98 → 107')).toBeInTheDocument()
+    expect(screen.queryByText(/cfg_gatb/)).not.toBeInTheDocument()
+  })
+
+  it('says the change is forward-looking', () => {
+    renderCard(
+      curriculumPending({
+        kind: 'setActivityPosition',
+        childId: 'lincoln1',
+        activityConfigId: 'cfg_gatb',
+        position: 107,
+      }),
+      CURRICULUM_CONFIGS,
+    )
+    expect(screen.getByText(/already recorded stay as they are/)).toBeInTheDocument()
+  })
+
+  it('renders no card for a hallucinated id', () => {
+    renderCard(
+      curriculumPending({
+        kind: 'setActivityPosition',
+        childId: 'lincoln1',
+        activityConfigId: 'cfg_nope',
+        position: 107,
+      }),
+      CURRICULUM_CONFIGS,
+    )
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+  })
+
+  it('renders no card against a finished program', () => {
+    renderCard(
+      curriculumPending({
+        kind: 'setActivityPosition',
+        childId: 'lincoln1',
+        activityConfigId: 'cfg_done',
+        position: 12,
+      }),
+      CURRICULUM_CONFIGS,
+    )
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ActionConfirmCard — markActivityComplete (FEAT-143)', () => {
+  const COMPLETE: PendingAction['action'] = {
+    kind: 'markActivityComplete',
+    childId: 'lincoln1',
+    activityConfigId: 'cfg_gatb',
+  }
+
+  it('names the activity and the child', () => {
+    renderCard(curriculumPending(COMPLETE), CURRICULUM_CONFIGS)
+    expect(screen.getByText('Mark "GATB Math 3" finished for Lincoln')).toBeInTheDocument()
+  })
+
+  // The consequence has to be on the card, in parent language, before the tap.
+  it('states the consequence and that there is no undo anywhere', () => {
+    renderCard(curriculumPending(COMPLETE), CURRICULUM_CONFIGS)
+    const note = screen.getByText(/stops appearing in future plans/)
+    expect(note).toHaveTextContent('everything already logged stays')
+    expect(note).toHaveTextContent('no undo for this, here or in Progress → Curriculum')
+  })
+})
+
+describe('ActionConfirmCard — addActivity (FEAT-143)', () => {
+  it('shows the full shape being created', () => {
+    renderCard(curriculumPending(ADD), CURRICULUM_CONFIGS)
+    expect(screen.getByText('Add "Khan Academy math" to Lincoln\'s curriculum')).toBeInTheDocument()
+    expect(screen.getByText('Math · 20m · daily')).toBeInTheDocument()
+  })
+
+  it('names only the acting child for an unshared add', () => {
+    renderCard(curriculumPending(ADD), CURRICULUM_CONFIGS)
+    expect(screen.getByText('Affects Lincoln only.')).toBeInTheDocument()
+  })
+
+  // A shared add lands on every child's list — she has to read that BEFORE she
+  // taps, not discover it after.
+  it('carries the both-boys warning for a shared add', () => {
+    renderCard(
+      curriculumPending({ ...ADD, type: 'routine', shared: true }),
+      CURRICULUM_CONFIGS,
+    )
+    expect(
+      screen.getByText(describeActivityAudience('both', ['Lincoln', 'London'], 'Lincoln')),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Lincoln and London/)).toBeInTheDocument()
+  })
+
+  it('shows the starting position when the parent gave real numbers', () => {
+    renderCard(
+      curriculumPending({ ...ADD, type: 'workbook', totalUnits: 140, currentPosition: 98 }),
+      CURRICULUM_CONFIGS,
+    )
+    expect(screen.getByText('Math · 20m · daily · lesson 98 of 140')).toBeInTheDocument()
+  })
+
+  // DATA-08 — the one add the card must refuse to render.
+  it('renders no card for a shared workbook', () => {
+    renderCard(
+      curriculumPending({ ...ADD, type: 'workbook', shared: true }),
+      CURRICULUM_CONFIGS,
+    )
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+  })
+})
+
+// ── A confirmed card survives its own write (Codex P2, PR #1669) ─────
+//
+// Confirming a write CHANGES the state the card resolves against, and the
+// subscription delivers that change at once. `markActivityComplete` is the sharp
+// case: the config becomes `completed: true`, the resolver correctly refuses it
+// as already finished — and the card would disappear, taking with it the
+// "Done ✓" that is the parent's only confirmation of an IRREVERSIBLE write.
+
+describe('ActionConfirmCard — an applied card outlives its own write (FEAT-143)', () => {
+  const COMPLETE: PendingAction['action'] = {
+    kind: 'markActivityComplete',
+    childId: 'lincoln1',
+    activityConfigId: 'cfg_gatb',
+  }
+  /** The post-write world: the very config that was just finished. */
+  const AFTER_WRITE: ChatActivityConfig[] = CURRICULUM_CONFIGS.map((c) =>
+    c.id === 'cfg_gatb' ? { ...c, completed: true } : c,
+  )
+
+  it('keeps rendering, with Done, after the config turns completed', () => {
+    renderCard(
+      [{ id: 'msg1_0', status: 'applied', action: COMPLETE }],
+      AFTER_WRITE,
+    )
+    expect(screen.getByText('Mark "GATB Math 3" finished for Lincoln')).toBeInTheDocument()
+    expect(screen.getByText('Done')).toBeInTheDocument()
+  })
+
+  // The gate still means something while the card is undecided: an activity
+  // finished in another tab must stop OFFERING a card here.
+  it('still hides a PENDING card once the config turns completed', () => {
+    renderCard(
+      [{ id: 'msg1_0', status: 'pending', action: COMPLETE }],
+      AFTER_WRITE,
+    )
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/GATB Math 3/)).not.toBeInTheDocument()
+  })
+
+  it('keeps a dismissed card rendering too', () => {
+    renderCard(
+      [{ id: 'msg1_0', status: 'dismissed', action: COMPLETE }],
+      AFTER_WRITE,
+    )
+    expect(screen.getByText('Dismissed')).toBeInTheDocument()
+  })
+
+  it('renders nothing when the config is gone entirely, whatever the status', () => {
+    renderCard([{ id: 'msg1_0', status: 'applied', action: COMPLETE }], [])
+    expect(screen.queryByText('Done')).not.toBeInTheDocument()
+  })
+
+  it('shows Saving… while the write is in flight, with no buttons to tap again', () => {
+    renderCard(
+      [{ id: 'msg1_0', status: 'applying', action: COMPLETE }],
+      CURRICULUM_CONFIGS,
+    )
+    expect(screen.getByText('Saving…')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+  })
+
+  // An applied position card reads the config's NEW number on both sides; the
+  // arrow is dropped rather than rendering "lesson 107 → 107".
+  it('drops the arrow on an applied position card', () => {
+    const applied: ChatActivityConfig[] = CURRICULUM_CONFIGS.map((c) =>
+      c.id === 'cfg_gatb' ? { ...c, currentPosition: 107 } : c,
+    )
+    renderCard(
+      [
+        {
+          id: 'msg1_0',
+          status: 'applied',
+          action: {
+            kind: 'setActivityPosition',
+            childId: 'lincoln1',
+            activityConfigId: 'cfg_gatb',
+            position: 107,
+          },
+        },
+      ],
+      applied,
+    )
+    expect(screen.getByText('GATB Math 3: lesson 107')).toBeInTheDocument()
+  })
+})

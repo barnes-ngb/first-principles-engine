@@ -1,9 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
+  DIAGNOSTIC_WINDOW_RADIUS,
+  MALFORMED_MESSAGE,
+  STRICT_JSON_RETRY_REMINDER,
+  TRUNCATED_MESSAGE,
   buildNoteIndex,
+  buildParseFailureDiagnostics,
   collectWorkbookArtifactIds,
   composeMonthlyReview,
   formatPhotoSection,
+  generateBookJsonWithRetry,
+  parsePositionFromError,
+  rawTextWindow,
   type ComposeInput,
 } from "./monthlyReview.js";
 import type { MonthAggregate, PhotoRef } from "./monthlyReviewData.js";
@@ -376,5 +384,350 @@ describe("collectWorkbookArtifactIds — FEAT-141 (Codex P1)", () => {
     });
     expect(() => collectWorkbookArtifactIds(data)).not.toThrow();
     expect(collectWorkbookArtifactIds(data).size).toBe(0);
+  });
+});
+
+// ── FEAT-146: parse diagnostics + one automatic retry ─────────
+
+describe("book JSON parse diagnostics", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads the failure position out of a JSON.parse error", () => {
+    let err: unknown;
+    try {
+      JSON.parse('{"a": "unterminated');
+    } catch (e) {
+      err = e;
+    }
+    expect(parsePositionFromError(err)).toBeGreaterThan(0);
+    expect(parsePositionFromError(new Error("no offset here"))).toBeUndefined();
+  });
+
+  it("bounds the raw window and centers it on the failure position", () => {
+    const text = "x".repeat(3000);
+    const { window, from, to } = rawTextWindow(text, 2965);
+    expect(window.length).toBeLessThanOrEqual(DIAGNOSTIC_WINDOW_RADIUS * 2 + 1);
+    expect(from).toBe(2965 - DIAGNOSTIC_WINDOW_RADIUS);
+    // The failing position itself is inside the window, not just near it.
+    expect(from).toBeLessThanOrEqual(2965);
+    expect(to).toBeGreaterThan(2965);
+  });
+
+  it("falls back to a bounded tail when the error carries no position", () => {
+    const text = "y".repeat(3000);
+    const { window, to } = rawTextWindow(text, undefined);
+    expect(window.length).toBe(DIAGNOSTIC_WINDOW_RADIUS * 2);
+    expect(to).toBe(3000);
+  });
+
+  it("logs a bounded, labeled window — never the whole payload", () => {
+    const text = "z".repeat(5000);
+    const diagnostics = buildParseFailureDiagnostics({
+      stopReason: "end_turn",
+      text,
+      err: new SyntaxError("Unterminated string in JSON at position 2965"),
+      attempt: 1,
+    });
+    expect(diagnostics.window.length).toBeLessThanOrEqual(
+      DIAGNOSTIC_WINDOW_RADIUS * 2 + 1,
+    );
+    expect(diagnostics.logLine).toContain("stop_reason=end_turn");
+    expect(diagnostics.logLine).toContain("responseLength=5000");
+    expect(diagnostics.logLine).toContain("failurePosition=2965");
+    expect(diagnostics.logLine).toContain("rawWindow[2765..3166]");
+    // The whole 5000-char payload must not be in the log line.
+    expect(diagnostics.logLine.length).toBeLessThan(text.length);
+  });
+
+  it("names the two roots apart", () => {
+    const malformed = buildParseFailureDiagnostics({
+      stopReason: "end_turn",
+      text: "{",
+      err: new SyntaxError("bad"),
+      attempt: 1,
+    });
+    expect(malformed.truncated).toBe(false);
+    expect(malformed.userMessage).toBe(MALFORMED_MESSAGE);
+    expect(malformed.userMessage).toContain("malformed");
+
+    const cut = buildParseFailureDiagnostics({
+      stopReason: "max_tokens",
+      text: "{",
+      err: new SyntaxError("bad"),
+      attempt: 1,
+    });
+    expect(cut.truncated).toBe(true);
+    expect(cut.userMessage).toBe(TRUNCATED_MESSAGE);
+    expect(cut.userMessage).toContain("cut off");
+  });
+
+  it("never puts raw model text in the parent-facing message", () => {
+    const diagnostics = buildParseFailureDiagnostics({
+      stopReason: "end_turn",
+      text: '{"body": "Lincoln read Papa Hut on April 8"',
+      err: new SyntaxError("Unterminated string in JSON at position 42"),
+      attempt: 1,
+    });
+    expect(diagnostics.userMessage).not.toContain("Lincoln");
+    expect(diagnostics.userMessage).not.toContain("Papa Hut");
+  });
+});
+
+describe("generateBookJsonWithRetry", () => {
+  const goodBook = JSON.stringify({
+    theme: "Stories You Built",
+    sections: { cover: { kidMode: { headline: "Stories You Built" } } },
+  });
+  const brokenBook = '{"theme": "Stories", "sections": {"cover": ';
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("does not retry a clean first response", async () => {
+    const call = vi.fn().mockResolvedValue({
+      text: goodBook,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith("USER PROMPT");
+    expect(result.retried).toBe(false);
+    expect(result.parsed.theme).toBe("Stories You Built");
+    expect(result.inputTokens).toBe(100);
+    expect(result.outputTokens).toBe(50);
+  });
+
+  it("retries once on a parse failure and appends the strictness reminder", async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: brokenBook,
+        inputTokens: 100,
+        outputTokens: 50,
+        stopReason: "end_turn",
+      })
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 110,
+        outputTokens: 60,
+        stopReason: "end_turn",
+      });
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+
+    expect(call).toHaveBeenCalledTimes(1 + 1);
+    expect(call.mock.calls[1][0]).toBe(
+      `USER PROMPT\n\n${STRICT_JSON_RETRY_REMINDER}`,
+    );
+    expect(result.retried).toBe(true);
+    expect(result.parsed.theme).toBe("Stories You Built");
+    // Usage is summed across both attempts, so cost logging stays honest.
+    expect(result.inputTokens).toBe(210);
+    expect(result.outputTokens).toBe(110);
+  });
+
+  it("retries a max_tokens cut even when nothing threw", async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 100,
+        outputTokens: 6000,
+        stopReason: "max_tokens",
+      })
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 110,
+        outputTokens: 60,
+        stopReason: "end_turn",
+      });
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(result.retried).toBe(true);
+  });
+
+  it("throws the cut-off message after a second max_tokens failure", async () => {
+    const call = vi.fn().mockResolvedValue({
+      text: '{"theme": "Stories", "body": "he read the whole',
+      inputTokens: 100,
+      outputTokens: 6000,
+      stopReason: "max_tokens",
+    });
+
+    await expect(generateBookJsonWithRetry(call, "USER PROMPT")).rejects.toThrow(
+      TRUNCATED_MESSAGE,
+    );
+    // Two attempts is the whole budget — no third.
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws the malformed message after two malformed responses, with diagnostics logged", async () => {
+    const call = vi.fn().mockResolvedValue({
+      text: brokenBook,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+
+    await expect(generateBookJsonWithRetry(call, "USER PROMPT")).rejects.toThrow(
+      MALFORMED_MESSAGE,
+    );
+    expect(call).toHaveBeenCalledTimes(2);
+
+    const logged = vi.mocked(console.error).mock.calls.map((c) => String(c[0]));
+    expect(logged).toHaveLength(2);
+    expect(logged[0]).toContain("attempt 1");
+    expect(logged[1]).toContain("attempt 2");
+    for (const line of logged) {
+      expect(line).toContain("rawWindow[");
+      expect(line).toContain("stop_reason=end_turn");
+    }
+  });
+
+  it("keeps the first attempt's book when the retry comes back unreadable", async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 100,
+        outputTokens: 6000,
+        stopReason: "max_tokens",
+      })
+      .mockResolvedValueOnce({
+        text: brokenBook,
+        inputTokens: 110,
+        outputTokens: 60,
+        stopReason: "end_turn",
+      });
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(result.parsed.theme).toBe("Stories You Built");
+    expect(result.retried).toBe(true);
+  });
+
+  it("keeps the first attempt's book when the retry call itself rejects", async () => {
+    // Codex P2: the retry is mandatory after a max_tokens cut, so a rejecting
+    // retry (timeout, rate limit, transient provider error) must not destroy a
+    // book attempt 1 already gave us.
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 100,
+        outputTokens: 6000,
+        stopReason: "max_tokens",
+      })
+      .mockRejectedValueOnce(new Error("socket hang up"));
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(result.parsed.theme).toBe("Stories You Built");
+    expect(result.retried).toBe(true);
+    // Only attempt 1 returned, so only attempt 1's usage is counted.
+    expect(result.inputTokens).toBe(100);
+    expect(result.outputTokens).toBe(6000);
+  });
+
+  it("propagates a rejecting retry when there is no first book to keep", async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: brokenBook,
+        inputTokens: 100,
+        outputTokens: 50,
+        stopReason: "end_turn",
+      })
+      .mockRejectedValueOnce(new Error("socket hang up"));
+
+    await expect(generateBookJsonWithRetry(call, "USER PROMPT")).rejects.toThrow(
+      "socket hang up",
+    );
+  });
+
+  it("reports usage for every charged attempt, including on the throw path", async () => {
+    // Codex P2: both attempts are billed even when neither parses. The caller
+    // logs what it is told here, so cost totals stay honest on the failure path.
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: brokenBook,
+        inputTokens: 100,
+        outputTokens: 50,
+        stopReason: "end_turn",
+      })
+      .mockResolvedValueOnce({
+        text: brokenBook,
+        inputTokens: 110,
+        outputTokens: 60,
+        stopReason: "end_turn",
+      });
+    const seen: Array<{ inputTokens: number; outputTokens: number }> = [];
+
+    await expect(
+      generateBookJsonWithRetry(call, "USER PROMPT", (u) => seen.push(u)),
+    ).rejects.toThrow(MALFORMED_MESSAGE);
+
+    expect(seen).toEqual([
+      { inputTokens: 100, outputTokens: 50 },
+      { inputTokens: 110, outputTokens: 60 },
+    ]);
+  });
+
+  it("reports usage once when the first response is clean", async () => {
+    const call = vi.fn().mockResolvedValue({
+      text: goodBook,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+    const seen: Array<{ inputTokens: number; outputTokens: number }> = [];
+
+    await generateBookJsonWithRetry(call, "USER PROMPT", (u) => seen.push(u));
+    expect(seen).toEqual([{ inputTokens: 100, outputTokens: 50 }]);
+  });
+
+  it("parses a first response whose only flaw is an interior quote — no retry", async () => {
+    // The exact production failure class, end to end through the sanitizer.
+    const call = vi.fn().mockResolvedValue({
+      text: `{
+  "theme": "The "Big" Month",
+  "sections": {
+    "whatYouLoved": {
+      "kidMode": { "body": "You read a lot
+and you built a lot" }
+    }
+  }
+}`,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(result.retried).toBe(false);
+    expect(result.parsed.theme).toBe('The "Big" Month');
+    expect(result.parsed.sections.whatYouLoved.kidMode?.body).toBe(
+      "You read a lot\nand you built a lot",
+    );
   });
 });

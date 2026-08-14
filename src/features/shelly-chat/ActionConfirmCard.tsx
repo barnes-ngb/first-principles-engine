@@ -4,6 +4,7 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
+import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined'
 import TimerOutlinedIcon from '@mui/icons-material/TimerOutlined'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import Box from '@mui/material/Box'
@@ -14,6 +15,15 @@ import Typography from '@mui/material/Typography'
 
 import type { ChatAction, Child } from '../../core/types'
 import { describeActivityAudience } from './activityMinutesView'
+import type { ResolvedCurriculumAction } from './curriculumActions'
+import {
+  curriculumActionFootnote,
+  describeAddActivityShape,
+  describeCurriculumAction,
+  isCurriculumAction,
+  resolveCurriculumAction,
+  resolveCurriculumActionForDisplay,
+} from './curriculumActions'
 import type { ChatWeekDay, ResolvedDayItemAction } from './dayItemActions'
 import {
   dayItemActionFootnote,
@@ -244,6 +254,79 @@ function DayItemPreview({
 }
 
 /**
+ * Preview for a curriculum edit (FEAT-143) — add / finish / reposition.
+ *
+ * Framed like the other cards that change what future plans read: a warning
+ * accent and a label naming what is about to change. The body names the child
+ * and the activity **by name** — never a doc id — and shows old → new for a
+ * position bump so the parent can check the proposal against the number she
+ * already knows.
+ *
+ * An add is the one action that creates something from nothing, so its card
+ * shows the whole shape (subject · minutes · frequency, and the position when
+ * one was given) plus who it is for — loudly, when the activity is shared,
+ * because a shared add lands on every child's list.
+ *
+ * The footnote carries the consequence. For a completion that is the important
+ * one: the program stops appearing in future plans, everything already logged
+ * stays, and there is no undo anywhere in the app.
+ */
+function CurriculumPreview({
+  resolved,
+  childName,
+  allChildNames,
+}: {
+  resolved: ResolvedCurriculumAction
+  childName: string
+  allChildNames: string[]
+}) {
+  const { action } = resolved
+  const isAdd = action.kind === 'addActivity'
+  const shared = isAdd && action.shared === true
+  return (
+    <Stack spacing={0.25}>
+      <Typography
+        variant="caption"
+        sx={{ display: 'block', fontWeight: 700, color: 'warning.main', letterSpacing: 0.2 }}
+      >
+        {action.kind === 'addActivity'
+          ? `Adds to ${childName}'s curriculum`
+          : action.kind === 'markActivityComplete'
+            ? `Finishes a program for ${childName}`
+            : `Changes where ${childName} picks up`}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {describeCurriculumAction(resolved, childName)}
+      </Typography>
+      {isAdd && (
+        <>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {describeAddActivityShape(action)}
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{
+              display: 'block',
+              fontWeight: shared ? 700 : 400,
+              color: shared ? 'warning.main' : 'text.secondary',
+            }}
+          >
+            {describeActivityAudience(
+              shared ? 'both' : action.childId,
+              allChildNames,
+              childName,
+            )}
+          </Typography>
+        </>
+      )}
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+        {curriculumActionFootnote(action)}
+      </Typography>
+    </Stack>
+  )
+}
+
+/**
  * Before → after preview for an `editProfileField` action. These are
  * replace-writes on freeform text, so Shelly must see exactly what changes
  * before she taps: the current value and the proposed new value.
@@ -288,7 +371,10 @@ function ProfileEditPreview({
  * shared) and the fact that it applies to future plans only, and the live-day
  * edits (FEAT-142) as a sentence naming the child, the weekday in words and the
  * row by its title — never an id — with a footnote that finished work stays
- * put. A batch
+ * put, and the curriculum edits (FEAT-143) naming the activity by name with the
+ * full shape for an add (subject · minutes · frequency, plus who it lands on)
+ * and a real old → new for a position bump, footnoted with what the write does
+ * NOT touch — and, for a completion, that the app has no undo for it. A batch
  * "Confirm all" appears when 2+ are
  * still pending. Nothing here writes — taps call back into
  * `useShellyChatActions`. Mobile-first: large tap targets.
@@ -355,6 +441,34 @@ export default function ActionConfirmCard({
             : null
           const isDayItem = isDayItemAction(action)
           if (isDayItem && !dayResolution?.ok) return null
+          // FEAT-143 — resolve against the live configs so the card can name the
+          // activity and show a real old → new position. Unresolvable proposals
+          // are already filtered out at stage time (with a reason shown in the
+          // card's place); if one somehow reaches here we render no card rather
+          // than one that names nothing. `canEdit` is true at this point by
+          // construction — a non-parent's proposal never becomes a `pending`
+          // entry — and the write layer checks it again regardless.
+          // Gated on the LIVE configs only while the card is still PENDING —
+          // that is when the gate means something (an activity finished in
+          // another tab must stop offering a card here). Once she has tapped,
+          // the question "may this be proposed?" is settled, and the card
+          // renders leniently so a confirmed write keeps its "Done ✓". Without
+          // that split, `markActivityComplete` succeeds and its own card
+          // disappears, which is the one action where the confirmation matters
+          // most — it cannot be undone (Codex P2, PR #1669).
+          const isCurriculum = isCurriculumAction(action)
+          const isPending = item.status === 'pending'
+          const curriculumGate =
+            isCurriculum && isPending
+              ? resolveCurriculumAction(action, activityConfigs, true)
+              : null
+          if (isCurriculum && isPending && !curriculumGate?.ok) return null
+          const curriculumResolved = !isCurriculum
+            ? null
+            : curriculumGate?.ok
+              ? curriculumGate.resolved
+              : resolveCurriculumActionForDisplay(action, activityConfigs)
+          if (isCurriculum && !curriculumResolved) return null
           const icon =
             action.kind === 'addSightWord' ? (
               <AddCircleOutlineIcon fontSize="small" color="action" />
@@ -368,6 +482,8 @@ export default function ActionConfirmCard({
               <TimerOutlinedIcon fontSize="small" color="warning" />
             ) : isDayItem ? (
               <EventNoteOutlinedIcon fontSize="small" color="warning" />
+            ) : isCurriculum ? (
+              <MenuBookOutlinedIcon fontSize="small" color="warning" />
             ) : (
               <EditOutlinedIcon fontSize="small" color="action" />
             )
@@ -384,7 +500,8 @@ export default function ActionConfirmCard({
                   isSnapshotEdit ||
                   isPlanAdjustment ||
                   isActivityMinutes ||
-                  isDayItem
+                  isDayItem ||
+                  isCurriculum
                     ? 'flex-start'
                     : 'center',
                 gap: 1,
@@ -393,7 +510,7 @@ export default function ActionConfirmCard({
                 // slightly stronger border so they read weightier than a
                 // sight-word card. The plan-adjustment handoff gets its own
                 // (info) accent so it reads as "opens the planner", not a write.
-                ...(isSnapshotEdit || isActivityMinutes || isDayItem
+                ...(isSnapshotEdit || isActivityMinutes || isDayItem || isCurriculum
                   ? { borderColor: 'warning.main', borderLeftWidth: 3 }
                   : isPlanAdjustment
                     ? { borderColor: 'info.main', borderLeftWidth: 3 }
@@ -413,6 +530,12 @@ export default function ActionConfirmCard({
                   <DayItemPreview
                     resolved={dayResolution.resolved}
                     childName={childName(action.childId)}
+                  />
+                ) : curriculumResolved ? (
+                  <CurriculumPreview
+                    resolved={curriculumResolved}
+                    childName={childName(action.childId)}
+                    allChildNames={allChildNames}
                   />
                 ) : isSnapshotEdit ? (
                   <SnapshotEditPreview action={action} childName={childName(action.childId)} />
@@ -454,6 +577,11 @@ export default function ActionConfirmCard({
                     Dismiss
                   </Button>
                 </Box>
+              )}
+              {item.status === 'applying' && (
+                <Typography variant="caption" color="text.secondary">
+                  Saving…
+                </Typography>
               )}
               {item.status === 'applied' && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'success.main' }}>

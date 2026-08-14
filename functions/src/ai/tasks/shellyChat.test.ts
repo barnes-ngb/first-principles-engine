@@ -3,6 +3,7 @@ import {
   extractImageUrls,
   buildActivityMinutesActionAddendum,
   buildAllChildrenLearnerModels,
+  buildCurriculumActionAddendum,
   buildDayItemActionAddendum,
   chatChecklistItemKey,
   civilDateInZone,
@@ -1184,5 +1185,237 @@ describe("civilDateInZone (Codex P2, PR #1667)", () => {
     expect(civilDateInZone(new Date("2026-08-12T12:00:00Z"), "Not/AZone")).toMatch(
       /^\d{4}-\d{2}-\d{2}$/,
     );
+  });
+});
+
+// ── FEAT-143. The chat can edit the curriculum ──────────────────────
+//
+// Slice 2 of the chat arc. Nathan: "chat with it on where Lincoln is in a topic
+// … what curriculum to add for Lincoln on the tablet — ok let's add this one."
+// Two things had to change on this side: the ACTIVITIES section had to carry
+// enough to HAVE that conversation (type + position), and the model needed a
+// grammar for the three writes Shelly makes by hand at Progress → Curriculum.
+
+describe("formatChatActivities — the FEAT-143 widening", () => {
+  const ROWS: ChatActivityRow[] = [
+    {
+      id: "cfg_gatb",
+      name: "GATB Math 3",
+      subjectBucket: "Math",
+      defaultMinutes: 20,
+      frequency: "daily",
+      childId: "lincoln1",
+      type: "workbook",
+      currentPosition: 98,
+      totalUnits: 140,
+      unitLabel: "lesson",
+    },
+    {
+      id: "cfg_morning",
+      name: "Morning formation",
+      subjectBucket: "Other",
+      defaultMinutes: 10,
+      frequency: "daily",
+      childId: "both",
+      type: "routine",
+    },
+  ];
+
+  it("carries the activity TYPE, so the model knows what the owner rule applies to", () => {
+    const out = formatChatActivities(ROWS, ["Lincoln", "London"]);
+    expect(out).toContain("workbook");
+    expect(out).toContain("routine");
+  });
+
+  it("carries the position — the whole subject of 'where is Lincoln in this topic'", () => {
+    const out = formatChatActivities(ROWS, ["Lincoln", "London"]);
+    expect(out).toContain("on lesson 98 of 140");
+  });
+
+  it("says plainly when an activity has no position to set", () => {
+    const out = formatChatActivities(ROWS, ["Lincoln", "London"]);
+    const morningLine = out.split("\n").find((l) => l.includes("cfg_morning")) ?? "";
+    expect(morningLine).toContain("no position tracked");
+  });
+
+  it("renders a position in the config's own unit noun", () => {
+    const out = formatChatActivities(
+      [{ ...ROWS[0], unitLabel: "chapter", currentPosition: 4, totalUnits: 42 }],
+      ["Lincoln"],
+    );
+    expect(out).toContain("on chapter 4 of 42");
+  });
+
+  it("handles a position with no known total, and a total with no position", () => {
+    expect(
+      formatChatActivities(
+        [{ ...ROWS[0], currentPosition: 12, totalUnits: undefined }],
+        ["Lincoln"],
+      ),
+    ).toContain("on lesson 12");
+    expect(
+      formatChatActivities(
+        [{ ...ROWS[0], currentPosition: undefined, totalUnits: 140 }],
+        ["Lincoln"],
+      ),
+    ).toContain("140 lessons, position not set");
+  });
+
+  // Characterization — FEAT-135's consumers must be unaffected by the widening.
+  it("still carries everything FEAT-135 put there", () => {
+    const out = formatChatActivities(ROWS, ["Lincoln", "London"]);
+    expect(out).toContain("ACTIVITIES");
+    expect(out).toContain("GATB Math 3");
+    expect(out).toContain("20 min");
+    expect(out).toContain("daily");
+    expect(out).toContain("Math");
+    expect(out).toContain("(id: cfg_gatb)");
+    expect(out).toContain("shared: Lincoln and London");
+    expect(out).toContain("exactly");
+  });
+
+  it("still excludes completed activities and still omits an empty section", () => {
+    const done: ChatActivityRow = { ...ROWS[0], id: "cfg_done", name: "Done Book", completed: true };
+    const out = formatChatActivities([...ROWS, done], ["Lincoln"]);
+    expect(out).not.toContain("Done Book");
+    expect(out).not.toContain("cfg_done");
+    expect(formatChatActivities([done], ["Lincoln"])).toBe("");
+  });
+
+  it("tolerates a row with no widened fields at all (a pre-FEAT-143 doc)", () => {
+    const bare: ChatActivityRow = {
+      id: "cfg_bare",
+      name: "Old Activity",
+      defaultMinutes: 15,
+      frequency: "daily",
+      childId: "lincoln1",
+    };
+    const out = formatChatActivities([bare], ["Lincoln"]);
+    expect(out).toContain("Old Activity");
+    expect(out).toContain("(id: cfg_bare)");
+    expect(out).toContain("no position tracked");
+  });
+});
+
+describe("buildCurriculumActionAddendum (FEAT-143)", () => {
+  const OUT = buildCurriculumActionAddendum("lincoln123", "Lincoln");
+
+  it("returns empty string on the general (no-child) tab — no curriculum actions there", () => {
+    expect(buildCurriculumActionAddendum(undefined, "Lincoln")).toBe("");
+    expect(buildCurriculumActionAddendum("", "")).toBe("");
+  });
+
+  it("emits all three grammars bound to the active childId", () => {
+    expect(OUT).toContain('"kind":"addActivity"');
+    expect(OUT).toContain('"kind":"markActivityComplete"');
+    expect(OUT).toContain('"kind":"setActivityPosition"');
+    expect(OUT).toContain('"childId":"lincoln123"');
+    expect(OUT).not.toContain("${");
+  });
+
+  it("states every enum the parser rejects outside of", () => {
+    for (const type of ["workbook", "routine", "app", "activity", "formation", "evaluation"]) {
+      expect(OUT, `type=${type}`).toContain(type);
+    }
+    for (const freq of ["daily", "3x", "2x", "1x", "as-needed"]) {
+      expect(OUT, `frequency=${freq}`).toContain(freq);
+    }
+    expect(OUT).toContain("between 5 and 120");
+  });
+
+  it("teaches the DATA-08 owner rule — a workbook is never shared", () => {
+    expect(OUT).toContain("WORKBOOKS BELONG TO ONE CHILD");
+    expect(OUT).toContain('"shared":true');
+    expect(OUT).toContain("rejected outright");
+  });
+
+  it("says a completion is irreversible, in both places it could be undone", () => {
+    expect(OUT).toContain("THERE IS NO UNDO");
+    expect(OUT).toContain("Progress → Curriculum");
+    expect(OUT).toContain("Everything already logged against it stays");
+  });
+
+  it("forbids deleting an activity and offers completion instead", () => {
+    expect(OUT).toContain("CANNOT delete");
+    expect(OUT).toContain("retires programs");
+  });
+
+  it("rejects rather than clamps a position past the end", () => {
+    expect(OUT).toContain("cannot be past");
+    expect(OUT).toContain("rather than trimmed");
+  });
+
+  it("forbids inventing an activity id and points at the ACTIVITIES section", () => {
+    expect(OUT).toContain("ACTIVITIES");
+    expect(OUT).toContain("NEVER invent");
+    expect(OUT).toContain("ask which one");
+  });
+
+  it("keeps the model out of picking a sort order", () => {
+    expect(OUT).toContain("Do NOT pick an ordering");
+  });
+
+  // The conservatism rail the run prompt names explicitly: the "where is he in
+  // this topic" conversation is a READ, not a write.
+  it("says discussing where the child is in a topic is not a write", () => {
+    expect(OUT).toContain("TALKING about where Lincoln is in a topic is NOT a write");
+    expect(OUT).toContain("Be conservative");
+    expect(OUT).toContain("NEVER say it's done");
+  });
+
+  // The failure mode this rail exists for: reaching for the wrong capability.
+  // "Make math 30 minutes" is the minutes action, not a curriculum add.
+  it("stays distinct from its three neighbouring capabilities", () => {
+    expect(OUT).toContain("setActivityMinutes");
+    expect(OUT).toContain('"make math 30 minutes" is that action, not this one');
+    expect(OUT).toContain("THIS week");
+    expect(OUT).toContain("NEXT week");
+  });
+});
+
+describe("NAVIGATION HONESTY after FEAT-143", () => {
+  const CHILD = buildShellyChatRoleSection("Lincoln");
+  const GENERAL = buildShellyChatRoleSection(undefined);
+
+  it("moves curriculum edits out of the 'coming' list and into what it CAN do", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("adding an activity, marking one finished");
+      // The old promise is gone — the capability shipped.
+      expect(out).not.toContain(
+        "adding or completing a curriculum activity or changing its position",
+      );
+    }
+  });
+
+  it("leaves slices 3 and 4 as the only two 'coming' items, with their real screens", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("finding videos on the web and planning them");
+      expect(out).toContain("Watch Library");
+      expect(out).toContain("reshaping NEXT week from here");
+      expect(out).toContain("Plan My Week");
+      expect(out).toContain('Say "that\'s coming" only for these two');
+    }
+  });
+
+  it("states the two things that remain impossible — delete, and un-finish", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("CANNOT DELETE an activity");
+      expect(out).toContain("cannot be un-finished");
+      expect(out).toContain("Never offer a way to undo it");
+    }
+  });
+
+  it("still names only real screens, and still forbids inventing one", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("Progress → Curriculum");
+      expect(out).toContain("NEVER describe a screen");
+      // The FEAT-135 bug is still called out by name as the thing NOT to do.
+      // (The invented phrase appears only inside that prohibition, and Settings
+      // is explicitly ruled out as a destination for it.)
+      expect(out).toContain("Inventing a plausible-sounding location");
+      expect(out).toContain(
+        "Settings does NOT contain any schedule, subject-duration, or time-block screen",
+      );
+    }
   });
 });
