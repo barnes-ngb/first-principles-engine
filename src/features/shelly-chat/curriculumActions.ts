@@ -190,6 +190,38 @@ export function resolveCurriculumAction(
   return { ok: true, resolved: { action, config } }
 }
 
+/**
+ * Resolve for DISPLAY, ignoring the gates that decide whether an action may be
+ * OFFERED (Codex P2, PR #1669).
+ *
+ * A confirmed write changes the state its own card resolves against, and the
+ * subscription delivers that change at once. `markActivityComplete` is the sharp
+ * case: the instant it succeeds the config reads `completed: true`, so
+ * {@link resolveCurriculumAction} correctly refuses it as already finished — and
+ * the card vanishes, taking with it the "Done ✓" that is the parent's only
+ * confirmation that an **irreversible** write happened.
+ *
+ * So an already-decided card renders through here instead: same shape, but the
+ * running / position / owner gates are not applied, because they answer "may
+ * this be proposed?" and that question is settled once she has tapped. The
+ * config is still found by id — a card that can name nothing still renders
+ * nothing.
+ *
+ * **Never** use this to decide whether to OFFER a card; that is
+ * {@link resolveCurriculumAction}'s job and it stays gated on the live state, so
+ * an activity finished in another tab stops offering a card here.
+ */
+export function resolveCurriculumActionForDisplay(
+  action: CurriculumAction,
+  configs: ChatActivityConfig[],
+): ResolvedCurriculumAction | null {
+  if (action.kind === 'addActivity') {
+    return { action, sortOrder: nextActivitySortOrder(configs) }
+  }
+  const config = configs.find((c) => c.id === action.activityConfigId)
+  return config ? { action, config } : null
+}
+
 // ── Card wording ─────────────────────────────────────────────────────────────
 
 /**
@@ -212,7 +244,11 @@ export function describeCurriculumAction(
       const name = config?.name ?? 'this activity'
       const unit = config ? unitLabelFor(config) : 'lesson'
       const from = config?.currentPosition
-      return from == null
+      // No arrow when there is nothing to move FROM, and none when the two ends
+      // are equal — which is what an APPLIED card reads like once the write has
+      // landed and the config already holds the new number. "lesson 107 → 107"
+      // would read as a bug rather than as a completed change.
+      return from == null || from === action.position
         ? `${name}: ${unit} ${action.position}`
         : `${name}: ${unit} ${from} → ${action.position}`
     }

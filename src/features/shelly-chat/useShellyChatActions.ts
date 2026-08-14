@@ -86,7 +86,17 @@ import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
 import { currentWeekDayKeys } from './useChatWeekDays'
 import { stagePlanAdjustment } from './stagePlanAdjustment'
 
-export type ActionStatus = 'pending' | 'applied' | 'dismissed'
+/**
+ * `'applying'` is the in-flight state between a confirm tap and the write
+ * resolving (Codex P1, PR #1669). It exists because a confirm tap awaits a
+ * network round-trip, and until FEAT-143 every kind in the union was idempotent
+ * — a repeated sight-word add, profile replace, snapshot add, minutes set,
+ * completion or position set all converge on the same document, so a double tap
+ * was harmless. `addActivity` is the first kind that is NOT: it mints a fresh
+ * auto-id per call, so two taps create two active curriculum entries and BOTH
+ * land in future plans.
+ */
+export type ActionStatus = 'pending' | 'applying' | 'applied' | 'dismissed'
 
 export interface PendingAction {
   /** Stable key for list rendering + per-card status. */
@@ -416,6 +426,16 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // a card that never appears — the same "tells you something untrue" failure
   // this feature exists to fix. Surfaced instead.
   const [suppressed, setSuppressed] = useState<string[]>([])
+  // Actions whose write has been started. The card's status flips to
+  // `'applying'` at the same moment, which hides the buttons — but state is
+  // asynchronous and two taps inside one frame both read the pre-render value,
+  // so the ref is what actually holds the line and the status is what tells the
+  // parent. Entries are kept after a SUCCESSFUL write (an applied action must
+  // never be applied twice) and released on failure so a retry is possible.
+  // Guarded here rather than in the card so the rail cannot be forgotten by a
+  // new call site — and for every kind, since "idempotent" is a property a
+  // future kind may not have.
+  const appliedOrInFlightRef = useRef<Set<ChatAction>>(new Set())
 
   // Latest configs + capability, read at stage/apply time rather than captured
   // in a closure, so a snapshot that lands between renders is the one we
@@ -531,6 +551,8 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     setPending([])
     setPendingMessageId(null)
     setSuppressed([])
+    // The guard is scoped to the cards on screen; a new turn starts clean.
+    appliedOrInFlightRef.current = new Set()
   }, [])
 
   /**
@@ -586,21 +608,12 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   )
 
   /**
-   * Apply a single proposed action on a confirm tap. Validates the active-child
-   * binding, routes through the shared sight-word writer, records the applied
-   * write inline on the source message, and marks the card applied. Idempotent
-   * and safe to re-tap (the underlying writers guarantee this).
-   *
-   * @returns true if the write was performed, false if rejected.
+   * The write itself. Split out of {@link applyChatAction} so the re-entry guard
+   * above wraps it whole — a guard that shares a function body with the writes
+   * it protects is one early `return` away from being bypassed.
    */
-  const applyChatAction = useCallback(
+  const performChatAction = useCallback(
     async (action: ChatAction): Promise<boolean> => {
-      const reason = rejectReason(action)
-      if (reason) {
-        console.warn('[shellyChat] rejected action —', reason, action)
-        return false
-      }
-
       if (action.kind === 'addSightWord') {
         await addSightWord(familyId, action.childId, action.word)
       } else if (action.kind === 'removeSightWord') {
@@ -682,7 +695,56 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
 
       return true
     },
-    [familyId, activeThreadId, pendingMessageId, rejectReason, navigateToPlanner],
+    [familyId, activeThreadId, pendingMessageId, navigateToPlanner],
+  )
+
+  /**
+   * Apply a single proposed action on a confirm tap.
+   *
+   * Guards re-entry, validates the active-child binding, then hands off to
+   * {@link performChatAction} for the write itself. A repeat tap — a double tap
+   * inside one frame, or a tap on a card whose write already succeeded — is
+   * refused before any writer is reached, so a non-idempotent kind like
+   * `addActivity` cannot create two documents (Codex P1, PR #1669).
+   *
+   * @returns true if the write was performed, false if refused.
+   */
+  const applyChatAction = useCallback(
+    async (action: ChatAction): Promise<boolean> => {
+      // Re-entry guard (Codex P1, PR #1669). A second tap while the first write
+      // is still in flight — or on a card whose write already succeeded — must
+      // not reach a writer. See `appliedOrInFlightRef`.
+      if (appliedOrInFlightRef.current.has(action)) {
+        console.warn('[shellyChat] ignored a repeat confirm — already applied or in flight', action)
+        return false
+      }
+
+      const reason = rejectReason(action)
+      if (reason) {
+        console.warn('[shellyChat] rejected action —', reason, action)
+        return false
+      }
+
+      appliedOrInFlightRef.current.add(action)
+      // Hide the buttons for the duration. Reverted to `'pending'` below if the
+      // write does not happen, so a genuine failure stays retryable.
+      setPending((prev) =>
+        prev.map((p) => (p.action === action ? { ...p, status: 'applying' } : p)),
+      )
+      let wrote = false
+      try {
+        wrote = await performChatAction(action)
+      } finally {
+        if (!wrote) {
+          appliedOrInFlightRef.current.delete(action)
+          setPending((prev) =>
+            prev.map((p) => (p.action === action ? { ...p, status: 'pending' } : p)),
+          )
+        }
+      }
+      return wrote
+    },
+    [performChatAction, rejectReason],
   )
 
   /** Dismiss a proposed action without writing. */
