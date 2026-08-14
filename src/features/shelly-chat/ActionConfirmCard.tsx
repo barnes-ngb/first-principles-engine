@@ -22,6 +22,7 @@ import {
   describeCurriculumAction,
   isCurriculumAction,
   resolveCurriculumAction,
+  resolveCurriculumActionForDisplay,
 } from './curriculumActions'
 import type { ChatWeekDay, ResolvedDayItemAction } from './dayItemActions'
 import {
@@ -447,11 +448,27 @@ export default function ActionConfirmCard({
           // than one that names nothing. `canEdit` is true at this point by
           // construction — a non-parent's proposal never becomes a `pending`
           // entry — and the write layer checks it again regardless.
-          const curriculumResolution = isCurriculumAction(action)
-            ? resolveCurriculumAction(action, activityConfigs, true)
-            : null
+          // Gated on the LIVE configs only while the card is still PENDING —
+          // that is when the gate means something (an activity finished in
+          // another tab must stop offering a card here). Once she has tapped,
+          // the question "may this be proposed?" is settled, and the card
+          // renders leniently so a confirmed write keeps its "Done ✓". Without
+          // that split, `markActivityComplete` succeeds and its own card
+          // disappears, which is the one action where the confirmation matters
+          // most — it cannot be undone (Codex P2, PR #1669).
           const isCurriculum = isCurriculumAction(action)
-          if (isCurriculum && !curriculumResolution?.ok) return null
+          const isPending = item.status === 'pending'
+          const curriculumGate =
+            isCurriculum && isPending
+              ? resolveCurriculumAction(action, activityConfigs, true)
+              : null
+          if (isCurriculum && isPending && !curriculumGate?.ok) return null
+          const curriculumResolved = !isCurriculum
+            ? null
+            : curriculumGate?.ok
+              ? curriculumGate.resolved
+              : resolveCurriculumActionForDisplay(action, activityConfigs)
+          if (isCurriculum && !curriculumResolved) return null
           const icon =
             action.kind === 'addSightWord' ? (
               <AddCircleOutlineIcon fontSize="small" color="action" />
@@ -514,9 +531,9 @@ export default function ActionConfirmCard({
                     resolved={dayResolution.resolved}
                     childName={childName(action.childId)}
                   />
-                ) : curriculumResolution?.ok ? (
+                ) : curriculumResolved ? (
                   <CurriculumPreview
-                    resolved={curriculumResolution.resolved}
+                    resolved={curriculumResolved}
                     childName={childName(action.childId)}
                     allChildNames={allChildNames}
                   />
@@ -560,6 +577,11 @@ export default function ActionConfirmCard({
                     Dismiss
                   </Button>
                 </Box>
+              )}
+              {item.status === 'applying' && (
+                <Typography variant="caption" color="text.secondary">
+                  Saving…
+                </Typography>
               )}
               {item.status === 'applied' && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'success.main' }}>

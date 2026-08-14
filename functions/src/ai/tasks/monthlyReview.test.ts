@@ -387,7 +387,7 @@ describe("collectWorkbookArtifactIds — FEAT-141 (Codex P1)", () => {
   });
 });
 
-// ── FEAT-144: parse diagnostics + one automatic retry ─────────
+// ── FEAT-146: parse diagnostics + one automatic retry ─────────
 
 describe("book JSON parse diagnostics", () => {
   beforeEach(() => {

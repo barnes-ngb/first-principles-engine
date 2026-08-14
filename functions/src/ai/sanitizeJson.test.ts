@@ -147,7 +147,7 @@ describe("sanitizeAndParseJson", () => {
     expect(() => sanitizeAndParseJson("not json at all")).toThrow();
   });
 
-  // ── Interior quotes (FEAT-144) ──────────────────────────────
+  // ── Interior quotes (FEAT-146) ──────────────────────────────
   //
   // The failure class that killed Lincoln's July 2026 monthly book: the model
   // quoted someone inside a caption. Before the fix the in-string tracker

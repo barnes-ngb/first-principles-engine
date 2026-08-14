@@ -104,7 +104,7 @@ describe('sanitizeAndParseJson', () => {
     expect(() => sanitizeAndParseJson('not json at all')).toThrow()
   })
 
-  // ── Interior quotes (FEAT-144) ──────────────────────────────
+  // ── Interior quotes (FEAT-146) ──────────────────────────────
   //
   // Mirror of the server suite in `functions/src/ai/sanitizeJson.test.ts` — the
   // two sanitizer copies are a deliberate duplication, so they get the same

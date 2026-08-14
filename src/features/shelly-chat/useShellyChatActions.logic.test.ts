@@ -464,18 +464,25 @@ describe('useShellyChatActions', () => {
     expect(addSightWord).not.toHaveBeenCalled()
   })
 
-  it('is idempotent and safe to re-tap a confirmed action', async () => {
+  // Superseded by the FEAT-143 re-entry guard (Codex P1, PR #1669). This used to
+  // assert that a re-tap simply wrote again, which was harmless while every kind
+  // was idempotent. It no longer is — `addActivity` mints a fresh auto-id per
+  // call, and `addItemToDay` appends a row with no id — so the guard now refuses
+  // the second tap for EVERY kind rather than relying on each writer to absorb
+  // it. Re-tapping is still safe; it is now safe by construction.
+  it('refuses a re-tap of a confirmed action instead of writing twice', async () => {
     const { result } = setup()
     const action: ChatAction = { kind: 'addSightWord', childId: 'lincoln1', word: 'and' }
 
     act(() => result.current.stagePendingActions('msg1', [action]))
+    let second: boolean | undefined
     await act(async () => {
       await result.current.applyChatAction(action)
-      await result.current.applyChatAction(action)
+      second = await result.current.applyChatAction(action)
     })
 
-    // The writer is safe to call again (setDoc merge); no throw, still applied.
-    expect(addSightWord).toHaveBeenCalledTimes(2)
+    expect(addSightWord).toHaveBeenCalledTimes(1)
+    expect(second).toBe(false)
     expect(result.current.pending[0].status).toBe('applied')
   })
 
@@ -754,11 +761,14 @@ describe('useShellyChatActions', () => {
       second = await result.current.applyChatAction(action)
     })
 
-    // Both taps succeed at the hook boundary; the central writer absorbs the
-    // duplicate (changed:false) without error, and the card stays applied.
+    // The first tap succeeds. The second never reaches the writer at all now —
+    // the FEAT-143 re-entry guard refuses it (Codex P1, PR #1669) — so 6a's
+    // dedup is no longer the thing standing between a double tap and a
+    // duplicate. It still absorbs one if a write arrives by another route; this
+    // test now pins the guard, and the card stays applied either way.
     expect(first).toBe(true)
-    expect(second).toBe(true)
-    expect(writeSnapshotUpdate).toHaveBeenCalledTimes(2)
+    expect(second).toBe(false)
+    expect(writeSnapshotUpdate).toHaveBeenCalledTimes(1)
     expect(result.current.pending[0].status).toBe('applied')
   })
 
@@ -1426,5 +1436,130 @@ describe('setActivityMinutes against a finished config (FEAT-143 subscription ch
     })
     expect(applied).toBe(false)
     expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
+  })
+})
+
+// ── Re-entry guard (Codex P1, PR #1669) ─────────────────────────────
+//
+// Until FEAT-143 every kind in the union was idempotent, so a double tap on
+// Confirm was harmless. `addActivity` is the first kind that is not: it mints a
+// fresh auto-id per call, so two taps would create two active curriculum entries
+// and BOTH would land in future plans.
+
+describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => {
+  it('writes ONCE when two taps race the same in-flight add', async () => {
+    // Hold the write open so both taps land before either resolves — the exact
+    // window a double tap on a phone falls into.
+    let release: (() => void) | undefined
+    addActivityConfig.mockImplementation(
+      () => new Promise<string>((resolve) => { release = () => resolve('new-cfg-id') }),
+    )
+
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [CURRICULUM_ADD])
+    })
+
+    let first: Promise<boolean> | undefined
+    let second: Promise<boolean> | undefined
+    await act(async () => {
+      first = result.current.applyChatAction(CURRICULUM_ADD)
+      second = result.current.applyChatAction(CURRICULUM_ADD)
+      release?.()
+      await Promise.all([first, second])
+    })
+
+    expect(addActivityConfig).toHaveBeenCalledTimes(1)
+    expect(await first).toBe(true)
+    expect(await second).toBe(false)
+  })
+
+  it('refuses a re-tap after the write has already succeeded', async () => {
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [CURRICULUM_ADD])
+    })
+    await act(async () => {
+      await result.current.applyChatAction(CURRICULUM_ADD)
+    })
+    let again: boolean | undefined
+    await act(async () => {
+      again = await result.current.applyChatAction(CURRICULUM_ADD)
+    })
+    expect(again).toBe(false)
+    expect(addActivityConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks the card `applying` while in flight, then `applied`', async () => {
+    let release: (() => void) | undefined
+    addActivityConfig.mockImplementation(
+      () => new Promise<string>((resolve) => { release = () => resolve('new-cfg-id') }),
+    )
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [CURRICULUM_ADD])
+    })
+
+    let inFlight: Promise<boolean> | undefined
+    await act(async () => {
+      inFlight = result.current.applyChatAction(result.current.pending[0].action)
+    })
+    expect(result.current.pending[0].status).toBe('applying')
+
+    await act(async () => {
+      release?.()
+      await inFlight
+    })
+    expect(result.current.pending[0].status).toBe('applied')
+  })
+
+  // A failure must stay retryable — the guard is against duplicates, not against
+  // second chances.
+  it('returns the card to `pending` and releases the guard when the write fails', async () => {
+    addActivityConfig.mockRejectedValueOnce(new Error('network'))
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [CURRICULUM_ADD])
+    })
+
+    await act(async () => {
+      await expect(result.current.applyChatAction(CURRICULUM_ADD)).rejects.toThrow('network')
+    })
+    expect(result.current.pending[0].status).toBe('pending')
+
+    addActivityConfig.mockResolvedValue('new-cfg-id')
+    let retried: boolean | undefined
+    await act(async () => {
+      retried = await result.current.applyChatAction(CURRICULUM_ADD)
+    })
+    expect(retried).toBe(true)
+    expect(addActivityConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it('guards every kind, not just the non-idempotent one', async () => {
+    const { result } = curriculumSetup()
+    await act(async () => {
+      await result.current.applyChatAction(CURRICULUM_COMPLETE)
+    })
+    let again: boolean | undefined
+    await act(async () => {
+      again = await result.current.applyChatAction(CURRICULUM_COMPLETE)
+    })
+    expect(again).toBe(false)
+    expect(completeActivityConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('clearPending releases the guard, so a fresh turn starts clean', async () => {
+    const { result } = curriculumSetup()
+    await act(async () => {
+      await result.current.applyChatAction(CURRICULUM_COMPLETE)
+    })
+    act(() => {
+      result.current.clearPending()
+    })
+    await act(async () => {
+      await result.current.applyChatAction(CURRICULUM_COMPLETE)
+    })
+    expect(completeActivityConfig).toHaveBeenCalledTimes(2)
   })
 })

@@ -11,6 +11,7 @@ import {
   isCurriculumAction,
   nextActivitySortOrder,
   resolveCurriculumAction,
+  resolveCurriculumActionForDisplay,
 } from './curriculumActions'
 import type { ChatActivityConfig } from './useShellyChatActions'
 
@@ -345,5 +346,46 @@ describe('curriculumActionFootnote', () => {
         `kind=${action.kind}`,
       ).toContain('already recorded stay as they are')
     }
+  })
+})
+
+describe('resolveCurriculumActionForDisplay (Codex P2, PR #1669)', () => {
+  // The gate answers "may this be proposed?". Once the parent has tapped, that
+  // question is settled — but the write has already changed the state the gate
+  // reads, so a card rendered through the gate would vanish at the moment its
+  // "Done ✓" matters most.
+  it('resolves a finished config the offer-gate refuses', () => {
+    expect(resolveCurriculumAction(complete('cfg-done'), CONFIGS, true).ok).toBe(false)
+    const display = resolveCurriculumActionForDisplay(complete('cfg-done'), CONFIGS)
+    expect(display?.config).toBe(finished)
+    expect(describeCurriculumAction(display!, 'Lincoln')).toBe(
+      'Mark "Explode the Code 3" finished for Lincoln',
+    )
+  })
+
+  it('resolves a position past the end, which the gate also refuses', () => {
+    expect(resolveCurriculumAction(setPosition('cfg-gatb', 141), CONFIGS, true).ok).toBe(false)
+    expect(resolveCurriculumActionForDisplay(setPosition('cfg-gatb', 141), CONFIGS)?.config).toBe(
+      gatb,
+    )
+  })
+
+  it('still returns null when the config is gone entirely', () => {
+    expect(resolveCurriculumActionForDisplay(complete('cfg-nope'), CONFIGS)).toBeNull()
+  })
+
+  it('resolves an add, which names no existing config', () => {
+    const display = resolveCurriculumActionForDisplay(addActivity(), CONFIGS)
+    expect(display?.config).toBeUndefined()
+    expect(display?.sortOrder).toBe(4)
+  })
+})
+
+describe('describeCurriculumAction — an applied position card (Codex P2)', () => {
+  it('drops the arrow when both ends are the same number', () => {
+    // What an APPLIED card reads: the config already holds the new position.
+    const after: ChatActivityConfig = { ...gatb, currentPosition: 107 }
+    const display = resolveCurriculumActionForDisplay(setPosition('cfg-gatb', 107), [after])
+    expect(describeCurriculumAction(display!, 'Lincoln')).toBe('GATB Math 3: lesson 107')
   })
 })

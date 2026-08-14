@@ -167,7 +167,7 @@ export async function runMonthlyReview(
   });
 
   // 4 + 5. Call Sonnet and parse, with one automatic retry on a malformed or
-  // truncated response (FEAT-144).
+  // truncated response (FEAT-146).
   //
   // Every attempt that returns is charged, so its usage is accumulated as it
   // happens rather than read off the result — on the throw path there is no
@@ -963,7 +963,7 @@ export interface BookJsonResult {
 
 /**
  * Call the model for the book JSON, retrying ONCE on a malformed or truncated
- * response (FEAT-144).
+ * response (FEAT-146).
  *
  * A stochastic generator producing one bad response is usually a one-off, so a
  * single retry — with a terse strictness reminder appended — is the cheapest
