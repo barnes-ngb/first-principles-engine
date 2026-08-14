@@ -46,6 +46,27 @@ vi.mock('../../core/firebase/updateActivityMinutes', () => ({
   updateActivityConfigMinutes: (...args: unknown[]) => updateActivityConfigMinutes(...args),
 }))
 
+// The shared `activityConfigs` write core (FEAT-143) — the SAME core
+// `useActivityConfigs` wraps for Progress → Curriculum. Spied, not
+// reimplemented, so these tests assert the chat calls the real writers with the
+// real arguments; the payloads those writers produce (completedDate, the
+// created-doc shape, the owner-rule throw) are pinned in
+// activityConfigWrites.test.ts against actual Firestore primitives.
+const addActivityConfig = vi.fn()
+const completeActivityConfig = vi.fn()
+const setActivityConfigPosition = vi.fn()
+vi.mock('../../core/firebase/activityConfigWrites', async () => {
+  const actual = await vi.importActual<typeof import('../../core/firebase/activityConfigWrites')>(
+    '../../core/firebase/activityConfigWrites',
+  )
+  return {
+    ...actual,
+    addActivityConfig: (...args: unknown[]) => addActivityConfig(...args),
+    completeActivityConfig: (...args: unknown[]) => completeActivityConfig(...args),
+    setActivityConfigPosition: (...args: unknown[]) => setActivityConfigPosition(...args),
+  }
+})
+
 // The FEAT-138 live-day edit lane (FEAT-142). Spied — NOT reimplemented — so
 // these tests assert the chat calls the REAL lane. Everything else in the module
 // (the completed-row rule, the identity lookup, the preservation guard) is left
@@ -157,6 +178,9 @@ beforeEach(() => {
   writeSnapshotUpdate.mockResolvedValue({ changed: true })
   stagePlanAdjustment.mockResolvedValue(undefined)
   updateActivityConfigMinutes.mockResolvedValue(undefined)
+  addActivityConfig.mockResolvedValue('new-cfg-id')
+  completeActivityConfig.mockResolvedValue(undefined)
+  setActivityConfigPosition.mockResolvedValue(undefined)
   removeItemFromLiveDay.mockResolvedValue({ status: 'done' })
   moveItemToLiveDay.mockResolvedValue({ status: 'done' })
   addItemToLiveDay.mockResolvedValue({ status: 'done' })
@@ -1057,5 +1081,350 @@ describe('live-day edits — the week is re-read from the clock (Codex P2, PR #1
     })
     expect(ok).toBe(false)
     expect(removeItemFromLiveDay).not.toHaveBeenCalled()
+  })
+})
+
+// ── Curriculum edits (FEAT-143) ─────────────────────────────────────
+//
+// Three contracts under test: a hallucinated / finished / out-of-bounds proposal
+// never becomes a card (and says why), a confirmed action calls the SAME shared
+// writer Progress → Curriculum calls, and nothing retroactive happens — no
+// dayLog, no plan, no child record, on any of the three.
+
+/** Lincoln's live curriculum: a workbook mid-book, a shared routine, a finished book. */
+const CURRICULUM_CONFIGS: ChatActivityConfig[] = [
+  {
+    id: 'cfg_gatb',
+    name: 'GATB Math 3',
+    childId: 'lincoln1',
+    defaultMinutes: 20,
+    type: 'workbook',
+    currentPosition: 98,
+    totalUnits: 140,
+    unitLabel: 'lesson',
+    sortOrder: 2,
+  },
+  {
+    id: 'cfg_morning',
+    name: 'Morning formation',
+    childId: 'both',
+    defaultMinutes: 10,
+    type: 'routine',
+    sortOrder: 1,
+  },
+  {
+    id: 'cfg_etc',
+    name: 'Explode the Code 3',
+    childId: 'lincoln1',
+    defaultMinutes: 15,
+    type: 'workbook',
+    currentPosition: 60,
+    totalUnits: 60,
+    completed: true,
+    sortOrder: 5,
+  },
+]
+
+const curriculumSetup = (
+  opts: { canEditActivityConfigs?: boolean; activeChildId?: string } = {},
+) =>
+  setup(opts.activeChildId ?? 'lincoln1', 'thread1', {
+    activityConfigs: CURRICULUM_CONFIGS,
+    canEditActivityConfigs: opts.canEditActivityConfigs ?? true,
+  })
+
+const CURRICULUM_ADD: ChatAction = {
+  kind: 'addActivity',
+  childId: 'lincoln1',
+  name: 'Khan Academy math',
+  type: 'app',
+  subjectBucket: 'Math',
+  defaultMinutes: 20,
+  frequency: 'daily',
+}
+
+const CURRICULUM_COMPLETE: ChatAction = {
+  kind: 'markActivityComplete',
+  childId: 'lincoln1',
+  activityConfigId: 'cfg_gatb',
+}
+
+const CURRICULUM_POSITION: ChatAction = {
+  kind: 'setActivityPosition',
+  childId: 'lincoln1',
+  activityConfigId: 'cfg_gatb',
+  position: 107,
+}
+
+describe('curriculum edits — the resolution gate (FEAT-143)', () => {
+  it('offers a card for each well-formed, resolvable action', () => {
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [CURRICULUM_ADD, CURRICULUM_COMPLETE, CURRICULUM_POSITION])
+    })
+    expect(result.current.pending).toHaveLength(3)
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('drops a hallucinated activity id and shows the reason', () => {
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [
+        { ...CURRICULUM_COMPLETE, activityConfigId: 'cfg_nope' } as ChatAction,
+      ])
+    })
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed[0]).toContain("didn't match one of your activities")
+  })
+
+  it('drops both existing-config kinds against a FINISHED config, by name', () => {
+    for (const action of [
+      { ...CURRICULUM_COMPLETE, activityConfigId: 'cfg_etc' } as ChatAction,
+      { ...CURRICULUM_POSITION, activityConfigId: 'cfg_etc', position: 12 } as ChatAction,
+    ]) {
+      const { result } = curriculumSetup()
+      act(() => {
+        result.current.stagePendingActions('m1', [action])
+      })
+      expect(result.current.pending, `kind=${action.kind}`).toEqual([])
+      expect(result.current.suppressed[0]).toContain('Explode the Code 3')
+      expect(result.current.suppressed[0]).toContain('already marked finished')
+    }
+  })
+
+  it('drops a position set against a config that tracks no position', () => {
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [
+        { ...CURRICULUM_POSITION, activityConfigId: 'cfg_morning', position: 3 } as ChatAction,
+      ])
+    })
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed[0]).toContain("doesn't track a lesson or page number")
+  })
+
+  it('drops a position past the end of the book rather than clamping it', () => {
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [
+        { ...CURRICULUM_POSITION, position: 141 } as ChatAction,
+      ])
+    })
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed[0]).toContain('past the end')
+  })
+
+  it('drops every curriculum action for a non-parent, with the gate reason', () => {
+    const { result } = curriculumSetup({ canEditActivityConfigs: false })
+    act(() => {
+      result.current.stagePendingActions('m1', [CURRICULUM_ADD, CURRICULUM_COMPLETE, CURRICULUM_POSITION])
+    })
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed).toEqual([
+      'Changing the curriculum is something a grown-up does — nothing was changed.',
+    ])
+  })
+
+  it('drops a shared workbook add with the DATA-08 owner rule reason', () => {
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [
+        { ...CURRICULUM_ADD, type: 'workbook', shared: true } as ChatAction,
+      ])
+    })
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed[0]).toContain('must belong to a specific child')
+  })
+})
+
+describe('curriculum edits — the write (FEAT-143)', () => {
+  it('routes a confirmed add through the shared writer, at the end of the list', async () => {
+    const { result } = curriculumSetup()
+    await act(async () => {
+      await result.current.applyChatAction(CURRICULUM_ADD)
+    })
+
+    expect(addActivityConfig).toHaveBeenCalledTimes(1)
+    const [familyId, payload] = addActivityConfig.mock.calls[0] as [string, Record<string, unknown>]
+    expect(familyId).toBe('fam1')
+    expect(payload).toMatchObject({
+      name: 'Khan Academy math',
+      type: 'app',
+      subjectBucket: 'Math',
+      defaultMinutes: 20,
+      frequency: 'daily',
+      childId: 'lincoln1',
+      // max(1, 2, 5) + 1 — appended past the largest existing order, including
+      // the completed config's, so a new row can never collide with an old one.
+      sortOrder: 6,
+      scannable: false,
+    })
+  })
+
+  it('writes a shared add as childId "both"', async () => {
+    const { result } = curriculumSetup()
+    await act(async () => {
+      await result.current.applyChatAction({
+        ...CURRICULUM_ADD,
+        type: 'routine',
+        shared: true,
+      } as ChatAction)
+    })
+    const [, payload] = addActivityConfig.mock.calls[0] as [string, Record<string, unknown>]
+    expect(payload.childId).toBe('both')
+  })
+
+  it('marks an add scannable with a unit label only when it tracks a position', async () => {
+    const { result } = curriculumSetup()
+    await act(async () => {
+      await result.current.applyChatAction({
+        ...CURRICULUM_ADD,
+        type: 'workbook',
+        totalUnits: 140,
+        currentPosition: 1,
+      } as ChatAction)
+    })
+    const [, payload] = addActivityConfig.mock.calls[0] as [string, Record<string, unknown>]
+    expect(payload).toMatchObject({
+      scannable: true,
+      unitLabel: 'lesson',
+      totalUnits: 140,
+      currentPosition: 1,
+    })
+  })
+
+  it('routes a confirmed completion through the shared writer', async () => {
+    const { result } = curriculumSetup()
+    await act(async () => {
+      await result.current.applyChatAction(CURRICULUM_COMPLETE)
+    })
+    expect(completeActivityConfig).toHaveBeenCalledTimes(1)
+    expect(completeActivityConfig).toHaveBeenCalledWith('fam1', 'cfg_gatb')
+  })
+
+  it('routes a confirmed position through the shared writer, with the config for the model sync', async () => {
+    const { result } = curriculumSetup()
+    await act(async () => {
+      await result.current.applyChatAction(CURRICULUM_POSITION)
+    })
+    expect(setActivityConfigPosition).toHaveBeenCalledTimes(1)
+    expect(setActivityConfigPosition).toHaveBeenCalledWith(
+      'fam1',
+      'cfg_gatb',
+      107,
+      expect.objectContaining({ id: 'cfg_gatb', name: 'GATB Math 3', childId: 'lincoln1' }),
+    )
+  })
+
+  it('marks the card applied and audits it inline on the source message', async () => {
+    const { result } = curriculumSetup()
+    act(() => {
+      result.current.stagePendingActions('m1', [CURRICULUM_POSITION])
+    })
+    await act(async () => {
+      await result.current.applyChatAction(result.current.pending[0].action)
+    })
+    expect(result.current.pending[0].status).toBe('applied')
+    expect(updateDoc).toHaveBeenCalled()
+  })
+})
+
+describe('curriculum edits — the write backstop (FEAT-143)', () => {
+  // Even if a card were somehow offered, the write must still be refused.
+  it('refuses a hallucinated id at apply time', async () => {
+    const { result } = curriculumSetup()
+    let applied: boolean | undefined
+    await act(async () => {
+      applied = await result.current.applyChatAction({
+        ...CURRICULUM_COMPLETE,
+        activityConfigId: 'cfg_nope',
+      } as ChatAction)
+    })
+    expect(applied).toBe(false)
+    expect(completeActivityConfig).not.toHaveBeenCalled()
+  })
+
+  it('refuses a finished config at apply time', async () => {
+    const { result } = curriculumSetup()
+    let applied: boolean | undefined
+    await act(async () => {
+      applied = await result.current.applyChatAction({
+        ...CURRICULUM_POSITION,
+        activityConfigId: 'cfg_etc',
+        position: 12,
+      } as ChatAction)
+    })
+    expect(applied).toBe(false)
+    expect(setActivityConfigPosition).not.toHaveBeenCalled()
+  })
+
+  it('refuses every curriculum write for a non-parent', async () => {
+    const { result } = curriculumSetup({ canEditActivityConfigs: false })
+    for (const action of [CURRICULUM_ADD, CURRICULUM_COMPLETE, CURRICULUM_POSITION]) {
+      let applied: boolean | undefined
+      await act(async () => {
+        applied = await result.current.applyChatAction(action)
+      })
+      expect(applied, `kind=${action.kind}`).toBe(false)
+    }
+    expect(addActivityConfig).not.toHaveBeenCalled()
+    expect(completeActivityConfig).not.toHaveBeenCalled()
+    expect(setActivityConfigPosition).not.toHaveBeenCalled()
+  })
+
+  it('refuses an action bound to a different child than the active tab', async () => {
+    const { result } = curriculumSetup({ activeChildId: 'london1' })
+    let applied: boolean | undefined
+    await act(async () => {
+      applied = await result.current.applyChatAction(CURRICULUM_COMPLETE)
+    })
+    expect(applied).toBe(false)
+    expect(completeActivityConfig).not.toHaveBeenCalled()
+  })
+})
+
+describe('curriculum edits touch nothing retroactive (FEAT-143)', () => {
+  it('writes no day, no plan, no snapshot and no profile on any of the three', async () => {
+    const { result } = curriculumSetup()
+    for (const action of [CURRICULUM_ADD, CURRICULUM_COMPLETE, CURRICULUM_POSITION]) {
+      await act(async () => {
+        await result.current.applyChatAction(action)
+      })
+    }
+    expect(removeItemFromLiveDay).not.toHaveBeenCalled()
+    expect(moveItemToLiveDay).not.toHaveBeenCalled()
+    expect(addItemToLiveDay).not.toHaveBeenCalled()
+    expect(stagePlanAdjustment).not.toHaveBeenCalled()
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+    expect(addSightWord).not.toHaveBeenCalled()
+    // And no cross-talk with FEAT-135's minutes write.
+    expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
+  })
+})
+
+describe('setActivityMinutes against a finished config (FEAT-143 subscription change)', () => {
+  // Completed configs are now visible to the resolvers (so a curriculum action
+  // can refuse one BY NAME). `resolveActivityConfig` therefore has to say no
+  // explicitly — this pins that FEAT-135's refusal survived the change.
+  it('still refuses, and still never reaches the write', async () => {
+    const { result } = curriculumSetup()
+    const action: ChatAction = {
+      kind: 'setActivityMinutes',
+      childId: 'lincoln1',
+      activityConfigId: 'cfg_etc',
+      minutes: 30,
+    }
+    act(() => {
+      result.current.stagePendingActions('m1', [action])
+    })
+    expect(result.current.pending).toEqual([])
+
+    let applied: boolean | undefined
+    await act(async () => {
+      applied = await result.current.applyChatAction(action)
+    })
+    expect(applied).toBe(false)
+    expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
   })
 })

@@ -38,12 +38,19 @@ export function chatActivityConfigsCacheKey(familyId: string, childId: string): 
 
 /**
  * Subscribe to the activity configs visible to one child — the child's own plus
- * shared (`'both'`) ones — with completed configs filtered out (they can't be
- * scheduled, so their default minutes are not a thing to change).
+ * shared (`'both'`) ones.
+ *
+ * **Completed configs are included** (FEAT-143). They used to be filtered out
+ * here, which made a proposal against a finished program refuse as "that didn't
+ * match one of your activities" — false, and unhelpful, about an activity the
+ * parent can see in Curriculum's Completed list. The resolvers now refuse a
+ * completed config explicitly and BY NAME (`resolveActivityConfig` for
+ * `setActivityMinutes`, `resolveCurriculumAction` for the curriculum kinds), so
+ * every prior refusal still refuses — with the true reason.
  *
  * Returns `[]` while loading, when either id is missing, or on error: an empty
- * list simply means no `setActivityMinutes` proposal can resolve, which fails
- * closed rather than offering a card the app can't back with a real config.
+ * list simply means no activity proposal can resolve, which fails closed rather
+ * than offering a card the app can't back with a real config.
  */
 export function useChatActivityConfigs(familyId: string, childId: string): ActivityConfig[] {
   // Keyed by the subscription's identity so a child/family switch reads as
@@ -70,7 +77,6 @@ export function useChatActivityConfigs(familyId: string, childId: string): Activ
           key,
           configs: snap.docs
             .map((d) => ({ ...(d.data() as ActivityConfig), id: d.id }))
-            .filter((c) => !c.completed)
             .sort((a, b) => a.sortOrder - b.sortOrder),
         })
       },
