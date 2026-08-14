@@ -166,17 +166,20 @@ export async function runMonthlyReview(
     placement,
   });
 
-  // 4. Call Sonnet
-  const result = await callClaude({
-    apiKey,
-    model,
-    maxTokens: 6000,
-    systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-  });
-
-  // 5. Parse JSON
-  const parsed = parseMonthlyReviewJson(result.text);
+  // 4 + 5. Call Sonnet and parse, with one automatic retry on a malformed or
+  // truncated response (FEAT-144).
+  const result = await generateBookJsonWithRetry(
+    (prompt) =>
+      callClaude({
+        apiKey,
+        model,
+        maxTokens: MONTHLY_REVIEW_MAX_TOKENS,
+        systemPrompt,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    userPrompt,
+  );
+  const parsed = result.parsed;
 
   // 6. Compose final document
   const payload = composeMonthlyReview({
@@ -815,6 +818,210 @@ interface ParsedSection {
 interface ParsedMonthlyReview {
   theme: string;
   sections: Record<string, ParsedSection>;
+}
+
+/** Output ceiling for the book call. One place, so diagnostics can name it. */
+export const MONTHLY_REVIEW_MAX_TOKENS = 6000;
+
+/**
+ * Half-width, in characters, of the raw-text window logged around a parse
+ * failure. The whole window is at most `2 * RADIUS + 1` characters — enough to
+ * see what broke, never the whole payload. The payload is a child's month.
+ */
+export const DIAGNOSTIC_WINDOW_RADIUS = 200;
+
+/**
+ * The one strictness line appended to the user prompt on the single retry.
+ * Deliberately terse — this is a reminder, not a prompt redesign.
+ */
+export const STRICT_JSON_RETRY_REMINDER = `RETRY — the previous response could not be parsed. Respond with ONLY the JSON object from the schema: no markdown fences, no preamble, no commentary. Escape every interior quote as \\" and every newline inside a string as \\n. Keep every section within its length guide so the response finishes.`;
+
+/** Pull the character offset out of a V8 JSON.parse error message. */
+export function parsePositionFromError(err: unknown): number | undefined {
+  const message = err instanceof Error ? err.message : String(err);
+  const match = message.match(/position (\d+)/);
+  if (!match) return undefined;
+  const position = Number(match[1]);
+  return Number.isFinite(position) ? position : undefined;
+}
+
+/**
+ * A bounded slice of the raw model text around `position`. When the error
+ * carries no position (some engines omit it), the tail is returned instead —
+ * a response that died inside a string usually died at its end.
+ */
+export function rawTextWindow(
+  text: string,
+  position: number | undefined,
+  radius: number = DIAGNOSTIC_WINDOW_RADIUS,
+): { window: string; from: number; to: number } {
+  if (position === undefined) {
+    const from = Math.max(0, text.length - radius * 2);
+    return { window: text.slice(from), from, to: text.length };
+  }
+  const from = Math.max(0, position - radius);
+  const to = Math.min(text.length, position + radius + 1);
+  return { window: text.slice(from, to), from, to };
+}
+
+/** Parent-facing message when the model ran out of output budget. */
+export const TRUNCATED_MESSAGE =
+  "The book came back too long and was cut off, so it could not be saved. Nothing was written — try generating it again.";
+
+/** Parent-facing message when the model wrote JSON we could not read. */
+export const MALFORMED_MESSAGE =
+  "The book came back malformed and could not be read, so it could not be saved. Nothing was written — try generating it again.";
+
+export interface ParseFailureDiagnostics {
+  /** Whether the model ran out of output budget rather than writing bad JSON. */
+  truncated: boolean;
+  /** Parent-facing message. Carries no raw model text. */
+  userMessage: string;
+  /** Labeled, bounded console line. Never the whole payload. */
+  logLine: string;
+  /** The bounded raw window, exposed for tests and for the log line. */
+  window: string;
+}
+
+/**
+ * Everything a future run needs to diagnose a book that failed to parse,
+ * without ever putting a child's month whole into the logs.
+ *
+ * Two roots present almost identically to `JSON.parse`, so they are named
+ * apart here: a `max_tokens` stop means the book was cut off mid-sentence;
+ * anything else means the model wrote JSON we could not read.
+ */
+export function buildParseFailureDiagnostics(input: {
+  stopReason: string;
+  text: string;
+  err: unknown;
+  attempt: number;
+}): ParseFailureDiagnostics {
+  const { stopReason, text, err, attempt } = input;
+  const truncated = stopReason === "max_tokens";
+  const position = parsePositionFromError(err);
+  const { window, from, to } = rawTextWindow(text, position);
+  const parseError = err instanceof Error ? err.message : String(err);
+
+  const userMessage = truncated ? TRUNCATED_MESSAGE : MALFORMED_MESSAGE;
+
+  const logLine = [
+    `[monthlyReview] book JSON parse failed (attempt ${attempt})`,
+    `stop_reason=${stopReason}`,
+    `maxTokens=${MONTHLY_REVIEW_MAX_TOKENS}`,
+    `responseLength=${text.length}`,
+    `failurePosition=${position ?? "unknown"}`,
+    `parseError=${parseError}`,
+    // Bounded and labeled on purpose: this is a child's month, and only the
+    // characters around the break belong in a log.
+    `rawWindow[${from}..${to}]=${JSON.stringify(window)}`,
+  ].join(" | ");
+
+  return { truncated, userMessage, logLine, window };
+}
+
+/** One call to the model, as `generateBookJsonWithRetry` needs it. */
+export type BookJsonCall = (userPrompt: string) => Promise<{
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  stopReason: string;
+}>;
+
+export interface BookJsonResult {
+  parsed: ParsedMonthlyReview;
+  /** Summed across every attempt, so usage logging stays honest. */
+  inputTokens: number;
+  outputTokens: number;
+  retried: boolean;
+}
+
+/**
+ * Call the model for the book JSON, retrying ONCE on a malformed or truncated
+ * response (FEAT-144).
+ *
+ * A stochastic generator producing one bad response is usually a one-off, so a
+ * single retry — with a terse strictness reminder appended — is the cheapest
+ * real fix. Two attempts is the whole budget: the callable has 540s and the
+ * parent has less patience than that, so there is no third attempt and no loop.
+ *
+ * A parsed result is never thrown away. If the retry fails but the first
+ * attempt parsed (a book cut off right at its closing brace, say), the first
+ * attempt's book is returned rather than failing a generation we already have.
+ */
+export async function generateBookJsonWithRetry(
+  call: BookJsonCall,
+  userPrompt: string,
+): Promise<BookJsonResult> {
+  const first = await call(userPrompt);
+  let firstParsed: ParsedMonthlyReview | undefined;
+  let firstDiagnostics: ParseFailureDiagnostics | undefined;
+
+  try {
+    firstParsed = parseMonthlyReviewJson(first.text);
+  } catch (err) {
+    firstDiagnostics = buildParseFailureDiagnostics({
+      stopReason: first.stopReason,
+      text: first.text,
+      err,
+      attempt: 1,
+    });
+    console.error(firstDiagnostics.logLine);
+  }
+
+  const firstWasClean = firstParsed !== undefined && first.stopReason !== "max_tokens";
+  if (firstWasClean) {
+    return {
+      parsed: firstParsed as ParsedMonthlyReview,
+      inputTokens: first.inputTokens,
+      outputTokens: first.outputTokens,
+      retried: false,
+    };
+  }
+
+  console.warn(
+    `[monthlyReview] retrying book generation once (stop_reason=${first.stopReason}, parsed=${firstParsed !== undefined})`,
+  );
+
+  const second = await call(`${userPrompt}\n\n${STRICT_JSON_RETRY_REMINDER}`);
+  const inputTokens = first.inputTokens + second.inputTokens;
+  const outputTokens = first.outputTokens + second.outputTokens;
+
+  try {
+    return {
+      parsed: parseMonthlyReviewJson(second.text),
+      inputTokens,
+      outputTokens,
+      retried: true,
+    };
+  } catch (err) {
+    const diagnostics = buildParseFailureDiagnostics({
+      stopReason: second.stopReason,
+      text: second.text,
+      err,
+      attempt: 2,
+    });
+    console.error(diagnostics.logLine);
+
+    // The retry failed, but attempt 1 gave us a readable book — use it.
+    if (firstParsed !== undefined) {
+      console.warn(
+        "[monthlyReview] retry failed to parse; keeping the first attempt's book",
+      );
+      return { parsed: firstParsed, inputTokens, outputTokens, retried: true };
+    }
+
+    // Both attempts failed. The parent sees which root it was; the raw text
+    // stays in the logs above, never in the message that crosses the wire.
+    // "Cut off" wins when either attempt ran out of budget — a length problem
+    // is the more actionable of the two, and it does not go away on a retry.
+    const truncated = diagnostics.truncated || firstDiagnostics?.truncated === true;
+    throw new Error(
+      truncated
+        ? TRUNCATED_MESSAGE
+        : diagnostics.userMessage,
+    );
+  }
 }
 
 export function parseMonthlyReviewJson(text: string): ParsedMonthlyReview {
