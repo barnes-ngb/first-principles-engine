@@ -130,10 +130,19 @@ export type ReasoningEffort = (typeof ReasoningEffort)[keyof typeof ReasoningEff
  * so it runs at **low**. Tasks not listed inherit the API default (high) — this
  * table intentionally does **not** touch the global chat-task default.
  *
+ * `monthlyReview` joins it for the same reason and with the same evidence shape
+ * (FEAT-147): the book is a structured-JSON writing task against a fully
+ * assembled month, with a tight `maxTokens` ceiling. At the default HIGH effort
+ * the thinking budget competes with the prose, and the July 2026 book came back
+ * parseable but wordless — sections in the right shape with no writing in them.
+ * Low effort is the appropriate setting for the task and gives the visible text
+ * the budget back.
+ *
  * The chosen effort is sent as `output_config.effort`; see `callClaude`.
  */
 export const EFFORT_BY_TASK: Readonly<Record<string, ReasoningEffort>> = {
   learnerSynthesis: ReasoningEffort.Low,
+  monthlyReview: ReasoningEffort.Low,
 };
 
 /** Resolve a task type to its reasoning effort, or `undefined` (API default). */

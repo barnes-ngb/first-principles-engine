@@ -3,6 +3,7 @@ import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import type { SnapshotData } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
+import { resolveEffortForTask, type ReasoningEffort } from "../models.js";
 import { CHARTER_PREAMBLE } from "../contextSlices.js";
 import { sanitizeAndParseJson } from "../sanitizeJson.js";
 import {
@@ -179,8 +180,7 @@ export async function runMonthlyReview(
       (prompt) =>
         callClaude({
           apiKey,
-          model,
-          maxTokens: MONTHLY_REVIEW_MAX_TOKENS,
+          ...buildBookCallOptions(model),
           systemPrompt,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -848,6 +848,31 @@ interface ParsedMonthlyReview {
 /** Output ceiling for the book call. One place, so diagnostics can name it. */
 export const MONTHLY_REVIEW_MAX_TOKENS = 6000;
 
+/** The model-side options for the book call — everything but prompt and key. */
+export interface BookCallOptions {
+  model: string;
+  maxTokens: number;
+  /** `undefined` means "send no `output_config`" — the API default applies. */
+  effort: ReasoningEffort | undefined;
+}
+
+/**
+ * The book call's model-side options, in one exported place (FEAT-147).
+ *
+ * The `effort` comes from the central `EFFORT_BY_TASK` table rather than a
+ * literal here — the FEAT-77 precedent, so every per-task reasoning decision
+ * stays readable in one file. It lives in a builder rather than inline at the
+ * call so the setting is assertable without standing up a Firestore fake for
+ * `runMonthlyReview`.
+ */
+export function buildBookCallOptions(model: string): BookCallOptions {
+  return {
+    model,
+    maxTokens: MONTHLY_REVIEW_MAX_TOKENS,
+    effort: resolveEffortForTask("monthlyReview"),
+  };
+}
+
 /**
  * Half-width, in characters, of the raw-text window logged around a parse
  * failure. The whole window is at most `2 * RADIUS + 1` characters — enough to
@@ -945,6 +970,110 @@ export function buildParseFailureDiagnostics(input: {
   return { truncated, userMessage, logLine, window };
 }
 
+// ── The empty-book guard (FEAT-147) ───────────────────────────
+
+/**
+ * Parent-facing message when the model returned a book with no writing in it.
+ * A distinct root from "cut off" and "malformed": this response arrived whole
+ * and readable, and simply had no prose in it.
+ */
+export const WORDLESS_MESSAGE =
+  "The book came back with no writing in it, so it could not be saved. Nothing was written — try generating it again.";
+
+/** True when one mode of a section carries words a person could read. */
+function modeHasText(content: PageContent | undefined): boolean {
+  if (!content) return false;
+  if (content.headline?.trim()) return true;
+  if (content.body?.trim()) return true;
+  return (content.highlights ?? []).some((h) => h.trim().length > 0);
+}
+
+/**
+ * A section carries real text when EITHER mode has a non-empty `headline`,
+ * `body`, or `highlights` entry after trimming.
+ *
+ * Captions are deliberately excluded: a caption is a label on a photo, and a
+ * page of captioned photos with no prose around them is exactly the textless
+ * book this guard exists to catch.
+ */
+export function sectionHasText(section: ParsedSection | undefined): boolean {
+  if (!section) return false;
+  return modeHasText(section.kidMode) || modeHasText(section.parentMode);
+}
+
+/** How many parsed sections carry real narrative text. */
+export function countSectionsWithText(parsed: ParsedMonthlyReview): number {
+  return Object.values(parsed.sections).filter(sectionHasText).length;
+}
+
+/**
+ * THE THRESHOLD, stated once: a generation is refused only when **zero**
+ * sections carry narrative text.
+ *
+ * One real section is a thin book, and a thin book still publishes — sparse
+ * months are real months ("rest by design"), and refusing them would be this
+ * guard inventing a quality bar the family never asked for. What it refuses is
+ * the non-event: a response that parsed into the right shape with no words in
+ * it anywhere, which is what a truncated-but-parseable response now produces
+ * (FEAT-146 made parsing resilient; `normalizeContent` accepts empty strings
+ * without complaint, and `composeMonthlyReview` would write them as a book).
+ */
+export function hasNarrativeText(parsed: ParsedMonthlyReview): boolean {
+  return countSectionsWithText(parsed) > 0;
+}
+
+/**
+ * Diagnostics for a response that PARSED but carries no narrative text.
+ *
+ * Not a parse failure, so it does not borrow the parse diagnostics — but it
+ * fails the generation the same way, and this is where `stop_reason` finally
+ * gets seen on the path that used to publish silently.
+ */
+export function buildWordlessDiagnostics(input: {
+  stopReason: string;
+  text: string;
+  attempt: number;
+}): ParseFailureDiagnostics {
+  const { stopReason, text, attempt } = input;
+  const truncated = stopReason === "max_tokens";
+  // No failure position to center on — a wordless response is empty
+  // everywhere, so the bounded tail is the informative window.
+  const { window, from, to } = rawTextWindow(text, undefined);
+
+  const logLine = [
+    `[monthlyReview] book carried no narrative text (attempt ${attempt})`,
+    `stop_reason=${stopReason}`,
+    `maxTokens=${MONTHLY_REVIEW_MAX_TOKENS}`,
+    `responseLength=${text.length}`,
+    `sectionsWithText=0`,
+    // Bounded and labeled, same rail as the parse diagnostics.
+    `rawWindow[${from}..${to}]=${JSON.stringify(window)}`,
+  ].join(" | ");
+
+  return { truncated, userMessage: WORDLESS_MESSAGE, logLine, window };
+}
+
+/**
+ * One bounded info line per generation, on SUCCESS as well as failure
+ * (FEAT-147, Step 3).
+ *
+ * FEAT-146 logs only failures, so a response that truncated but still parsed
+ * left no trace at all — which is exactly how a textless book shipped as a
+ * publish. Numbers only: no payload contents beyond the three counts.
+ */
+export function buildGenerationLogLine(input: {
+  stopReason: string;
+  responseLength: number;
+  sectionsWithText: number;
+}): string {
+  return [
+    "[monthlyReview] book generated",
+    `stop_reason=${input.stopReason}`,
+    `responseLength=${input.responseLength}`,
+    `sectionsWithText=${input.sectionsWithText}`,
+  ].join(" | ");
+}
+
 /** One call to the model, as `generateBookJsonWithRetry` needs it. */
 export type BookJsonCall = (userPrompt: string) => Promise<{
   text: string;
@@ -988,6 +1117,31 @@ export async function generateBookJsonWithRetry(
     outputTokens: number;
   }) => void,
 ): Promise<BookJsonResult> {
+  /**
+   * The single success exit, so exactly one info line is logged per
+   * generation — whichever attempt's book ends up winning.
+   */
+  const succeed = (
+    parsed: ParsedMonthlyReview,
+    from: { stopReason: string; text: string },
+    tokens: { inputTokens: number; outputTokens: number },
+    retried: boolean,
+  ): BookJsonResult => {
+    console.info(
+      buildGenerationLogLine({
+        stopReason: from.stopReason,
+        responseLength: from.text.length,
+        sectionsWithText: countSectionsWithText(parsed),
+      }),
+    );
+    return {
+      parsed,
+      inputTokens: tokens.inputTokens,
+      outputTokens: tokens.outputTokens,
+      retried,
+    };
+  };
+
   const first = await call(userPrompt);
   onAttemptUsage?.({
     inputTokens: first.inputTokens,
@@ -997,7 +1151,20 @@ export async function generateBookJsonWithRetry(
   let firstDiagnostics: ParseFailureDiagnostics | undefined;
 
   try {
-    firstParsed = parseMonthlyReviewJson(first.text);
+    const candidate = parseMonthlyReviewJson(first.text);
+    // A book that parses but has no words in it is a FAILED generation, not a
+    // thin one. Leaving `firstParsed` undefined routes it into the same retry a
+    // malformed response takes, and keeps it out of every "keep the first
+    // attempt's book" fallback below — a wordless book is never worth keeping.
+    if (hasNarrativeText(candidate)) {
+      firstParsed = candidate;
+    } else {
+      firstDiagnostics = buildWordlessDiagnostics({
+        stopReason: first.stopReason,
+        text: first.text,
+        attempt: 1,
+      });
+    }
   } catch (err) {
     firstDiagnostics = buildParseFailureDiagnostics({
       stopReason: first.stopReason,
@@ -1005,17 +1172,12 @@ export async function generateBookJsonWithRetry(
       err,
       attempt: 1,
     });
-    console.error(firstDiagnostics.logLine);
   }
+  if (firstDiagnostics) console.error(firstDiagnostics.logLine);
 
   const firstWasClean = firstParsed !== undefined && first.stopReason !== "max_tokens";
   if (firstWasClean) {
-    return {
-      parsed: firstParsed as ParsedMonthlyReview,
-      inputTokens: first.inputTokens,
-      outputTokens: first.outputTokens,
-      retried: false,
-    };
+    return succeed(firstParsed as ParsedMonthlyReview, first, first, false);
   }
 
   console.warn(
@@ -1035,12 +1197,7 @@ export async function generateBookJsonWithRetry(
         "[monthlyReview] retry call failed; keeping the first attempt's book",
         err,
       );
-      return {
-        parsed: firstParsed,
-        inputTokens: first.inputTokens,
-        outputTokens: first.outputTokens,
-        retried: true,
-      };
+      return succeed(firstParsed, first, first, true);
     }
     throw err;
   }
@@ -1051,41 +1208,52 @@ export async function generateBookJsonWithRetry(
   const inputTokens = first.inputTokens + second.inputTokens;
   const outputTokens = first.outputTokens + second.outputTokens;
 
+  let secondParsed: ParsedMonthlyReview | undefined;
+  let secondDiagnostics: ParseFailureDiagnostics | undefined;
   try {
-    return {
-      parsed: parseMonthlyReviewJson(second.text),
-      inputTokens,
-      outputTokens,
-      retried: true,
-    };
+    const candidate = parseMonthlyReviewJson(second.text);
+    // Same guard on the retry: a second wordless response fails the generation
+    // rather than publishing itself.
+    if (hasNarrativeText(candidate)) {
+      secondParsed = candidate;
+    } else {
+      secondDiagnostics = buildWordlessDiagnostics({
+        stopReason: second.stopReason,
+        text: second.text,
+        attempt: 2,
+      });
+    }
   } catch (err) {
-    const diagnostics = buildParseFailureDiagnostics({
+    secondDiagnostics = buildParseFailureDiagnostics({
       stopReason: second.stopReason,
       text: second.text,
       err,
       attempt: 2,
     });
-    console.error(diagnostics.logLine);
-
-    // The retry failed, but attempt 1 gave us a readable book — use it.
-    if (firstParsed !== undefined) {
-      console.warn(
-        "[monthlyReview] retry failed to parse; keeping the first attempt's book",
-      );
-      return { parsed: firstParsed, inputTokens, outputTokens, retried: true };
-    }
-
-    // Both attempts failed. The parent sees which root it was; the raw text
-    // stays in the logs above, never in the message that crosses the wire.
-    // "Cut off" wins when either attempt ran out of budget — a length problem
-    // is the more actionable of the two, and it does not go away on a retry.
-    const truncated = diagnostics.truncated || firstDiagnostics?.truncated === true;
-    throw new Error(
-      truncated
-        ? TRUNCATED_MESSAGE
-        : diagnostics.userMessage,
-    );
   }
+  if (secondDiagnostics) console.error(secondDiagnostics.logLine);
+
+  if (secondParsed !== undefined) {
+    return succeed(secondParsed, second, { inputTokens, outputTokens }, true);
+  }
+
+  // The retry failed, but attempt 1 gave us a usable book — use it.
+  if (firstParsed !== undefined) {
+    console.warn(
+      "[monthlyReview] retry produced no usable book; keeping the first attempt's book",
+    );
+    return succeed(firstParsed, first, { inputTokens, outputTokens }, true);
+  }
+
+  // Both attempts failed. The parent sees which root it was; the raw text
+  // stays in the logs above, never in the message that crosses the wire.
+  // "Cut off" wins when either attempt ran out of budget — a length problem
+  // is the more actionable of the two, and it does not go away on a retry.
+  const truncated =
+    secondDiagnostics?.truncated === true || firstDiagnostics?.truncated === true;
+  throw new Error(
+    truncated ? TRUNCATED_MESSAGE : (secondDiagnostics?.userMessage ?? MALFORMED_MESSAGE),
+  );
 }
 
 export function parseMonthlyReviewJson(text: string): ParsedMonthlyReview {
