@@ -1001,9 +1001,35 @@ export function sectionHasText(section: ParsedSection | undefined): boolean {
   return modeHasText(section.kidMode) || modeHasText(section.parentMode);
 }
 
-/** How many parsed sections carry real narrative text. */
+/**
+ * The section keys the composer actually renders from model output.
+ *
+ * `SECTION_ORDER` is derived from this rather than the other way round, so the
+ * two can never drift: `moreFromMonth` is the only composed section whose
+ * content is fixed in code, so it is the only one this list omits.
+ */
+export const AI_RENDERED_SECTIONS: readonly MonthlyReviewPage["sectionType"][] = [
+  "cover",
+  "monthInSentence",
+  "whatYouLoved",
+  "workedThrough",
+  "byTheNumbers",
+];
+
+/**
+ * How many COMPOSED sections carry real narrative text.
+ *
+ * Counted over `AI_RENDERED_SECTIONS`, not over every key the model happened to
+ * emit (Codex P2, PR #1673). `parseMonthlyReviewJson` preserves unknown keys,
+ * but `composeMonthlyReview` reads only its fixed order and silently discards
+ * the rest — so a response that wrote all its prose under `sections.summary`
+ * and left the five real sections empty would have passed a count over
+ * `Object.values` and published a wordless book anyway. Text the reader will
+ * never see is not text.
+ */
 export function countSectionsWithText(parsed: ParsedMonthlyReview): number {
-  return Object.values(parsed.sections).filter(sectionHasText).length;
+  return AI_RENDERED_SECTIONS.filter((key) => sectionHasText(parsed.sections[key]))
+    .length;
 }
 
 /**
@@ -1307,12 +1333,11 @@ export interface ComposeInput {
   parsed: ParsedMonthlyReview;
 }
 
+// Derived from AI_RENDERED_SECTIONS so the guard and the composer can never
+// disagree about which sections a book is actually made of. `moreFromMonth` is
+// appended here because its content is fixed in code, not written by the model.
 const SECTION_ORDER: MonthlyReviewPage["sectionType"][] = [
-  "cover",
-  "monthInSentence",
-  "whatYouLoved",
-  "workedThrough",
-  "byTheNumbers",
+  ...AI_RENDERED_SECTIONS,
   "moreFromMonth",
 ];
 

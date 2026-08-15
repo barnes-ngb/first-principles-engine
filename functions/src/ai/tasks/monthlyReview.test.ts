@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
+  AI_RENDERED_SECTIONS,
   DIAGNOSTIC_WINDOW_RADIUS,
   MALFORMED_MESSAGE,
   MONTHLY_REVIEW_MAX_TOKENS,
@@ -819,6 +820,59 @@ describe("FEAT-147 — the empty-book threshold", () => {
     const parsed = parseMonthlyReviewJson(THIN_BOOK);
     expect(countSectionsWithText(parsed)).toBe(1);
     expect(hasNarrativeText(parsed)).toBe(true);
+  });
+
+  it("ignores text under a key the composer never renders", () => {
+    // Codex P2 (PR #1673): `parseMonthlyReviewJson` preserves unknown keys, but
+    // `composeMonthlyReview` reads only its fixed order and discards the rest.
+    // Prose under `summary` reaches no reader, so it cannot rescue a book whose
+    // five real sections are empty.
+    const parsed = parseMonthlyReviewJson(
+      JSON.stringify({
+        theme: "This Month",
+        sections: {
+          cover: { kidMode: { headline: "" }, parentMode: { headline: "" } },
+          monthInSentence: { kidMode: { body: "" }, parentMode: { body: "" } },
+          summary: { parentMode: { body: "He read every single day." } },
+        },
+      }),
+    );
+
+    // The key survives the parse — this is about what the guard COUNTS.
+    expect(parsed.sections.summary.parentMode?.body).toBe(
+      "He read every single day.",
+    );
+    expect(countSectionsWithText(parsed)).toBe(0);
+    expect(hasNarrativeText(parsed)).toBe(false);
+  });
+
+  it("counts exactly the sections the composer renders from model output", () => {
+    // moreFromMonth is composed from fixed content, never from the model, so it
+    // is the one composed section absent from the counted list.
+    expect([...AI_RENDERED_SECTIONS]).toEqual([
+      "cover",
+      "monthInSentence",
+      "whatYouLoved",
+      "workedThrough",
+      "byTheNumbers",
+    ]);
+    expect(AI_RENDERED_SECTIONS).not.toContain("moreFromMonth");
+
+    // And the composer's own page order still carries all six, in order —
+    // SECTION_ORDER is derived from this list, so the two cannot drift.
+    const placement = emptyPlacement();
+    placement.moreFromMonth.kid = [1, 2].map((n) => ({
+      id: `artifact:over-${n}`,
+      storagePath: `art/over-${n}.jpg`,
+      source: "artifact" as const,
+      sourceDocId: `over-${n}`,
+      capturedAt: "2026-05-15T10:00:00Z",
+    }));
+    const review = composeMonthlyReview(baseInput({ placement }));
+    expect(review.pages.map((p) => p.sectionType)).toEqual([
+      ...AI_RENDERED_SECTIONS,
+      "moreFromMonth",
+    ]);
   });
 
   it("names the wordless root apart from cut-off and malformed", () => {
