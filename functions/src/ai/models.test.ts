@@ -64,6 +64,14 @@ describe("model table (FEAT-58)", () => {
     expect(resolveEffortForTask("not-a-real-task")).toBeUndefined();
   });
 
+  it("monthlyReview runs at LOW reasoning effort too (FEAT-147)", () => {
+    // A structured-JSON writing task with a tight maxTokens — the same shape
+    // as learnerSynthesis, and the same failure when reasoning eats the budget:
+    // July 2026's book parsed into well-shaped sections with no words in them.
+    expect(resolveEffortForTask("monthlyReview")).toBe(ReasoningEffort.Low);
+    expect(EFFORT_BY_TASK.monthlyReview).toBe("low");
+  });
+
   it("generate / chat stay on Haiku; unlisted tasks default to Haiku", () => {
     expect(resolveModelForTask("generate")).toBe(CLAUDE_HAIKU);
     expect(resolveModelForTask("chat")).toBe(CLAUDE_HAIKU);

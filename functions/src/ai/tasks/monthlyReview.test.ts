@@ -2,16 +2,25 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   DIAGNOSTIC_WINDOW_RADIUS,
   MALFORMED_MESSAGE,
+  MONTHLY_REVIEW_MAX_TOKENS,
   STRICT_JSON_RETRY_REMINDER,
   TRUNCATED_MESSAGE,
+  WORDLESS_MESSAGE,
+  buildBookCallOptions,
+  buildGenerationLogLine,
   buildNoteIndex,
   buildParseFailureDiagnostics,
+  buildWordlessDiagnostics,
   collectWorkbookArtifactIds,
   composeMonthlyReview,
+  countSectionsWithText,
   formatPhotoSection,
   generateBookJsonWithRetry,
+  hasNarrativeText,
+  parseMonthlyReviewJson,
   parsePositionFromError,
   rawTextWindow,
+  sectionHasText,
   type ComposeInput,
 } from "./monthlyReview.js";
 import type { MonthAggregate, PhotoRef } from "./monthlyReviewData.js";
@@ -490,6 +499,7 @@ describe("generateBookJsonWithRetry", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -729,5 +739,358 @@ and you built a lot" }
     expect(result.parsed.sections.whatYouLoved.kidMode?.body).toBe(
       "You read a lot\nand you built a lot",
     );
+  });
+});
+
+// ── FEAT-147: a wordless book is a failure, not a publish ─────
+
+/** A response in the right shape whose every string is empty. */
+const WORDLESS_BOOK = JSON.stringify({
+  theme: "This Month",
+  sections: {
+    cover: {
+      kidMode: { headline: "", body: "" },
+      parentMode: { headline: "", body: "" },
+    },
+    monthInSentence: { kidMode: { body: "" }, parentMode: { body: "   " } },
+    whatYouLoved: {
+      kidMode: { body: "", highlights: [] },
+      parentMode: { body: "\n", highlights: ["  ", ""] },
+    },
+  },
+});
+
+/** One section with real prose; every other section empty. */
+const THIN_BOOK = JSON.stringify({
+  theme: "Quiet Month",
+  sections: {
+    cover: { kidMode: { headline: "" }, parentMode: { headline: "" } },
+    monthInSentence: { kidMode: { body: "" }, parentMode: { body: "" } },
+    byTheNumbers: {
+      kidMode: { body: "" },
+      parentMode: { body: "A quiet month, and a real one." },
+    },
+  },
+});
+
+describe("FEAT-147 — the empty-book threshold", () => {
+  it("counts a section with a headline, a body, or one highlight", () => {
+    expect(sectionHasText({ kidMode: { headline: "Stories You Built" } })).toBe(
+      true,
+    );
+    expect(sectionHasText({ parentMode: { body: "He read every day." } })).toBe(
+      true,
+    );
+    expect(sectionHasText({ kidMode: { highlights: ["", "You did it"] } })).toBe(
+      true,
+    );
+  });
+
+  it("does not count whitespace, empty strings, or a missing mode", () => {
+    expect(sectionHasText(undefined)).toBe(false);
+    expect(sectionHasText({})).toBe(false);
+    expect(
+      sectionHasText({ kidMode: { headline: "  ", body: "\n" }, parentMode: {} }),
+    ).toBe(false);
+    expect(sectionHasText({ parentMode: { highlights: ["", "   "] } })).toBe(
+      false,
+    );
+  });
+
+  it("does not count captions — a photo label is not a book", () => {
+    // A page of captioned photos with no prose around it is exactly the
+    // textless book this guard exists to catch.
+    expect(
+      sectionHasText({
+        kidMode: { body: "", captions: { photo_a: "Deep in the book" } },
+      }),
+    ).toBe(false);
+  });
+
+  it("refuses a book with ZERO narrative text anywhere", () => {
+    const parsed = parseMonthlyReviewJson(WORDLESS_BOOK);
+    expect(countSectionsWithText(parsed)).toBe(0);
+    expect(hasNarrativeText(parsed)).toBe(false);
+  });
+
+  it("accepts a thin-but-real book — one real section is enough", () => {
+    // The conservative threshold, asserted from the other side: sparse months
+    // are real months, so a thin book still publishes.
+    const parsed = parseMonthlyReviewJson(THIN_BOOK);
+    expect(countSectionsWithText(parsed)).toBe(1);
+    expect(hasNarrativeText(parsed)).toBe(true);
+  });
+
+  it("names the wordless root apart from cut-off and malformed", () => {
+    const diagnostics = buildWordlessDiagnostics({
+      stopReason: "max_tokens",
+      text: WORDLESS_BOOK,
+      attempt: 1,
+    });
+
+    expect(diagnostics.userMessage).toBe(WORDLESS_MESSAGE);
+    expect(diagnostics.userMessage).not.toBe(MALFORMED_MESSAGE);
+    // A `max_tokens` cut is still a cut, so the caller can prefer that copy.
+    expect(diagnostics.truncated).toBe(true);
+    expect(diagnostics.logLine).toContain("stop_reason=max_tokens");
+    expect(diagnostics.logLine).toContain("sectionsWithText=0");
+    expect(diagnostics.logLine).toContain(
+      `maxTokens=${MONTHLY_REVIEW_MAX_TOKENS}`,
+    );
+    // Bounded, same rail as the parse diagnostics — never the whole payload.
+    expect(diagnostics.window.length).toBeLessThanOrEqual(
+      DIAGNOSTIC_WINDOW_RADIUS * 2,
+    );
+  });
+
+  it("carries no raw model text in the parent-facing message", () => {
+    expect(WORDLESS_MESSAGE).not.toContain("{");
+    expect(WORDLESS_MESSAGE).toContain("Nothing was written");
+  });
+});
+
+describe("FEAT-147 — a wordless generation routes into the retry", () => {
+  const goodBook = JSON.stringify({
+    theme: "Stories You Built",
+    sections: { cover: { kidMode: { headline: "Stories You Built" } } },
+  });
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("retries when the first response parses but has no words", async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: WORDLESS_BOOK,
+        inputTokens: 100,
+        outputTokens: 6000,
+        stopReason: "end_turn",
+      })
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 110,
+        outputTokens: 60,
+        stopReason: "end_turn",
+      });
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(call.mock.calls[1][0]).toBe(
+      `USER PROMPT\n\n${STRICT_JSON_RETRY_REMINDER}`,
+    );
+    expect(result.retried).toBe(true);
+    expect(result.parsed.theme).toBe("Stories You Built");
+  });
+
+  it("throws with diagnostics when the retry is wordless too", async () => {
+    const call = vi.fn().mockResolvedValue({
+      text: WORDLESS_BOOK,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+
+    await expect(generateBookJsonWithRetry(call, "USER PROMPT")).rejects.toThrow(
+      WORDLESS_MESSAGE,
+    );
+    // Two attempts is still the whole budget — no third.
+    expect(call).toHaveBeenCalledTimes(2);
+
+    const logged = vi.mocked(console.error).mock.calls.map((c) => String(c[0]));
+    expect(logged).toHaveLength(2);
+    expect(logged[0]).toContain("attempt 1");
+    expect(logged[1]).toContain("attempt 2");
+    for (const line of logged) {
+      expect(line).toContain("no narrative text");
+      expect(line).toContain("stop_reason=end_turn");
+      expect(line).toContain("sectionsWithText=0");
+      expect(line).toContain("rawWindow[");
+    }
+  });
+
+  it("prefers the cut-off message when the wordless response was truncated", async () => {
+    // The live July shape: reasoning ate the budget, the response was cut, and
+    // what survived still parsed. "Cut off" is the more actionable root.
+    const call = vi.fn().mockResolvedValue({
+      text: WORDLESS_BOOK,
+      inputTokens: 100,
+      outputTokens: 6000,
+      stopReason: "max_tokens",
+    });
+
+    await expect(generateBookJsonWithRetry(call, "USER PROMPT")).rejects.toThrow(
+      TRUNCATED_MESSAGE,
+    );
+  });
+
+  it("never keeps a wordless first attempt when the retry call rejects", async () => {
+    // A wordless book is never worth keeping, so the `firstParsed` fallback
+    // that legitimately rescues a readable book must not rescue this one.
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: WORDLESS_BOOK,
+        inputTokens: 100,
+        outputTokens: 6000,
+        stopReason: "max_tokens",
+      })
+      .mockRejectedValueOnce(new Error("socket hang up"));
+
+    await expect(generateBookJsonWithRetry(call, "USER PROMPT")).rejects.toThrow(
+      "socket hang up",
+    );
+  });
+
+  it("publishes a thin-but-real first response without retrying", async () => {
+    const call = vi.fn().mockResolvedValue({
+      text: THIN_BOOK,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+
+    const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(result.retried).toBe(false);
+    expect(result.parsed.sections.byTheNumbers.parentMode?.body).toBe(
+      "A quiet month, and a real one.",
+    );
+  });
+
+  it("writes no book document when both attempts come back wordless", async () => {
+    // The caller's sequence (`generateForChildMonth`): generate → compose →
+    // write. The throw must reach the caller before the write does.
+    const write = vi.fn();
+    const call = vi.fn().mockResolvedValue({
+      text: WORDLESS_BOOK,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+
+    await expect(
+      (async () => {
+        const result = await generateBookJsonWithRetry(call, "USER PROMPT");
+        write(composeMonthlyReview(baseInput({ parsed: result.parsed })));
+      })(),
+    ).rejects.toThrow(WORDLESS_MESSAGE);
+
+    expect(write).not.toHaveBeenCalled();
+  });
+});
+
+describe("FEAT-147 — the success log", () => {
+  const goodBook = JSON.stringify({
+    theme: "Stories You Built",
+    sections: {
+      cover: { kidMode: { headline: "Stories You Built" } },
+      byTheNumbers: { parentMode: { body: "154 minutes of language arts." } },
+    },
+  });
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("fires once on a clean generation, with the three numbers", async () => {
+    const call = vi.fn().mockResolvedValue({
+      text: goodBook,
+      inputTokens: 100,
+      outputTokens: 50,
+      stopReason: "end_turn",
+    });
+
+    await generateBookJsonWithRetry(call, "USER PROMPT");
+
+    const logged = vi.mocked(console.info).mock.calls.map((c) => String(c[0]));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("stop_reason=end_turn");
+    expect(logged[0]).toContain(`responseLength=${goodBook.length}`);
+    expect(logged[0]).toContain("sectionsWithText=2");
+  });
+
+  it("fires once — not twice — when a retry was needed", async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: '{"theme": "Stories", "sections": {"cover": ',
+        inputTokens: 100,
+        outputTokens: 50,
+        stopReason: "end_turn",
+      })
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 110,
+        outputTokens: 60,
+        stopReason: "end_turn",
+      });
+
+    await generateBookJsonWithRetry(call, "USER PROMPT");
+
+    expect(vi.mocked(console.info).mock.calls).toHaveLength(1);
+  });
+
+  it("sees a truncation that still parsed — the trace July never left", async () => {
+    // A `max_tokens` cut that parses is the case FEAT-146's failure-only
+    // logging is blind to. Attempt 1's cut is what the winning line reports.
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: goodBook,
+        inputTokens: 100,
+        outputTokens: 6000,
+        stopReason: "max_tokens",
+      })
+      .mockRejectedValueOnce(new Error("socket hang up"));
+
+    await generateBookJsonWithRetry(call, "USER PROMPT");
+
+    const logged = vi.mocked(console.info).mock.calls.map((c) => String(c[0]));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("stop_reason=max_tokens");
+  });
+
+  it("carries numbers only — no payload contents", () => {
+    const line = buildGenerationLogLine({
+      stopReason: "end_turn",
+      responseLength: 4212,
+      sectionsWithText: 5,
+    });
+
+    expect(line).toBe(
+      "[monthlyReview] book generated | stop_reason=end_turn | responseLength=4212 | sectionsWithText=5",
+    );
+  });
+});
+
+describe("FEAT-147 — the book call runs at low reasoning effort", () => {
+  it("carries effort: 'low' on the call options", () => {
+    // Asserted as the option the caller passes, not as the wire format —
+    // `output_config.effort` is chatTypes' business and is pinned there.
+    expect(buildBookCallOptions("claude-sonnet-5").effort).toBe("low");
+  });
+
+  it("leaves the output ceiling where it was", () => {
+    // One variable at a time: the effort setting moves, `maxTokens` does not.
+    const options = buildBookCallOptions("claude-sonnet-5");
+    expect(options.maxTokens).toBe(MONTHLY_REVIEW_MAX_TOKENS);
+    expect(MONTHLY_REVIEW_MAX_TOKENS).toBe(6000);
+    expect(options.model).toBe("claude-sonnet-5");
   });
 });
