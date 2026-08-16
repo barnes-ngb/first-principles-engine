@@ -153,6 +153,38 @@ export interface ShellyChatMessage {
  * one checklist row and no block, so no `plannedMinutes` is created on a live
  * week — minutes on an applied week stay locked exactly as FEAT-138 left them.
  *
+ * **The watch kinds (FEAT-149)** — `vetInVideo`, `planVideoOnDay` — are the
+ * chat's half of the Watch Vehicle. The chat could already SEARCH the web for a
+ * teaching video (`buildWebSearchAddendum` + the TEACHING VIDEOS block); what it
+ * could not do was get one INTO the app, so the parent re-typed the link into
+ * the vet-in form by hand. These two kinds close that, in the order the parent
+ * actually works: vet one in, then plan it onto a day.
+ *
+ * Five properties hold across them:
+ *  1. **URL-grounded or nothing.** `vetInVideo` carries a REQUIRED
+ *     `suggestedFromUrl` — the page the search actually surfaced — and
+ *     `youtubeId` must be extractable from it (`extractYouTubeId`, the same rule
+ *     `WatchVetInForm` validates a paste with; there is no second URL parser).
+ *     A model that "remembers" a video id it never saw cannot express it here.
+ *  2. **Vet-in is the only library write.** There is no retire, no restore, no
+ *     delete, and no edit kind — un-retiring stays a Progress-surface act, so a
+ *     duplicate of a RETIRED video is refused with a pointer to the Archive
+ *     rather than quietly resurrected.
+ *  3. **The tap IS the vetting act.** `addedBy` is stamped with the confirming
+ *     parent's uid at the write, never taken from the model, exactly as the form
+ *     stamps the curating parent.
+ *  4. **Only an ACTIVE library video can be planned.** `watchVideoId` is a
+ *     non-empty string here; whether it names a live entry the acting child can
+ *     see is resolved against the library before a card is offered — the
+ *     `activeVideos` rule FEAT-138/139 already apply to the picker and the swap.
+ *  5. **The week window is current OR next, add-only.** `planVideoOnDay` is the
+ *     one kind allowed past this week: "find me videos for next week" is the ask
+ *     it exists for. It is purely additive (`writeWatchItemToDay`, no block, no
+ *     hours math), which is why the widening is safe where FEAT-142's
+ *     move/remove — which mutate rows a family may already be working through —
+ *     stay pinned to the current week. Next-plus-one and beyond are refused; a
+ *     longer horizon is an owner decision, not a default.
+ *
  * **`proposePlanAdjustment` is a HANDOFF, not a write** (chunk 2A/2). It is the
  * one kind that touches **no** child record at all: on confirm it stages a brief
  * to the planner's per-child inbox (`settings/pendingPlanAdjustment_{childId}`)
@@ -258,6 +290,35 @@ export type ChatAction =
       estimatedMinutes: number
       /** Optional subject bucket; omitted rather than guessed. */
       subjectBucket?: SubjectBucket
+    }
+  | {
+      kind: 'vetInVideo'
+      /** The acting child the video is curated for. Never `'both'` from chat. */
+      childId: string
+      /**
+       * Validated 11-char YouTube id, and it must be the id
+       * `extractYouTubeId(suggestedFromUrl)` yields — the model never supplies
+       * an id it did not read off a real found page.
+       */
+      youtubeId: string
+      /** Kid-facing title, model-proposed and shown on the card before the tap. */
+      title: string
+      /** Positive integer — the vet-in form's own rule, not a new band. */
+      plannedMinutes: number
+      /** Required: a real bucket, never guessed (unlike `addItemToDay`'s). */
+      subjectBucket: SubjectBucket
+      /** Required one-line "why we're watching" — parent framing on the card. */
+      why: string
+      /** Required: the URL the web search surfaced. The card links it. */
+      suggestedFromUrl: string
+    }
+  | {
+      kind: 'planVideoOnDay'
+      childId: string
+      /** Doc id of an ACTIVE `watchLibrary` entry the acting child can see. */
+      watchVideoId: string
+      /** `YYYY-MM-DD`. A weekday of the current OR next school week. */
+      dateKey: string
     }
 
 /**

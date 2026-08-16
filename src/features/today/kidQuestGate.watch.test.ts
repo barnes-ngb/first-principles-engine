@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ChecklistItem } from '../../core/types'
+import type { ChecklistItem, DayLog, WatchVideo } from '../../core/types'
+import { SubjectBucket } from '../../core/types/enums'
+import { appendWatchItemToDayLog } from '../watch/watchDayItem'
 import { categorizeItems, computeQuestProgress, isDayAllDone } from './kidQuestGate'
 
 function quest(overrides: Partial<ChecklistItem> = {}): ChecklistItem {
@@ -132,5 +134,67 @@ describe('computeQuestProgress — a video moves no counter (FEAT-134)', () => {
         selectedChoiceItems: p.choose,
       }),
     ).toBe(true)
+  })
+})
+
+// ── The chat's planned video reaches the kid the same way (FEAT-149) ─────────
+//
+// A video planned from a confirm card lands through `writeWatchItemToDay` →
+// `appendWatchItemToDayLog`, the same builder the planner and Today's edit mode
+// use. This walks the REAL builder rather than a hand-made fixture, so if the
+// chat's row ever stopped carrying `itemType: 'watch'`, this fails here — where
+// the consequence is visible (Lincoln can't see the video) rather than three
+// modules away.
+
+describe('a video planned from the chat lands in the kid watch bucket (FEAT-149)', () => {
+  const video: WatchVideo = {
+    id: 'vid_glacier',
+    youtubeId: 'dQw4w9WgXcQ',
+    title: 'How Glaciers Move',
+    plannedMinutes: 9,
+    subjectBucket: SubjectBucket.Science,
+    childId: 'lincoln1',
+    addedBy: 'fam1',
+    vettedAt: '2026-08-16T00:00:00.000Z',
+    createdAt: '2026-08-16T00:00:00.000Z',
+    updatedAt: '2026-08-16T00:00:00.000Z',
+  }
+
+  const dayWithChatVideo = (): DayLog =>
+    appendWatchItemToDayLog(
+      {
+        childId: 'lincoln1',
+        date: '2026-08-18',
+        blocks: [],
+        checklist: [quest({ label: 'Prayer' })],
+        createdAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+      video,
+    )
+
+  /** The day's checklist as the kid view reads it. */
+  const chatVideoChecklist = (): ChecklistItem[] => dayWithChatVideo().checklist ?? []
+
+  it('is bucketed as `watch`, not as a quest or a craft', () => {
+    const { mustDo, choose, watch } = categorizeItems(chatVideoChecklist())
+    expect(watch.map((i) => i.label)).toEqual(['Watch: How Glaciers Move (9m)'])
+    expect(mustDo.map((i) => i.label)).toEqual(['Prayer'])
+    expect(choose).toHaveLength(0)
+  })
+
+  it('carries the id the player resolves, so it is actually playable', () => {
+    const row = categorizeItems(chatVideoChecklist()).watch[0]
+    expect(row.itemType).toBe('watch')
+    expect(row.watchVideoId).toBe('vid_glacier')
+  })
+
+  it('adds no quest and no craft slot — it stays optional', () => {
+    const before = computeQuestProgress([quest({ label: 'Prayer' })])
+    const after = computeQuestProgress(chatVideoChecklist())
+    expect(after.mustDo).toHaveLength(before.mustDo.length)
+    expect(after.mustDoRemaining).toBe(before.mustDoRemaining)
+    expect(after.choose).toHaveLength(0)
+    expect(after.gateThreshold).toBe(before.gateThreshold)
   })
 })
