@@ -105,6 +105,19 @@ export function retiredVideoNotice(title: string): string {
   return `"${title}" was retired, so nothing was added. It's in the Archive tab of Watch Library — put it back from there if you want it again.`
 }
 
+/**
+ * The refusal for a SECOND vet-in of the same video inside one reply (Codex P2,
+ * PR #1676).
+ *
+ * Not a library duplicate — nothing is written yet — so it must not say "already
+ * in the Watch Library", which would be false and would send the parent looking
+ * for something that isn't there. It is a repeat in the proposal itself, and the
+ * honest sentence says so and points at the card that IS on screen.
+ */
+export function repeatedVetInNotice(title: string): string {
+  return `I proposed "${title}" twice in one message — only the first card is shown, so you don't add it twice.`
+}
+
 /** The plan-side refusal for a retired entry — same rule, different sentence. */
 export function retiredPlanNotice(title: string): string {
   return `"${title}" has been retired, so it can't be planned. Put it back from the Archive tab of Watch Library first.`

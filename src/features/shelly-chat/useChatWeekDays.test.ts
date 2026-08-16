@@ -61,12 +61,10 @@ describe('plannableWatchDayKeys (FEAT-149)', () => {
     process.env.TZ = originalTz
   })
 
-  it('returns this week then next week, ten weekdays, correctly labelled', () => {
+  it('runs from today through next Friday, correctly labelled', () => {
+    // Wednesday 2026-08-12. Monday and Tuesday have already happened.
     const days = plannableWatchDayKeys(new Date('2026-08-12T12:00:00'))
-    expect(days).toHaveLength(10)
     expect(days.map((d) => d.dateKey)).toEqual([
-      '2026-08-10',
-      '2026-08-11',
       '2026-08-12',
       '2026-08-13',
       '2026-08-14',
@@ -76,13 +74,38 @@ describe('plannableWatchDayKeys (FEAT-149)', () => {
       '2026-08-20',
       '2026-08-21',
     ])
-    expect(days[1].label).toBe('Tuesday')
-    expect(days[6].label).toBe('next Tuesday')
+    expect(days[0].label).toBe('Wednesday')
+    expect(days[4].label).toBe('next Tuesday')
   })
 
-  it('opens with exactly the current week — the two windows cannot drift apart', () => {
-    const now = new Date('2026-08-13T09:00:00')
-    expect(plannableWatchDayKeys(now).slice(0, 5)).toEqual(currentWeekDayKeys(now))
+  it('drops elapsed weekdays but keeps TODAY (Codex P2, PR #1676)', () => {
+    // "Add it to today" is a real ask, so today is the floor, not the exclusive
+    // bound. On a Friday, only Friday and next week remain.
+    const friday = plannableWatchDayKeys(new Date('2026-08-14T12:00:00'))
+    expect(friday[0].dateKey).toBe('2026-08-14')
+    expect(friday.map((d) => d.dateKey)).not.toContain('2026-08-10')
+    expect(friday).toHaveLength(6)
+  })
+
+  it('never offers a past day — the grammar says so, and the window must agree', () => {
+    // Spreading the whole current week would make Monday plannable on Friday:
+    // an unfinished row on a day that already happened, and a flat contradiction
+    // of the addendum's own "not a past day" rule.
+    for (const [now, today] of [
+      ['2026-08-10T08:00:00', '2026-08-10'],
+      ['2026-08-12T12:00:00', '2026-08-12'],
+      ['2026-08-14T23:00:00', '2026-08-14'],
+    ] as const) {
+      for (const d of plannableWatchDayKeys(new Date(now))) {
+        expect(d.dateKey >= today, `${d.dateKey} on ${today}`).toBe(true)
+      }
+    }
+  })
+
+  it('is a prefix-trimmed current week — the two windows cannot drift apart', () => {
+    // On a Monday nothing has elapsed, so the head is exactly the current week.
+    const monday = new Date('2026-08-10T09:00:00')
+    expect(plannableWatchDayKeys(monday).slice(0, 5)).toEqual(currentWeekDayKeys(monday))
   })
 
   it('excludes weekends, the week after next, and last week', () => {
@@ -93,21 +116,19 @@ describe('plannableWatchDayKeys (FEAT-149)', () => {
     expect(keys).not.toContain('2026-08-07') // last Friday
   })
 
-  it('rolls over with the week: on a Sunday the window is the week just ending, plus one', () => {
-    // Sunday belongs to the week that is ENDING (the client + CF rule), so a
-    // Sunday-evening ask about "next week" lands on the days that are actually
-    // next — never on the week that has already gone by.
+  it('on a weekend the window is next week alone — which is what the ask means', () => {
+    // Sunday belongs to the week that is ENDING, so its Mon–Fri are all behind.
+    // A Sunday-evening "plan some videos for next week" therefore gets exactly
+    // next week, and cannot land on the week that has gone by.
     const days = plannableWatchDayKeys(new Date('2026-08-16T19:30:00'))
-    expect(days[0].dateKey).toBe('2026-08-10')
-    expect(days[5].dateKey).toBe('2026-08-17')
-    expect(days[5].label).toBe('next Monday')
+    expect(days).toHaveLength(5)
+    expect(days[0]).toEqual({ dateKey: '2026-08-17', label: 'next Monday' })
+    expect(days[4]).toEqual({ dateKey: '2026-08-21', label: 'next Friday' })
   })
 
   it('crosses a month boundary as calendar arithmetic, not +7 on the day number', () => {
     const days = plannableWatchDayKeys(new Date('2026-08-26T12:00:00'))
     expect(days.map((d) => d.dateKey)).toEqual([
-      '2026-08-24',
-      '2026-08-25',
       '2026-08-26',
       '2026-08-27',
       '2026-08-28',
@@ -125,8 +146,9 @@ describe('plannableWatchDayKeys (FEAT-149)', () => {
     // accepts. A divergence would offer the model days the client refuses, so
     // the same date/label pairs are asserted on each side.
     const days = plannableWatchDayKeys(new Date('2026-08-12T12:00:00'))
-    expect(days[5]).toEqual({ dateKey: '2026-08-17', label: 'next Monday' })
-    expect(days[9]).toEqual({ dateKey: '2026-08-21', label: 'next Friday' })
+    expect(days[0]).toEqual({ dateKey: '2026-08-12', label: 'Wednesday' })
+    expect(days[3]).toEqual({ dateKey: '2026-08-17', label: 'next Monday' })
+    expect(days[7]).toEqual({ dateKey: '2026-08-21', label: 'next Friday' })
   })
 })
 

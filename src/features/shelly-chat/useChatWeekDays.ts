@@ -92,6 +92,19 @@ function shiftDateKey(dateKey: string, days: number): string {
  * Next-plus-one and beyond are deliberately absent: "next week" is what was
  * asked for, and a longer horizon is an owner decision rather than a default.
  *
+ * **Elapsed weekdays are dropped** (Codex P2, PR #1676). Spreading the whole
+ * current week would make Monday a valid target on Friday, which puts an
+ * unfinished row on a day that has already happened — and contradicts the
+ * grammar's own "not a past day" rule, which is the navigation-honesty failure
+ * in miniature. Today is kept: "add it to today" is a real ask. On a Saturday or
+ * Sunday the current week is entirely behind, so the window is next week alone —
+ * exactly the week a weekend planner means.
+ *
+ * This is deliberately TIGHTER than FEAT-142's current-week gate for
+ * add/move/remove, which is unchanged: those edit rows on a week already in
+ * play, where reaching back to Monday is a legitimate correction. Planning a
+ * video into the past is not a correction, it is a mistake.
+ *
  * Built by shifting {@link currentWeekDayKeys} rather than recomputing a Monday,
  * so both windows come from ONE definition of "which week is it right now" —
  * including its rollover behaviour — and the labels read the way a card should
@@ -102,13 +115,14 @@ export function plannableWatchDayKeys(now: Date = new Date()): {
   label: string
 }[] {
   const current = currentWeekDayKeys(now)
+  const today = formatDateYmd(now)
   return [
     ...current,
     ...current.map((d) => ({
       dateKey: shiftDateKey(d.dateKey, 7),
       label: `next ${d.label}`,
     })),
-  ]
+  ].filter((d) => d.dateKey >= today)
 }
 
 /**

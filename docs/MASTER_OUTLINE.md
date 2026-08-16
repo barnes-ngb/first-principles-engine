@@ -440,7 +440,12 @@ the confirming account's uid at the write (`watchCuratorLabel` keeps the library
 **The one deliberate week widening (FEAT-149).** `planVideoOnDay` may target a weekday of the **current
 or next** school week — "find me videos for *next week*" is the ask it exists for — computed from the
 same civil-date-in-the-family's-zone helpers as #1667, never the runtime clock, and pinned on both sides
-(`plannableWatchDayKeys` on the client, `plannableWatchDays` in the CF). It is safe there precisely
+(`plannableWatchDayKeys` on the client, `plannableWatchDays` in the CF). **Elapsed weekdays are dropped**
+and today is kept, so the window runs from today through next Friday and shrinks as the week goes by;
+on a weekend it is next week alone. That makes it deliberately *tighter* than FEAT-142's current-week
+gate — reaching back to Monday is a legitimate correction when you are editing rows already in play, but
+planning a video into the past is just a mistake, and the grammar tells the model "not a past day", so
+the list it is handed has to agree. It is safe there precisely
 because it is **add-only**: one checklist row through the FEAT-132 lane, no block, no hours math, nothing
 existing touched. FEAT-142's move and remove mutate rows a family may already be working through, so
 they stay pinned to the current week, untouched. Next-plus-one and beyond are refused — a longer horizon

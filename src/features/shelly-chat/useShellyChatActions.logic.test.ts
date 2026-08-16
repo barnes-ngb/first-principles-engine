@@ -1500,10 +1500,16 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
   it('writes ONCE when two taps race the same in-flight add', async () => {
     // Hold the write open so both taps land before either resolves — the exact
     // window a double tap on a phone falls into.
-    let release: (() => void) | undefined
-    addActivityConfig.mockImplementation(
-      () => new Promise<string>((resolve) => { release = () => resolve('new-cfg-id') }),
-    )
+    // The gate promise is built UP FRONT, not inside the mock, so `release` is
+    // callable the moment the test wants it. Confirmed writes are queued behind
+    // one another (Codex P1, PR #1676), so a write no longer necessarily starts
+    // in the same microtask as the tap — a `release` assigned by the mock body
+    // would still be undefined when the test reaches for it.
+    let release!: () => void
+    const gate = new Promise<string>((resolve) => {
+      release = () => resolve('new-cfg-id')
+    })
+    addActivityConfig.mockImplementation(() => gate)
 
     const { result } = curriculumSetup()
     act(() => {
@@ -1515,7 +1521,7 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
     await act(async () => {
       first = result.current.applyChatAction(CURRICULUM_ADD)
       second = result.current.applyChatAction(CURRICULUM_ADD)
-      release?.()
+      release()
       await Promise.all([first, second])
     })
 
@@ -1541,10 +1547,16 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
   })
 
   it('marks the card `applying` while in flight, then `applied`', async () => {
-    let release: (() => void) | undefined
-    addActivityConfig.mockImplementation(
-      () => new Promise<string>((resolve) => { release = () => resolve('new-cfg-id') }),
-    )
+    // The gate promise is built UP FRONT, not inside the mock, so `release` is
+    // callable the moment the test wants it. Confirmed writes are queued behind
+    // one another (Codex P1, PR #1676), so a write no longer necessarily starts
+    // in the same microtask as the tap — a `release` assigned by the mock body
+    // would still be undefined when the test reaches for it.
+    let release!: () => void
+    const gate = new Promise<string>((resolve) => {
+      release = () => resolve('new-cfg-id')
+    })
+    addActivityConfig.mockImplementation(() => gate)
     const { result } = curriculumSetup()
     act(() => {
       result.current.stagePendingActions('m1', [CURRICULUM_ADD])
@@ -1557,7 +1569,7 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
     expect(result.current.pending[0].status).toBe('applying')
 
     await act(async () => {
-      release?.()
+      release()
       await inFlight
     })
     expect(result.current.pending[0].status).toBe('applied')
@@ -1622,10 +1634,15 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
 // confirmed plan lands through the FEAT-132 day lane — no second write path to
 // either the library or a day document.
 
+// Built from the real window rather than hardcoded dates — hardcoded ones would
+// pass this week and fail every week after. The window runs from TODAY through
+// next Friday and shrinks as the week elapses (Codex P2, PR #1676), so these
+// pick by position from each end rather than assuming ten entries.
 const PLANNABLE = plannableWatchDayKeys()
-/** A weekday of THIS week, and the same weekday of NEXT week. */
-const THIS_WEDNESDAY = PLANNABLE[2].dateKey
-const NEXT_TUESDAY = PLANNABLE[6].dateKey
+/** The soonest plannable weekday (today, or the next one that hasn't gone by). */
+const SOONEST = PLANNABLE[0].dateKey
+/** The far end of the window — next Friday. */
+const NEXT_TUESDAY = PLANNABLE[PLANNABLE.length - 1].dateKey
 
 const VET_IN_ACTION: ChatAction = {
   kind: 'vetInVideo',
@@ -1673,27 +1690,30 @@ describe('watch actions — the staging gate (FEAT-149)', () => {
     expect(addWatchVideo).not.toHaveBeenCalled()
   })
 
-  it('accepts a weekday of THIS week and of NEXT week', () => {
+  it('accepts both ends of the window — the soonest day and next Friday', () => {
     const { result } = setup()
     act(() =>
       result.current.stagePendingActions('m1', [
-        { ...PLAN_ACTION, dateKey: THIS_WEDNESDAY } as ChatAction,
+        { ...PLAN_ACTION, dateKey: SOONEST } as ChatAction,
         PLAN_ACTION,
       ]),
     )
-    expect(result.current.pending).toHaveLength(2)
+    expect(result.current.pending).toHaveLength(PLANNABLE.length > 1 ? 2 : 1)
     expect(result.current.suppressed).toEqual([])
   })
 
   it('drops a weekend, a past day, and the week after next — each with a reason', () => {
-    const saturday = new Date(`${PLANNABLE[4].dateKey}T00:00:00Z`)
-    saturday.setUTCDate(saturday.getUTCDate() + 1)
-    const lastWeek = new Date(`${PLANNABLE[0].dateKey}T00:00:00Z`)
-    lastWeek.setUTCDate(lastWeek.getUTCDate() - 7)
-    const weekAfterNext = new Date(`${PLANNABLE[5].dateKey}T00:00:00Z`)
-    weekAfterNext.setUTCDate(weekAfterNext.getUTCDate() + 7)
+    const shift = (dateKey: string, days: number) => {
+      const d = new Date(`${dateKey}T00:00:00Z`)
+      d.setUTCDate(d.getUTCDate() + days)
+      return d
+    }
+    const last = PLANNABLE[PLANNABLE.length - 1].dateKey
+    const saturday = shift(last, 1)
+    const yesterday = shift(PLANNABLE[0].dateKey, -1)
+    const weekAfterNext = shift(last, 7)
 
-    for (const d of [saturday, lastWeek, weekAfterNext]) {
+    for (const d of [saturday, yesterday, weekAfterNext]) {
       const { result } = setup()
       const dateKey = d.toISOString().slice(0, 10)
       act(() =>
@@ -1847,5 +1867,104 @@ describe('watch actions — the write backstop (FEAT-149)', () => {
       expect(await result.current.applyChatAction(wrongChild)).toBe(false)
     })
     expect(addWatchVideo).not.toHaveBeenCalled()
+  })
+})
+
+// ── Codex findings on PR #1676 ───────────────────────────────────────────────
+
+describe('a repeated vet-in in one reply becomes one card (Codex P2, PR #1676)', () => {
+  it('stages the first and drops the second, saying it was proposed twice', () => {
+    // Both would resolve against the SAME pre-write library snapshot, so neither
+    // sees the other; `addWatchVideo` is an `addDoc` and the re-entry guard is
+    // keyed on the action OBJECT, so two objects would mint two library entries.
+    const { result } = setup()
+    const again = { ...VET_IN_ACTION, title: 'Rivers and canyons' } as ChatAction
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION, again]))
+
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.pending[0].action).toBe(VET_IN_ACTION)
+    expect(result.current.suppressed).toHaveLength(1)
+    // It is NOT a library duplicate — nothing is written yet — so the sentence
+    // must not send her looking for it in the Watch Library.
+    expect(result.current.suppressed[0]).toContain('twice in one message')
+    expect(result.current.suppressed[0]).not.toContain('already in the Watch Library')
+  })
+
+  it('writes once when the reply repeated itself', async () => {
+    const { result } = setup()
+    const again = { ...VET_IN_ACTION } as ChatAction
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION, again]))
+    await act(async () => {
+      await result.current.confirmAll()
+    })
+    expect(addWatchVideo).toHaveBeenCalledTimes(1)
+  })
+
+  it('still stages two DIFFERENT videos from one reply', () => {
+    // The dedupe is on the video, not on the kind — "add these two" must work.
+    const other = {
+      ...VET_IN_ACTION,
+      youtubeId: 'qQqQqQqQqQq',
+      title: 'How Caves Form',
+      suggestedFromUrl: 'https://www.youtube.com/watch?v=qQqQqQqQqQq',
+    } as ChatAction
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION, other]))
+    expect(result.current.pending).toHaveLength(2)
+    expect(result.current.suppressed).toEqual([])
+  })
+})
+
+describe('confirmed writes are serialized (Codex P1, PR #1676)', () => {
+  it('does not start a second day write while the first is still in flight', async () => {
+    // `writeWatchItemToDay` is a read-modify-setDoc, so two of them racing on the
+    // same day both build from the same old checklist and the later write drops
+    // the earlier one's row — while BOTH cards say "Done". Two different cards
+    // are not covered by the per-action re-entry guard, so the queue is what
+    // holds the line.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = () => resolve()
+    })
+    let started = 0
+    writeWatchItemToDay.mockImplementation(() => {
+      started += 1
+      return gate
+    })
+
+    const second = { ...PLAN_ACTION, dateKey: SOONEST } as ChatAction
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [PLAN_ACTION, second]))
+
+    await act(async () => {
+      const a = result.current.applyChatAction(PLAN_ACTION)
+      const b = result.current.applyChatAction(second)
+      // Let both taps get as far as they can while the first write hangs.
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(started).toBe(1)
+      release()
+      await Promise.all([a, b])
+    })
+
+    // Both still happen — serialized, not dropped.
+    expect(started).toBe(2)
+    expect(writeWatchItemToDay).toHaveBeenCalledTimes(2)
+    expect(result.current.pending.every((p) => p.status === 'applied')).toBe(true)
+  })
+
+  it('a failed write does not wedge the queue for the rest of the turn', async () => {
+    writeWatchItemToDay.mockRejectedValueOnce(new Error('offline'))
+    const second = { ...PLAN_ACTION, dateKey: SOONEST } as ChatAction
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [PLAN_ACTION, second]))
+
+    await act(async () => {
+      await expect(result.current.applyChatAction(PLAN_ACTION)).rejects.toThrow('offline')
+    })
+    await act(async () => {
+      expect(await result.current.applyChatAction(second)).toBe(true)
+    })
+    expect(writeWatchItemToDay).toHaveBeenCalledTimes(2)
   })
 })

@@ -1430,12 +1430,10 @@ describe("NAVIGATION HONESTY after FEAT-143", () => {
 // ── FEAT-149: the chat can vet in a found video and plan it ──────────────────
 
 describe("plannableWatchDays (FEAT-149)", () => {
-  it("returns this week then next week — ten weekdays, labelled for a card", () => {
+  it("runs from today through next Friday, labelled for a card", () => {
+    // Wednesday. Monday and Tuesday have already happened.
     const days = plannableWatchDays(new Date("2026-08-12T12:00:00Z"), "America/Chicago");
-    expect(days).toHaveLength(10);
     expect(days.map((d) => d.dateKey)).toEqual([
-      "2026-08-10",
-      "2026-08-11",
       "2026-08-12",
       "2026-08-13",
       "2026-08-14",
@@ -1445,42 +1443,63 @@ describe("plannableWatchDays (FEAT-149)", () => {
       "2026-08-20",
       "2026-08-21",
     ]);
-    expect(days[1].label).toBe("Tuesday");
-    expect(days[6].label).toBe("next Tuesday");
+    expect(days[0].label).toBe("Wednesday");
+    expect(days[4].label).toBe("next Tuesday");
   });
 
-  it("opens with exactly currentWeekDays — the two windows cannot drift apart", () => {
-    const now = new Date("2026-08-13T09:00:00Z");
-    expect(plannableWatchDays(now, "America/Chicago").slice(0, 5)).toEqual(
-      currentWeekDays(now, "America/Chicago"),
+  it("drops elapsed weekdays but keeps TODAY (Codex P2, PR #1676)", () => {
+    // The addendum tells the model "not a past day". If the list it is handed
+    // still contained one, the prompt would be contradicting its own data — and
+    // the client gate would refuse a proposal the prompt invited.
+    const friday = plannableWatchDays(new Date("2026-08-14T15:00:00Z"), "America/Chicago");
+    expect(friday[0].dateKey).toBe("2026-08-14");
+    expect(friday.map((d) => d.dateKey)).not.toContain("2026-08-10");
+    expect(friday).toHaveLength(6);
+  });
+
+  it("is a prefix-trimmed currentWeekDays — the two windows cannot drift apart", () => {
+    // On a Monday nothing has elapsed, so the head is exactly the current week.
+    const monday = new Date("2026-08-10T14:00:00Z");
+    expect(plannableWatchDays(monday, "America/Chicago").slice(0, 5)).toEqual(
+      currentWeekDays(monday, "America/Chicago"),
     );
   });
 
   it("uses the family's CIVIL date, not the runtime's — the #1667 rail", () => {
-    // Sunday 23:30 in Chicago is already Monday in UTC. The window must be the
-    // family's: the week that is ending, plus the one that is genuinely next.
-    // Deriving it from the runtime clock would offer the model a "next week"
-    // that the client gate has already moved past.
+    // Sunday 23:30 in Chicago is already Monday in UTC. Read in the family's
+    // zone it is still Sunday, so the whole current week has elapsed and the
+    // window is next week alone. Read in UTC it is Monday, so that Monday is
+    // itself plannable — a different answer from the same instant, which is
+    // exactly the divergence the client gate would refuse.
     const sundayNight = new Date("2026-08-17T04:30:00Z"); // Sun 23:30 CDT
     const chicago = plannableWatchDays(sundayNight, "America/Chicago");
-    expect(chicago[0].dateKey).toBe("2026-08-10");
-    expect(chicago[5].dateKey).toBe("2026-08-17");
-    // Read in UTC the same instant is Monday, so the window has already rolled.
-    expect(plannableWatchDays(sundayNight, "UTC")[0].dateKey).toBe("2026-08-17");
+    expect(chicago).toHaveLength(5);
+    expect(chicago[0]).toEqual({ dateKey: "2026-08-17", label: "next Monday" });
+    const utc = plannableWatchDays(sundayNight, "UTC");
+    expect(utc[0]).toEqual({ dateKey: "2026-08-17", label: "Monday" });
   });
 
   it("agrees with the client's plannableWatchDayKeys on the same date", () => {
     // The client's copy in `useChatWeekDays.ts` is what the confirm gate accepts;
     // this is what the model is told about. Both sides pin these pairs.
     const days = plannableWatchDays(new Date("2026-08-12T12:00:00Z"), "America/Chicago");
-    expect(days[5]).toEqual({ dateKey: "2026-08-17", label: "next Monday" });
-    expect(days[9]).toEqual({ dateKey: "2026-08-21", label: "next Friday" });
+    expect(days[0]).toEqual({ dateKey: "2026-08-12", label: "Wednesday" });
+    expect(days[3]).toEqual({ dateKey: "2026-08-17", label: "next Monday" });
+    expect(days[7]).toEqual({ dateKey: "2026-08-21", label: "next Friday" });
   });
 
   it("crosses a month boundary as calendar arithmetic", () => {
     const days = plannableWatchDays(new Date("2026-08-26T12:00:00Z"), "America/Chicago");
-    expect(days[5].dateKey).toBe("2026-08-31");
-    expect(days[6].dateKey).toBe("2026-09-01");
+    expect(days.map((d) => d.dateKey)).toEqual([
+      "2026-08-26",
+      "2026-08-27",
+      "2026-08-28",
+      "2026-08-31",
+      "2026-09-01",
+      "2026-09-02",
+      "2026-09-03",
+      "2026-09-04",
+    ]);
   });
 });
 

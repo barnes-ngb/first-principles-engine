@@ -96,7 +96,7 @@ import {
 import type { ChatWeekDay, DayItemAction } from './dayItemActions'
 import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
 import type { WatchAction } from './watchActions'
-import { isWatchAction, resolveWatchAction } from './watchActions'
+import { isWatchAction, repeatedVetInNotice, resolveWatchAction } from './watchActions'
 import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
 import { stagePlanAdjustment } from './stagePlanAdjustment'
 import { addWatchVideo } from '../watch/useWatchLibrary'
@@ -518,6 +518,10 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // new call site — and for every kind, since "idempotent" is a property a
   // future kind may not have.
   const appliedOrInFlightRef = useRef<Set<ChatAction>>(new Set())
+  // Tail of the confirmed-write queue (Codex P1, PR #1676). Every confirmed
+  // action chains onto this, so two cards tapped a frame apart write one after
+  // the other instead of racing. See `applyChatAction` for why that matters.
+  const writeQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   // Latest configs + capability, read at stage/apply time rather than captured
   // in a closure, so a snapshot that lands between renders is the one we
@@ -561,6 +565,15 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     (messageId: string, actions: ChatAction[]) => {
       setPendingMessageId(messageId)
       const notices: string[] = []
+      // Videos this turn has already accepted a vet-in for (Codex P2, PR #1676).
+      // One reply really can carry two `vetInVideo` blocks for the same video —
+      // "add all five" with a repeat in the list is the obvious way — and both
+      // would resolve against the SAME pre-write library snapshot, so neither
+      // sees the other. `addWatchVideo` is an `addDoc`, and the re-entry guard
+      // is keyed on the action OBJECT, so two distinct objects would mint two
+      // library entries for one video. Deduped here, where the whole turn is
+      // visible at once, rather than at the write, where each call is alone.
+      const acceptedYouTubeIds = new Set<string>()
       const offerable = actions.filter((action) => {
         // FEAT-142 — a live-day edit is resolved against THIS WEEK before it can
         // become a card: the day must be a weekday of the current week, the row
@@ -597,6 +610,14 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
             console.warn('[shellyChat] dropped watch action —', resolution.notice, action)
             notices.push(resolution.notice)
             return false
+          }
+          if (action.kind === 'vetInVideo') {
+            if (acceptedYouTubeIds.has(action.youtubeId)) {
+              console.warn('[shellyChat] dropped a repeated vet-in in one turn', action)
+              notices.push(repeatedVetInNotice(action.title))
+              return false
+            }
+            acceptedYouTubeIds.add(action.youtubeId)
           }
           return true
         }
@@ -830,6 +851,17 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
    * refused before any writer is reached, so a non-idempotent kind like
    * `addActivity` cannot create two documents (Codex P1, PR #1669).
    *
+   * Writes are additionally **serialized** against each other (Codex P1, PR
+   * #1676). The re-entry guard is keyed on the action object, so it says nothing
+   * about two DIFFERENT cards confirmed a frame apart — and every day write in
+   * this app is a read-modify-`setDoc` (`liveDayEdit`, `writeWatchItemToDay`),
+   * so two of them racing on the same day both build from the same old checklist
+   * and the later one silently drops the earlier one's row. Both cards would
+   * still say "Done". Nothing about the shared lane changes; the chat simply
+   * stops firing its writes concurrently, which is the only surface that can
+   * (a tap on Today or in the planner is one affordance at a time, and
+   * `confirmAll` already awaits in sequence).
+   *
    * @returns true if the write was performed, false if refused.
    */
   const applyChatAction = useCallback(
@@ -856,7 +888,18 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       )
       let wrote = false
       try {
-        wrote = await performChatAction(action)
+        // Queue behind whatever write is already running. The tail is reset to a
+        // resolved promise on failure so one rejected write cannot wedge the
+        // queue for the rest of the turn.
+        const queued = writeQueueRef.current.then(
+          () => performChatAction(action),
+          () => performChatAction(action),
+        )
+        writeQueueRef.current = queued.then(
+          () => undefined,
+          () => undefined,
+        )
+        wrote = await queued
       } finally {
         if (!wrote) {
           appliedOrInFlightRef.current.delete(action)

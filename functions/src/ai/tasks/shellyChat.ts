@@ -288,10 +288,17 @@ export function currentWeekDays(
  * so they stay pinned to the current week. Next-plus-one and beyond are absent:
  * a longer horizon is an owner decision, not a default.
  *
+ * **Elapsed weekdays are dropped** (Codex P2, PR #1676), against the family's
+ * CIVIL date — otherwise the list offered to the model would include Monday on a
+ * Friday, contradicting the grammar's own "not a past day" rule and inviting a
+ * proposal the client gate then refuses. Today is kept. On a weekend the current
+ * week is entirely behind, so the window is next week alone.
+ *
  * Built by shifting {@link currentWeekDays}, so both windows come from ONE
  * definition of "which week is it right now" — including its civil-date-in-the-
  * family's-zone arithmetic. The mirror of the client's
- * `plannableWatchDayKeys`, which the confirm gate resolves against.
+ * `plannableWatchDayKeys`, which the confirm gate resolves against; the two must
+ * agree or the model is told about days the tap will refuse.
  */
 export function plannableWatchDays(
   now: Date = new Date(),
@@ -303,7 +310,8 @@ export function plannableWatchDays(
     shifted.setUTCDate(shifted.getUTCDate() + 7);
     return { dateKey: shifted.toISOString().slice(0, 10), label: `next ${d.label}` };
   });
-  return [...current, ...next];
+  const today = civilDateInZone(now, timeZone);
+  return [...current, ...next].filter((d) => d.dateKey >= today);
 }
 
 /** One curated library video, as the WATCH LIBRARY section needs to see it. */
