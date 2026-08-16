@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   extractImageUrls,
   buildActivityMinutesActionAddendum,
+  buildWatchActionAddendum,
+  formatWatchLibrary,
+  plannableWatchDays,
   buildAllChildrenLearnerModels,
   buildCurriculumActionAddendum,
   buildDayItemActionAddendum,
@@ -24,6 +27,7 @@ import {
 } from "./shellyChat.js";
 import type {
   ChatActivityRow,
+  WatchLibraryRow,
   DispositionCacheDoc,
   DispositionOverridesDoc,
   TeachBackArtifactInput,
@@ -1387,13 +1391,16 @@ describe("NAVIGATION HONESTY after FEAT-143", () => {
     }
   });
 
-  it("leaves slices 3 and 4 as the only two 'coming' items, with their real screens", () => {
+  it("leaves the remaining slice as a 'coming' item, with its real screen", () => {
+    // FEAT-149 shipped slice 3, so the two-item list became one. The wording of
+    // the bound moved with it: promising "two" while listing one is the same
+    // class of inaccuracy the rule exists to stop.
     for (const out of [CHILD, GENERAL]) {
-      expect(out).toContain("finding videos on the web and planning them");
+      expect(out).not.toContain("finding videos on the web and planning them");
       expect(out).toContain("Watch Library");
       expect(out).toContain("reshaping NEXT week from here");
       expect(out).toContain("Plan My Week");
-      expect(out).toContain('Say "that\'s coming" only for these two');
+      expect(out).toContain('Say "that\'s coming" only for that one');
     }
   });
 
@@ -1416,6 +1423,218 @@ describe("NAVIGATION HONESTY after FEAT-143", () => {
       expect(out).toContain(
         "Settings does NOT contain any schedule, subject-duration, or time-block screen",
       );
+    }
+  });
+});
+
+// ── FEAT-149: the chat can vet in a found video and plan it ──────────────────
+
+describe("plannableWatchDays (FEAT-149)", () => {
+  it("returns this week then next week — ten weekdays, labelled for a card", () => {
+    const days = plannableWatchDays(new Date("2026-08-12T12:00:00Z"), "America/Chicago");
+    expect(days).toHaveLength(10);
+    expect(days.map((d) => d.dateKey)).toEqual([
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-17",
+      "2026-08-18",
+      "2026-08-19",
+      "2026-08-20",
+      "2026-08-21",
+    ]);
+    expect(days[1].label).toBe("Tuesday");
+    expect(days[6].label).toBe("next Tuesday");
+  });
+
+  it("opens with exactly currentWeekDays — the two windows cannot drift apart", () => {
+    const now = new Date("2026-08-13T09:00:00Z");
+    expect(plannableWatchDays(now, "America/Chicago").slice(0, 5)).toEqual(
+      currentWeekDays(now, "America/Chicago"),
+    );
+  });
+
+  it("uses the family's CIVIL date, not the runtime's — the #1667 rail", () => {
+    // Sunday 23:30 in Chicago is already Monday in UTC. The window must be the
+    // family's: the week that is ending, plus the one that is genuinely next.
+    // Deriving it from the runtime clock would offer the model a "next week"
+    // that the client gate has already moved past.
+    const sundayNight = new Date("2026-08-17T04:30:00Z"); // Sun 23:30 CDT
+    const chicago = plannableWatchDays(sundayNight, "America/Chicago");
+    expect(chicago[0].dateKey).toBe("2026-08-10");
+    expect(chicago[5].dateKey).toBe("2026-08-17");
+    // Read in UTC the same instant is Monday, so the window has already rolled.
+    expect(plannableWatchDays(sundayNight, "UTC")[0].dateKey).toBe("2026-08-17");
+  });
+
+  it("agrees with the client's plannableWatchDayKeys on the same date", () => {
+    // The client's copy in `useChatWeekDays.ts` is what the confirm gate accepts;
+    // this is what the model is told about. Both sides pin these pairs.
+    const days = plannableWatchDays(new Date("2026-08-12T12:00:00Z"), "America/Chicago");
+    expect(days[5]).toEqual({ dateKey: "2026-08-17", label: "next Monday" });
+    expect(days[9]).toEqual({ dateKey: "2026-08-21", label: "next Friday" });
+  });
+
+  it("crosses a month boundary as calendar arithmetic", () => {
+    const days = plannableWatchDays(new Date("2026-08-26T12:00:00Z"), "America/Chicago");
+    expect(days[5].dateKey).toBe("2026-08-31");
+    expect(days[6].dateKey).toBe("2026-09-01");
+  });
+});
+
+describe("formatWatchLibrary (FEAT-149) — the section that makes a video plannable", () => {
+  const LIBRARY: WatchLibraryRow[] = [
+    {
+      id: "vid_glacier",
+      title: "How Glaciers Move",
+      plannedMinutes: 9,
+      subjectBucket: "Science",
+      childId: "lincoln1",
+      why: "He asked how the big rocks got there",
+    },
+    {
+      id: "vid_volcano",
+      title: "Inside a Volcano",
+      plannedMinutes: 12,
+      subjectBucket: "Science",
+      childId: "both",
+      status: "retired",
+    },
+  ];
+
+  it("lists each video with the doc id the action must copy", () => {
+    const out = formatWatchLibrary(LIBRARY, "Lincoln");
+    expect(out).toContain("WATCH LIBRARY");
+    expect(out).toContain("How Glaciers Move");
+    expect(out).toContain("(watchVideoId: vid_glacier)");
+    expect(out).toContain("9 min");
+    expect(out).toContain("Science");
+  });
+
+  it("marks a retired entry as unplannable rather than hiding it", () => {
+    // Hidden, the model would propose vetting it in again — refused at the gate,
+    // but only after spending the parent's attention.
+    const out = formatWatchLibrary(LIBRARY, "Lincoln");
+    expect(out).toContain("Inside a Volcano");
+    expect(out).toContain("RETIRED — cannot be planned");
+    expect(out).toContain("Archive tab of Watch Library");
+  });
+
+  it("says who a shared video is for", () => {
+    const out = formatWatchLibrary(LIBRARY, "Lincoln");
+    expect(out).toContain("for both boys");
+    expect(out).toContain("for this child");
+  });
+
+  it("carries the parent's own framing when there is one", () => {
+    expect(formatWatchLibrary(LIBRARY, "Lincoln")).toContain(
+      '"He asked how the big rocks got there"',
+    );
+  });
+
+  it("omits itself entirely when the library is empty", () => {
+    // An empty section reads as "there is no such thing as a library".
+    expect(formatWatchLibrary([], "Lincoln")).toBe("");
+  });
+
+  it("tolerates a half-written document without crashing the chat", () => {
+    const out = formatWatchLibrary([{ id: "vid_x" }], "Lincoln");
+    expect(out).toContain("Untitled");
+    expect(out).toContain("(watchVideoId: vid_x)");
+  });
+});
+
+describe("buildWatchActionAddendum (FEAT-149)", () => {
+  const DAYS = [
+    { dateKey: "2026-08-17", label: "Monday" },
+    { dateKey: "2026-08-24", label: "next Monday" },
+  ];
+  const OUT = buildWatchActionAddendum("lincoln1", "Lincoln", DAYS);
+
+  it("is emitted only on a child-scoped tab", () => {
+    // General mode emits no actions at all — the same rail every other grammar
+    // holds. A kid-scoped or general chat therefore cannot even propose one.
+    expect(buildWatchActionAddendum(undefined, "Lincoln", DAYS)).toBe("");
+    expect(buildWatchActionAddendum("", undefined, DAYS)).toBe("");
+    expect(OUT).toContain("WATCH ACTIONS");
+  });
+
+  it("teaches both kinds with the child's real id", () => {
+    expect(OUT).toContain('"kind":"vetInVideo","childId":"lincoln1"');
+    expect(OUT).toContain('"kind":"planVideoOnDay","childId":"lincoln1"');
+  });
+
+  it("forbids inventing a youtube id, and requires the URL it came from", () => {
+    expect(OUT).toContain("NEVER invent, guess, or recall a YouTube id");
+    expect(OUT).toContain('"suggestedFromUrl" MUST be the real URL your search returned');
+    expect(OUT).toContain("do not propose it");
+  });
+
+  it("keeps presenting candidates in prose — searching is not a write", () => {
+    expect(OUT).toContain("Presenting candidates is NOT a write");
+    expect(OUT).toContain("When the parent CHOOSES one");
+  });
+
+  it("refuses a batch card — five adds are five taps", () => {
+    expect(OUT).toContain("never batch them into one card");
+    expect(OUT).toContain("ONE video per action block");
+  });
+
+  it("lists the plannable days explicitly, and rules out everything else", () => {
+    expect(OUT).toContain("Monday = 2026-08-17");
+    expect(OUT).toContain("next Monday = 2026-08-24");
+    expect(OUT).toContain("not a weekend, not the week after next, not a past day");
+  });
+
+  it("states that vet-in is the ONLY library change it can make", () => {
+    expect(OUT).toContain("CANNOT retire, un-retire, edit, or delete");
+    expect(OUT).toContain("Adding is the only library change you can make");
+  });
+
+  it("tells it a duplicate is already there, and a retired one is in the Archive", () => {
+    expect(OUT).toContain("already in the WATCH LIBRARY section");
+    expect(OUT).toContain("Archive tab of Watch Library");
+  });
+
+  it("keeps the two id spaces apart", () => {
+    // A youtubeId in a `watchVideoId` field is the likeliest confusion here.
+    expect(OUT).toContain("never use a YouTube id here — they are different things");
+  });
+
+  it("never claims a video is added, safe, or approved", () => {
+    expect(OUT).toContain("NEVER say a video is added, safe, or approved");
+    expect(OUT).toContain("The parent is the curator, not you");
+  });
+
+  it("says a plan changes nothing already on the day", () => {
+    expect(OUT).toContain("It changes nothing already on the day");
+    expect(OUT).toContain("touches no hours");
+  });
+});
+
+describe("NAVIGATION HONESTY after FEAT-149", () => {
+  const CHILD = buildShellyChatRoleSection("Lincoln");
+  const GENERAL = buildShellyChatRoleSection(undefined);
+
+  it("moves video find-and-add out of 'coming' and into what it CAN do", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("adding one you found on the web to the Watch Library");
+      expect(out).toContain("planning a vetted one onto a day of this week or next");
+    }
+  });
+
+  it("still says retiring and un-retiring live on the Watch Library surface", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("cannot RETIRE a video, un-retire one, edit one, or delete one");
+      expect(out).toContain("Retiring and putting back live in Watch Library");
+    }
+  });
+
+  it("keeps Watch Library out of Settings, as FEAT-132 left it", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("it is NOT inside Settings");
     }
   });
 });

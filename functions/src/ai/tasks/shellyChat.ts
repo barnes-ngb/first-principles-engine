@@ -278,6 +278,90 @@ export function currentWeekDays(
 }
 
 /**
+ * The ten weekdays a video may be PLANNED onto (FEAT-149): the family's current
+ * school week and the next one, labelled the way a card says them out loud.
+ *
+ * The one deliberate widening past FEAT-142's current-week gate, and scoped to
+ * exactly one action. "Find me videos for next week and add them" is the ask, so
+ * next week has to be nameable — but only for `planVideoOnDay`, which is purely
+ * additive. Move and remove mutate rows a family may already be working through,
+ * so they stay pinned to the current week. Next-plus-one and beyond are absent:
+ * a longer horizon is an owner decision, not a default.
+ *
+ * Built by shifting {@link currentWeekDays}, so both windows come from ONE
+ * definition of "which week is it right now" — including its civil-date-in-the-
+ * family's-zone arithmetic. The mirror of the client's
+ * `plannableWatchDayKeys`, which the confirm gate resolves against.
+ */
+export function plannableWatchDays(
+  now: Date = new Date(),
+  timeZone: string = DEFAULT_FAMILY_TIME_ZONE,
+): { dateKey: string; label: string }[] {
+  const current = currentWeekDays(now, timeZone);
+  const next = current.map((d) => {
+    const shifted = new Date(`${d.dateKey}T00:00:00Z`);
+    shifted.setUTCDate(shifted.getUTCDate() + 7);
+    return { dateKey: shifted.toISOString().slice(0, 10), label: `next ${d.label}` };
+  });
+  return [...current, ...next];
+}
+
+/** One curated library video, as the WATCH LIBRARY section needs to see it. */
+export interface WatchLibraryRow {
+  id?: string;
+  title?: string;
+  plannedMinutes?: number;
+  subjectBucket?: string;
+  childId?: string;
+  why?: string;
+  status?: string;
+}
+
+/**
+ * Format the WATCH LIBRARY section for a child-scoped chat (FEAT-149).
+ *
+ * This is what lets the assistant address a `planVideoOnDay` action at a REAL
+ * library entry — the exact division of labour the ACTIVITIES section already
+ * has for activity ids. Without it the model has nothing valid to put in a
+ * payload, which is precisely why the chat could find a video on the web and
+ * still not get it into the app.
+ *
+ * **Retired entries are listed and marked**, not omitted. Two things go wrong if
+ * they're hidden: the model proposes a duplicate vet-in of a video the parent
+ * deliberately retired (refused at the gate, but only after spending her
+ * attention), and it can't say the true thing — "that one's in the Archive" —
+ * when she asks for it by name.
+ *
+ * Returns "" for an empty library so the section is omitted rather than rendered
+ * empty — an empty section reads as "there is no such thing as a library".
+ */
+export function formatWatchLibrary(
+  videos: WatchLibraryRow[],
+  childName: string,
+): string {
+  if (videos.length === 0) return "";
+
+  const lines = videos.map((v) => {
+    const bits = [
+      `${v.plannedMinutes ?? "?"} min`,
+      v.subjectBucket || "Other",
+      v.childId === "both" ? "for both boys" : "for this child",
+    ];
+    if (v.status === "retired") bits.push("RETIRED — cannot be planned");
+    const why = v.why ? ` — "${v.why}"` : "";
+    return `  - ${v.title || "Untitled"} [${bits.join(", ")}]${why} (watchVideoId: ${v.id ?? ""})`;
+  });
+
+  const who = childName || "this child";
+  return [
+    `WATCH LIBRARY (${who}'s curated, already-vetted videos — the ONLY videos that can be planned onto a day):`,
+    ...lines,
+    "",
+    'Use a "watchVideoId" exactly as written when you propose planning a video. A video marked RETIRED was deliberately taken out of rotation: it cannot be planned and must not be vetted in again — say it is in the Archive tab of Watch Library instead.',
+  ].join("\n");
+}
+
+/**
  * Format the THIS WEEK section for a child-scoped chat (FEAT-142).
  *
  * This is what lets the assistant name a row on a day and address a
@@ -508,13 +592,14 @@ The real map, for the things parents most often ask to change:
 - The weekly plan itself: Plan My Week.
 - Today's checklist: Today. (You can also change what is on a day of THIS week yourself, right here — see TODAY / THIS WEEK ACTIONS below, if that section is present.)
 - Hours, compliance records, evaluations and the portfolio: Records.
-- The curated video library: Watch Library (its own entry in the parent nav — it is NOT inside Settings).
+- The curated video library: Watch Library (its own entry in the parent nav — it is NOT inside Settings). Retiring a video, and putting a retired one back from its Archive tab, happen there and only there. (You can add a video you found and plan it onto a day yourself, right here — see WATCH ACTIONS below, if that section is present.)
 - Account, profiles, voice input, stickers: Settings. Settings does NOT contain any schedule, subject-duration, or time-block screen — never send anyone there for one.
 
 What you can change from this chat, and what you can't (say this accurately, never more):
-- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, what is on a day of THIS week (remove / move / add), and the curriculum itself — adding an activity, marking one finished, and setting where the child is in it — each one confirmed by a tap.
+- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, what is on a day of THIS week (remove / move / add), the curriculum itself — adding an activity, marking one finished, and setting where the child is in it — and videos: adding one you found on the web to the Watch Library and planning a vetted one onto a day of this week or next. Each one is confirmed by a tap.
 - You still CANNOT DELETE an activity. The app retires programs (mark finished) rather than deleting them, and a finished program cannot be un-finished — not from here, and not from Progress → Curriculum. Never offer a way to undo it.
-- NOT YET, and these are coming: finding videos on the web and planning them (for now: vet one in at Watch Library, then plan it in Plan My Week); reshaping NEXT week from here (for now: the plan-adjustment handoff opens Plan My Week with your brief). Say "that's coming" only for these two — do not promise anything else is on the way.`;
+- You also cannot RETIRE a video, un-retire one, edit one, or delete one from here. Adding is the only library change you can make. Retiring and putting back live in Watch Library.
+- NOT YET, and this is coming: reshaping NEXT week from here — changing the shape of the plan itself, dropping or repacing subjects (for now: the plan-adjustment handoff opens Plan My Week with your brief, and that is where a week gets reshaped). Say "that's coming" only for that one — do not promise anything else is on the way.`;
 
 export function buildShellyChatRoleSection(childName: string | undefined): string {
   if (childName) {
@@ -798,6 +883,66 @@ Rules:
 }
 
 /**
+ * Build the Watch Vehicle `<action>` grammar addendum (FEAT-149).
+ *
+ * The chat's answer to "find me videos for next week and add them". It already
+ * had half the job: `buildWebSearchAddendum` plus the TEACHING VIDEOS block have
+ * let it SEARCH for a lesson video, pitched to the child, since FEAT-12/FEAT-20.
+ * What it lacked was a way to get one into the app, so the parent read the link
+ * off the reply and re-typed it into the vet-in form.
+ *
+ * Two rules carry most of the weight, and both exist because the app refuses the
+ * payload anyway — telling the model up front turns a silent refusal into a
+ * useful sentence:
+ *  - **Never invent a youtubeId.** `suggestedFromUrl` is required, and the id
+ *    must be extractable from it. An id the model "remembers" is rejected at
+ *    parse, so the grammar says: only from a URL you actually found.
+ *  - **Presenting candidates is prose, not a write.** The parent chooses; the
+ *    model is a scout. A card per video it happened to find would spend her
+ *    attention on things she never asked for, and one of them would be wrong.
+ *
+ * The plannable days are listed explicitly because they are the one thing the
+ * model cannot derive: THIS WEEK gives it the current five, and "next week" needs
+ * five more dates it would otherwise have to compute from a date it doesn't have.
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like the other action
+ * grammars. Returns "" on the general (no-child) branch.
+ */
+export function buildWatchActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+  plannableDays: { dateKey: string; label: string }[],
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  const dayList = plannableDays.map((d) => `${d.label} = ${d.dateKey}`).join(", ");
+  return `
+
+WATCH ACTIONS (you CAN add a video you found to the library, and plan a vetted one onto a day): When the parent asks you to find videos — "find me some videos about volcanoes for next week and add them" — SEARCH first and present what you found as ordinary prose with markdown links, pitched to ${who} exactly as the TEACHING VIDEOS guidance says. Presenting candidates is NOT a write and must NOT emit an action. When the parent CHOOSES one ("the second one", "yes, the glacier one"), propose ONE vetInVideo action for it. Once a video is in the WATCH LIBRARY section above, you can propose planning it onto a day.
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
+<action>{"kind":"vetInVideo","childId":"${childId}","youtubeId":"<11-char id>","title":"How glaciers move","plannedMinutes":9,"subjectBucket":"Science","why":"He asked how the big rocks got there","suggestedFromUrl":"https://www.youtube.com/watch?v=<11-char id>"}</action>
+<action>{"kind":"planVideoOnDay","childId":"${childId}","watchVideoId":"<watchVideoId from WATCH LIBRARY>","dateKey":"<YYYY-MM-DD from the plannable days below>"}</action>
+
+Rules for vetInVideo:
+- NEVER invent, guess, or recall a YouTube id. "suggestedFromUrl" MUST be the real URL your search returned, and "youtubeId" MUST be the 11-character id from that exact URL. If you do not have a real URL for a video, do not propose it — say you couldn't find one.
+- "title" is the KID-FACING title in plain words, not YouTube's clickbait one. "why" is one line of framing for the parent — required, because it is what makes the card checkable. "plannedMinutes" is a whole number (the video's actual length). "subjectBucket" must be one of Reading, LanguageArts, Math, Science, SocialStudies, Music, Art, PracticalArts, PE, Other.
+- ONE video per action block, and only for a video the parent has CHOSEN. If she says "add all five", propose them one at a time as separate blocks so she can see and approve each — never batch them into one card.
+- If the video is already in the WATCH LIBRARY section, do NOT propose adding it again — say it is already there and offer to plan it. If it is marked RETIRED there, say it is in the Archive tab of Watch Library and that putting it back happens there; do NOT propose adding it.
+- You CANNOT retire, un-retire, edit, or delete a library video from here. Adding is the only library change you can make. If she asks for one of those, say it lives in Watch Library — do NOT emit any action.
+- The parent is the curator, not you. NEVER say a video is added, safe, or approved. Say you've proposed it and she can watch it from the link on the card before confirming.
+
+Rules for planVideoOnDay:
+- "watchVideoId" MUST be copied exactly from the WATCH LIBRARY section. NEVER invent one, and never use a YouTube id here — they are different things. A video you have only just proposed vetting in is not in the library yet: wait until she confirms it, then propose the day.
+- "dateKey" must be one of these plannable weekdays: ${dayList}. Nothing else is accepted — not a weekend, not the week after next, not a past day.
+- ONE video onto ONE day per action block. If she wants three videos across next week, emit three blocks.
+- This ADDS a row to that day. It changes nothing already on the day, it does not re-plan the week, it touches no hours, and watching it stays optional for the boys.
+- NEVER say it's done. Say you've proposed it and it takes effect once she confirms — she sees the video's title and the day on a card first.
+
+- Be conservative in exactly the way the other action rules are: talking about videos is not a write. Only propose when the parent has chosen a video or named a day.`;
+}
+
+/**
  * Build the `proposePlanAdjustment` HANDOFF grammar addendum (chunk 2A/2).
  *
  * When the parent wants a **next-week plan change** — drop/reduce/repace a
@@ -927,7 +1072,7 @@ export const handleShellyChat = async (
   fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
   const reflectionStartDate = fourteenDaysAgo.toISOString().slice(0, 10);
 
-  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult, familyResult] =
+  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult, watchLibraryResult, familyResult] =
     await Promise.allSettled([
       db.collection(`families/${familyId}/children`).get(),
       childId
@@ -980,6 +1125,17 @@ export const handleShellyChat = async (
       // is. Child-scoped only; the general branch emits no actions.
       childId
         ? db.collection(`families/${familyId}/activityConfigs`)
+            .where("childId", "in", [childId, "both"])
+            .get()
+        : Promise.resolve(null),
+      // Watch library (FEAT-149) — the WATCH LIBRARY section. Same shape as the
+      // activityConfigs read above and for the same reason: without real
+      // `watchVideoId`s the model has nothing valid to put in a
+      // `planVideoOnDay` payload. Retired entries are read too, so the model can
+      // say "that one's in the Archive" instead of proposing it again.
+      // Child-scoped only; the general branch emits no actions.
+      childId
+        ? db.collection(`families/${familyId}/watchLibrary`)
             .where("childId", "in", [childId, "both"])
             .get()
         : Promise.resolve(null),
@@ -1126,6 +1282,20 @@ export const handleShellyChat = async (
     }
   }
 
+  // WATCH LIBRARY (FEAT-149) — the doc ids of the videos already vetted in, so
+  // the model can plan a real one and can tell a duplicate from a new find.
+  if (watchLibraryResult.status === "fulfilled" && watchLibraryResult.value) {
+    const snap = watchLibraryResult.value as { empty: boolean; docs: Array<{ id: string; data: () => Record<string, unknown> }> };
+    if (!snap.empty) {
+      const rows: WatchLibraryRow[] = snap.docs.map((d) => ({
+        ...(d.data() as Omit<WatchLibraryRow, "id">),
+        id: d.id,
+      }));
+      const section = formatWatchLibrary(rows, childName);
+      if (section) supplementalContext += `\n\n${section}`;
+    }
+  }
+
   // THIS WEEK (FEAT-142) — the live checklist of each weekday, with each row's
   // identity key and whether it is finished. Without this section the model has
   // no valid row to name in a payload, which is exactly why the chat could only
@@ -1230,6 +1400,14 @@ Example: If the parent says "Lincoln seems bored with reading" and the data show
   const activityMinutesActionAddendum = buildActivityMinutesActionAddendum(childId || undefined, childName || undefined);
   const curriculumActionAddendum = buildCurriculumActionAddendum(childId || undefined, childName || undefined);
   const dayItemActionAddendum = buildDayItemActionAddendum(childId || undefined, childName || undefined);
+  // FEAT-149 — the plannable window is this week plus next, derived from the
+  // same family-zone civil date the THIS WEEK read uses, so the days the model
+  // is told about are exactly the days the client gate will accept.
+  const watchActionAddendum = buildWatchActionAddendum(
+    childId || undefined,
+    childName || undefined,
+    plannableWatchDays(new Date(), familyTimeZone),
+  );
   const planAdjustmentActionAddendum = buildPlanAdjustmentActionAddendum(childId || undefined, childName || undefined);
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
   const webSearchAddendum = buildWebSearchAddendum(childId && childName ? childName : undefined);
@@ -1244,6 +1422,7 @@ ${snapshotActionAddendum}
 ${activityMinutesActionAddendum}
 ${curriculumActionAddendum}
 ${dayItemActionAddendum}
+${watchActionAddendum}
 ${planAdjustmentActionAddendum}
 ${frictionCaptureAddendum}
 ${webSearchAddendum}

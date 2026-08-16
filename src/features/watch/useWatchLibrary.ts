@@ -13,6 +13,36 @@ import type { WatchVideo } from '../../core/types'
  */
 export type NewWatchVideo = Omit<WatchVideo, 'id' | 'vettedAt' | 'createdAt' | 'updatedAt'>
 
+/**
+ * Vet one video into the family's library (`addDoc`). Returns the new auto-ID.
+ *
+ * Module-level rather than hook-bound so the Shelly portal's confirmed vet-in
+ * (FEAT-149) can call the SAME writer the form calls, instead of standing up a
+ * second `addDoc` against `watchLibrary`. That is the `addSightWord` /
+ * `removeSightWord` pattern exactly: one definition of what a library write
+ * looks like, one place the `vettedAt` / `createdAt` / `updatedAt` stamps are
+ * applied, whichever surface the parent's tap came from.
+ *
+ * `addedBy` is the caller's to supply and is never defaulted here — it is the
+ * provenance of a curation decision, so the surface that took the parent's
+ * action is the one that knows whose it was.
+ */
+export async function addWatchVideo(
+  familyId: string,
+  video: NewWatchVideo,
+): Promise<string> {
+  if (!familyId) throw new Error('addWatchVideo: no family')
+  const now = new Date().toISOString()
+  const ref = await addDoc(watchLibraryCollection(familyId), {
+    ...video,
+    vettedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    // `id` is supplied by the converter on read.
+  } as Omit<WatchVideo, 'id'> as WatchVideo)
+  return ref.id
+}
+
 export interface UseWatchLibraryResult {
   /** Curated videos, most-recently-updated first. */
   videos: WatchVideo[]
@@ -95,18 +125,7 @@ export function useWatchLibrary(childId?: string | null): UseWatchLibraryResult 
   }, [familyId, childId])
 
   const addVideo = useCallback(
-    async (video: NewWatchVideo) => {
-      if (!familyId) throw new Error('addVideo: no family')
-      const now = new Date().toISOString()
-      const ref = await addDoc(watchLibraryCollection(familyId), {
-        ...video,
-        vettedAt: now,
-        createdAt: now,
-        updatedAt: now,
-        // `id` is supplied by the converter on read.
-      } as Omit<WatchVideo, 'id'> as WatchVideo)
-      return ref.id
-    },
+    (video: NewWatchVideo) => addWatchVideo(familyId, video),
     [familyId],
   )
 

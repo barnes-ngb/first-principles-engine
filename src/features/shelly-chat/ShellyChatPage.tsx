@@ -39,7 +39,8 @@ import type { ChatContext } from '../../core/types'
 import { UserProfile } from '../../core/types/enums'
 import ActionConfirmCard from './ActionConfirmCard'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
-import { useChatWeekDays } from './useChatWeekDays'
+import { useChatWatchLibrary } from './useChatWatchLibrary'
+import { plannableWatchDayKeys, useChatWeekDays } from './useChatWeekDays'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 import { formatRelativeTime } from './formatRelativeTime'
@@ -145,6 +146,18 @@ export default function ShellyChatPage() {
   // and the weekday name instead of an id. Parent-gated the same way, and at the
   // same two layers, as the configs above — passing '' costs zero reads.
   const weekDays = useChatWeekDays(familyId, isParent ? contextChildId : '')
+  // FEAT-149 — the child's curated Watch Library, read-only. It refuses a
+  // duplicate vet-in with a reason, resolves a proposed `planVideoOnDay` to a
+  // real ACTIVE entry before its card is offered, and gives the card the video's
+  // title instead of a doc id. Parent-gated the same way, and at the same two
+  // layers, as the two reads above — passing '' costs zero reads.
+  const watchVideos = useChatWatchLibrary(familyId, isParent ? contextChildId : '')
+  // The ten weekdays a video may be planned onto — this week's and next week's.
+  // Recomputed every render (five `Date` allocations) for the same reason
+  // `useChatWeekDays` recomputes its week: pinning it at mount would let a page
+  // left open across a rollover render "next Tuesday" for a day that is now this
+  // week's. The card is a preview of a gate the write layer re-reads anyway.
+  const plannableDays = plannableWatchDayKeys()
   const {
     pending: pendingActions,
     suppressed: suppressedActionNotices,
@@ -158,6 +171,7 @@ export default function ShellyChatPage() {
     activeChildId: contextChildId,
     activityConfigs,
     weekDays,
+    watchVideos,
     canEditActivityConfigs: isParent,
     activeThreadId,
     // A confirmed proposePlanAdjustment HANDOFF stages its brief, then navigates
@@ -520,6 +534,8 @@ export default function ShellyChatPage() {
           familyChildren={children}
           activityConfigs={activityConfigs}
           weekDays={weekDays}
+          watchVideos={watchVideos}
+          plannableDays={plannableDays}
           suppressed={suppressedActionNotices}
           onConfirm={applyChatAction}
           onDismiss={dismissAction}

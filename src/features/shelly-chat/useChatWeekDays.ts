@@ -70,6 +70,47 @@ export function currentWeekDayKeys(now: Date = new Date()): {
   })
 }
 
+/** Shift a `YYYY-MM-DD` key by whole days, as pure calendar arithmetic. */
+function shiftDateKey(dateKey: string, days: number): string {
+  const d = new Date(`${dateKey}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * The ten weekdays a video may be PLANNED onto: this school week and the next
+ * (FEAT-149).
+ *
+ * This is the run's one deliberate widening past FEAT-142's current-week gate,
+ * and it is scoped to exactly one action. "Find me videos for next week and add
+ * them" is the ask, so next week has to be reachable — but only for
+ * `planVideoOnDay`, which is purely additive (one checklist row, no block, no
+ * hours math, nothing existing touched). Move and remove mutate rows a family
+ * may already be working through, so they stay pinned to the current week where
+ * FEAT-142 left them.
+ *
+ * Next-plus-one and beyond are deliberately absent: "next week" is what was
+ * asked for, and a longer horizon is an owner decision rather than a default.
+ *
+ * Built by shifting {@link currentWeekDayKeys} rather than recomputing a Monday,
+ * so both windows come from ONE definition of "which week is it right now" —
+ * including its rollover behaviour — and the labels read the way a card should
+ * say them out loud ("Tuesday" / "next Tuesday"), never a raw date.
+ */
+export function plannableWatchDayKeys(now: Date = new Date()): {
+  dateKey: string
+  label: string
+}[] {
+  const current = currentWeekDayKeys(now)
+  return [
+    ...current,
+    ...current.map((d) => ({
+      dateKey: shiftDateKey(d.dateKey, 7),
+      label: `next ${d.label}`,
+    })),
+  ]
+}
+
 /**
  * Project a saved day into the narrow shape the chat reasons over: each row's
  * identity, its label, and whether it is finished.

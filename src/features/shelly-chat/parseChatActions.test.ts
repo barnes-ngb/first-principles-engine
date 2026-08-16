@@ -784,3 +784,182 @@ describe('parseChatActions — curriculum removals stay unrepresentable (FEAT-14
     }
   })
 })
+
+// ── Watch Vehicle actions (FEAT-149) ─────────────────────────────────────────
+//
+// The rail these tests exist for: **the model can never emit a youtubeId it did
+// not read off a real found URL.** Everything else here is the usual
+// reject-never-coerce discipline.
+
+const REAL_ID = 'dQw4w9WgXcQ'
+const REAL_URL = `https://www.youtube.com/watch?v=${REAL_ID}`
+
+function vetIn(overrides: Record<string, unknown> = {}): string {
+  const payload = {
+    kind: 'vetInVideo',
+    childId: 'lincoln',
+    youtubeId: REAL_ID,
+    title: 'How glaciers move',
+    plannedMinutes: 9,
+    subjectBucket: 'Science',
+    why: 'He asked how the big rocks got there',
+    suggestedFromUrl: REAL_URL,
+    ...overrides,
+  }
+  return `<action>${JSON.stringify(payload)}</action>`
+}
+
+describe('parseChatActions — vetInVideo (FEAT-149)', () => {
+  it('accepts a complete, URL-grounded proposal', () => {
+    const { actions } = parseChatActions(vetIn())
+    expect(actions).toEqual([
+      {
+        kind: 'vetInVideo',
+        childId: 'lincoln',
+        youtubeId: REAL_ID,
+        title: 'How glaciers move',
+        plannedMinutes: 9,
+        subjectBucket: 'Science',
+        why: 'He asked how the big rocks got there',
+        suggestedFromUrl: REAL_URL,
+      },
+    ])
+  })
+
+  it('accepts the other real YouTube URL shapes the vet-in form accepts', () => {
+    for (const url of [
+      `https://youtu.be/${REAL_ID}`,
+      `https://www.youtube.com/embed/${REAL_ID}`,
+      `https://www.youtube.com/shorts/${REAL_ID}`,
+      `https://m.youtube.com/watch?v=${REAL_ID}&t=30s`,
+    ]) {
+      expect(parseChatActions(vetIn({ suggestedFromUrl: url })).actions, url).toHaveLength(1)
+    }
+  })
+
+  it('rejects a youtubeId that is not the canonical 11-char form', () => {
+    for (const id of ['dQw4w9WgXc', 'dQw4w9WgXcQQ', 'dQw4w9WgX Q', '', 'dQw4w9WgXc!']) {
+      expect(parseChatActions(vetIn({ youtubeId: id })).actions, `id=${id}`).toEqual([])
+    }
+  })
+
+  it('rejects a URL-shaped youtubeId — the field holds an id, never a link', () => {
+    expect(parseChatActions(vetIn({ youtubeId: REAL_URL })).actions).toEqual([])
+  })
+
+  it('rejects an id that is not extractable from the URL it claims to come from', () => {
+    // A remembered id laundered through someone else's link.
+    expect(
+      parseChatActions(vetIn({ suggestedFromUrl: 'https://youtu.be/aBcDeFgHiJk' })).actions,
+    ).toEqual([])
+    // A real id on a page that is not YouTube at all.
+    expect(
+      parseChatActions(vetIn({ suggestedFromUrl: `https://example.com/watch?v=${REAL_ID}` }))
+        .actions,
+    ).toEqual([])
+  })
+
+  it('rejects a bare id in suggestedFromUrl — the field must prove provenance', () => {
+    // `extractYouTubeId` accepts a bare id by design (a parent may paste one).
+    // Here it would let the model invent an id and "cite" itself, so the field
+    // is additionally required to be an http(s) URL.
+    expect(parseChatActions(vetIn({ suggestedFromUrl: REAL_ID })).actions).toEqual([])
+  })
+
+  it('rejects a missing or blank suggestedFromUrl', () => {
+    expect(parseChatActions(vetIn({ suggestedFromUrl: undefined })).actions).toEqual([])
+    expect(parseChatActions(vetIn({ suggestedFromUrl: '   ' })).actions).toEqual([])
+  })
+
+  it('rejects a missing or blank why — it is what makes the card checkable', () => {
+    expect(parseChatActions(vetIn({ why: undefined })).actions).toEqual([])
+    expect(parseChatActions(vetIn({ why: '  ' })).actions).toEqual([])
+  })
+
+  it('rejects a blank title', () => {
+    expect(parseChatActions(vetIn({ title: '   ' })).actions).toEqual([])
+  })
+
+  it('rejects out-of-bounds minutes, never coercing them', () => {
+    for (const m of [0, -5, 9.5, '9', null, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(parseChatActions(vetIn({ plannedMinutes: m })).actions, `m=${m}`).toEqual([])
+    }
+  })
+
+  it('accepts a long or a very short real video — the form has no upper band', () => {
+    expect(parseChatActions(vetIn({ plannedMinutes: 1 })).actions).toHaveLength(1)
+    expect(parseChatActions(vetIn({ plannedMinutes: 240 })).actions).toHaveLength(1)
+  })
+
+  it('rejects an unknown subject rather than dropping the field', () => {
+    // Unlike `addItemToDay`, where a bad bucket drops the FIELD: a library entry
+    // carries its subject into the compliance record, so it is not a hint.
+    expect(parseChatActions(vetIn({ subjectBucket: 'Astronomy' })).actions).toEqual([])
+    expect(parseChatActions(vetIn({ subjectBucket: undefined })).actions).toEqual([])
+  })
+
+  it('rejects a missing childId, like every other kind', () => {
+    expect(parseChatActions(vetIn({ childId: '' })).actions).toEqual([])
+  })
+})
+
+describe('parseChatActions — planVideoOnDay (FEAT-149)', () => {
+  const plan = (overrides: Record<string, unknown> = {}) =>
+    `<action>${JSON.stringify({
+      kind: 'planVideoOnDay',
+      childId: 'lincoln',
+      watchVideoId: 'vid_glacier',
+      dateKey: '2026-08-25',
+      ...overrides,
+    })}</action>`
+
+  it('accepts a real doc id and a real calendar date', () => {
+    expect(parseChatActions(plan()).actions).toEqual([
+      {
+        kind: 'planVideoOnDay',
+        childId: 'lincoln',
+        watchVideoId: 'vid_glacier',
+        dateKey: '2026-08-25',
+      },
+    ])
+  })
+
+  it('rejects a blank watchVideoId', () => {
+    expect(parseChatActions(plan({ watchVideoId: '   ' })).actions).toEqual([])
+    expect(parseChatActions(plan({ watchVideoId: undefined })).actions).toEqual([])
+  })
+
+  it('rejects a date that is not a real calendar day', () => {
+    for (const dateKey of ['2026-02-31', '2026-13-01', '08-25-2026', 'next Tuesday', '']) {
+      expect(parseChatActions(plan({ dateKey })).actions, dateKey).toEqual([])
+    }
+  })
+
+  it('says nothing about WHICH week — that is resolved against the live clock', () => {
+    // A date far outside the plannable window still PARSES; `watchActions`
+    // refuses it with a reason the parent can read.
+    expect(parseChatActions(plan({ dateKey: '2027-04-01' })).actions).toHaveLength(1)
+  })
+})
+
+describe('parseChatActions — library removals stay unrepresentable (FEAT-149)', () => {
+  // Vet-in is the ONLY library write the chat can make. Retire, un-retire, edit
+  // and delete live on the Watch Library surface, so every kind naming one falls
+  // through to null by construction — the same structural guarantee the snapshot
+  // kinds carry for downgrades and the curriculum kinds carry for deletes.
+  it('rejects retire / un-retire / edit / delete-shaped kinds', () => {
+    for (const kind of [
+      'retireVideo',
+      'restoreVideo',
+      'unretireVideo',
+      'deleteVideo',
+      'removeVideo',
+      'editVideo',
+      'updateWatchVideo',
+      'removeVideoFromDay',
+    ]) {
+      const raw = `<action>{"kind":"${kind}","childId":"lincoln","watchVideoId":"vid_1"}</action>`
+      expect(parseChatActions(raw).actions, `kind=${kind}`).toEqual([])
+    }
+  })
+})
