@@ -363,11 +363,11 @@ Two distinct chat-shaped tasks exist; do not conflate them. (This bit Chat-Link 
 | Task type | Where it's invoked | Slice list | Notes |
 |---|---|---|---|
 | `chat` | `src/features/books/StoryGuidePage.tsx:90` (kid story-shaping prompt) and `src/features/books/useComprehensionQuestions.ts:68` (comprehension Q generation). Lightweight, kid-facing utility. | `["charter", "childProfile"]` only (`functions/src/ai/contextSlices.ts:52`). Model: Haiku. `maxTokens: 1024`. | Must NOT gain Lincoln's eval / disposition / teach-back context — would dump heavy data into kid prompts. Pinned by a cross-task isolation test in `contextSlices.test.ts`. |
-| `shellyChat` | `src/features/shelly-chat/ShellyChatPage.tsx:523`. Shelly's main chat UI. | 14 shared slices via `buildContextForTask("shellyChat", …)` (`contextSlices.ts:65-70`) plus 10 supplemental queries in `tasks/shellyChat.ts` (the 9th is FEAT-135's `activityConfigs` read behind the `ACTIVITIES` section; the 10th is FEAT-142's five-doc `getAll` of this week's day logs behind the `THIS WEEK` section). Model: Sonnet. `maxTokens: 2000`. | Supplemental block includes disposition profile (from `child.dispositionCache.result.dispositions` with `dispositionOverrides` applied), 5-row weekly review strip, conundrum title, completion patterns, conundrum/chapter response counts, and recent teach-backs (last 14 days, limit 10). Child-scoped `PLANNING-PARTNER MODE` addendum in the role section. |
+| `shellyChat` | `src/features/shelly-chat/ShellyChatPage.tsx:523`. Shelly's main chat UI. | 14 shared slices via `buildContextForTask("shellyChat", …)` (`contextSlices.ts:65-70`) plus 11 supplemental queries in `tasks/shellyChat.ts` (the 9th is FEAT-135's `activityConfigs` read behind the `ACTIVITIES` section; the 10th is FEAT-149's `watchLibrary` read behind the `WATCH LIBRARY` section; the 11th is FEAT-142's five-doc `getAll` of this week's day logs behind the `THIS WEEK` section). Model: Sonnet. `maxTokens: 2000`. | Supplemental block includes disposition profile (from `child.dispositionCache.result.dispositions` with `dispositionOverrides` applied), 5-row weekly review strip, conundrum title, completion patterns, conundrum/chapter response counts, and recent teach-backs (last 14 days, limit 10). Child-scoped `PLANNING-PARTNER MODE` addendum in the role section. |
 
 Other chat-dispatched task types (21 total in `tasks/index.ts` registry) are independent: `plan`, `generate`, `evaluate`, `quest`, `generateStory`, `reviseStory`, `revisePage`, `workshop`, `analyzeWorkbook`, `disposition`, `conundrum`, `weeklyFocus`, `scan`, `shellyChat`, `foundationsReview`, `chapterQuestions`, `bookLookup`, `lessonVideo`, `helpCard`, `monthlyReview`, `chat`. `analyzeEvaluationPatterns` is exported separately.
 
-### What Ask AI can change directly — and what it can't (FEAT-135 · FEAT-142 · FEAT-143)
+### What Ask AI can change directly — and what it can't (FEAT-135 · FEAT-142 · FEAT-143 · FEAT-149)
 
 Every one of these is **propose → confirm → write**: the assistant emits an `<action>` block, the parent
 sees a plain-language card, and the write happens only on her tap. Nothing auto-writes.
@@ -380,6 +380,7 @@ sees a plain-language card, and the write happens only on her tap. Nothing auto-
 | **"math should be 30 minutes from now on"** | **`setActivityMinutes` (FEAT-135)** — one field, `defaultMinutes`, on one activity config, via `updateActivityConfigMinutes`. Integer 5–120, rejected outright outside that band. The id must resolve to a real config the acting child owns, or no card is offered. Parent-only at the component *and* the write layer. | `activityConfigs` |
 | **"take Reading Eggs off Wednesday" / "move the video to Friday" / "add 15 minutes of sight words to today"** | **`removeItemFromDay` / `moveItemToDay` / `addItemToDay` (FEAT-142)** — the chat's half of FEAT-138's live-week edit lane, calling **those** writers rather than reimplementing them. Current week only (Mon–Fri); a completed row is refused; an add is `source: 'manual'` with integer minutes 5–120, rejected outright outside that band. Parent-only at the component *and* the write layer. | `days` (the saved day log), via `today/liveDayEdit.ts` |
 | **"add Khan Academy math, 20 minutes a day" / "we finished Explode the Code 3" / "he's on lesson 107 now"** | **`addActivity` / `markActivityComplete` / `setActivityPosition` (FEAT-143)** — the writes Shelly makes by hand at Progress → Curriculum, routed through the **shared** `core/firebase/activityConfigWrites` core that surface itself calls. **No delete:** completion is the only removal (retire, don't delete), and no `ChatAction` kind names one. A workbook may never be shared (DATA-08), refused at parse, at resolution, and at the writer. Ids must resolve to a **running** config the acting child owns; a position past `totalUnits` is rejected outright, never clamped. Parent-only at the component *and* the write layer. | `activityConfigs` |
+| **"find me some videos about volcanoes for next week and add them"** | **`vetInVideo` / `planVideoOnDay` (FEAT-149)** — the chat could already SEARCH for a teaching video; these get one INTO the app. A vet-in routes through `addWatchVideo`, the **same** module-level writer the vet-in form calls; a plan routes through `writeWatchItemToDay`, the FEAT-132 day lane. **URL-grounded or nothing:** `suggestedFromUrl` is required and the 11-char `youtubeId` must be extractable from it, using `extractYouTubeId` — the vet-in form's own rule, not a second parser. A duplicate is refused with a reason (and a retired one is pointed at the Archive); there is **no un-retire, no edit, no delete** — vet-in is the only library write. `addedBy` is the confirming account's uid, stamped at the write, never the model's. Parent-only at the component *and* the write layer. | `watchLibrary`, and `days` via `writeWatchItemToDay` |
 | "next week needs to be lighter" | `proposePlanAdjustment` — a **handoff**, not a write: stages a brief and opens Plan My Week, where she reviews and locks in | `settings/pendingPlanAdjustment_{childId}` |
 
 **`setActivityMinutes` changes a default for FUTURE plans and nothing else.** No `dayLog` is touched — not
@@ -419,15 +420,43 @@ delete — and a finished program cannot be **un-finished**, because nothing in 
 an undo that does not exist. `currentPosition` has a second writer (the scan pipeline) and the two can
 race: **last writer wins, no lock** — the field is a bookmark a human corrects when it is wrong.
 
+**What the chat can now do with a video, and what stays out of reach (FEAT-149).** It could already
+**search** the web for a teaching video pitched to the child (`buildWebSearchAddendum` + the TEACHING
+VIDEOS block, live since FEAT-12/FEAT-20); what it could not do was get one **into** the app, so the
+parent read the link off the reply and re-typed it into the vet-in form. Now it can **vet a found video
+in** and **plan a vetted one onto a day** — the composed flow being: she asks → it searches → it presents
+candidates *in prose with links* → she picks one → a `vetInVideo` card → confirm → it may then propose
+`planVideoOnDay` cards for the days discussed. **One action per card**, per the house rule: five adds are
+five taps, each showing exactly what it does. Three properties carry it. **URL-grounded or nothing** — a
+`youtubeId` the model did not read off a real found page is unrepresentable, because `suggestedFromUrl`
+is required and the id must be extractable from it by `extractYouTubeId`, the vet-in form's own
+validation reused rather than re-implemented. **The parent is the curator** — the card carries the source
+as a tappable link so she can watch it before confirming, and the prompt forbids the assistant from
+calling a video added, safe, or approved. **Vet-in is the only library write** — there is no retire,
+un-retire, edit, or delete kind, so a duplicate of a *retired* video is refused with a pointer to the
+Archive rather than quietly resurrected; un-retiring stays a Watch Library act. `addedBy` is stamped with
+the confirming account's uid at the write (`watchCuratorLabel` keeps the library chip human).
+
+**The one deliberate week widening (FEAT-149).** `planVideoOnDay` may target a weekday of the **current
+or next** school week — "find me videos for *next week*" is the ask it exists for — computed from the
+same civil-date-in-the-family's-zone helpers as #1667, never the runtime clock, and pinned on both sides
+(`plannableWatchDayKeys` on the client, `plannableWatchDays` in the CF). It is safe there precisely
+because it is **add-only**: one checklist row through the FEAT-132 lane, no block, no hours math, nothing
+existing touched. FEAT-142's move and remove mutate rows a family may already be working through, so
+they stay pinned to the current week, untouched. Next-plus-one and beyond are refused — a longer horizon
+is an owner decision. **Context that makes it possible:** a `WATCH LIBRARY` section in the `shellyChat`
+supplemental block (`formatWatchLibrary`) listing each curated video's doc id, length, subject, audience
+and framing, with retired ones **listed and marked unplannable** rather than hidden — hidden, the model
+proposes re-adding a video the parent deliberately retired.
+
 **What the chat still can't do.** It cannot delete or un-finish a curriculum activity (above); it cannot
-find videos on the web and plan them; it cannot reshape next week wholesale (the plan-adjustment handoff
-opens Plan My Week instead); it cannot remove or downgrade anything on a skill snapshot (the future
-Option 3); it cannot change a live week's planned minutes. For all of those it says so plainly — and
-under the **navigation-honesty rule** it may end in exactly three ways: name a REAL screen, say the
-capability is **coming** and name the real screen that does it today, or say it isn't in the app yet. It
-must never invent a location. The "coming" ending is bounded to the **two** remaining slices (video
-search → Watch Library then Plan My Week; next week → Plan My Week) and the prompt says outright not to
-promise anything else. The true map
+retire, un-retire, edit, or delete a library video; it cannot reshape next week wholesale (the
+plan-adjustment handoff opens Plan My Week instead); it cannot remove or downgrade anything on a skill
+snapshot (the future Option 3); it cannot change a live week's planned minutes. For all of those it says
+so plainly — and under the **navigation-honesty rule** it may end in exactly three ways: name a REAL
+screen, say the capability is **coming** and name the real screen that does it today, or say it isn't in
+the app yet. It must never invent a location. The "coming" ending is now bounded to the **one** remaining
+slice (reshaping next week → Plan My Week) and the prompt says outright not to promise anything else. The true map
 for durations is **Progress → Curriculum** (`CurriculumTab` / `EditRoutinesDialog` / `AddActivityDialog`);
 the **Watch Library** is its own top-level parent nav entry, **not** inside Settings (FEAT-132); and
 Settings holds no schedule, subject-duration, or time-block screen and never has.
