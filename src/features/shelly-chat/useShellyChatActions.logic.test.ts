@@ -114,6 +114,7 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 import {
+  generalTabDropNotice,
   resolveActivityConfig,
   useShellyChatActions,
   type ActivityMinutesAction,
@@ -2086,5 +2087,125 @@ describe('draftNextWeek vs the handoff — one question, one card (Codex P2, PR 
     const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
     act(() => result.current.stagePendingActions('msg1', [HANDOFF, DRAFT]))
     expect(result.current.pending.map((p) => p.action.kind)).toEqual(['proposePlanAdjustment'])
+  })
+})
+
+// ── FEAT-152. The General tab writes nothing, and drops out loud ──
+//
+// The prompt fix (functions/src/ai/tasks/shellyChat.ts) is the real one: the
+// general branch now carries an explicit no-write contract, so the model stops
+// narrating a "Pushed! ✅" over a turn in which nothing was proposed. This is
+// the seatbelt under it, and it closes a hole the prompt alone would not have:
+//
+// on the General tab `activeChildId` is `''`, so `rejectReason`'s mismatch check
+// — `activeChildId && action.childId !== activeChildId` — short-circuits, and a
+// well-formed action naming a REAL child (one the model can read straight off
+// the ALL CHILDREN section) would have been offered as a card and written. The
+// tab with no write powers had, structurally, the loosest child binding.
+
+describe('generalTabDropNotice (FEAT-152)', () => {
+  it('names the family\'s own tabs, not hardcoded strings', () => {
+    expect(generalTabDropNotice(['Lincoln', 'London'])).toContain(
+      "Ask on Lincoln's or London's tab",
+    )
+  })
+
+  it('handles a single child without a dangling or', () => {
+    const out = generalTabDropNotice(['Lincoln'])
+    expect(out).toContain("Ask on Lincoln's tab")
+    expect(out).not.toContain("'s or ")
+  })
+
+  it('scales past two without hardcoding a count', () => {
+    expect(generalTabDropNotice(['A', 'B', 'C'])).toContain("Ask on A, B's or C's tab")
+  })
+
+  it('falls back to a generic, still-actionable sentence with no names', () => {
+    for (const names of [[], ['', '  ']]) {
+      expect(generalTabDropNotice(names)).toContain("the child's tab")
+    }
+  })
+
+  it('says nothing was changed, and says the card is what writes', () => {
+    const out = generalTabDropNotice(['Lincoln', 'London'])
+    expect(out).toContain('nothing was changed')
+    expect(out).toContain('the card is what makes it real')
+  })
+})
+
+describe('the General tab drops every action, with a visible reason (FEAT-152)', () => {
+  /** The General tab: no child selected. */
+  const general = () => setup('')
+
+  const SIGHT_WORD: ChatAction = {
+    kind: 'addSightWord',
+    childId: 'lincoln1',
+    word: 'because',
+  }
+
+  it('offers no card for a well-formed action naming a REAL child', () => {
+    // The pre-fix hole: `lincoln1` is a real family child, so nothing in the
+    // binding checks refused it once `activeChildId` was ''.
+    const { result } = general()
+    act(() => result.current.stagePendingActions('msg1', [SIGHT_WORD]))
+    expect(result.current.pending).toEqual([])
+  })
+
+  it('drops it with a reason the parent can read, not silently', () => {
+    const { result } = general()
+    act(() => result.current.stagePendingActions('msg1', [SIGHT_WORD]))
+    expect(result.current.suppressed).toHaveLength(1)
+    expect(result.current.suppressed[0]).toContain("can't change anything from the General tab")
+    expect(result.current.suppressed[0]).toContain('nothing was changed')
+    // Names the real tabs from the family's children.
+    expect(result.current.suppressed[0]).toContain("Lincoln's or London's tab")
+  })
+
+  it('drops EVERY kind, including the ones with no other gate', () => {
+    // Deliberately spans the union: a sight word (no resolver at all), a
+    // snapshot add (no resolver), a handoff (no resolver), and a live-day add
+    // (resolver would have passed it — the day is real and the row is new).
+    const { result } = general()
+    const actions: ChatAction[] = [
+      SIGHT_WORD,
+      { kind: 'addPrioritySkill', childId: 'lincoln1', skill: 'inference' },
+      { kind: 'editProfileField', childId: 'lincoln1', field: 'motivators', value: 'Lego' },
+      {
+        kind: 'proposePlanAdjustment',
+        childId: 'lincoln1',
+        summary: 'lighter week',
+        rationale: 'frustration is spiking',
+      },
+    ]
+    act(() => result.current.stagePendingActions('msg1', actions))
+    expect(result.current.pending).toEqual([])
+    // One sentence, not four — the tab can't write, and that is the whole story.
+    expect(result.current.suppressed).toHaveLength(1)
+  })
+
+  it('stays quiet on an ordinary General-tab turn that proposed nothing', () => {
+    // The overwhelmingly common case, and the one the contract is meant to
+    // produce: discussion, no action block, no notice, no card.
+    const { result } = general()
+    act(() => result.current.stagePendingActions('msg1', []))
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('refuses the write even if a card were somehow tapped (backstop)', async () => {
+    const { result } = general()
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(SIGHT_WORD)
+    })
+    expect(ok).toBe(false)
+    expect(addSightWord).not.toHaveBeenCalled()
+  })
+
+  it('changes nothing on a child tab — the same action is still offered there', () => {
+    const { result } = setup('lincoln1')
+    act(() => result.current.stagePendingActions('msg1', [SIGHT_WORD]))
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.suppressed).toEqual([])
   })
 })
