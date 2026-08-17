@@ -17,6 +17,7 @@ import {
   DEFAULT_FAMILY_TIME_ZONE,
   formatChatWeekDays,
   buildFrictionCaptureAddendum,
+  buildGeneralNoWriteContract,
   buildPlanAdjustmentActionAddendum,
   buildShellyChatRoleSection,
   buildSightWordActionAddendum,
@@ -705,10 +706,19 @@ describe("Phase 1 supplemental-block token-budget sanity", () => {
 
     const totalChars = disposition.length + weeklyReviews.length + conundrum.length + teachBacks.length + roleSection.length;
 
-    // Bound (8000 chars ≈ 2000 tokens) covers all Phase 1 supplemental additions
-    // plus the new addendum-bearing role section. Stays comfortably below the
+    // Bound (9000 chars ≈ 2250 tokens) covers all Phase 1 supplemental additions
+    // plus the addendum-bearing role section. Stays comfortably below the
     // +25-29% headroom budgeted in Step 1.
-    expect(totalChars).toBeLessThan(8000);
+    //
+    // Raised from 8000 by FEAT-152, which hoists the card-or-it-didn't-happen
+    // rule into the base role section so it survives the absence of every action
+    // grammar — the exact condition under which the General tab invented a
+    // write. ~800 chars, on both branches, and the only honest place to put it:
+    // the per-grammar rules it backs up are each scoped to a grammar that may
+    // never be emitted. The guard is a budget, not a freeze; it moves when a
+    // rule earns the room, and this is the second time it has (FEAT-135 was the
+    // first).
+    expect(totalChars).toBeLessThan(9000);
 
     // All Phase 1 sections actually populated under realistic fixtures.
     expect(disposition).not.toBe("");
@@ -1872,5 +1882,191 @@ describe("next-week precedence — two grammars, one question (Codex P2, PR #167
     // handoff. Some weeks are easier to build on the planner surface.
     expect(HANDOFF).toContain("PLAN-ADJUSTMENT HANDOFF");
     expect(HANDOFF).toContain('"kind":"proposePlanAdjustment"');
+  });
+});
+
+// ── FEAT-152. The General tab can't write, and now says so ────────
+//
+// The live bug, 2026-08-17: on the General tab a parent asked to add 30 minutes
+// of recorder practice and got back "Pushed! ✅ New curriculum activity added
+// for Lincoln … ✅ Added to Today's checklist for every remaining day this
+// week". No confirm card rendered and nothing was written — Today still showed
+// its original eleven items.
+//
+// The root was in the prompt, not the pipeline. Every action grammar returns ""
+// without a `childId` (correct — actions bind to a child), and each grammar's
+// own "NEVER say it's done" rule went with it, so the general-branch model was
+// told nothing at all about its limits. The drop-with-reason machinery never
+// fired because there was no action block to drop.
+
+describe("General-tab no-write contract (FEAT-152)", () => {
+  const GENERAL = buildShellyChatRoleSection(undefined, ["Lincoln", "London"]);
+  const CHILD = buildShellyChatRoleSection("Lincoln", ["Lincoln", "London"]);
+
+  it("states outright that the general branch has no write powers", () => {
+    expect(GENERAL).toContain("NO WRITE POWERS ON THIS TAB");
+    expect(GENERAL).toContain("has NO actions behind it");
+    expect(GENERAL).toContain("Nothing you say here reaches the app");
+  });
+
+  it("forbids by NAME the words the false report actually used", () => {
+    // "Never claim a change is done" is a rule a model can satisfy while
+    // writing "Pushed! ✅" — it did. So the tokens are ruled out by name.
+    expect(GENERAL).toContain('No "Pushed"');
+    expect(GENERAL).toContain('no "Added"');
+    expect(GENERAL).toContain("no ✅");
+  });
+
+  it("routes a change request to a child tab and names the card as the writer", () => {
+    expect(GENERAL).toContain("send her to Lincoln's or London's tab");
+    expect(GENERAL).toContain("the card is the only thing that writes");
+  });
+
+  it("leaves discussion, comparison and planning talk untouched", () => {
+    expect(GENERAL).toContain("Everything else is unchanged and welcome here");
+    expect(GENERAL).toContain("comparing the children");
+    // The FEAT-60 cross-child grounding is not disturbed by the new contract.
+    expect(GENERAL).toContain("Cross-child comparison is welcome here");
+    expect(GENERAL).toContain("PER-CHILD LEARNER MODELS");
+  });
+
+  it("emits no action grammar — the contract describes an absence, it does not create one", () => {
+    expect(GENERAL).not.toContain("<action>");
+  });
+
+  it("does not leak the general contract onto a child tab", () => {
+    expect(CHILD).not.toContain("NO WRITE POWERS ON THIS TAB");
+  });
+});
+
+describe("buildGeneralNoWriteContract — tabs named from the family, not hardcoded", () => {
+  // The repo's capability-never-name rail: a child's name is a label to render,
+  // never a gate. The tab names come from the children the family actually has.
+  it("names two children as an either/or", () => {
+    expect(buildGeneralNoWriteContract(["Lincoln", "London"])).toContain(
+      "Lincoln's or London's tab",
+    );
+  });
+
+  it("names a single child without an or", () => {
+    const out = buildGeneralNoWriteContract(["Lincoln"]);
+    expect(out).toContain("send her to Lincoln's tab");
+    // No dangling "X's or" when there is only one tab to send her to.
+    expect(out).not.toContain("'s or ");
+  });
+
+  it("scales past two without hardcoding a count", () => {
+    expect(buildGeneralNoWriteContract(["A", "B", "C"])).toContain("A, B's or C's tab");
+  });
+
+  it("falls back to a generic, still-true sentence when no names are available", () => {
+    // The children read can fail; the contract must still be emitted and must
+    // still be actionable rather than naming a tab that may not exist.
+    for (const names of [[], ["", "   "]]) {
+      const out = buildGeneralNoWriteContract(names);
+      expect(out).toContain("the child's tab");
+      expect(out).toContain("NO WRITE POWERS ON THIS TAB");
+    }
+  });
+
+  it("is emitted with no names at all when the caller omits them", () => {
+    const out = buildShellyChatRoleSection(undefined);
+    expect(out).toContain("NO WRITE POWERS ON THIS TAB");
+    expect(out).toContain("the child's tab");
+  });
+});
+
+describe("card-or-it-didn't-happen, hoisted to BOTH branches (FEAT-152)", () => {
+  const CHILD = buildShellyChatRoleSection("Lincoln", ["Lincoln", "London"]);
+  const GENERAL = buildShellyChatRoleSection(undefined, ["Lincoln", "London"]);
+
+  // The per-grammar "NEVER say it's done" lines are each correct and each
+  // scoped to the grammar they close — a grammar that was never emitted rules
+  // over nothing. This is the belt under them, and the only one of the two
+  // present when there are no actions at all.
+  it("states the rule on both branches", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("CARD OR IT DIDN'T HAPPEN");
+      expect(out).toContain("ONLY when the parent taps a confirm card");
+      expect(out).toContain("nothing happened and you must say so plainly");
+    }
+  });
+
+  it("names the forbidden report words on both branches", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain('NEVER report a change as made');
+      expect(out).toContain('no "Pushed"');
+      expect(out).toContain("no ✅");
+    }
+  });
+
+  it("requires the future tense for a proposal, on both branches", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("future tense");
+      expect(out).toContain("never the past tense");
+    }
+  });
+
+  it("keeps every per-grammar rule intact underneath it", () => {
+    // The belt does not replace the braces. Each grammar still carries its own.
+    expect(buildSightWordActionAddendum("lincoln", "Lincoln")).toContain(
+      "NEVER say the change is done",
+    );
+    expect(buildSnapshotActionAddendum("lincoln", "Lincoln")).toContain("NEVER claim it's done");
+    expect(buildActivityMinutesActionAddendum("lincoln", "Lincoln")).toContain("NEVER say it's done");
+    expect(buildCurriculumActionAddendum("lincoln", "Lincoln")).toContain("NEVER say it's done");
+    expect(buildDayItemActionAddendum("lincoln", "Lincoln")).toContain("NEVER say it's done");
+  });
+});
+
+describe("multi-day adds are one card per day (FEAT-152)", () => {
+  const OUT = buildDayItemActionAddendum("lincoln", "Lincoln");
+
+  // The false report promised "every remaining day this week" as a single
+  // change. There is no batch: an action carries ONE dateKey, so the model must
+  // never promise a shape it cannot emit.
+  it("says a multi-day add is one action block per day", () => {
+    expect(OUT).toContain("ONE DAY PER CARD");
+    expect(OUT).toContain("there is no batch");
+    expect(OUT).toContain("ONE action block PER DAY");
+  });
+
+  it("quotes the very phrasing that triggered the bug", () => {
+    expect(OUT).toContain("every remaining day this week");
+  });
+
+  it("requires the several-taps cost to be said out loud, up front", () => {
+    expect(OUT).toContain("SEVERAL confirm taps");
+    expect(OUT).toContain("Say that out loud before you propose");
+    expect(OUT).toContain("never describe a multi-day add as a single change");
+  });
+
+  it("stays child-scoped like every other grammar", () => {
+    expect(buildDayItemActionAddendum(undefined, undefined)).toBe("");
+  });
+});
+
+describe("no-writes-from-general, after FEAT-152", () => {
+  // The FEAT-60 guard, restated against the new contract: the general branch
+  // gains a statement of its limits, and gains no capability whatsoever.
+  it("keeps every action grammar empty on the general branch", () => {
+    for (const addendum of [
+      buildSightWordActionAddendum(undefined, undefined),
+      buildSnapshotActionAddendum(undefined, undefined),
+      buildPlanAdjustmentActionAddendum(undefined, undefined),
+      buildActivityMinutesActionAddendum(undefined, undefined),
+      buildCurriculumActionAddendum(undefined, undefined),
+      buildDayItemActionAddendum(undefined, undefined),
+      buildWatchActionAddendum(undefined, undefined, []),
+      buildDraftNextWeekAddendum(undefined, undefined, []),
+    ]) {
+      expect(addendum).toBe("");
+    }
+  });
+
+  it("still says nothing is 'coming' — a limit is not a promise", () => {
+    const general = buildShellyChatRoleSection(undefined, ["Lincoln", "London"]);
+    expect(general).toContain('NOTHING is "coming"');
+    expect(general).not.toContain("coming soon");
   });
 });
