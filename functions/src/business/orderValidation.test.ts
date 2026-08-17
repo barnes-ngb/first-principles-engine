@@ -8,7 +8,7 @@ import {
   ORDER_LIMITS,
   HONEYPOT_FIELD,
   ALLOWED_ORDER_ORIGINS,
-} from './orderValidation'
+} from './orderValidation.js'
 
 // ── validateOrderSubmission ─────────────────────────────────────
 
