@@ -54,7 +54,7 @@ export interface WatchVideoCardProps {
  *
  * Behaviour is unchanged from FEAT-129: inline edit reuses `WatchVetInForm`,
  * retire is propose→confirm, and a retired row offers "Put back" instead of
- * "Remove". What is new is the watch-history line (FEAT-139) — a **read**, never
+ * "Archive". What is new is the watch-history line (FEAT-139) — a **read**, never
  * a write, and deliberately worded to name its own window so an old watch
  * outside it is never reported as "never".
  */
@@ -126,8 +126,8 @@ export default function WatchVideoCard({
           {confirmingRetire ? (
             <Box sx={{ mt: 1 }}>
               <Typography variant="body2" sx={{ mb: 0.5 }}>
-                Remove “{video.title}” from the library? It stays in any week it was already
-                planned into, and can still be watched there. You&apos;ll find it in the Archive.
+                Move “{video.title}” to the Archive? It stays in any week it was already
+                planned into, and can still be watched there. You can put it back anytime.
               </Typography>
               <Stack direction="row" spacing={1}>
                 <Button
@@ -136,7 +136,7 @@ export default function WatchVideoCard({
                   color="warning"
                   onClick={() => void onConfirmRetire()}
                 >
-                  Remove from library
+                  Move to Archive
                 </Button>
                 <Button size="small" onClick={onCancelRetire}>
                   Cancel
@@ -162,7 +162,7 @@ export default function WatchVideoCard({
                 </Button>
               ) : (
                 <Button size="small" variant="text" color="warning" onClick={onArmRetire}>
-                  Remove
+                  Archive
                 </Button>
               )}
             </Stack>
