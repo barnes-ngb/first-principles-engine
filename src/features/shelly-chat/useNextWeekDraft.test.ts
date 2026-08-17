@@ -7,8 +7,8 @@
 // snapshot, workbook positions and priority skills.
 //
 // Two defences, and this suite pins both: the write targets `view.childId`, and
-// the draft is cleared outright when the context changes so a card for one boy
-// never sits under another boy's tab.
+// a draft is only VISIBLE under its own tab (a keyed read, not a clearing
+// effect), so a card for one boy never sits under another boy's.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
@@ -93,12 +93,12 @@ describe('useNextWeekDraft — the draft belongs to a child (Codex P1, #1679)', 
 
   it("applies to the DRAFT's stamped child, not to a re-read of the active tab", async () => {
     // Defence in depth, and worth being precise about what this does and does
-    // not prove. With the clearing effect below in place the two values cannot
-    // diverge in a mounted component — a tab switch destroys the draft before it
-    // can be applied. What this pins is that the write reads the value that is
-    // *bound to the plan* rather than the one that follows the UI, so the
-    // guarantee does not depend on the effect firing first. Both defences are
-    // cheap; relying on either alone is what made this a P1.
+    // not prove. With the keyed read below in place a tab switch hides the draft
+    // before it can be applied, so the two values do not diverge in practice.
+    // What this pins is that the write reads the value *bound to the plan*
+    // rather than the one that follows the UI — so the guarantee does not rest
+    // on the visibility rule. Both defences are cheap; relying on either alone
+    // is what made this a P1.
     const { result } = renderHook(() => useNextWeekDraft(deps({ activeChildId: 'lincoln' })))
     await act(async () => {
       await result.current.generateNextWeek(action('lincoln'))
@@ -123,7 +123,7 @@ describe('useNextWeekDraft — the draft belongs to a child (Codex P1, #1679)', 
 })
 
 describe('useNextWeekDraft — a draft is only visible under its own tab (Codex P1, #1679)', () => {
-  it('clears a ready draft when the chat moves to another child', async () => {
+  it('hides a ready draft when the chat moves to another child', async () => {
     const { result, rerender } = renderHook((d: UseNextWeekDraftDeps) => useNextWeekDraft(d), {
       initialProps: deps({ activeChildId: 'lincoln' }),
     })
