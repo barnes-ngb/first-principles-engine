@@ -50,7 +50,6 @@ function renderKid(checklist: ChecklistItem[], opts: { isMvd?: boolean } = {}) {
         gateUnlocked={p.gateUnlocked}
         gateThreshold={p.gateThreshold}
         mustDoCompleted={p.mustDoCompleted}
-        mustDoSkipped={p.mustDoSkipped}
         mustDoDone={p.mustDoDone}
         mustDoRemaining={p.mustDoRemaining}
         dailyXp={0}
@@ -82,7 +81,7 @@ describe('KidChecklist — a planned video is visible and playable (FEAT-134)', 
   it('shows the video with a ▶ Watch button when almost no quests are done', () => {
     // The reported bug: at 1 of 11 quests done the row was locked inside "Craft 2".
     renderKid(lincolnsDay())
-    expect(screen.getByText('1 of 11 quests done')).toBeTruthy()
+    expect(screen.getByText('10 quests to go!')).toBeTruthy()
     expect(screen.getByText(/Watch: Revolution war/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /watch/i })).toBeTruthy()
     // …and no lock copy anywhere near it.
@@ -91,7 +90,7 @@ describe('KidChecklist — a planned video is visible and playable (FEAT-134)', 
 
   it('shows the video with zero quests done', () => {
     renderKid([quest({ label: 'Prayer' }), quest({ label: 'Math' }), watchRow()])
-    expect(screen.getByText('0 of 2 quests done')).toBeTruthy()
+    expect(screen.getByText('2 quests to go!')).toBeTruthy()
     expect(screen.getByRole('button', { name: /watch/i })).toBeTruthy()
   })
 
@@ -140,8 +139,8 @@ describe('KidChecklist — a planned video is visible and playable (FEAT-134)', 
       quest({ label: 'Math' }),
       watchRow({ category: 'must-do', mvdEssential: true }),
     ])
-    // Denominator stays 2 — the video is not a quest.
-    expect(screen.getByText('0 of 2 quests done')).toBeTruthy()
+    // The count stays 2 — the video is not a quest.
+    expect(screen.getByText('2 quests to go!')).toBeTruthy()
     expect(screen.getByRole('button', { name: /watch/i })).toBeTruthy()
   })
 

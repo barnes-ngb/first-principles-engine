@@ -171,10 +171,11 @@ describe('QuestQuestionScreen — progress / diamond visibility', () => {
   it('shows diamonds mined and how many questions remain', () => {
     renderScreen()
     // totalCorrect=1 → 1 mined; MAX_QUESTIONS(5) - totalQuestions(2) → 3 to go.
-    // The "to go" rescales with the shorter run cap.
+    // The "to go" rescales with the shorter run cap. One remaining-count
+    // grammar across kid surfaces (UX-75): "{n} {noun} to go".
     const tally = screen.getByText(/mined/)
     expect(tally.textContent).toContain('1 mined')
-    expect(tally.textContent).toContain('3 to go')
+    expect(tally.textContent).toContain('3 questions to go')
   })
 
   it('fills the diamond bag (progress bar) by diamonds mined, not question count', () => {
@@ -203,7 +204,7 @@ describe('QuestQuestionScreen — progress / diamond visibility', () => {
     })
     const tally = screen.getByText(/mined/)
     expect(tally.textContent).toContain('1 mined')
-    expect(tally.textContent).toContain('3 to go')
+    expect(tally.textContent).toContain('3 questions to go')
   })
 
   it('resets the selection when the question changes', () => {
