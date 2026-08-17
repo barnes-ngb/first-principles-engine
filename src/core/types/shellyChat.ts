@@ -320,6 +320,41 @@ export type ChatAction =
       /** `YYYY-MM-DD`. A weekday of the current OR next school week. */
       dateKey: string
     }
+  /**
+   * Ask for a draft of NEXT week, shaped by what the parent just said
+   * (FEAT-150 — the last slice of the chat arc).
+   *
+   * **This kind carries no plan and writes nothing.** That is the whole of its
+   * design. The model does not compose a week out of prose — it cannot see the
+   * child's workbook positions, the routine, or the day budget, and a week it
+   * invented in a chat reply would be a plan nobody generated. What it emits is
+   * the parent's *instructions*, verbatim enough to be recognisable on a card
+   * ("Draft next week for Lincoln around: …"), and confirming that card spends
+   * ONE plan generation — the planner's own `TaskType.Plan`, with the planner's
+   * own prompt — whose result is then rendered in the chat in full.
+   *
+   * Applying that draft is a **second, separate tap** on a card the model can
+   * never emit, because there is no `applyNextWeek` kind in this union. The two
+   * taps are structural, not a UI convention: one confirms the spend, the other
+   * confirms the write, and no single confirmation can do both.
+   *
+   * The week is likewise not the model's to choose. There is no `weekStart`
+   * field: the target is always the NEXT school week, resolved from the family's
+   * civil date at generation time and re-resolved at the write
+   * (`nextWeekActions.ts`). The current live week belongs to the planner and to
+   * FEAT-142's live-day edits; the week after next is refused.
+   */
+  | {
+      kind: 'draftNextWeek'
+      childId: string
+      /**
+       * What the parent asked for, in their own words — "lighter, math every day
+       * but short". Non-empty and length-capped by `parseChatActions`; folded
+       * into the plan-generation prompt, never executed as an instruction to the
+       * app.
+       */
+      instructions: string
+    }
 
 /**
  * The brief shelly-chat stages for Plan My Week when Shelly confirms a

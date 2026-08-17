@@ -51,8 +51,6 @@ import type {
   ChapterBook,
   ChapterQuestionPoolItem,
   ChatMessage,
-  ChecklistItem,
-  DayBlock,
   DayLog,
   DraftPlanItem,
   DraftWeeklyPlan,
@@ -71,7 +69,6 @@ import type { SubjectTimeDefaults } from '../../core/types/planning'
 import {
   AssignmentAction,
   ChatMessageRole,
-  DayBlockType,
   EngineStage,
   EvidenceType,
   PlannerConversationStatus,
@@ -80,7 +77,6 @@ import {
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
-import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import { getPlanningWeekRange } from '../../core/utils/time'
 import { todayKey } from '../../core/utils/dateKey'
 import { useTodayKey } from '../../core/hooks/useTodayKey'
@@ -91,7 +87,7 @@ import {
 } from '../today/applyChapterPoolForChild'
 import { dayLogDocId } from '../today/daylog.model'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
-import { checklistItemKey, setDayLogGuarded, updateDayLogGuarded } from '../today/dayWriteGuard'
+import { checklistItemKey, updateDayLogGuarded } from '../today/dayWriteGuard'
 import {
   checklistItemEditLock,
   draftItemChecklistLabel,
@@ -107,7 +103,6 @@ import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
   buildPlannerPrompt,
-  buildShiftedWeekPlan,
   dateKeyForDayPlan,
   ensureEvaluationItems,
   formatPlanningWeekLabel,
@@ -119,6 +114,7 @@ import {
   WEEK_DAYS,
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
+import { applyDraftWeek } from './applyWeekPlan'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
 import ContextDrawer from './ContextDrawer'
@@ -146,17 +142,6 @@ import { consumePlanAdjustment } from '../shelly-chat/stagePlanAdjustment'
 /** Detect if an AI response looks like it was trying to return plan JSON (contains days/items structure). */
 function looksLikePlanJson(text: string): boolean {
   return /["']days["']\s*:/.test(text) && /["']items["']\s*:/.test(text)
-}
-
-function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
-  switch (subject) {
-    case SubjectBucket.Reading: return DayBlockType.Reading
-    case SubjectBucket.Math: return DayBlockType.Math
-    case SubjectBucket.LanguageArts: return DayBlockType.Reading
-    case SubjectBucket.Science: return DayBlockType.Project
-    case SubjectBucket.SocialStudies: return DayBlockType.Together
-    default: return DayBlockType.Other
-  }
 }
 
 function photoLabelsToAssignments(labels: PhotoLabel[]): AssignmentCandidate[] {
@@ -2286,48 +2271,34 @@ Generate a plan for Monday through Friday.`.trim()
 
       setSnack({ text: 'Applying plan...', severity: 'info' })
 
-      // Step 2: Write WeekPlan update (upsert). A forward-shifted apply can
-      // target a week whose WeekPlan doc the page never created (only the live
-      // `weekRange.start` doc is auto-seeded), so childGoals must land even when
-      // the doc is absent — otherwise the plan's days land on the shifted week
-      // while its WeekPlan summary is missing (FEAT-112 follow-up).
-      const weekRef = doc(weeksCollection(familyId), effectiveWeekStart)
-      const weekSnap = await getDoc(weekRef)
-      const planGoals = currentDraft.days
-        .flatMap((d) => d.items)
-        .filter((item) => item.accepted && !item.isAppBlock)
-        .map((item) => item.title)
-      if (weekSnap.exists()) {
-        const existing = weekSnap.data()
-        const existingGoals = existing.childGoals ?? []
-        const childGoalIndex = existingGoals.findIndex(
-          (g: { childId: string }) => g.childId === activeChildId,
-        )
-        const updatedGoals = [...existingGoals]
-        if (childGoalIndex >= 0) {
-          updatedGoals[childGoalIndex] = {
-            ...updatedGoals[childGoalIndex],
-            goals: [...updatedGoals[childGoalIndex].goals, ...planGoals],
-          }
-        } else {
-          updatedGoals.push({ childId: activeChildId, goals: planGoals })
-        }
-        const { readAloudBookId: _existingReadAloudBookId, ...existingWithoutBook } = existing
-        void _existingReadAloudBookId
-        await setDoc(weekRef, {
-          ...existingWithoutBook,
-          childGoals: updatedGoals,
-          ...(selectedBook ? { readAloudBookId: selectedBook.id } : {}),
-        })
-      } else {
-        // Absent — typically the forward-shift target. Create the WeekPlan with
-        // this child's goals, mirroring the default shape the weekPlanRef effect
-        // seeds for the live week.
-        await setDoc(
-          weekRef,
-          buildShiftedWeekPlan(effectiveWeekStart, children, activeChildId, planGoals, selectedBook?.id),
-        )
-      }
+      // Step 2: the apply itself — WeekPlan upsert + the Mon–Fri day writes.
+      //
+      // FEAT-150 moved this out of the page and into `applyWeekPlan.ts`, where
+      // it is unit-testable and, crucially, callable by the chat. Everything the
+      // planner does AROUND an apply — lesson cards above, the read-aloud
+      // default below, help cards, the chapter pool, the conversation persist —
+      // stays here, because those are the planner's enrichments and not the
+      // apply. `readAloudBookId: selectedBook?.id ?? null` preserves this page's
+      // long-standing behaviour exactly: a chosen book is written, and an empty
+      // picker CLEARS the week's book. (The chat passes `undefined` instead,
+      // which leaves the field untouched — it has no picker to mean anything.)
+      await applyDraftWeek({
+        familyId,
+        childId: activeChildId,
+        weekStart: effectiveWeekStart,
+        draft: currentDraft,
+        children,
+        activityConfigs,
+        lessonCardMap,
+        readAloudBookId: selectedBook?.id ?? null,
+        // `true` records the status quo rather than asserting a check: this page
+        // has never had a capability gate (`/planner/chat` sits OUTSIDE
+        // `RequireParent` in the router), so passing anything else here would
+        // change planner behaviour, which is not this run's scope. The chat's
+        // lane passes the real capability. If the planner is ever route-gated,
+        // this is the line that should start reading it.
+        canEdit: true,
+      })
 
       // Persist readAloudBookId to plannerDefaults so it carries to the next week
       void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
@@ -2337,97 +2308,6 @@ Generate a plan for Monday through Friday.`.trim()
           : { readAloudBookId: deleteField() }),
         updatedAt: new Date().toISOString(),
       }, { merge: true })
-
-      // Write DayLog checklist items for each day
-      for (const dayPlan of currentDraft.days) {
-        const dayItems = dayPlan.items.filter((item) => item.accepted)
-        if (dayItems.length === 0) continue
-        if (!WEEK_DAYS.includes(dayPlan.day as typeof WEEK_DAYS[number])) continue
-
-        const dateKey = dateKeyForDayPlan(effectiveWeekStart, dayPlan.day as typeof WEEK_DAYS[number])
-
-        const docId = dayLogDocId(dateKey, activeChildId)
-        const dayLogRef = doc(daysCollection(familyId), docId)
-        const dayLogSnap = await getDoc(dayLogRef)
-
-        const checklist: ChecklistItem[] = dayItems.map((item) => {
-          // FEAT-62 join: stamp the scannable workbook config id while the config
-          // identity is still recoverable (name/subject match). This is the only
-          // point the item can know its workbook — the routine→item pipeline
-          // round-trips through free text and drops the config id.
-          const workbookConfigId = findWorkbookConfigId(
-            { label: item.title, subjectBucket: item.subjectBucket },
-            activityConfigs,
-          )
-          return {
-            label: `${item.title} (${item.estimatedMinutes}m)`,
-            completed: false,
-            skillTags: item.skillTags,
-            ladderRef: item.ladderRef,
-            source: 'planner' as const,
-            mvdEssential: item.mvdEssential ?? item.category === 'must-do',
-            category: item.category ?? 'must-do',
-            estimatedMinutes: item.estimatedMinutes,
-            subjectBucket: item.subjectBucket,
-            ...(lessonCardMap.get(item.title) ? { lessonCardId: lessonCardMap.get(item.title) } : {}),
-            ...(item.skipGuidance ? { skipGuidance: item.skipGuidance } : {}),
-            ...(item.itemType ? { itemType: item.itemType } : {}),
-            ...(item.evaluationMode ? { evaluationMode: item.evaluationMode } : {}),
-            ...(item.link ? { link: item.link } : {}),
-            ...(item.bookId ? { bookId: item.bookId } : {}),
-            ...(item.watchVideoId ? { watchVideoId: item.watchVideoId } : {}),
-            ...(workbookConfigId ? { workbookConfigId } : {}),
-          }
-        })
-
-        const blocks: DayBlock[] = dayItems
-          .filter((item) => !item.isAppBlock)
-          .map((item) => ({
-            type: subjectToDayBlockType(item.subjectBucket),
-            title: item.title,
-            subjectBucket: item.subjectBucket,
-            plannedMinutes: item.estimatedMinutes,
-            skillTags: item.skillTags,
-            ladderRef: item.ladderRef,
-            source: 'planner' as const,
-          }))
-
-        // Persist the day's time budget so rollover/budget enforcement can trim overflow.
-        const dailyBudgetMinutes = Math.round(dayPlan.timeBudgetMinutes)
-
-        if (dayLogSnap.exists()) {
-          const existing = dayLogSnap.data()
-          // Applied plan is authoritative for the days it covers (owner decision
-          // 2026-07-19). Keep completed work (+ its minutes/evidence) and manual
-          // items, DROP stale incomplete rolled-over residue, then append the
-          // fresh planned items. The reset never touches completed work or logged
-          // minutes — see `applyReset.ts` (HARD CONSTRAINT).
-          const existingChecklist = retainChecklistForApply(existing.checklist ?? [])
-          const existingBlocks = retainBlocksForApply(existing.blocks ?? [])
-          await setDayLogGuarded(
-            dayLogRef,
-            {
-              ...existing,
-              checklist: [...existingChecklist, ...checklist],
-              blocks: [...existingBlocks, ...blocks],
-              dailyBudgetMinutes,
-              updatedAt: new Date().toISOString(),
-            },
-            'apply-plan',
-          )
-        } else {
-          const newDayLog: DayLog = {
-            childId: activeChildId,
-            date: dateKey,
-            blocks,
-            checklist,
-            dailyBudgetMinutes,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }
-          await setDayLogGuarded(dayLogRef, newDayLog, 'apply-plan-new')
-        }
-      }
 
       // Add "applied" message
       const appliedMsg: ChatMessage = {

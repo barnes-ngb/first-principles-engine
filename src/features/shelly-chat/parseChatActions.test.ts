@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseChatActions } from './parseChatActions'
+import { MAX_DRAFT_INSTRUCTION_CHARS, parseChatActions } from './parseChatActions'
 
 describe('parseChatActions', () => {
   it('extracts a valid addSightWord block and strips the tag', () => {
@@ -959,6 +959,98 @@ describe('parseChatActions — library removals stay unrepresentable (FEAT-149)'
       'removeVideoFromDay',
     ]) {
       const raw = `<action>{"kind":"${kind}","childId":"lincoln","watchVideoId":"vid_1"}</action>`
+      expect(parseChatActions(raw).actions, `kind=${kind}`).toEqual([])
+    }
+  })
+})
+
+describe('parseChatActions — draftNextWeek (FEAT-150)', () => {
+  const draft = (over: Record<string, unknown> = {}) => {
+    const payload: Record<string, unknown> = {
+      kind: 'draftNextWeek',
+      childId: 'lincoln',
+      instructions: 'lighter, math every day but short',
+      ...over,
+    }
+    for (const [k, v] of Object.entries(payload)) if (v === undefined) delete payload[k]
+    return `<action>${JSON.stringify(payload)}</action>`
+  }
+
+  it('parses a well-formed proposal', () => {
+    expect(parseChatActions(draft()).actions).toEqual([
+      {
+        kind: 'draftNextWeek',
+        childId: 'lincoln',
+        instructions: 'lighter, math every day but short',
+      },
+    ])
+  })
+
+  it('trims the instructions', () => {
+    const { actions } = parseChatActions(draft({ instructions: '  make it lighter  ' }))
+    expect(actions[0]).toMatchObject({ instructions: 'make it lighter' })
+  })
+
+  it('rejects empty or non-string instructions', () => {
+    for (const instructions of ['', '   ', 42, null, [], {}, undefined]) {
+      expect(parseChatActions(draft({ instructions })).actions, String(instructions)).toEqual([])
+    }
+  })
+
+  it('REJECTS an over-long instruction rather than truncating it', () => {
+    // A truncated instruction is one the parent read on the card and did not
+    // get. Rejection is the honest failure; silent truncation is not.
+    const tooLong = 'a'.repeat(MAX_DRAFT_INSTRUCTION_CHARS + 1)
+    expect(parseChatActions(draft({ instructions: tooLong })).actions).toEqual([])
+    const atLimit = 'a'.repeat(MAX_DRAFT_INSTRUCTION_CHARS)
+    expect(parseChatActions(draft({ instructions: atLimit })).actions).toHaveLength(1)
+  })
+
+  it('requires a childId, like every other kind', () => {
+    expect(parseChatActions(draft({ childId: '' })).actions).toEqual([])
+  })
+
+  it('drops unknown fields rather than carrying them through', () => {
+    const { actions } = parseChatActions(
+      draft({ weekStart: '2026-08-23', days: [{ day: 'Monday' }], apply: true, hoursPerDay: 2 }),
+    )
+    expect(actions).toEqual([
+      {
+        kind: 'draftNextWeek',
+        childId: 'lincoln',
+        instructions: 'lighter, math every day but short',
+      },
+    ])
+  })
+
+  it('gives the model no way to express a WEEK — the target is never its choice', () => {
+    // There is no `weekStart` / `targetWeek` field on the parsed action, so a
+    // hallucinated week cannot travel. "Next week" is resolved from the clock at
+    // generation and re-resolved at the write.
+    const { actions } = parseChatActions(draft({ targetWeek: '2026-12-07' }))
+    expect(actions[0]).not.toHaveProperty('targetWeek')
+    expect(actions[0]).not.toHaveProperty('weekStart')
+  })
+
+  it('gives the model no way to express a PLAN — a week it wrote is not a week', () => {
+    const { actions } = parseChatActions(
+      draft({ days: [{ day: 'Monday', items: [{ title: 'Math', estimatedMinutes: 30 }] }] }),
+    )
+    expect(actions[0]).not.toHaveProperty('days')
+  })
+
+  it('gives the model no way to APPLY — the second tap has no kind', () => {
+    // The whole two-tap rail is structural: there is no action kind that writes
+    // a week, so no reply, however phrased, can reach one in a single tap.
+    for (const kind of [
+      'applyNextWeek',
+      'applyNextWeekDraft',
+      'writeNextWeek',
+      'applyPlan',
+      'lockInWeek',
+      'applyWeekPlan',
+    ]) {
+      const raw = `<action>{"kind":"${kind}","childId":"lincoln","weekStart":"2026-08-23"}</action>`
       expect(parseChatActions(raw).actions, `kind=${kind}`).toEqual([])
     }
   })

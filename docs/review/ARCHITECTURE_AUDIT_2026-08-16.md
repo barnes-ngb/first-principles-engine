@@ -135,6 +135,19 @@ problem — but it's now the highest-leverage decomposition candidate in the fil
 is this clean. **Recommend as next `PROMPT_FIX` candidate for ARCH-02** (extract the live-day-edit handler
 trio, not a full page decomposition).
 
+> **Follow-up (FEAT-150, 2026-08-17) — a DIFFERENT seam was taken, and this one is still open.**
+> The FEAT-150 run extracted **Apply** (`handleApplyPlan`'s `WeekPlan` upsert + Mon–Fri day writes) into
+> `planner-chat/applyWeekPlan.ts`, taking the page from 3,412L to 3,292L (**−120L**). That was forced by
+> the feature rather than chosen from this audit: the chat had to apply a week, and the alternative to
+> extracting was a second copy of a day-write — the shape of both audited compliance failures (FEAT-111,
+> FEAT-114's P0). It was covered by 30 characterization assertions written before the move.
+>
+> **It is not the seam this section names.** The live-day-edit handler trio (`handleRemoveItem` /
+> `handleMoveItemToDay` / `handleSwapWatchItem` → `useLiveDayEditHandlers`) is untouched and remains the
+> recommendation above, with its ~230L estimate intact — the two extractions are independent regions of
+> the file. Recorded here so the next `PROMPT_FIX` run against ARCH-02 doesn't read the −120L as this work
+> already being done.
+
 **`TodayChecklist.tsx` newly crosses 1,500L** (+93L from the 08-03 health report's 1,498L) — same live-week-
 edit feature. Not yet flagged as a decomposition candidate; watch next cycle.
 

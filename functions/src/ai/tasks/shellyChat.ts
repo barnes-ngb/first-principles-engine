@@ -314,6 +314,53 @@ export function plannableWatchDays(
   return [...current, ...next].filter((d) => d.dateKey >= today);
 }
 
+/**
+ * The five weekdays of the NEXT school week (FEAT-150), for the `draftNextWeek`
+ * grammar.
+ *
+ * Built by shifting {@link currentWeekDays} seven days, exactly as
+ * {@link plannableWatchDays} builds its second half — so "which week is it right
+ * now" has ONE definition on this side, including its civil-date-in-the-family's
+ * -zone arithmetic and its Sunday-belongs-to-the-week-that-is-ending rule.
+ *
+ * The mirror of the client's `nextWeekDayKeys`, which the confirm gate and the
+ * writer both resolve against. The two must agree or the model would be told
+ * about a week the tap refuses.
+ *
+ * Note what this window does NOT do, unlike `plannableWatchDays`: it drops no
+ * elapsed day. Every weekday of next week is still ahead, on every day of this
+ * one — that is what makes it next week.
+ */
+export function nextWeekDays(
+  now: Date = new Date(),
+  timeZone: string = DEFAULT_FAMILY_TIME_ZONE,
+): { dateKey: string; label: string }[] {
+  return currentWeekDays(now, timeZone).map((d) => {
+    const shifted = new Date(`${d.dateKey}T00:00:00Z`);
+    shifted.setUTCDate(shifted.getUTCDate() + 7);
+    return { dateKey: shifted.toISOString().slice(0, 10), label: d.label };
+  });
+}
+
+/**
+ * How the drafted week reads in the grammar: "Aug 24–28". The model quotes this
+ * back to the parent, so it must be the same span the client's card shows.
+ */
+export function formatWeekSpan(days: { dateKey: string }[]): string {
+  if (days.length === 0) return "next week";
+  const fmt = (key: string, opts: Intl.DateTimeFormatOptions) =>
+    new Date(`${key}T00:00:00Z`).toLocaleDateString("en-US", { ...opts, timeZone: "UTC" });
+  const first = days[0].dateKey;
+  const last = days[days.length - 1].dateKey;
+  const firstMonth = fmt(first, { month: "short" });
+  const lastMonth = fmt(last, { month: "short" });
+  const firstDay = fmt(first, { day: "numeric" });
+  const lastDay = fmt(last, { day: "numeric" });
+  return firstMonth === lastMonth
+    ? `${firstMonth} ${firstDay}–${lastDay}`
+    : `${firstMonth} ${firstDay} – ${lastMonth} ${lastDay}`;
+}
+
 /** One curated library video, as the WATCH LIBRARY section needs to see it. */
 export interface WatchLibraryRow {
   id?: string;
@@ -585,29 +632,39 @@ export function formatRecentTeachBacks(rawArtifacts: TeachBackArtifactInput[]): 
  * map for the thing that triggered this — activity durations — is Progress →
  * Curriculum, and the chat can now change that number directly anyway.
  *
- * FEAT-142 adds a third permitted ending, for the same honesty reason. "It isn't
- * in the app yet" is true of a curriculum edit or a video search *from the chat*
- * and false of the app as a whole — the screens exist, the chat just can't drive
- * them. Saying "coming; for now: Progress → Curriculum" is the accurate answer,
- * and it still names only a real screen. What stays forbidden is unchanged: a
- * screen nobody has been told exists.
+ * FEAT-142 added a third permitted ending, for the same honesty reason. "It
+ * isn't in the app yet" was true of a curriculum edit or a video search *from
+ * the chat* and false of the app as a whole — the screens existed, the chat just
+ * couldn't drive them. Saying "coming; for now: Progress → Curriculum" was the
+ * accurate answer, and it still named only a real screen.
+ *
+ * **FEAT-150 retires that ending.** It was always bounded to exactly one
+ * outstanding slice — reshaping next week — and this run ships it, so the last
+ * true "coming" is gone and the rule now says outright that NOTHING is coming.
+ * That is the stricter and more honest position: a capability the chat does not
+ * have is one it may not promise, because the model has no way of knowing what
+ * is being built and a parent plans around what she is told. Two permitted
+ * endings remain: name a REAL screen, or say it isn't in the app. What stays
+ * forbidden is unchanged, and is what started all of this: a screen nobody has
+ * been told exists.
  */
 const NAVIGATION_HONESTY_RULE = `
-NAVIGATION HONESTY (hard rule): NEVER describe a screen, tab, setting, or menu you have not been told exists. If you can't do something, say so plainly and then end in one of exactly three ways: name a REAL screen from the map below, say the capability is coming and name the real screen that does it today, or say it isn't in the app yet. Inventing a plausible-sounding location ("check the schedule settings screen") is worse than admitting the gap, because the parent will go looking for something that isn't there. If you are not certain a screen exists, do not name it.
+NAVIGATION HONESTY (hard rule): NEVER describe a screen, tab, setting, or menu you have not been told exists. If you can't do something, say so plainly and then end in one of exactly two ways: name a REAL screen from the map below, or say it isn't in the app yet. Inventing a plausible-sounding location ("check the schedule settings screen") is worse than admitting the gap, because the parent will go looking for something that isn't there. If you are not certain a screen exists, do not name it.
 
 The real map, for the things parents most often ask to change:
 - Activities, how many minutes each one takes by default, and where the child is in each one: Progress → Curriculum. (You can also change an activity's default minutes yourself, right here — see ACTIVITY TIME ACTIONS below — and add an activity, mark one finished, or set its position — see CURRICULUM ACTIONS below, if those sections are present.)
-- The weekly plan itself: Plan My Week.
+- The weekly plan itself: Plan My Week. (You can also draft and apply NEXT week yourself — see NEXT-WEEK DRAFT below, if present. THIS week is reshaped there; from here you can only change its individual days.)
 - Today's checklist: Today. (You can also change what is on a day of THIS week yourself, right here — see TODAY / THIS WEEK ACTIONS below, if that section is present.)
 - Hours, compliance records, evaluations and the portfolio: Records.
-- The curated video library: Watch Library (its own entry in the parent nav — it is NOT inside Settings). Retiring a video, and putting a retired one back from its Archive tab, happen there and only there. (You can add a video you found and plan it onto a day yourself, right here — see WATCH ACTIONS below, if that section is present.)
+- The curated video library: Watch Library (its own entry in the parent nav — it is NOT inside Settings). Retiring a video, and putting a retired one back from its Archive tab, happen there and only there. (You can add a video you found and plan it onto a day yourself — see WATCH ACTIONS below, if present.)
 - Account, profiles, voice input, stickers: Settings. Settings does NOT contain any schedule, subject-duration, or time-block screen — never send anyone there for one.
 
 What you can change from this chat, and what you can't (say this accurately, never more):
-- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, what is on a day of THIS week (remove / move / add), the curriculum itself — adding an activity, marking one finished, and setting where the child is in it — and videos: adding one you found on the web to the Watch Library and planning a vetted one onto a day of this week or next. Each one is confirmed by a tap.
+- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, what is on a day of THIS week (remove / move / add), the curriculum — adding an activity, marking one finished, setting where the child is in it — videos: adding one you found on the web to the Watch Library and planning a vetted one onto a day of this week or next — and reshaping NEXT week: drafting the whole week from what she describes, showing it in full, and applying it. Each is confirmed by a tap; the next-week draft takes two (draft, then apply).
 - You still CANNOT DELETE an activity. The app retires programs (mark finished) rather than deleting them, and a finished program cannot be un-finished — not from here, and not from Progress → Curriculum. Never offer a way to undo it.
 - You also cannot RETIRE a video, un-retire one, edit one, or delete one from here. Adding is the only library change you can make. Retiring and putting back live in Watch Library.
-- NOT YET, and this is coming: reshaping NEXT week from here — changing the shape of the plan itself, dropping or repacing subjects (for now: the plan-adjustment handoff opens Plan My Week with your brief, and that is where a week gets reshaped). Say "that's coming" only for that one — do not promise anything else is on the way.`;
+- NOTHING is "coming". Never say a capability is on the way — you cannot know, and she plans around what you tell her. If you can't do it, say so and name the real screen.
+- Next week has two real routes: draft it here, or the handoff that opens Plan My Week with your brief. Offer that as a choice, not a fallback.`;
 
 export function buildShellyChatRoleSection(childName: string | undefined): string {
   if (childName) {
@@ -714,7 +771,8 @@ Rules:
  * skill / support / stop rule, or mark a skill the parent says the child has —
  * each confirmed by a tap. Removals, downgrades, and level-lowering are impossible
  * in the app (the future Option 3), so the model must NEVER emit one; if the parent
- * asks to remove/lower something it says that's coming later and offers to note
+ * asks to remove/lower something it says plainly that it can't (never "coming",
+ * per FEAT-150's tightened navigation-honesty rule) and offers to note
  * it (which can become a friction-capture entry) rather than emitting an action.
  *
  * Only emitted on a child-scoped tab (a real `childId`), like the other action
@@ -738,7 +796,7 @@ Grammar — one JSON object per <action> block, after your prose, using ${who}'s
 <action>{"kind":"markSkillProgress","childId":"${childId}","skill":"CVCe long vowels","mastered":true}</action>
 
 Rules:
-- ADDITIVE ONLY. The app cannot remove, downgrade, or lower a level. If the parent asks to REMOVE a skill, DELETE a support, or LOWER/DOWNGRADE a level, say that capability is coming later and offer to note it for later — do NOT emit any action.
+- ADDITIVE ONLY. The app cannot remove, downgrade, or lower a level. If the parent asks to REMOVE a skill, DELETE a support, or LOWER/DOWNGRADE a level, say plainly that it can't be done from here — do NOT say it is coming, and do NOT emit any action. Offer to note it down for her instead.
 - For markSkillProgress: set "mastered":true only when the parent says the child has fully got it; omit "mastered" (or set it false) to mark a skill as progressing rather than mastered.
 - NEVER claim it's done. Say you've proposed it and it's confirmed with a tap; the parent sees a clearly-labeled "Updates the skill snapshot" card first.
 - One JSON object per <action> block. Be conservative: only propose when the parent clearly wants to change the snapshot. Discussion is not a write.`;
@@ -951,6 +1009,58 @@ Rules for planVideoOnDay:
 }
 
 /**
+ * Build the `draftNextWeek` grammar addendum (FEAT-150) — the last slice of the
+ * chat arc, and the one that retires the map's final "coming".
+ *
+ * What changes for the model here is smaller than what changes for the parent.
+ * The model gains ONE action that carries ONE string. It does not gain the
+ * ability to write a week, or even to describe one: it cannot see workbook
+ * positions, the routine, or the day budget, so a week it composed in a reply
+ * would be a plan nobody generated, checked against nothing. Confirming this
+ * action runs the PLANNER's generator on the planner's own context, and the
+ * result is what the parent reads.
+ *
+ * Which is why the two hardest rules in this grammar are both about restraint:
+ * **do not write out a plan** (the model's instinct, and the thing that would
+ * make the card a lie), and **do not say it is done** (there are two taps, and
+ * the first one writes nothing at all).
+ *
+ * The week is stated, not chosen. There is no field for it in the payload, so
+ * naming the span here is purely so the model can say the right thing out loud
+ * — the client resolves the actual target from its own clock and refuses a
+ * mismatch.
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like every other action
+ * grammar: a week belongs to a specific boy. Returns "" on the general branch.
+ */
+export function buildDraftNextWeekAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+  weekDays: { dateKey: string; label: string }[],
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  const span = formatWeekSpan(weekDays);
+  return `
+
+NEXT-WEEK DRAFT (reshaping next week — a DRAFT first, then a separate apply): When the parent wants ${who}'s NEXT WEEK to be shaped differently — lighter or heavier overall, a subject dropped, added, repaced or spread differently, a day kept clear, a shift toward a Minimum Viable week (e.g. "make next week lighter", "math every day but short", "next week needs to be a survival week", "can we do less reading and more read-alouds next week", "keep Wednesday clear, we have the dentist") — propose ONE next-week draft action carrying what she asked for, in her words.
+
+She does NOT have to be upset for this to apply, and she does not have to use the word "plan". A calm, specific request about next week is exactly what this is for.
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
+<action>{"kind":"draftNextWeek","childId":"${childId}","instructions":"lighter overall, math every day but short"}</action>
+
+Rules — read these carefully, because two of them are about what NOT to do:
+- **Do NOT write out a plan.** Never list days, activities, or minutes in your reply as if they were the week. You cannot see ${who}'s workbook positions, the daily routine, or the day budget, so any week you compose would be made up. The app runs the real planner and shows her the result. Describe what you'll ASK for, not what the week will be.
+- **Do NOT say it's done, drafted, or applied.** Confirming this card only DRAFTS — it writes nothing. She then reads the whole week and taps a separate "apply" on it. Two taps. Say you've proposed drafting it and she'll see the week before anything is written.
+- "instructions" is her ask in her own words, one line, under 600 characters. Keep it faithful — it is quoted back on the card, and it is what shapes the plan. Do not add goals she did not ask for.
+- ONE action per turn. If she asks for several changes to the same week, put them all in the one "instructions" string; they are one week.
+- The week is always the NEXT school week (${span}) — Monday to Friday. You cannot target the current week, the week after next, or a single day of next week from here. For a change to THIS week's days use the TODAY / THIS WEEK actions above; for a change to how long an activity runs from now on use setActivityMinutes.
+- **This is the DEFAULT route for reshaping next week — use it, not the plan-adjustment handoff above.** The handoff is only for when she explicitly asks to work in Plan My Week herself. **Never emit both kinds in one turn.**
+- If she just wants to talk about next week, talk. Only propose when she clearly wants it changed.`;
+}
+
+/**
  * Build the `proposePlanAdjustment` HANDOFF grammar addendum (chunk 2A/2).
  *
  * When the parent wants a **next-week plan change** — drop/reduce/repace a
@@ -992,6 +1102,7 @@ Grammar — one JSON object per <action> block, after your prose, using ${who}'s
 Rules:
 - This is a HANDOFF. Confirming it opens Plan My Week with your brief preloaded — the parent reviews and locks in the actual plan there. You do NOT write the plan, and you must NEVER claim the plan is changed or done.
 - "summary" is the one-line change the parent will see in the planner; "rationale" is the grounded WHY (cite the signal). You may add "scope" or "targetWeek" as short optional hints, but they're not required.
+- **PRECEDENCE (read this first): if a NEXT-WEEK DRAFT section appears below, that is the default route for reshaping next week, and this handoff is NOT.** Use draftNextWeek for every ordinary "make next week lighter / drop maths / repace reading" ask. Reserve this handoff for when the parent explicitly asks to work in the planner ("open Plan My Week", "let me build it myself", "I want to see the planner"). **NEVER emit both in one turn** — they are two answers to one question, and she would get two conflicting cards.
 - Use this for a change to the SHAPE of next week. To change how long ONE activity runs by default from now on, use setActivityMinutes above instead — that's a real write and it sticks. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when the parent clearly wants the plan to change.`;
 }
 
@@ -1417,6 +1528,14 @@ Example: If the parent says "Lincoln seems bored with reading" and the data show
     plannableWatchDays(new Date(), familyTimeZone),
   );
   const planAdjustmentActionAddendum = buildPlanAdjustmentActionAddendum(childId || undefined, childName || undefined);
+  // FEAT-150 — the next school week, from the same family-zone civil date every
+  // other window here uses, so the span the model says out loud is the span the
+  // client's card shows and the week its writer will accept.
+  const draftNextWeekAddendum = buildDraftNextWeekAddendum(
+    childId || undefined,
+    childName || undefined,
+    nextWeekDays(new Date(), familyTimeZone),
+  );
   const frictionCaptureAddendum = buildFrictionCaptureAddendum();
   const webSearchAddendum = buildWebSearchAddendum(childId && childName ? childName : undefined);
 
@@ -1432,6 +1551,7 @@ ${curriculumActionAddendum}
 ${dayItemActionAddendum}
 ${watchActionAddendum}
 ${planAdjustmentActionAddendum}
+${draftNextWeekAddendum}
 ${frictionCaptureAddendum}
 ${webSearchAddendum}
 
