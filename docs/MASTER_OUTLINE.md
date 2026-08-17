@@ -454,17 +454,58 @@ supplemental block (`formatWatchLibrary`) listing each curated video's doc id, l
 and framing, with retired ones **listed and marked unplannable** rather than hidden — hidden, the model
 proposes re-adding a video the parent deliberately retired.
 
+**Reshaping next week, in two taps (FEAT-150) — the arc completes.** The last slice, and the largest:
+*"make next week lighter, math every day but short"* now produces a full next-week draft in the chat,
+reviewable whole, applied by one confirm. Two things make it safe to be that large.
+
+**One: the model never writes the week.** The `draftNextWeek` action carries the parent's *instructions*
+and nothing else — no days, no minutes, and deliberately **no `weekStart` field to hallucinate into**. A
+week composed in a chat reply would be a plan no generator produced, checked against no workbook position
+and no day budget. Confirming the card runs the **planner's own** `TaskType.Plan` on the **planner's own**
+`buildPlannerPrompt`, with the parent's sentence appended and fenced (it is a request *about* a week, never
+instructions *to* the prompt). There is no second week-generation prompt, and a test asserts the planner's
+prompt appears verbatim in what is sent.
+
+**Two: the two taps are structural, not a UI convention.** Tap one generates and writes nothing; tap two
+applies. The apply card is built by the app from a draft that already exists and has **no `ChatAction`
+kind at all** — there is no `applyNextWeek` in the union — so no reply, however phrased, can reach a week
+write in a single confirmation. A test enumerates the apply-shaped kinds and asserts every one parses to
+nothing. The card states the retain rules in the parent's own words *before* the tap, because she is
+approving a write over days that may already hold her boys' finished work.
+
+**The week is never the model's choice, and never a stored value.** "Next week" is resolved from the
+family's civil date at generation and **re-resolved inside the writer at the tap**, so a chat page left
+open across a Sunday→Monday rollover is refused rather than reshaping a week the family has already
+started. The current week and the week after next are refused at stage *and* at the writer.
+
+**What made it possible: `handleApplyPlan` became a module.** Apply lived for three years inside the
+3,400-line `PlannerChatPage`, reachable only by rendering the planner. `planner-chat/applyWeekPlan.ts`
+is now the **single Apply** — pure core plus one guarded writer — and both the planner and the chat call
+it. That was the alternative to writing a day-write a second time, and both of this app's audited
+compliance failures (FEAT-111, FEAT-114's P0) were *a second copy of a day-write that forgot a rule*.
+30 characterization assertions were written **before** the move. The chat reaches it through
+`shelly-chat/writeNextWeekDraft.ts`, a router carrying the one rail the shared module cannot hold (the
+planner legitimately writes the *live* week): next week only. It passes no lesson-card map — the chat
+spends no second AI generation the parent wasn't told about — and no `readAloudBookId`, so a chat apply
+can never blank a book chosen in the planner. The draft renders through `PlanDayCards`, the planner's own
+renderer in its read-only configuration, so the two surfaces cannot drift about what was planned.
+
 **What the chat still can't do.** It cannot delete or un-finish a curriculum activity (above); it cannot
-retire, un-retire, edit, or delete a library video; it cannot reshape next week wholesale (the
-plan-adjustment handoff opens Plan My Week instead); it cannot remove or downgrade anything on a skill
-snapshot (the future Option 3); it cannot change a live week's planned minutes. For all of those it says
-so plainly — and under the **navigation-honesty rule** it may end in exactly three ways: name a REAL
-screen, say the capability is **coming** and name the real screen that does it today, or say it isn't in
-the app yet. It must never invent a location. The "coming" ending is now bounded to the **one** remaining
-slice (reshaping next week → Plan My Week) and the prompt says outright not to promise anything else. The true map
-for durations is **Progress → Curriculum** (`CurriculumTab` / `EditRoutinesDialog` / `AddActivityDialog`);
-the **Watch Library** is its own top-level parent nav entry, **not** inside Settings (FEAT-132); and
-Settings holds no schedule, subject-duration, or time-block screen and never has.
+retire, un-retire, edit, or delete a library video; it cannot reshape **this** week wholesale (Plan My
+Week owns the live week; from the chat only its individual days change); it cannot remove or downgrade
+anything on a skill snapshot (the future Option 3); it cannot change a live week's planned minutes. For
+all of those it says so plainly — and under the **navigation-honesty rule** it may now end in exactly
+**two** ways: name a REAL screen, or say it isn't in the app yet. **The "coming" ending is retired.** It
+entered the rule in FEAT-142 as a legitimate third option while three slices were genuinely outstanding;
+FEAT-143 and FEAT-149 took the list to one, and FEAT-150 ships the last — so rather than empty the list,
+the ending itself is forbidden. That is the stricter position and the more honest one: the model has no
+way of knowing what is being built, and a parent plans around what she is told. (The snapshot grammar's
+"that capability is coming later" went with it, for the same reason.) It must never invent a location.
+The plan-adjustment handoff **stays**, offered as a named alternative rather than a fallback — some weeks
+are easier to build on the planner surface. The true map for durations is **Progress → Curriculum**
+(`CurriculumTab` / `EditRoutinesDialog` / `AddActivityDialog`); the **Watch Library** is its own
+top-level parent nav entry, **not** inside Settings (FEAT-132); and Settings holds no schedule,
+subject-duration, or time-block screen and never has.
 
 **Context that makes it possible:** an `ACTIVITIES` section in the `shellyChat` supplemental block
 (`formatChatActivities`) listing each non-completed config's doc id, name, subject, current default
