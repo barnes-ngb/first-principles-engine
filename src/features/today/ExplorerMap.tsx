@@ -113,6 +113,8 @@ export default function ExplorerMap({
 
   const allExplored = exploredCount === 5
 
+  // One remaining-count grammar across kid surfaces: "{n} {noun} to go" (UX-75)
+  // — the bare "{n} to discover..." left the remaining count with no noun.
   const summaryText = allExplored
     ? isLondon
       ? 'All dinos hatched this week! 🎉'
@@ -120,10 +122,10 @@ export default function ExplorerMap({
         ? 'Full map explored! Legendary week!'
         : 'Full week explored! What an adventure! 🎉'
     : isLondon
-      ? `${exploredCount} dino${exploredCount !== 1 ? 's' : ''} hatched! ${remainingCount} to discover...`
+      ? `${exploredCount} dino${exploredCount !== 1 ? 's' : ''} hatched! ${remainingCount} dino${remainingCount !== 1 ? 's' : ''} to go!`
       : isLincoln
-        ? `${exploredCount} biome${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} to discover...`
-        : `${exploredCount} day${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} to discover...`
+        ? `${exploredCount} biome${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} biome${remainingCount !== 1 ? 's' : ''} to go!`
+        : `${exploredCount} day${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} day${remainingCount !== 1 ? 's' : ''} to go!`
 
   const title = isLondon
     ? '🦕 Dino Discovery'

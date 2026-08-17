@@ -24,7 +24,6 @@ function renderKidChecklist(mustDo: ChecklistItem[]) {
         gateUnlocked={false}
         gateThreshold={3}
         mustDoCompleted={mustDo.filter((i) => i.completed).length}
-        mustDoSkipped={mustDo.filter((i) => i.skipped).length}
         mustDoDone={false}
         mustDoRemaining={mustDo.filter((i) => !i.completed && !i.skipped).length}
         dailyXp={0}

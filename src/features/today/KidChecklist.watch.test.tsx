@@ -35,7 +35,6 @@ function renderKid(
         gateUnlocked
         gateThreshold={3}
         mustDoCompleted={0}
-        mustDoSkipped={0}
         mustDoDone={false}
         mustDoRemaining={mustDo.length}
         dailyXp={0}

@@ -58,17 +58,21 @@ export interface QuestProgress {
    * the quest count, the Workshop gate, or the craft-selection cap.
    */
   watch: ChecklistItem[]
-  /** True when every must-do quest is completed (skips do NOT count). */
+  /**
+   * True when every must-do quest is resolved — completed or parent-skipped
+   * (UX-72). A skip is not a completion (it earns nothing and advances no
+   * count); it just stops blocking the day the kid can't act on.
+   */
   mustDoDone: boolean
   /** Quests still open for the kid — neither completed nor parent-skipped. */
   mustDoRemaining: number
   /** Completed must-do count (drives the unlock gate). */
   mustDoCompleted: number
-  /** Parent-skipped must-do count (shown, but never counts toward the gate). */
+  /** Parent-skipped must-do count (shrinks the gate bar; never counts as done). */
   mustDoSkipped: number
-  /** Quests the kid must complete to unlock Workshop/Books. */
+  /** Quests the kid must complete to unlock Workshop/Books — capped at the *completable* count. */
   gateThreshold: number
-  /** True once enough quests are *completed* (skips never unlock the gate). */
+  /** True once enough completable quests are *completed* (a skip shrinks the bar, it never fills it). */
   gateUnlocked: boolean
 }
 
@@ -76,19 +80,29 @@ export interface QuestProgress {
  * Derive the kid quest gate + progress from a checklist.
  *
  * Skipping is a parent-only action (FUNC-08). A parent-skipped item is removed
- * from the kid's remaining/to-do set but is NOT treated as completed: it never
- * advances the unlock gate, the "X of N done" count, or day completion.
+ * from the kid's remaining/to-do set and counts as *resolved* for day
+ * completion and the gate bar (UX-72) — but it is NOT a completion: it never
+ * advances `mustDoCompleted`, earns no XP, and completes nothing. It only
+ * stops blocking.
  */
 export function computeQuestProgress(checklist: ChecklistItem[]): QuestProgress {
   const { mustDo, choose, watch } = categorizeItems(checklist)
 
-  const mustDoDone = mustDo.length > 0 && mustDo.every((item) => item.completed)
+  // UX-72: completed OR skipped resolves a quest. Requiring `completed` alone
+  // made one parent skip strand the day — zero completable quests left, Craft
+  // locked, celebration unreachable.
+  const mustDoDone =
+    mustDo.length > 0 && mustDo.every((item) => item.completed || item.skipped)
   const mustDoRemaining = mustDo.filter((item) => !item.completed && !item.skipped).length
 
-  // Gate: 3+ must-do items completed unlocks Workshop and Books
+  // Gate: enough must-do items completed unlocks Workshop and Books. The
+  // threshold is computed over *completable* items, so a skip shrinks the bar
+  // instead of stranding it. Edge, decided: ALL must-dos skipped → threshold 0
+  // → gate unlocked. A parent who cleared the whole day chose an empty day;
+  // the Workshop is not a second punishment.
   const mustDoCompleted = mustDo.filter((i) => i.completed).length
   const mustDoSkipped = mustDo.filter((i) => i.skipped).length
-  const gateThreshold = Math.min(3, mustDo.length)
+  const gateThreshold = Math.min(3, Math.max(0, mustDo.length - mustDoSkipped))
   const gateUnlocked = mustDoCompleted >= gateThreshold
 
   return {
@@ -102,6 +116,17 @@ export function computeQuestProgress(checklist: ChecklistItem[]): QuestProgress 
     gateThreshold,
     gateUnlocked,
   }
+}
+
+/**
+ * UX-72 celebration gate: "you finished!" copy and the day-complete XP awards
+ * require real work. `doneFlag` is `mustDoDone` (or `allDone`), which a parent
+ * can now reach through skips alone — a day resolved by skips is *open* (Craft
+ * and Workshop unlock) but never *celebrated*: no "🎉 you did it!" over zero
+ * completions (UX-11's cousin; not created here).
+ */
+export function celebrationEarned(doneFlag: boolean, mustDoCompleted: number): boolean {
+  return doneFlag && mustDoCompleted > 0
 }
 
 /**

@@ -57,7 +57,7 @@ import KidChecklist from './KidChecklist'
 import WatchItemDialog from '../watch/WatchItemDialog'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
-import { computeQuestProgress, isDayAllDone } from './kidQuestGate'
+import { celebrationEarned, computeQuestProgress, isDayAllDone } from './kidQuestGate'
 import KidCelebration from './KidCelebration'
 import KidChapterPool from './KidChapterPool'
 import { isChapterPoolVisible, isReadAloudSectionVisible } from './chapterPool.logic'
@@ -225,7 +225,6 @@ export default function KidTodayView({
     mustDoDone,
     mustDoRemaining,
     mustDoCompleted,
-    mustDoSkipped,
     gateThreshold,
     gateUnlocked,
   } = useMemo(() => computeQuestProgress(checklist), [checklist])
@@ -246,6 +245,14 @@ export default function KidTodayView({
     choose,
     selectedChoiceItems,
   })
+
+  // UX-72: celebration (and the day-complete XP behind it) requires real work.
+  // `mustDoDone` can now be reached by parent skips alone; a fully-skipped day
+  // is *open* — Craft and Workshop unlock — but never *celebrated*: no
+  // "🎉 you did it!" (and no XP) over zero completions. See `celebrationEarned`.
+  const hasCompletedWork = mustDoCompleted > 0
+  const celebrateMustDo = celebrationEarned(mustDoDone, mustDoCompleted)
+  const celebrateAllDone = celebrationEarned(allDone, mustDoCompleted)
 
   const isLincoln = child.name.toLowerCase() === 'lincoln'
   const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])
@@ -322,10 +329,13 @@ export default function KidTodayView({
     [dailyArmorSession?.appliedPieces],
   )
 
-  // Award XP when all must-do items are completed (once per day per child)
+  // Award XP when all must-do items are resolved (once per day per child).
+  // Gated on `hasCompletedWork`: a skip earns nothing, so an all-skipped day
+  // must not mint the day-complete award (UX-72) — same behavior it had when
+  // `mustDoDone` could not be reached through skips at all.
   const prevMustDoDoneRef = useRef(false)
   useEffect(() => {
-    if (mustDoDone && !prevMustDoDoneRef.current && child.id && familyId) {
+    if (celebrateMustDo && !prevMustDoDoneRef.current && child.id && familyId) {
       void addXpEvent(
         familyId,
         child.id,
@@ -336,14 +346,16 @@ export default function KidTodayView({
         if (awarded > 0) setXpToast({ amount: awarded, reason: 'All must-do items complete!' })
       }).catch((err) => console.error('[XP] Award failed:', err))
     }
-    prevMustDoDoneRef.current = mustDoDone
-  }, [mustDoDone, child.id, familyId, today])
+    // Track the gated value so a later unskip + real completion still awards.
+    prevMustDoDoneRef.current = celebrateMustDo
+  }, [celebrateMustDo, child.id, familyId, today])
 
-  // Bonus XP when ALL items (must-do + choose) are completed
+  // Bonus XP when ALL items (must-do + choose) are completed. Same UX-72 gate:
+  // `allDone` reached through skips alone is an open day, not a finished one.
   const prevAllDoneRef = useRef(false)
   useEffect(() => {
     const totalItems = checklist.length
-    if (allDone && !prevAllDoneRef.current && child.id && familyId && totalItems >= 3) {
+    if (celebrateAllDone && !prevAllDoneRef.current && child.id && familyId && totalItems >= 3) {
       void addXpEvent(
         familyId,
         child.id,
@@ -355,15 +367,17 @@ export default function KidTodayView({
         if (awarded > 0) setXpToast({ amount: awarded, reason: `All ${totalItems} items done — bonus!` })
       }).catch((err) => console.error('[XP] Award failed:', err))
     }
-    prevAllDoneRef.current = allDone
-  }, [allDone, child.id, familyId, today, checklist.length])
+    prevAllDoneRef.current = celebrateAllDone
+  }, [celebrateAllDone, child.id, familyId, today, checklist.length])
 
-  // Track gate unlock for celebration display (state-during-render pattern)
+  // Track gate unlock for celebration display (state-during-render pattern).
+  // "Great work!" is celebration copy, so it needs real work too (UX-72): an
+  // all-skip unlock opens the Workshop silently, without praise over nothing.
   const [justUnlockedGate, setJustUnlockedGate] = useState(false)
   const [prevGateUnlocked, setPrevGateUnlocked] = useState(gateUnlocked)
   if (gateUnlocked !== prevGateUnlocked) {
     setPrevGateUnlocked(gateUnlocked)
-    if (gateUnlocked) {
+    if (gateUnlocked && hasCompletedWork) {
       setJustUnlockedGate(true)
     }
   }
@@ -706,7 +720,6 @@ export default function KidTodayView({
           gateUnlocked={gateUnlocked}
           gateThreshold={gateThreshold}
           mustDoCompleted={mustDoCompleted}
-          mustDoSkipped={mustDoSkipped}
           mustDoDone={mustDoDone}
           mustDoRemaining={mustDoRemaining}
           ritualsRemaining={ritualsToGo}
@@ -973,11 +986,12 @@ export default function KidTodayView({
         )
       )}
 
-      {/* ── CELEBRATION ── */}
+      {/* ── CELEBRATION — only over real work (UX-72): a fully-skipped day
+          reaches `mustDoDone`/`allDone` but stays open, never celebrated. */}
       <SectionErrorBoundary section="celebration">
         <KidCelebration
-          allDone={allDone}
-          mustDoDone={mustDoDone}
+          allDone={celebrateAllDone}
+          mustDoDone={celebrateMustDo}
           isMvd={!!isMvd}
           celebrationMessage={celebrationMessage}
           isLincoln={isLincoln}
