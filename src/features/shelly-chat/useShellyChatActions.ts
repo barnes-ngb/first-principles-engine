@@ -302,6 +302,45 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
   }
 }
 
+/**
+ * Why a proposal from the GENERAL tab was dropped (FEAT-152).
+ *
+ * The seatbelt under the prompt fix. Every action grammar is child-scoped by
+ * construction — each addendum returns "" without a `childId` — so a General-tab
+ * reply should carry no `<action>` block at all, and the live bug was that the
+ * model, told nothing about its limits, narrated a write in prose instead. But
+ * "should carry none" is a property of a prompt, and a prompt is a probability:
+ * the grammars are still in the model's training-time reach through the rest of
+ * the conversation, and a childId it read off the ALL CHILDREN section would be
+ * a REAL one.
+ *
+ * That is exactly what made this the wrong thing to leave un-gated. On the
+ * General tab `activeChildId` is `''`, so `rejectReason`'s mismatch check —
+ * `activeChildId && action.childId !== activeChildId` — short-circuits to
+ * false, and a well-formed action naming a real child would have been offered as
+ * a card and written. The tab with no write powers was, structurally, the tab
+ * with the LOOSEST child binding.
+ *
+ * So the General tab drops every action, and drops it out loud. Inferring the
+ * child from the payload is deliberately not the fix: a write must name its
+ * child by TAB, which is the parent's own unambiguous statement of who she means
+ * — not the model's guess at it.
+ *
+ * Names come from the family's own children (capability-never-name: a name is a
+ * label to render, never a gate), and fall back to a generic sentence that is
+ * still true and still actionable when there are none to render.
+ */
+export function generalTabDropNotice(childNames: string[]): string {
+  const names = childNames.map((n) => n.trim()).filter((n) => n.length > 0)
+  const tabs =
+    names.length >= 2
+      ? `${names.slice(0, -1).join(", ")}'s or ${names[names.length - 1]}'s tab`
+      : names.length === 1
+        ? `${names[0]}'s tab`
+        : "the child's tab"
+  return `I can't change anything from the General tab, so nothing was changed. Ask on ${tabs} and you'll get a card to confirm — the card is what makes it real.`
+}
+
 /** Stable empty default so an omitted `activityConfigs` dep doesn't churn refs. */
 const EMPTY_CONFIGS: ChatActivityConfig[] = []
 /** Same, for an omitted `weekDays` dep. */
@@ -561,12 +600,20 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // stage gate needs to know whether a `draftNextWeek` card would have anything
   // behind it BEFORE offering one.
   const onDraftNextWeekRef = useRef<ShellyChatActionsDeps['onDraftNextWeek']>(undefined)
+  // Whether a child tab is selected at all (FEAT-152). Empty on the General tab,
+  // which has no write powers — see `generalTabDropNotice`. A ref for the same
+  // reason as the others: `stagePendingActions` must keep a stable identity.
+  const activeChildIdRef = useRef<string>(activeChildId)
+  // Every child's name, for the General-tab drop's "ask on X's tab" sentence.
+  const allChildNamesRef = useRef<string[]>([])
   useEffect(() => {
     configsRef.current = activityConfigs
     weekRef.current = weekDays
     videosRef.current = watchVideos
     parentRef.current = canEditActivityConfigs
     childNameRef.current = children.find((c) => c.id === activeChildId)?.name
+    activeChildIdRef.current = activeChildId
+    allChildNamesRef.current = children.map((c) => c.name)
     onDraftNextWeekRef.current = onDraftNextWeek
   }, [activityConfigs, weekDays, watchVideos, canEditActivityConfigs, children, activeChildId, onDraftNextWeek])
 
@@ -591,6 +638,24 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     (messageId: string, actions: ChatAction[]) => {
       setPendingMessageId(messageId)
       const notices: string[] = []
+      // FEAT-152 — the General tab writes nothing, and says so. No action
+      // grammar is emitted without a childId, so an action block here is already
+      // off-contract; it is dropped whole rather than resolved, because the one
+      // thing that could rescue it — inferring the child from the payload — is
+      // precisely the thing a write must never do. See `generalTabDropNotice`.
+      if (!activeChildIdRef.current) {
+        if (actions.length > 0) {
+          console.warn(
+            '[shellyChat] dropped every action — the General tab has no write powers',
+            actions,
+          )
+          setSuppressed([generalTabDropNotice(allChildNamesRef.current)])
+        } else {
+          setSuppressed([])
+        }
+        setPending([])
+        return
+      }
       // Videos this turn has already accepted a vet-in for (Codex P2, PR #1676).
       // One reply really can carry two `vetInVideo` blocks for the same video —
       // "add all five" with a repeat in the list is the obvious way — and both
@@ -769,7 +834,14 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       if (!children.some((c) => c.id === action.childId)) {
         return 'unknown child'
       }
-      if (activeChildId && action.childId !== activeChildId) {
+      // FEAT-152 backstop, and the reason the mismatch check below is not enough
+      // on its own: on the General tab `activeChildId` is `''`, so that check
+      // short-circuits and a well-formed action naming a REAL child would sail
+      // through. No child tab selected means no write, full stop.
+      if (!activeChildId) {
+        return 'no child tab selected — the General tab cannot write'
+      }
+      if (action.childId !== activeChildId) {
         return 'child mismatch with active context'
       }
       // FEAT-135 backstop: even if a card were somehow offered, the action must

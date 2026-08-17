@@ -666,7 +666,74 @@ What you can change from this chat, and what you can't (say this accurately, nev
 - NOTHING is "coming". Never say a capability is on the way — you cannot know, and she plans around what you tell her. If you can't do it, say so and name the real screen.
 - Next week has two real routes: draft it here, or the handoff that opens Plan My Week with your brief. Offer that as a choice, not a fallback.`;
 
-export function buildShellyChatRoleSection(childName: string | undefined): string {
+/**
+ * The card-or-it-didn't-happen rule, hoisted to BOTH role branches (FEAT-152).
+ *
+ * Every action grammar already ends with its own "NEVER say it's done" line, and
+ * each one is right — but each one is also scoped to the grammar it closes, and
+ * a grammar that was never emitted rules over nothing. That is precisely how the
+ * General tab failed: with no `childId` every addendum returns "", so every
+ * don't-claim-it rule went with them, and the model — asked to add 30 minutes of
+ * recorder practice — replied "Pushed! ✅ … ✅ Added to Today's checklist for
+ * every remaining day this week" over a turn in which nothing was proposed and
+ * nothing was written.
+ *
+ * So the rule is stated once, in the base role section, where it survives the
+ * absence of every grammar. The per-grammar lines stay exactly as they are; this
+ * is the belt under them, and it is the ONLY one of the two that is present when
+ * there are no actions at all.
+ *
+ * The forbidden words are named rather than described. "Never claim a change is
+ * done" is a rule a model can satisfy while writing "Pushed! ✅" — it did — and
+ * the tokens the false report actually reached for are the cheapest thing to
+ * rule out by name.
+ */
+const CONFIRM_CARD_RULE = `
+CARD OR IT DIDN'T HAPPEN (hard rule, and it outranks anything below): a change to this family's records becomes real ONLY when the parent taps a confirm card. Proposing is not writing, and describing a change is not making one. If no confirm card was shown for something, then nothing happened and you must say so plainly.
+- NEVER report a change as made: no "Pushed", no "Added", no "Updated", no "Done", no "I've set", no ✅ or other checkmark about a record.
+- Speak about a proposal in the future tense — "I've proposed …, tap to confirm and it'll be added" — never the past tense.
+- If you cannot propose something, say you cannot, and say what nothing-was-changed means: her records are exactly as they were.`;
+
+/**
+ * The General tab's explicit no-write contract (FEAT-152).
+ *
+ * Present on the no-child branch, always. The four-time-repeated bug class this
+ * closes is a non-event narrated as a success, and the General tab was its
+ * cleanest case: the drop-with-reason machinery in the client never fired
+ * because no action block was ever emitted, so there was nothing to drop. The
+ * hole was never in the pipeline — it was that nothing in the prompt told the
+ * general-branch model it had no write powers, and a model with no stated limit
+ * and a parent asking for a change will invent the success.
+ *
+ * The tabs are NAMED from the family's own children rather than hardcoded, per
+ * the repo's capability-never-name rail — a child's name is a label to render,
+ * never a gate. With no names available it falls back to "the child's tab",
+ * which is still true and still actionable.
+ */
+export function buildGeneralNoWriteContract(childNames: string[]): string {
+  const names = childNames.map((n) => n.trim()).filter((n) => n.length > 0);
+  const tabs =
+    names.length >= 2
+      ? `${names.slice(0, -1).join(", ")}'s or ${names[names.length - 1]}'s tab`
+      : names.length === 1
+        ? `${names[0]}'s tab`
+        : "the child's tab";
+  return `
+NO WRITE POWERS ON THIS TAB (hard rule): this general conversation has NO actions behind it. You cannot add, change, push, record, schedule, or remove anything from here — not a curriculum activity, not an item on a checklist, not a sight word, not a plan, not a profile field. Nothing you say here reaches the app.
+- You must NEVER say you did any of those things. No "Pushed", no "Added", no "Updated", no "I've added it to Today", no ✅. There is no confirm card on this tab, and a change with no card behind it did not happen.
+- When the parent asks for a change, say plainly that this tab can't make it, and send her to ${tabs} — asking there puts a confirm card in front of her, and the card is the only thing that writes.
+- Everything else is unchanged and welcome here: talking it through, comparing the children, planning out loud, answering questions, working out WHAT to ask for. Help fully — just don't claim a change you cannot make.`;
+}
+
+export function buildShellyChatRoleSection(
+  childName: string | undefined,
+  /**
+   * Every child's name, for the General tab's "go ask on X's tab" sentence.
+   * Unused on the child branch. Optional so the child-scoped call sites and the
+   * existing prompt tests read exactly as they did.
+   */
+  allChildNames: string[] = [],
+): string {
   if (childName) {
     return `ROLE: You are the family's homeschool assistant. The ${childName} tab is selected, so prioritize ${childName}'s data and needs in your responses. Address the parent directly as "you"; never assume or use the parent's name (you don't know which parent is typing).
 
@@ -681,6 +748,7 @@ GUIDELINES:
 - If you're asked to generate an image, say to tap the image button.
 - For printable activities, format them clearly for screenshot or print.
 ${NAVIGATION_HONESTY_RULE}
+${CONFIRM_CARD_RULE}
 
 PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the year-to-date instructional-hours total against the reporting target (see HOURS PROGRESS), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE, and "are we on track for our hours" answers in HOURS PROGRESS, rather than guessing. For any question about ${childName}'s LEVEL, what to WORK ON next, or what curriculum/materials to BUY, ground the answer in the LEARNER MODEL section and SAY which evidence supports the level claim ("two sources agree — Fast Phonics and his June check"); the Learner Model covers reading & math only, so for any other subject (science, handwriting, etc.) say plainly that the model doesn't cover it rather than guessing. Use them to help the parent see patterns over time — what is shifting, what is steady, what connects across signals they have not linked. When the parent shares an observation about ${childName} mid-conversation, treat it as evidence they have earned the right to add to the picture — don't argue with it, build on it.`;
   }
@@ -694,7 +762,9 @@ GUIDELINES:
 - Keep responses concise unless you're asked for detail.
 - If you're asked to generate an image, say to tap the image button.
 - For printable activities, format them clearly for screenshot or print.
-${NAVIGATION_HONESTY_RULE}`;
+${NAVIGATION_HONESTY_RULE}
+${CONFIRM_CARD_RULE}
+${buildGeneralNoWriteContract(allChildNames)}`;
 }
 
 /**
@@ -943,6 +1013,7 @@ Rules:
 - Only days in THIS WEEK (Monday–Friday, listed above). A move's target must be a different weekday of the same week. For anything about NEXT week, use the plan-adjustment handoff below instead.
 - For "add": "label" is the kid-facing title WITHOUT a minutes suffix (the app adds it), "estimatedMinutes" is a whole number between 5 and 120 — a value outside that range is rejected outright, so don't propose one — and "subjectBucket" is optional (one of Reading, LanguageArts, Math, Science, SocialStudies, Music, Art, PracticalArts, PE, Other). Leave it out rather than guessing.
 - ONE change per action block. If the parent names two ("drop math and move reading to Thursday"), emit two separate blocks.
+- ONE DAY PER CARD — there is no batch. An action carries a single "dateKey", so a request spanning several days ("add 30 minutes of recorder every remaining day this week", "put it on Wednesday and Thursday") is ONE action block PER DAY and therefore SEVERAL confirm taps. Say that out loud before you propose — name the days and say it's one card each — and never describe a multi-day add as a single change, because there is no way for you to make one.
 - This changes the day's checklist only. It does not change how long an activity takes by default (that's setActivityMinutes), it does not re-plan the week, and it never touches hours already recorded.
 - NEVER say it's done. Say you've proposed it and it takes effect once they confirm — they see the row and the day on a card first.
 - Be conservative: only propose when the parent clearly wants the day changed. Talking about the week is not a change to it.`;
@@ -1513,7 +1584,15 @@ Example: If the parent says "Lincoln seems bored with reading" and the data show
   );
 
   // ── Step C: Build system prompt with charter alignment ──────────
-  const roleSection = buildShellyChatRoleSection(childId && childName ? childName : undefined);
+  // FEAT-152 — `allChildNames` is filled by the ALL CHILDREN block above, so the
+  // General tab's no-write contract can name the REAL tabs to ask on rather than
+  // hardcoded strings (capability-never-name: a name is a label, never a gate).
+  // It is empty only when the children read failed, and the contract falls back
+  // to "the child's tab", which is still true and still actionable.
+  const roleSection = buildShellyChatRoleSection(
+    childId && childName ? childName : undefined,
+    allChildNames,
+  );
   const sightWordActionAddendum = buildSightWordActionAddendum(childId || undefined, childName || undefined);
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
   const activityMinutesActionAddendum = buildActivityMinutesActionAddendum(childId || undefined, childName || undefined);
