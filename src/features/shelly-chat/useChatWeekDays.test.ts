@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import type { DayLog } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
@@ -6,6 +6,7 @@ import { checklistItemKey } from '../today/dayWriteGuard'
 import {
   chatWeekDaysCacheKey,
   currentWeekDayKeys,
+  plannableWatchDayKeys,
   toChatWeekDay,
 } from './useChatWeekDays'
 
@@ -39,6 +40,115 @@ describe('currentWeekDayKeys (FEAT-142)', () => {
     // divergence would offer the model rows the client cannot resolve.
     const week = currentWeekDayKeys(new Date('2026-08-10T00:00:00'))
     expect(week[0]).toEqual({ dateKey: '2026-08-10', label: 'Monday' })
+  })
+})
+
+describe('plannableWatchDayKeys (FEAT-149)', () => {
+  // The window a video may be planned onto: this school week and the next. This
+  // is the run's ONE widening past FEAT-142's current-week gate, so what is in
+  // it — and what is deliberately not — is pinned here.
+  //
+  // TZ is pinned for the whole block. On a UTC runner these assertions would
+  // pass vacuously: the boundary bug this guards against (a Sunday-evening
+  // civil date that has already rolled to Monday in UTC) is invisible unless the
+  // process is running in a zone behind UTC. Node re-reads `process.env.TZ` for
+  // Dates constructed after the assignment.
+  const originalTz = process.env.TZ
+  beforeAll(() => {
+    process.env.TZ = 'America/Chicago'
+  })
+  afterAll(() => {
+    process.env.TZ = originalTz
+  })
+
+  it('runs from today through next Friday, correctly labelled', () => {
+    // Wednesday 2026-08-12. Monday and Tuesday have already happened.
+    const days = plannableWatchDayKeys(new Date('2026-08-12T12:00:00'))
+    expect(days.map((d) => d.dateKey)).toEqual([
+      '2026-08-12',
+      '2026-08-13',
+      '2026-08-14',
+      '2026-08-17',
+      '2026-08-18',
+      '2026-08-19',
+      '2026-08-20',
+      '2026-08-21',
+    ])
+    expect(days[0].label).toBe('Wednesday')
+    expect(days[4].label).toBe('next Tuesday')
+  })
+
+  it('drops elapsed weekdays but keeps TODAY (Codex P2, PR #1676)', () => {
+    // "Add it to today" is a real ask, so today is the floor, not the exclusive
+    // bound. On a Friday, only Friday and next week remain.
+    const friday = plannableWatchDayKeys(new Date('2026-08-14T12:00:00'))
+    expect(friday[0].dateKey).toBe('2026-08-14')
+    expect(friday.map((d) => d.dateKey)).not.toContain('2026-08-10')
+    expect(friday).toHaveLength(6)
+  })
+
+  it('never offers a past day — the grammar says so, and the window must agree', () => {
+    // Spreading the whole current week would make Monday plannable on Friday:
+    // an unfinished row on a day that already happened, and a flat contradiction
+    // of the addendum's own "not a past day" rule.
+    for (const [now, today] of [
+      ['2026-08-10T08:00:00', '2026-08-10'],
+      ['2026-08-12T12:00:00', '2026-08-12'],
+      ['2026-08-14T23:00:00', '2026-08-14'],
+    ] as const) {
+      for (const d of plannableWatchDayKeys(new Date(now))) {
+        expect(d.dateKey >= today, `${d.dateKey} on ${today}`).toBe(true)
+      }
+    }
+  })
+
+  it('is a prefix-trimmed current week — the two windows cannot drift apart', () => {
+    // On a Monday nothing has elapsed, so the head is exactly the current week.
+    const monday = new Date('2026-08-10T09:00:00')
+    expect(plannableWatchDayKeys(monday).slice(0, 5)).toEqual(currentWeekDayKeys(monday))
+  })
+
+  it('excludes weekends, the week after next, and last week', () => {
+    const keys = plannableWatchDayKeys(new Date('2026-08-12T12:00:00')).map((d) => d.dateKey)
+    expect(keys).not.toContain('2026-08-15') // Saturday
+    expect(keys).not.toContain('2026-08-16') // Sunday
+    expect(keys).not.toContain('2026-08-24') // next-plus-one Monday
+    expect(keys).not.toContain('2026-08-07') // last Friday
+  })
+
+  it('on a weekend the window is next week alone — which is what the ask means', () => {
+    // Sunday belongs to the week that is ENDING, so its Mon–Fri are all behind.
+    // A Sunday-evening "plan some videos for next week" therefore gets exactly
+    // next week, and cannot land on the week that has gone by.
+    const days = plannableWatchDayKeys(new Date('2026-08-16T19:30:00'))
+    expect(days).toHaveLength(5)
+    expect(days[0]).toEqual({ dateKey: '2026-08-17', label: 'next Monday' })
+    expect(days[4]).toEqual({ dateKey: '2026-08-21', label: 'next Friday' })
+  })
+
+  it('crosses a month boundary as calendar arithmetic, not +7 on the day number', () => {
+    const days = plannableWatchDayKeys(new Date('2026-08-26T12:00:00'))
+    expect(days.map((d) => d.dateKey)).toEqual([
+      '2026-08-26',
+      '2026-08-27',
+      '2026-08-28',
+      '2026-08-31',
+      '2026-09-01',
+      '2026-09-02',
+      '2026-09-03',
+      '2026-09-04',
+    ])
+  })
+
+  it('agrees with the Cloud Function on the same date (both sides pinned)', () => {
+    // `plannableWatchDays` in `functions/src/ai/tasks/shellyChat.ts` builds the
+    // list the model is told about; this builds the list the confirm gate
+    // accepts. A divergence would offer the model days the client refuses, so
+    // the same date/label pairs are asserted on each side.
+    const days = plannableWatchDayKeys(new Date('2026-08-12T12:00:00'))
+    expect(days[0]).toEqual({ dateKey: '2026-08-12', label: 'Wednesday' })
+    expect(days[3]).toEqual({ dateKey: '2026-08-17', label: 'next Monday' })
+    expect(days[7]).toEqual({ dateKey: '2026-08-21', label: 'next Friday' })
   })
 })
 

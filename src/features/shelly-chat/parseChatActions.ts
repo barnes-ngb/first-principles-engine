@@ -18,6 +18,7 @@ import { isWorkbookOwnerInvalid } from '../../core/firebase/activityConfigWrites
 import { ActivityFrequency, ActivityType, SubjectBucket } from '../../core/types/enums'
 import type { ChatAction } from '../../core/types/shellyChat'
 import { sanitizeAndParseJson } from '../../core/utils/sanitizeJson'
+import { extractYouTubeId, isValidYouTubeId } from '../../core/utils/youtubeId'
 
 export interface ParsedChatActions {
   actions: ChatAction[]
@@ -39,6 +40,17 @@ const SOFT_PROFILE_FIELDS = ['motivators', 'interests', 'strengths'] as const
  */
 export const MIN_ACTIVITY_MINUTES = 5
 export const MAX_ACTIVITY_MINUTES = 120
+
+/**
+ * The cap on a `draftNextWeek` instruction string (FEAT-150).
+ *
+ * Generous enough for any real ask a parent would voice about a week — "lighter
+ * overall, math every day but short, and please keep Wednesday clear for the
+ * dentist" is under 120 characters — and short enough that the field cannot
+ * become a channel for model-authored prose into a generation prompt. Rejected
+ * when exceeded, never truncated.
+ */
+export const MAX_DRAFT_INSTRUCTION_CHARS = 600
 
 /**
  * Shape gate for a `YYYY-MM-DD` day key (FEAT-142).
@@ -126,6 +138,12 @@ function isPositiveInteger(value: unknown): value is number {
  *   ≥ 1). A **shared workbook** is rejected outright (DATA-08). Whether an id
  *   names a real config, whether that config is already finished, and whether a
  *   position is past the end are resolved later, against the live configs.
+ * - Watch Vehicle (FEAT-149): `vetInVideo` (+ an 11-char `youtubeId` that must
+ *   be extractable from a REQUIRED http(s) `suggestedFromUrl`, a non-empty
+ *   `title`, a positive-integer `plannedMinutes`, a real `SubjectBucket`, and a
+ *   non-empty `why`), and `planVideoOnDay` (+ a non-empty `watchVideoId` and a
+ *   real `dateKey`). Whether the video is already in the library, whether it is
+ *   retired, and whether the date is a plannable weekday are resolved later.
  *
  * Everything else — including a well-formed JSON object carrying an unknown
  * `kind`, an `editProfileField` targeting a disallowed field like
@@ -374,6 +392,104 @@ function toChatAction(payload: unknown): ChatAction | null {
     const activityConfigId = nonEmptyString(obj.activityConfigId)
     if (!activityConfigId) return null
     return { kind: 'markActivityComplete', childId: obj.childId, activityConfigId }
+  }
+
+  // ── Watch Vehicle — vet a found video in, plan a vetted one (FEAT-149) ─
+  // The chat could already search the web for a teaching video; it could not
+  // get one into the app. These two kinds do, and the first one carries the
+  // rail the whole feature hangs on:
+  //
+  //   **A youtubeId the model did not read off a real page is unrepresentable.**
+  //
+  // `suggestedFromUrl` is REQUIRED and must be an http(s) URL that
+  // `extractYouTubeId` — the exact rule `WatchVetInForm` validates a paste with,
+  // reused rather than re-implemented — resolves to the same id. A bare id in
+  // that field is therefore rejected too: `extractYouTubeId` would happily
+  // accept it, and accepting it would let the model launder a remembered id
+  // through the field that exists to prove provenance.
+  //
+  // Everything this pure module cannot check — is that video already in the
+  // library, is it retired, is that date in a plannable week — is checked in
+  // `watchActions` against the live library and the live clock.
+  if (obj.kind === 'vetInVideo') {
+    if (typeof obj.youtubeId !== 'string' || !isValidYouTubeId(obj.youtubeId)) return null
+    const suggestedFromUrl = nonEmptyString(obj.suggestedFromUrl)
+    if (!suggestedFromUrl) return null
+    if (!/^https?:\/\//i.test(suggestedFromUrl)) return null
+    if (extractYouTubeId(suggestedFromUrl) !== obj.youtubeId) return null
+    const title = nonEmptyString(obj.title)
+    if (!title) return null
+    // The vet-in form's own minutes rule — a positive integer — mirrored, not
+    // reinvented. The [5, 120] band the other kinds carry is deliberately NOT
+    // applied: a 3-minute clip and a 90-minute documentary are both real
+    // library entries, and the form has always accepted them.
+    if (!isPositiveInteger(obj.plannedMinutes)) return null
+    if (
+      typeof obj.subjectBucket !== 'string' ||
+      !SUBJECT_BUCKETS.includes(obj.subjectBucket)
+    ) {
+      return null
+    }
+    // `why` is REQUIRED here, unlike the library's own optional field: a video
+    // the parent did not choose the framing for is one the model is pushing, and
+    // the one line of "why we're watching" is what makes the card checkable.
+    const why = nonEmptyString(obj.why)
+    if (!why) return null
+    return {
+      kind: 'vetInVideo',
+      childId: obj.childId,
+      youtubeId: obj.youtubeId,
+      title,
+      plannedMinutes: obj.plannedMinutes,
+      subjectBucket: obj.subjectBucket as SubjectBucket,
+      why,
+      suggestedFromUrl,
+    }
+  }
+
+  if (obj.kind === 'planVideoOnDay') {
+    const watchVideoId = nonEmptyString(obj.watchVideoId)
+    if (!watchVideoId) return null
+    // Shape only. WHICH week the date belongs to is not this module's to know —
+    // `watchActions` resolves it against the current-or-next school week, the
+    // one deliberate widening past FEAT-142's current-week gate.
+    if (!isValidDateKey(obj.dateKey)) return null
+    return {
+      kind: 'planVideoOnDay',
+      childId: obj.childId,
+      watchVideoId,
+      dateKey: obj.dateKey,
+    }
+  }
+
+  // ── draftNextWeek — ask for a draft of next week (FEAT-150) ────────
+  //
+  // The narrowest possible shape for the widest capability in the portal, and
+  // the narrowness is the point. Three things are deliberately NOT here:
+  //
+  //   1. **No plan.** The model cannot emit days, items or minutes. A week it
+  //      wrote out of prose would be a plan no generator produced, checked
+  //      against no workbook position and no day budget. Confirming this action
+  //      runs the planner's own generation task instead.
+  //   2. **No week.** There is no `weekStart` / `targetWeek` field to hallucinate
+  //      into. "Next week" is resolved from the family's clock at generation and
+  //      re-resolved at the write (`nextWeekActions`), so a stale card cannot
+  //      write to a week that has since become the current one.
+  //   3. **No apply.** There is no `applyNextWeek` kind anywhere in the union,
+  //      so the model has no way to express "and write it". The apply card is
+  //      built by the app from a draft that already exists.
+  //
+  // What it does carry is `instructions`: the parent's own words, gated as a
+  // non-empty string and CAPPED. The cap is not a formatting nicety — the string
+  // is folded into a generation prompt, so an unbounded one is a way to spend
+  // the parent's tokens and to bury the planner's instructions under a wall of
+  // model-authored text. Over-long is rejected as malformed, never truncated: a
+  // truncated instruction is one the parent read on the card and did not get.
+  if (obj.kind === 'draftNextWeek') {
+    const instructions = nonEmptyString(obj.instructions)
+    if (!instructions) return null
+    if (instructions.length > MAX_DRAFT_INSTRUCTION_CHARS) return null
+    return { kind: 'draftNextWeek', childId: obj.childId, instructions }
   }
 
   if (obj.kind === 'setActivityPosition') {

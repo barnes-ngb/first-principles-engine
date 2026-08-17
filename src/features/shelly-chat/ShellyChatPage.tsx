@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
@@ -34,12 +34,21 @@ import Typography from '@mui/material/Typography'
 import { useAI } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
+import {
+  activityConfigsToRoutineText,
+  parseRoutineTotalMinutes,
+} from '../planner-chat/chatPlanner.logic'
 import { useProfile } from '../../core/profile/useProfile'
 import type { ChatContext } from '../../core/types'
 import { UserProfile } from '../../core/types/enums'
 import ActionConfirmCard from './ActionConfirmCard'
+import NextWeekDraftCard from './NextWeekDraftCard'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
-import { useChatWeekDays } from './useChatWeekDays'
+import { useChatPlannerDefaults } from './useChatPlannerDefaults'
+import { useNextWeekDraft } from './useNextWeekDraft'
+import { useChatWatchLibrary } from './useChatWatchLibrary'
+import { plannableWatchDayKeys, useChatWeekDays } from './useChatWeekDays'
 import ChatMessageBubble from './ChatMessageBubble'
 import ChatThreadDrawer from './ChatThreadDrawer'
 import { formatRelativeTime } from './formatRelativeTime'
@@ -145,6 +154,61 @@ export default function ShellyChatPage() {
   // and the weekday name instead of an id. Parent-gated the same way, and at the
   // same two layers, as the configs above — passing '' costs zero reads.
   const weekDays = useChatWeekDays(familyId, isParent ? contextChildId : '')
+  // FEAT-149 — the child's curated Watch Library, read-only. It refuses a
+  // duplicate vet-in with a reason, resolves a proposed `planVideoOnDay` to a
+  // real ACTIVE entry before its card is offered, and gives the card the video's
+  // title instead of a doc id. Parent-gated the same way, and at the same two
+  // layers, as the two reads above — passing '' costs zero reads.
+  const watchVideos = useChatWatchLibrary(familyId, isParent ? contextChildId : '')
+  // The ten weekdays a video may be planned onto — this week's and next week's.
+  // Recomputed every render (five `Date` allocations) for the same reason
+  // `useChatWeekDays` recomputes its week: pinning it at mount would let a page
+  // left open across a rollover render "next Tuesday" for a day that is now this
+  // week's. The card is a preview of a gate the write layer re-reads anyway.
+  const plannableDays = plannableWatchDayKeys()
+  // FEAT-150 — everything the planner's own generator needs to draft next week,
+  // read the planner's own way so a week drafted here and a week drafted in Plan
+  // My Week come out the same. The routine text and the day budget are DERIVED
+  // from the configs above rather than read separately, which is exactly what
+  // `PlannerChatPage` does — one source for "what does a normal day look like".
+  const { snapshot } = useChildSkillSnapshot(familyId, isParent ? contextChildId : undefined)
+  const subjectTimeDefaults = useChatPlannerDefaults(familyId, isParent ? contextChildId : '')
+  const dailyRoutine = useMemo(
+    () => activityConfigsToRoutineText(activityConfigs),
+    [activityConfigs],
+  )
+  // The planner's 'full energy' branch, which is the right default here: the
+  // parent's own words ("make it lighter") shape the week through the prompt,
+  // so the budget should start from the real routine rather than pre-shrink it.
+  const hoursPerDay = useMemo(() => {
+    const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
+    return routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3
+  }, [dailyRoutine])
+  // The same derivation the planner uses (FEAT-72): the snapshot's priority tags
+  // target `parseAIResponse`'s parse-time catalog-tag backfill, so a week drafted
+  // here lands on tags the FEAT-68/69 re-test bridge can map. Empty is fine.
+  const prioritySkillTags = useMemo(
+    () => snapshot?.prioritySkills.map((s) => s.tag) ?? [],
+    [snapshot],
+  )
+  const {
+    nextWeek,
+    generateNextWeek,
+    applyNextWeek,
+    dismissNextWeek,
+  } = useNextWeekDraft({
+    familyId,
+    activeChildId: contextChildId,
+    children,
+    activityConfigs,
+    dailyRoutine,
+    hoursPerDay,
+    snapshot,
+    subjectTimeDefaults,
+    prioritySkillTags,
+    canEdit: isParent,
+    chat,
+  })
   const {
     pending: pendingActions,
     suppressed: suppressedActionNotices,
@@ -158,11 +222,16 @@ export default function ShellyChatPage() {
     activeChildId: contextChildId,
     activityConfigs,
     weekDays,
+    watchVideos,
     canEditActivityConfigs: isParent,
     activeThreadId,
     // A confirmed proposePlanAdjustment HANDOFF stages its brief, then navigates
     // here to Plan My Week — the chat never writes the plan itself.
     navigateToPlanner: () => navigate('/planner'),
+    // FEAT-150 — tap one of two. Confirming a `draftNextWeek` card spends a plan
+    // generation and renders the week here; the write is a SECOND tap on the
+    // draft card below, which has no `ChatAction` kind behind it.
+    onDraftNextWeek: generateNextWeek,
   })
 
   const {
@@ -520,12 +589,23 @@ export default function ShellyChatPage() {
           familyChildren={children}
           activityConfigs={activityConfigs}
           weekDays={weekDays}
+          watchVideos={watchVideos}
+          plannableDays={plannableDays}
           suppressed={suppressedActionNotices}
           onConfirm={applyChatAction}
           onDismiss={dismissAction}
           onConfirmAll={confirmAll}
         />
       )}
+
+      {/* The drafted week, in full, plus its own separate Apply (FEAT-150) */}
+      <NextWeekDraftCard
+        view={nextWeek}
+        childName={children.find((c) => c.id === contextChildId)?.name ?? 'this week'}
+        hoursPerDay={hoursPerDay}
+        onApply={() => void applyNextWeek()}
+        onDismiss={dismissNextWeek}
+      />
 
       {/* Follow-up suggestions */}
       {followUps.length > 0 && !sending && (

@@ -52,6 +52,18 @@
 //     book never reaches a write — and the parent is told, in words, why no card
 //     appeared. There is deliberately **no delete**: completion is the only
 //     removal the chat can propose (retire, don't delete).
+//   - The watch actions (FEAT-149) — `vetInVideo` / `planVideoOnDay` — let the
+//     chat get a video it FOUND on the web into the app. Vet-in routes through
+//     `addWatchVideo`, the same writer the vet-in form calls; a plan routes
+//     through `writeWatchItemToDay`, the FEAT-132 day lane. Both are additive and
+//     neither is reimplemented here. Resolved against the child's live library
+//     and the plannable week window BEFORE a card is offered (`watchActions`), so
+//     a duplicate, a retired entry, or a date outside this-week-or-next never
+//     reaches a write — and the parent is told why no card appeared. There is
+//     deliberately **no un-retire, no delete, and no library edit**: vet-in is
+//     the only library write the chat can make. `vetInVideo` is, like
+//     `addActivity`, NOT idempotent — it mints a fresh doc per call — so the
+//     re-entry guard below is what stops a double tap creating two entries.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
@@ -64,7 +76,7 @@ import {
 import { shellyChatMessagesCollection } from '../../core/firebase/firestore'
 import { updateActivityConfigMinutes } from '../../core/firebase/updateActivityMinutes'
 import { updateChildSoftProfile } from '../../core/family/updateChildSoftProfile'
-import type { ChatAction, Child } from '../../core/types'
+import type { ChatAction, Child, WatchVideo } from '../../core/types'
 import type { ActivityType } from '../../core/types/enums'
 import { todayKey } from '../../core/utils/dateKey'
 import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
@@ -83,8 +95,17 @@ import {
 } from './curriculumActions'
 import type { ChatWeekDay, DayItemAction } from './dayItemActions'
 import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
-import { currentWeekDayKeys } from './useChatWeekDays'
+import type { WatchAction } from './watchActions'
+import { isWatchAction, repeatedVetInNotice, resolveWatchAction } from './watchActions'
+import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
+import {
+  isDraftNextWeekAction,
+  resolveDraftNextWeek,
+  type DraftNextWeekAction,
+} from './nextWeekActions'
 import { stagePlanAdjustment } from './stagePlanAdjustment'
+import { addWatchVideo } from '../watch/useWatchLibrary'
+import { writeWatchItemToDay } from '../watch/writeWatchItemToDay'
 
 /**
  * `'applying'` is the in-flight state between a confirm tap and the write
@@ -187,6 +208,15 @@ export interface ShellyChatActionsDeps {
    */
   weekDays?: ChatWeekDay[]
   /**
+   * The acting child's curated Watch Library — the child's own entries plus
+   * shared `'both'` ones, RETIRED ones included (FEAT-149). Used to refuse a
+   * duplicate vet-in with a reason, to resolve a proposed `planVideoOnDay` to a
+   * real ACTIVE entry before its card is offered, and to render that card by
+   * title. Defaults to empty, which simply means nothing can be planned (a
+   * vet-in still resolves — nothing is a duplicate of nothing).
+   */
+  watchVideos?: WatchVideo[]
+  /**
    * Whether the signed-in profile is a parent. `setActivityMinutes` and the
    * live-day edits are parent-only, and `/chat` is nav-gated rather than
    * route-gated, so the write layer states the gate itself instead of trusting
@@ -201,6 +231,20 @@ export interface ShellyChatActionsDeps {
    * router (and testable); the page wires it with `useNavigate`.
    */
   navigateToPlanner?: () => void
+  /**
+   * Run the plan generation a confirmed `draftNextWeek` asks for (FEAT-150).
+   *
+   * **This is the first of the feature's two taps, and it writes nothing.** The
+   * hook deliberately owns no draft state and no generation logic: the draft, the
+   * week it targets, and the SECOND tap that actually writes it all live in
+   * `useNextWeekDraft`. What crosses this seam is one call and one boolean —
+   * `false` when no week was produced, so the confirm card reverts to pending
+   * instead of stamping "Done ✓" over a generation that failed.
+   *
+   * Optional, and absent means the kind simply cannot be staged, which is the
+   * correct behaviour for any caller that has not wired the draft surface.
+   */
+  onDraftNextWeek?: (action: DraftNextWeekAction) => Promise<boolean>
 }
 
 /** The Tier-C Option-2 additive snapshot kinds (6b). */
@@ -262,6 +306,8 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
 const EMPTY_CONFIGS: ChatActivityConfig[] = []
 /** Same, for an omitted `weekDays` dep. */
 const EMPTY_WEEK: ChatWeekDay[] = []
+/** Same, for an omitted `watchVideos` dep. */
+const EMPTY_VIDEOS: WatchVideo[] = []
 
 /**
  * Narrow the subscribed week to the week it is RIGHT NOW (Codex P2 on PR #1667).
@@ -344,6 +390,60 @@ async function applyDayItemAction(
 }
 
 /**
+ * Perform a confirmed watch action (FEAT-149).
+ *
+ * **This is a router, not a writer.** A vet-in calls `addWatchVideo`, the same
+ * module-level writer `WatchVetInForm` calls through `useWatchLibrary.addVideo`,
+ * so a video curated from a confirm card and one curated from the form are the
+ * same document written the same way. A plan calls `writeWatchItemToDay`, the
+ * FEAT-132 lane, which builds the row through `buildWatchChecklistItem` (so
+ * `itemType` / `watchVideoId` survive and the kid's watch bucket finds it),
+ * routes through `setDayLogGuarded`, and creates the day document when the day
+ * was never planned. The chat opens no second path to either.
+ *
+ * `addedBy` is stamped HERE with the confirming account's uid — never taken from
+ * the model, and never defaulted by the writer. The tap is the vetting act, so
+ * the identity on the record is the identity that tapped. (`familyId` IS that
+ * uid: `useFamilyId` derives the family id from the signed-in user's uid, and
+ * the family shares one account.)
+ *
+ * Returns false when the video a plan names is no longer resolvable, so the
+ * caller leaves the card pending rather than stamping "Done" over nothing.
+ */
+async function applyWatchAction(
+  familyId: string,
+  action: WatchAction,
+  videos: WatchVideo[],
+): Promise<boolean> {
+  if (action.kind === 'vetInVideo') {
+    await addWatchVideo(familyId, {
+      youtubeId: action.youtubeId,
+      title: action.title,
+      plannedMinutes: action.plannedMinutes,
+      subjectBucket: action.subjectBucket,
+      childId: action.childId,
+      why: action.why,
+      addedBy: familyId,
+      suggestedFromUrl: action.suggestedFromUrl,
+    })
+    return true
+  }
+
+  const video = videos.find((v) => v.id === action.watchVideoId)
+  if (!video) {
+    console.warn('[shellyChat] planVideoOnDay — video vanished before the write', action)
+    return false
+  }
+  await writeWatchItemToDay({
+    familyId,
+    childId: action.childId,
+    dateKey: action.dateKey,
+    video,
+  })
+  return true
+}
+
+/**
  * Perform a confirmed curriculum edit through the shared write core (FEAT-143).
  *
  * **This is a router, not a writer.** Every branch calls
@@ -412,9 +512,11 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     activeChildId,
     activityConfigs = EMPTY_CONFIGS,
     weekDays = EMPTY_WEEK,
+    watchVideos = EMPTY_VIDEOS,
     canEditActivityConfigs = false,
     activeThreadId,
     navigateToPlanner,
+    onDraftNextWeek,
   } = deps
 
   const [pending, setPending] = useState<PendingAction[]>([])
@@ -436,6 +538,10 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // new call site — and for every kind, since "idempotent" is a property a
   // future kind may not have.
   const appliedOrInFlightRef = useRef<Set<ChatAction>>(new Set())
+  // Tail of the confirmed-write queue (Codex P1, PR #1676). Every confirmed
+  // action chains onto this, so two cards tapped a frame apart write one after
+  // the other instead of racing. See `applyChatAction` for why that matters.
+  const writeQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   // Latest configs + capability, read at stage/apply time rather than captured
   // in a closure, so a snapshot that lands between renders is the one we
@@ -444,17 +550,25 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // runs before any confirm tap can reach these callbacks.
   const configsRef = useRef<ChatActivityConfig[]>(activityConfigs)
   const weekRef = useRef<ChatWeekDay[]>(weekDays)
+  const videosRef = useRef<WatchVideo[]>(watchVideos)
   const parentRef = useRef<boolean>(canEditActivityConfigs)
   // The acting child's NAME, for the refusal sentences a dropped live-day edit
   // shows ("Lincoln already did this one — …"). A ref for the same reason as the
   // others: `stagePendingActions` must keep a stable identity.
   const childNameRef = useRef<string | undefined>(undefined)
+  // The next-week draft surface (FEAT-150). A ref for the same reason as the
+  // others — `stagePendingActions` must keep a stable identity — and because the
+  // stage gate needs to know whether a `draftNextWeek` card would have anything
+  // behind it BEFORE offering one.
+  const onDraftNextWeekRef = useRef<ShellyChatActionsDeps['onDraftNextWeek']>(undefined)
   useEffect(() => {
     configsRef.current = activityConfigs
     weekRef.current = weekDays
+    videosRef.current = watchVideos
     parentRef.current = canEditActivityConfigs
     childNameRef.current = children.find((c) => c.id === activeChildId)?.name
-  }, [activityConfigs, weekDays, canEditActivityConfigs, children, activeChildId])
+    onDraftNextWeekRef.current = onDraftNextWeek
+  }, [activityConfigs, weekDays, watchVideos, canEditActivityConfigs, children, activeChildId, onDraftNextWeek])
 
   /**
    * Stage the actions parsed from an assistant message, awaiting a confirm tap.
@@ -477,7 +591,47 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     (messageId: string, actions: ChatAction[]) => {
       setPendingMessageId(messageId)
       const notices: string[] = []
+      // Videos this turn has already accepted a vet-in for (Codex P2, PR #1676).
+      // One reply really can carry two `vetInVideo` blocks for the same video —
+      // "add all five" with a repeat in the list is the obvious way — and both
+      // would resolve against the SAME pre-write library snapshot, so neither
+      // sees the other. `addWatchVideo` is an `addDoc`, and the re-entry guard
+      // is keyed on the action OBJECT, so two distinct objects would mint two
+      // library entries for one video. Deduped here, where the whole turn is
+      // visible at once, rather than at the write, where each call is alone.
+      const acceptedYouTubeIds = new Set<string>()
+      // Both next-week routes in one turn (Codex P2, PR #1679). The grammar now
+      // states precedence and forbids emitting both, but a prompt is a
+      // probability and this is a determinism: `draftNextWeek` and
+      // `proposePlanAdjustment` answer the SAME question ("reshape next week"),
+      // so two cards would be two conflicting confirmations for one intent —
+      // one drafting the week here, one navigating away to build it elsewhere.
+      // When both arrive, the draft wins and the handoff is dropped.
+      //
+      // Deliberately NOT recorded as a suppressed notice: the notices exist so
+      // that a reply promising "confirm with a tap" never leaves the parent
+      // waiting on a card that does not come. Here a card DOES come, and it does
+      // the thing she asked for — telling her about a redundant second route she
+      // never saw would be noise, not honesty. (The escape hatch to Plan My Week
+      // is still on the draft card itself.)
+      // Keyed on whether a draft will actually be OFFERED, not merely on whether
+      // one was emitted. The difference is load-bearing: for a kid profile (or
+      // with no draft surface wired) the draft is refused, and suppressing the
+      // handoff on the strength of its mere presence would leave the turn with
+      // NO card at all — turning a redundancy fix into a capability regression.
+      const draftWillBeOffered = actions.some(
+        (a) =>
+          isDraftNextWeekAction(a) &&
+          Boolean(onDraftNextWeekRef.current) &&
+          resolveDraftNextWeek(a, parentRef.current).ok,
+      )
       const offerable = actions.filter((action) => {
+        if (draftWillBeOffered && action.kind === 'proposePlanAdjustment') {
+          console.warn(
+            '[shellyChat] dropped a plan-adjustment handoff — a next-week draft was proposed in the same turn',
+          )
+          return false
+        }
         // FEAT-142 — a live-day edit is resolved against THIS WEEK before it can
         // become a card: the day must be a weekday of the current week, the row
         // must really be on it, and a finished row is refused here with the
@@ -493,6 +647,56 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
             console.warn('[shellyChat] dropped live-day edit —', resolution.notice, action)
             notices.push(resolution.notice)
             return false
+          }
+          return true
+        }
+        // FEAT-150 — a next-week draft is resolved against the capability
+        // before it can become a card. It is the largest thing this chat can
+        // propose, so it is also refused when the surface that would run it is
+        // not wired: a card whose confirm has nothing behind it would spend the
+        // parent's tap on nothing, which is the exact failure the suppressed
+        // notices exist to prevent.
+        if (isDraftNextWeekAction(action)) {
+          if (!onDraftNextWeekRef.current) {
+            console.warn('[shellyChat] dropped draftNextWeek — no draft surface wired')
+            notices.push(
+              "I can't draft a week from here right now — nothing was changed. Plan My Week can build it.",
+            )
+            return false
+          }
+          const resolution = resolveDraftNextWeek(action, parentRef.current)
+          if (!resolution.ok) {
+            console.warn('[shellyChat] dropped draftNextWeek —', resolution.notice, action)
+            notices.push(resolution.notice)
+            return false
+          }
+          return true
+        }
+        // FEAT-149 — a watch action is resolved against the child's live library
+        // and the plannable week window before it can become a card: a video
+        // already vetted in is refused (and pointed at the Archive when it was
+        // retired), and a plan must name a live entry and a weekday of this week
+        // or next. The window is recomputed from the clock HERE, for the same
+        // reason `thisWeekOnly` recomputes the current week.
+        if (isWatchAction(action)) {
+          const resolution = resolveWatchAction(
+            action,
+            videosRef.current,
+            plannableWatchDayKeys(),
+            parentRef.current,
+          )
+          if (!resolution.ok) {
+            console.warn('[shellyChat] dropped watch action —', resolution.notice, action)
+            notices.push(resolution.notice)
+            return false
+          }
+          if (action.kind === 'vetInVideo') {
+            if (acceptedYouTubeIds.has(action.youtubeId)) {
+              console.warn('[shellyChat] dropped a repeated vet-in in one turn', action)
+              notices.push(repeatedVetInNotice(action.title))
+              return false
+            }
+            acceptedYouTubeIds.add(action.youtubeId)
           }
           return true
         }
@@ -591,6 +795,27 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         )
         if (!resolution.ok) return resolution.notice
       }
+      // FEAT-149 backstop: same shape as the ones above. A card staged before
+      // the video was retired elsewhere — or before the week rolled over,
+      // carrying "next Tuesday" out of the plannable window — must not reach a
+      // write on a later tap.
+      if (isWatchAction(action)) {
+        const resolution = resolveWatchAction(
+          action,
+          videosRef.current,
+          plannableWatchDayKeys(),
+          parentRef.current,
+        )
+        if (!resolution.ok) return resolution.notice
+      }
+      // FEAT-150 backstop: a card staged while the parent was signed in must not
+      // reach a generation on a later tap from a kid profile — and a surface
+      // that has since gone away must not be called into.
+      if (isDraftNextWeekAction(action)) {
+        if (!onDraftNextWeekRef.current) return 'no next-week draft surface'
+        const resolution = resolveDraftNextWeek(action, parentRef.current)
+        if (!resolution.ok) return resolution.notice
+      }
       // FEAT-143 backstop: same shape as the two above. A card staged before a
       // config was completed elsewhere (or before the capability was lost) must
       // not reach a write on a later tap.
@@ -631,6 +856,12 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         // plan reads. Nothing retroactive: no dayLog is touched, no applied
         // week is re-planned, and no already-recorded minute moves.
         await updateActivityConfigMinutes(familyId, action.activityConfigId, action.minutes)
+      } else if (isWatchAction(action)) {
+        // FEAT-149 — vet a found video into the library, or plan a vetted one
+        // onto a weekday of this week or next. Routed through the vet-in form's
+        // own writer and the FEAT-132 day lane; purely additive on both sides.
+        const done = await applyWatchAction(familyId, action, videosRef.current)
+        if (!done) return false
       } else if (isCurriculumAction(action)) {
         // FEAT-143 — add / finish / reposition an activity, routed through the
         // shared `activityConfigWrites` core Progress → Curriculum calls. Nothing
@@ -648,6 +879,16 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
           console.warn('[shellyChat] live-day edit refused by the write lane', action)
           return false
         }
+      } else if (isDraftNextWeekAction(action)) {
+        // FEAT-150 — tap ONE of two. This spends a plan generation and puts a
+        // draft on screen; it writes no week, no day and no child record. The
+        // second tap lives on the draft card and has no `ChatAction` kind, so a
+        // reply can never reach a week write in a single confirmation.
+        //
+        // A `false` return means no week was produced, so the card must go back
+        // to pending rather than claim a draft the parent cannot see.
+        const drafted = await onDraftNextWeekRef.current?.(action)
+        if (!drafted) return false
       } else if (action.kind === 'proposePlanAdjustment') {
         // HANDOFF, not a write (chunk 2A/2): stage the brief to the planner's
         // per-child inbox. shelly-chat NEVER writes the plan — the planner owns
@@ -707,6 +948,17 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
    * refused before any writer is reached, so a non-idempotent kind like
    * `addActivity` cannot create two documents (Codex P1, PR #1669).
    *
+   * Writes are additionally **serialized** against each other (Codex P1, PR
+   * #1676). The re-entry guard is keyed on the action object, so it says nothing
+   * about two DIFFERENT cards confirmed a frame apart — and every day write in
+   * this app is a read-modify-`setDoc` (`liveDayEdit`, `writeWatchItemToDay`),
+   * so two of them racing on the same day both build from the same old checklist
+   * and the later one silently drops the earlier one's row. Both cards would
+   * still say "Done". Nothing about the shared lane changes; the chat simply
+   * stops firing its writes concurrently, which is the only surface that can
+   * (a tap on Today or in the planner is one affordance at a time, and
+   * `confirmAll` already awaits in sequence).
+   *
    * @returns true if the write was performed, false if refused.
    */
   const applyChatAction = useCallback(
@@ -733,7 +985,18 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       )
       let wrote = false
       try {
-        wrote = await performChatAction(action)
+        // Queue behind whatever write is already running. The tail is reset to a
+        // resolved promise on failure so one rejected write cannot wedge the
+        // queue for the rest of the turn.
+        const queued = writeQueueRef.current.then(
+          () => performChatAction(action),
+          () => performChatAction(action),
+        )
+        writeQueueRef.current = queued.then(
+          () => undefined,
+          () => undefined,
+        )
+        wrote = await queued
       } finally {
         if (!wrote) {
           appliedOrInFlightRef.current.delete(action)
