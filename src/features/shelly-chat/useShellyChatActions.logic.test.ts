@@ -86,6 +86,20 @@ vi.mock('../today/liveDayEdit', async () => {
   }
 })
 
+// The Watch Vehicle writers (FEAT-149). `addWatchVideo` is the SAME
+// module-level writer `WatchVetInForm` reaches through `useWatchLibrary.addVideo`,
+// and `writeWatchItemToDay` is the FEAT-132 day lane. Both are spied so these
+// tests assert the chat CALLS them rather than opening a second write path; what
+// each one writes is pinned in useWatchLibrary.test.ts / writeWatchItemToDay.test.ts.
+const addWatchVideo = vi.fn()
+vi.mock('../watch/useWatchLibrary', () => ({
+  addWatchVideo: (...args: unknown[]) => addWatchVideo(...args),
+}))
+const writeWatchItemToDay = vi.fn()
+vi.mock('../watch/writeWatchItemToDay', () => ({
+  writeWatchItemToDay: (...args: unknown[]) => writeWatchItemToDay(...args),
+}))
+
 const updateDoc = vi.fn()
 const arrayUnion = vi.fn((...v: unknown[]) => ({ __arrayUnion: v[0] }))
 const doc = vi.fn((...args: unknown[]) => ({ __doc: args.length }))
@@ -106,7 +120,10 @@ import {
   type ChatActivityConfig,
 } from './useShellyChatActions'
 import type { ChatWeekDay } from './dayItemActions'
-import { currentWeekDayKeys } from './useChatWeekDays'
+import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
+import { SubjectBucket } from '../../core/types/enums'
+import { WatchVideoStatus } from '../../core/types/watch'
+import type { WatchVideo } from '../../core/types'
 
 // The hook re-reads the CLOCK to bound proposals to the current week, so these
 // fixtures are built from the real current week rather than hardcoded dates —
@@ -140,6 +157,35 @@ const CONFIGS: ChatActivityConfig[] = [
   { id: 'cfg_london', name: "London's Letters", childId: 'london1', defaultMinutes: 10 },
 ]
 
+/** Lincoln's curated library: one live video and one he has retired. */
+const VIDEOS: WatchVideo[] = [
+  {
+    id: 'vid_glacier',
+    youtubeId: 'dQw4w9WgXcQ',
+    title: 'How Glaciers Move',
+    plannedMinutes: 9,
+    subjectBucket: SubjectBucket.Science,
+    childId: 'lincoln1',
+    addedBy: 'parent',
+    vettedAt: '2026-08-01T00:00:00.000Z',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  },
+  {
+    id: 'vid_volcano',
+    youtubeId: 'aBcDeFgHiJk',
+    title: 'Inside a Volcano',
+    plannedMinutes: 12,
+    subjectBucket: SubjectBucket.Science,
+    childId: 'both',
+    addedBy: 'parent',
+    status: WatchVideoStatus.Retired,
+    vettedAt: '2026-08-01T00:00:00.000Z',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  },
+]
+
 const CHILDREN: Child[] = [
   { id: 'lincoln1', name: 'Lincoln' } as Child,
   { id: 'london1', name: 'London' } as Child,
@@ -154,6 +200,7 @@ function setup(
     activityConfigs?: ChatActivityConfig[]
     canEditActivityConfigs?: boolean
     weekDays?: ChatWeekDay[]
+    watchVideos?: WatchVideo[]
   } = {},
 ) {
   return renderHook(() =>
@@ -165,6 +212,7 @@ function setup(
       navigateToPlanner,
       activityConfigs: opts.activityConfigs ?? CONFIGS,
       weekDays: opts.weekDays ?? WEEK,
+      watchVideos: opts.watchVideos ?? VIDEOS,
       canEditActivityConfigs: opts.canEditActivityConfigs ?? true,
     }),
   )
@@ -184,6 +232,8 @@ beforeEach(() => {
   removeItemFromLiveDay.mockResolvedValue({ status: 'done' })
   moveItemToLiveDay.mockResolvedValue({ status: 'done' })
   addItemToLiveDay.mockResolvedValue({ status: 'done' })
+  addWatchVideo.mockResolvedValue('new-vid-id')
+  writeWatchItemToDay.mockResolvedValue(undefined)
   updateDoc.mockResolvedValue(undefined)
 })
 
@@ -1450,10 +1500,16 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
   it('writes ONCE when two taps race the same in-flight add', async () => {
     // Hold the write open so both taps land before either resolves — the exact
     // window a double tap on a phone falls into.
-    let release: (() => void) | undefined
-    addActivityConfig.mockImplementation(
-      () => new Promise<string>((resolve) => { release = () => resolve('new-cfg-id') }),
-    )
+    // The gate promise is built UP FRONT, not inside the mock, so `release` is
+    // callable the moment the test wants it. Confirmed writes are queued behind
+    // one another (Codex P1, PR #1676), so a write no longer necessarily starts
+    // in the same microtask as the tap — a `release` assigned by the mock body
+    // would still be undefined when the test reaches for it.
+    let release!: () => void
+    const gate = new Promise<string>((resolve) => {
+      release = () => resolve('new-cfg-id')
+    })
+    addActivityConfig.mockImplementation(() => gate)
 
     const { result } = curriculumSetup()
     act(() => {
@@ -1465,7 +1521,7 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
     await act(async () => {
       first = result.current.applyChatAction(CURRICULUM_ADD)
       second = result.current.applyChatAction(CURRICULUM_ADD)
-      release?.()
+      release()
       await Promise.all([first, second])
     })
 
@@ -1491,10 +1547,16 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
   })
 
   it('marks the card `applying` while in flight, then `applied`', async () => {
-    let release: (() => void) | undefined
-    addActivityConfig.mockImplementation(
-      () => new Promise<string>((resolve) => { release = () => resolve('new-cfg-id') }),
-    )
+    // The gate promise is built UP FRONT, not inside the mock, so `release` is
+    // callable the moment the test wants it. Confirmed writes are queued behind
+    // one another (Codex P1, PR #1676), so a write no longer necessarily starts
+    // in the same microtask as the tap — a `release` assigned by the mock body
+    // would still be undefined when the test reaches for it.
+    let release!: () => void
+    const gate = new Promise<string>((resolve) => {
+      release = () => resolve('new-cfg-id')
+    })
+    addActivityConfig.mockImplementation(() => gate)
     const { result } = curriculumSetup()
     act(() => {
       result.current.stagePendingActions('m1', [CURRICULUM_ADD])
@@ -1507,7 +1569,7 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
     expect(result.current.pending[0].status).toBe('applying')
 
     await act(async () => {
-      release?.()
+      release()
       await inFlight
     })
     expect(result.current.pending[0].status).toBe('applied')
@@ -1561,5 +1623,348 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
       await result.current.applyChatAction(CURRICULUM_COMPLETE)
     })
     expect(completeActivityConfig).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ── Watch Vehicle actions (FEAT-149) ─────────────────────────────────────────
+//
+// Three contracts under test: a duplicate or retired video never becomes a card
+// (and the parent is told why), a confirmed vet-in lands through the vet-in
+// form's OWN writer with the confirming account's uid as provenance, and a
+// confirmed plan lands through the FEAT-132 day lane — no second write path to
+// either the library or a day document.
+
+// Built from the real window rather than hardcoded dates — hardcoded ones would
+// pass this week and fail every week after. The window runs from TODAY through
+// next Friday and shrinks as the week elapses (Codex P2, PR #1676), so these
+// pick by position from each end rather than assuming ten entries.
+const PLANNABLE = plannableWatchDayKeys()
+/** The soonest plannable weekday (today, or the next one that hasn't gone by). */
+const SOONEST = PLANNABLE[0].dateKey
+/** The far end of the window — next Friday. */
+const NEXT_TUESDAY = PLANNABLE[PLANNABLE.length - 1].dateKey
+
+const VET_IN_ACTION: ChatAction = {
+  kind: 'vetInVideo',
+  childId: 'lincoln1',
+  youtubeId: 'zZzZzZzZzZz',
+  title: 'How Rivers Carve Canyons',
+  plannedMinutes: 11,
+  subjectBucket: SubjectBucket.Science,
+  why: 'He asked how the Grand Canyon got there',
+  suggestedFromUrl: 'https://www.youtube.com/watch?v=zZzZzZzZzZz',
+}
+
+const PLAN_ACTION: ChatAction = {
+  kind: 'planVideoOnDay',
+  childId: 'lincoln1',
+  watchVideoId: 'vid_glacier',
+  dateKey: NEXT_TUESDAY,
+}
+
+describe('watch actions — the staging gate (FEAT-149)', () => {
+  it('offers a card for a video that is not in the library yet', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION]))
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('drops a duplicate of an ACTIVE video — no card, and the reason offers to plan it', () => {
+    const { result } = setup()
+    const dup = { ...VET_IN_ACTION, youtubeId: 'dQw4w9WgXcQ' } as ChatAction
+    act(() => result.current.stagePendingActions('m1', [dup]))
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed).toHaveLength(1)
+    expect(result.current.suppressed[0]).toContain('already in the Watch Library')
+    expect(result.current.suppressed[0]).toContain('plan it onto a day')
+    expect(addWatchVideo).not.toHaveBeenCalled()
+  })
+
+  it('drops a duplicate of a RETIRED video — no card, and the reason names the Archive', () => {
+    const { result } = setup()
+    const dup = { ...VET_IN_ACTION, youtubeId: 'aBcDeFgHiJk' } as ChatAction
+    act(() => result.current.stagePendingActions('m1', [dup]))
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed[0]).toContain('Archive')
+    expect(addWatchVideo).not.toHaveBeenCalled()
+  })
+
+  it('accepts both ends of the window — the soonest day and next Friday', () => {
+    const { result } = setup()
+    act(() =>
+      result.current.stagePendingActions('m1', [
+        { ...PLAN_ACTION, dateKey: SOONEST } as ChatAction,
+        PLAN_ACTION,
+      ]),
+    )
+    expect(result.current.pending).toHaveLength(PLANNABLE.length > 1 ? 2 : 1)
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('drops a weekend, a past day, and the week after next — each with a reason', () => {
+    const shift = (dateKey: string, days: number) => {
+      const d = new Date(`${dateKey}T00:00:00Z`)
+      d.setUTCDate(d.getUTCDate() + days)
+      return d
+    }
+    const last = PLANNABLE[PLANNABLE.length - 1].dateKey
+    const saturday = shift(last, 1)
+    const yesterday = shift(PLANNABLE[0].dateKey, -1)
+    const weekAfterNext = shift(last, 7)
+
+    for (const d of [saturday, yesterday, weekAfterNext]) {
+      const { result } = setup()
+      const dateKey = d.toISOString().slice(0, 10)
+      act(() =>
+        result.current.stagePendingActions('m1', [{ ...PLAN_ACTION, dateKey } as ChatAction]),
+      )
+      expect(result.current.pending, dateKey).toEqual([])
+      expect(result.current.suppressed[0], dateKey).toContain('this week or next week')
+    }
+    expect(writeWatchItemToDay).not.toHaveBeenCalled()
+  })
+
+  it('drops a plan for a RETIRED video, naming it', () => {
+    const { result } = setup()
+    const retired = { ...PLAN_ACTION, watchVideoId: 'vid_volcano' } as ChatAction
+    act(() => result.current.stagePendingActions('m1', [retired]))
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed[0]).toContain('Inside a Volcano')
+  })
+
+  it('drops a plan for a video that is not in the library at all', () => {
+    const { result } = setup()
+    const bogus = { ...PLAN_ACTION, watchVideoId: 'vid_hallucinated' } as ChatAction
+    act(() => result.current.stagePendingActions('m1', [bogus]))
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed[0]).toContain("didn't match a video")
+  })
+
+  it('drops both kinds for a kid profile, and says why', () => {
+    // `/chat` is nav-gated, not route-gated, so a kid can reach it by URL.
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION, PLAN_ACTION]))
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed).toHaveLength(1)
+    expect(result.current.suppressed[0]).toContain('a grown-up does')
+    expect(addWatchVideo).not.toHaveBeenCalled()
+    expect(writeWatchItemToDay).not.toHaveBeenCalled()
+  })
+})
+
+describe('watch actions — the write (FEAT-149)', () => {
+  it('vets a video in through the vet-in form\'s own writer, stamped with the confirming uid', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION]))
+    await act(async () => {
+      await result.current.applyChatAction(VET_IN_ACTION)
+    })
+
+    expect(addWatchVideo).toHaveBeenCalledTimes(1)
+    expect(addWatchVideo).toHaveBeenCalledWith('fam1', {
+      youtubeId: 'zZzZzZzZzZz',
+      title: 'How Rivers Carve Canyons',
+      plannedMinutes: 11,
+      subjectBucket: SubjectBucket.Science,
+      childId: 'lincoln1',
+      why: 'He asked how the Grand Canyon got there',
+      // The tap IS the vetting act: provenance is the confirming account's uid
+      // (which is the family id), never anything the model supplied.
+      addedBy: 'fam1',
+      suggestedFromUrl: 'https://www.youtube.com/watch?v=zZzZzZzZzZz',
+    })
+    // A vet-in plans nothing.
+    expect(writeWatchItemToDay).not.toHaveBeenCalled()
+    expect(result.current.pending[0].status).toBe('applied')
+  })
+
+  it('plans a vetted video through the FEAT-132 day lane, with the real library entry', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [PLAN_ACTION]))
+    await act(async () => {
+      await result.current.applyChatAction(PLAN_ACTION)
+    })
+
+    expect(writeWatchItemToDay).toHaveBeenCalledTimes(1)
+    expect(writeWatchItemToDay).toHaveBeenCalledWith({
+      familyId: 'fam1',
+      childId: 'lincoln1',
+      dateKey: NEXT_TUESDAY,
+      // The whole library document, so the lane's shared row builder keeps
+      // `itemType` / `watchVideoId` — not a hand-made subset.
+      video: VIDEOS[0],
+    })
+    // Planning writes no library entry, no activity config, no day-item lane.
+    expect(addWatchVideo).not.toHaveBeenCalled()
+    expect(addItemToLiveDay).not.toHaveBeenCalled()
+  })
+
+  it('touches nothing retroactive — no hours, no plan, no child record', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION, PLAN_ACTION]))
+    await act(async () => {
+      await result.current.applyChatAction(VET_IN_ACTION)
+      await result.current.applyChatAction(PLAN_ACTION)
+    })
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+    expect(updateActivityConfigMinutes).not.toHaveBeenCalled()
+    expect(stagePlanAdjustment).not.toHaveBeenCalled()
+    expect(removeItemFromLiveDay).not.toHaveBeenCalled()
+    expect(moveItemToLiveDay).not.toHaveBeenCalled()
+  })
+
+  it('refuses a repeat confirm — vetInVideo mints a doc per call, so two taps would add two', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION]))
+    await act(async () => {
+      await Promise.all([
+        result.current.applyChatAction(VET_IN_ACTION),
+        result.current.applyChatAction(VET_IN_ACTION),
+      ])
+      await result.current.applyChatAction(VET_IN_ACTION)
+    })
+    expect(addWatchVideo).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('watch actions — the write backstop (FEAT-149)', () => {
+  it('refuses a staged plan whose video was retired before the tap', async () => {
+    const { result, rerender } = renderHook(
+      ({ videos }: { videos: WatchVideo[] }) =>
+        useShellyChatActions({
+          familyId: 'fam1',
+          children: CHILDREN,
+          activeChildId: 'lincoln1',
+          activeThreadId: 'thread1',
+          watchVideos: videos,
+          canEditActivityConfigs: true,
+        }),
+      { initialProps: { videos: VIDEOS } },
+    )
+
+    act(() => result.current.stagePendingActions('m1', [PLAN_ACTION]))
+    expect(result.current.pending).toHaveLength(1)
+
+    // Retired in the Watch Library in another tab, between the card and the tap.
+    rerender({
+      videos: [{ ...VIDEOS[0], status: WatchVideoStatus.Retired }, VIDEOS[1]],
+    })
+    await act(async () => {
+      const wrote = await result.current.applyChatAction(PLAN_ACTION)
+      expect(wrote).toBe(false)
+    })
+    expect(writeWatchItemToDay).not.toHaveBeenCalled()
+    // The card stays retryable rather than claiming a write that didn't happen.
+    expect(result.current.pending[0].status).toBe('pending')
+  })
+
+  it('refuses a watch action bound to a different child than the active tab', async () => {
+    const { result } = setup('lincoln1')
+    const wrongChild = { ...VET_IN_ACTION, childId: 'london1' } as ChatAction
+    await act(async () => {
+      expect(await result.current.applyChatAction(wrongChild)).toBe(false)
+    })
+    expect(addWatchVideo).not.toHaveBeenCalled()
+  })
+})
+
+// ── Codex findings on PR #1676 ───────────────────────────────────────────────
+
+describe('a repeated vet-in in one reply becomes one card (Codex P2, PR #1676)', () => {
+  it('stages the first and drops the second, saying it was proposed twice', () => {
+    // Both would resolve against the SAME pre-write library snapshot, so neither
+    // sees the other; `addWatchVideo` is an `addDoc` and the re-entry guard is
+    // keyed on the action OBJECT, so two objects would mint two library entries.
+    const { result } = setup()
+    const again = { ...VET_IN_ACTION, title: 'Rivers and canyons' } as ChatAction
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION, again]))
+
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.pending[0].action).toBe(VET_IN_ACTION)
+    expect(result.current.suppressed).toHaveLength(1)
+    // It is NOT a library duplicate — nothing is written yet — so the sentence
+    // must not send her looking for it in the Watch Library.
+    expect(result.current.suppressed[0]).toContain('twice in one message')
+    expect(result.current.suppressed[0]).not.toContain('already in the Watch Library')
+  })
+
+  it('writes once when the reply repeated itself', async () => {
+    const { result } = setup()
+    const again = { ...VET_IN_ACTION } as ChatAction
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION, again]))
+    await act(async () => {
+      await result.current.confirmAll()
+    })
+    expect(addWatchVideo).toHaveBeenCalledTimes(1)
+  })
+
+  it('still stages two DIFFERENT videos from one reply', () => {
+    // The dedupe is on the video, not on the kind — "add these two" must work.
+    const other = {
+      ...VET_IN_ACTION,
+      youtubeId: 'qQqQqQqQqQq',
+      title: 'How Caves Form',
+      suggestedFromUrl: 'https://www.youtube.com/watch?v=qQqQqQqQqQq',
+    } as ChatAction
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [VET_IN_ACTION, other]))
+    expect(result.current.pending).toHaveLength(2)
+    expect(result.current.suppressed).toEqual([])
+  })
+})
+
+describe('confirmed writes are serialized (Codex P1, PR #1676)', () => {
+  it('does not start a second day write while the first is still in flight', async () => {
+    // `writeWatchItemToDay` is a read-modify-setDoc, so two of them racing on the
+    // same day both build from the same old checklist and the later write drops
+    // the earlier one's row — while BOTH cards say "Done". Two different cards
+    // are not covered by the per-action re-entry guard, so the queue is what
+    // holds the line.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = () => resolve()
+    })
+    let started = 0
+    writeWatchItemToDay.mockImplementation(() => {
+      started += 1
+      return gate
+    })
+
+    const second = { ...PLAN_ACTION, dateKey: SOONEST } as ChatAction
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [PLAN_ACTION, second]))
+
+    await act(async () => {
+      const a = result.current.applyChatAction(PLAN_ACTION)
+      const b = result.current.applyChatAction(second)
+      // Let both taps get as far as they can while the first write hangs.
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(started).toBe(1)
+      release()
+      await Promise.all([a, b])
+    })
+
+    // Both still happen — serialized, not dropped.
+    expect(started).toBe(2)
+    expect(writeWatchItemToDay).toHaveBeenCalledTimes(2)
+    expect(result.current.pending.every((p) => p.status === 'applied')).toBe(true)
+  })
+
+  it('a failed write does not wedge the queue for the rest of the turn', async () => {
+    writeWatchItemToDay.mockRejectedValueOnce(new Error('offline'))
+    const second = { ...PLAN_ACTION, dateKey: SOONEST } as ChatAction
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('m1', [PLAN_ACTION, second]))
+
+    await act(async () => {
+      await expect(result.current.applyChatAction(PLAN_ACTION)).rejects.toThrow('offline')
+    })
+    await act(async () => {
+      expect(await result.current.applyChatAction(second)).toBe(true)
+    })
+    expect(writeWatchItemToDay).toHaveBeenCalledTimes(2)
   })
 })

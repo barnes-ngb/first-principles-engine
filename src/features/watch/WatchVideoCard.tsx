@@ -9,6 +9,7 @@ import { SubjectBucketLabel } from '../../core/types/enums'
 import type { WatchVideo } from '../../core/types'
 import WatchVetInForm from './WatchVetInForm'
 import { isRetired } from './watchLibraryStatus'
+import { watchCuratorLabel } from './watchCuratorLabel'
 
 export interface WatchVideoCardProps {
   video: WatchVideo
@@ -104,7 +105,11 @@ export default function WatchVideoCard({
             <Chip size="small" label={`${video.plannedMinutes} min`} />
             <Chip size="small" label={SubjectBucketLabel[video.subjectBucket]} />
             <Chip size="small" variant="outlined" label={scopeLabel} />
-            <Chip size="small" variant="outlined" label={`Added by ${video.addedBy}`} />
+            <Chip
+              size="small"
+              variant="outlined"
+              label={`Added by ${watchCuratorLabel(video.addedBy)}`}
+            />
             {retired && <Chip size="small" color="default" label="Retired" />}
           </Box>
 

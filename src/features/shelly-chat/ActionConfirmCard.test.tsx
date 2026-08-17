@@ -12,7 +12,9 @@ import { render, screen } from '@testing-library/react'
 import type { Child } from '../../core/types'
 import ActionConfirmCard from './ActionConfirmCard'
 import { describeActivityAudience } from './activityMinutesView'
+import { SubjectBucket } from '../../core/types/enums'
 import type { ChatWeekDay } from './dayItemActions'
+import type { ChatWatchVideo } from './watchActions'
 import type { ChatActivityConfig, PendingAction } from './useShellyChatActions'
 
 const CHILDREN: Child[] = [
@@ -536,5 +538,177 @@ describe('ActionConfirmCard — an applied card outlives its own write (FEAT-143
       applied,
     )
     expect(screen.getByText('GATB Math 3: lesson 107')).toBeInTheDocument()
+  })
+})
+
+// ── Watch actions (FEAT-149) ─────────────────────────────────────────────────
+//
+// A vet-in card is the one card in the portal that asks the parent to let
+// something the ASSISTANT found into a library the boys play from. So it has to
+// carry the source link: she is the curator, the model is a scout, and she
+// cannot curate what she cannot watch.
+
+const WATCH_VIDEOS: ChatWatchVideo[] = [
+  {
+    id: 'vid_glacier',
+    youtubeId: 'dQw4w9WgXcQ',
+    title: 'How Glaciers Move',
+    plannedMinutes: 9,
+    subjectBucket: SubjectBucket.Science,
+    childId: 'lincoln1',
+  },
+]
+
+const PLANNABLE_DAYS = [
+  { dateKey: '2026-08-19', label: 'Wednesday' },
+  { dateKey: '2026-08-25', label: 'next Tuesday' },
+]
+
+const VET_IN_PENDING: PendingAction[] = [
+  {
+    id: 'msg1_0',
+    status: 'pending',
+    action: {
+      kind: 'vetInVideo',
+      childId: 'lincoln1',
+      youtubeId: 'zZzZzZzZzZz',
+      title: 'How Rivers Carve Canyons',
+      plannedMinutes: 11,
+      subjectBucket: SubjectBucket.Science,
+      why: 'He asked how the Grand Canyon got there',
+      suggestedFromUrl: 'https://www.youtube.com/watch?v=zZzZzZzZzZz',
+    },
+  },
+]
+
+function renderWatchCard(pending: PendingAction[]) {
+  return render(
+    <ActionConfirmCard
+      pending={pending}
+      familyChildren={CHILDREN}
+      watchVideos={WATCH_VIDEOS}
+      plannableDays={PLANNABLE_DAYS}
+      onConfirm={vi.fn()}
+      onDismiss={vi.fn()}
+      onConfirmAll={vi.fn()}
+    />,
+  )
+}
+
+describe('ActionConfirmCard — vetInVideo (FEAT-149)', () => {
+  it('shows the title, length, subject, who it is for, and the why', () => {
+    renderWatchCard(VET_IN_PENDING)
+    expect(
+      screen.getByText('Add "How Rivers Carve Canyons" to Lincoln\'s Watch Library'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Science · 11m')).toBeInTheDocument()
+    expect(screen.getByText(/Adds a video to Lincoln's library/)).toBeInTheDocument()
+    expect(screen.getByText(/He asked how the Grand Canyon got there/)).toBeInTheDocument()
+  })
+
+  it('links the source so she can watch it before confirming', () => {
+    renderWatchCard(VET_IN_PENDING)
+    const link = screen.getByRole('link', { name: /watch it first/i })
+    expect(link).toHaveAttribute('href', 'https://www.youtube.com/watch?v=zZzZzZzZzZz')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+  })
+
+  it('says adding it plans nothing', () => {
+    renderWatchCard(VET_IN_PENDING)
+    expect(screen.getByText(/nothing lands on a day until you plan it/i)).toBeInTheDocument()
+  })
+
+  it('never shows the raw youtube id', () => {
+    const { container } = renderWatchCard(VET_IN_PENDING)
+    // The id appears inside the href (it has to — that IS the link), but never
+    // as text the parent is asked to read.
+    expect(container.textContent).not.toContain('zZzZzZzZzZz')
+  })
+})
+
+describe('ActionConfirmCard — planVideoOnDay (FEAT-149)', () => {
+  const planPending = (dateKey: string, status: PendingAction['status'] = 'pending'): PendingAction[] => [
+    {
+      id: 'msg1_0',
+      status,
+      action: { kind: 'planVideoOnDay', childId: 'lincoln1', watchVideoId: 'vid_glacier', dateKey },
+    },
+  ]
+
+  it('names the video and the weekday in words — including "next Tuesday"', () => {
+    renderWatchCard(planPending('2026-08-25'))
+    expect(
+      screen.getByText('Add "How Glaciers Move" to Lincoln\'s next Tuesday'),
+    ).toBeInTheDocument()
+  })
+
+  it('names a current-week day without the "next"', () => {
+    renderWatchCard(planPending('2026-08-19'))
+    expect(screen.getByText('Add "How Glaciers Move" to Lincoln\'s Wednesday')).toBeInTheDocument()
+  })
+
+  it('shows neither a doc id nor a raw date', () => {
+    const { container } = renderWatchCard(planPending('2026-08-25'))
+    expect(container.textContent).not.toContain('vid_glacier')
+    expect(container.textContent).not.toContain('2026-08-25')
+  })
+
+  it('says the add changes nothing already on the day', () => {
+    renderWatchCard(planPending('2026-08-25'))
+    expect(screen.getByText(/Nothing already on it changes/i)).toBeInTheDocument()
+  })
+
+  it('renders no card for a video that is not in the library', () => {
+    const { container } = render(
+      <ActionConfirmCard
+        pending={[
+          {
+            id: 'msg1_0',
+            status: 'pending',
+            action: {
+              kind: 'planVideoOnDay',
+              childId: 'lincoln1',
+              watchVideoId: 'vid_gone',
+              dateKey: '2026-08-25',
+            },
+          },
+        ]}
+        familyChildren={CHILDREN}
+        watchVideos={WATCH_VIDEOS}
+        plannableDays={PLANNABLE_DAYS}
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+        onConfirmAll={vi.fn()}
+      />,
+    )
+    expect(container.textContent).toBe('')
+  })
+})
+
+describe('ActionConfirmCard — an applied vet-in outlives its own write (FEAT-149)', () => {
+  it("keeps the card and its Done ✓ once the video it added is in the library", () => {
+    // The write makes the action a duplicate of itself, so the OFFER gate now
+    // refuses it. The already-tapped card must still render — it is the parent's
+    // only confirmation the video landed (the FEAT-144 lesson).
+    const applied: PendingAction[] = [{ ...VET_IN_PENDING[0], status: 'applied' }]
+    render(
+      <ActionConfirmCard
+        pending={applied}
+        familyChildren={CHILDREN}
+        watchVideos={[
+          ...WATCH_VIDEOS,
+          { ...WATCH_VIDEOS[0], id: 'vid_new', youtubeId: 'zZzZzZzZzZz', title: 'How Rivers Carve Canyons' },
+        ]}
+        plannableDays={PLANNABLE_DAYS}
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+        onConfirmAll={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByText('Add "How Rivers Carve Canyons" to Lincoln\'s Watch Library'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Done')).toBeInTheDocument()
   })
 })

@@ -5,10 +5,12 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined'
+import OndemandVideoOutlinedIcon from '@mui/icons-material/OndemandVideoOutlined'
 import TimerOutlinedIcon from '@mui/icons-material/TimerOutlined'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Link from '@mui/material/Link'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
@@ -31,6 +33,15 @@ import {
   isDayItemAction,
   resolveDayItemAction,
 } from './dayItemActions'
+import type { ChatWatchVideo, ResolvedWatchAction } from './watchActions'
+import {
+  describeVetInShape,
+  describeWatchAction,
+  isWatchAction,
+  resolveWatchAction,
+  resolveWatchActionForDisplay,
+  watchActionFootnote,
+} from './watchActions'
 import type { ActivityMinutesAction, ChatActivityConfig, PendingAction } from './useShellyChatActions'
 import { resolveActivityConfig } from './useShellyChatActions'
 
@@ -48,6 +59,18 @@ interface ActionConfirmCardProps {
    * `itemKey` or a raw date (FEAT-142).
    */
   weekDays?: ChatWeekDay[]
+  /**
+   * The acting child's Watch Library — needed to render a `planVideoOnDay` card
+   * by the video's TITLE, and to keep a card off screen once the entry it names
+   * is gone (FEAT-149).
+   */
+  watchVideos?: ChatWatchVideo[]
+  /**
+   * The weekdays a video may be planned onto — this week's and next week's, with
+   * the labels a card says out loud ("Tuesday" / "next Tuesday"). Supplied by
+   * the page so the component holds no clock (FEAT-149).
+   */
+  plannableDays?: { dateKey: string; label: string }[]
   /**
    * Plain-language reasons a proposal was dropped before it became a card.
    * Rendered in the card's place so a reply that says "confirm with a tap"
@@ -327,6 +350,68 @@ function CurriculumPreview({
 }
 
 /**
+ * Preview for a watch action (FEAT-149) — vet a found video in, or plan a
+ * vetted one onto a day.
+ *
+ * A vet-in card carries something no other card in the portal does: **a tappable
+ * link to the source**. That is the whole division of labour of this feature —
+ * the model is a scout, the parent is the curator — so she has to be able to
+ * WATCH the thing before she lets it into a library the boys can play from. The
+ * card therefore shows the title she'll see, its length and subject, who it's
+ * for, the one-line "why", and the link; the footnote says that adding it plans
+ * nothing.
+ *
+ * A plan card names the video by title and the weekday **in words**, including
+ * "next Tuesday" for the next-week half of the window — never an id, never a raw
+ * date.
+ */
+function WatchPreview({
+  resolved,
+  childName,
+}: {
+  resolved: ResolvedWatchAction
+  childName: string
+}) {
+  const { action } = resolved
+  const isVetIn = action.kind === 'vetInVideo'
+  return (
+    <Stack spacing={0.25}>
+      <Typography
+        variant="caption"
+        sx={{ display: 'block', fontWeight: 700, color: 'warning.main', letterSpacing: 0.2 }}
+      >
+        {isVetIn ? `Adds a video to ${childName}'s library` : `Adds a video to ${childName}'s week`}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {describeWatchAction(resolved, childName)}
+      </Typography>
+      {action.kind === 'vetInVideo' && (
+        <>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {describeVetInShape(action)}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Why: {action.why}
+          </Typography>
+          <Link
+            href={action.suggestedFromUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            variant="caption"
+            sx={{ display: 'block', wordBreak: 'break-all' }}
+          >
+            Watch it first ↗
+          </Link>
+        </>
+      )}
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+        {watchActionFootnote(action)}
+      </Typography>
+    </Stack>
+  )
+}
+
+/**
  * Before → after preview for an `editProfileField` action. These are
  * replace-writes on freeform text, so Shelly must see exactly what changes
  * before she taps: the current value and the proposed new value.
@@ -374,7 +459,11 @@ function ProfileEditPreview({
  * put, and the curriculum edits (FEAT-143) naming the activity by name with the
  * full shape for an add (subject · minutes · frequency, plus who it lands on)
  * and a real old → new for a position bump, footnoted with what the write does
- * NOT touch — and, for a completion, that the app has no undo for it. A batch
+ * NOT touch — and, for a completion, that the app has no undo for it, and the
+ * watch actions (FEAT-149) naming the video by title and the weekday in words
+ * ("next Tuesday"), with a vet-in additionally carrying its length, subject, the
+ * one-line why, and a **tappable link to the source** so the parent can watch it
+ * before she lets it into the library. A batch
  * "Confirm all" appears when 2+ are
  * still pending. Nothing here writes — taps call back into
  * `useShellyChatActions`. Mobile-first: large tap targets.
@@ -384,6 +473,8 @@ export default function ActionConfirmCard({
   familyChildren,
   activityConfigs = [],
   weekDays = [],
+  watchVideos = [],
+  plannableDays = [],
   suppressed = [],
   onConfirm,
   onDismiss,
@@ -456,8 +547,33 @@ export default function ActionConfirmCard({
           // that split, `markActivityComplete` succeeds and its own card
           // disappears, which is the one action where the confirmation matters
           // most — it cannot be undone (Codex P2, PR #1669).
-          const isCurriculum = isCurriculumAction(action)
+          // FEAT-149 — resolve against the live library + the plannable window
+          // so the card can name the video and the weekday in words.
+          // Unresolvable proposals are already filtered out at stage time (with
+          // a reason shown in the card's place); if one somehow reaches here we
+          // render no card rather than one that names nothing. `canEdit` is true
+          // at this point by construction — a non-parent's proposal never
+          // becomes a `pending` entry — and the write layer checks it again.
+          //
+          // Gated on the LIVE library only while the card is still PENDING, the
+          // same split FEAT-144 made for the curriculum cards: once she has
+          // tapped, "may this be proposed?" is settled, and a vet-in's own write
+          // makes it a duplicate of itself — so a strict gate here would delete
+          // the "Done ✓" that is her only confirmation the video landed.
+          const isWatch = isWatchAction(action)
           const isPending = item.status === 'pending'
+          const watchGate =
+            isWatch && isPending
+              ? resolveWatchAction(action, watchVideos, plannableDays, true)
+              : null
+          if (isWatch && isPending && !watchGate?.ok) return null
+          const watchResolved: ResolvedWatchAction | null = !isWatch
+            ? null
+            : watchGate?.ok
+              ? watchGate.resolved
+              : resolveWatchActionForDisplay(action, watchVideos, plannableDays)
+          if (isWatch && !watchResolved) return null
+          const isCurriculum = isCurriculumAction(action)
           const curriculumGate =
             isCurriculum && isPending
               ? resolveCurriculumAction(action, activityConfigs, true)
@@ -484,6 +600,8 @@ export default function ActionConfirmCard({
               <EventNoteOutlinedIcon fontSize="small" color="warning" />
             ) : isCurriculum ? (
               <MenuBookOutlinedIcon fontSize="small" color="warning" />
+            ) : isWatch ? (
+              <OndemandVideoOutlinedIcon fontSize="small" color="warning" />
             ) : (
               <EditOutlinedIcon fontSize="small" color="action" />
             )
@@ -501,7 +619,8 @@ export default function ActionConfirmCard({
                   isPlanAdjustment ||
                   isActivityMinutes ||
                   isDayItem ||
-                  isCurriculum
+                  isCurriculum ||
+                  isWatch
                     ? 'flex-start'
                     : 'center',
                 gap: 1,
@@ -510,7 +629,7 @@ export default function ActionConfirmCard({
                 // slightly stronger border so they read weightier than a
                 // sight-word card. The plan-adjustment handoff gets its own
                 // (info) accent so it reads as "opens the planner", not a write.
-                ...(isSnapshotEdit || isActivityMinutes || isDayItem || isCurriculum
+                ...(isSnapshotEdit || isActivityMinutes || isDayItem || isCurriculum || isWatch
                   ? { borderColor: 'warning.main', borderLeftWidth: 3 }
                   : isPlanAdjustment
                     ? { borderColor: 'info.main', borderLeftWidth: 3 }
@@ -529,6 +648,11 @@ export default function ActionConfirmCard({
                 ) : dayResolution?.ok ? (
                   <DayItemPreview
                     resolved={dayResolution.resolved}
+                    childName={childName(action.childId)}
+                  />
+                ) : watchResolved ? (
+                  <WatchPreview
+                    resolved={watchResolved}
                     childName={childName(action.childId)}
                   />
                 ) : curriculumResolved ? (
