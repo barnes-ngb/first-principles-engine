@@ -600,7 +600,38 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       // library entries for one video. Deduped here, where the whole turn is
       // visible at once, rather than at the write, where each call is alone.
       const acceptedYouTubeIds = new Set<string>()
+      // Both next-week routes in one turn (Codex P2, PR #1679). The grammar now
+      // states precedence and forbids emitting both, but a prompt is a
+      // probability and this is a determinism: `draftNextWeek` and
+      // `proposePlanAdjustment` answer the SAME question ("reshape next week"),
+      // so two cards would be two conflicting confirmations for one intent —
+      // one drafting the week here, one navigating away to build it elsewhere.
+      // When both arrive, the draft wins and the handoff is dropped.
+      //
+      // Deliberately NOT recorded as a suppressed notice: the notices exist so
+      // that a reply promising "confirm with a tap" never leaves the parent
+      // waiting on a card that does not come. Here a card DOES come, and it does
+      // the thing she asked for — telling her about a redundant second route she
+      // never saw would be noise, not honesty. (The escape hatch to Plan My Week
+      // is still on the draft card itself.)
+      // Keyed on whether a draft will actually be OFFERED, not merely on whether
+      // one was emitted. The difference is load-bearing: for a kid profile (or
+      // with no draft surface wired) the draft is refused, and suppressing the
+      // handoff on the strength of its mere presence would leave the turn with
+      // NO card at all — turning a redundancy fix into a capability regression.
+      const draftWillBeOffered = actions.some(
+        (a) =>
+          isDraftNextWeekAction(a) &&
+          Boolean(onDraftNextWeekRef.current) &&
+          resolveDraftNextWeek(a, parentRef.current).ok,
+      )
       const offerable = actions.filter((action) => {
+        if (draftWillBeOffered && action.kind === 'proposePlanAdjustment') {
+          console.warn(
+            '[shellyChat] dropped a plan-adjustment handoff — a next-week draft was proposed in the same turn',
+          )
+          return false
+        }
         // FEAT-142 — a live-day edit is resolved against THIS WEEK before it can
         // become a card: the day must be a weekday of the current week, the row
         // must really be on it, and a finished row is refused here with the

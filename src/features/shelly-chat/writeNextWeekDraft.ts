@@ -49,8 +49,17 @@ export type WriteNextWeekDraftOutcome =
   | { status: 'done'; daysWritten: string[] }
   /** Refused before any write. Nothing changed, and `notice` says why. */
   | { status: 'refused'; notice: string }
-  /** Failed partway. `daysWritten` is what really landed — never rolled back. */
-  | { status: 'partial'; daysWritten: string[] }
+  /**
+   * Failed partway. `daysWritten` is what really landed — never rolled back.
+   *
+   * `weekPlanWritten` is carried separately and is NOT redundant with a
+   * non-empty `daysWritten` (Codex P2, PR #1679). The `WeekPlan` upsert runs
+   * FIRST, so the sharp case is "goals saved, zero days written": reporting that
+   * as `daysWritten: []` alone would tell the parent nothing was written when
+   * the week's goals had in fact changed — the exact class of untruth the
+   * partial-outcome path exists to prevent.
+   */
+  | { status: 'partial'; daysWritten: string[]; weekPlanWritten: boolean }
 
 /**
  * Apply a generated draft to the next school week.
@@ -107,9 +116,17 @@ export async function writeNextWeekDraft(
   } catch (err) {
     if (err instanceof WeekApplyError) {
       console.warn('[shellyChat] next-week apply failed partway', err.daysWritten, err)
-      return { status: 'partial', daysWritten: err.daysWritten }
+      return {
+        status: 'partial',
+        daysWritten: err.daysWritten,
+        weekPlanWritten: err.weekPlanWritten,
+      }
     }
+    // A non-`WeekApplyError` escape means the shared Apply did not even get to
+    // report itself, so we know nothing about what landed. `false` is the honest
+    // reading of "unknown" here: it makes the notice say the cautious thing
+    // (check before re-applying) rather than claim a write we cannot evidence.
     console.warn('[shellyChat] next-week apply failed', err)
-    return { status: 'partial', daysWritten: [] }
+    return { status: 'partial', daysWritten: [], weekPlanWritten: false }
   }
 }

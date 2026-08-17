@@ -205,9 +205,20 @@ export function describeApplyNextWeek(childName: string, weekLabel: string): str
  * Today, so the message names the days that landed and tells her the rest did
  * not — never "failed", which would imply nothing happened.
  */
-export function partialApplyNotice(daysWritten: string[]): string {
+export function partialApplyNotice(
+  daysWritten: string[],
+  weekPlanWritten = false,
+): string {
   if (daysWritten.length === 0) {
-    return "That didn't go through — nothing was written to next week. Nothing on those days changed."
+    // The `WeekPlan` upsert runs BEFORE any day write, so "goals saved, no day
+    // written" is a real and reachable state (Codex P2, PR #1679). Saying
+    // "nothing was written" there would be false about the one thing that did
+    // change — and the week's goal list appends on each apply, so a parent who
+    // retried on the strength of that sentence would end up with the list
+    // doubled. Named explicitly instead.
+    return weekPlanWritten
+      ? "That didn't finish. The week's goals were saved but no day was planned — so next week's days are unchanged. Open Plan My Week to finish it there; applying again would list the goals twice."
+      : "That didn't go through — nothing was written to next week. Nothing on those days changed."
   }
   const labels = daysWritten.map((k) =>
     new Date(`${k}T00:00:00Z`).toLocaleDateString('en-US', {

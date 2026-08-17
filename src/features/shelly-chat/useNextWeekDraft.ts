@@ -46,6 +46,17 @@ export type NextWeekPhase =
 export interface NextWeekDraftView {
   phase: NextWeekPhase
   draft: DraftWeeklyPlan | null
+  /**
+   * The child this draft was GENERATED for (Codex P1, PR #1679).
+   *
+   * Not the same thing as the chat's active child, and the difference is a real
+   * bug if it is ignored: a parent can draft Lincoln's week, switch to London's
+   * tab, and tap Apply. Reading the active child at the write would then put
+   * Lincoln's generated routine — built from Lincoln's snapshot, his workbook
+   * positions and his priority skills — onto London's days. The draft is bound
+   * to the boy it was made for, and the write targets THIS id.
+   */
+  childId: string
   /** Sunday-start key the draft targets — what the writer re-checks. */
   weekStart: string
   /** "Aug 24–28". What every card says out loud. */
@@ -82,6 +93,7 @@ export interface UseNextWeekDraftDeps {
 const EMPTY: NextWeekDraftView = {
   phase: 'idle',
   draft: null,
+  childId: '',
   weekStart: '',
   weekLabel: '',
   days: [],
@@ -130,6 +142,23 @@ export function useNextWeekDraft(deps: UseNextWeekDraftDeps) {
     write(EMPTY)
   }, [write])
 
+  // A draft is only visible under the tab it was drafted for (Codex P1, PR
+  // #1679). The page renders the card unconditionally, so without this a week
+  // drafted for Lincoln stays on screen under London's tab — captioned with
+  // London's name by the page, offering an Apply for a plan built from Lincoln's
+  // snapshot. Even with the write now bound to `view.childId`, leaving it
+  // visible would be the card telling the parent something untrue about whose
+  // week it is, which is the failure this whole feature is written against.
+  //
+  // Done as a KEYED READ rather than an effect that clears — the pattern every
+  // sibling read in this folder uses (`useChatWeekDays`, `useChatActivityConfigs`,
+  // `useChatPlannerDefaults`). No `setState` in an effect, no cascading render,
+  // and the switch takes effect on the very render that changes the tab rather
+  // than one render later. It also means a draft SURVIVES switching away and
+  // back, which is the kinder behaviour: the plan is still that boy's and the
+  // writer re-checks the week regardless.
+  const visible = view.childId && view.childId !== deps.activeChildId ? EMPTY : view
+
   /**
    * The FIRST tap. Spends one plan generation and puts a draft on screen.
    *
@@ -157,6 +186,7 @@ export function useNextWeekDraft(deps: UseNextWeekDraftDeps) {
       write({
         ...EMPTY,
         phase: 'generating',
+        childId: action.childId,
         weekStart: resolution.weekStart,
         weekLabel,
         days: resolution.days,
@@ -188,6 +218,7 @@ export function useNextWeekDraft(deps: UseNextWeekDraftDeps) {
       write({
         phase: 'ready',
         draft: result.draft,
+        childId: action.childId,
         weekStart: resolution.weekStart,
         weekLabel,
         days: resolution.days,
@@ -224,7 +255,12 @@ export function useNextWeekDraft(deps: UseNextWeekDraftDeps) {
 
     const outcome = await writeNextWeekDraft({
       familyId: d.familyId,
-      childId: d.activeChildId,
+      // The child the draft was GENERATED for, never the tab that happens to be
+      // open now (Codex P1, PR #1679). The effect below clears a draft when the
+      // context changes, so in practice these agree — but "in practice" is not
+      // what a week write should rest on, and this is the value that decides
+      // whose days are rewritten.
+      childId: current.childId,
       weekStart: current.weekStart,
       draft: current.draft,
       children: d.children,
@@ -260,13 +296,13 @@ export function useNextWeekDraft(deps: UseNextWeekDraftDeps) {
     write({
       ...viewRef.current,
       phase: 'error',
-      error: partialApplyNotice(outcome.daysWritten),
+      error: partialApplyNotice(outcome.daysWritten, outcome.weekPlanWritten),
       daysWritten: outcome.daysWritten,
     })
   }, [write])
 
   return {
-    nextWeek: view,
+    nextWeek: visible,
     generateNextWeek,
     applyNextWeek,
     dismissNextWeek,

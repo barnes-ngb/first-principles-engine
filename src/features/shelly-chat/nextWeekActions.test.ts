@@ -246,3 +246,25 @@ describe('civilTodayKey', () => {
     expect(civilTodayKey(at(2026, 8, 18))).toBe('2026-08-18')
   })
 })
+
+describe('partialApplyNotice — goals-only is its own truth (Codex P2, #1679)', () => {
+  it('names the WeekPlan write rather than claiming nothing happened', () => {
+    const notice = partialApplyNotice([], true)
+    expect(notice).toMatch(/goals were saved/i)
+    expect(notice).not.toMatch(/nothing was written/i)
+  })
+
+  it('warns that re-applying would duplicate the goal list', () => {
+    // `childGoals` APPENDS on each apply, so "just try again" is the one piece
+    // of advice that would actively make it worse.
+    expect(partialApplyNotice([], true)).toMatch(/twice/i)
+  })
+
+  it('still says nothing was written when nothing was', () => {
+    expect(partialApplyNotice([], false)).toMatch(/nothing was written/i)
+  })
+
+  it('defaults to the cautious reading when the flag is absent', () => {
+    expect(partialApplyNotice([])).toMatch(/nothing was written/i)
+  })
+})

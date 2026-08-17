@@ -144,17 +144,48 @@ describe('writeNextWeekDraft — failure honesty', () => {
       new WeekApplyError('offline', { daysWritten: ['2026-08-24'], weekPlanWritten: true }),
     )
     const outcome = await writeNextWeekDraft(input())
-    expect(outcome).toEqual({ status: 'partial', daysWritten: ['2026-08-24'] })
+    expect(outcome).toEqual({
+      status: 'partial',
+      daysWritten: ['2026-08-24'],
+      weekPlanWritten: true,
+    })
   })
 
   it('reports an empty day list for a failure with no week-apply context', async () => {
     applyDraftWeekMock.mockRejectedValue(new Error('network'))
     const outcome = await writeNextWeekDraft(input())
-    expect(outcome).toEqual({ status: 'partial', daysWritten: [] })
+    expect(outcome).toEqual({ status: 'partial', daysWritten: [], weekPlanWritten: false })
   })
 
   it('never throws — every failure has a sentence the caller can show', async () => {
     applyDraftWeekMock.mockRejectedValue(new Error('boom'))
     await expect(writeNextWeekDraft(input())).resolves.toBeDefined()
+  })
+})
+
+describe('writeNextWeekDraft — the WeekPlan write survives a partial outcome (Codex P2, #1679)', () => {
+  it('reports goals-saved-but-no-day-written as its own distinct state', async () => {
+    // The `WeekPlan` upsert runs FIRST, so this is reachable: goals changed, no
+    // day did. Collapsing it into `daysWritten: []` would tell the parent
+    // nothing was written when something was.
+    applyDraftWeekMock.mockRejectedValue(
+      new WeekApplyError('offline', { daysWritten: [], weekPlanWritten: true }),
+    )
+    const outcome = await writeNextWeekDraft(input())
+    expect(outcome).toEqual({ status: 'partial', daysWritten: [], weekPlanWritten: true })
+  })
+
+  it('carries weekPlanWritten alongside the days that landed', async () => {
+    applyDraftWeekMock.mockRejectedValue(
+      new WeekApplyError('offline', { daysWritten: ['2026-08-24'], weekPlanWritten: true }),
+    )
+    const outcome = await writeNextWeekDraft(input())
+    expect(outcome).toMatchObject({ daysWritten: ['2026-08-24'], weekPlanWritten: true })
+  })
+
+  it('claims nothing when the failure carries no apply context', async () => {
+    applyDraftWeekMock.mockRejectedValue(new Error('network'))
+    const outcome = await writeNextWeekDraft(input())
+    expect(outcome).toEqual({ status: 'partial', daysWritten: [], weekPlanWritten: false })
   })
 })

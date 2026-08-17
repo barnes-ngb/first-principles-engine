@@ -1056,6 +1056,7 @@ Rules — read these carefully, because two of them are about what NOT to do:
 - "instructions" is her ask in her own words, one line, under 600 characters. Keep it faithful — it is quoted back on the card, and it is what shapes the plan. Do not add goals she did not ask for.
 - ONE action per turn. If she asks for several changes to the same week, put them all in the one "instructions" string; they are one week.
 - The week is always the NEXT school week (${span}) — Monday to Friday. You cannot target the current week, the week after next, or a single day of next week from here. For a change to THIS week's days use the TODAY / THIS WEEK actions above; for a change to how long an activity runs from now on use setActivityMinutes.
+- **This is the DEFAULT route for reshaping next week — use it, not the plan-adjustment handoff above.** The handoff is only for when she explicitly asks to work in Plan My Week herself. **Never emit both kinds in one turn.**
 - If she just wants to talk about next week, talk. Only propose when she clearly wants it changed.`;
 }
 
@@ -1101,6 +1102,7 @@ Grammar — one JSON object per <action> block, after your prose, using ${who}'s
 Rules:
 - This is a HANDOFF. Confirming it opens Plan My Week with your brief preloaded — the parent reviews and locks in the actual plan there. You do NOT write the plan, and you must NEVER claim the plan is changed or done.
 - "summary" is the one-line change the parent will see in the planner; "rationale" is the grounded WHY (cite the signal). You may add "scope" or "targetWeek" as short optional hints, but they're not required.
+- **PRECEDENCE (read this first): if a NEXT-WEEK DRAFT section appears below, that is the default route for reshaping next week, and this handoff is NOT.** Use draftNextWeek for every ordinary "make next week lighter / drop maths / repace reading" ask. Reserve this handoff for when the parent explicitly asks to work in the planner ("open Plan My Week", "let me build it myself", "I want to see the planner"). **NEVER emit both in one turn** — they are two answers to one question, and she would get two conflicting cards.
 - Use this for a change to the SHAPE of next week. To change how long ONE activity runs by default from now on, use setActivityMinutes above instead — that's a real write and it sticks. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when the parent clearly wants the plan to change.`;
 }
 

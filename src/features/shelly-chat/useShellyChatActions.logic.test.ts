@@ -120,6 +120,7 @@ import {
   type ChatActivityConfig,
 } from './useShellyChatActions'
 import type { ChatWeekDay } from './dayItemActions'
+import type { DraftNextWeekAction } from './nextWeekActions'
 import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
 import { SubjectBucket } from '../../core/types/enums'
 import { WatchVideoStatus } from '../../core/types/watch'
@@ -192,6 +193,7 @@ const CHILDREN: Child[] = [
 ]
 
 const navigateToPlanner = vi.fn()
+const onDraftNextWeek = vi.fn<(action: DraftNextWeekAction) => Promise<boolean>>()
 
 function setup(
   activeChildId = 'lincoln1',
@@ -201,6 +203,7 @@ function setup(
     canEditActivityConfigs?: boolean
     weekDays?: ChatWeekDay[]
     watchVideos?: WatchVideo[]
+    onDraftNextWeek?: (action: DraftNextWeekAction) => Promise<boolean>
   } = {},
 ) {
   return renderHook(() =>
@@ -210,6 +213,7 @@ function setup(
       activeChildId,
       activeThreadId,
       navigateToPlanner,
+      onDraftNextWeek: 'onDraftNextWeek' in opts ? opts.onDraftNextWeek : onDraftNextWeek,
       activityConfigs: opts.activityConfigs ?? CONFIGS,
       weekDays: opts.weekDays ?? WEEK,
       watchVideos: opts.watchVideos ?? VIDEOS,
@@ -220,6 +224,7 @@ function setup(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  onDraftNextWeek.mockResolvedValue(true)
   addSightWord.mockResolvedValue(undefined)
   removeSightWord.mockResolvedValue(undefined)
   updateChildSoftProfile.mockResolvedValue(undefined)
@@ -1966,5 +1971,120 @@ describe('confirmed writes are serialized (Codex P1, PR #1676)', () => {
       expect(await result.current.applyChatAction(second)).toBe(true)
     })
     expect(writeWatchItemToDay).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('draftNextWeek — the first of two taps (FEAT-150)', () => {
+  const DRAFT: ChatAction = {
+    kind: 'draftNextWeek',
+    childId: 'lincoln1',
+    instructions: 'lighter, math every day but short',
+  }
+
+  it('offers the card when a parent asks', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [DRAFT]))
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('refuses a kid profile with a reason, not silently', () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+    act(() => result.current.stagePendingActions('msg1', [DRAFT]))
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed[0]).toMatch(/grown-up/i)
+  })
+
+  it('refuses when no draft surface is wired, rather than promising a dead card', () => {
+    const { result } = setup('lincoln1', 'thread1', { onDraftNextWeek: undefined })
+    act(() => result.current.stagePendingActions('msg1', [DRAFT]))
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed[0]).toMatch(/Plan My Week/)
+  })
+
+  it('runs the generation on confirm and marks the card applied', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [DRAFT]))
+    await act(async () => {
+      await result.current.applyChatAction(DRAFT)
+    })
+    expect(onDraftNextWeek).toHaveBeenCalledWith(DRAFT)
+    expect(result.current.pending[0].status).toBe('applied')
+  })
+
+  it('leaves the card PENDING when generation produced no week', async () => {
+    onDraftNextWeek.mockResolvedValue(false)
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [DRAFT]))
+    await act(async () => {
+      await result.current.applyChatAction(DRAFT)
+    })
+    // No "Done ✓" over a week that does not exist — the tap stays retryable.
+    expect(result.current.pending[0].status).toBe('pending')
+  })
+
+  it('writes nothing — it is a generation, not a write', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [DRAFT]))
+    await act(async () => {
+      await result.current.applyChatAction(DRAFT)
+    })
+    expect(addSightWord).not.toHaveBeenCalled()
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+    expect(stagePlanAdjustment).not.toHaveBeenCalled()
+    expect(navigateToPlanner).not.toHaveBeenCalled()
+  })
+})
+
+describe('draftNextWeek vs the handoff — one question, one card (Codex P2, PR #1679)', () => {
+  const DRAFT: ChatAction = {
+    kind: 'draftNextWeek',
+    childId: 'lincoln1',
+    instructions: 'lighter next week',
+  }
+  const HANDOFF: ChatAction = {
+    kind: 'proposePlanAdjustment',
+    childId: 'lincoln1',
+    summary: 'Reduce math next week',
+    rationale: 'Frustration is spiking',
+  }
+
+  it('drops the handoff when a draft is proposed in the same turn', () => {
+    // Both answer "reshape next week". Two cards would be two conflicting
+    // confirmations for one intent — one drafting here, one navigating away.
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [HANDOFF, DRAFT]))
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.pending[0].action.kind).toBe('draftNextWeek')
+  })
+
+  it('drops it regardless of which order the model emitted them', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [DRAFT, HANDOFF]))
+    expect(result.current.pending.map((p) => p.action.kind)).toEqual(['draftNextWeek'])
+  })
+
+  it('records no suppressed notice — a card DID appear for what she asked', () => {
+    // The notices exist so a reply promising "confirm with a tap" never leaves
+    // the parent waiting on a card that never comes. Here one comes, and it does
+    // the thing she asked for; naming a redundant route she never saw is noise.
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [HANDOFF, DRAFT]))
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('still offers the handoff alone when no draft accompanies it', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [HANDOFF]))
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.pending[0].action.kind).toBe('proposePlanAdjustment')
+  })
+
+  it('keeps the handoff when the draft was itself refused', () => {
+    // A kid profile: the draft never becomes a card, so suppressing the handoff
+    // too would leave the turn with nothing at all.
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+    act(() => result.current.stagePendingActions('msg1', [HANDOFF, DRAFT]))
+    expect(result.current.pending.map((p) => p.action.kind)).toEqual(['proposePlanAdjustment'])
   })
 })

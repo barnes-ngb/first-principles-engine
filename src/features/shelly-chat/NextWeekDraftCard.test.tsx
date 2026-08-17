@@ -57,6 +57,7 @@ const fullWeek: DraftWeeklyPlan = {
 const view = (over: Partial<NextWeekDraftView> = {}): NextWeekDraftView => ({
   phase: 'ready',
   draft: fullWeek,
+  childId: 'c1',
   weekStart: '2026-08-23',
   weekLabel: 'Aug 24–28',
   days: nextWeekDayKeys(new Date(2026, 7, 18, 12)),

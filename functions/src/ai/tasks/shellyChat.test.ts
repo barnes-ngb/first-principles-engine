@@ -1842,3 +1842,35 @@ describe("NAVIGATION HONESTY after FEAT-150 — the arc is complete", () => {
     expect(snapshot).toContain("can't be done from here");
   });
 });
+
+describe("next-week precedence — two grammars, one question (Codex P2, PR #1679)", () => {
+  const DAYS = nextWeekDays(new Date("2026-08-18T18:00:00Z"), "America/Chicago");
+  const DRAFT = buildDraftNextWeekAddendum("lincoln", "Lincoln", DAYS);
+  const HANDOFF = buildPlanAdjustmentActionAddendum("lincoln", "Lincoln");
+
+  // Both blocks ship in the same system prompt and both are triggered by
+  // "make next week lighter". Without an explicit precedence the model can emit
+  // either — or both, giving the parent two conflicting confirmations for one
+  // intent. The prompt states the order; the client dedupes as a backstop.
+  it("makes the draft the DEFAULT route, stated in both blocks", () => {
+    expect(HANDOFF).toContain("that is the default route for reshaping next week");
+    expect(DRAFT).toContain("This is the DEFAULT route for reshaping next week");
+  });
+
+  it("scopes the handoff to an explicit ask for the planner", () => {
+    expect(HANDOFF).toContain("Reserve this handoff for when the parent explicitly asks");
+    expect(HANDOFF).toContain("open Plan My Week");
+  });
+
+  it("forbids emitting both in one turn, from both sides", () => {
+    expect(HANDOFF).toContain("NEVER emit both in one turn");
+    expect(DRAFT).toContain("Never emit both kinds in one turn");
+  });
+
+  it("keeps the handoff available rather than deleting it", () => {
+    // The run's rail: this slice ADDS the direct path, it does not remove the
+    // handoff. Some weeks are easier to build on the planner surface.
+    expect(HANDOFF).toContain("PLAN-ADJUSTMENT HANDOFF");
+    expect(HANDOFF).toContain('"kind":"proposePlanAdjustment"');
+  });
+});
