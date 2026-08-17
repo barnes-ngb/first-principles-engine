@@ -6,6 +6,9 @@ import {
   formatWatchLibrary,
   plannableWatchDays,
   buildAllChildrenLearnerModels,
+  buildDraftNextWeekAddendum,
+  formatWeekSpan,
+  nextWeekDays,
   buildCurriculumActionAddendum,
   buildDayItemActionAddendum,
   chatChecklistItemKey,
@@ -1093,23 +1096,28 @@ describe("buildDayItemActionAddendum (FEAT-142)", () => {
   });
 });
 
-describe("navigation honesty after FEAT-142 — 'coming' is a real ending, invented screens are not", () => {
+describe("navigation honesty after FEAT-142/150 — two endings, and no invented screens", () => {
   it("names the live-week edits among what the chat CAN change", () => {
     const out = buildShellyChatRoleSection("Lincoln");
     expect(out).toContain("what is on a day of THIS week");
   });
 
-  it("names the three coming slices with the REAL screen that does each today", () => {
+  it("still names the REAL screen for each area a parent asks about", () => {
     const out = buildShellyChatRoleSection("Lincoln");
     expect(out).toContain("Progress → Curriculum");
     expect(out).toContain("Watch Library");
     expect(out).toContain("Plan My Week");
-    expect(out).toContain("coming");
   });
 
-  it("bounds the promise — 'coming' applies to those three and nothing else", () => {
+  it("permits exactly TWO endings now, not three — 'coming' is gone (FEAT-150)", () => {
+    // FEAT-142 introduced "coming" as a legitimate third ending while three
+    // slices were genuinely outstanding. All three have shipped, so the ending
+    // has no true use left and is forbidden rather than merely bounded.
     const out = buildShellyChatRoleSection("Lincoln");
-    expect(out).toContain("do not promise anything else is on the way");
+    expect(out).toContain("end in one of exactly two ways");
+    expect(out).toContain("or say it isn't in the app yet");
+    expect(out).not.toContain("say the capability is coming");
+    expect(out).not.toContain("do not promise anything else is on the way");
   });
 
   it("still forbids naming a screen it was not told exists, and still denies Settings", () => {
@@ -1391,16 +1399,20 @@ describe("NAVIGATION HONESTY after FEAT-143", () => {
     }
   });
 
-  it("leaves the remaining slice as a 'coming' item, with its real screen", () => {
-    // FEAT-149 shipped slice 3, so the two-item list became one. The wording of
-    // the bound moved with it: promising "two" while listing one is the same
-    // class of inaccuracy the rule exists to stop.
+  it("has no 'coming' slice left — FEAT-150 shipped the last one", () => {
+    // The list shrank with each slice (three → two → one) and this run empties
+    // it. What replaced it is stricter than the bound ever was: the rule now
+    // forbids the ending outright, because a promise the model cannot verify is
+    // one a parent plans around.
     for (const out of [CHILD, GENERAL]) {
       expect(out).not.toContain("finding videos on the web and planning them");
+      expect(out).not.toContain("reshaping NEXT week from here");
+      expect(out).not.toContain('Say "that\'s coming" only for that one');
+      expect(out).not.toContain("do not promise anything else is on the way");
+      expect(out).toContain('NOTHING is "coming"');
+      // The real screens are still named — that half of the rule is unchanged.
       expect(out).toContain("Watch Library");
-      expect(out).toContain("reshaping NEXT week from here");
       expect(out).toContain("Plan My Week");
-      expect(out).toContain('Say "that\'s coming" only for that one');
     }
   });
 
@@ -1655,5 +1667,178 @@ describe("NAVIGATION HONESTY after FEAT-149", () => {
     for (const out of [CHILD, GENERAL]) {
       expect(out).toContain("it is NOT inside Settings");
     }
+  });
+});
+
+describe("nextWeekDays (FEAT-150) — the CF's half of 'next week'", () => {
+  const CT = "America/Chicago";
+
+  it("returns the following Mon–Fri on a weekday", () => {
+    // Tue 2026-08-18 18:00Z = 13:00 CT.
+    expect(
+      nextWeekDays(new Date("2026-08-18T18:00:00Z"), CT).map((d) => d.dateKey),
+    ).toEqual([
+      "2026-08-24",
+      "2026-08-25",
+      "2026-08-26",
+      "2026-08-27",
+      "2026-08-28",
+    ]);
+  });
+
+  it("labels the days by name, for the span the model says out loud", () => {
+    expect(nextWeekDays(new Date("2026-08-18T18:00:00Z"), CT).map((d) => d.label)).toEqual([
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+    ]);
+  });
+
+  it("means the week about to start, on a Saturday and on a Sunday alike", () => {
+    for (const iso of ["2026-08-22T18:00:00Z", "2026-08-23T18:00:00Z"]) {
+      expect(nextWeekDays(new Date(iso), CT)[0].dateKey, iso).toBe("2026-08-24");
+    }
+  });
+
+  it("keeps every weekday — unlike the watch window, none of next week is elapsed", () => {
+    // `plannableWatchDays` drops elapsed days of the CURRENT week; next week has
+    // none by definition, so a Friday still sees all five.
+    expect(nextWeekDays(new Date("2026-08-21T18:00:00Z"), CT)).toHaveLength(5);
+  });
+
+  it("uses the family's civil date, not the runtime clock", () => {
+    // 2026-08-24T02:00Z is Monday in UTC but still Sunday 21:00 in Chicago, so
+    // the family's "next week" is the one starting 2026-08-24 — the same answer
+    // the client reaches. Getting this wrong shifts a whole week by one.
+    expect(nextWeekDays(new Date("2026-08-24T02:00:00Z"), CT)[0].dateKey).toBe("2026-08-24");
+  });
+
+  it("agrees with plannableWatchDays' next-week half — one definition, two windows", () => {
+    const now = new Date("2026-08-18T18:00:00Z");
+    const watchNext = plannableWatchDays(now, CT)
+      .filter((d) => d.label.startsWith("next "))
+      .map((d) => d.dateKey);
+    expect(nextWeekDays(now, CT).map((d) => d.dateKey)).toEqual(watchNext);
+  });
+});
+
+describe("formatWeekSpan (FEAT-150)", () => {
+  it("reads as a span a parent can check, never as date keys", () => {
+    const span = formatWeekSpan(nextWeekDays(new Date("2026-08-18T18:00:00Z"), "America/Chicago"));
+    expect(span).toBe("Aug 24–28");
+    expect(span).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it("spans a month boundary readably", () => {
+    expect(
+      formatWeekSpan(nextWeekDays(new Date("2026-08-25T18:00:00Z"), "America/Chicago")),
+    ).toBe("Aug 31 – Sep 4");
+  });
+
+  it("degrades to plain words rather than throwing on an empty week", () => {
+    expect(formatWeekSpan([])).toBe("next week");
+  });
+});
+
+describe("buildDraftNextWeekAddendum (FEAT-150)", () => {
+  const DAYS = nextWeekDays(new Date("2026-08-18T18:00:00Z"), "America/Chicago");
+  const OUT = buildDraftNextWeekAddendum("lincoln", "Lincoln", DAYS);
+
+  it("is omitted on the general (no-child) branch — a week belongs to a boy", () => {
+    expect(buildDraftNextWeekAddendum(undefined, undefined, DAYS)).toBe("");
+  });
+
+  it("pins the childId into the grammar so the model cannot address another child", () => {
+    expect(OUT).toContain('"childId":"lincoln"');
+  });
+
+  it("teaches the one kind, carrying only instructions", () => {
+    expect(OUT).toContain('"kind":"draftNextWeek"');
+    expect(OUT).toContain('"instructions"');
+    // No week, no plan, no apply — the payload has nowhere to put them. Matched
+    // as JSON KEYS (`"name":`), not as bare quoted words: the prose legitimately
+    // says a separate "apply" tap follows, and that sentence is the point.
+    for (const key of ['"weekStart":', '"targetWeek":', '"days":', '"apply":', '"plan":']) {
+      expect(OUT, key).not.toContain(key);
+    }
+  });
+
+  it("forbids writing out a plan, and says why the model cannot", () => {
+    expect(OUT).toContain("Do NOT write out a plan");
+    expect(OUT).toContain("workbook positions");
+    expect(OUT).toContain("any week you compose would be made up");
+  });
+
+  it("forbids claiming it is done — the first tap writes nothing", () => {
+    expect(OUT).toContain("Do NOT say it's done");
+    expect(OUT).toContain("writes nothing");
+    expect(OUT).toContain("Two taps");
+  });
+
+  it("names the week span it targets, in the same words the card shows", () => {
+    expect(OUT).toContain("Aug 24–28");
+  });
+
+  it("rules out every week except next week", () => {
+    expect(OUT).toContain("always the NEXT school week");
+    expect(OUT).toContain("cannot target the current week, the week after next");
+  });
+
+  it("routes this-week changes and durations to the actions that own them", () => {
+    expect(OUT).toContain("TODAY / THIS WEEK actions");
+    expect(OUT).toContain("setActivityMinutes");
+  });
+
+  it("caps the instruction length the parser enforces", () => {
+    expect(OUT).toContain("600 characters");
+  });
+
+  it("stays conservative — talking about next week is not a proposal", () => {
+    expect(OUT).toContain("Only propose when she clearly wants it changed");
+  });
+
+  it("does not require the parent to be upset, the FEAT-135 trigger lesson", () => {
+    expect(OUT).toContain("does NOT have to be upset");
+  });
+});
+
+describe("NAVIGATION HONESTY after FEAT-150 — the arc is complete", () => {
+  const CHILD = buildShellyChatRoleSection("Lincoln");
+  const GENERAL = buildShellyChatRoleSection(undefined);
+
+  it("moves reshaping next week out of 'coming' and into what it CAN do", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("reshaping NEXT week");
+      expect(out).toContain("drafting the whole week");
+    }
+  });
+
+  it("says the next-week draft takes TWO taps, unlike every other action", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("the next-week draft takes two");
+    }
+  });
+
+  it("keeps the plan-adjustment handoff as a real alternative, not a fallback", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("two real routes");
+      expect(out).toContain("Offer that as a choice, not a fallback");
+    }
+  });
+
+  it("still reserves THIS week's reshaping for Plan My Week", () => {
+    for (const out of [CHILD, GENERAL]) {
+      expect(out).toContain("THIS week is reshaped there");
+    }
+  });
+
+  it("no longer promises a removal/downgrade capability is coming either", () => {
+    // The snapshot grammar carried the same forbidden ending; the rule is global
+    // now, so that one had to go with it.
+    const snapshot = buildSnapshotActionAddendum("lincoln", "Lincoln");
+    expect(snapshot).not.toContain("coming later");
+    expect(snapshot).toContain("can't be done from here");
   });
 });
