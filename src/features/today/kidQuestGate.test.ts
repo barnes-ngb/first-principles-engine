@@ -116,6 +116,29 @@ describe('computeQuestProgress — a skip resolves, it never strands (UX-72)', (
     expect(celebrationEarned(p.mustDoDone, p.mustDoCompleted)).toBe(true)
   })
 
+  it('skipping an already-COMPLETED row never shrinks the bar (Codex P2, PR #1686)', () => {
+    // The parent skip toggle preserves `completed`, so a row can be both. A
+    // completed row is real work still holding the bar up — if it also shrank
+    // the threshold, skipping a done row would unlock over a quest still open.
+    const p = computeQuestProgress([
+      item({ label: 'Prayer', completed: true, skipped: true }),
+      item({ label: 'Math', completed: true }),
+      item({ label: 'Phonics' }),
+    ])
+    expect(p.gateThreshold).toBe(3) // only skipped-and-incomplete rows shrink it
+    expect(p.gateUnlocked).toBe(false) // Phonics is still open
+    expect(p.mustDoDone).toBe(false)
+
+    // …and completing the open quest unlocks as usual.
+    const after = computeQuestProgress([
+      item({ label: 'Prayer', completed: true, skipped: true }),
+      item({ label: 'Math', completed: true }),
+      item({ label: 'Phonics', completed: true }),
+    ])
+    expect(after.gateUnlocked).toBe(true)
+    expect(after.mustDoDone).toBe(true)
+  })
+
   it('characterization: zero must-dos behaves as before — no done flag, gate open', () => {
     const p = computeQuestProgress([])
     expect(p.mustDoDone).toBe(false)

@@ -250,9 +250,17 @@ export default function KidTodayView({
   // `mustDoDone` can now be reached by parent skips alone; a fully-skipped day
   // is *open* — Craft and Workshop unlock — but never *celebrated*: no
   // "🎉 you did it!" (and no XP) over zero completions. See `celebrationEarned`.
+  //
+  // "Real work" for the ALL-done celebration counts any completion the kid
+  // made — must-do or selected craft — because `allDone`'s own predicate
+  // includes choose completions (Codex P2, PR #1686): on an all-skipped day a
+  // kid who crafts anyway has finished real work and is celebrated. The
+  // must-do award/copy stay keyed to must-do completions alone.
   const hasCompletedWork = mustDoCompleted > 0
+  const completedWorkCount =
+    mustDoCompleted + selectedChoiceItems.filter((i) => i.completed).length
   const celebrateMustDo = celebrationEarned(mustDoDone, mustDoCompleted)
-  const celebrateAllDone = celebrationEarned(allDone, mustDoCompleted)
+  const celebrateAllDone = celebrationEarned(allDone, completedWorkCount)
 
   const isLincoln = child.name.toLowerCase() === 'lincoln'
   const todayXp = useMemo(() => calculateXp(dayLog), [dayLog])

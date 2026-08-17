@@ -100,9 +100,17 @@ export function computeQuestProgress(checklist: ChecklistItem[]): QuestProgress 
   // instead of stranding it. Edge, decided: ALL must-dos skipped → threshold 0
   // → gate unlocked. A parent who cleared the whole day chose an empty day;
   // the Workshop is not a second punishment.
+  //
+  // A row can be BOTH completed and skipped — the parent skip toggle preserves
+  // `completed` — and such a row still counts in the bar: only a
+  // skipped-and-incomplete row is uncompletable, so only those shrink the
+  // threshold. Otherwise skipping an already-done row would lower the bar
+  // under the completed count and unlock over a quest still open (Codex P2,
+  // PR #1686). `mustDoSkipped` stays the full skip tally.
   const mustDoCompleted = mustDo.filter((i) => i.completed).length
   const mustDoSkipped = mustDo.filter((i) => i.skipped).length
-  const gateThreshold = Math.min(3, Math.max(0, mustDo.length - mustDoSkipped))
+  const skippedIncomplete = mustDo.filter((i) => i.skipped && !i.completed).length
+  const gateThreshold = Math.min(3, Math.max(0, mustDo.length - skippedIncomplete))
   const gateUnlocked = mustDoCompleted >= gateThreshold
 
   return {
