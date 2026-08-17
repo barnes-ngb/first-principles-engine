@@ -680,7 +680,7 @@ export default function QuestQuestionScreen({
           </IconButton>
         )}
         <Typography
-          aria-label={`${diamondsMined} diamonds mined, ${questionsRemaining} to go`}
+          aria-label={`${diamondsMined} diamonds mined, ${questionsRemaining} question${questionsRemaining !== 1 ? 's' : ''} to go`}
           sx={{
             fontFamily: MC.font,
             fontSize: '0.5rem',
@@ -689,7 +689,8 @@ export default function QuestQuestionScreen({
             lineHeight: 1.6,
           }}
         >
-          💎 {diamondsMined} mined · {questionsRemaining} to go
+          {/* One remaining-count grammar across kid surfaces: "{n} {noun} to go" (UX-75). */}
+          💎 {diamondsMined} mined · {questionsRemaining} question{questionsRemaining !== 1 ? 's' : ''} to go
         </Typography>
       </Stack>
       </Box>

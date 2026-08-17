@@ -49,7 +49,6 @@ interface KidChecklistProps {
   gateUnlocked: boolean
   gateThreshold: number
   mustDoCompleted: number
-  mustDoSkipped: number
   mustDoDone: boolean
   mustDoRemaining: number
   /**
@@ -87,7 +86,6 @@ export default function KidChecklist({
   gateUnlocked,
   gateThreshold,
   mustDoCompleted,
-  mustDoSkipped,
   mustDoDone,
   mustDoRemaining,
   ritualsRemaining = 0,
@@ -313,22 +311,20 @@ export default function KidChecklist({
           })}
         </Stack>
 
-        {/* Progress message */}
+        {/* Progress message — ONE count, one noun (UX-75). The old
+            "X of N quests done" line counted must-dos only while the line
+            below counts must-dos + rituals; two denominators four lines apart
+            is arithmetic a kid will do. Only the single falling number
+            survives, so no denominator can disagree. */}
         <Stack spacing={0.5} alignItems="center" sx={{ mt: 1 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Typography variant="body2">
-              {mustDoCompleted} of {mustDo.length} quests done
-              {mustDoSkipped > 0 && `, ${mustDoSkipped} skipped`}
-            </Typography>
-            {dailyXp > 0 && (
-              <Chip
-                label={`💎 ${dailyXp} XP earned`}
-                size="small"
-                color="success"
-                variant="outlined"
-              />
-            )}
-          </Stack>
+          {dailyXp > 0 && (
+            <Chip
+              label={`💎 ${dailyXp} XP earned`}
+              size="small"
+              color="success"
+              variant="outlined"
+            />
+          )}
           {/* No "then you choose/craft!" tail: this count now includes rituals,
               which don't gate the unlock. The locked Workshop card carries the
               gate message ("Complete N more quests to unlock!"). */}
@@ -339,13 +335,13 @@ export default function KidChecklist({
               textAlign="center"
               sx={{ fontWeight: 500 }}
             >
-              {isLincoln
-                ? `${listRemaining} quest${listRemaining !== 1 ? 's' : ''} to go!`
-                : `${listRemaining} to go!`}
+              {`${listRemaining} quest${listRemaining !== 1 ? 's' : ''} to go!`}
             </Typography>
           )}
         </Stack>
-        {mustDoDone && !isMvd && choose.length > 0 && (
+        {/* "Quests complete!" requires real work (UX-72): on a fully-skipped
+            day the craft pool is open but nothing is celebrated. */}
+        {mustDoDone && mustDoCompleted > 0 && !isMvd && choose.length > 0 && (
           <Typography
             variant="body1"
             textAlign="center"
