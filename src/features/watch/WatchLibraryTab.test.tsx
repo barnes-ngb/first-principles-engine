@@ -229,7 +229,7 @@ describe('WatchLibraryTab parent gate (FEAT-129)', () => {
   it('gates no write affordance behind a name — only the capability', () => {
     canEditRef.current = false
     render(<WatchLibraryTab />)
-    expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^archive$/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument()
   })
 })
@@ -267,23 +267,38 @@ describe('WatchLibraryTab edit (FEAT-129)', () => {
   })
 })
 
-// ── FEAT-129: retire (the "remove") ─────────────────────────────────────────
+// ── FEAT-129: retire (the "archive") ────────────────────────────────────────
 
 describe('WatchLibraryTab retire (FEAT-129)', () => {
-  it('a single Remove tap writes nothing — it proposes, then confirms', () => {
+  // UX audit 2026-08 (UX-01) renamed the verb from "Remove" to "Archive" —
+  // text only. Retire was always reversible and the Archive tab was always
+  // where it landed; "Remove" was the one word in the feature that disagreed
+  // with the data model. These cases pin the new wording AND the unchanged
+  // propose→confirm behaviour behind it.
+  it('a single Archive tap writes nothing — it proposes, then confirms', () => {
     render(<WatchLibraryTab />)
-    fireEvent.click(screen.getAllByRole('button', { name: /^remove$/i })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /^archive$/i })[0])
 
     expect(retireVideoMock).not.toHaveBeenCalled()
     expect(screen.getByText(/stays in any week it was already planned into/i)).toBeInTheDocument()
+  })
+
+  it('never calls the affordance "Remove" — the write is reversible and the word says so', () => {
+    render(<WatchLibraryTab />)
+    expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: /^archive$/i })[0])
+    expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument()
+    // And the confirm promises the way back, matching what the chat already
+    // tells a parent ("put it back from the Archive tab").
+    expect(screen.getByText(/put it back any time/i)).toBeInTheDocument()
   })
 
   it('confirming retires exactly that video', async () => {
     render(<WatchLibraryTab />)
     // Arm the SECOND row, then confirm. The confirm action is named distinctly
     // from the row action so this can't accidentally re-arm the first row.
-    fireEvent.click(screen.getAllByRole('button', { name: /^remove$/i })[1])
-    fireEvent.click(screen.getByRole('button', { name: /remove from library/i }))
+    fireEvent.click(screen.getAllByRole('button', { name: /^archive$/i })[1])
+    fireEvent.click(screen.getByRole('button', { name: /move to archive/i }))
 
     await waitFor(() => expect(retireVideoMock).toHaveBeenCalledTimes(1))
     expect(retireVideoMock).toHaveBeenCalledWith('b')
@@ -291,7 +306,7 @@ describe('WatchLibraryTab retire (FEAT-129)', () => {
 
   it('cancelling the confirm writes nothing', () => {
     render(<WatchLibraryTab />)
-    fireEvent.click(screen.getAllByRole('button', { name: /^remove$/i })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /^archive$/i })[0])
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
 
     expect(retireVideoMock).not.toHaveBeenCalled()
@@ -313,12 +328,12 @@ describe('WatchLibraryTab retire (FEAT-129)', () => {
     expect(screen.getByText('Retired one')).toBeInTheDocument()
   })
 
-  it('a retired video offers Put back, not Remove', () => {
+  it('a retired video offers Put back, not Archive', () => {
     videosRef.current = [video('r', 'Retired one', 'retired')]
     render(<WatchLibraryTab />)
     openArchive()
 
-    expect(screen.queryByRole('button', { name: /^remove$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^archive$/i })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /put back/i }))
     expect(restoreVideoMock).toHaveBeenCalledWith('r')
   })
@@ -531,7 +546,7 @@ describe('WatchLibraryTab archive view (FEAT-139)', () => {
 
   it('switching views drops any half-armed retire confirm', () => {
     render(<WatchLibraryTab />)
-    fireEvent.click(screen.getByRole('button', { name: /^remove$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^archive$/i }))
     expect(screen.getByText(/stays in any week it was already planned into/i)).toBeInTheDocument()
 
     openArchive()
@@ -559,11 +574,11 @@ describe('WatchLibraryTab back-compat: an absent status reads as active (FEAT-13
     expect(screen.getByText(/nothing archived/i)).toBeInTheDocument()
   })
 
-  it('offers Remove (not Put back) for a status-less video', () => {
+  it('offers Archive (not Put back) for a status-less video', () => {
     videosRef.current = [video('legacy', 'Pre-FEAT-129 video')]
     render(<WatchLibraryTab />)
 
-    expect(screen.getByRole('button', { name: /^remove$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^archive$/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /put back/i })).not.toBeInTheDocument()
   })
 })

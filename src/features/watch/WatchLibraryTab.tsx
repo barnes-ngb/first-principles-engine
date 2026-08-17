@@ -208,7 +208,7 @@ function WatchLibraryTabInner() {
                     <EmptyState
                       icon={<InventoryIcon />}
                       title="Everything is in the Archive"
-                      description={`All ${retired.length} videos have been removed from the library. Open the Archive tab to put one back.`}
+                      description={`All ${retired.length} videos are archived. Open the Archive tab to put one back.`}
                     />
                   )
                 ) : (
@@ -229,8 +229,8 @@ function WatchLibraryTabInner() {
         ) : (
           <>
             <Typography variant="body2" color="text.secondary">
-              Videos you removed from the library. Nothing is ever deleted — a week that already
-              planned one still plays it, and it stays out of the planner until you put it back.
+              Videos you archived. Nothing is ever deleted — a week that already planned one
+              still plays it, and it stays out of the planner until you put it back.
             </Typography>
 
             {loading ? (
@@ -241,7 +241,7 @@ function WatchLibraryTabInner() {
               <EmptyState
                 icon={<InventoryIcon />}
                 title="Nothing archived"
-                description="Videos you remove from the library land here, so you can always put one back."
+                description="Videos you archive land here, so you can always put one back."
               />
             ) : (
               <Stack spacing={1}>{retired.map(renderCard)}</Stack>

@@ -54,7 +54,17 @@ export interface WatchVideoCardProps {
  *
  * Behaviour is unchanged from FEAT-129: inline edit reuses `WatchVetInForm`,
  * retire is propose→confirm, and a retired row offers "Put back" instead of
- * "Remove". What is new is the watch-history line (FEAT-139) — a **read**, never
+ * "Archive".
+ *
+ * **The verb is "Archive", not "Remove" (UX audit 2026-08, UX-01).** Retire is
+ * reversible by construction — nothing is ever deleted, the Archive tab holds
+ * every retired entry, and the chat already tells a parent to "put it back from
+ * the Archive tab" (`shelly-chat/watchActions.ts`). "Remove" made the confirm
+ * body spend a sentence undoing the fear the verb had just created, and it was
+ * the only word in the feature that disagreed with the data model. Text only —
+ * `onArmRetire` / `onConfirmRetire` are untouched.
+ *
+ * What is new is the watch-history line (FEAT-139) — a **read**, never
  * a write, and deliberately worded to name its own window so an old watch
  * outside it is never reported as "never".
  */
@@ -126,8 +136,9 @@ export default function WatchVideoCard({
           {confirmingRetire ? (
             <Box sx={{ mt: 1 }}>
               <Typography variant="body2" sx={{ mb: 0.5 }}>
-                Remove “{video.title}” from the library? It stays in any week it was already
-                planned into, and can still be watched there. You&apos;ll find it in the Archive.
+                Archive “{video.title}”? It stays in any week it was already planned into, and
+                can still be watched there. You&apos;ll find it in the Archive, and you can put
+                it back any time.
               </Typography>
               <Stack direction="row" spacing={1}>
                 <Button
@@ -136,7 +147,7 @@ export default function WatchVideoCard({
                   color="warning"
                   onClick={() => void onConfirmRetire()}
                 >
-                  Remove from library
+                  Move to Archive
                 </Button>
                 <Button size="small" onClick={onCancelRetire}>
                   Cancel
@@ -162,7 +173,7 @@ export default function WatchVideoCard({
                 </Button>
               ) : (
                 <Button size="small" variant="text" color="warning" onClick={onArmRetire}>
-                  Remove
+                  Archive
                 </Button>
               )}
             </Stack>
