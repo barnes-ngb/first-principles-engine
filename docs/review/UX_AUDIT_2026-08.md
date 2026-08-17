@@ -16,7 +16,11 @@
 > names the concrete state a parent or a kid can reach.
 >
 > **Base:** `origin/main` @ `212a928` (post FEAT-152). **Branch:** `claude/ux-audit-2026-08-banjov`.
-> **Scope:** parent surfaces walked in full; kid surfaces read-only (flag, don't touch).
+>
+> **Scope — a targeted pass, not a whole-app sweep.** Six surfaces, in the priority order the run
+> was given: Watch Library · Today (parent) · Ask AI · Progress · Planner · app shell/nav, plus a
+> read-only kid-Today pass. **Nine other parent routes were not walked** — they are named in §12 so
+> the next run inherits a queue rather than a blind spot.
 
 ---
 
@@ -503,3 +507,39 @@ run.
 **Recommendation:** make this recurring, quarterly, at the same cadence and in the same shape as the
 monthly architecture audit — walk, file, rank, fix only dishonest words. The reusable prompt should
 land in `docs/review/prompts/` on the first repeat run, once the shape has proven itself twice.
+
+---
+
+## 12. Not walked this run — the next run's queue
+
+**This audit covered six surfaces, not the app.** They were the six the run named, in its priority
+order, and they are where the owner's report came from — but the parent nav and router expose nine
+more destinations that got **no surface review**. Recorded explicitly, because an audit that reads as
+complete when it isn't is exactly the drift the ledger's `DOC-11`/`DOC-12`/`DOC-13` sequence exists
+to punish, and because the next quarterly run should start here rather than re-walking §1–§6.
+
+| Not walked | Route | Where the JSX lives |
+|---|---|---|
+| Weekly Review | `/weekly-review` | `features/weekly-review/` |
+| Records — hours, compliance, evaluations, portfolio | `/records`, `/records/portfolio` | `features/records/` |
+| Books — bookshelf, editor, reader, review chat, sight-word dashboard, story guide | `/books`, `/books/*` | `features/books/` |
+| Settings — AI usage, account, avatar admin, sticker library, Dev tab | `/settings` | `features/settings/` |
+| Dad Lab | `/dad-lab` | `features/dad-lab/` |
+| Barnes Bros — sales log, goals, kit builder, catalog, orders | `/business` | `features/business/` |
+| Game Workshop | `/workshop` | `features/workshop/` |
+| Reading evaluation chat | `/evaluate` | `features/evaluate/` |
+| Stickers | `/stickers` | `features/books/StickersPage.tsx` |
+
+Two of the nine were touched only incidentally and only from the shell's side, so they are **not**
+audited: `/records/portfolio` (UX-24, the header renders the kid's label "My Stuff") and `/evaluate`
+(UX-25, the header falls through to "Home"). Both findings are about `AppShell`, not about those
+pages.
+
+Kid surfaces beyond kid Today — Knowledge Mine, My Books, Books About Me, My Hero, My Stuff — were
+likewise not walked. Kid findings stay read-only regardless (§7).
+
+**Sizing the remainder honestly:** `BookEditorPage` (2,103L), `WorkshopPage` (1,623L) and
+`useQuestSession` (2,161L) are each larger than anything walked here, and Records carries the
+compliance surfaces. A second run of this size will not clear all nine — expect two, split
+Records + Weekly Review + Evaluate (the records-and-loop half) from Books + Workshop + Barnes Bros +
+Settings (the making half).
