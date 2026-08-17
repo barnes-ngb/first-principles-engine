@@ -1,3 +1,4 @@
+import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
@@ -33,6 +34,14 @@ import {
   isDayItemAction,
   resolveDayItemAction,
 } from './dayItemActions'
+import {
+  describeDraftNextWeek,
+  DRAFT_FOOTNOTE,
+  formatNextWeekLabel,
+  isDraftNextWeekAction,
+  nextWeekDayKeys,
+  type DraftNextWeekAction,
+} from './nextWeekActions'
 import type { ChatWatchVideo, ResolvedWatchAction } from './watchActions'
 import {
   describeVetInShape,
@@ -81,6 +90,43 @@ interface ActionConfirmCardProps {
   onConfirm: (action: ChatAction) => void
   onDismiss: (action: ChatAction) => void
   onConfirmAll: () => void
+}
+
+/**
+ * Preview for a `draftNextWeek` proposal (FEAT-150) — the first of two taps.
+ *
+ * Two things this card must get across, because the parent's mental model of
+ * "Confirm" everywhere else in this chat is "and it's done":
+ *
+ *   1. **It writes nothing.** It spends one plan generation and shows her a
+ *      week. The footnote says so in those words.
+ *   2. **What it was asked for.** The instructions are quoted back verbatim,
+ *      because the generation is about to be shaped by the model's reading of
+ *      what she said, and this is her one chance to notice it read her wrong
+ *      before the tokens are spent.
+ *
+ * The week is named in words ("Aug 24–28"), recomputed from the clock here
+ * rather than carried on the action — a card that sat through a rollover would
+ * otherwise name a week that is no longer the one the tap targets.
+ */
+function DraftNextWeekPreview({
+  action,
+  childName,
+}: {
+  action: DraftNextWeekAction
+  childName: string
+}) {
+  const weekLabel = formatNextWeekLabel(nextWeekDayKeys())
+  return (
+    <>
+      <Typography variant="body2">
+        {describeDraftNextWeek(action, childName, weekLabel)}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+        {DRAFT_FOOTNOTE}
+      </Typography>
+    </>
+  )
 }
 
 const FIELD_LABEL: Record<'motivators' | 'interests' | 'strengths', string> = {
@@ -510,6 +556,7 @@ export default function ActionConfirmCard({
           const isProfileEdit = action.kind === 'editProfileField'
           const isSnapshotEdit = isSnapshotAction(action)
           const isPlanAdjustment = action.kind === 'proposePlanAdjustment'
+          const isDraftNextWeek = isDraftNextWeekAction(action)
           // FEAT-135 — resolve the proposal to a live config so the card can
           // show a NAME and a real old → new diff. An unresolvable id is
           // already filtered out at stage time; if one somehow reaches here we
@@ -602,6 +649,8 @@ export default function ActionConfirmCard({
               <MenuBookOutlinedIcon fontSize="small" color="warning" />
             ) : isWatch ? (
               <OndemandVideoOutlinedIcon fontSize="small" color="warning" />
+            ) : isDraftNextWeek ? (
+              <CalendarMonthOutlinedIcon fontSize="small" color="info" />
             ) : (
               <EditOutlinedIcon fontSize="small" color="action" />
             )
@@ -620,7 +669,8 @@ export default function ActionConfirmCard({
                   isActivityMinutes ||
                   isDayItem ||
                   isCurriculum ||
-                  isWatch
+                  isWatch ||
+                  isDraftNextWeek
                     ? 'flex-start'
                     : 'center',
                 gap: 1,
@@ -631,7 +681,7 @@ export default function ActionConfirmCard({
                 // (info) accent so it reads as "opens the planner", not a write.
                 ...(isSnapshotEdit || isActivityMinutes || isDayItem || isCurriculum || isWatch
                   ? { borderColor: 'warning.main', borderLeftWidth: 3 }
-                  : isPlanAdjustment
+                  : isPlanAdjustment || isDraftNextWeek
                     ? { borderColor: 'info.main', borderLeftWidth: 3 }
                     : {}),
               }}
@@ -663,6 +713,8 @@ export default function ActionConfirmCard({
                   />
                 ) : isSnapshotEdit ? (
                   <SnapshotEditPreview action={action} childName={childName(action.childId)} />
+                ) : isDraftNextWeek ? (
+                  <DraftNextWeekPreview action={action} childName={childName(action.childId)} />
                 ) : isPlanAdjustment ? (
                   <PlanAdjustmentPreview action={action} childName={childName(action.childId)} />
                 ) : isProfileEdit ? (
@@ -685,11 +737,15 @@ export default function ActionConfirmCard({
                   <Button
                     size="small"
                     variant="contained"
-                    color={isPlanAdjustment ? 'info' : 'primary'}
+                    color={isPlanAdjustment || isDraftNextWeek ? 'info' : 'primary'}
                     onClick={() => onConfirm(item.action)}
                     sx={{ textTransform: 'none', minWidth: 0, py: 0.5 }}
                   >
-                    {isPlanAdjustment ? 'Review in Plan My Week' : 'Confirm'}
+                    {isPlanAdjustment
+                      ? 'Review in Plan My Week'
+                      : isDraftNextWeek
+                        ? 'Draft it'
+                        : 'Confirm'}
                   </Button>
                   <Button
                     size="small"
@@ -704,13 +760,25 @@ export default function ActionConfirmCard({
               )}
               {item.status === 'applying' && (
                 <Typography variant="caption" color="text.secondary">
-                  Saving…
+                  {isDraftNextWeek ? 'Drafting…' : 'Saving…'}
                 </Typography>
               )}
               {item.status === 'applied' && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'success.main' }}>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    color: isDraftNextWeek ? 'info.main' : 'success.main',
+                  }}
+                >
                   <CheckCircleIcon fontSize="small" />
-                  <Typography variant="caption">Done</Typography>
+                  {/* "Done" would be a lie on a draft card: the tap produced a
+                      week to READ, and nothing has been written. The word points
+                      at the draft below, which is where the actual decision is. */}
+                  <Typography variant="caption">
+                    {isDraftNextWeek ? 'Drafted below' : 'Done'}
+                  </Typography>
                 </Box>
               )}
               {item.status === 'dismissed' && (

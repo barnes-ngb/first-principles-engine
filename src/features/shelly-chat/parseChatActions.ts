@@ -42,6 +42,17 @@ export const MIN_ACTIVITY_MINUTES = 5
 export const MAX_ACTIVITY_MINUTES = 120
 
 /**
+ * The cap on a `draftNextWeek` instruction string (FEAT-150).
+ *
+ * Generous enough for any real ask a parent would voice about a week — "lighter
+ * overall, math every day but short, and please keep Wednesday clear for the
+ * dentist" is under 120 characters — and short enough that the field cannot
+ * become a channel for model-authored prose into a generation prompt. Rejected
+ * when exceeded, never truncated.
+ */
+export const MAX_DRAFT_INSTRUCTION_CHARS = 600
+
+/**
  * Shape gate for a `YYYY-MM-DD` day key (FEAT-142).
  *
  * Strict on both halves: the string must LOOK like a date key, and the date it
@@ -449,6 +460,36 @@ function toChatAction(payload: unknown): ChatAction | null {
       watchVideoId,
       dateKey: obj.dateKey,
     }
+  }
+
+  // ── draftNextWeek — ask for a draft of next week (FEAT-150) ────────
+  //
+  // The narrowest possible shape for the widest capability in the portal, and
+  // the narrowness is the point. Three things are deliberately NOT here:
+  //
+  //   1. **No plan.** The model cannot emit days, items or minutes. A week it
+  //      wrote out of prose would be a plan no generator produced, checked
+  //      against no workbook position and no day budget. Confirming this action
+  //      runs the planner's own generation task instead.
+  //   2. **No week.** There is no `weekStart` / `targetWeek` field to hallucinate
+  //      into. "Next week" is resolved from the family's clock at generation and
+  //      re-resolved at the write (`nextWeekActions`), so a stale card cannot
+  //      write to a week that has since become the current one.
+  //   3. **No apply.** There is no `applyNextWeek` kind anywhere in the union,
+  //      so the model has no way to express "and write it". The apply card is
+  //      built by the app from a draft that already exists.
+  //
+  // What it does carry is `instructions`: the parent's own words, gated as a
+  // non-empty string and CAPPED. The cap is not a formatting nicety — the string
+  // is folded into a generation prompt, so an unbounded one is a way to spend
+  // the parent's tokens and to bury the planner's instructions under a wall of
+  // model-authored text. Over-long is rejected as malformed, never truncated: a
+  // truncated instruction is one the parent read on the card and did not get.
+  if (obj.kind === 'draftNextWeek') {
+    const instructions = nonEmptyString(obj.instructions)
+    if (!instructions) return null
+    if (instructions.length > MAX_DRAFT_INSTRUCTION_CHARS) return null
+    return { kind: 'draftNextWeek', childId: obj.childId, instructions }
   }
 
   if (obj.kind === 'setActivityPosition') {

@@ -98,6 +98,11 @@ import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
 import type { WatchAction } from './watchActions'
 import { isWatchAction, repeatedVetInNotice, resolveWatchAction } from './watchActions'
 import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
+import {
+  isDraftNextWeekAction,
+  resolveDraftNextWeek,
+  type DraftNextWeekAction,
+} from './nextWeekActions'
 import { stagePlanAdjustment } from './stagePlanAdjustment'
 import { addWatchVideo } from '../watch/useWatchLibrary'
 import { writeWatchItemToDay } from '../watch/writeWatchItemToDay'
@@ -226,6 +231,20 @@ export interface ShellyChatActionsDeps {
    * router (and testable); the page wires it with `useNavigate`.
    */
   navigateToPlanner?: () => void
+  /**
+   * Run the plan generation a confirmed `draftNextWeek` asks for (FEAT-150).
+   *
+   * **This is the first of the feature's two taps, and it writes nothing.** The
+   * hook deliberately owns no draft state and no generation logic: the draft, the
+   * week it targets, and the SECOND tap that actually writes it all live in
+   * `useNextWeekDraft`. What crosses this seam is one call and one boolean —
+   * `false` when no week was produced, so the confirm card reverts to pending
+   * instead of stamping "Done ✓" over a generation that failed.
+   *
+   * Optional, and absent means the kind simply cannot be staged, which is the
+   * correct behaviour for any caller that has not wired the draft surface.
+   */
+  onDraftNextWeek?: (action: DraftNextWeekAction) => Promise<boolean>
 }
 
 /** The Tier-C Option-2 additive snapshot kinds (6b). */
@@ -497,6 +516,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     canEditActivityConfigs = false,
     activeThreadId,
     navigateToPlanner,
+    onDraftNextWeek,
   } = deps
 
   const [pending, setPending] = useState<PendingAction[]>([])
@@ -536,13 +556,19 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // shows ("Lincoln already did this one — …"). A ref for the same reason as the
   // others: `stagePendingActions` must keep a stable identity.
   const childNameRef = useRef<string | undefined>(undefined)
+  // The next-week draft surface (FEAT-150). A ref for the same reason as the
+  // others — `stagePendingActions` must keep a stable identity — and because the
+  // stage gate needs to know whether a `draftNextWeek` card would have anything
+  // behind it BEFORE offering one.
+  const onDraftNextWeekRef = useRef<ShellyChatActionsDeps['onDraftNextWeek']>(undefined)
   useEffect(() => {
     configsRef.current = activityConfigs
     weekRef.current = weekDays
     videosRef.current = watchVideos
     parentRef.current = canEditActivityConfigs
     childNameRef.current = children.find((c) => c.id === activeChildId)?.name
-  }, [activityConfigs, weekDays, watchVideos, canEditActivityConfigs, children, activeChildId])
+    onDraftNextWeekRef.current = onDraftNextWeek
+  }, [activityConfigs, weekDays, watchVideos, canEditActivityConfigs, children, activeChildId, onDraftNextWeek])
 
   /**
    * Stage the actions parsed from an assistant message, awaiting a confirm tap.
@@ -588,6 +614,28 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
           )
           if (!resolution.ok) {
             console.warn('[shellyChat] dropped live-day edit —', resolution.notice, action)
+            notices.push(resolution.notice)
+            return false
+          }
+          return true
+        }
+        // FEAT-150 — a next-week draft is resolved against the capability
+        // before it can become a card. It is the largest thing this chat can
+        // propose, so it is also refused when the surface that would run it is
+        // not wired: a card whose confirm has nothing behind it would spend the
+        // parent's tap on nothing, which is the exact failure the suppressed
+        // notices exist to prevent.
+        if (isDraftNextWeekAction(action)) {
+          if (!onDraftNextWeekRef.current) {
+            console.warn('[shellyChat] dropped draftNextWeek — no draft surface wired')
+            notices.push(
+              "I can't draft a week from here right now — nothing was changed. Plan My Week can build it.",
+            )
+            return false
+          }
+          const resolution = resolveDraftNextWeek(action, parentRef.current)
+          if (!resolution.ok) {
+            console.warn('[shellyChat] dropped draftNextWeek —', resolution.notice, action)
             notices.push(resolution.notice)
             return false
           }
@@ -729,6 +777,14 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         )
         if (!resolution.ok) return resolution.notice
       }
+      // FEAT-150 backstop: a card staged while the parent was signed in must not
+      // reach a generation on a later tap from a kid profile — and a surface
+      // that has since gone away must not be called into.
+      if (isDraftNextWeekAction(action)) {
+        if (!onDraftNextWeekRef.current) return 'no next-week draft surface'
+        const resolution = resolveDraftNextWeek(action, parentRef.current)
+        if (!resolution.ok) return resolution.notice
+      }
       // FEAT-143 backstop: same shape as the two above. A card staged before a
       // config was completed elsewhere (or before the capability was lost) must
       // not reach a write on a later tap.
@@ -792,6 +848,16 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
           console.warn('[shellyChat] live-day edit refused by the write lane', action)
           return false
         }
+      } else if (isDraftNextWeekAction(action)) {
+        // FEAT-150 — tap ONE of two. This spends a plan generation and puts a
+        // draft on screen; it writes no week, no day and no child record. The
+        // second tap lives on the draft card and has no `ChatAction` kind, so a
+        // reply can never reach a week write in a single confirmation.
+        //
+        // A `false` return means no week was produced, so the card must go back
+        // to pending rather than claim a draft the parent cannot see.
+        const drafted = await onDraftNextWeekRef.current?.(action)
+        if (!drafted) return false
       } else if (action.kind === 'proposePlanAdjustment') {
         // HANDOFF, not a write (chunk 2A/2): stage the brief to the planner's
         // per-child inbox. shelly-chat NEVER writes the plan — the planner owns
