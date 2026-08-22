@@ -80,7 +80,10 @@ describe('ShellyChatPage (shell smoke test)', () => {
   it('renders the general empty state with greeting and starter prompts', () => {
     renderPage()
     // Default context is "general" when there is no active child.
-    expect(screen.getByText(/Hi Shelly/)).toBeInTheDocument()
+    // UX-39: the General tab no longer greets the parent by Shelly's name — one
+    // assistant name (the nav's "Ask AI"), and a greeting that says what the tab does.
+    expect(screen.getByText('Ask me anything')).toBeInTheDocument()
+    expect(screen.queryByText(/Hi Shelly/)).not.toBeInTheDocument()
     expect(screen.getByText('Weekly planning help')).toBeInTheDocument()
   })
 
@@ -89,7 +92,7 @@ describe('ShellyChatPage (shell smoke test)', () => {
     expect(screen.getByRole('tab', { name: 'Lincoln' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'London' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText("Ask Shelly's AI...")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask AI\u2026')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument()
   })
 

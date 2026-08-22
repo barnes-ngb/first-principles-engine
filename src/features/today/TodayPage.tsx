@@ -958,7 +958,7 @@ export default function TodayPage() {
         <Typography variant="h4" component="h1">Today</Typography>
         <HelpStrip
           pageKey="today"
-          text="This is today's checklist. Saving creates the Daily Log."
+          text="Tap items off as you go — everything saves itself."
         />
         {isKidProfile ? (
           <Typography variant="subtitle1" color="text.secondary">
@@ -1086,7 +1086,7 @@ export default function TodayPage() {
 
       <HelpStrip
         pageKey="today"
-        text="This is today's checklist. Saving creates the Daily Log."
+        text="Tap items off as you go — everything saves itself."
       />
       {isKidProfile ? (
         <Typography variant="subtitle1" color="text.secondary">

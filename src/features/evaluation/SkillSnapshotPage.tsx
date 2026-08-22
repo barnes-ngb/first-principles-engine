@@ -284,7 +284,12 @@ export default function SkillSnapshotPage() {
     <Page>
       <Stack direction="row" alignItems="center" justifyContent="space-between">
         <div>
-          <Typography variant="h4" component="h1">Lincoln Evaluation</Typography>
+          {/* UX-50: the page sits above a child switcher, so a hardcoded name
+              was wrong for half the family — and the tab that opens it is called
+              "Skill Snapshot", not "Evaluation". */}
+          <Typography variant="h4" component="h1">
+            {activeChild?.name ?? 'Your child'}&apos;s Skill Snapshot
+          </Typography>
           <Typography color="text.secondary">
             Maintain a living Skill Snapshot used by the planner and teach helper.
           </Typography>

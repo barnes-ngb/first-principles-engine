@@ -1527,8 +1527,9 @@ export default function TodayChecklist({
         </Stack>
       ) : (
         <Stack spacing={1} sx={{ py: 1 }}>
+          {/* UX-24: the shared EmptyState convention — warm, no negation. */}
           <Typography color="text.secondary">
-            No plan for today yet.{' '}
+            Nothing on today&apos;s list yet.{' '}
             <RouterLink to="/planner/chat" style={{ color: 'inherit', fontWeight: 600 }}>
               Plan My Week
             </RouterLink>{' '}

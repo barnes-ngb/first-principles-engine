@@ -31,7 +31,9 @@ const MC = {
 
 const FILTER_OPTIONS: Array<{ value: WordFilter; label: string }> = [
   { value: 'all', label: 'All' },
-  { value: 'struggling', label: 'Struggling \uD83D\uDD34' },
+  // UX-49: the filter value is the stored mastery level; the label is what the
+  // kid reads off the wall. "Still practicing" is the same fact without the grade.
+  { value: 'struggling', label: 'Still practicing \u26CF\uFE0F' },
   { value: 'emerging', label: 'Emerging \uD83D\uDFE1' },
   { value: 'known', label: 'Known \uD83D\uDFE2' },
   { value: 'not-yet', label: 'Not Yet \u2B1C' },
@@ -143,7 +145,8 @@ export default function WordWall() {
           <Typography
             sx={{ fontFamily: MC.font, fontSize: '0.4rem', color: MC.stone }}
           >
-            {stats.total} words discovered &middot; {stats.known} mastered
+            {stats.total} word{stats.total === 1 ? '' : 's'} discovered &middot;{' '}
+            {stats.known} mastered
           </Typography>
         </Box>
 
@@ -238,7 +241,8 @@ export default function WordWall() {
                 '&:hover': { bgcolor: '#4adccc' },
               }}
             >
-              Generate Practice Story ({strugglingWords.length} words)
+              Generate Practice Story ({strugglingWords.length} word
+              {strugglingWords.length === 1 ? '' : 's'})
             </Button>
           )}
         </Stack>

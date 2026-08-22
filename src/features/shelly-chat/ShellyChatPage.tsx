@@ -56,9 +56,18 @@ import { useShellyChatActions } from './useShellyChatActions'
 import { useShellyChatState } from './useShellyChatState'
 import { useShellyChatFlows } from './useShellyChatFlows'
 
+// UX-39: the assistant had three names, and one of them was the user's — the nav
+// says "Ask AI", the input said "Ask Shelly's AI", and the General tab greeted the
+// PARENT as "Hi Shelly", which is wrong for Dad on the shared profile and blurs
+// who "Shelly" is. The greetings now say what the tab is for. The kid-dashboard
+// register ("Learning Space 🎮" / "Creative Corner 🎨") also goes: this is a
+// parent-only surface.
+// UX-37: the General subtitle used to offer scheduling and curriculum changes,
+// and every action proposed from this tab is dropped with a notice to go ask on a
+// child tab. It now says that up front instead of inviting the refusal.
 const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: string; suggestions: ReadonlyArray<{ label: string; message: string }> }> = {
   lincoln: {
-    greeting: "Lincoln's Learning Space \u{1F3AE}",
+    greeting: 'Ask about Lincoln',
     subtitle: "Ask about Lincoln's reading progress, activity ideas, skill recommendations, or anything related to his learning.",
     suggestions: [
       { label: 'Reading progress check', message: "How is Lincoln doing with reading? What should we focus on this week based on his evaluations?" },
@@ -67,7 +76,7 @@ const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: 
     ],
   },
   london: {
-    greeting: "London's Creative Corner \u{1F3A8}",
+    greeting: 'Ask about London',
     subtitle: "Ask about London's progress, story ideas, creative activities, or anything related to his learning.",
     suggestions: [
       { label: 'Story activity ideas', message: 'What are some creative story or drawing activities for London this week?' },
@@ -76,8 +85,8 @@ const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: 
     ],
   },
   general: {
-    greeting: "Hi Shelly \u{1F44B}",
-    subtitle: "Ask me anything — teaching ideas, curriculum questions, scheduling, or just vent about your day.",
+    greeting: 'Ask me anything',
+    subtitle: "Teaching ideas, curriculum questions, or just vent about your day. To change a plan or a record, switch to Lincoln's or London's tab.",
     suggestions: [
       { label: 'Weekly planning help', message: "Help me think through this week's plan. What should I prioritize?" },
       { label: 'Low energy day ideas', message: "I'm having a low energy day. What's the most important thing to cover with the boys?" },
@@ -694,7 +703,7 @@ export default function ShellyChatPage() {
             multiline
             maxRows={4}
             size="small"
-            placeholder="Ask Shelly's AI..."
+            placeholder="Ask AI…"
             inputRef={chatInputRef}
             value={input}
             onChange={(e) => { setInput(e.target.value); if (followUps.length) setFollowUps([]) }}

@@ -260,17 +260,32 @@ export function MonthlyReviewReader({
         )}
 
         {!lockedMode && (
-          <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+          <Box
+            sx={{
+              flex: 1,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: 1,
+            }}
+          >
+            {/* UX-53: two bare nouns read equally as "who is this book for" and
+                "hand the phone over". This toggle does neither — it previews the
+                same book two ways. The caption says which. */}
+            <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+              Preview as:
+            </Typography>
             <ToggleButtonGroup
               value={mode}
               exclusive
               size="small"
+              aria-label="Preview audience"
               onChange={(_, next) => {
                 if (next) setMode(next)
               }}
             >
-              <ToggleButton value="kid">Kid</ToggleButton>
-              <ToggleButton value="parent">Parent</ToggleButton>
+              <ToggleButton value="kid">Kid&apos;s view</ToggleButton>
+              <ToggleButton value="parent">Parent&apos;s view</ToggleButton>
             </ToggleButtonGroup>
           </Box>
         )}

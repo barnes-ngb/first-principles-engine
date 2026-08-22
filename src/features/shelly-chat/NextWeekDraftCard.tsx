@@ -175,6 +175,14 @@ export default function NextWeekDraftCard({
               </Box>
             </Box>
 
+            {/* UX-35: the re-draft sentence sits ABOVE the buttons now. Read in
+                the old order, "Not this" landed right beside "I'll draft it
+                again" and read as the way to ask for another one — it is the
+                way to throw this one away, and a draft costs a generation. */}
+            <Typography variant="caption" color="text.secondary">
+              Want it different? Just say what to change and I'll draft it again. Or open Plan My
+              Week to build it there.
+            </Typography>
             <Stack direction="row" spacing={1}>
               <Button
                 size="small"
@@ -186,13 +194,9 @@ export default function NextWeekDraftCard({
                 {busy ? 'Applying…' : describeApplyNextWeek(childName, view.weekLabel)}
               </Button>
               <Button size="small" variant="text" onClick={onDismiss} disabled={busy}>
-                Not this
+                Discard this draft
               </Button>
             </Stack>
-            <Typography variant="caption" color="text.secondary">
-              Want it different? Just say what to change and I'll draft it again. Or open Plan My
-              Week to build it there.
-            </Typography>
           </>
         )}
 
