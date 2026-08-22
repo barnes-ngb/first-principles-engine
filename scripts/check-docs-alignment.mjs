@@ -113,6 +113,35 @@ export function parseLedgerStatusCells(md) {
 }
 
 /**
+ * The phrasings a status cell uses to claim its PR has not landed yet.
+ *
+ * WHY THIS IS A LIST AND WHY IT GREW — every entry was earned by a real episode,
+ * and the list grows only when a stale cell demonstrably sails past the ones
+ * already here. It is not a guess at what a future run might write.
+ *
+ *   1-2. "PR open" / "do not merge" — the original pair (DOC-13, PR #1662),
+ *        drawn from the 25 + 30 stale rows DOC-11 and DOC-12 swept by hand.
+ *   3.   "awaiting … review/merge" — added 2026-08-22 (DOC-15). The house
+ *        convention had shifted to "**SHIPPED — PR #1681, 2026-08-17; awaiting
+ *        human review + merge**", which says exactly the same untrue thing on
+ *        `main` and matched none of the above. Three rows (FEAT-152/153/154)
+ *        carried it before anyone noticed — the same slow drift DOC-11/12 fixed
+ *        by hand, re-forming in new words.
+ *
+ * The third pattern deliberately requires a following "review"/"merge" WORD, so
+ * "awaiting" alone never fires: FEAT-119's cell legitimately reads "**DRAFT
+ * LANDED — AWAITING OWNER CURATION** (PR #1622, merged 2026-07-25)" — a merged
+ * PR waiting on a human task, which is an honest status, not a stale one. Note
+ * `\bmerge\b` does not match "merged", so a cell that states the merge as a fact
+ * stays clean.
+ */
+const OPEN_PR_STATUS_PATTERNS = [
+  /PR open/i,
+  /do not merge/i,
+  /awaiting\b.{0,40}?\b(?:merge|review)\b/i,
+]
+
+/**
  * Ledger rows whose STATUS CELL still claims an open, unmerged PR.
  *
  * Deliberately status-cell-only: row *bodies* quote "PR open" / "do not merge"
@@ -120,12 +149,15 @@ export function parseLedgerStatusCells(md) {
  * drift class, and FEAT-139's own body ends "**Do not merge** — Nathan reviews
  * and merges"). Matching bodies would fire on rows whose status cells are
  * already correct — false positives that get a rule deleted rather than fixed.
+ * That scope is unchanged by the 2026-08-22 widening: the third pattern reads
+ * `cells[3]` like the other two, and every run's PR body still ends "**Do not
+ * merge** — Nathan reviews and merges" without tripping it.
  *
  * @returns {{ id: string, status: string, line: number }[]}
  */
 export function findOpenPrStatusRows(md) {
   return parseLedgerStatusCells(md).filter((r) =>
-    /PR open|do not merge/i.test(r.status),
+    OPEN_PR_STATUS_PATTERNS.some((re) => re.test(r.status)),
   )
 }
 
