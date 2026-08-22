@@ -47,16 +47,38 @@ write-through at the already-stubbed point in `useSkillMapWrite.ts`.
 | Dimension | Authoritative store | Written by (only) | Read by | Notes |
 |---|---|---|---|---|
 | **Stable identity** — level band, strengths, motivators, supports, speech/ND notes | `children/{childId}` (childProfile) | Settings (human) · Tier C portal (human-confirmed) | charter context everywhere | The "who Lincoln is" layer. Slow-changing, human-owned. |
-| **Current academic state** — priority skills, supports, stop rules, conceptual blocks, working levels | `skillSnapshots/{childId}` | Eval Apply (`EvaluateChatPage.handleSaveAndApply`), quest end (`useQuestSession`), manual edit (`SkillSnapshotPage`); **scan write-through (to add)** | plan, quest, generateStory, disposition, scan, shellyChat, weeklyReview AI tasks; Skill Snapshot UI | **THE authority for "what to teach next."** Writers are currently inline (no central helper); hardening adds one — see implied change #2. |
+| **Current academic state** — priority skills, supports, stop rules, conceptual blocks, working levels | `skillSnapshots/{childId}` | Eval Apply (`EvaluateChatPage.handleSaveAndApply`), quest end (`useQuestSession`), manual edit (`SkillSnapshotPage`); **both scan write-throughs** (`useCertificateProgress` + `CertificateScanSection`) and the **Shelly chat portal** (Tier C Option 2), the latter three via the central `evaluate/skillSnapshotWrites.ts` | plan, quest, generateStory, disposition, scan, shellyChat, weeklyReview AI tasks; Skill Snapshot UI | **THE authority for "what to teach next."** The central helper exists now (`skillSnapshotWrites.ts`, shipped with FUNC-02) and every writer added since routes through it — **additive-only**, never a downgrade. The three original inline writers were deliberately not migrated; that remainder is tracked as **ARCH-12**, not implied change #2. |
 | **Curriculum coverage / node mastery** — "what's been covered" | `childSkillMaps/{childId}` | `updateSkillMapFromFindings` (quest/eval/worksheet-scan findings) | Learning Map UI + Curriculum Tab (real-time `useSkillMap`) — **not read directly by any AI task** | Distinct from working levels — it's graph coverage, not skill grade. AI tasks see coverage only indirectly via the `workbookPaces`/`activityConfigs` slices. |
-| **Curriculum position** — lesson/page per activity | `activityConfigs/{childId}` (`curriculumMeta`) | planner setup, certificate scan (`useCertificateProgress`) | quest (starting level via `workbookPaces`), planner, scan + weeklyReview AI tasks, Curriculum UI | "What page are we on." Numeric, not a skill judgement. |
+| **Curriculum position** — lesson/page per activity | `activityConfigs/{childId}` (`curriculumMeta`) | planner setup, certificate scan (`useCertificateProgress`), Progress → Curriculum (`CurriculumTab` / `AddActivityDialog` via `useActivityConfigs`), **Shelly chat portal** (FEAT-143 `curriculumActions` — add / complete / set-position, confirm-gated) | quest (starting level via `workbookPaces`), planner, scan + weeklyReview AI tasks, Curriculum UI | "What page are we on." Numeric, not a skill judgement. The Curriculum tab and the chat portal share one core, `core/firebase/activityConfigWrites.ts` (FEAT-143) — the chat opened no second lane. **The two scan paths do not, and that is a live exception, not a rounding error:** `useScanToActivityConfig` (worksheet) and `useCertificateProgress.applyUpdate` (certificate) both write `activityConfigs` with raw `updateDoc`/`setDoc`. The worksheet path at least calls `syncWorkbookPositionToModel` itself (`via: 'scan'`); **the certificate path calls neither the core nor the sync**, so a certificate advance moves the position without the FEAT-63 learner-model fold that a manual or chat advance triggers. Tracked as **DATA-17** — do not read this row as "one chokepoint". The same doc's `defaultMinutes` is written by FEAT-135's narrow `updateActivityMinutes` helper; that is activity *config*, not position. **No delete from the chat** — completion is its only removal. |
 | **Disposition** — how he approaches learning | `children/{childId}.dispositionCache` (+ `dispositionOverrides`) | `DispositionProfile.tsx` AI regen (+ parent override field) | Disposition UI, shellyChat | **Derived cache, NOT authoritative.** Recomputed on demand from day logs; cache TTL ~24h; may lag. |
 | **Milestones** | *(no Firestore collection — computed at render from blocks/XP/quests/certs)* | — | Progress → Milestones | Not a store; makes no authority claim. (The brief's `milestoneProgress` collection does not exist in code.) |
 | **Ladders** | `ladderProgress` | *(deprecated — none)* | portfolio scoring only | Data-only, retained for history (ARCH-07). |
 
+### Execution-record stores the portal can now write (added after the 2026-05-30 ruling)
+
+The table above answers *"where is Lincoln"* and its seven dimensions are unchanged by the
+ruling. But the table's working purpose is the second question — *"when Shelly edits X, which
+store is written?"* — and since the ruling the Shelly portal has grown three write lanes into
+stores that had no row here at all. They are **not** "where is Lincoln" judgements (nothing
+below is an authority on what to teach next), which is why they sit in their own block rather
+than being folded in above. They are listed because a writer with no row is exactly the gap
+this doc exists to close.
+
+| Dimension | Authoritative store | Written by (only) | Read by | Notes |
+|---|---|---|---|---|
+| **Daily execution record** — what was planned/done on one day, and the minutes behind it | `days/{dateKey}` (dayLog) | Today (`useDayLog`), Apply (`planner-chat/applyWeekPlan.ts`), live-day edits (`today/liveDayEdit.ts` — Today's edit mode, the planner's post-Apply live-week edit (FEAT-138) **and** the chat's FEAT-142 day actions), watch-to-day (`watch/writeWatchItemToDay.ts`), quest auto-complete, workshop, the Dev Sunday sweep | Today, hours + compliance aggregation, weeklyReview / monthlyReview, disposition | **Every one of these routes through `today/dayWriteGuard.ts`** — there is no second write path to a day document, and the FEAT-114 preservation guard + FEAT-111 retain rules hold for all of them. This store feeds the `hours` line, so a careless write is a compliance bug: the two audited failures in this app's history (FEAT-111, FEAT-114's P0) were both a second copy of a day-write that forgot a rule. |
+| **Planned week** — a child's goals for a week, and that week's day rows | `weeks/{weekStart}` + the `days` writes it drives | **`planner-chat/applyWeekPlan.ts` — the single Apply** (FEAT-150), called by Plan My Week and by the chat's next-week lane (`shelly-chat/writeNextWeekDraft.ts`); plus the planner's own redo-plan goal removal | Today's week focus, planner, weeklyReview | FEAT-150 extracted Apply out of `PlannerChatPage` precisely so the chat would not become a *second* implementation of it. The chat adds exactly one rail the shared module cannot hold — **it may write only the NEXT school week**, re-resolved at the write, never the live week the family is working through. Applying a chat draft is a second, separate tap with **no `ChatAction` behind it**. |
+| **Curated media** — the videos the kids may watch | `watchLibrary/{autoId}` (family-scoped, `childId \| 'both'`) | parent vet-in form (`useWatchLibrary`), the planner's + Today's inline vet-in, **Shelly chat portal** (FEAT-149 `vetInVideo`, confirm-gated) — all through the shared `addWatchVideo` | `/watch` route, `WatchLibraryPicker` (planner + Today) | Parent-gated on every path; kids never curate. Additive: retire (status flip) is the only removal, and the chat cannot un-retire, delete, or edit a library entry — **vet-in is its only library write**. Stores a validated `youtubeId`, never a free-form URL. |
+
 **Write-through rules (one-directional, via central helpers):**
 
-1. **Scan / curriculum advance → Skill Snapshot** *(closes FUNC-02)*: a scan currently
+> **Status, 2026-08-22 (DOC-14).** Rule 1 below **shipped** — FUNC-02, commit `b60c3d6`, via
+> `evaluate/skillSnapshotWrites.ts`, wired into both scan paths. It is kept as written because
+> this is a decision record and the reasoning is the point, but read it as **history, not a
+> to-do**: the sections below (implied changes #1/#2 and the build prompt) describe work that
+> is already done, and following them would reimplement it. Rules 2–4 remain live contracts.
+
+1. **Scan / curriculum advance → Skill Snapshot** *(closes FUNC-02 — SHIPPED, see above)*: a scan currently
    writes `childSkillMaps` and/or `activityConfigs` but never `skillSnapshots`. Two scan
    paths need a write-through: the **certificate path** (`useCertificateProgress.applyUpdate`,
    which already holds `suggestedSnapshotUpdate.masteredSkills` from the scan AI) and the
@@ -74,12 +96,20 @@ write-through at the already-stubbed point in `useSkillMapWrite.ts`.
 
 ## Implied code changes (hand to Claude Code as PROMPT_FIX runs)
 
-| # | Change | Target | Issue |
-|---|---|---|---|
-| 1 | Wire scan → snapshot write-through on both scan paths. Certificate: in `useCertificateProgress.applyUpdate`, fold `suggestedSnapshotUpdate.masteredSkills` into `skillSnapshots` (mark matching blocks RESOLVING/RESOLVED, additive). Worksheet: alongside the `updateSkillMapFromFindings` call in `CertificateScanSection`, apply the same write-through. Add tests. | `src/core/hooks/useCertificateProgress.ts:115-250`; `src/features/progress/CertificateScanSection.tsx:49-76`; scan AI shape at `functions/src/ai/tasks/scan.ts:94`, `src/core/types/planning.ts:728` | **FUNC-02** |
-| 2 | Create a single `skillSnapshots` writer module (e.g. `src/features/evaluate/skillSnapshotWrites.ts`) with an additive, block-merging, idempotent `applyToSnapshot()`, and migrate the three current inline writers onto it so every academic-state write goes through one chokepoint. | `EvaluateChatPage.tsx:492-614`, `useQuestSession.ts:874-971`, `SkillSnapshotPage.tsx:114-150` | FUNC-01 hardening |
-| 3 | Document the authority table as JSDoc on each owning collection helper so the seams are discoverable at the call site. | `src/core/firebase/firestore.ts` | FUNC-01 hardening |
-| 4 | Tier C portal routing map (see green-light below) — when built, route each editable field to its owning store. | Shelly Chat portal | Tier C |
+> **Status, 2026-08-22 (DOC-14).** **#1 and #2 are DONE — do not hand either to a run.** #1
+> shipped as FUNC-02 (`b60c3d6`); #2's central writer `evaluate/skillSnapshotWrites.ts` exists
+> and every writer added since routes through it, though the three *original* inline writers
+> named in that row were deliberately not migrated — that remainder is **ARCH-12**, and it is
+> the only part of #2 still open. #4 shipped as the Tier B/C portal (see the green-light below
+> and its amendment). **#3 is still open.** Status column added rather than the rows deleted:
+> the targets and reasoning are the record of why each was wanted.
+
+| # | Change | Target | Issue | Status (2026-08-22) |
+|---|---|---|---|---|
+| 1 | Wire scan → snapshot write-through on both scan paths. Certificate: in `useCertificateProgress.applyUpdate`, fold `suggestedSnapshotUpdate.masteredSkills` into `skillSnapshots` (mark matching blocks RESOLVING/RESOLVED, additive). Worksheet: alongside the `updateSkillMapFromFindings` call in `CertificateScanSection`, apply the same write-through. Add tests. | `src/core/hooks/useCertificateProgress.ts:115-250`; `src/features/progress/CertificateScanSection.tsx:49-76`; scan AI shape at `functions/src/ai/tasks/scan.ts:94`, `src/core/types/planning.ts:728` | **FUNC-02** | **DONE** — shipped as FUNC-02, `b60c3d6` |
+| 2 | Create a single `skillSnapshots` writer module (e.g. `src/features/evaluate/skillSnapshotWrites.ts`) with an additive, block-merging, idempotent `applyToSnapshot()`, and migrate the three current inline writers onto it so every academic-state write goes through one chokepoint. | `EvaluateChatPage.tsx:492-614`, `useQuestSession.ts:874-971`, `SkillSnapshotPage.tsx:114-150` | FUNC-01 hardening | **DONE** — `skillSnapshotWrites.ts` exists; migrating the 3 original inline writers is **ARCH-12** |
+| 3 | Document the authority table as JSDoc on each owning collection helper so the seams are discoverable at the call site. | `src/core/firebase/firestore.ts` | FUNC-01 hardening | **OPEN** |
+| 4 | Tier C portal routing map (see green-light below) — when built, route each editable field to its owning store. | Shelly Chat portal | Tier C | **DONE** — Tier A/B/C live; see the green-light amendment |
 
 ---
 
@@ -99,9 +129,28 @@ Tier C ("Shelly updates the profile") is **unblocked**, with this routing contra
 (academic state, via the central helper), both behind a human-confirm step. Position edits
 to `activityConfigs` are a Tier B convenience. Everything else is read-only to the portal.
 
+> **Amended 2026-08-22 (DOC-14).** "Everything else is read-only to the portal" was true when
+> written and is not any more. The portal's write surface has since been widened three times,
+> each time by a separate human-assigned run and each time onto an **existing** writer rather
+> than a new lane: `days` (FEAT-142, via `today/liveDayEdit.ts`), `watchLibrary` (FEAT-149, via
+> `addWatchVideo`), and `weeks` + its day rows (FEAT-150, via the extracted
+> `planner-chat/applyWeekPlan.ts`). See the execution-record block above for what each may do.
+> The **rule** the sentence was protecting is intact and is the one to carry forward: the portal
+> writes only through a store's already-owning writer, only behind a confirm tap, and never
+> invents a second lane. What changed is the list, not the contract. The two prohibitions are
+> also unchanged: Shelly still must never write `dispositionCache` (derived) or Milestones
+> (computed).
+
 ---
 
-## Build prompt (ready to paste into Claude Code web)
+## Build prompt (historical — do NOT run)
+
+> **⚠️ Status, 2026-08-22 (DOC-14). This prompt has already been run and must not be run
+> again.** FUNC-02 shipped at commit `b60c3d6`: `evaluate/skillSnapshotWrites.ts` exists, and
+> both the certificate path (`useCertificateProgress.applyUpdate`) and the worksheet path
+> (`CertificateScanSection`) call it. Step 4's optional migration of the three original inline
+> writers was deliberately **not** taken and is tracked as **ARCH-12**. Pasting this now would
+> reimplement completed work. Kept verbatim as the record of what was asked for.
 
 > **Run for ISSUE_ID: FUNC-02 (implements the FUNC-01 write-through seam).**
 >

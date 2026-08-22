@@ -404,7 +404,7 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 
 ## Known Technical Debt
 
-- **PlannerChatPage.tsx (2,669L)** — Decomposed render (800→500L) but state management is still ~1,700L. Interconnected wizard/chat/plan/apply state makes further splitting complex. Stable as-is.
+- **PlannerChatPage.tsx (3,295L)** — Grew through the chat arc (live-week edit, watch picker, plan handoff), then **shrank ~120L when FEAT-150 extracted Apply** into `planner-chat/applyWeekPlan.ts` (PR #1679) so the planner and Ask AI share one week-write instead of two. The interconnected wizard/chat/plan/apply state is still the hard part. The 2026-08-16 audit named the next clean seam: the three near-identical live-day-edit handlers (`handleRemoveItem` / `handleMoveItemToDay` / `handleSwapWatchItem`) lift into a `useLiveDayEditHandlers` hook mirroring the already-extracted `useAppliedWeekDays` — ~230L out without touching the tangled core. Tracked as ARCH-02.
 - **chat.ts CF (2,548L)** — `buildQuestPrompt` alone is 400+ lines. Highest-leverage decomposition target: extract prompt builders to separate files.
 - **BookEditorPage.tsx (2,103L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
 - **useQuestSession.ts (2,161L)** — Quest, comprehension, fluency, encoding (build-word/spell-word/build-sentence) all in one hook. Consider splitting by quest domain.
