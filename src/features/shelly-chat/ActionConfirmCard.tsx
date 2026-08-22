@@ -488,6 +488,64 @@ function ProfileEditPreview({
 }
 
 /**
+ * The verb on a card's Confirm button, and the word its applied state settles
+ * on (UX-32 / UX-41). Pure string selection — every tap still runs the same
+ * `onConfirm(item.action)`.
+ *
+ * Three things this fixes, all of them the same fault (the verb not matching
+ * the write):
+ *  - `proposePlanAdjustment` said **"Review in Plan My Week"**, which reads
+ *    read-only. It is a write: `stagePlanAdjustment` `setDoc`s a brief that,
+ *    per its own docblock, overwrites any un-consumed prior one, then navigates
+ *    away. "Send" is what happened, and "Sent" is what to say afterwards —
+ *    "Done" belongs to a write that finished on a child's record.
+ *  - one neutral **"Confirm"** fronted everything from a single sight word to
+ *    `markActivityComplete`, whose own footnote says the app has no undo for it
+ *    anywhere. That one gets its own verb.
+ *  - an `editProfileField` that clears the field announced itself only through
+ *    a caption-sized "(empty)" in the after-line. If the tap erases a field,
+ *    the button says so.
+ */
+function confirmVerb(action: ChatAction): string {
+  switch (action.kind) {
+    case 'proposePlanAdjustment':
+      return 'Send to Plan My Week'
+    case 'draftNextWeek':
+      return 'Draft it'
+    case 'markActivityComplete':
+      return 'Mark finished'
+    case 'editProfileField':
+      return action.value.trim() ? 'Confirm' : 'Clear this field'
+    default:
+      return 'Confirm'
+  }
+}
+
+/** The in-flight word, matched to the verb above. */
+function applyingVerb(action: ChatAction): string {
+  switch (action.kind) {
+    case 'proposePlanAdjustment':
+      return 'Handing off…'
+    case 'draftNextWeek':
+      return 'Drafting…'
+    default:
+      return 'Saving…'
+  }
+}
+
+/** The settled word. A handoff is "Sent"; a draft points at what it produced. */
+function appliedVerb(action: ChatAction): string {
+  switch (action.kind) {
+    case 'proposePlanAdjustment':
+      return 'Sent'
+    case 'draftNextWeek':
+      return 'Drafted below'
+    default:
+      return 'Done'
+  }
+}
+
+/**
  * Inline confirm cards for proposed `<action>` writes (Build Step 3b + 4 + 6b).
  * Each pending action gets a human-readable preview with Confirm / Dismiss —
  * sight words as a one-liner, `editProfileField` as a before → after diff since
@@ -496,8 +554,8 @@ function ProfileEditPreview({
  * as visibly weightier cards (accent border + "Updates {child}'s skill
  * snapshot" label) since they write the authoritative learning record, and the
  * `proposePlanAdjustment` HANDOFF (chunk 2A/2) framed distinctly (info accent +
- * a "Review in Plan My Week" CTA) since confirming it opens the planner rather
- * than writing a child's record, and `setActivityMinutes` (FEAT-135) as a named
+ * a "Send to Plan My Week" CTA) since confirming it stages a brief and opens the
+ * planner rather than writing a child's record, and `setActivityMinutes` (FEAT-135) as a named
  * old → new time diff carrying who it affects (loudly, when the activity is
  * shared) and the fact that it applies to future plans only, and the live-day
  * edits (FEAT-142) as a sentence naming the child, the weekday in words and the
@@ -741,11 +799,7 @@ export default function ActionConfirmCard({
                     onClick={() => onConfirm(item.action)}
                     sx={{ textTransform: 'none', minWidth: 0, py: 0.5 }}
                   >
-                    {isPlanAdjustment
-                      ? 'Review in Plan My Week'
-                      : isDraftNextWeek
-                        ? 'Draft it'
-                        : 'Confirm'}
+                    {confirmVerb(action)}
                   </Button>
                   <Button
                     size="small"
@@ -760,7 +814,7 @@ export default function ActionConfirmCard({
               )}
               {item.status === 'applying' && (
                 <Typography variant="caption" color="text.secondary">
-                  {isDraftNextWeek ? 'Drafting…' : 'Saving…'}
+                  {applyingVerb(action)}
                 </Typography>
               )}
               {item.status === 'applied' && (
@@ -775,9 +829,11 @@ export default function ActionConfirmCard({
                   <CheckCircleIcon fontSize="small" />
                   {/* "Done" would be a lie on a draft card: the tap produced a
                       week to READ, and nothing has been written. The word points
-                      at the draft below, which is where the actual decision is. */}
+                      at the draft below, which is where the actual decision is.
+                      A handoff is the same shape — it staged a brief and opened
+                      the planner, so it settles on "Sent" (UX-32). */}
                   <Typography variant="caption">
-                    {isDraftNextWeek ? 'Drafted below' : 'Done'}
+                    {appliedVerb(action)}
                   </Typography>
                 </Box>
               )}

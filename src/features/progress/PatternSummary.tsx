@@ -100,7 +100,7 @@ export default function PatternSummary({ patterns }: PatternSummaryProps) {
               }}
             >
               {p.masteryPercent}%
-              {p.strugglingWords > 0 && ` · ${p.strugglingWords} struggling`}
+              {p.strugglingWords > 0 && ` · ${p.strugglingWords} still practicing`}
               {p.emergingWords > 0 && ` · ${p.emergingWords} emerging`}
             </Typography>
           </Box>

@@ -74,7 +74,7 @@ export default function PlanSummaryPanel({
                 return (
                   <Chip
                     key={entry.subject}
-                    label={`${entry.subject}: ${entry.totalBlocks} blocks${detail}`}
+                    label={`${entry.subject}: ${entry.totalBlocks} block${entry.totalBlocks === 1 ? '' : 's'}${detail}`}
                     size="small"
                     variant="outlined"
                     color={entry.priorityHits > 0 ? 'success' : 'default'}

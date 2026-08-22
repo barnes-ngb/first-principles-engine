@@ -312,7 +312,7 @@ describe('UnifiedCaptureCard (parent variant)', () => {
 
   it('renders the artifacts section with empty state', () => {
     renderCard()
-    expect(screen.getByText(/No artifacts logged yet today/i)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing captured yet today/i)).toBeInTheDocument()
   })
 
   it('renders the photo capture component when Photo tab is selected', () => {
@@ -440,17 +440,36 @@ describe('UnifiedCaptureCard (kid variant)', () => {
     expect(getKidDuration().textContent).toBe('40')
   })
 
-  it('disables Save Capture when no chip is selected', () => {
+  // UX-74: the kid button logs minutes only (`artifactSaved: false`), so it is
+  // named "Save my time" — the parent Note tab keeps "Save Capture" because it
+  // really does write an artifact. Safety string: the one big button on the kid
+  // capture card must not promise a capture it never makes.
+  it('names the kid button for what it writes — minutes, not a capture', async () => {
+    const { onSnackMessage } = renderCard({ variant: 'kid' })
+    expect(screen.getByRole('button', { name: /save my time/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /save capture/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save my time/i }))
+
+    // One write, and it is an hours row — no artifact, exactly as the label says.
+    await waitFor(() => expect(addDocCalls.length).toBe(1))
+    expect(addDocCalls[0].collectionKey).toBe('hours')
+    expect(onSnackMessage).toHaveBeenCalledWith({ text: 'Logged 45 min', severity: 'success' })
+  })
+
+  it('disables the kid save button when no chip is selected', () => {
     renderCard({ variant: 'kid' })
-    const saveBtn = screen.getByRole('button', { name: /save capture/i })
+    const saveBtn = screen.getByRole('button', { name: /save my time/i })
     expect(saveBtn).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /save capture/i })).not.toBeInTheDocument()
     expect(screen.getByText(/tap a chip above/i)).toBeInTheDocument()
   })
 
   it('saves hours with chip label as activity name and proper subject bucket', async () => {
     const { onSnackMessage } = renderCard({ variant: 'kid' })
     fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
-    fireEvent.click(screen.getByRole('button', { name: /save capture/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save my time/i }))
 
     await waitFor(() => expect(addDocCalls.length).toBe(1))
     expect(addDocCalls[0].collectionKey).toBe('hours')
@@ -471,7 +490,7 @@ describe('UnifiedCaptureCard (kid variant)', () => {
   it('resets stepper and chip selection after save', async () => {
     renderCard({ variant: 'kid' })
     fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
-    fireEvent.click(screen.getByRole('button', { name: /save capture/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save my time/i }))
 
     await waitFor(() => {
       expect(addDocCalls.length).toBe(1)
@@ -484,7 +503,7 @@ describe('UnifiedCaptureCard (kid variant)', () => {
 
   it('does not render the parent Artifacts section', () => {
     renderCard({ variant: 'kid' })
-    expect(screen.queryByText(/No artifacts logged yet today/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Nothing captured yet today/i)).not.toBeInTheDocument()
   })
 
   it('applies the Lincoln (Minecraft) accent on chips', () => {

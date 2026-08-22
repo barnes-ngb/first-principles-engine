@@ -711,7 +711,10 @@ export default function KidTodayView({
       {/* MVD warm message */}
       {isMvd && (
         <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
-          Light day today. Just these {mustDo.length}!
+          {/* A noun on every count, and a singular that reads (UX-81) —
+              "Just these 1!" was the light-day message on the lightest day. */}
+          Light day today. Just {mustDo.length} quest
+          {mustDo.length === 1 ? '' : 's'}!
         </Typography>
       )}
 

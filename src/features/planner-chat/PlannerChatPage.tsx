@@ -2313,7 +2313,9 @@ Generate a plan for Monday through Friday.`.trim()
       const appliedMsg: ChatMessage = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
-        text: 'Plan applied! Your weekly plan and daily checklists have been updated. Check the Week and Today pages.',
+        // UX-63: there is no "Week" page in the nav — pointing at one sent the
+        // parent hunting for a screen that does not exist. Today is where it lands.
+        text: "Plan applied! Your weekly plan and daily checklists have been updated. It's all on Today.",
         createdAt: new Date().toISOString(),
       }
       const updatedMessages = [...messages, appliedMsg]
@@ -2348,7 +2350,8 @@ Generate a plan for Monday through Friday.`.trim()
         void persistPromise
       }
 
-      setSnack({ text: 'Plan applied! Check This Week and Today.', severity: 'success' })
+      // UX-63: "This Week" is not a page either — see the applied message above.
+      setSnack({ text: "Plan applied! It's on Today.", severity: 'success' })
 
       // Non-blocking (FEAT-43): batch-generate inline Help Card bodies for the
       // must-do Reading/Math items. Fire-and-forget — lock-in already succeeded;

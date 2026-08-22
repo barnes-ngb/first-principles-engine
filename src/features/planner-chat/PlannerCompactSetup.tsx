@@ -12,6 +12,7 @@ import Typography from '@mui/material/Typography'
 
 import type { BookLookupResult, BookProgress, ChapterBook, WorkbookConfig } from '../../core/types'
 import ChapterBookPicker from './ChapterBookPicker'
+import { weekEnergyLabel } from './weekEnergyLabels'
 
 interface PlannerCompactSetupProps {
   childName: string
@@ -94,9 +95,9 @@ export default function PlannerCompactSetup({
           size="small"
           fullWidth
         >
-          <ToggleButton value="full">Normal ({Math.round(hoursPerDay * 10) / 10}h/day)</ToggleButton>
-          <ToggleButton value="lighter">Lighter</ToggleButton>
-          <ToggleButton value="mvd">Tough (MVD)</ToggleButton>
+          <ToggleButton value="full">{weekEnergyLabel('full', hoursPerDay)}</ToggleButton>
+          <ToggleButton value="lighter">{weekEnergyLabel('lighter', hoursPerDay)}</ToggleButton>
+          <ToggleButton value="mvd">{weekEnergyLabel('mvd', hoursPerDay)}</ToggleButton>
         </ToggleButtonGroup>
       </Box>
 

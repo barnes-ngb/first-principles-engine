@@ -83,12 +83,16 @@ export function formatCoverageSummaryText(
   lines.push('Coverage this week:')
   for (const entry of entries) {
     const detailStr = entry.details.length > 0 ? ` (${entry.details.join(', ')})` : ''
-    lines.push(`  ${entry.subject}: ${entry.totalBlocks} blocks, ${entry.totalMinutes}m${detailStr}`)
+    lines.push(
+      `  ${entry.subject}: ${entry.totalBlocks} block${entry.totalBlocks === 1 ? '' : 's'}, ${entry.totalMinutes}m${detailStr}`,
+    )
   }
 
   if (prioritySkills.length > 0) {
     const totalPriorityHits = entries.reduce((sum, e) => sum + e.priorityHits, 0)
-    lines.push(`\nPriority skill alignment: ${totalPriorityHits} blocks match priority skills.`)
+    lines.push(
+      `\nPriority skill alignment: ${totalPriorityHits} ${totalPriorityHits === 1 ? 'block matches' : 'blocks match'} priority skills.`,
+    )
   }
 
   return lines.join('\n')
