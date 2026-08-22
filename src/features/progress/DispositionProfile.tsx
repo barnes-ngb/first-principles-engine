@@ -403,7 +403,10 @@ export default function DispositionProfile() {
                               color="text.secondary"
                               sx={{ fontStyle: 'italic' }}
                             >
-                              Edited by Shelly
+                              {/* UX-57: the override records no author, and both
+                                  parents share one profile — so naming one of
+                                  them was a guess the data never made. */}
+                              Edited by a parent
                               {override.note && <> &mdash; &ldquo;{override.note}&rdquo;</>}
                             </Typography>
                           </Stack>

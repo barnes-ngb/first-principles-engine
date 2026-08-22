@@ -778,7 +778,9 @@ export default function UnifiedCaptureCard({
                 }}
                 title={kidSaveHelper}
               >
-                Save Capture
+                {/* UX-74: this button saves no capture — `handleKidSave` writes
+                    hours and passes `artifactSaved: false`. Name it what it does. */}
+                Save my time
               </Button>
               {kidSaveHelper && (
                 <Typography
@@ -806,7 +808,10 @@ export default function UnifiedCaptureCard({
               View all work in Portfolio →
             </Link>
             {todayArtifacts.length === 0 ? (
-              <EmptyState title="No artifacts logged yet today." />
+              // UX-24: EmptyState's own convention is "Nothing here yet", never
+              // "No data" — and "artifacts" is the data model's word, not a
+              // parent's.
+              <EmptyState title="Nothing captured yet today." />
             ) : (
               <List dense>
                 {todayArtifacts.map((artifact) => (

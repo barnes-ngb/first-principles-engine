@@ -9,9 +9,16 @@ import { watchCuratorLabel } from './watchCuratorLabel'
 
 describe('watchCuratorLabel (FEAT-149)', () => {
   it('shows a human label verbatim', () => {
-    expect(watchCuratorLabel('parent')).toBe('parent')
     expect(watchCuratorLabel('Shelly')).toBe('Shelly')
     expect(watchCuratorLabel('Nathan B')).toBe('Nathan B')
+  })
+
+  // UX-02: the form's literal and the portal's uid describe the same provenance,
+  // so they must render the same sentence — "Added by parent" beside "Added by a
+  // parent" was the standing inconsistency.
+  it('normalizes the form\'s literal "parent" to the uid path\'s wording', () => {
+    expect(watchCuratorLabel('parent')).toBe('a parent')
+    expect(watchCuratorLabel('Parent')).toBe('a parent')
   })
 
   it('reads a Firebase uid as "a parent" rather than 28 characters of base62', () => {

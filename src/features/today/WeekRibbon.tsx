@@ -303,8 +303,9 @@ export default function WeekRibbon({
           flexWrap: 'wrap',
         }}
       >
+        {/* UX-24: the shared EmptyState convention — warm, no negation. */}
         <Typography variant="body2" color="text.secondary">
-          No week planned yet.
+          Nothing planned for this week yet.
         </Typography>
         <Typography
           component={RouterLink}

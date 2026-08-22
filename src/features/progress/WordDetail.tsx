@@ -127,7 +127,8 @@ function formatMastery(level: string, total: number): string {
   const labels: Record<string, string> = {
     known: 'Known',
     emerging: 'Emerging',
-    struggling: 'Struggling',
+    // UX-49: same wording as the wall's filter chip and blocks — one word per level.
+    struggling: 'Still practicing',
     'not-yet': 'Not Yet',
   }
   return `${labels[level] ?? level} (${total} attempts)`

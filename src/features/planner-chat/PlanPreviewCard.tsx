@@ -29,7 +29,9 @@ import SkipAdvisorChip from './SkipAdvisorChip'
 /** Block display metadata for plan preview grouping. */
 const BLOCK_HEADER: Record<string, { label: string; color: string }> = {
   readaloud: { label: 'Paired \u2014 happen at the same time', color: 'info.main' },
-  choice: { label: "Lincoln\u2019s choice (do both, pick order)", color: 'warning.main' },
+  // UX-64: the block is "whoever this week is for picks the order" \u2014 the name was
+  // hardcoded, so it rendered "Lincoln's choice" over London's plan.
+  choice: { label: "Kid\u2019s choice (do both, pick order)", color: 'warning.main' },
   flex: { label: 'Flex \u2014 end of day', color: 'text.secondary' },
 }
 

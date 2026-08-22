@@ -223,7 +223,9 @@ export default function KidChapterPool({
         })
       } catch (err) {
         console.error('Chapter response delete failed:', err)
-        setSaveError('Failed to delete recording. Check your connection and try again.')
+        // UX-80: the one shame word in the kid app. Every sibling surface says
+        // "Hmm, that didn't save…" — this one said "Failed".
+        setSaveError("Hmm, that didn't delete. Check your connection and try again.")
       }
       setDeletingChapter(null)
       setConfirmDeleteItem(null)
@@ -351,11 +353,13 @@ export default function KidChapterPool({
                   sx={{
                     fontFamily: mcFont,
                     fontSize: '0.35rem',
-                    color: '#ff6b6b',
+                    // UX-80: the only red button in the kid app, on a control
+                    // whose sibling one card down is a plain gold "Redo".
+                    color: kidPalette.gold,
                     textTransform: 'none',
                   }}
                 >
-                  {isDeletingThis ? 'Deleting...' : 'Delete & redo'}
+                  {isDeletingThis ? 'Starting over…' : 'Try again'}
                 </Button>
               </Stack>
             </Box>
@@ -496,26 +500,27 @@ export default function KidChapterPool({
         })}
       </Stack>
 
-      {/* Confirm delete dialog */}
+      {/* Confirm dialog. UX-80: it used to ask a kid to confirm a destruction
+          ("Delete this recording?", "The audio file will be removed", a red
+          button). Same write, told as what he came here to do — record it again. */}
       <Dialog
         open={confirmDeleteItem != null}
         onClose={() => setConfirmDeleteItem(null)}
       >
-        <DialogTitle>Delete this recording?</DialogTitle>
+        <DialogTitle>Record this one again?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Delete this recording and try again? The audio file will be removed.
+            This clears what you recorded so you can say it again.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmDeleteItem(null)}>Cancel</Button>
+          <Button onClick={() => setConfirmDeleteItem(null)}>Never mind</Button>
           <Button
-            color="error"
             onClick={() => {
               if (confirmDeleteItem) handleDeleteResponse(confirmDeleteItem)
             }}
           >
-            Delete & redo
+            Try again
           </Button>
         </DialogActions>
       </Dialog>

@@ -25,6 +25,7 @@ import { ActivityFrequencyLabel } from '../../core/types/enums'
 import type { ActivityFrequency } from '../../core/types/enums'
 import ChapterBookPicker from './ChapterBookPicker'
 import PhotoLabelForm from './PhotoLabelForm'
+import { weekEnergyLabel } from './weekEnergyLabels'
 
 type MasterySummary = {
   gotIt: string[]
@@ -112,9 +113,9 @@ export default function PlannerSetupWizard({
       <Box>
         <Typography variant="subtitle2" gutterBottom>How&apos;s this week looking?</Typography>
         <ToggleButtonGroup value={weekEnergy} exclusive onChange={(_, v) => { if (v) onWeekEnergyChange(v) }} size="small" fullWidth>
-          <ToggleButton value="full">Full Week ({Math.round(hoursPerDay * 10) / 10}h/day)</ToggleButton>
-          <ToggleButton value="lighter">Lighter Week</ToggleButton>
-          <ToggleButton value="mvd">Tough Week (MVD)</ToggleButton>
+          <ToggleButton value="full">{weekEnergyLabel('full', hoursPerDay)}</ToggleButton>
+          <ToggleButton value="lighter">{weekEnergyLabel('lighter', hoursPerDay)}</ToggleButton>
+          <ToggleButton value="mvd">{weekEnergyLabel('mvd', hoursPerDay)}</ToggleButton>
         </ToggleButtonGroup>
       </Box>
 

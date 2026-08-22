@@ -18,11 +18,17 @@
  * a short word. Anything that looks like an opaque id reads as "a parent" (which
  * is true — the family shares one account and only a parent can vet a video in);
  * anything human is shown verbatim, so a future named curator survives untouched.
+ *
+ * UX-02: the form's own literal `'parent'` is normalized to the same "a parent"
+ * the uid path produces. Without it, two cards vetted in the same afternoon read
+ * "Added by parent" and "Added by a parent" side by side — one provenance, two
+ * sentences. The stored value is untouched; only the rendered word changes.
  */
 const OPAQUE_ID_RE = /^[A-Za-z0-9]{20,}$/
 
 export function watchCuratorLabel(addedBy: string): string {
   const trimmed = addedBy.trim()
   if (!trimmed) return 'a parent'
+  if (trimmed.toLowerCase() === 'parent') return 'a parent'
   return OPAQUE_ID_RE.test(trimmed) ? 'a parent' : trimmed
 }

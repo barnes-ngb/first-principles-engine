@@ -271,7 +271,8 @@ export function describeAddActivityShape(
     parts.push(
       action.currentPosition != null
         ? `${unit} ${action.currentPosition} of ${action.totalUnits}`
-        : `${action.totalUnits} ${unit}s`,
+        // UX-46: the singular guard its sibling `positionPastEndNotice` already has.
+        : `${action.totalUnits} ${unit}${action.totalUnits === 1 ? '' : 's'}`,
     )
   } else if (action.currentPosition != null) {
     parts.push(`starting at lesson ${action.currentPosition}`)
