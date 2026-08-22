@@ -247,6 +247,14 @@ export function MonthlyReviewReader({
           top: 0,
           zIndex: 10,
           bgcolor: bgColor,
+          // UX-53 follow-up (Codex, PR #1688): the honest preview labels are
+          // wider than the bare "Kid"/"Parent" they replaced, and this bar does
+          // not wrap — at 375px the exit button, the preview group and the
+          // Draft/Publish controls no longer fit on one line. The bar now wraps
+          // and the preview group takes its own centered row on a phone (see the
+          // `order`/`flex` below); on sm+ nothing moves.
+          flexWrap: 'wrap',
+          rowGap: 1,
         }}
       >
         {onExit && (
@@ -262,10 +270,14 @@ export function MonthlyReviewReader({
         {!lockedMode && (
           <Box
             sx={{
-              flex: 1,
+              // Phone: its own full-width row below the exit + publish controls.
+              // Tablet up: the centered middle of a single row, as before.
+              flex: { xs: '1 1 100%', sm: '1 1 auto' },
+              order: { xs: 1, sm: 0 },
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
+              flexWrap: 'wrap',
               gap: 1,
             }}
           >
@@ -293,7 +305,9 @@ export function MonthlyReviewReader({
         {lockedMode && <Box sx={{ flex: 1 }} />}
 
         {!isKidLocked && (
-          <Stack direction="row" spacing={1} alignItems="center">
+          // `ml: 'auto'` keeps these hard right on a phone, where the preview
+          // group has wrapped away and no longer pushes them there.
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ ml: 'auto' }}>
             <Chip
               label={isPublished ? 'Published' : 'Draft'}
               size="small"
