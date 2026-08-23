@@ -100,6 +100,21 @@ vi.mock('../watch/writeWatchItemToDay', () => ({
   writeWatchItemToDay: (...args: unknown[]) => writeWatchItemToDay(...args),
 }))
 
+// The Dad Lab writers (FEAT-157). `createArc` is the SAME module-level writer
+// the Dad Lab page's New Arc dialog reaches through `useConceptArcs`, and
+// `createPlannedLab` is the extracted suggestion-flow lane. Both are spied so
+// these tests assert the chat CALLS them rather than opening a second write
+// path; what each one writes is pinned in plannedLab.test.ts and the
+// ConceptArcsSection suite.
+const createArc = vi.fn()
+vi.mock('../dad-lab/useConceptArcs', () => ({
+  createArc: (...args: unknown[]) => createArc(...args),
+}))
+const createPlannedLab = vi.fn()
+vi.mock('../dad-lab/plannedLab', () => ({
+  createPlannedLab: (...args: unknown[]) => createPlannedLab(...args),
+}))
+
 const updateDoc = vi.fn()
 const arrayUnion = vi.fn((...v: unknown[]) => ({ __arrayUnion: v[0] }))
 const doc = vi.fn((...args: unknown[]) => ({ __doc: args.length }))
@@ -123,9 +138,9 @@ import {
 import type { ChatWeekDay } from './dayItemActions'
 import type { DraftNextWeekAction } from './nextWeekActions'
 import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
-import { SubjectBucket } from '../../core/types/enums'
+import { ArcOrigin, ArcStepStatus, SubjectBucket } from '../../core/types/enums'
 import { WatchVideoStatus } from '../../core/types/watch'
-import type { WatchVideo } from '../../core/types'
+import type { ConceptArc, WatchVideo } from '../../core/types'
 
 // The hook re-reads the CLOCK to bound proposals to the current week, so these
 // fixtures are built from the real current week rather than hardcoded dates —
@@ -193,6 +208,22 @@ const CHILDREN: Child[] = [
   { id: 'london1', name: 'London' } as Child,
 ]
 
+/** One live arc with two steps, for the FEAT-157 resolution gate. */
+const ARCS: ConceptArc[] = [
+  {
+    id: 'arc_elec',
+    title: 'The Electricity Arc',
+    childIds: ['lincoln1', 'london1'],
+    steps: [
+      { title: 'Static electricity', conceptBeat: 'Charge jumps', status: ArcStepStatus.Done },
+      { title: 'Make a circuit', conceptBeat: 'A loop', status: ArcStepStatus.Active },
+    ],
+    createdFrom: ArcOrigin.OwnerAuthored,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  },
+]
+
 const navigateToPlanner = vi.fn()
 const onDraftNextWeek = vi.fn<(action: DraftNextWeekAction) => Promise<boolean>>()
 
@@ -204,6 +235,7 @@ function setup(
     canEditActivityConfigs?: boolean
     weekDays?: ChatWeekDay[]
     watchVideos?: WatchVideo[]
+    conceptArcs?: ConceptArc[]
     onDraftNextWeek?: (action: DraftNextWeekAction) => Promise<boolean>
   } = {},
 ) {
@@ -218,6 +250,7 @@ function setup(
       activityConfigs: opts.activityConfigs ?? CONFIGS,
       weekDays: opts.weekDays ?? WEEK,
       watchVideos: opts.watchVideos ?? VIDEOS,
+      conceptArcs: opts.conceptArcs ?? ARCS,
       canEditActivityConfigs: opts.canEditActivityConfigs ?? true,
     }),
   )
@@ -240,6 +273,8 @@ beforeEach(() => {
   addItemToLiveDay.mockResolvedValue({ status: 'done' })
   addWatchVideo.mockResolvedValue('new-vid-id')
   writeWatchItemToDay.mockResolvedValue(undefined)
+  createArc.mockResolvedValue('new-arc-id')
+  createPlannedLab.mockResolvedValue('new-lab-id')
   updateDoc.mockResolvedValue(undefined)
 })
 
@@ -2207,5 +2242,176 @@ describe('the General tab drops every action, with a visible reason (FEAT-152)',
     act(() => result.current.stagePendingActions('msg1', [SIGHT_WORD]))
     expect(result.current.pending).toHaveLength(1)
     expect(result.current.suppressed).toEqual([])
+  })
+})
+
+// ── Dad Lab — createConceptArc / planLab (FEAT-157) ─────────────────
+// The contracts under test: a confirmed arc lands through the SAME writer the
+// New Arc dialog uses, carrying exactly the card's steps in order with the
+// dialog's own statuses and the AI origin; a confirmed lab lands through the
+// extracted Planned lane (whose Planned-only / zero-hours shape is pinned in
+// plannedLab.test.ts); and a hallucinated arc link never becomes a card.
+
+const CREATE_ARC_ACTION: ChatAction = {
+  kind: 'createConceptArc',
+  childId: 'lincoln1',
+  title: 'The Motor Arc',
+  domainLabel: 'Motors',
+  steps: [
+    { title: 'Spin a magnet' },
+    { title: 'Build the motor', conceptBeat: 'Current makes torque' },
+    { title: 'Race it' },
+  ],
+}
+
+const PLAN_LAB_ACTION: ChatAction = {
+  kind: 'planLab',
+  childId: 'lincoln1',
+  title: 'Make a bulb light up',
+  question: 'What makes it turn on?',
+  labType: 'science',
+  materials: ['battery', 'bulb', 'wire'],
+  arcId: 'arc_elec',
+  arcStepIndex: 1,
+}
+
+describe('useShellyChatActions — Dad Lab (FEAT-157)', () => {
+  it('a confirmed arc routes through createArc with EXACTLY the card steps in order, first active, AI origin', async () => {
+    const { result } = setup()
+
+    act(() => result.current.stagePendingActions('msg1', [CREATE_ARC_ACTION]))
+    expect(result.current.pending).toHaveLength(1)
+
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(CREATE_ARC_ACTION)
+    })
+
+    expect(ok).toBe(true)
+    expect(createArc).toHaveBeenCalledTimes(1)
+    expect(createArc).toHaveBeenCalledWith('fam1', ['lincoln1', 'london1'], {
+      title: 'The Motor Arc',
+      domainLabel: 'Motors',
+      childIds: undefined,
+      createdFrom: 'ai-suggested',
+      steps: [
+        { title: 'Spin a magnet', conceptBeat: '', status: 'active' },
+        { title: 'Build the motor', conceptBeat: 'Current makes torque', status: 'upcoming' },
+        { title: 'Race it', conceptBeat: '', status: 'upcoming' },
+      ],
+    })
+    expect(createPlannedLab).not.toHaveBeenCalled()
+    expect(result.current.pending[0].status).toBe('applied')
+  })
+
+  it('a confirmed lab routes through the Planned lane with the card fields — and touches nothing else', async () => {
+    const { result } = setup()
+
+    act(() => result.current.stagePendingActions('msg1', [PLAN_LAB_ACTION]))
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.applyChatAction(PLAN_LAB_ACTION)
+    })
+
+    expect(ok).toBe(true)
+    expect(createPlannedLab).toHaveBeenCalledTimes(1)
+    expect(createPlannedLab).toHaveBeenCalledWith('fam1', {
+      title: 'Make a bulb light up',
+      question: 'What makes it turn on?',
+      labType: 'science',
+      materials: ['battery', 'bulb', 'wire'],
+      arcId: 'arc_elec',
+      arcStepIndex: 1,
+    })
+    // No hours, no status flip, no other lane: the write layer's zero-hours
+    // shape is pinned in plannedLab.test.ts; here we pin that the chat reached
+    // ONLY the Dad Lab lane plus the inline confirm audit.
+    expect(createArc).not.toHaveBeenCalled()
+    expect(addActivityConfig).not.toHaveBeenCalled()
+    expect(addItemToLiveDay).not.toHaveBeenCalled()
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+    expect(updateDoc).toHaveBeenCalledTimes(1)
+    const [, payload] = updateDoc.mock.calls[0] as [unknown, Record<string, unknown>]
+    expect(Object.keys(payload)).toEqual(['appliedActions'])
+  })
+
+  it('never offers a card for a hallucinated arcId — dropped with the reason shown', () => {
+    const { result } = setup()
+    const bogus: ChatAction = { ...PLAN_LAB_ACTION, arcId: 'arc_made_up' } as ChatAction
+
+    act(() => result.current.stagePendingActions('msg1', [bogus]))
+
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed.join(' ')).toContain('concept arcs')
+    expect(createPlannedLab).not.toHaveBeenCalled()
+  })
+
+  it('never offers a card for a step index past the end of a real arc', () => {
+    const { result } = setup()
+    const past: ChatAction = { ...PLAN_LAB_ACTION, arcStepIndex: 2 } as ChatAction
+
+    act(() => result.current.stagePendingActions('msg1', [past]))
+
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed.join(' ')).toContain('past the end')
+  })
+
+  it('drops both kinds for a kid profile, out loud, and never reaches a writer', async () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+
+    act(() =>
+      result.current.stagePendingActions('msg1', [CREATE_ARC_ACTION, PLAN_LAB_ACTION]),
+    )
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed.join(' ')).toContain('grown-up')
+
+    // Backstop: even a direct apply attempt is refused.
+    await act(async () => {
+      expect(await result.current.applyChatAction(CREATE_ARC_ACTION)).toBe(false)
+    })
+    expect(createArc).not.toHaveBeenCalled()
+    expect(createPlannedLab).not.toHaveBeenCalled()
+  })
+
+  it('drops both kinds on the General tab like every other action', () => {
+    const { result } = setup('')
+
+    act(() =>
+      result.current.stagePendingActions('msg1', [CREATE_ARC_ACTION, PLAN_LAB_ACTION]),
+    )
+
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed).toEqual([
+      generalTabDropNotice(['Lincoln', 'London']),
+    ])
+  })
+
+  it('an arc naming a stranger in childIds never becomes a card', () => {
+    const { result } = setup()
+    const bad: ChatAction = {
+      ...CREATE_ARC_ACTION,
+      childIds: ['lincoln1', 'stranger'],
+    } as ChatAction
+
+    act(() => result.current.stagePendingActions('msg1', [bad]))
+
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed.join(' ')).toContain("don't recognize")
+  })
+
+  it('a named-audience arc passes the ids through to the shared writer', async () => {
+    const { result } = setup()
+    const named: ChatAction = { ...CREATE_ARC_ACTION, childIds: ['london1'] } as ChatAction
+
+    act(() => result.current.stagePendingActions('msg1', [named]))
+    await act(async () => {
+      await result.current.applyChatAction(named)
+    })
+
+    expect(createArc).toHaveBeenCalledWith(
+      'fam1',
+      ['lincoln1', 'london1'],
+      expect.objectContaining({ childIds: ['london1'] }),
+    )
   })
 })

@@ -45,6 +45,7 @@ import { UserProfile } from '../../core/types/enums'
 import ActionConfirmCard from './ActionConfirmCard'
 import NextWeekDraftCard from './NextWeekDraftCard'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
+import { useChatConceptArcs } from './useChatConceptArcs'
 import { useChatPlannerDefaults } from './useChatPlannerDefaults'
 import { useNextWeekDraft } from './useNextWeekDraft'
 import { useChatWatchLibrary } from './useChatWatchLibrary'
@@ -169,6 +170,12 @@ export default function ShellyChatPage() {
   // title instead of a doc id. Parent-gated the same way, and at the same two
   // layers, as the two reads above — passing '' costs zero reads.
   const watchVideos = useChatWatchLibrary(familyId, isParent ? contextChildId : '')
+  // FEAT-157 — the family's active concept arcs, read-only. They resolve a
+  // proposed `planLab` arc link to a real arc and a real step before its
+  // confirm card is offered, and give the card the arc's title instead of a
+  // doc id. Parent-gated the same way, and at the same two layers, as the
+  // reads above — passing '' costs zero reads.
+  const conceptArcs = useChatConceptArcs(familyId, isParent ? contextChildId : '')
   // The ten weekdays a video may be planned onto — this week's and next week's.
   // Recomputed every render (five `Date` allocations) for the same reason
   // `useChatWeekDays` recomputes its week: pinning it at mount would let a page
@@ -232,6 +239,7 @@ export default function ShellyChatPage() {
     activityConfigs,
     weekDays,
     watchVideos,
+    conceptArcs,
     canEditActivityConfigs: isParent,
     activeThreadId,
     // A confirmed proposePlanAdjustment HANDOFF stages its brief, then navigates
@@ -600,6 +608,7 @@ export default function ShellyChatPage() {
           weekDays={weekDays}
           watchVideos={watchVideos}
           plannableDays={plannableDays}
+          conceptArcs={conceptArcs}
           suppressed={suppressedActionNotices}
           onConfirm={applyChatAction}
           onDismiss={dismissAction}

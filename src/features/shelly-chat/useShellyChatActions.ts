@@ -64,6 +64,16 @@
 //     the only library write the chat can make. `vetInVideo` is, like
 //     `addActivity`, NOT idempotent — it mints a fresh doc per call — so the
 //     re-entry guard below is what stops a double tap creating two entries.
+//   - The Dad Lab actions (FEAT-157) — `createConceptArc` / `planLab` — let the
+//     chat create a concept arc and plan a backlog lab through the Dad Lab
+//     page's own extracted lanes (`dad-lab/useConceptArcs.createArc`,
+//     `dad-lab/plannedLab.createPlannedLab`). CREATE ONLY: no edit, archive,
+//     delete, or status flip is representable, a planned lab lands `Planned`
+//     with no hours write (compliance credits only on completion, on the Dad
+//     Lab page), and a `planLab` arc link is resolved against the live arcs
+//     BEFORE a card is offered (`dadLabActions`) — a hallucinated arc id or an
+//     out-of-range step never reaches a write, and the parent is told why no
+//     card appeared. Both mint fresh docs, so both lean on the re-entry guard.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
@@ -93,6 +103,12 @@ import {
   nextActivitySortOrder,
   resolveCurriculumAction,
 } from './curriculumActions'
+import type { DadLabAction, DadLabChild } from './dadLabActions'
+import {
+  buildArcStepsFromAction,
+  isDadLabAction,
+  resolveDadLabAction,
+} from './dadLabActions'
 import type { ChatWeekDay, DayItemAction } from './dayItemActions'
 import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
 import type { WatchAction } from './watchActions'
@@ -104,8 +120,12 @@ import {
   type DraftNextWeekAction,
 } from './nextWeekActions'
 import { stagePlanAdjustment } from './stagePlanAdjustment'
+import { createArc } from '../dad-lab/useConceptArcs'
+import { createPlannedLab } from '../dad-lab/plannedLab'
 import { addWatchVideo } from '../watch/useWatchLibrary'
 import { writeWatchItemToDay } from '../watch/writeWatchItemToDay'
+import { ArcOrigin } from '../../core/types/enums'
+import type { ConceptArc } from '../../core/types'
 
 /**
  * `'applying'` is the in-flight state between a confirm tap and the write
@@ -207,6 +227,14 @@ export interface ShellyChatActionsDeps {
    * Defaults to empty, which simply means no live-day action can be staged.
    */
   weekDays?: ChatWeekDay[]
+  /**
+   * The family's ACTIVE concept arcs (FEAT-157). Used to resolve a proposed
+   * `planLab` arc link — a real arc, a real step — before its confirm card is
+   * offered, and to render that card by the arc's title. Defaults to empty,
+   * which simply means no arc link can resolve; unlinked labs and new arcs
+   * still stage fine.
+   */
+  conceptArcs?: ConceptArc[]
   /**
    * The acting child's curated Watch Library — the child's own entries plus
    * shared `'both'` ones, RETIRED ones included (FEAT-149). Used to refuse a
@@ -347,6 +375,8 @@ const EMPTY_CONFIGS: ChatActivityConfig[] = []
 const EMPTY_WEEK: ChatWeekDay[] = []
 /** Same, for an omitted `watchVideos` dep. */
 const EMPTY_VIDEOS: WatchVideo[] = []
+/** Same, for an omitted `conceptArcs` dep. */
+const EMPTY_ARCS: ConceptArc[] = []
 
 /**
  * Narrow the subscribed week to the week it is RIGHT NOW (Codex P2 on PR #1667).
@@ -539,6 +569,55 @@ async function applyCurriculumAction(
 }
 
 /**
+ * Perform a confirmed Dad Lab action through the extracted lanes (FEAT-157).
+ *
+ * **This is a router, not a writer.** An arc calls the module-level
+ * `createArc` the Dad Lab page's New Arc dialog routes through; a lab calls
+ * `createPlannedLab`, the extracted suggestion-flow lane. The chat opens no
+ * second write path to `conceptArcs` or `dadLabReports`.
+ *
+ * Three invariants, each held by construction rather than by this function's
+ * good behaviour:
+ *  - The arc's step statuses come from `buildArcStepsFromAction` (first
+ *    active, rest upcoming) — there is no status field in the action.
+ *  - `createdFrom` is `AiSuggested`, the member the enum reserved for
+ *    AI-authored arcs (design §3) — a chat arc never masquerades as
+ *    owner-authored.
+ *  - The lab lands `Planned` (hardcoded in the shared builder) and writes no
+ *    hours entry — labs feed compliance only on completion, which stays a Dad
+ *    Lab page act.
+ *
+ * Both kinds mint fresh auto-id documents, so — like `addActivity` and
+ * `vetInVideo` — they are NOT idempotent: the hook's re-entry guard and the
+ * serialized write queue are what stop a double tap creating two records.
+ */
+async function applyDadLabAction(
+  familyId: string,
+  action: DadLabAction,
+  allChildIds: string[],
+): Promise<void> {
+  if (action.kind === 'createConceptArc') {
+    await createArc(familyId, allChildIds, {
+      title: action.title,
+      domainLabel: action.domainLabel,
+      steps: buildArcStepsFromAction(action.steps),
+      childIds: action.childIds,
+      createdFrom: ArcOrigin.AiSuggested,
+    })
+    return
+  }
+
+  await createPlannedLab(familyId, {
+    title: action.title,
+    question: action.question,
+    labType: action.labType,
+    materials: action.materials,
+    arcId: action.arcId,
+    arcStepIndex: action.arcStepIndex,
+  })
+}
+
+/**
  * Owns the propose → human-confirm → write loop for `<action>` blocks. The page
  * stages actions parsed from the latest assistant message via
  * {@link stagePendingActions}; the confirm-card UI calls {@link applyChatAction}
@@ -552,6 +631,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     activityConfigs = EMPTY_CONFIGS,
     weekDays = EMPTY_WEEK,
     watchVideos = EMPTY_VIDEOS,
+    conceptArcs = EMPTY_ARCS,
     canEditActivityConfigs = false,
     activeThreadId,
     navigateToPlanner,
@@ -606,6 +686,13 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   const activeChildIdRef = useRef<string>(activeChildId)
   // Every child's name, for the General-tab drop's "ask on X's tab" sentence.
   const allChildNamesRef = useRef<string[]>([])
+  // The live arcs and the family's children as id+name pairs (FEAT-157) — the
+  // Dad Lab resolver needs both: an arc to resolve a `planLab` link against,
+  // and real child ids to check a `createConceptArc` audience with. Refs for
+  // the same reason as the others: `stagePendingActions` must keep a stable
+  // identity.
+  const arcsRef = useRef<ConceptArc[]>(conceptArcs)
+  const familyChildrenRef = useRef<DadLabChild[]>([])
   useEffect(() => {
     configsRef.current = activityConfigs
     weekRef.current = weekDays
@@ -614,8 +701,10 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     childNameRef.current = children.find((c) => c.id === activeChildId)?.name
     activeChildIdRef.current = activeChildId
     allChildNamesRef.current = children.map((c) => c.name)
+    arcsRef.current = conceptArcs
+    familyChildrenRef.current = children.map((c) => ({ id: c.id, name: c.name }))
     onDraftNextWeekRef.current = onDraftNextWeek
-  }, [activityConfigs, weekDays, watchVideos, canEditActivityConfigs, children, activeChildId, onDraftNextWeek])
+  }, [activityConfigs, weekDays, watchVideos, conceptArcs, canEditActivityConfigs, children, activeChildId, onDraftNextWeek])
 
   /**
    * Stage the actions parsed from an assistant message, awaiting a confirm tap.
@@ -765,6 +854,25 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
           }
           return true
         }
+        // FEAT-157 — a Dad Lab proposal is resolved against the live arcs and
+        // the family's real children before it can become a card: a `planLab`
+        // arc link must name an active arc and an in-range step, and a
+        // `createConceptArc` audience must name family children. Each drop
+        // shows its own reason — a hallucinated arc id never reaches a card.
+        if (isDadLabAction(action)) {
+          const resolution = resolveDadLabAction(
+            action,
+            arcsRef.current,
+            familyChildrenRef.current,
+            parentRef.current,
+          )
+          if (!resolution.ok) {
+            console.warn('[shellyChat] dropped Dad Lab action —', resolution.notice, action)
+            notices.push(resolution.notice)
+            return false
+          }
+          return true
+        }
         // FEAT-143 — a curriculum edit is resolved against the family's live
         // configs before it can become a card: the id must name a config the
         // acting child owns, the program must still be running, and a position
@@ -888,6 +996,18 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         const resolution = resolveDraftNextWeek(action, parentRef.current)
         if (!resolution.ok) return resolution.notice
       }
+      // FEAT-157 backstop: same shape as its siblings. A card staged before
+      // the arc it links to was archived elsewhere — or before the capability
+      // was lost — must not reach a write on a later tap.
+      if (isDadLabAction(action)) {
+        const resolution = resolveDadLabAction(
+          action,
+          arcsRef.current,
+          familyChildrenRef.current,
+          parentRef.current,
+        )
+        if (!resolution.ok) return resolution.notice
+      }
       // FEAT-143 backstop: same shape as the two above. A card staged before a
       // config was completed elsewhere (or before the capability was lost) must
       // not reach a write on a later tap.
@@ -940,6 +1060,16 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         // retroactive: no dayLog is touched, no applied week is re-planned, and
         // no already-recorded minute moves.
         await applyCurriculumAction(familyId, action, configsRef.current)
+      } else if (isDadLabAction(action)) {
+        // FEAT-157 — create a concept arc or a Planned backlog lab, routed
+        // through the Dad Lab page's own extracted lanes. Create only: no
+        // status flip, no hours, no XP — completing a lab stays a Dad Lab
+        // page act, and that is where compliance credit happens.
+        await applyDadLabAction(
+          familyId,
+          action,
+          familyChildrenRef.current.map((c) => c.id),
+        )
       } else if (isDayItemAction(action)) {
         // FEAT-142 — remove / move / add on a day of THIS week, routed through
         // the FEAT-138 lane. If the lane refuses (a completion landed between
