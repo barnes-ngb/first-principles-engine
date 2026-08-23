@@ -2217,6 +2217,16 @@ describe("buildDadLabActionAddendum (FEAT-157) — chat-powers slice 5", () => {
     expect(OUT).toContain("NEVER invent, guess, or reconstruct");
   });
 
+  it("an arc-and-first-lab ask is a TWO-TURN flow — a just-proposed arc has no arcId to link to (Codex P2, PR #1696)", () => {
+    expect(OUT).toContain("does NOT exist yet");
+    expect(OUT).toContain("propose the ARC alone");
+    expect(OUT).toContain("with its arcId next turn");
+    expect(OUT).toContain("NEVER put a placeholder or guessed arcId");
+    // The old instruction — both blocks in one turn — is gone: the second
+    // block could only ever carry a placeholder (dropped) or no link at all.
+    expect(OUT).not.toContain("emit two blocks and say each is its own tap");
+  });
+
   it("is create-only: starting, completing, editing, archiving and step-marking are named as Dad Lab page acts", () => {
     expect(OUT).toContain("CREATE ONLY");
     expect(OUT).toContain("cannot start, complete, edit, reorder, archive, or delete");
