@@ -274,6 +274,14 @@ export default function LabReportForm({
   // failed reference write); `attachError` marks the failed-write case.
   const [unattachedUploads, setUnattachedUploads] = useState(0)
   const [attachError, setAttachError] = useState(false)
+  // In-flight uploads (Codex P1 on PR #1693). Save composes the FULL doc from
+  // state and `saveReport` writes it with `setDoc` — a Save tapped while an
+  // upload is mid-flight would capture state from before the upload landed and
+  // overwrite the narrow reference write with that stale snapshot, re-orphaning
+  // the artifact. A counter, not `uploadingChildId`/`uploadingBeat`: multi-select
+  // fires per-file uploads concurrently, so a single slot can read empty while
+  // a sibling upload is still in the air.
+  const [pendingUploads, setPendingUploads] = useState(0)
 
   useEffect(() => {
     onUnattachedUploadsChange?.(unattachedUploads)
@@ -356,6 +364,7 @@ export default function LabReportForm({
   const handlePhotoCapture = useCallback(
     async (childId: string, file: File) => {
       setUploadingChildId(childId)
+      setPendingUploads((n) => n + 1)
       try {
         const ext = file.name.split('.').pop() ?? 'jpg'
         const artifact = {
@@ -390,6 +399,7 @@ export default function LabReportForm({
         setArtifactRefreshKey(prev => prev + 1)
       } finally {
         setUploadingChildId(null)
+        setPendingUploads((n) => n - 1)
       }
     },
     [familyId, title, children, childReports, persistArtifactRef],
@@ -400,6 +410,7 @@ export default function LabReportForm({
   const handleAudioCapture = useCallback(
     async (childId: string, blob: Blob) => {
       setUploadingChildId(childId)
+      setPendingUploads((n) => n + 1)
       try {
         const artifact = {
           childId,
@@ -433,6 +444,7 @@ export default function LabReportForm({
         setArtifactRefreshKey(prev => prev + 1)
       } finally {
         setUploadingChildId(null)
+        setPendingUploads((n) => n - 1)
       }
     },
     [familyId, title, children, childReports, persistArtifactRef],
@@ -464,6 +476,7 @@ export default function LabReportForm({
   const captureBeatArtifact = useCallback(
     async (beat: LabBeatId, type: EvidenceType, file: File, filename: string) => {
       setUploadingBeat(beat)
+      setPendingUploads((n) => n + 1)
       try {
         const artifact = {
           // Whole-family lab by default (DATA-04); the real per-item attribution
@@ -500,6 +513,7 @@ export default function LabReportForm({
         }))
       } finally {
         setUploadingBeat(null)
+        setPendingUploads((n) => n - 1)
       }
     },
     [familyId, title, persistArtifactRef],
@@ -1211,7 +1225,7 @@ export default function LabReportForm({
           variant="contained"
           size="large"
           startIcon={
-            saveState === 'saving' ? (
+            saveState === 'saving' || pendingUploads > 0 ? (
               <CircularProgress size={18} />
             ) : isCompleting ? (
               <CheckCircleIcon />
@@ -1220,13 +1234,17 @@ export default function LabReportForm({
             )
           }
           onClick={handleSave}
-          disabled={saveState === 'saving' || !title.trim()}
+          // Also disabled while uploads are in flight (Codex P1): Save's full
+          // setDoc must never race a pending reference write with stale state.
+          disabled={saveState === 'saving' || pendingUploads > 0 || !title.trim()}
           color={isCompleting ? 'success' : 'primary'}
           sx={{ height: 56 }}
         >
           {saveState === 'saving'
             ? 'Saving...'
-            : isCompleting
+            : pendingUploads > 0
+              ? 'Uploading...'
+              : isCompleting
               ? 'Complete Lab'
               : isEditingActive
                 ? 'Save Changes'

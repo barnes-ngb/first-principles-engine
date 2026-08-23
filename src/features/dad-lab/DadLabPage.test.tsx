@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { RouterProvider, createMemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { UserProfile } from '../../core/types/enums'
@@ -75,6 +76,17 @@ vi.mock('../../components/ArtifactGallery', () => ({ default: () => <div data-te
 
 import DadLabPage from './DadLabPage'
 
+/** The page calls `useBlocker` (UX-82's navigation guard), which needs a data
+ * router — render inside a memory router, with a second route to navigate to. */
+function renderPage() {
+  const router = createMemoryRouter([
+    { path: '/', element: <DadLabPage /> },
+    { path: '/elsewhere', element: <div data-testid="elsewhere" /> },
+  ])
+  render(<RouterProvider router={router} />)
+  return router
+}
+
 const kidView = () => screen.queryByTestId('kid-lab-view')
 /** The parent page's headline action — present only on the parent branch. */
 const parentPage = () => screen.queryByRole('button', { name: /Plan a Lab/i })
@@ -92,7 +104,7 @@ describe('DadLabPage — capability routing (FEAT-124)', () => {
 
   it('routes Lincoln to the kid view, on his own child record', () => {
     mockUseProfile.mockReturnValue({ profile: UserProfile.Lincoln, canEdit: false })
-    render(<DadLabPage />)
+    renderPage()
     expect(kidView()).toBeInTheDocument()
     expect(kidView()).toHaveAttribute('data-child-id', 'c-lincoln')
     expect(parentPage()).toBeNull()
@@ -100,14 +112,14 @@ describe('DadLabPage — capability routing (FEAT-124)', () => {
 
   it('routes London to the kid view, on his own child record', () => {
     mockUseProfile.mockReturnValue({ profile: UserProfile.London, canEdit: false })
-    render(<DadLabPage />)
+    renderPage()
     expect(kidView()).toBeInTheDocument()
     expect(kidView()).toHaveAttribute('data-child-id', 'c-london')
     expect(parentPage()).toBeNull()
   })
 
   it('routes the parent profile to the parent page', () => {
-    render(<DadLabPage />)
+    renderPage()
     expect(parentPage()).toBeInTheDocument()
     expect(kidView()).toBeNull()
   })
@@ -122,7 +134,7 @@ describe('DadLabPage — capability routing (FEAT-124)', () => {
       profile: 'grandma' as UserProfile,
       canEdit: false,
     })
-    render(<DadLabPage />)
+    renderPage()
     expect(kidView()).toBeInTheDocument()
     expect(parentPage()).toBeNull()
     // The diag surface with the `hoursAdjustments` write path is not mounted.
@@ -139,7 +151,7 @@ describe('DadLabPage — capability routing (FEAT-124)', () => {
       profile: 'grandma' as UserProfile,
       canEdit: false,
     })
-    render(<DadLabPage />)
+    renderPage()
     expect(kidView()).toHaveAttribute('data-child-id', 'grandma')
     expect(kidView()).toHaveAttribute('data-child-name', 'Grandma')
     expect(kidView()).not.toHaveAttribute('data-child-id', 'c-london')
@@ -153,7 +165,7 @@ describe('DadLabPage — Back is guarded while uploads are unattached (UX-82)', 
 
   it('warns before leaving, and only "Leave anyway" abandons the form', async () => {
     const user = userEvent.setup({ delay: null })
-    render(<DadLabPage />)
+    renderPage()
 
     await user.click(screen.getByRole('button', { name: /Plan a Lab/i }))
     expect(screen.getByTestId('lab-form')).toBeInTheDocument()
@@ -179,11 +191,35 @@ describe('DadLabPage — Back is guarded while uploads are unattached (UX-82)', 
 
   it('Back leaves immediately when nothing is unattached', async () => {
     const user = userEvent.setup({ delay: null })
-    render(<DadLabPage />)
+    renderPage()
 
     await user.click(screen.getByRole('button', { name: /Plan a Lab/i }))
     await user.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.queryByTestId('lab-form')).toBeNull()
     expect(parentPage()).toBeInTheDocument()
+  }, 20000)
+
+  it('blocks an SPA route change (nav tap) while uploads are unattached', async () => {
+    // Codex P2 on PR #1693: the shell's NavLinks never fire beforeunload and
+    // bypass the Back button — the router blocker must hold the door.
+    const user = userEvent.setup({ delay: null })
+    const router = renderPage()
+
+    await user.click(screen.getByRole('button', { name: /Plan a Lab/i }))
+    await user.click(screen.getByText('report-unattached'))
+
+    await act(async () => {
+      await router.navigate('/elsewhere')
+    })
+
+    // Held: still on the form, with the same dialog asking.
+    expect(screen.getByTestId('lab-form')).toBeInTheDocument()
+    expect(
+      await screen.findByText(/aren't attached to this report yet/i),
+    ).toBeInTheDocument()
+
+    // Leave anyway releases the blocked navigation.
+    await user.click(screen.getByRole('button', { name: 'Leave anyway' }))
+    expect(await screen.findByTestId('elsewhere')).toBeInTheDocument()
   }, 20000)
 })
