@@ -15,7 +15,7 @@
 // write path — `applyChatAction` lands in 3b.
 
 import { isWorkbookOwnerInvalid } from '../../core/firebase/activityConfigWrites'
-import { ActivityFrequency, ActivityType, SubjectBucket } from '../../core/types/enums'
+import { ActivityFrequency, ActivityType, DadLabType, SubjectBucket } from '../../core/types/enums'
 import type { ChatAction } from '../../core/types/shellyChat'
 import { sanitizeAndParseJson } from '../../core/utils/sanitizeJson'
 import { extractYouTubeId, isValidYouTubeId } from '../../core/utils/youtubeId'
@@ -96,6 +96,30 @@ function isValidMinutes(value: unknown): value is number {
 const SUBJECT_BUCKETS = Object.values(SubjectBucket) as readonly string[]
 const ACTIVITY_TYPES = Object.values(ActivityType) as readonly string[]
 const ACTIVITY_FREQUENCIES = Object.values(ActivityFrequency) as readonly string[]
+const DAD_LAB_TYPES = Object.values(DadLabType) as readonly string[]
+
+/**
+ * The Dad Lab caps (FEAT-157), all rejected-never-truncated: a truncated title
+ * or step is text the parent read on the card and did not get, and an
+ * over-long one is a model misusing a field that lands verbatim in a record.
+ *
+ * The step band is the load-bearing one. An arc IS its ordered concept beats
+ * (design D1 Option C: `steps[].status` is the arc's own coverage record), so a
+ * one-step "arc" is just a lab with a wrapper and is rejected as malformed —
+ * and nine-plus Saturdays is a season, not an arc; the manual dialog's own seed
+ * example is four. The character caps mirror the shapes the Dad Lab surfaces
+ * already render: a step title is a chip, a concept beat is "one line" (its
+ * field label in the New Arc dialog), materials are short list rows.
+ */
+export const MIN_ARC_STEPS = 2
+export const MAX_ARC_STEPS = 8
+export const MAX_DAD_LAB_TITLE_CHARS = 80
+export const MAX_ARC_STEP_TITLE_CHARS = 80
+export const MAX_ARC_CONCEPT_BEAT_CHARS = 120
+export const MAX_ARC_DOMAIN_LABEL_CHARS = 40
+export const MAX_LAB_QUESTION_CHARS = 200
+export const MAX_LAB_MATERIALS = 12
+export const MAX_LAB_MATERIAL_CHARS = 60
 
 /**
  * A count gate for `totalUnits` / `currentPosition` (FEAT-143) — a real integer
@@ -138,6 +162,16 @@ function isPositiveInteger(value: unknown): value is number {
  *   ≥ 1). A **shared workbook** is rejected outright (DATA-08). Whether an id
  *   names a real config, whether that config is already finished, and whether a
  *   position is past the end are resolved later, against the live configs.
+ * - Dad Lab (FEAT-157): `createConceptArc` (+ non-empty capped `title`,
+ *   optional `domainLabel` hint, optional `childIds` — every entry a non-empty
+ *   string, and 2–8 `steps`, each a non-empty capped `title` with an optional
+ *   capped one-line `conceptBeat`) and `planLab` (+ non-empty capped `title`,
+ *   a real `DadLabType`, optional capped `question` / `materials`, optional
+ *   `arcId` with an optional non-negative integer `arcStepIndex` that requires
+ *   it). Create only — there is no status, no edit, no delete, and no
+ *   `narrativeHook` (design D5) representable here. Whether an `arcId` names a
+ *   live arc, a step index is in range, and a `childIds` entry names a family
+ *   child are resolved later, against the live arcs.
  * - Watch Vehicle (FEAT-149): `vetInVideo` (+ an 11-char `youtubeId` that must
  *   be extractable from a REQUIRED http(s) `suggestedFromUrl`, a non-empty
  *   `title`, a positive-integer `plannedMinutes`, a real `SubjectBucket`, and a
@@ -490,6 +524,126 @@ function toChatAction(payload: unknown): ChatAction | null {
     if (!instructions) return null
     if (instructions.length > MAX_DRAFT_INSTRUCTION_CHARS) return null
     return { kind: 'draftNextWeek', childId: obj.childId, instructions }
+  }
+
+  // ── Dad Lab — create a Concept Arc, plan a lab (FEAT-157) ───────────
+  // The pair that closes the 2026-08-23 substitution episode by making the
+  // asked-for writes exist. Validated here exactly as strictly as the kinds
+  // above — shape only; whether an `arcId` names a live arc, a step index is
+  // in range for it, and a `childIds` entry names a family child are resolved
+  // in `dadLabActions` against the live data before a card is offered.
+  //
+  // Two absences are the point:
+  //  - There is no `status` anywhere: an arc's step statuses are built by the
+  //    apply layer (first active, rest upcoming — the New Arc dialog's rule)
+  //    and a planned lab's `Planned` is hardcoded in the shared builder. The
+  //    model cannot express an `Active` lab or a pre-`done` step.
+  //  - There is no `narrativeHook`: design D5 (evaluate, don't force) — the
+  //    model does not get to push Stonebridge ties, so the field is
+  //    unrepresentable and a payload carrying one simply loses it.
+  if (obj.kind === 'createConceptArc') {
+    const title = nonEmptyString(obj.title)
+    if (!title || title.length > MAX_DAD_LAB_TITLE_CHARS) return null
+    // `domainLabel` is a hint, like `addItemToDay`'s subjectBucket: junk drops
+    // the FIELD (the arc is still whole without it), but an over-long value is
+    // rejected — never truncated — because it lands verbatim in the record.
+    const rawDomain = typeof obj.domainLabel === 'string' ? obj.domainLabel.trim() : ''
+    if (rawDomain.length > MAX_ARC_DOMAIN_LABEL_CHARS) return null
+    const domainLabel = rawDomain.length > 0 ? rawDomain : undefined
+    // `childIds` is "who is this for" — like `addActivity`'s `shared`, junk
+    // drops the ACTION, because audience is the one thing a write must never
+    // guess. Deduped so a repeated id can't double a card's "for" line.
+    let childIds: string[] | undefined
+    if (obj.childIds !== undefined) {
+      if (!Array.isArray(obj.childIds) || obj.childIds.length === 0) return null
+      const ids: string[] = []
+      for (const raw of obj.childIds) {
+        const id = nonEmptyString(raw)
+        if (!id) return null
+        if (!ids.includes(id)) ids.push(id)
+      }
+      childIds = ids
+    }
+    // The steps ARE the write: 2–8 entries, each a non-empty capped title plus
+    // an optional capped one-line concept beat. Any bad entry drops the whole
+    // action — a partially-kept list would silently differ from what the model
+    // proposed, and the card must show exactly what will be written.
+    if (!Array.isArray(obj.steps)) return null
+    if (obj.steps.length < MIN_ARC_STEPS || obj.steps.length > MAX_ARC_STEPS) return null
+    const steps: { title: string; conceptBeat?: string }[] = []
+    for (const raw of obj.steps) {
+      if (typeof raw !== 'object' || raw === null) return null
+      const step = raw as Record<string, unknown>
+      const stepTitle = nonEmptyString(step.title)
+      if (!stepTitle || stepTitle.length > MAX_ARC_STEP_TITLE_CHARS) return null
+      const rawBeat = typeof step.conceptBeat === 'string' ? step.conceptBeat.trim() : ''
+      if (rawBeat.length > MAX_ARC_CONCEPT_BEAT_CHARS) return null
+      steps.push(
+        rawBeat.length > 0 ? { title: stepTitle, conceptBeat: rawBeat } : { title: stepTitle },
+      )
+    }
+    return {
+      kind: 'createConceptArc',
+      childId: obj.childId,
+      ...(childIds ? { childIds } : {}),
+      title,
+      ...(domainLabel ? { domainLabel } : {}),
+      steps,
+    }
+  }
+
+  if (obj.kind === 'planLab') {
+    const title = nonEmptyString(obj.title)
+    if (!title || title.length > MAX_DAD_LAB_TITLE_CHARS) return null
+    // The real enum, exactly as `addActivity` gates `ActivityType`: an unknown
+    // labType is malformed, never coerced to a default the parent didn't see.
+    if (typeof obj.labType !== 'string' || !DAD_LAB_TYPES.includes(obj.labType)) return null
+    const rawQuestion = typeof obj.question === 'string' ? obj.question.trim() : ''
+    if (rawQuestion.length > MAX_LAB_QUESTION_CHARS) return null
+    const question = rawQuestion.length > 0 ? rawQuestion : undefined
+    // Materials land verbatim in the record, so a half-valid list is rejected
+    // whole rather than silently thinned to something the model didn't write.
+    let materials: string[] | undefined
+    if (obj.materials !== undefined) {
+      if (!Array.isArray(obj.materials) || obj.materials.length > MAX_LAB_MATERIALS) {
+        return null
+      }
+      const items: string[] = []
+      for (const raw of obj.materials) {
+        const item = nonEmptyString(raw)
+        if (!item || item.length > MAX_LAB_MATERIAL_CHARS) return null
+        items.push(item)
+      }
+      materials = items.length > 0 ? items : undefined
+    }
+    // The arc link: `arcId` alone is a valid link (the arc page surfaces
+    // step-less links under "Other labs in this arc"), but a step index
+    // without an arc points at nothing and is malformed. Range is the live
+    // arc's to decide, at resolution.
+    const arcId = obj.arcId === undefined ? undefined : (nonEmptyString(obj.arcId) ?? null)
+    if (arcId === null) return null
+    if (obj.arcStepIndex !== undefined) {
+      if (!arcId) return null
+      if (
+        typeof obj.arcStepIndex !== 'number' ||
+        !Number.isInteger(obj.arcStepIndex) ||
+        obj.arcStepIndex < 0
+      ) {
+        return null
+      }
+    }
+    return {
+      kind: 'planLab',
+      childId: obj.childId,
+      title,
+      ...(question ? { question } : {}),
+      labType: obj.labType as DadLabType,
+      ...(materials ? { materials } : {}),
+      ...(arcId ? { arcId } : {}),
+      ...(arcId && obj.arcStepIndex !== undefined
+        ? { arcStepIndex: obj.arcStepIndex as number }
+        : {}),
+    }
   }
 
   if (obj.kind === 'setActivityPosition') {
