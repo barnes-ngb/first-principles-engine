@@ -103,6 +103,54 @@ describe('ledger-status invariant (a merged row cannot claim an open PR)', () =>
     expect(findOpenPrStatusRows(clean)).toEqual([])
   })
 
+  // ── The 2026-08-22 widening (DOC-15) ──────────────────────────────────────
+  // The house convention drifted to an "awaiting …" phrasing that says exactly
+  // the same untrue thing on `main` as "PR open", in words the original two
+  // patterns did not match. Three real rows (FEAT-152/153/154) carried it before
+  // anyone noticed. Fixtures below are the verbatim ledger cells from that
+  // episode, so a future "simplification" of the pattern list fails here.
+  describe('"awaiting … review/merge" phrasings (added 2026-08-22)', () => {
+    const shipped = (id, pr) =>
+      `| **${id}** | 2 | **SHIPPED — PR #${pr}, 2026-08-17; awaiting human review + merge** (cell flipped on the final pre-merge commit per this run's prompt) | t | e |`
+    const header = ['| ID | Band | Status | Title | Evidence |', '|---|---|---|---|---|']
+
+    it('flags the real FEAT-152/153/154 wording that sailed past "PR open"/"do not merge"', () => {
+      const md = [...header, shipped('FEAT-152', 1681), shipped('FEAT-153', 1684)].join('\n')
+      expect(findOpenPrStatusRows(md).map((r) => r.id)).toEqual(['FEAT-152', 'FEAT-153'])
+    })
+
+    it('flags a bare "awaiting merge" and "awaiting review"', () => {
+      const md = [
+        ...header,
+        '| **ARCH-98** | 1 | **DONE — awaiting merge** | t | e |',
+        '| **ARCH-97** | 1 | **SHIPPED, awaiting review** | t | e |',
+      ].join('\n')
+      expect(findOpenPrStatusRows(md).map((r) => r.id)).toEqual(['ARCH-98', 'ARCH-97'])
+    })
+
+    // The load-bearing negative. FEAT-119's cell is an HONEST "awaiting": a
+    // merged PR waiting on a human task. Requiring a following review/merge WORD
+    // is what keeps it clean — and `\bmerge\b` does not match the "merged
+    // 2026-07-25" that sits 29 characters later, so a cell stating the merge as
+    // a fact never fires.
+    it('does not fire on "AWAITING OWNER CURATION" on an already-merged row', () => {
+      const md = [
+        ...header,
+        '| **FEAT-119** | 2 | **DRAFT LANDED — AWAITING OWNER CURATION** (PR #1622, merged 2026-07-25 — verified 2026-07-26) | t | e |',
+      ].join('\n')
+      expect(findOpenPrStatusRows(md)).toEqual([])
+    })
+
+    // Scope is unchanged by the widening: status cell only, never row bodies.
+    it('still ignores the phrase in a row BODY, as the original patterns do', () => {
+      const md = [
+        ...header,
+        '| **DOC-15** | 1 | **MERGED** (PR #3, merged 2026-08-22) | swept cells reading "awaiting human review + merge" | e |',
+      ].join('\n')
+      expect(findOpenPrStatusRows(md)).toEqual([])
+    })
+  })
+
   // The branch split is the load-bearing part: HARD on main, SOFT on PR runs.
   it('is HARD only against main, SOFT on PR runs and unforced local runs', () => {
     expect(ledgerStatusIsHard({ GITHUB_REF_NAME: 'main' })).toBe(true)
