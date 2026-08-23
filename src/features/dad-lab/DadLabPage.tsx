@@ -147,6 +147,10 @@ export default function DadLabPage() {
   const [ideaText, setIdeaText] = useState('')
   const [ideaLoading, setIdeaLoading] = useState(false)
   const [ideaResult, setIdeaResult] = useState<Prefill | null>(null)
+  // UX-82: uploads whose reference is not yet persisted (reported by the form).
+  // Back is guarded while any exist, so leaving can't silently orphan them.
+  const [unattachedUploads, setUnattachedUploads] = useState(0)
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
 
   // Split reports by status
   const { planned, active, completed } = useMemo(() => {
@@ -211,8 +215,19 @@ export default function DadLabPage() {
     setPrefill(undefined)
     setCompleting(false)
     setReadOnly(false)
+    setUnattachedUploads(0)
+    setLeaveConfirmOpen(false)
     setView('list')
   }, [])
+
+  // Back from the form: warn first when uploads aren't attached yet (UX-82).
+  const handleBackRequest = useCallback(() => {
+    if (unattachedUploads > 0) {
+      setLeaveConfirmOpen(true)
+      return
+    }
+    handleCancel()
+  }, [unattachedUploads, handleCancel])
 
   const handleSave = useCallback(
     async (report: DadLabReport) => {
@@ -391,7 +406,7 @@ export default function DadLabPage() {
   if (view === 'form') {
     return (
       <Box sx={{ maxWidth: 600, mx: 'auto', px: 2, pt: { xs: 1, md: 2 }, pb: 2 }}>
-        <Button startIcon={<ArrowBackIcon />} onClick={handleCancel} sx={{ mb: 2 }}>
+        <Button startIcon={<ArrowBackIcon />} onClick={handleBackRequest} sx={{ mb: 2 }}>
           Back
         </Button>
         <LabReportForm
@@ -401,8 +416,28 @@ export default function DadLabPage() {
           completing={completing}
           readOnly={readOnly}
           onSave={handleSave}
-          onCancel={handleCancel}
+          onCancel={handleBackRequest}
+          onUnattachedUploadsChange={setUnattachedUploads}
         />
+
+        {/* UX-82: leaving with unattached uploads is a choice, never a silent orphan. */}
+        <Dialog open={leaveConfirmOpen} onClose={() => setLeaveConfirmOpen(false)}>
+          <DialogTitle>Leave without saving?</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              Your photos aren&apos;t attached to this report yet — save the report to keep
+              them.
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button variant="contained" onClick={() => setLeaveConfirmOpen(false)}>
+              Keep editing
+            </Button>
+            <Button color="error" onClick={handleCancel}>
+              Leave anyway
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Box>
     )
   }
@@ -1021,7 +1056,8 @@ function ReportCard({
               )}
               {artifactCount > 0 && (
                 <Typography variant="caption" color="text.secondary">
-                  &middot; {artifactCount} photo{artifactCount !== 1 ? 's' : ''}
+                  {/* "artifacts", not "photos" — the count includes audio (UX-90). */}
+                  &middot; {artifactCount} artifact{artifactCount !== 1 ? 's' : ''}
                 </Typography>
               )}
               <Typography variant="caption" color="text.secondary">

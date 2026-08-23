@@ -9,14 +9,18 @@ import type { Child, DadLabReport } from '../../core/types'
 const addDocMock = vi.fn()
 const updateDocMock = vi.fn()
 
+// Refs are tagged with their collection path so the tests can tell the report-doc
+// reference write apart from the artifact `uri` write (UX-82).
 vi.mock('firebase/firestore', () => ({
   addDoc: (...args: unknown[]) => addDocMock(...args),
   updateDoc: (...args: unknown[]) => updateDocMock(...args),
-  doc: vi.fn(() => ({})),
+  doc: vi.fn((coll: { path?: string }, id: string) => ({ path: coll?.path, id })),
+  arrayUnion: (...values: unknown[]) => ({ __arrayUnion: values }),
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
-  artifactsCollection: () => ({}),
+  artifactsCollection: () => ({ path: 'artifacts' }),
+  dadLabReportsCollection: () => ({ path: 'dadLabReports' }),
 }))
 
 vi.mock('../../core/firebase/upload', () => ({
@@ -221,5 +225,116 @@ describe('LabReportForm — legacy report renders unchanged (FEAT-56 additive)',
 
     // Framework is collapsed by default on a beat report.
     expect(screen.getByRole('button', { name: /Show full framework/i })).toBeInTheDocument()
+  })
+})
+
+// ── UX-82: an upload must never orphan ──────────────────────────
+// The repro (Nathan, 2026-08-23): upload an image to a completed lab, tap
+// "Use Photo", leave without Save — the artifact doc + storage file exist, the
+// report doc never gains the reference. The fix: on a SAVED report (`report.id`
+// exists) every upload writes its reference into the report doc immediately, as
+// a narrow update touching only the reference field — KidLabView's own pattern.
+
+/** updateDoc calls that hit the report doc (not the artifact `uri` write). */
+const reportUpdates = () =>
+  updateDocMock.mock.calls.filter(
+    ([ref]) => (ref as { path?: string })?.path === 'dadLabReports',
+  )
+
+describe('LabReportForm — uploads to a saved report persist immediately (UX-82)', () => {
+  it('writes a beat upload into the report doc with NO Save tapped', async () => {
+    const user = userEvent.setup({ delay: null })
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={onSave} onCancel={vi.fn()} />,
+    )
+
+    // Capture a photo into the first beat (Predict) — and stop there. No Save.
+    await user.click(screen.getAllByText('capture-photo')[0])
+    await waitFor(() => expect(reportUpdates().length).toBeGreaterThan(0))
+
+    const [ref, payload] = reportUpdates()[0] as [
+      { path: string; id: string },
+      Record<string, unknown>,
+    ]
+    expect(ref.id).toBe('lab-2')
+    expect(payload['beats.predict.items']).toEqual({
+      __arrayUnion: [{ artifactId: 'art-1', child: 'both' }],
+    })
+    expect(onSave).not.toHaveBeenCalled()
+  }, 20000)
+
+  it('the reference write is narrow — only the reference field and updatedAt move', async () => {
+    const user = userEvent.setup({ delay: null })
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+
+    // Per-child capture lives behind "Show full framework".
+    await user.click(screen.getByRole('button', { name: /Show full framework/i }))
+    // Beats render 3 photo buttons first; the per-child sections follow.
+    await user.click(screen.getAllByText('capture-photo')[3])
+    await waitFor(() => expect(reportUpdates().length).toBeGreaterThan(0))
+
+    const [, payload] = reportUpdates()[0] as [unknown, Record<string, unknown>]
+    // Completed labs carry hours-audit data (subjectTags, totalMinutes, status…)
+    // — nothing but the one reference field and the updatedAt stamp may move.
+    expect(Object.keys(payload).sort()).toEqual([
+      'childReports.lincoln.artifacts',
+      'updatedAt',
+    ])
+    expect(payload['childReports.lincoln.artifacts']).toEqual({
+      __arrayUnion: ['art-1'],
+    })
+  }, 20000)
+
+  it('surfaces a failed reference write — the artifact is not silently lost', async () => {
+    const user = userEvent.setup({ delay: null })
+    // The artifact `uri` write succeeds; the report reference write fails.
+    updateDocMock.mockImplementation((ref: { path?: string }) =>
+      ref?.path === 'dadLabReports'
+        ? Promise.reject(new Error('offline'))
+        : Promise.resolve(undefined),
+    )
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+
+    await user.click(screen.getAllByText('capture-photo')[0])
+
+    // The failure is said out loud, and the upload survives in the beat card
+    // (local state still carries it, so Save can attach it).
+    expect(await screen.findByText(/couldn't be attached/i)).toBeInTheDocument()
+    expect(screen.getByTestId('gallery')).toHaveTextContent('art-1')
+  }, 20000)
+
+  it('a never-saved report stays draft and warns that uploads are not attached', async () => {
+    const user = userEvent.setup({ delay: null })
+    // No `id`: there is no doc to reference — draft state is correct, but the
+    // form must say so. (Unreachable via DadLabPage today — every report it
+    // passes carries a doc id — asserted here so the branch stays honest.)
+    const unsaved: DadLabReport = { ...ACTIVE_REPORT, id: undefined }
+    render(
+      <LabReportForm report={unsaved} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+
+    await user.click(screen.getAllByText('capture-photo')[0])
+    await waitFor(() => expect(addDocMock).toHaveBeenCalled())
+
+    expect(reportUpdates()).toHaveLength(0)
+    expect(
+      await screen.findByText(/aren't attached yet — save the report/i),
+    ).toBeInTheDocument()
+  }, 20000)
+
+  it('the read-only completed view offers no upload affordance at all', () => {
+    // The Step-0 decision, asserted: a disabled form must not render a
+    // working-looking upload that quietly discards (the UX-33 class). Capture
+    // lives only in the editable views, where it now persists immediately.
+    render(
+      <LabReportForm report={LEGACY_REPORT} children={KIDS} readOnly onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+    expect(screen.queryByText('capture-photo')).toBeNull()
+    expect(screen.queryByText('capture-audio')).toBeNull()
   })
 })

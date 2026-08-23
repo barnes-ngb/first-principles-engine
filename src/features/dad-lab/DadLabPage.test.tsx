@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { UserProfile } from '../../core/types/enums'
@@ -56,7 +57,19 @@ vi.mock('./KidLabView', () => ({
 }))
 vi.mock('./ConceptArcsSection', () => ({ default: () => <div data-testid="concept-arcs" /> }))
 vi.mock('./HoursRoutingAuditPanel', () => ({ default: () => <div data-testid="hours-audit" /> }))
-vi.mock('./LabReportForm', () => ({ default: () => <div data-testid="lab-form" /> }))
+// The form stub exposes its UX-82 unattached-uploads channel so the page's
+// Back guard can be exercised without the real upload machinery.
+vi.mock('./LabReportForm', () => ({
+  default: ({
+    onUnattachedUploadsChange,
+  }: {
+    onUnattachedUploadsChange?: (count: number) => void
+  }) => (
+    <div data-testid="lab-form">
+      <button onClick={() => onUnattachedUploadsChange?.(1)}>report-unattached</button>
+    </div>
+  ),
+}))
 vi.mock('./LabSuggestions', () => ({ default: () => <div data-testid="lab-suggestions" /> }))
 vi.mock('../../components/ArtifactGallery', () => ({ default: () => <div data-testid="gallery" /> }))
 
@@ -131,4 +144,46 @@ describe('DadLabPage — capability routing (FEAT-124)', () => {
     expect(kidView()).toHaveAttribute('data-child-name', 'Grandma')
     expect(kidView()).not.toHaveAttribute('data-child-id', 'c-london')
   })
+})
+
+describe('DadLabPage — Back is guarded while uploads are unattached (UX-82)', () => {
+  beforeEach(() => {
+    mockUseProfile.mockReturnValue({ profile: UserProfile.Parents, canEdit: true })
+  })
+
+  it('warns before leaving, and only "Leave anyway" abandons the form', async () => {
+    const user = userEvent.setup({ delay: null })
+    render(<DadLabPage />)
+
+    await user.click(screen.getByRole('button', { name: /Plan a Lab/i }))
+    expect(screen.getByTestId('lab-form')).toBeInTheDocument()
+
+    // The form reports an unattached upload; Back now asks instead of leaving.
+    await user.click(screen.getByText('report-unattached'))
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByText(/aren't attached to this report yet/i)).toBeInTheDocument()
+    expect(screen.getByTestId('lab-form')).toBeInTheDocument()
+
+    // Keep editing stays on the form…
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }))
+    expect(screen.getByTestId('lab-form')).toBeInTheDocument()
+
+    // …and Leave anyway is the explicit way out. (Wait out the dialog's close
+    // transition — while it runs, aria-modal hides the page's buttons.)
+    const back = await screen.findByRole('button', { name: 'Back' })
+    await user.click(back)
+    await user.click(screen.getByRole('button', { name: 'Leave anyway' }))
+    expect(screen.queryByTestId('lab-form')).toBeNull()
+    expect(parentPage()).toBeInTheDocument()
+  }, 20000)
+
+  it('Back leaves immediately when nothing is unattached', async () => {
+    const user = userEvent.setup({ delay: null })
+    render(<DadLabPage />)
+
+    await user.click(screen.getByRole('button', { name: /Plan a Lab/i }))
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.queryByTestId('lab-form')).toBeNull()
+    expect(parentPage()).toBeInTheDocument()
+  }, 20000)
 })

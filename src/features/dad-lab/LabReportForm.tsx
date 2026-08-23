@@ -22,7 +22,7 @@ import ArtifactGallery from '../../components/ArtifactGallery'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { artifactsCollection } from '../../core/firebase/firestore'
+import { artifactsCollection, dadLabReportsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useSaveState } from '../../core/hooks/useSaveState'
 import type { Child, ChildLabReport, DadLabReport } from '../../core/types'
@@ -36,7 +36,7 @@ import {
 import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, LabBeatId, SubjectBucket } from '../../core/types/enums'
 import LabCaptureBeats from './LabCaptureBeats'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
-import { addDoc, updateDoc, doc } from 'firebase/firestore'
+import { addDoc, arrayUnion, updateDoc, doc } from 'firebase/firestore'
 import { normalizeChildRoles, resolveChildReport } from './childRoles'
 import { subjectsForLabType } from './labTypeSubjects'
 import { useConceptArcs } from './useConceptArcs'
@@ -100,6 +100,12 @@ interface LabReportFormProps {
   readOnly?: boolean
   onSave: (report: DadLabReport) => Promise<void>
   onCancel: () => void
+  /**
+   * Notified with the count of uploads whose reference is NOT yet on the report
+   * doc (UX-82: a draft report, or a failed reference write). Lets the parent
+   * page guard its Back navigation instead of silently orphaning artifacts.
+   */
+  onUnattachedUploadsChange?: (count: number) => void
 }
 
 // ── Helper ─────────────────────────────────────────────────────
@@ -146,6 +152,7 @@ export default function LabReportForm({
   readOnly,
   onSave,
   onCancel,
+  onUnattachedUploadsChange,
 }: LabReportFormProps) {
   const familyId = useFamilyId()
   const { saveState, withSave } = useSaveState()
@@ -193,7 +200,11 @@ export default function LabReportForm({
   })
   // Three-beat capture (FEAT-56). One set of beats per lab — Predict / Try /
   // What we saw — with per-item kid attribution. Seeded from the report or empty.
-  const [beats, setBeats] = useState<LabBeats>(() => report?.beats ?? emptyLabBeats())
+  const [beats, setBeats] = useState<LabBeats>(() =>
+    // Merge over the empty set: a doc whose `beats` was created by a narrow
+    // per-beat reference write (UX-82) may carry fewer than three keys.
+    report?.beats ? { ...emptyLabBeats(), ...report.beats } : emptyLabBeats(),
+  )
   const [uploadingBeat, setUploadingBeat] = useState<LabBeatId | null>(null)
   // "Show full framework" expand — the five-chip framework + legacy per-child
   // fields, preserved but no longer demanded. Collapsed by default on new labs;
@@ -255,6 +266,61 @@ export default function LabReportForm({
   const [uploadingChildId, setUploadingChildId] = useState<string | null>(null)
   const [artifactRefreshKey, setArtifactRefreshKey] = useState(0)
 
+  // ── Upload reference persistence (UX-82) ──
+  // An upload's reference must never live only in component state: the artifact
+  // doc + storage file are written the moment the parent taps "Use Photo", so
+  // leaving without Save used to orphan them. `unattachedUploads` counts uploads
+  // whose reference is not yet on the report doc (a never-saved report, or a
+  // failed reference write); `attachError` marks the failed-write case.
+  const [unattachedUploads, setUnattachedUploads] = useState(0)
+  const [attachError, setAttachError] = useState(false)
+
+  useEffect(() => {
+    onUnattachedUploadsChange?.(unattachedUploads)
+  }, [unattachedUploads, onUnattachedUploadsChange])
+
+  // Browser-level close/refresh guard while uploads are unattached.
+  useEffect(() => {
+    if (unattachedUploads === 0) return
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [unattachedUploads])
+
+  /**
+   * Write an upload's reference into the report doc immediately — a narrow
+   * update touching only the reference field (via `arrayUnion`, so concurrent
+   * uploads never clobber each other) plus `updatedAt`. KidLabView's own
+   * pattern, and FEAT-138's: an edit to a saved thing is a guarded, narrow
+   * write to the saved thing, never a hope that a later Save flushes it.
+   * Ordering discipline: the artifact is already written when this runs, so a
+   * failure here leaves a recoverable orphan (visible in Firestore), never a
+   * dangling reference — and the failure is said on the surface, not swallowed.
+   */
+  const persistArtifactRef = useCallback(
+    async (fields: Record<string, unknown>) => {
+      if (!report?.id) {
+        // Never-saved report: there is no doc to reference — draft state is
+        // correct, and the unattached warning + leave guard carry the honesty.
+        setUnattachedUploads((n) => n + 1)
+        return
+      }
+      try {
+        await updateDoc(doc(dadLabReportsCollection(familyId), report.id), {
+          ...fields,
+          updatedAt: new Date().toISOString(),
+        })
+      } catch (err) {
+        console.error('Artifact reference write failed', err)
+        setUnattachedUploads((n) => n + 1)
+        setAttachError(true)
+      }
+    },
+    [familyId, report?.id],
+  )
+
   // Initialize from prefill
   useEffect(() => {
     if (prefill && !report) {
@@ -309,9 +375,15 @@ export default function LabReportForm({
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
+        // Artifact first, then reference (UX-82): persist into the report doc
+        // immediately, keyed the way the doc already keys this child.
+        const child = children.find(c => c.id === childId)
+        const key = child ? getChildReportKey(childReports, child) : childId
+        await persistArtifactRef({
+          [`childReports.${key}.artifacts`]: arrayUnion(docRef.id),
+        })
+
         setChildReports((prev) => {
-          const child = children.find(c => c.id === childId)
-          const key = child ? getChildReportKey(prev, child) : childId
           const cr = prev[key] ?? emptyChildReport()
           return { ...prev, [key]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
         })
@@ -320,7 +392,7 @@ export default function LabReportForm({
         setUploadingChildId(null)
       }
     },
-    [familyId, title, children],
+    [familyId, title, children, childReports, persistArtifactRef],
   )
 
   // ── Audio capture ──
@@ -347,9 +419,14 @@ export default function LabReportForm({
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
+        // Artifact first, then reference (UX-82) — same as the photo path.
+        const child = children.find(c => c.id === childId)
+        const key = child ? getChildReportKey(childReports, child) : childId
+        await persistArtifactRef({
+          [`childReports.${key}.artifacts`]: arrayUnion(docRef.id),
+        })
+
         setChildReports((prev) => {
-          const child = children.find(c => c.id === childId)
-          const key = child ? getChildReportKey(prev, child) : childId
           const cr = prev[key] ?? emptyChildReport()
           return { ...prev, [key]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
         })
@@ -358,7 +435,7 @@ export default function LabReportForm({
         setUploadingChildId(null)
       }
     },
-    [familyId, title, children],
+    [familyId, title, children, childReports, persistArtifactRef],
   )
 
   // ── Three-beat capture (FEAT-56) ──
@@ -407,18 +484,25 @@ export default function LabReportForm({
         const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+        // Artifact first, then reference (UX-82): the beat item lands on the
+        // report doc the moment the upload succeeds, not on a later Save.
+        await persistArtifactRef({
+          [`beats.${beat}.items`]: arrayUnion({ artifactId: docRef.id, child: BEAT_BOTH }),
+        })
+
         setBeats((prev) => ({
           ...prev,
           [beat]: {
             ...prev[beat],
-            items: [...prev[beat].items, { artifactId: docRef.id, child: BEAT_BOTH }],
+            items: [...(prev[beat]?.items ?? []), { artifactId: docRef.id, child: BEAT_BOTH }],
           },
         }))
       } finally {
         setUploadingBeat(null)
       }
     },
-    [familyId, title],
+    [familyId, title, persistArtifactRef],
   )
 
   const handleBeatPhoto = useCallback(
@@ -569,7 +653,12 @@ export default function LabReportForm({
       })
     }
 
-    await withSave(() => onSave(reportData))
+    await withSave(async () => {
+      await onSave(reportData)
+      // Save persisted every reference held in state — the drafts are attached.
+      setUnattachedUploads(0)
+      setAttachError(false)
+    })
   }, [
     date, title, labType, question, description, childReports, children, materials,
     roles, subjectTags, skillTags, virtueTag, dadReflection, beats,
@@ -1101,6 +1190,19 @@ export default function LabReportForm({
             />
           </Stack>
         </Box>
+      )}
+
+      {/* Upload-attachment honesty (UX-82) — impossible to miss, right above Save. */}
+      {!disabled && attachError && (
+        <Alert severity="error">
+          A photo or recording was uploaded but couldn&apos;t be attached to this lab.
+          It&apos;s safe — tap Save below to attach it.
+        </Alert>
+      )}
+      {!disabled && !attachError && unattachedUploads > 0 && (
+        <Alert severity="warning">
+          Your photos aren&apos;t attached yet — save the report to keep them.
+        </Alert>
       )}
 
       {/* Save / Complete button */}
