@@ -10,7 +10,9 @@ import {
   formatWeekSpan,
   nextWeekDays,
   buildCurriculumActionAddendum,
+  buildDadLabActionAddendum,
   buildDayItemActionAddendum,
+  formatDadLabSection,
   chatChecklistItemKey,
   civilDateInZone,
   currentWeekDays,
@@ -31,6 +33,8 @@ import {
 } from "./shellyChat.js";
 import type {
   ChatActivityRow,
+  ChatArcRow,
+  ChatBacklogLabRow,
   WatchLibraryRow,
   DispositionCacheDoc,
   DispositionOverridesDoc,
@@ -706,9 +710,9 @@ describe("Phase 1 supplemental-block token-budget sanity", () => {
 
     const totalChars = disposition.length + weeklyReviews.length + conundrum.length + teachBacks.length + roleSection.length;
 
-    // Bound (9000 chars ≈ 2250 tokens) covers all Phase 1 supplemental additions
-    // plus the addendum-bearing role section. Stays comfortably below the
-    // +25-29% headroom budgeted in Step 1.
+    // Bound (11000 chars ≈ 2750 tokens) covers all Phase 1 supplemental
+    // additions plus the addendum-bearing role section. Stays comfortably below
+    // the +25-29% headroom budgeted in Step 1.
     //
     // Raised from 8000 by FEAT-152, which hoists the card-or-it-didn't-happen
     // rule into the base role section so it survives the absence of every action
@@ -716,9 +720,12 @@ describe("Phase 1 supplemental-block token-budget sanity", () => {
     // write. ~800 chars, on both branches, and the only honest place to put it:
     // the per-grammar rules it backs up are each scoped to a grammar that may
     // never be emitted. The guard is a budget, not a freeze; it moves when a
-    // rule earns the room, and this is the second time it has (FEAT-135 was the
-    // first).
-    expect(totalChars).toBeLessThan(9000);
+    // rule earns the room, and this is the third time it has (FEAT-135, then
+    // FEAT-152). FEAT-157 raised it from 9000 for the no-substitution rule —
+    // the same FEAT-152 shape: a hard rule that must survive the absence of
+    // every grammar, because the 2026-08-23 substitution was precisely a
+    // failure ACROSS grammars — plus the Dad Lab lines in the navigation map.
+    expect(totalChars).toBeLessThan(11000);
 
     // All Phase 1 sections actually populated under realistic fixtures.
     expect(disposition).not.toBe("");
@@ -2056,6 +2063,7 @@ describe("no-writes-from-general, after FEAT-152", () => {
       buildPlanAdjustmentActionAddendum(undefined, undefined),
       buildActivityMinutesActionAddendum(undefined, undefined),
       buildCurriculumActionAddendum(undefined, undefined),
+      buildDadLabActionAddendum(undefined, undefined),
       buildDayItemActionAddendum(undefined, undefined),
       buildWatchActionAddendum(undefined, undefined, []),
       buildDraftNextWeekAddendum(undefined, undefined, []),
@@ -2068,5 +2076,181 @@ describe("no-writes-from-general, after FEAT-152", () => {
     const general = buildShellyChatRoleSection(undefined, ["Lincoln", "London"]);
     expect(general).toContain('NOTHING is "coming"');
     expect(general).not.toContain("coming soon");
+  });
+});
+
+// ── FEAT-157 — the no-substitution rule, and arcs + labs from the chat ──
+
+describe("the no-substitution rule (FEAT-157) — no action may impersonate another", () => {
+  it("is stated in the built CHILD-branch prompt, as a hard rule", () => {
+    const out = buildShellyChatRoleSection("Lincoln");
+    expect(out).toContain("NEVER SUBSTITUTE A DIFFERENT ACTION");
+    expect(out).toContain("no action may ever stand in for another");
+    expect(out).toContain("NEVER approximate it with a different action kind");
+    // Names the failure by its own example — the 08-23 shape.
+    expect(out).toContain("A curriculum activity is not a concept arc");
+    // And says why a wrong write is worse than a refusal.
+    expect(out).toContain("worse than a refusal");
+  });
+
+  it("is stated in the built GENERAL-branch prompt too — it must survive the absence of every grammar", () => {
+    const out = buildShellyChatRoleSection(undefined, ["Lincoln", "London"]);
+    expect(out).toContain("NEVER SUBSTITUTE A DIFFERENT ACTION");
+    expect(out).toContain("NEVER approximate it with a different action kind");
+  });
+
+  it("regression-shaped: the curriculum grammar names its own lane's boundary — an activity is NOT an arc or a lab (the 2026-08-23 episode)", () => {
+    const out = buildCurriculumActionAddendum("lincoln123", "Lincoln");
+    expect(out).toContain("This lane's boundary");
+    expect(out).toContain("NOT a Dad Lab concept arc");
+    expect(out).toContain("not a lab");
+    expect(out).toContain("NEVER dress the ask up as a curriculum activity");
+  });
+
+  it("every child-scoped grammar carries its own boundary line", () => {
+    const addenda = [
+      buildSightWordActionAddendum("c1", "Lincoln"),
+      buildSnapshotActionAddendum("c1", "Lincoln"),
+      buildActivityMinutesActionAddendum("c1", "Lincoln"),
+      buildCurriculumActionAddendum("c1", "Lincoln"),
+      buildDadLabActionAddendum("c1", "Lincoln"),
+      buildDayItemActionAddendum("c1", "Lincoln"),
+      buildWatchActionAddendum("c1", "Lincoln", [{ dateKey: "2026-08-24", label: "Monday" }]),
+      buildPlanAdjustmentActionAddendum("c1", "Lincoln"),
+      buildDraftNextWeekAddendum("c1", "Lincoln", [{ dateKey: "2026-08-31", label: "Monday" }]),
+    ];
+    for (const addendum of addenda) {
+      expect(addendum).toContain("This lane's boundary");
+    }
+  });
+});
+
+describe("formatDadLabSection (FEAT-157) — the section that makes an arc linkable", () => {
+  const ARCS: ChatArcRow[] = [
+    {
+      id: "arc_elec",
+      title: "The Electricity Arc",
+      domainLabel: "Electricity",
+      steps: [
+        { title: "Static electricity", status: "done" },
+        { title: "Make a circuit", status: "active" },
+        { title: "Add a switch", status: "upcoming" },
+      ],
+    },
+    { id: "arc_old", title: "The Water Arc", archivedAt: "2026-07-01T00:00:00.000Z", steps: [] },
+  ];
+  const BACKLOG: ChatBacklogLabRow[] = [
+    { title: "Vinegar volcano", labType: "science", date: "2026-08-29" },
+  ];
+
+  it("carries the arc id, title, domain, and every step with a 0-BASED bracketed index and its status", () => {
+    const out = formatDadLabSection(ARCS, BACKLOG);
+    expect(out).toContain("DAD LAB");
+    expect(out).toContain("The Electricity Arc — Electricity (arcId: arc_elec)");
+    // 0-based, because the bracketed number IS the arcStepIndex payload value.
+    expect(out).toContain("[0] Static electricity (done)");
+    expect(out).toContain("[1] Make a circuit (active)");
+    expect(out).toContain("[2] Add a switch (upcoming)");
+  });
+
+  it("drops archived arcs entirely — a closed container is not linkable", () => {
+    const out = formatDadLabSection(ARCS, BACKLOG);
+    expect(out).not.toContain("The Water Arc");
+    expect(out).not.toContain("arc_old");
+  });
+
+  it("lists the planned backlog by title so a duplicate is never proposed", () => {
+    const out = formatDadLabSection(ARCS, BACKLOG);
+    expect(out).toContain("Vinegar volcano");
+    expect(out).toContain("backlog");
+    expect(out).toContain("does not need proposing again");
+  });
+
+  it("tells the model to copy arcId exactly and never invent one", () => {
+    const out = formatDadLabSection(ARCS, []);
+    expect(out).toContain('"arcId" exactly as written');
+    expect(out).toContain("NEVER invent");
+  });
+
+  it("omits the section entirely when there are no active arcs and no backlog", () => {
+    expect(formatDadLabSection([], [])).toBe("");
+    expect(formatDadLabSection([ARCS[1]], [])).toBe("");
+  });
+});
+
+describe("buildDadLabActionAddendum (FEAT-157) — chat-powers slice 5", () => {
+  const OUT = buildDadLabActionAddendum("lincoln123", "Lincoln");
+
+  it("returns empty string on the general (no-child) tab", () => {
+    expect(buildDadLabActionAddendum(undefined, "Lincoln")).toBe("");
+    expect(buildDadLabActionAddendum("", "")).toBe("");
+  });
+
+  it("emits both grammars bound to the active childId", () => {
+    expect(OUT).toContain("DAD LAB ACTIONS");
+    expect(OUT).toContain('"kind":"createConceptArc"');
+    expect(OUT).toContain('"kind":"planLab"');
+    expect(OUT).toContain('"childId":"lincoln123"');
+    expect(OUT).not.toContain("${");
+  });
+
+  it("says the steps ARE the arc — 2 to 8 real beats, first one active, shown in full on the card", () => {
+    expect(OUT).toContain("The steps ARE the arc");
+    expect(OUT).toContain("2 to 8");
+    expect(OUT).toContain("first step starts active");
+    expect(OUT).toContain("The card shows every step");
+  });
+
+  it("pins the real labType enum and rejects unknowns", () => {
+    expect(OUT).toContain("science, engineering, adventure, heart");
+    expect(OUT).toContain("rejected outright");
+  });
+
+  it("says where a planned lab lands — the backlog, started from the Dad Lab page, no hours until completion", () => {
+    expect(OUT).toContain("BACKLOG");
+    expect(OUT).toContain("started from the Dad Lab page");
+    expect(OUT).toContain("NO hours are recorded until it is completed there");
+  });
+
+  it("forbids inventing an arcId or a step number and points at the DAD LAB section", () => {
+    expect(OUT).toContain('"arcId" exactly from the DAD LAB section');
+    expect(OUT).toContain("NEVER invent, guess, or reconstruct");
+  });
+
+  it("is create-only: starting, completing, editing, archiving and step-marking are named as Dad Lab page acts", () => {
+    expect(OUT).toContain("CREATE ONLY");
+    expect(OUT).toContain("cannot start, complete, edit, reorder, archive, or delete");
+    expect(OUT).toContain("mark a step done");
+  });
+
+  it("keeps the model out of the narrative-hook business (design D5)", () => {
+    expect(OUT).toContain("Do NOT add a story or Stonebridge tie-in");
+    expect(OUT).not.toContain("narrativeHook");
+  });
+
+  it("never claims done, and carries the conservative trigger + its own boundary line", () => {
+    expect(OUT).toContain("NEVER say it's done");
+    expect(OUT).toContain("TALKING about lab ideas is NOT a write");
+    expect(OUT).toContain("This lane's boundary");
+    expect(OUT).toContain("nothing else may ever stand in for an arc or a lab");
+  });
+});
+
+describe("NAVIGATION HONESTY after FEAT-157 — Dad Lab is on the map", () => {
+  it("names the Dad Lab page as the true home of starting/completing labs and arc upkeep, on both branches", () => {
+    for (const out of [
+      buildShellyChatRoleSection("Lincoln"),
+      buildShellyChatRoleSection(undefined, ["Lincoln", "London"]),
+    ]) {
+      expect(out).toContain("the Dad Lab page");
+      expect(out).toContain("DAD LAB ACTIONS below");
+    }
+  });
+
+  it("the CAN list includes creating an arc and planning a backlog lab; the CANNOT list pins start/complete/edit/archive to the page", () => {
+    const out = buildShellyChatRoleSection("Lincoln");
+    expect(out).toContain("creating a concept arc and planning a lab into the backlog");
+    expect(out).toContain("You cannot START, COMPLETE, edit, or archive a Dad Lab lab or arc");
+    expect(out).toContain("hours are credited only when a lab is completed there");
   });
 });

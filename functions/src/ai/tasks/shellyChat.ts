@@ -7,7 +7,8 @@
  *          + supplemental: all children, disposition profile (dispositionCache
  *            with overrides), recent weekly reviews (5-row strip), conundrum
  *            title, completion patterns, conundrum response count, chapter
- *            responses, recent teach-backs (14d, limit 10)
+ *            responses, recent teach-backs (14d, limit 10), active concept
+ *            arcs + planned-lab backlog (DAD LAB, FEAT-157)
  *          + general-branch only (no childId): every child's learnerModel slice
  *            concatenated under per-child headers (FEAT-60) — read-only, for
  *            grounded cross-child comparison; no actions are emitted here
@@ -167,6 +168,90 @@ export function formatChatActivities(
     "",
     'Use the "id" exactly as written when you propose an action against one of these. An activity marked "shared" belongs to more than one child — changing its minutes changes it for all of them, so say so before proposing. An activity marked "no position tracked" has no lesson number to set.',
   ].join("\n");
+}
+
+/** A `conceptArcs` doc as the DAD LAB section reads it (FEAT-157). */
+export interface ChatArcRow {
+  id: string;
+  title?: string;
+  domainLabel?: string;
+  steps?: { title?: string; status?: string }[];
+  archivedAt?: string;
+}
+
+/** A planned `dadLabReports` doc as the DAD LAB section reads it (FEAT-157). */
+export interface ChatBacklogLabRow {
+  title?: string;
+  labType?: string;
+  date?: string;
+}
+
+/**
+ * Format the DAD LAB section for a child-scoped chat (FEAT-157).
+ *
+ * This is what lets the assistant link a `planLab` to a REAL arc — the exact
+ * division of labour the ACTIVITIES section has for activity ids. Without it
+ * the model has no valid `arcId` to put in a payload, and no view of what
+ * already exists — which is how the 2026-08-23 episode started: asked to push
+ * an arc, the model could see neither the arcs nor any way to make one.
+ *
+ * Step indexes are printed in brackets, **0-based**, because the bracketed
+ * number IS the `arcStepIndex` value the payload carries — printing 1-based
+ * numbers here would manufacture an off-by-one between what the model reads
+ * and what the client resolves. Each step also carries its status, so the
+ * model can propose against the arc's real frontier instead of re-planning a
+ * step already done.
+ *
+ * Archived arcs are dropped entirely (unlike the WATCH LIBRARY's marked
+ * retirees): a retired video can still be ASKED about by name, but an archived
+ * arc is a closed container nothing can be planned against, and listing it
+ * would only invite a proposal the client gate refuses.
+ *
+ * The backlog is titles only — enough to answer "what labs are queued" and to
+ * stop a duplicate proposal, without pasting report bodies into the prompt.
+ * Returns "" when there is nothing at all, so the section is omitted rather
+ * than rendered empty.
+ */
+export function formatDadLabSection(
+  arcs: ChatArcRow[],
+  backlog: ChatBacklogLabRow[],
+): string {
+  const active = arcs.filter((a) => !a.archivedAt);
+  if (active.length === 0 && backlog.length === 0) return "";
+
+  const lines: string[] = [
+    "DAD LAB (what exists today — the family's concept arcs and the planned-lab backlog, so propose against reality):",
+  ];
+
+  if (active.length > 0) {
+    lines.push("Concept arcs (active):");
+    for (const arc of active) {
+      const domain = arc.domainLabel ? ` — ${arc.domainLabel}` : "";
+      lines.push(`- ${arc.title || "Untitled Arc"}${domain} (arcId: ${arc.id})`);
+      const steps = arc.steps ?? [];
+      if (steps.length > 0) {
+        const stepBits = steps.map(
+          (s, i) => `[${i}] ${s.title || "Untitled"} (${s.status || "upcoming"})`,
+        );
+        lines.push(`  steps: ${stepBits.join(" · ")}`);
+      }
+    }
+  }
+
+  if (backlog.length > 0) {
+    lines.push("Planned-lab backlog (labs waiting to be started from the Dad Lab page):");
+    for (const lab of backlog) {
+      const bits = [lab.labType, lab.date].filter(Boolean).join(", ");
+      lines.push(`- ${lab.title || "Untitled Lab"}${bits ? ` (${bits})` : ""}`);
+    }
+  }
+
+  lines.push(
+    "",
+    'Use an "arcId" exactly as written when you link a lab to an arc, and an "arcStepIndex" that is one of that arc\'s bracketed step numbers. NEVER invent, guess, or reconstruct either. A step marked (done) is already covered — propose against the active or upcoming steps. A lab already in the backlog does not need proposing again.',
+  );
+
+  return lines.join("\n");
 }
 
 /** A saved day's checklist row, as the THIS WEEK section reads it (FEAT-142). */
@@ -657,10 +742,12 @@ The real map, for the things parents most often ask to change:
 - Today's checklist: Today. (You can also change what is on a day of THIS week yourself, right here — see TODAY / THIS WEEK ACTIONS below, if that section is present.)
 - Hours, compliance records, evaluations and the portfolio: Records.
 - The curated video library: Watch Library (its own entry in the parent nav — it is NOT inside Settings). Retiring a video, and putting a retired one back from its Archive tab, happen there and only there. (You can add a video you found and plan it onto a day yourself — see WATCH ACTIONS below, if present.)
+- Saturday labs, concept arcs, lab reports: the Dad Lab page. Starting a lab, completing it (which is when hours are credited), marking arc steps done, and archiving an arc all happen there and only there. (You can create a concept arc and plan a lab into the backlog yourself — see DAD LAB ACTIONS below, if present.)
 - Account, profiles, voice input, stickers: Settings. Settings does NOT contain any schedule, subject-duration, or time-block screen — never send anyone there for one.
 
 What you can change from this chat, and what you can't (say this accurately, never more):
-- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, what is on a day of THIS week (remove / move / add), the curriculum — adding an activity, marking one finished, setting where the child is in it — videos: adding one you found on the web to the Watch Library and planning a vetted one onto a day of this week or next — and reshaping NEXT week: drafting the whole week from what she describes, showing it in full, and applying it. Each is confirmed by a tap; the next-week draft takes two (draft, then apply).
+- You CAN: sight words, soft-profile fields, additive skill-snapshot entries, an activity's default minutes, what is on a day of THIS week (remove / move / add), the curriculum — adding an activity, marking one finished, setting where the child is in it — videos: adding one you found on the web to the Watch Library and planning a vetted one onto a day of this week or next — Dad Lab: creating a concept arc and planning a lab into the backlog — and reshaping NEXT week: drafting the whole week from what she describes, showing it in full, and applying it. Each is confirmed by a tap; the next-week draft takes two (draft, then apply).
+- You cannot START, COMPLETE, edit, or archive a Dad Lab lab or arc, and you cannot mark an arc step done — creating is the only Dad Lab change you can make. The rest lives on the Dad Lab page, and hours are credited only when a lab is completed there.
 - You still CANNOT DELETE an activity. The app retires programs (mark finished) rather than deleting them, and a finished program cannot be un-finished — not from here, and not from Progress → Curriculum. Never offer a way to undo it.
 - You also cannot RETIRE a video, un-retire one, edit one, or delete one from here. Adding is the only library change you can make. Retiring and putting back live in Watch Library.
 - NOTHING is "coming". Never say a capability is on the way — you cannot know, and she plans around what you tell her. If you can't do it, say so and name the real screen.
@@ -693,6 +780,37 @@ CARD OR IT DIDN'T HAPPEN (hard rule, and it outranks anything below): a change t
 - NEVER report a change as made: no "Pushed", no "Added", no "Updated", no "Done", no "I've set", no ✅ or other checkmark about a record.
 - Speak about a proposal in the future tense — "I've proposed …, tap to confirm and it'll be added" — never the past tense.
 - If you cannot propose something, say you cannot, and say what nothing-was-changed means: her records are exactly as they were.`;
+
+/**
+ * The no-substitution rule, stated once in the base role — both branches — as
+ * the card rule's sibling (FEAT-157).
+ *
+ * The 2026-08-23 episode this closes: asked to push a Dad's Lab CONCEPT ARC,
+ * the model had no arc action — so across two turns it first described the
+ * proposal in prose with no card, then, challenged, emitted the nearest card it
+ * DID have: a curriculum activity named "Dad's Lab: micro:bit". Confirmed,
+ * written, "Done". A real write of the wrong kind — substitute success — which
+ * is strictly worse than a refusal, because the record then contains a
+ * curriculum activity masquerading as a lab arc, with the parent's own
+ * confirming tap on it.
+ *
+ * Every grammar already says which neighbouring lane an ask belongs to
+ * ("changing a number = this action; changing the week = the handoff"), but
+ * those lines only route between lanes that EXIST. Nothing anywhere said what
+ * to do when the asked-for write has no lane at all — and a model with a
+ * parent asking for a write, no matching action, and a toolbox of near-misses
+ * will reach for the nearest one. So the rule is grammar-level and named: when
+ * you don't have the action, say so and name the real screen; approximating
+ * with a different action kind is forbidden outright.
+ *
+ * Stated in the base role (not in any one grammar) for FEAT-152's reason: a
+ * rule that lives inside a grammar rules over nothing when that grammar is
+ * absent, and the substitution failure is precisely a failure ACROSS grammars.
+ * Each grammar's "be conservative" block additionally names its own lane's
+ * boundary, so the general rule and the per-lane line meet in the middle.
+ */
+const NO_SUBSTITUTION_RULE = `
+NEVER SUBSTITUTE A DIFFERENT ACTION (hard rule, the card rule's sibling): every action kind writes ONE specific kind of record, and no action may ever stand in for another. If the parent asks for a write you do NOT have an action for, say so plainly and name the real screen where it lives (or say it isn't in the app yet, per the navigation rules above) — you must NEVER approximate it with a different action kind just to have something to confirm. A curriculum activity is not a concept arc; a checklist row on a day is not a lab; a profile field is not a plan. A confirmed write of the WRONG KIND is worse than a refusal: it puts a record in the app that says something false, with the parent's own confirming tap on it.`;
 
 /**
  * The General tab's explicit no-write contract (FEAT-152).
@@ -749,6 +867,7 @@ GUIDELINES:
 - For printable activities, format them clearly for screenshot or print.
 ${NAVIGATION_HONESTY_RULE}
 ${CONFIRM_CARD_RULE}
+${NO_SUBSTITUTION_RULE}
 
 PLANNING-PARTNER MODE: You have ${childName}'s recent evaluation history across reading (comprehension), math, fluency, and phonics (see EVALUATION HISTORY BY DOMAIN above), ${childName}'s disposition signals across curiosity, persistence, articulation, self-awareness, and ownership (see DISPOSITION PROFILE), curriculum coverage across the knowledge map — which nodes are mastered, in progress, or not yet started (see CURRICULUM MAP / COVERAGE), the year-to-date instructional-hours total against the reporting target (see HOURS PROGRESS), the week-over-week strip of recent reviews (see RECENT WEEKLY REVIEWS), and recent teach-backs (see RECENT TEACH-BACKS). Ground "where is ${childName} on the map" / "what have we covered" answers in CURRICULUM MAP / COVERAGE, and "are we on track for our hours" answers in HOURS PROGRESS, rather than guessing. For any question about ${childName}'s LEVEL, what to WORK ON next, or what curriculum/materials to BUY, ground the answer in the LEARNER MODEL section and SAY which evidence supports the level claim ("two sources agree — Fast Phonics and his June check"); the Learner Model covers reading & math only, so for any other subject (science, handwriting, etc.) say plainly that the model doesn't cover it rather than guessing. Use them to help the parent see patterns over time — what is shifting, what is steady, what connects across signals they have not linked. When the parent shares an observation about ${childName} mid-conversation, treat it as evidence they have earned the right to add to the picture — don't argue with it, build on it.`;
   }
@@ -764,6 +883,7 @@ GUIDELINES:
 - For printable activities, format them clearly for screenshot or print.
 ${NAVIGATION_HONESTY_RULE}
 ${CONFIRM_CARD_RULE}
+${NO_SUBSTITUTION_RULE}
 ${buildGeneralNoWriteContract(allChildNames)}`;
 }
 
@@ -817,7 +937,7 @@ Grammar — one trailing line per action, after your prose, using ${who}'s id ex
 Rules:
 - One JSON object per <action> block; lowercase the word; always use childId "${childId}".
 - NEVER say the change is done. Say you've proposed it and it can be confirmed with a tap — the app performs the write only on confirm.
-- Be conservative: if you're unsure whether the parent wants a write versus just talking about words, do NOT emit an action — ask or stay in prose.
+- Be conservative: if you're unsure whether the parent wants a write versus just talking about words, do NOT emit an action — ask or stay in prose. This lane's boundary: these two kinds touch the sight-word list and nothing else — never use a sight word to stand in for a write you don't have.
 
 PROFILE ACTIONS: When the parent clearly wants to update ${who}'s profile — only the freeform fields motivators, interests, or strengths (e.g. "add Lego to ${who}'s motivators", "he's really into dinosaurs now") — propose an editProfileField action. These are the ONLY editable profile fields: never propose this for grade, supports, priority skills, or anything else.
 
@@ -830,7 +950,7 @@ Rules:
 - field must be exactly one of: motivators, interests, strengths.
 - value is the full new text for that field (merge in the change yourself).
 - NEVER say it's done. Say you've proposed it and it's confirmed with a tap — the parent sees a before → after preview first.
-- Be conservative: discussion is not a write. Only propose when the parent clearly asks to change the profile.`;
+- Be conservative: discussion is not a write. Only propose when the parent clearly asks to change the profile. This lane's boundary: those three freeform fields are the whole lane — a profile field is not a snapshot, a plan, or a curriculum, so never park a different ask in one.`;
 }
 
 /**
@@ -869,7 +989,7 @@ Rules:
 - ADDITIVE ONLY. The app cannot remove, downgrade, or lower a level. If the parent asks to REMOVE a skill, DELETE a support, or LOWER/DOWNGRADE a level, say plainly that it can't be done from here — do NOT say it is coming, and do NOT emit any action. Offer to note it down for her instead.
 - For markSkillProgress: set "mastered":true only when the parent says the child has fully got it; omit "mastered" (or set it false) to mark a skill as progressing rather than mastered.
 - NEVER claim it's done. Say you've proposed it and it's confirmed with a tap; the parent sees a clearly-labeled "Updates the skill snapshot" card first.
-- One JSON object per <action> block. Be conservative: only propose when the parent clearly wants to change the snapshot. Discussion is not a write.`;
+- One JSON object per <action> block. Be conservative: only propose when the parent clearly wants to change the snapshot. Discussion is not a write. This lane's boundary: a snapshot entry is not a curriculum activity, a plan change, or a lab — if the ask is one of those, use its own lane or say you can't; never file it here to have something to confirm.`;
 }
 
 /**
@@ -908,7 +1028,7 @@ Rules:
 - If the activity is marked "shared" in ACTIVITIES, TELL the parent it changes the time for both boys before you propose it.
 - One activity per action. If the parent names two ("30 for math and 20 for reading"), emit two separate action blocks.
 - NEVER say it's done. Say you've proposed it and it takes effect once they confirm — they see the activity name and the old → new time on a card first.
-- This is for a STANDING default. If what they want is a change to next week's plan SHAPE — drop a subject, repace it, shift toward a lighter week, change the week's focus — use the plan-adjustment handoff below instead. Changing a number = this action; changing the week = the handoff. Discussion is not a write.`;
+- This is for a STANDING default. If what they want is a change to next week's plan SHAPE — drop a subject, repace it, shift toward a lighter week, change the week's focus — use the plan-adjustment handoff below instead. Changing a number = this action; changing the week = the handoff. Discussion is not a write. This lane's boundary: ONE number on ONE existing activity — it creates nothing and is never a stand-in for a write you don't have.`;
 }
 
 /**
@@ -972,7 +1092,66 @@ Rules for all three:
 - ONE change per action block. If the parent names two, emit two separate blocks.
 - NEVER say it's done. Say you've proposed it and it takes effect once they confirm — they see the activity by name on a card first.
 - This is for WHAT curriculum exists and where ${who} is in it. Changing how LONG an existing activity runs by default is setActivityMinutes above — "make math 30 minutes" is that action, not this one. Changing what is on a day of THIS week is the today/this-week actions below. Reshaping NEXT week is the plan-adjustment handoff below.
-- Be conservative in exactly the way the activity-time rules are: TALKING about where ${who} is in a topic is NOT a write. Answer the question from the ACTIVITIES section and stop. Only propose when the parent clearly wants the curriculum changed.`;
+- Be conservative in exactly the way the activity-time rules are: TALKING about where ${who} is in a topic is NOT a write. Answer the question from the ACTIVITIES section and stop. Only propose when the parent clearly wants the curriculum changed. This lane's boundary: a curriculum activity is a rotation entry and nothing else — it is NOT a Dad Lab concept arc, not a lab, not a row on a day, and not a video. If the parent asks for one of those, use that lane if you have it or say you can't — NEVER dress the ask up as a curriculum activity to have something to confirm.`;
+}
+
+/**
+ * Build the Dad Lab `<action>` grammar addendum (FEAT-157) — chat-powers
+ * slice 5: concept arcs and planned labs.
+ *
+ * The pair that closes the 2026-08-23 substitution episode from the capability
+ * side (the no-substitution rule closes it from the prohibition side): asked to
+ * push a concept arc, the chat had no arc action and eventually emitted a
+ * curriculum activity named "Dad's Lab: micro:bit" instead. Now the asked-for
+ * writes exist, taught from the DAD LAB section above them.
+ *
+ * Three rules carry most of the weight:
+ *  - **The steps ARE the arc.** The card renders every step in order because
+ *    the steps are the write; the grammar says to compose 2–8 real concept
+ *    beats and that the first one starts active.
+ *  - **Create only.** Starting a lab, completing it, marking a step done, and
+ *    archiving an arc all live on the Dad Lab page — the model must say so,
+ *    never offer to do them, and never claim hours (labs credit compliance
+ *    only on completion, on the page).
+ *  - **Never invent an arcId.** Same rail as every id in the portal: copied
+ *    exactly from the DAD LAB section or absent.
+ *
+ * `narrativeHook` is deliberately unteachable and unrepresentable (arcs design
+ * D5: evaluate, don't force — the model does not get to push Stonebridge ties).
+ *
+ * Only emitted on a child-scoped tab (a real `childId`), like the other action
+ * grammars. Returns "" on the general (no-child) branch.
+ */
+export function buildDadLabActionAddendum(
+  childId: string | undefined,
+  childName: string | undefined,
+): string {
+  if (!childId) return "";
+  const who = childName || "this child";
+  return `
+
+DAD LAB ACTIONS (you CAN create a concept arc and plan a lab into the backlog): When the parent wants a designed sequence of Saturday labs — "push this as an arc", "make an electricity arc: static, then a circuit, then a switch, then a motor" — propose ONE createConceptArc action carrying the whole arc. When she wants a single lab queued — "plan a baking-soda volcano for Saturday", "add a micro:bit lab to the backlog" — propose ONE planLab action. Use the DAD LAB section above (if present) to see what already exists.
+
+Grammar — one JSON object per <action> block, after your prose, using ${who}'s id exactly ("${childId}"):
+<action>{"kind":"createConceptArc","childId":"${childId}","title":"The Electricity Arc","domainLabel":"Electricity","steps":[{"title":"Static electricity","conceptBeat":"Charge builds up and jumps"},{"title":"Make a circuit","conceptBeat":"A loop lets current flow"},{"title":"Add a switch","conceptBeat":"Breaking the loop stops it"}]}</action>
+<action>{"kind":"planLab","childId":"${childId}","title":"Make a bulb light up","question":"What makes the bulb turn on?","labType":"science","materials":["battery","bulb","wire"],"arcId":"<arcId from DAD LAB>","arcStepIndex":1}</action>
+
+Rules for createConceptArc:
+- The steps ARE the arc: compose 2 to 8 real concept beats, in teaching order, each with a short "title" and a one-line "conceptBeat" (the idea that step teaches). The card shows every step and the arc is created exactly as the card reads — the first step starts active. Fewer than 2 steps or more than 8 is rejected outright.
+- An arc is for the whole family by default. Add "childIds" only when the parent explicitly says it's for one boy, using real child ids — never guess an audience.
+- Do NOT add a story or Stonebridge tie-in — there is no field for one, by design.
+
+Rules for planLab:
+- "labType" must be exactly one of: science, engineering, adventure, heart. An unknown type is rejected outright — ask rather than guess.
+- The lab lands in the Dad Lab BACKLOG as a planned lab, dated for the coming Saturday. Say where it lands: it is started from the Dad Lab page, and NO hours are recorded until it is completed there. Never present a planned lab as scheduled school time.
+- To link the lab to an arc, copy "arcId" exactly from the DAD LAB section and use one of THAT arc's bracketed step numbers as "arcStepIndex". NEVER invent, guess, or reconstruct either — if you can't find the arc the parent means, ask, or propose the lab without the link.
+- "materials" is a short list of real household items, only when the parent asked for or agreed to them.
+
+Rules for both:
+- CREATE ONLY. You cannot start, complete, edit, reorder, archive, or delete an arc or a lab, and you cannot mark a step done — all of that lives on the Dad Lab page. If the parent asks for one of those, say so and name the page; do NOT emit any action.
+- ONE arc or ONE lab per action block. If the parent wants an arc AND its first lab, emit two blocks and say each is its own tap.
+- NEVER say it's done. Say you've proposed it and it's created once she confirms — she sees the whole arc (every step) or the whole lab on a card first.
+- Be conservative in exactly the way the curriculum rules are: TALKING about lab ideas is NOT a write. Suggesting ideas is prose; only propose when the parent clearly wants an arc or a lab created. This lane's boundary: a Dad Lab arc or lab is not a curriculum activity, not a row on a day, and not a video — and nothing else may ever stand in for an arc or a lab.`;
 }
 
 /**
@@ -1016,7 +1195,7 @@ Rules:
 - ONE DAY PER CARD — there is no batch. An action carries a single "dateKey", so a request spanning several days ("add 30 minutes of recorder every remaining day this week", "put it on Wednesday and Thursday") is ONE action block PER DAY and therefore SEVERAL confirm taps. Say that out loud before you propose — name the days and say it's one card each — and never describe a multi-day add as a single change, because there is no way for you to make one.
 - This changes the day's checklist only. It does not change how long an activity takes by default (that's setActivityMinutes), it does not re-plan the week, and it never touches hours already recorded.
 - NEVER say it's done. Say you've proposed it and it takes effect once they confirm — they see the row and the day on a card first.
-- Be conservative: only propose when the parent clearly wants the day changed. Talking about the week is not a change to it.`;
+- Be conservative: only propose when the parent clearly wants the day changed. Talking about the week is not a change to it. This lane's boundary: a checklist row on a day is this lane's whole reach — a row is not a lab, not a curriculum entry, and not a plan, so never add one as a stand-in for a write you don't have.`;
 }
 
 /**
@@ -1076,7 +1255,7 @@ Rules for planVideoOnDay:
 - This ADDS a row to that day. It changes nothing already on the day, it does not re-plan the week, it touches no hours, and watching it stays optional for the boys.
 - NEVER say it's done. Say you've proposed it and it takes effect once she confirms — she sees the video's title and the day on a card first.
 
-- Be conservative in exactly the way the other action rules are: talking about videos is not a write. Only propose when the parent has chosen a video or named a day.`;
+- Be conservative in exactly the way the other action rules are: talking about videos is not a write. Only propose when the parent has chosen a video or named a day. This lane's boundary: videos only — a library entry or a video on a day — never a stand-in for any other kind of write.`;
 }
 
 /**
@@ -1128,7 +1307,7 @@ Rules — read these carefully, because two of them are about what NOT to do:
 - ONE action per turn. If she asks for several changes to the same week, put them all in the one "instructions" string; they are one week.
 - The week is always the NEXT school week (${span}) — Monday to Friday. You cannot target the current week, the week after next, or a single day of next week from here. For a change to THIS week's days use the TODAY / THIS WEEK actions above; for a change to how long an activity runs from now on use setActivityMinutes.
 - **This is the DEFAULT route for reshaping next week — use it, not the plan-adjustment handoff above.** The handoff is only for when she explicitly asks to work in Plan My Week herself. **Never emit both kinds in one turn.**
-- If she just wants to talk about next week, talk. Only propose when she clearly wants it changed.`;
+- If she just wants to talk about next week, talk. Only propose when she clearly wants it changed. This lane's boundary: drafting next week is this action's one job — it is not a substitute for any other write, and no other action kind is a substitute for it.`;
 }
 
 /**
@@ -1174,7 +1353,7 @@ Rules:
 - This is a HANDOFF. Confirming it opens Plan My Week with your brief preloaded — the parent reviews and locks in the actual plan there. You do NOT write the plan, and you must NEVER claim the plan is changed or done.
 - "summary" is the one-line change the parent will see in the planner; "rationale" is the grounded WHY (cite the signal). You may add "scope" or "targetWeek" as short optional hints, but they're not required.
 - **PRECEDENCE (read this first): if a NEXT-WEEK DRAFT section appears below, that is the default route for reshaping next week, and this handoff is NOT.** Use draftNextWeek for every ordinary "make next week lighter / drop maths / repace reading" ask. Reserve this handoff for when the parent explicitly asks to work in the planner ("open Plan My Week", "let me build it myself", "I want to see the planner"). **NEVER emit both in one turn** — they are two answers to one question, and she would get two conflicting cards.
-- Use this for a change to the SHAPE of next week. To change how long ONE activity runs by default from now on, use setActivityMinutes above instead — that's a real write and it sticks. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when the parent clearly wants the plan to change.`;
+- Use this for a change to the SHAPE of next week. To change how long ONE activity runs by default from now on, use setActivityMinutes above instead — that's a real write and it sticks. For a priority skill / support / stop rule or marking a skill, use the additive snapshot actions. For an unmet want or workflow friction, keep using silent friction capture. Ordinary discussion is not a handoff — be conservative and only propose when the parent clearly wants the plan to change. This lane's boundary: this handoff carries a next-week brief to the planner and nothing else — never use it to smuggle a different kind of write.`;
 }
 
 /**
@@ -1262,7 +1441,7 @@ export const handleShellyChat = async (
   fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
   const reflectionStartDate = fourteenDaysAgo.toISOString().slice(0, 10);
 
-  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult, watchLibraryResult, familyResult] =
+  const [allChildrenResult, dispositionResult, reviewResult, conundrumResult, completionResult, conundrumArtifactsResult, chapterResponseResult, teachBacksResult, activityConfigResult, watchLibraryResult, conceptArcsResult, plannedLabsResult, familyResult] =
     await Promise.allSettled([
       db.collection(`families/${familyId}/children`).get(),
       childId
@@ -1327,6 +1506,23 @@ export const handleShellyChat = async (
       childId
         ? db.collection(`families/${familyId}/watchLibrary`)
             .where("childId", "in", [childId, "both"])
+            .get()
+        : Promise.resolve(null),
+      // Concept arcs (FEAT-157) — the DAD LAB section. Same shape and reason
+      // as the two reads above: without real `arcId`s the model has nothing
+      // valid to put in a `planLab` link. Arcs are family-scoped, so no child
+      // filter; archived ones are dropped in the formatter. Child-scoped only;
+      // the general branch emits no actions.
+      childId
+        ? db.collection(`families/${familyId}/conceptArcs`).get()
+        : Promise.resolve(null),
+      // The planned-lab backlog (FEAT-157) — titles only, so the model knows
+      // what is already queued and never proposes a duplicate.
+      childId
+        ? db
+            .collection(`families/${familyId}/dadLabReports`)
+            .where("status", "==", "planned")
+            .limit(15)
             .get()
         : Promise.resolve(null),
       // The family doc, for its `timeZone` (FEAT-142 / Codex P2 on PR #1667).
@@ -1486,6 +1682,26 @@ export const handleShellyChat = async (
     }
   }
 
+  // DAD LAB (FEAT-157) — the family's active arcs (with real arcIds + 0-based
+  // step indexes) and the planned backlog, so the model proposes against what
+  // exists rather than inventing it.
+  {
+    const arcRows: ChatArcRow[] =
+      conceptArcsResult.status === "fulfilled" && conceptArcsResult.value
+        ? (conceptArcsResult.value as { docs: Array<{ id: string; data: () => Record<string, unknown> }> }).docs.map(
+            (d) => ({ ...(d.data() as Omit<ChatArcRow, "id">), id: d.id }),
+          )
+        : [];
+    const backlogRows: ChatBacklogLabRow[] =
+      plannedLabsResult.status === "fulfilled" && plannedLabsResult.value
+        ? (plannedLabsResult.value as { docs: Array<{ data: () => Record<string, unknown> }> }).docs.map(
+            (d) => d.data() as ChatBacklogLabRow,
+          )
+        : [];
+    const section = formatDadLabSection(arcRows, backlogRows);
+    if (section) supplementalContext += `\n\n${section}`;
+  }
+
   // THIS WEEK (FEAT-142) — the live checklist of each weekday, with each row's
   // identity key and whether it is finished. Without this section the model has
   // no valid row to name in a payload, which is exactly why the chat could only
@@ -1597,6 +1813,7 @@ Example: If the parent says "Lincoln seems bored with reading" and the data show
   const snapshotActionAddendum = buildSnapshotActionAddendum(childId || undefined, childName || undefined);
   const activityMinutesActionAddendum = buildActivityMinutesActionAddendum(childId || undefined, childName || undefined);
   const curriculumActionAddendum = buildCurriculumActionAddendum(childId || undefined, childName || undefined);
+  const dadLabActionAddendum = buildDadLabActionAddendum(childId || undefined, childName || undefined);
   const dayItemActionAddendum = buildDayItemActionAddendum(childId || undefined, childName || undefined);
   // FEAT-149 — the plannable window is this week plus next, derived from the
   // same family-zone civil date the THIS WEEK read uses, so the days the model
@@ -1627,6 +1844,7 @@ ${sightWordActionAddendum}
 ${snapshotActionAddendum}
 ${activityMinutesActionAddendum}
 ${curriculumActionAddendum}
+${dadLabActionAddendum}
 ${dayItemActionAddendum}
 ${watchActionAddendum}
 ${planAdjustmentActionAddendum}
