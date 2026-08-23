@@ -1,4 +1,4 @@
-import type { ActivityFrequency, ActivityType, SubjectBucket } from './enums'
+import type { ActivityFrequency, ActivityType, DadLabType, SubjectBucket } from './enums'
 
 export type ChatContext = 'lincoln' | 'london' | 'general'
 
@@ -354,6 +354,74 @@ export type ChatAction =
        * app.
        */
       instructions: string
+    }
+  /**
+   * **The Dad Lab kinds (FEAT-157)** — `createConceptArc`, `planLab` — are the
+   * chat's half of Dad Lab planning, and the pair that closes the 2026-08-23
+   * substitution episode: asked to push a concept arc, the chat had no arc
+   * action and emitted the nearest card it did have (a curriculum activity
+   * named "Dad's Lab: micro:bit"). Now the asked-for things exist — and the
+   * grammar-level no-substitution rule forbids the workaround forever.
+   *
+   * Five properties hold across them:
+   *  1. **Create only.** There is no edit, no archive, no delete, no status
+   *     flip in this union — starting a lab, completing it, marking a step
+   *     done, and archiving an arc all stay Dad Lab page acts, unrepresentable
+   *     here exactly as removals are among the snapshot kinds.
+   *  2. **The steps ARE the write.** `createConceptArc.steps` (2–8, each a
+   *     short `title` + optional `conceptBeat`, length-capped and
+   *     rejected-never-truncated) land verbatim as the arc's `ArcStep[]` —
+   *     first step active, the rest upcoming, the New Arc dialog's own rule —
+   *     so the confirm card must render every step in order; no card may
+   *     summarize them away. Step STATUSES are never the model's to set.
+   *  3. **A planned lab is `Planned`, structurally.** `planLab` routes through
+   *     the shared `plannedLab.ts` builder, which hardcodes the status — never
+   *     `Active`/`Completed`, never an hours entry (labs feed compliance only
+   *     on completion), never a report body.
+   *  4. **Ids must be real.** `planLab.arcId` / `arcStepIndex` are shape-gated
+   *     here and resolved against the family's live arcs before a card is
+   *     offered (`dadLabActions`) — a hallucinated arc id or an out-of-range
+   *     step never reaches a card, the `setActivityMinutes` division of labour.
+   *  5. **No narrative hook.** There is no `narrativeHook` field, by design
+   *     (arcs design D5: evaluate, don't force) — the model does not get to
+   *     push Stonebridge ties into an arc.
+   *
+   * `createConceptArc.childIds` is the arc's real audience field, defaulting to
+   * every child (DATA-04) when omitted; each entry must name a family child,
+   * resolved before a card is offered. `planLab` deliberately carries NO
+   * per-child scoping: a Dad Lab lab is a whole-family activity (DATA-04) and
+   * `DadLabReport` has no participation field a chat write could honestly land
+   * one in (`childRoles` is role TEXT, and its reader drops empty entries) —
+   * a field the write cannot honor must not appear on the card.
+   */
+  | {
+      kind: 'createConceptArc'
+      /** The acting child (tab binding) — same contract as every other kind. */
+      childId: string
+      /** Who the arc is for. Omitted → every child (DATA-04). Family ids only. */
+      childIds?: string[]
+      /** Arc name, trimmed, non-empty, length-capped by `parseChatActions`. */
+      title: string
+      /** Free-text domain label — a hint, dropped rather than guessed at. */
+      domainLabel?: string
+      /** 2–8 ordered concept beats. These land verbatim as the arc's steps. */
+      steps: { title: string; conceptBeat?: string }[]
+    }
+  | {
+      kind: 'planLab'
+      childId: string
+      /** Lab title, trimmed, non-empty, length-capped. */
+      title: string
+      /** The driving question, optional, length-capped. */
+      question?: string
+      /** A real `DadLabType` member — unknown values are rejected at parse. */
+      labType: DadLabType
+      /** Optional materials list — every entry non-empty, list and entries capped. */
+      materials?: string[]
+      /** Doc id of a live ConceptArc this lab realizes a step of. */
+      arcId?: string
+      /** 0-based step index — requires `arcId`, must be in range for that arc. */
+      arcStepIndex?: number
     }
 
 /**

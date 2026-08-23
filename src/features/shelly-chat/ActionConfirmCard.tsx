@@ -7,6 +7,7 @@ import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined'
 import OndemandVideoOutlinedIcon from '@mui/icons-material/OndemandVideoOutlined'
+import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
 import TimerOutlinedIcon from '@mui/icons-material/TimerOutlined'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import Box from '@mui/material/Box'
@@ -27,6 +28,14 @@ import {
   resolveCurriculumAction,
   resolveCurriculumActionForDisplay,
 } from './curriculumActions'
+import type { ResolvedDadLabAction } from './dadLabActions'
+import {
+  dadLabActionFootnote,
+  describeDadLabAction,
+  isDadLabAction,
+  resolveDadLabAction,
+  resolveDadLabActionForDisplay,
+} from './dadLabActions'
 import type { ChatWeekDay, ResolvedDayItemAction } from './dayItemActions'
 import {
   dayItemActionFootnote,
@@ -53,6 +62,7 @@ import {
 } from './watchActions'
 import type { ActivityMinutesAction, ChatActivityConfig, PendingAction } from './useShellyChatActions'
 import { resolveActivityConfig } from './useShellyChatActions'
+import type { ConceptArc } from '../../core/types'
 
 interface ActionConfirmCardProps {
   pending: PendingAction[]
@@ -80,6 +90,11 @@ interface ActionConfirmCardProps {
    * the page so the component holds no clock (FEAT-149).
    */
   plannableDays?: { dateKey: string; label: string }[]
+  /**
+   * The family's ACTIVE concept arcs — needed to render a linked `planLab`
+   * card by the arc's TITLE and step number, never a doc id (FEAT-157).
+   */
+  conceptArcs?: ConceptArc[]
   /**
    * Plain-language reasons a proposal was dropped before it became a card.
    * Rendered in the card's place so a reply that says "confirm with a tap"
@@ -458,6 +473,77 @@ function WatchPreview({
 }
 
 /**
+ * Preview for a Dad Lab action (FEAT-157) — create a concept arc, or plan a
+ * backlog lab.
+ *
+ * The arc card's load-bearing rule: **the steps ARE the write, so every step
+ * renders in order** — title and concept beat, numbered — and no card may
+ * summarize them away. A parent confirming an arc is confirming a sequence of
+ * Saturdays, and the sequence is the thing she has to be able to check.
+ *
+ * A lab card names the lab, its type, the arc step it realizes (by the arc's
+ * TITLE and a 1-based step number — never an id), the driving question and the
+ * materials when given, and — in the footnote — the sentence the design pinned:
+ * it lands in the Dad Lab backlog and is started from the Dad Lab page, with
+ * no hours until completion.
+ */
+function DadLabPreview({ resolved }: { resolved: ResolvedDadLabAction }) {
+  const { action } = resolved
+  return (
+    <Stack spacing={0.25}>
+      <Typography
+        variant="caption"
+        sx={{ display: 'block', fontWeight: 700, color: 'warning.main', letterSpacing: 0.2 }}
+      >
+        {action.kind === 'createConceptArc'
+          ? 'Creates a Dad Lab concept arc'
+          : 'Adds a lab to the Dad Lab backlog'}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {describeDadLabAction(resolved)}
+      </Typography>
+      {action.kind === 'createConceptArc' && (
+        <Stack spacing={0} sx={{ pl: 0.5 }}>
+          {action.domainLabel && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Domain: {action.domainLabel}
+            </Typography>
+          )}
+          {action.steps.map((step, i) => (
+            <Typography
+              key={`${step.title}-${i}`}
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block' }}
+            >
+              {i + 1}. {step.title}
+              {step.conceptBeat ? ` — ${step.conceptBeat}` : ''}
+            </Typography>
+          ))}
+        </Stack>
+      )}
+      {action.kind === 'planLab' && (
+        <>
+          {action.question && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Question: {action.question}
+            </Typography>
+          )}
+          {action.materials && action.materials.length > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Materials: {action.materials.join(', ')}
+            </Typography>
+          )}
+        </>
+      )}
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+        {dadLabActionFootnote(action)}
+      </Typography>
+    </Stack>
+  )
+}
+
+/**
  * Before → after preview for an `editProfileField` action. These are
  * replace-writes on freeform text, so Shelly must see exactly what changes
  * before she taps: the current value and the proposed new value.
@@ -579,6 +665,7 @@ export default function ActionConfirmCard({
   weekDays = [],
   watchVideos = [],
   plannableDays = [],
+  conceptArcs = [],
   suppressed = [],
   onConfirm,
   onDismiss,
@@ -678,6 +765,24 @@ export default function ActionConfirmCard({
               ? watchGate.resolved
               : resolveWatchActionForDisplay(action, watchVideos, plannableDays)
           if (isWatch && !watchResolved) return null
+          // FEAT-157 — resolve against the live arcs + real children so a
+          // linked lab card names the arc by title and a step by number. Same
+          // pending/applied split as the curriculum and watch cards: strict on
+          // the live state only while the card is still PENDING (an arc
+          // archived in another tab must stop offering a card here); lenient
+          // once she has tapped, so a confirmed create keeps its "Done ✓".
+          const isDadLab = isDadLabAction(action)
+          const familyForDadLab = familyChildren.map((c) => ({ id: c.id, name: c.name }))
+          const dadLabGate =
+            isDadLab && item.status === 'pending'
+              ? resolveDadLabAction(action, conceptArcs, familyForDadLab, true)
+              : null
+          if (isDadLab && item.status === 'pending' && !dadLabGate?.ok) return null
+          const dadLabResolved: ResolvedDadLabAction | null = !isDadLab
+            ? null
+            : dadLabGate?.ok
+              ? dadLabGate.resolved
+              : resolveDadLabActionForDisplay(action, conceptArcs, familyForDadLab)
           const isCurriculum = isCurriculumAction(action)
           const curriculumGate =
             isCurriculum && isPending
@@ -705,6 +810,8 @@ export default function ActionConfirmCard({
               <EventNoteOutlinedIcon fontSize="small" color="warning" />
             ) : isCurriculum ? (
               <MenuBookOutlinedIcon fontSize="small" color="warning" />
+            ) : isDadLab ? (
+              <ScienceOutlinedIcon fontSize="small" color="warning" />
             ) : isWatch ? (
               <OndemandVideoOutlinedIcon fontSize="small" color="warning" />
             ) : isDraftNextWeek ? (
@@ -727,6 +834,7 @@ export default function ActionConfirmCard({
                   isActivityMinutes ||
                   isDayItem ||
                   isCurriculum ||
+                  isDadLab ||
                   isWatch ||
                   isDraftNextWeek
                     ? 'flex-start'
@@ -737,7 +845,7 @@ export default function ActionConfirmCard({
                 // slightly stronger border so they read weightier than a
                 // sight-word card. The plan-adjustment handoff gets its own
                 // (info) accent so it reads as "opens the planner", not a write.
-                ...(isSnapshotEdit || isActivityMinutes || isDayItem || isCurriculum || isWatch
+                ...(isSnapshotEdit || isActivityMinutes || isDayItem || isCurriculum || isDadLab || isWatch
                   ? { borderColor: 'warning.main', borderLeftWidth: 3 }
                   : isPlanAdjustment || isDraftNextWeek
                     ? { borderColor: 'info.main', borderLeftWidth: 3 }
@@ -769,6 +877,8 @@ export default function ActionConfirmCard({
                     childName={childName(action.childId)}
                     allChildNames={allChildNames}
                   />
+                ) : dadLabResolved ? (
+                  <DadLabPreview resolved={dadLabResolved} />
                 ) : isSnapshotEdit ? (
                   <SnapshotEditPreview action={action} childName={childName(action.childId)} />
                 ) : isDraftNextWeek ? (

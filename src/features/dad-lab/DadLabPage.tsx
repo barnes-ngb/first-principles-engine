@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -27,6 +27,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import RouteIcon from '@mui/icons-material/Route'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import Collapse from '@mui/material/Collapse'
+import { useBlocker } from 'react-router-dom'
 
 import ArtifactGallery from '../../components/ArtifactGallery'
 import { EmptyState, LoadingState } from '../../components/states'
@@ -37,13 +38,12 @@ import { useProfile } from '../../core/profile/useProfile'
 import type { ConceptArc, DadLabReport } from '../../core/types'
 import type { DadLabType } from '../../core/types/enums'
 import { DadLabStatus } from '../../core/types/enums'
-import { formatDateShort, todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
-import { formatDateYmd } from '../../core/utils/format'
+import { formatDateShort, todayKey } from '../../core/utils/dateKey'
 import { parseChildRoles } from './childRoles'
 import { groupReportsByMonth } from './dadLabGrouping'
-import { subjectsForLabType } from './labTypeSubjects'
 import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
 import { useCalibrationSources } from './useCalibrationSources'
+import { createPlannedLab } from './plannedLab'
 import { useConceptArcs } from './useConceptArcs'
 import ConceptArcsSection from './ConceptArcsSection'
 import HoursRoutingAuditPanel from './HoursRoutingAuditPanel'
@@ -100,13 +100,6 @@ interface Prefill {
   duration?: number
 }
 
-function getNextSaturday(): Date {
-  const d = new Date()
-  const day = d.getDay()
-  const diff = (6 - day + 7) % 7 || 7
-  d.setDate(d.getDate() + (day === 6 ? 0 : diff))
-  return d
-}
 
 /**
  * Dad Lab.
@@ -151,6 +144,20 @@ export default function DadLabPage() {
   // Back is guarded while any exist, so leaving can't silently orphan them.
   const [unattachedUploads, setUnattachedUploads] = useState(0)
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
+
+  // Codex P2 on PR #1693: the shell's NavLinks are SPA route changes — they
+  // never fire `beforeunload` and don't pass through the Back button — so the
+  // router itself must hold the door while uploads are unattached. Same dialog,
+  // third trigger.
+  const navBlocker = useBlocker(view === 'form' && unattachedUploads > 0)
+  useEffect(() => {
+    if (navBlocker.state === 'blocked') setLeaveConfirmOpen(true)
+  }, [navBlocker.state])
+
+  const handleKeepEditing = useCallback(() => {
+    setLeaveConfirmOpen(false)
+    if (navBlocker.state === 'blocked') navBlocker.reset()
+  }, [navBlocker])
 
   // Split reports by status
   const { planned, active, completed } = useMemo(() => {
@@ -229,6 +236,17 @@ export default function DadLabPage() {
     handleCancel()
   }, [unattachedUploads, handleCancel])
 
+  // "Leave anyway": release a blocked route change if that's what asked, else
+  // it was the Back button — fall back to closing the form.
+  const handleLeaveAnyway = useCallback(() => {
+    if (navBlocker.state === 'blocked') {
+      setLeaveConfirmOpen(false)
+      navBlocker.proceed()
+      return
+    }
+    handleCancel()
+  }, [navBlocker, handleCancel])
+
   const handleSave = useCallback(
     async (report: DadLabReport) => {
       await saveReport(report)
@@ -242,32 +260,13 @@ export default function DadLabPage() {
   const handleSuggestionSelect = useCallback(
     async (data: Prefill) => {
       setSuggestionsOpen(false)
-      const nextSat = getNextSaturday()
-      const dateStr = formatDateYmd(nextSat)
-
-      const labType = data.labType ?? 'science'
-      const planned: DadLabReport = {
-        date: dateStr,
-        weekKey: weekKeyFromDate(nextSat),
-        title: data.title ?? 'Untitled Lab',
-        labType,
-        question: data.question ?? '',
-        description: data.description ?? '',
-        status: DadLabStatus.Planned,
-        materials: data.materials,
-        childRoles: data.childRoles ?? {},
-        childReports: {},
-        // Type → subject routing (FEAT-55): stamp the mapping's defaults at
-        // creation so a planned lab never lands with empty tags (the silent
-        // zero-hours path). Stays editable on LabReportForm.
-        subjectTags: subjectsForLabType(labType),
-        totalMinutes: data.duration ?? 60,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-      await saveReport(planned)
+      // The shared Planned-lab lane (FEAT-157) — the same builder + write the
+      // chat portal's confirmed `planLab` action uses, extracted from the
+      // report shape this handler used to build inline. The realtime listener
+      // picks the new entry up; no explicit reload needed.
+      await createPlannedLab(familyId, data)
     },
-    [saveReport],
+    [familyId],
   )
 
   const handleStartLab = useCallback(
@@ -420,8 +419,11 @@ export default function DadLabPage() {
           onUnattachedUploadsChange={setUnattachedUploads}
         />
 
-        {/* UX-82: leaving with unattached uploads is a choice, never a silent orphan. */}
-        <Dialog open={leaveConfirmOpen} onClose={() => setLeaveConfirmOpen(false)}>
+        {/* UX-82: leaving with unattached uploads is a choice, never a silent orphan.
+            Every dismissal (Escape/backdrop included) goes through handleKeepEditing:
+            it must also reset a blocked route change, or the blocker stays stuck
+            in 'blocked' with no dialog left to release it. */}
+        <Dialog open={leaveConfirmOpen} onClose={handleKeepEditing}>
           <DialogTitle>Leave without saving?</DialogTitle>
           <DialogContent>
             <DialogContentText>
@@ -430,10 +432,10 @@ export default function DadLabPage() {
             </DialogContentText>
           </DialogContent>
           <DialogActions>
-            <Button variant="contained" onClick={() => setLeaveConfirmOpen(false)}>
+            <Button variant="contained" onClick={handleKeepEditing}>
               Keep editing
             </Button>
-            <Button color="error" onClick={handleCancel}>
+            <Button color="error" onClick={handleLeaveAnyway}>
               Leave anyway
             </Button>
           </DialogActions>

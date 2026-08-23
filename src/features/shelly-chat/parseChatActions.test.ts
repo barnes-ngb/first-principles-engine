@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_DRAFT_INSTRUCTION_CHARS, parseChatActions } from './parseChatActions'
+import {
+  MAX_ARC_CONCEPT_BEAT_CHARS,
+  MAX_ARC_DOMAIN_LABEL_CHARS,
+  MAX_ARC_STEP_TITLE_CHARS,
+  MAX_DAD_LAB_TITLE_CHARS,
+  MAX_DRAFT_INSTRUCTION_CHARS,
+  MAX_LAB_MATERIAL_CHARS,
+  MAX_LAB_MATERIALS,
+  MAX_LAB_QUESTION_CHARS,
+  parseChatActions,
+} from './parseChatActions'
 
 describe('parseChatActions', () => {
   it('extracts a valid addSightWord block and strips the tag', () => {
@@ -1051,6 +1061,226 @@ describe('parseChatActions — draftNextWeek (FEAT-150)', () => {
       'applyWeekPlan',
     ]) {
       const raw = `<action>{"kind":"${kind}","childId":"lincoln","weekStart":"2026-08-23"}</action>`
+      expect(parseChatActions(raw).actions, `kind=${kind}`).toEqual([])
+    }
+  })
+})
+
+// ── FEAT-157 — Dad Lab: createConceptArc + planLab ─────────────────
+
+describe('parseChatActions — createConceptArc (FEAT-157)', () => {
+  const steps = [
+    { title: 'Static electricity', conceptBeat: 'Charge builds up and jumps' },
+    { title: 'Make a circuit', conceptBeat: 'A loop lets current flow' },
+    { title: 'Add a switch' },
+  ]
+  const base = {
+    kind: 'createConceptArc',
+    childId: 'lincoln',
+    title: 'The Electricity Arc',
+    domainLabel: 'Electricity',
+    steps,
+  }
+  const block = (overrides: Record<string, unknown> = {}) =>
+    `<action>${JSON.stringify({ ...base, ...overrides })}</action>`
+
+  it('accepts a well-formed arc, steps verbatim and in order', () => {
+    expect(parseChatActions(block()).actions).toEqual([
+      {
+        kind: 'createConceptArc',
+        childId: 'lincoln',
+        title: 'The Electricity Arc',
+        domainLabel: 'Electricity',
+        steps,
+      },
+    ])
+  })
+
+  it('trims the title and rejects an empty or over-long one', () => {
+    expect(parseChatActions(block({ title: '  The Motor Arc  ' })).actions[0]).toMatchObject({
+      title: 'The Motor Arc',
+    })
+    expect(parseChatActions(block({ title: '   ' })).actions).toEqual([])
+    expect(parseChatActions(block({ title: 42 })).actions).toEqual([])
+    expect(
+      parseChatActions(block({ title: 'x'.repeat(MAX_DAD_LAB_TITLE_CHARS + 1) })).actions,
+    ).toEqual([])
+  })
+
+  it('rejects a 1-step arc — an arc IS a sequence', () => {
+    expect(parseChatActions(block({ steps: [steps[0]] })).actions).toEqual([])
+  })
+
+  it('rejects a 9-step arc — a season is not an arc', () => {
+    const nine = Array.from({ length: 9 }, (_, i) => ({ title: `Step ${i + 1}` }))
+    expect(parseChatActions(block({ steps: nine })).actions).toEqual([])
+  })
+
+  it('accepts the band edges — exactly 2 and exactly 8 steps', () => {
+    const two = steps.slice(0, 2)
+    const eight = Array.from({ length: 8 }, (_, i) => ({ title: `Step ${i + 1}` }))
+    expect(parseChatActions(block({ steps: two })).actions).toHaveLength(1)
+    expect(parseChatActions(block({ steps: eight })).actions).toHaveLength(1)
+  })
+
+  it('rejects the whole action on any bad step — empty title, over-cap title or beat, non-object', () => {
+    expect(
+      parseChatActions(block({ steps: [steps[0], { title: '   ' }] })).actions,
+    ).toEqual([])
+    expect(
+      parseChatActions(
+        block({ steps: [steps[0], { title: 'x'.repeat(MAX_ARC_STEP_TITLE_CHARS + 1) }] }),
+      ).actions,
+    ).toEqual([])
+    expect(
+      parseChatActions(
+        block({
+          steps: [steps[0], { title: 'ok', conceptBeat: 'x'.repeat(MAX_ARC_CONCEPT_BEAT_CHARS + 1) }],
+        }),
+      ).actions,
+    ).toEqual([])
+    expect(parseChatActions(block({ steps: [steps[0], 'a string'] })).actions).toEqual([])
+    expect(parseChatActions(block({ steps: 'static, circuit' })).actions).toEqual([])
+  })
+
+  it('drops a junk domainLabel as a FIELD, but rejects an over-long one', () => {
+    expect(parseChatActions(block({ domainLabel: 7 })).actions[0]).not.toHaveProperty(
+      'domainLabel',
+    )
+    expect(parseChatActions(block({ domainLabel: '   ' })).actions[0]).not.toHaveProperty(
+      'domainLabel',
+    )
+    expect(
+      parseChatActions(block({ domainLabel: 'x'.repeat(MAX_ARC_DOMAIN_LABEL_CHARS + 1) })).actions,
+    ).toEqual([])
+  })
+
+  it('accepts childIds as a deduped list of non-empty strings, and rejects junk lists whole', () => {
+    expect(
+      parseChatActions(block({ childIds: ['lincoln', 'lincoln', 'london'] })).actions[0],
+    ).toMatchObject({ childIds: ['lincoln', 'london'] })
+    expect(parseChatActions(block({ childIds: [] })).actions).toEqual([])
+    expect(parseChatActions(block({ childIds: ['lincoln', ''] })).actions).toEqual([])
+    expect(parseChatActions(block({ childIds: 'lincoln' })).actions).toEqual([])
+  })
+
+  it('a narrativeHook is unrepresentable — the field is simply lost (design D5)', () => {
+    const parsed = parseChatActions(
+      block({ narrativeHook: 'Ties into the Stonebridge banner!' }),
+    ).actions[0]
+    expect(parsed).toBeDefined()
+    expect(parsed).not.toHaveProperty('narrativeHook')
+  })
+
+  it('step statuses are unrepresentable — a status on a step payload is lost, never kept', () => {
+    const parsed = parseChatActions(
+      block({ steps: [{ title: 'A', status: 'done' }, { title: 'B', status: 'done' }] }),
+    ).actions[0]
+    expect(parsed).toMatchObject({ steps: [{ title: 'A' }, { title: 'B' }] })
+    expect((parsed as { steps: object[] }).steps[0]).not.toHaveProperty('status')
+  })
+})
+
+describe('parseChatActions — planLab (FEAT-157)', () => {
+  const base = {
+    kind: 'planLab',
+    childId: 'lincoln',
+    title: 'Make a bulb light up',
+    question: 'What makes the bulb turn on?',
+    labType: 'science',
+    materials: ['battery', 'bulb', 'wire'],
+  }
+  const block = (overrides: Record<string, unknown> = {}) =>
+    `<action>${JSON.stringify({ ...base, ...overrides })}</action>`
+
+  it('accepts a well-formed lab', () => {
+    expect(parseChatActions(block()).actions).toEqual([
+      {
+        kind: 'planLab',
+        childId: 'lincoln',
+        title: 'Make a bulb light up',
+        question: 'What makes the bulb turn on?',
+        labType: 'science',
+        materials: ['battery', 'bulb', 'wire'],
+      },
+    ])
+  })
+
+  it('rejects an empty or over-long title', () => {
+    expect(parseChatActions(block({ title: '   ' })).actions).toEqual([])
+    expect(
+      parseChatActions(block({ title: 'x'.repeat(MAX_DAD_LAB_TITLE_CHARS + 1) })).actions,
+    ).toEqual([])
+  })
+
+  it('rejects an unknown labType — never coerced to a default', () => {
+    for (const labType of ['chemistry', 'Science', '', 7, null]) {
+      expect(parseChatActions(block({ labType })).actions, `labType=${String(labType)}`).toEqual([])
+    }
+  })
+
+  it('accepts every real DadLabType', () => {
+    for (const labType of ['science', 'engineering', 'adventure', 'heart']) {
+      expect(parseChatActions(block({ labType })).actions, `labType=${labType}`).toHaveLength(1)
+    }
+  })
+
+  it('drops a junk question as a FIELD, but rejects an over-long one', () => {
+    expect(parseChatActions(block({ question: 7 })).actions[0]).not.toHaveProperty('question')
+    expect(
+      parseChatActions(block({ question: 'x'.repeat(MAX_LAB_QUESTION_CHARS + 1) })).actions,
+    ).toEqual([])
+  })
+
+  it('rejects a bad materials list WHOLE — never silently thinned', () => {
+    expect(parseChatActions(block({ materials: ['battery', ''] })).actions).toEqual([])
+    expect(parseChatActions(block({ materials: ['battery', 7] })).actions).toEqual([])
+    expect(parseChatActions(block({ materials: 'battery, bulb' })).actions).toEqual([])
+    expect(
+      parseChatActions(
+        block({ materials: Array.from({ length: MAX_LAB_MATERIALS + 1 }, () => 'thing') }),
+      ).actions,
+    ).toEqual([])
+    expect(
+      parseChatActions(block({ materials: ['x'.repeat(MAX_LAB_MATERIAL_CHARS + 1)] })).actions,
+    ).toEqual([])
+  })
+
+  it('accepts an arc link — arcId alone, or arcId + a non-negative integer step index', () => {
+    expect(parseChatActions(block({ arcId: 'arc_elec' })).actions[0]).toMatchObject({
+      arcId: 'arc_elec',
+    })
+    expect(
+      parseChatActions(block({ arcId: 'arc_elec', arcStepIndex: 1 })).actions[0],
+    ).toMatchObject({ arcId: 'arc_elec', arcStepIndex: 1 })
+  })
+
+  it('rejects a step index without an arc, and a negative / fractional / string index', () => {
+    expect(parseChatActions(block({ arcStepIndex: 1 })).actions).toEqual([])
+    expect(parseChatActions(block({ arcId: 'arc_elec', arcStepIndex: -1 })).actions).toEqual([])
+    expect(parseChatActions(block({ arcId: 'arc_elec', arcStepIndex: 1.5 })).actions).toEqual([])
+    expect(parseChatActions(block({ arcId: 'arc_elec', arcStepIndex: '1' })).actions).toEqual([])
+    expect(parseChatActions(block({ arcId: '  ' })).actions).toEqual([])
+  })
+
+  it('a status is unrepresentable — a planned lab cannot be proposed Active or Complete', () => {
+    const parsed = parseChatActions(block({ status: 'active' })).actions[0]
+    expect(parsed).toBeDefined()
+    expect(parsed).not.toHaveProperty('status')
+  })
+})
+
+describe('parseChatActions — Dad Lab edits stay unrepresentable (FEAT-157)', () => {
+  it('archive / complete / step-flip shaped kinds all fall through to null', () => {
+    for (const kind of [
+      'archiveConceptArc',
+      'updateConceptArc',
+      'deleteConceptArc',
+      'startLab',
+      'completeLab',
+      'markArcStepDone',
+    ]) {
+      const raw = `<action>{"kind":"${kind}","childId":"lincoln","arcId":"arc_elec"}</action>`
       expect(parseChatActions(raw).actions, `kind=${kind}`).toEqual([])
     }
   })

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,6 +8,7 @@ import type { Child, DadLabReport } from '../../core/types'
 
 const addDocMock = vi.fn()
 const updateDocMock = vi.fn()
+const uploadArtifactFileMock = vi.fn()
 
 // Refs are tagged with their collection path so the tests can tell the report-doc
 // reference write apart from the artifact `uri` write (UX-82).
@@ -25,7 +26,7 @@ vi.mock('../../core/firebase/firestore', () => ({
 
 vi.mock('../../core/firebase/upload', () => ({
   generateFilename: (ext: string) => `file.${ext}`,
-  uploadArtifactFile: vi.fn(() => Promise.resolve({ downloadUrl: 'https://x/art' })),
+  uploadArtifactFile: (...args: unknown[]) => uploadArtifactFileMock(...args),
 }))
 
 vi.mock('../../core/auth/useAuth', () => ({
@@ -108,6 +109,8 @@ beforeEach(() => {
   addDocMock.mockImplementation(() => Promise.resolve({ id: `art-${++artCounter}` }))
   updateDocMock.mockReset()
   updateDocMock.mockResolvedValue(undefined)
+  uploadArtifactFileMock.mockReset()
+  uploadArtifactFileMock.mockResolvedValue({ downloadUrl: 'https://x/art' })
 })
 
 const WRITING_PLACEHOLDER = 'want to write one word? totally optional'
@@ -325,6 +328,35 @@ describe('LabReportForm — uploads to a saved report persist immediately (UX-82
     expect(
       await screen.findByText(/aren't attached yet — save the report/i),
     ).toBeInTheDocument()
+  }, 20000)
+
+  it('disables Save while an upload is in flight — the full-doc Save must never race a reference write (Codex P1)', async () => {
+    const user = userEvent.setup({ delay: null })
+    let release!: () => void
+    uploadArtifactFileMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ downloadUrl: 'https://x/art' })
+        }),
+    )
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+
+    await user.click(screen.getAllByText('capture-photo')[0])
+
+    // Mid-upload: the commit button is disabled and says why. A Save here would
+    // capture state from before the upload landed and its setDoc would clobber
+    // the narrow reference write.
+    const btn = await screen.findByRole('button', { name: 'Uploading...' })
+    expect(btn).toBeDisabled()
+
+    await act(async () => {
+      release()
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Complete Lab' })).toBeEnabled(),
+    )
   }, 20000)
 
   it('the read-only completed view offers no upload affordance at all', () => {
