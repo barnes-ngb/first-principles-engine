@@ -8,6 +8,7 @@ import {
   formatConceptualBlocks,
   formatMasterySummary,
   formatMasteredSkills,
+  loadLearnerModelContext,
   TASK_CONTEXT,
   CHARTER_PREAMBLE,
 } from "./contextSlices.js";
@@ -921,5 +922,146 @@ describe("formatMasterySummary", () => {
     ];
     const result = formatMasterySummary(summaries);
     expect(result).not.toContain("CAN SKIP");
+  });
+});
+
+// ── buildContextForTask — unknown task fallback ─────────────────
+
+describe("buildContextForTask — unknown task type fallback", () => {
+  function makeEmptyQuery(): unknown {
+    const q: unknown = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (typeof prop === "symbol") return undefined;
+          if (prop === "then") return undefined;
+          if (prop === "get") {
+            return async () => ({
+              docs: [],
+              forEach: () => {},
+              empty: true,
+              size: 0,
+              exists: false,
+              data: () => undefined,
+            });
+          }
+          return () => q;
+        },
+      },
+    );
+    return q;
+  }
+
+  function makeDb(): SliceContext["db"] {
+    const emptyQuery = makeEmptyQuery();
+    return {
+      doc: () => ({ get: async () => ({ exists: false, data: () => undefined }) }),
+      collection: () => emptyQuery,
+    } as unknown as SliceContext["db"];
+  }
+
+  function ctx(): SliceContext {
+    return {
+      db: makeDb(),
+      familyId: "fam-1",
+      childId: "lincoln",
+      childData: { name: "Lincoln", grade: "3rd" },
+      snapshotData: undefined,
+    };
+  }
+
+  it("falls back to chat slices for an unknown task type", async () => {
+    const chatSections = await buildContextForTask("chat", ctx());
+    const unknownSections = await buildContextForTask("nonexistent_task_xyz", ctx());
+    expect(unknownSections).toEqual(chatSections);
+  });
+
+  it("unknown task includes charter + child profile and nothing else", async () => {
+    const sections = await buildContextForTask("totally_bogus", ctx());
+    const joined = sections.join("\n\n");
+    expect(joined).toContain("Name: Lincoln");
+    expect(joined).toContain("Grade: 3rd");
+    expect(sections.length).toBe(2);
+  });
+});
+
+// ── buildContextForTask — Firestore error resilience ────────────
+
+describe("buildContextForTask — Firestore fetch failure resilience", () => {
+  function makeFailingDb(): SliceContext["db"] {
+    const throwingQuery: unknown = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (typeof prop === "symbol") return undefined;
+          if (prop === "then") return undefined;
+          if (prop === "get") {
+            return async () => {
+              throw new Error("Firestore unavailable");
+            };
+          }
+          return () => throwingQuery;
+        },
+      },
+    );
+    return {
+      doc: () => ({
+        get: async () => {
+          throw new Error("Firestore unavailable");
+        },
+      }),
+      collection: () => throwingQuery,
+    } as unknown as SliceContext["db"];
+  }
+
+  it("returns charter + childProfile even when all Firestore fetches fail", async () => {
+    const ctx: SliceContext = {
+      db: makeFailingDb(),
+      familyId: "fam-1",
+      childId: "lincoln",
+      childData: { name: "Lincoln", grade: "3rd" },
+      snapshotData: undefined,
+    };
+    const sections = await buildContextForTask("plan", ctx);
+    const joined = sections.join("\n\n");
+    expect(joined).toContain("Name: Lincoln");
+    expect(sections.length).toBe(2);
+  });
+
+  it("does not throw — Promise.allSettled isolates slice failures", async () => {
+    const ctx: SliceContext = {
+      db: makeFailingDb(),
+      familyId: "fam-1",
+      childId: "lincoln",
+      childData: { name: "Lincoln", grade: "3rd" },
+      snapshotData: undefined,
+    };
+    await expect(buildContextForTask("shellyChat", ctx)).resolves.toBeDefined();
+  });
+});
+
+// ── loadLearnerModelContext — error path ─────────────────────────
+
+describe("loadLearnerModelContext — error handling", () => {
+  it("returns empty string when Firestore throws", async () => {
+    const failDb = {
+      doc: () => ({
+        get: async () => {
+          throw new Error("permission-denied");
+        },
+      }),
+    } as unknown as SliceContext["db"];
+    const result = await loadLearnerModelContext(failDb, "fam-1", "child-1");
+    expect(result).toBe("");
+  });
+
+  it("returns empty string when the learner model doc does not exist", async () => {
+    const noDocDb = {
+      doc: () => ({
+        get: async () => ({ exists: false, data: () => undefined }),
+      }),
+    } as unknown as SliceContext["db"];
+    const result = await loadLearnerModelContext(noDocDb, "fam-1", "child-1");
+    expect(result).toBe("");
   });
 });

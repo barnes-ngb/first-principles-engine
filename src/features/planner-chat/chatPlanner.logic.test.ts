@@ -1894,3 +1894,273 @@ describe('generateDraftPlanFromInputs — budget overflow', () => {
     }
   })
 })
+
+// ─── dailyRoutine flow-through integration ──────────────────────────────────
+
+describe('generateDraftPlanFromInputs — dailyRoutine flow-through', () => {
+  it('populates routine items on all 5 days as must-do items', () => {
+    const routine = [
+      'Handwriting — 15 min — LanguageArts',
+      'Reading Eggs (20 min) — Reading',
+      'Math worksheet — 20 min — Math',
+    ].join('\n')
+
+    const result = generateDraftPlanFromInputs({
+      snapshot: null,
+      hoursPerDay: 2.5,
+      appBlocks: [],
+      assignments: [],
+      dailyRoutine: routine,
+    })
+
+    expect(result.days).toHaveLength(5)
+    for (const day of result.days) {
+      const titles = day.items.map(i => i.title)
+      expect(titles).toContain('Handwriting')
+      expect(titles).toContain('Reading Eggs')
+      expect(titles).toContain('Math worksheet')
+
+      const handwriting = day.items.find(i => i.title === 'Handwriting')!
+      expect(handwriting.category).toBe('must-do')
+      expect(handwriting.subjectBucket).toBe(SubjectBucket.LanguageArts)
+      expect(handwriting.estimatedMinutes).toBe(15)
+    }
+  })
+
+  it('infers subject from title when no explicit subject', () => {
+    const routine = 'Phonics drill — 10 min'
+    const result = generateDraftPlanFromInputs({
+      snapshot: null,
+      hoursPerDay: 2,
+      appBlocks: [],
+      assignments: [],
+      dailyRoutine: routine,
+    })
+
+    const item = result.days[0].items.find(i => i.title === 'Phonics drill')
+    expect(item).toBeDefined()
+    expect(item!.subjectBucket).toBe(SubjectBucket.Reading)
+  })
+
+  it('does not duplicate app blocks already covered by routine', () => {
+    const routine = 'Reading Eggs — 20 min — Reading'
+    const result = generateDraftPlanFromInputs({
+      snapshot: null,
+      hoursPerDay: 2,
+      appBlocks: [{ label: 'Reading Eggs', defaultMinutes: 20 }],
+      assignments: [],
+      dailyRoutine: routine,
+    })
+
+    for (const day of result.days) {
+      const readingEggsItems = day.items.filter(i =>
+        i.title.toLowerCase().includes('reading eggs'),
+      )
+      expect(readingEggsItems).toHaveLength(1)
+    }
+  })
+
+  it('adds app blocks not covered by routine as choose items', () => {
+    const routine = 'Handwriting — 15 min — LanguageArts'
+    const result = generateDraftPlanFromInputs({
+      snapshot: null,
+      hoursPerDay: 2,
+      appBlocks: [{ label: 'Math App', defaultMinutes: 15 }],
+      assignments: [],
+      dailyRoutine: routine,
+    })
+
+    for (const day of result.days) {
+      const mathApp = day.items.find(i => i.title === 'Math App')
+      expect(mathApp).toBeDefined()
+      expect(mathApp!.category).toBe('choose')
+    }
+  })
+})
+
+// ─── skip suggestion full pipeline ──────────────────────────────────────────
+
+describe('generateDraftPlanFromInputs — skip suggestion pipeline', () => {
+  it('populates skipSuggestions when snapshot triggers a skip on an assignment', () => {
+    const snapshot: SkillSnapshot = {
+      ...baseSnapshot,
+      prioritySkills: [
+        {
+          tag: 'math.subtraction.regrouping',
+          label: 'Regrouping',
+          level: SkillLevel.Emerging,
+          masteryGate: MasteryGate.IndependentConsistent,
+        },
+      ],
+    }
+
+    const assignments: AssignmentCandidate[] = [
+      {
+        id: 'a1',
+        subjectBucket: SubjectBucket.Math,
+        workbookName: 'Math G2',
+        lessonName: 'Regrouping L5',
+        estimatedMinutes: 15,
+        difficultyCues: [],
+        action: AssignmentAction.Keep,
+      },
+    ]
+
+    const result = generateDraftPlanFromInputs({
+      snapshot,
+      hoursPerDay: 2.5,
+      appBlocks: [],
+      assignments,
+    })
+
+    expect(result.skipSuggestions.length).toBeGreaterThan(0)
+    expect(result.skipSuggestions[0].action).toBe('skip')
+    const allItems = result.days.flatMap(d => d.items)
+    const skippedItem = allItems.find(i => i.assignmentId === 'a1')
+    expect(skippedItem).toBeUndefined()
+  })
+
+  it('reduces time for modify-suggested assignments in the plan', () => {
+    const snapshot: SkillSnapshot = {
+      ...baseSnapshot,
+      prioritySkills: [
+        {
+          tag: 'reading.phonics',
+          label: 'Phonics',
+          level: SkillLevel.Emerging,
+          masteryGate: MasteryGate.MostlyIndependent,
+        },
+      ],
+    }
+
+    const assignments: AssignmentCandidate[] = [
+      {
+        id: 'a1',
+        subjectBucket: SubjectBucket.Reading,
+        workbookName: 'Phonics G1',
+        lessonName: 'Phonics L3',
+        estimatedMinutes: 20,
+        difficultyCues: [],
+        action: AssignmentAction.Keep,
+      },
+    ]
+
+    const result = generateDraftPlanFromInputs({
+      snapshot,
+      hoursPerDay: 2.5,
+      appBlocks: [],
+      assignments,
+    })
+
+    expect(result.skipSuggestions.length).toBeGreaterThan(0)
+    expect(result.skipSuggestions[0].action).toBe('modify')
+    const allItems = result.days.flatMap(d => d.items)
+    const modifiedItem = allItems.find(i => i.assignmentId === 'a1')!
+    expect(modifiedItem).toBeDefined()
+    expect(modifiedItem.estimatedMinutes).toBe(Math.ceil(20 * 0.6))
+  })
+})
+
+// ─── full integration with all input channels ───────────────────────────────
+
+describe('generateDraftPlanFromInputs — full integration', () => {
+  it('produces a valid 5-day plan when all input channels are populated', () => {
+    const routine = [
+      'Handwriting — 15 min — LanguageArts',
+      'Read aloud — 20 min — Reading',
+    ].join('\n')
+
+    const assignments: AssignmentCandidate[] = [
+      {
+        id: 'a1',
+        subjectBucket: SubjectBucket.Math,
+        workbookName: 'Math G3',
+        lessonName: 'Addition L2',
+        estimatedMinutes: 15,
+        difficultyCues: [],
+        action: AssignmentAction.Keep,
+      },
+      {
+        id: 'a2',
+        subjectBucket: SubjectBucket.Science,
+        workbookName: 'Science G3',
+        lessonName: 'Plants L1',
+        estimatedMinutes: 15,
+        difficultyCues: [],
+        action: AssignmentAction.Keep,
+      },
+    ]
+
+    const result = generateDraftPlanFromInputs({
+      snapshot: baseSnapshot,
+      hoursPerDay: 3,
+      appBlocks: [{ label: 'Math App', defaultMinutes: 10 }],
+      assignments,
+      dailyRoutine: routine,
+      subjectTimeDefaults: {
+        [SubjectBucket.Math]: 20,
+        [SubjectBucket.Reading]: 25,
+      },
+    })
+
+    expect(result.days).toHaveLength(5)
+    expect(result.minimumWin).toBeTruthy()
+
+    for (const day of result.days) {
+      expect(day.timeBudgetMinutes).toBe(180)
+      expect(day.items.length).toBeGreaterThan(0)
+      const routineItems = day.items.filter(i => i.title === 'Handwriting' || i.title === 'Read aloud')
+      expect(routineItems.length).toBe(2)
+    }
+
+    const allTitles = result.days.flatMap(d => d.items.map(i => i.title))
+    expect(allTitles.some(t => t.includes('Math G3'))).toBe(true)
+    expect(allTitles.some(t => t.includes('Science G3'))).toBe(true)
+    expect(allTitles.some(t => t.includes('Skill practice'))).toBe(true)
+  })
+
+  it('applies multiple simultaneous adjustments', () => {
+    const assignments: AssignmentCandidate[] = [
+      {
+        id: 'a1',
+        subjectBucket: SubjectBucket.Reading,
+        workbookName: 'Reading G2',
+        lessonName: 'L1',
+        estimatedMinutes: 20,
+        difficultyCues: [],
+        action: AssignmentAction.Keep,
+      },
+      {
+        id: 'a2',
+        subjectBucket: SubjectBucket.Math,
+        workbookName: 'Math G2',
+        lessonName: 'L2',
+        estimatedMinutes: 20,
+        difficultyCues: [],
+        action: AssignmentAction.Keep,
+      },
+    ]
+
+    const result = generateDraftPlanFromInputs({
+      snapshot: null,
+      hoursPerDay: 2.5,
+      appBlocks: [],
+      assignments,
+      adjustments: [
+        { type: AdjustmentType.CapSubjectTime, subject: SubjectBucket.Reading, maxMinutesPerDay: 10 },
+        { type: AdjustmentType.ReduceSubject, subject: SubjectBucket.Math, factor: 0.5 },
+      ],
+    })
+
+    const allItems = result.days.flatMap(d => d.items)
+    const readingItems = allItems.filter(i => i.subjectBucket === SubjectBucket.Reading && i.assignmentId)
+    const mathItems = allItems.filter(i => i.subjectBucket === SubjectBucket.Math && i.assignmentId)
+
+    for (const item of readingItems) {
+      expect(item.estimatedMinutes).toBeLessThanOrEqual(10)
+    }
+    for (const item of mathItems) {
+      expect(item.estimatedMinutes).toBe(Math.ceil(20 * 0.5))
+    }
+  })
+})
