@@ -222,4 +222,31 @@ describe('DadLabPage — Back is guarded while uploads are unattached (UX-82)', 
     await user.click(screen.getByRole('button', { name: 'Leave anyway' }))
     expect(await screen.findByTestId('elsewhere')).toBeInTheDocument()
   }, 20000)
+
+  it('dismissing the dialog (Escape) resets the blocker — a later nav tap blocks again', async () => {
+    // Codex P2 on PR #1695: onClose that only hides the dialog leaves the
+    // blocker stuck in 'blocked' with nothing left to release it — the state
+    // never changes again, so the dialog can never reopen.
+    const user = userEvent.setup({ delay: null })
+    const router = renderPage()
+
+    await user.click(screen.getByRole('button', { name: /Plan a Lab/i }))
+    await user.click(screen.getByText('report-unattached'))
+
+    await act(async () => {
+      await router.navigate('/elsewhere')
+    })
+    expect(await screen.findByText(/aren't attached to this report yet/i)).toBeInTheDocument()
+
+    // Escape = Keep editing: the transition is cancelled, not left dangling.
+    await user.keyboard('{Escape}')
+    expect(screen.getByTestId('lab-form')).toBeInTheDocument()
+
+    // The blocker is armed again: a second nav attempt re-blocks and re-asks.
+    await act(async () => {
+      await router.navigate('/elsewhere')
+    })
+    expect(screen.getByTestId('lab-form')).toBeInTheDocument()
+    expect(await screen.findByText(/aren't attached to this report yet/i)).toBeInTheDocument()
+  }, 20000)
 })

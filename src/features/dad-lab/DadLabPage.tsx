@@ -446,8 +446,11 @@ export default function DadLabPage() {
           onUnattachedUploadsChange={setUnattachedUploads}
         />
 
-        {/* UX-82: leaving with unattached uploads is a choice, never a silent orphan. */}
-        <Dialog open={leaveConfirmOpen} onClose={() => setLeaveConfirmOpen(false)}>
+        {/* UX-82: leaving with unattached uploads is a choice, never a silent orphan.
+            Every dismissal (Escape/backdrop included) goes through handleKeepEditing:
+            it must also reset a blocked route change, or the blocker stays stuck
+            in 'blocked' with no dialog left to release it. */}
+        <Dialog open={leaveConfirmOpen} onClose={handleKeepEditing}>
           <DialogTitle>Leave without saving?</DialogTitle>
           <DialogContent>
             <DialogContentText>
