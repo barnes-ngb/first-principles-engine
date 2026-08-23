@@ -17,6 +17,44 @@ export interface CreateArcInput {
   /** Defaults to every child when omitted (DATA-04 — both children). */
   childIds?: string[]
   narrativeHook?: string
+  /**
+   * How the arc was authored. Defaults to `OwnerAuthored` (the manual dialog's
+   * origin). The Shelly-chat portal passes `AiSuggested` — the member the enum
+   * reserved for AI-authored arcs (design §3) — for an arc the model composed
+   * and a parent confirmed (FEAT-157).
+   */
+  createdFrom?: ArcOrigin
+}
+
+/**
+ * Create a Concept Arc — the module-level writer (FEAT-157).
+ *
+ * Extracted from the hook so a second caller (the Shelly-chat portal's
+ * confirmed `createConceptArc` action) routes through the SAME write as the
+ * Dad Lab page's New Arc dialog, rather than opening a second lane to
+ * `conceptArcs`. `allChildIds` carries the DATA-04 default — every child —
+ * because a module function has no `useChildren` to read it from.
+ */
+export async function createArc(
+  familyId: string,
+  allChildIds: string[],
+  input: CreateArcInput,
+): Promise<string> {
+  const now = new Date().toISOString()
+  const childIds =
+    input.childIds && input.childIds.length > 0 ? input.childIds : allChildIds
+  const arc: ConceptArc = {
+    title: input.title.trim() || 'Untitled Arc',
+    domainLabel: input.domainLabel?.trim() || undefined,
+    childIds,
+    steps: input.steps,
+    createdFrom: input.createdFrom ?? ArcOrigin.OwnerAuthored,
+    narrativeHook: input.narrativeHook?.trim() || undefined,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const ref = await addDoc(conceptArcsCollection(familyId), arc)
+  return ref.id
 }
 
 /** Fields that can be edited on an existing arc. */
@@ -45,26 +83,13 @@ export function useConceptArcs() {
     return unsubscribe
   }, [familyId])
 
-  const createArc = useCallback(
-    async (input: CreateArcInput): Promise<string> => {
-      const now = new Date().toISOString()
-      const childIds =
-        input.childIds && input.childIds.length > 0
-          ? input.childIds
-          : children.map((c) => c.id)
-      const arc: ConceptArc = {
-        title: input.title.trim() || 'Untitled Arc',
-        domainLabel: input.domainLabel?.trim() || undefined,
-        childIds,
-        steps: input.steps,
-        createdFrom: ArcOrigin.OwnerAuthored,
-        narrativeHook: input.narrativeHook?.trim() || undefined,
-        createdAt: now,
-        updatedAt: now,
-      }
-      const ref = await addDoc(conceptArcsCollection(familyId), arc)
-      return ref.id
-    },
+  const create = useCallback(
+    async (input: CreateArcInput): Promise<string> =>
+      createArc(
+        familyId,
+        children.map((c) => c.id),
+        input,
+      ),
     [familyId, children],
   )
 
@@ -106,7 +131,7 @@ export function useConceptArcs() {
   return {
     arcs,
     loading,
-    createArc,
+    createArc: create,
     updateArc,
     archiveArc,
     completeStep,

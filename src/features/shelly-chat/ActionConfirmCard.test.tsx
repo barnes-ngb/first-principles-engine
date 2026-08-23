@@ -712,3 +712,129 @@ describe('ActionConfirmCard — an applied vet-in outlives its own write (FEAT-1
     expect(screen.getByText('Done')).toBeInTheDocument()
   })
 })
+
+// ── Dad Lab cards (FEAT-157) ─────────────────────────────────────────
+
+describe('ActionConfirmCard — createConceptArc (FEAT-157)', () => {
+  const ARC_ACTION: PendingAction[] = [
+    {
+      id: 'msg1_0',
+      status: 'pending',
+      action: {
+        kind: 'createConceptArc',
+        childId: 'lincoln1',
+        title: 'The Electricity Arc',
+        domainLabel: 'Electricity',
+        steps: [
+          { title: 'Static electricity', conceptBeat: 'Charge jumps' },
+          { title: 'Make a circuit', conceptBeat: 'A loop lets current flow' },
+          { title: 'Add a switch' },
+        ],
+      },
+    },
+  ]
+
+  it('renders EVERY step, numbered and in order, with its concept beat — the steps ARE the write', () => {
+    renderCard(ARC_ACTION)
+
+    expect(screen.getByText('Creates a Dad Lab concept arc')).toBeInTheDocument()
+    expect(
+      screen.getByText('Create the concept arc "The Electricity Arc" for Lincoln and London'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('1. Static electricity — Charge jumps')).toBeInTheDocument()
+    expect(screen.getByText('2. Make a circuit — A loop lets current flow')).toBeInTheDocument()
+    expect(screen.getByText('3. Add a switch')).toBeInTheDocument()
+    expect(screen.getByText('Domain: Electricity')).toBeInTheDocument()
+  })
+
+  it('footnotes that the arc is created as shown and the rest lives on the Dad Lab page', () => {
+    renderCard(ARC_ACTION)
+
+    expect(
+      screen.getByText(/first step starts active/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/live on the Dad Lab page/)).toBeInTheDocument()
+  })
+})
+
+describe('ActionConfirmCard — planLab (FEAT-157)', () => {
+  const ARCS = [
+    {
+      id: 'arc_elec',
+      title: 'The Electricity Arc',
+      childIds: ['lincoln1', 'london1'],
+      steps: [
+        { title: 'Static', conceptBeat: '', status: 'done' as const },
+        { title: 'Circuit', conceptBeat: '', status: 'active' as const },
+      ],
+      createdFrom: 'owner-authored' as const,
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    },
+  ]
+  const LAB_ACTION: PendingAction[] = [
+    {
+      id: 'msg1_0',
+      status: 'pending',
+      action: {
+        kind: 'planLab',
+        childId: 'lincoln1',
+        title: 'Make a bulb light up',
+        question: 'What makes it turn on?',
+        labType: 'science',
+        materials: ['battery', 'bulb'],
+        arcId: 'arc_elec',
+        arcStepIndex: 1,
+      },
+    },
+  ]
+
+  function renderLabCard(pending: PendingAction[], arcs = ARCS) {
+    return render(
+      <ActionConfirmCard
+        pending={pending}
+        familyChildren={CHILDREN}
+        conceptArcs={arcs}
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+        onConfirmAll={vi.fn()}
+      />,
+    )
+  }
+
+  it('names the lab, the arc by TITLE with a 1-based step, the question and the materials — never a doc id', () => {
+    renderLabCard(LAB_ACTION)
+
+    expect(screen.getByText('Adds a lab to the Dad Lab backlog')).toBeInTheDocument()
+    expect(
+      screen.getByText('Plan the Science lab "Make a bulb light up" — step 2 of "The Electricity Arc"'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Question: What makes it turn on?')).toBeInTheDocument()
+    expect(screen.getByText('Materials: battery, bulb')).toBeInTheDocument()
+    expect(screen.queryByText(/arc_elec/)).not.toBeInTheDocument()
+  })
+
+  it('footnotes where it lands: the backlog, started from the Dad Lab page, no hours until completion', () => {
+    renderLabCard(LAB_ACTION)
+
+    expect(
+      screen.getByText(
+        'Adds to the Dad Lab backlog — start it from the Dad Lab page. No hours are recorded until the lab is completed there.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('offers no card while pending if the linked arc is gone — the stage gate holds at render too', () => {
+    renderLabCard(LAB_ACTION, [])
+
+    expect(screen.queryByText(/Make a bulb light up/)).not.toBeInTheDocument()
+  })
+
+  it('an APPLIED card outlives its arc — the "Done ✓" confirmation survives an archive', () => {
+    const applied: PendingAction[] = [{ ...LAB_ACTION[0], status: 'applied' }]
+    renderLabCard(applied, [])
+
+    expect(screen.getByText(/Plan the Science lab "Make a bulb light up"/)).toBeInTheDocument()
+    expect(screen.getByText('Done')).toBeInTheDocument()
+  })
+})

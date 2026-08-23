@@ -37,13 +37,12 @@ import { useProfile } from '../../core/profile/useProfile'
 import type { ConceptArc, DadLabReport } from '../../core/types'
 import type { DadLabType } from '../../core/types/enums'
 import { DadLabStatus } from '../../core/types/enums'
-import { formatDateShort, todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
-import { formatDateYmd } from '../../core/utils/format'
+import { formatDateShort, todayKey } from '../../core/utils/dateKey'
 import { parseChildRoles } from './childRoles'
 import { groupReportsByMonth } from './dadLabGrouping'
-import { subjectsForLabType } from './labTypeSubjects'
 import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
 import { useCalibrationSources } from './useCalibrationSources'
+import { createPlannedLab } from './plannedLab'
 import { useConceptArcs } from './useConceptArcs'
 import ConceptArcsSection from './ConceptArcsSection'
 import HoursRoutingAuditPanel from './HoursRoutingAuditPanel'
@@ -100,13 +99,6 @@ interface Prefill {
   duration?: number
 }
 
-function getNextSaturday(): Date {
-  const d = new Date()
-  const day = d.getDay()
-  const diff = (6 - day + 7) % 7 || 7
-  d.setDate(d.getDate() + (day === 6 ? 0 : diff))
-  return d
-}
 
 /**
  * Dad Lab.
@@ -242,32 +234,13 @@ export default function DadLabPage() {
   const handleSuggestionSelect = useCallback(
     async (data: Prefill) => {
       setSuggestionsOpen(false)
-      const nextSat = getNextSaturday()
-      const dateStr = formatDateYmd(nextSat)
-
-      const labType = data.labType ?? 'science'
-      const planned: DadLabReport = {
-        date: dateStr,
-        weekKey: weekKeyFromDate(nextSat),
-        title: data.title ?? 'Untitled Lab',
-        labType,
-        question: data.question ?? '',
-        description: data.description ?? '',
-        status: DadLabStatus.Planned,
-        materials: data.materials,
-        childRoles: data.childRoles ?? {},
-        childReports: {},
-        // Type → subject routing (FEAT-55): stamp the mapping's defaults at
-        // creation so a planned lab never lands with empty tags (the silent
-        // zero-hours path). Stays editable on LabReportForm.
-        subjectTags: subjectsForLabType(labType),
-        totalMinutes: data.duration ?? 60,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-      await saveReport(planned)
+      // The shared Planned-lab lane (FEAT-157) — the same builder + write the
+      // chat portal's confirmed `planLab` action uses, extracted from the
+      // report shape this handler used to build inline. The realtime listener
+      // picks the new entry up; no explicit reload needed.
+      await createPlannedLab(familyId, data)
     },
-    [saveReport],
+    [familyId],
   )
 
   const handleStartLab = useCallback(
