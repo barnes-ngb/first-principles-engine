@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -27,6 +27,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import RouteIcon from '@mui/icons-material/Route'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import Collapse from '@mui/material/Collapse'
+import { useBlocker } from 'react-router-dom'
 
 import ArtifactGallery from '../../components/ArtifactGallery'
 import { EmptyState, LoadingState } from '../../components/states'
@@ -144,6 +145,20 @@ export default function DadLabPage() {
   const [unattachedUploads, setUnattachedUploads] = useState(0)
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
 
+  // Codex P2 on PR #1693: the shell's NavLinks are SPA route changes — they
+  // never fire `beforeunload` and don't pass through the Back button — so the
+  // router itself must hold the door while uploads are unattached. Same dialog,
+  // third trigger.
+  const navBlocker = useBlocker(view === 'form' && unattachedUploads > 0)
+  useEffect(() => {
+    if (navBlocker.state === 'blocked') setLeaveConfirmOpen(true)
+  }, [navBlocker.state])
+
+  const handleKeepEditing = useCallback(() => {
+    setLeaveConfirmOpen(false)
+    if (navBlocker.state === 'blocked') navBlocker.reset()
+  }, [navBlocker])
+
   // Split reports by status
   const { planned, active, completed } = useMemo(() => {
     const p: DadLabReport[] = []
@@ -220,6 +235,17 @@ export default function DadLabPage() {
     }
     handleCancel()
   }, [unattachedUploads, handleCancel])
+
+  // "Leave anyway": release a blocked route change if that's what asked, else
+  // it was the Back button — fall back to closing the form.
+  const handleLeaveAnyway = useCallback(() => {
+    if (navBlocker.state === 'blocked') {
+      setLeaveConfirmOpen(false)
+      navBlocker.proceed()
+      return
+    }
+    handleCancel()
+  }, [navBlocker, handleCancel])
 
   const handleSave = useCallback(
     async (report: DadLabReport) => {
@@ -393,8 +419,11 @@ export default function DadLabPage() {
           onUnattachedUploadsChange={setUnattachedUploads}
         />
 
-        {/* UX-82: leaving with unattached uploads is a choice, never a silent orphan. */}
-        <Dialog open={leaveConfirmOpen} onClose={() => setLeaveConfirmOpen(false)}>
+        {/* UX-82: leaving with unattached uploads is a choice, never a silent orphan.
+            Every dismissal (Escape/backdrop included) goes through handleKeepEditing:
+            it must also reset a blocked route change, or the blocker stays stuck
+            in 'blocked' with no dialog left to release it. */}
+        <Dialog open={leaveConfirmOpen} onClose={handleKeepEditing}>
           <DialogTitle>Leave without saving?</DialogTitle>
           <DialogContent>
             <DialogContentText>
@@ -403,10 +432,10 @@ export default function DadLabPage() {
             </DialogContentText>
           </DialogContent>
           <DialogActions>
-            <Button variant="contained" onClick={() => setLeaveConfirmOpen(false)}>
+            <Button variant="contained" onClick={handleKeepEditing}>
               Keep editing
             </Button>
-            <Button color="error" onClick={handleCancel}>
+            <Button color="error" onClick={handleLeaveAnyway}>
               Leave anyway
             </Button>
           </DialogActions>
