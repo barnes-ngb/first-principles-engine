@@ -82,18 +82,37 @@ This window shipped real surface against Lens 1 (FEAT-150, FEAT-156) and a genui
 
 ## Step 1 — Architecture & Tech Debt (Band 1)
 
-### 1.1 Largest files — `PlannerChatPage.tsx` shrank again, but not on the recommended seam
+### 1.1 Largest files — full >1,500L listing, judged; `PlannerChatPage.tsx` shrank again but not on the recommended seam
 
-Re-run of `find src functions/src -name '*.ts' -o -name '*.tsx' | xargs wc -l | sort -rn`, filtered to
-files that materially moved:
+Full `find src functions/src -name '*.ts' -o -name '*.tsx' | xargs wc -l | sort -rn`, filtered to every
+production file ≥1,500L (test files excluded — `records.logic.test.ts` 2,764L,
+`useShellyChatActions.logic.test.ts` 2,211L, `shellyChat.test.ts` 2,072L, `chatPlanner.logic.test.ts`
+1,896L all cross the line but are test files, not decomposition candidates):
 
-| File | 2026-08-16 (post-audit, `c4dc12b`) | 2026-08-23 | Δ |
+| File | 2026-08-23 | Δ since `c4dc12b` (08-16) | Judgment |
 |---|---|---|---|
-| `PlannerChatPage.tsx` | 3,412L | **3,295L** | **−117** |
-| `functions/src/ai/tasks/shellyChat.ts` | 1,520L | **1,719L** | **+199** |
-| `src/features/shelly-chat/useShellyChatActions.ts` | 943L | **1,112L** | **+169** |
-| `applyWeekPlan.ts` (new file) | 404L | 404L | +0 (added same PR as the 08-16 report's follow-up note) |
-| `chat.ts` (CF), `useQuestSession.ts`, `BookEditorPage.tsx`, `MyAvatarPage.tsx`, `WorkshopPage.tsx`, `contextSlices.ts`, `VoxelCharacter.tsx` | — | unchanged | 0 (none touched this window) |
+| `PlannerChatPage.tsx` | **3,295L** | **−117** (3,412→3,295) | Tangled — ARCH-02, OPEN. See below. |
+| `functions/src/ai/chat.ts` | 2,641L | +0 | Cohesive-but-big — ARCH-01, OPEN, unchanged. `buildQuestPrompt` alone 400+L. |
+| `src/features/quest/useQuestSession.ts` | 2,218L | +0 | Tangled — ARCH-04, OPEN, unchanged. 5 question pipelines in one hook. |
+| `src/features/books/BookEditorPage.tsx` | 2,113L | +0 | Cohesive-but-big — ARCH-03, OPEN, unchanged. Section-bounded, low urgency. |
+| `src/features/avatar/MyAvatarPage.tsx` | 1,876L | +0 | Cohesive-but-big — CLAUDE.md tech-debt note, unchanged. Forge/portal/Stonebridge state. |
+| `functions/src/ai/tasks/shellyChat.ts` | **1,719L** | **+199** | Growing watch-list — see below, not yet a decomposition candidate. |
+| `src/features/records/dataReviewExport.logic.ts` | 1,713L | +0 | Tangled — **ARCH-44, OPEN, unchanged.** Born large (FEAT-120), one ~1,100-line function (`computeIntegrityChecks`). Already ledger-tracked; omitted from this table in an earlier pass of this report, corrected here. |
+| `src/features/workshop/WorkshopPage.tsx` | 1,623L | +0 | Cohesive-but-big — phase-based rendering delegates to sub-components. Not urgent. |
+| `functions/src/ai/contextSlices.ts` | 1,617L | +0 | Tangled — ARCH-14, OPEN, unchanged. 20+ slice loaders, needs a domain-group split. |
+| `src/features/avatar/VoxelCharacter.tsx` | 1,606L | +0 | Cohesive-but-big — ARCH-08 prerequisite (Three.js render loop), leave as-is per CLAUDE.md. |
+| `src/features/today/TodayChecklist.tsx` | 1,592L | +0 | Watch-list, not yet a decomposition candidate — crossed 1,500L on 2026-08-16 (live-week-edit feature), flat since. |
+| `src/features/planner-chat/chatPlanner.logic.ts` | 1,544L | +0 | Cohesive-but-big — pure planner logic module, no prior audit has flagged a tangled seam here; not a new candidate this cycle. |
+
+**Correction to an earlier pass of this table:** a first draft of this section filtered to only the files
+that materially moved this window and omitted `dataReviewExport.logic.ts`, `TodayChecklist.tsx`, and
+`chatPlanner.logic.ts` — all three are still ≥1,500L and the audit prompt requires listing and judging
+every such file, moved or not. Corrected above; none of the three changed this window, and
+`dataReviewExport.logic.ts` was already ledger-tracked as `ARCH-44` (unchanged, not new drift).
+
+**`src/features/shelly-chat/useShellyChatActions.ts` (1,112L, +169 from 943L)** stays below the 1,500L
+cutoff for this table but is trending toward it in lockstep with `shellyChat.ts` below — tracked in 1.8,
+not listed here.
 
 **`PlannerChatPage.tsx` (ARCH-02) — the −117L is FEAT-150's Apply extraction continuing, not the
 recommended seam.** Only two commits touched this file this window: `fdb663a` ("extract Apply into a
@@ -119,9 +138,9 @@ window — two consecutive large-growth cycles).
 with `shellyChat.ts` as expected (FEAT-150's `applyNextWeek` handler, FEAT-152's General-tab drop guard).
 Still comfortably below any threshold; noted for trend-tracking only.
 
-**ARCH-01/03/04/08/13/14 — unchanged, re-verified only** (`chat.ts`, `BookEditorPage.tsx`,
-`useQuestSession.ts`, `MyAvatarPage.tsx`, `WorkshopPage.tsx`, `contextSlices.ts`, `VoxelCharacter.tsx` all
-byte-identical this window — none appear in the 67-file diff).
+**ARCH-01/03/04/08/14/44 — unchanged, re-verified only** (see table above; none of these files appear in
+the 67-file diff this window). **ARCH-13** (`useShellyChatFlows.ts`, below this table's 1,500L cutoff at
+1,134L) is also unchanged this window — not in the diff.
 
 ### 1.2 Bundle (ARCH-05) — flat, still zero code-splitting
 
