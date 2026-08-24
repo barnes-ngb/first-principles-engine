@@ -79,22 +79,24 @@ None — every top-level file in `docs/*.md` (except `DOCUMENT_INDEX.md` itself)
 
 ### Stale Docs (Phase 3h)
 
-62 docs are marked `**CURRENT**` in `DOCUMENT_INDEX.md` (up from 56 last cycle — new review/design docs added). **54 have not been touched in over 30 days; 8 have.**
+> **Methodology correction (this cycle):** the previous version of this report extracted "CURRENT" docs with a single-line grep for any backtick-quoted `.md` filename on a line containing "CURRENT" — which false-positived on filenames merely *mentioned* in a CURRENT row's notes column (e.g. `DESIGN_SKIP_SYSTEM_2026-04-09.md`, actually marked **HISTORICAL** on its own row, was pulled in because the CURRENT row for its successor doc mentions it in prose) and missed non-`.md` entries like the `design-pass-v1/` and `review/prompts/` directory rows. Caught by an automated PR review comment on this cycle's own report; recomputed below by parsing each table row's own status column instead of grepping loose text. The 62/54 figures in the version pushed earlier this cycle were wrong — corrected to 59/51 here.
+
+59 unique docs are marked `**CURRENT**` in `DOCUMENT_INDEX.md` (some appear in more than one index table; deduped by filename). **51 have not been touched in over 30 days; 8 have.**
 
 **Not stale (≤30 days):**
 
 | Doc | Last touched | Age |
 |---|---|---|
-| `review/UX_AUDIT_2026-08.md` | 2026-08-24 (this cycle) | 0d |
+| `HEALTH_REPORT.md` | 2026-08-24 (this cycle's earlier commit) | 0d |
+| `MASTER_OUTLINE.md` | 2026-08-24 (this cycle's earlier commit) | 0d |
+| `review/UX_AUDIT_2026-08.md` | 2026-08-24 | 0d |
 | `DOCUMENT_INDEX.md` | 2026-08-23 | 1d |
-| `MASTER_OUTLINE.md` | 2026-08-23 | 1d |
 | `review/ARCHITECTURE_AUDIT_2026-08-23.md` | 2026-08-23 | 1d |
 | `review/DECISION_FUNC-01_source_of_truth.md` | 2026-08-22 | 2d |
-| `HEALTH_REPORT.md` | 2026-08-17 (superseded by this cycle) | 7d |
 | `review/SCAN_CURRICULUM_DIAGNOSIS.md` | 2026-08-11 | 13d |
 | `PROCESS_OVERVIEW.md` | 2026-07-26 | 29d |
 
-**Stale (>30 days), oldest 15 of 54:**
+**Stale (>30 days), oldest 15 of 51:**
 
 | Doc | Last touched | Age |
 |---|---|---|
@@ -108,13 +110,15 @@ None — every top-level file in `docs/*.md` (except `DOCUMENT_INDEX.md` itself)
 | `HERO_HUB_ANIMATION_TUNING.md` | 2026-04-07 | 139d |
 | `SCRIPT_CONVENTIONS.md` | 2026-04-11 | 135d |
 | `investigations/backend-reliability-assessment.md` | 2026-04-12 | 134d |
-| `DESIGN_SKIP_SYSTEM_2026-04-09.md` | 2026-04-14 | 132d |
 | `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md` | 2026-04-21 | 125d |
 | `EVALUATION_METHODOLOGY_2026-04.md` | 2026-05-16 | 100d |
 | `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | 2026-05-17 | 99d |
 | `PROFILE_LIMITS_AUDIT.md` | 2026-05-25 | 91d |
+| `design-pass-v1/` | 2026-05-26 | 90d |
 
-Remaining 39 cluster in the late-May through mid-July range (90d–31d old), largely unchanged from last cycle's list: `DESIGN_MONTHLY_REVIEW_BOOK.md`, `design-pass-v1/copy-pass-audit.md`, `PROMPT_FIX.md`, `SHELLY_PORTAL_CONTEXT.md`, `PROMPT_BACKUP_CHECK.md`, `ARCH-10_rules_hardening_plan.md`, `PROMPT_AUTO_ARCH_FIX.md`, `review/INTEGRATION_MAP.md`, `SHELLY_PORTAL_FEEDBACK_LOOP.md`, `WRITING_SPELLING_DESIGN.md`, `review/PER_CHILD_DELINEATION_AUDIT.md`, `GAME_WORLD_ECONOMY.md`, `ECONOMY_AUDIT_PART1/2.md`, `review/LONDON_EVAL_READINESS.md`, `review/DATA_COMPONENT_TRACE.md`, `review/UI_CONSISTENCY_AUDIT.md`, `review/UI_BATCH2_HEX_RECONCILIATION.md`, `COMPLIANCE_YEAR_END_CLOSEOUT.md`, `review/LEARNING_MAP_DIAGNOSIS.md`, `review/ALIGNMENT_AUDIT_2026-06-20.md`, `STICKER_CHARACTER_STUDIO.md`, `PROMPT_ARCH_AUDIT.md`, `LONDON_BACKLOG.md`, `GARDEN_DEFENSE_QUEST_PLAN.md`, `BUSINESS_TAB_DESIGN.md`, `SEED_VAULT_V1_RUNBOOK.md`, `review/STATE_COMPLIANCE_DESIGN.md`, `review/HOURS_UNDERCOUNT_DIAGNOSIS.md`, `FINDINGS_PIPELINE.md`, `barnes-shelly-chat-portal-design.md`, `08_RUNBOOK.md`, `OPS_WINDOW.md`, `DOCS_ALIGNMENT.md`, `review/LOOP_CLOSING_REVIEW_2026-07-15.md`, `review/CHARTER_ALIGNMENT_SWEEP_2026-07-16.md`, `SYSTEM_PROMPTS.md`, `PROJECT_CONTEXT.md`, `RUNBOOK_FIRESTORE_PITR.md`.
+Note: `DESIGN_SKIP_SYSTEM_2026-04-09.md` is correctly excluded — its own row is marked **HISTORICAL**, not CURRENT (it's superseded by the V2 doc above, which is CURRENT). The `PROMPT_ARCH_AUDIT.md` / `PROMPT_AUTO_ARCH_FIX.md` / `PROMPT_BACKUP_CHECK.md` / `PROMPT_FIX.md` files are also correctly excluded as individual rows — they're named only inside the single CURRENT row for `review/prompts/` (age 90d, folded into the remainder below), not individually tracked.
+
+Remaining 36 cluster in the late-May through mid-July range (90d–31d old): `design-pass-v1/copy-pass-audit.md`, `DESIGN_MONTHLY_REVIEW_BOOK.md`, `SHELLY_PORTAL_CONTEXT.md`, `ARCH-10_rules_hardening_plan.md`, `review/INTEGRATION_MAP.md`, `WRITING_SPELLING_DESIGN.md`, `SHELLY_PORTAL_FEEDBACK_LOOP.md`, `review/PER_CHILD_DELINEATION_AUDIT.md`, `GAME_WORLD_ECONOMY.md`, `ECONOMY_AUDIT_PART1/2.md`, `review/LONDON_EVAL_READINESS.md`, `review/DATA_COMPONENT_TRACE.md`, `review/UI_CONSISTENCY_AUDIT.md`, `review/UI_BATCH2_HEX_RECONCILIATION.md`, `COMPLIANCE_YEAR_END_CLOSEOUT.md`, `review/prompts/`, `review/LEARNING_MAP_DIAGNOSIS.md`, `review/ALIGNMENT_AUDIT_2026-06-20.md`, `STICKER_CHARACTER_STUDIO.md`, `LONDON_BACKLOG.md`, `GARDEN_DEFENSE_QUEST_PLAN.md`, `BUSINESS_TAB_DESIGN.md`, `SEED_VAULT_V1_RUNBOOK.md`, `review/STATE_COMPLIANCE_DESIGN.md`, `review/HOURS_UNDERCOUNT_DIAGNOSIS.md`, `FINDINGS_PIPELINE.md`, `barnes-shelly-chat-portal-design.md`, `08_RUNBOOK.md`, `OPS_WINDOW.md`, `DOCS_ALIGNMENT.md`, `review/LOOP_CLOSING_REVIEW_2026-07-15.md`, `review/CHARTER_ALIGNMENT_SWEEP_2026-07-16.md`, `SYSTEM_PROMPTS.md`, `PROJECT_CONTEXT.md`, `RUNBOOK_FIRESTORE_PITR.md`.
 
 **This is not necessarily a problem** — several are deliberately stable reference documents (`STONEBRIDGE_BIBLE.md`, `ENGINE_V2.md`, `ECONOMY_AUDIT_PART1/2.md`) or point-in-time audits correctly marked `CURRENT` for their findings rather than `HISTORICAL`. Same pattern and same doc set as last cycle — no new drift here, flagged for a human spot-check as before.
 
@@ -199,7 +203,7 @@ Companion pass found nothing further to fix this cycle: Phase 3 turned up zero g
 - **Dev-dependency-only npm audit findings remain** (9 on root, 2 in functions — see Build Status table). Both require `--force`/breaking upgrades and are outside the production dependency tree. Low priority per policy, unchanged assessment from prior cycles.
 - **Bundle size 4,352.08 kB (1,297.20 kB gzip), +14.42 kB / +5.05 kB gzip since last report:** modest growth, consistent with the +5,484 line-count delta. Heaviest single chunk is still the main `index-*.js` bundle (Three.js avatar, jsPDF print, curriculum map data, shelly-chat/chat surface). Route-level `React.lazy` splitting would reduce initial load. Not fixed — architectural decision, same recommendation as every prior cycle.
 - **Lint warnings (3, unchanged):** `react-hooks/exhaustive-deps` in `EvaluateChatPage.tsx:293`, `useQuestSession.ts:814`, `useQuestSession.ts:2083` — all involve `sessionTimer`. Not auto-fixable without reviewing timer semantics.
-- **54 of 62 `CURRENT`-marked docs are >30 days untouched** — same pattern as last cycle (48/56 then), 6 new `CURRENT` docs added to the index this cycle, all recent. Most look like legitimately-stable reference/design docs. Recommend a human skim pass on the oldest cluster (`ENGINE_V2.md` at 174d, `KNOWLEDGE_MINE_BRIEF.md` at 155d) if those surfaces are still active.
+- **51 of 59 unique `CURRENT`-marked docs are >30 days untouched** (see the Stale Docs methodology-correction note above — this cycle's figures aren't reliably comparable to the last report's 48/56, since it's unverified whether that count had the same extraction bug this cycle's did). Most look like legitimately-stable reference/design docs. Recommend a human skim pass on the oldest cluster (`ENGINE_V2.md` at 174d, `KNOWLEDGE_MINE_BRIEF.md` at 155d) if those surfaces are still active.
 
 ---
 
