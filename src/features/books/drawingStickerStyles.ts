@@ -70,6 +70,18 @@ export const FANCY_STYLE_OPTIONS: FancyStyleOption[] = FANCY_OPTION_SPECS.map(re
 export const DEFAULT_FANCY_STYLE_ID = FANCY_STYLE_OPTIONS[0].id
 
 /**
+ * Friendly "which style made this?" label for a saved version — the theme's
+ * emoji + name, or the raw id if the option list no longer carries it. Pure and
+ * exported so the library's version chips and their aria-labels read from the
+ * same table the picker does (a parent comparing three versions of one drawing
+ * needs to see which is which).
+ */
+export function fancyStyleLabel(themeId: string): string {
+  const option = FANCY_STYLE_OPTIONS.find((o) => o.id === themeId)
+  return option ? `${option.emoji} ${option.label}` : themeId
+}
+
+/**
  * Resolve a picker option id to the `style` / `theme` params for an
  * `enhanceSketch` request. Always returns the transparent-sticker knobs
  * (`transparent: true`) so the enhanced result is a clean cutout. Falls back to

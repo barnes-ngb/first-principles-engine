@@ -19,7 +19,11 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker } from '../../core/types'
-import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from './drawingStickerStyles'
+import {
+  FANCY_STYLE_OPTIONS,
+  DEFAULT_FANCY_STYLE_ID,
+  fancyStyleLabel,
+} from './drawingStickerStyles'
 import { generateStickerVersion } from './generateStickerVersion'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import type { DrawingGroup } from './stickerGrouping'
@@ -45,8 +49,7 @@ interface DrawingGroupCardProps {
 /** Friendly label for a version chip — "Original", or the theme's emoji + name. */
 function versionLabel(sticker: Sticker): string {
   if (sticker.isOriginal || !sticker.theme) return 'Original'
-  const option = FANCY_STYLE_OPTIONS.find((o) => o.id === sticker.theme)
-  return option ? `${option.emoji} ${option.label}` : sticker.theme
+  return fancyStyleLabel(sticker.theme)
 }
 
 /**

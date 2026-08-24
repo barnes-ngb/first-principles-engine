@@ -117,3 +117,98 @@ describe("buildEnhancePrompt", () => {
     expect(result).toContain("Safe for children, family-friendly");
   });
 });
+
+// ── FEAT-158: styles you can tell apart ────────────────────────────
+
+/**
+ * The nine "Make it fancy" options exactly as the client sends them — mirrors
+ * `FANCY_STYLE_OPTIONS` / `resolveFancyEnhanceParams` in
+ * `src/features/books/drawingStickerStyles.ts`. That file's own suite asserts
+ * this id list, so a change on either side breaks a test rather than silently
+ * drifting.
+ */
+const FANCY_PAYLOADS: Array<{
+  id: string;
+  style?: string;
+  theme?: string;
+}> = [
+  { id: "cartoon", style: "storybook" },
+  { id: "fantasy", theme: "fantasy" },
+  { id: "animals", theme: "animals" },
+  { id: "adventure", theme: "adventure" },
+  { id: "space", theme: "space" },
+  { id: "science", theme: "science" },
+  { id: "faith", theme: "faith" },
+  { id: "family", theme: "family" },
+  { id: "minecraft", style: "minecraft", theme: "minecraft" },
+];
+
+describe("buildEnhancePrompt — style distinctness (FEAT-158)", () => {
+  const render = (p: (typeof FANCY_PAYLOADS)[number]) =>
+    buildEnhancePrompt(p.style, undefined, p.theme, true);
+
+  it("renders a distinct prompt for every fancy option", () => {
+    // The test that would have caught a collapse: pairwise inequality across
+    // the whole option list.
+    for (let i = 0; i < FANCY_PAYLOADS.length; i++) {
+      for (let j = i + 1; j < FANCY_PAYLOADS.length; j++) {
+        expect(
+          render(FANCY_PAYLOADS[i]),
+          `"${FANCY_PAYLOADS[i].id}" and "${FANCY_PAYLOADS[j].id}" render the same prompt`,
+        ).not.toBe(render(FANCY_PAYLOADS[j]));
+      }
+    }
+  });
+
+  it("gives every option its own opening style sentence", () => {
+    // Before FEAT-158 eight of nine options opened with the identical
+    // watercolor sentence, so the model had almost nothing to separate them by.
+    const openings = FANCY_PAYLOADS.map(
+      (p) => render(p).split(", inspired by")[0],
+    );
+    expect(new Set(openings).size).toBe(FANCY_PAYLOADS.length);
+  });
+
+  it("names palette, line work and shading for every option", () => {
+    for (const payload of FANCY_PAYLOADS) {
+      const prompt = render(payload);
+      expect(prompt, payload.id).toContain("Palette:");
+      expect(prompt, payload.id).toContain("Line work:");
+      expect(prompt, payload.id).toContain("Shading:");
+    }
+  });
+
+  it("gives every option distinct palette, line and shading language", () => {
+    const grab = (prompt: string, from: string, to: string) =>
+      prompt.slice(prompt.indexOf(from), prompt.indexOf(to));
+    const palettes = FANCY_PAYLOADS.map((p) =>
+      grab(render(p), "Palette:", "Line work:"),
+    );
+    const lines = FANCY_PAYLOADS.map((p) =>
+      grab(render(p), "Line work:", "Shading:"),
+    );
+    expect(new Set(palettes).size).toBe(FANCY_PAYLOADS.length);
+    expect(new Set(lines).size).toBe(FANCY_PAYLOADS.length);
+  });
+
+  it("lets the theme own the look when no base style is named", () => {
+    // A themed option must not inherit the generic watercolor sentence — that
+    // inheritance is what made Fantasy and Cartoon come back looking alike.
+    const fantasy = buildEnhancePrompt(undefined, undefined, "fantasy", true);
+    expect(fantasy).not.toContain("warm hand-painted watercolor");
+    expect(fantasy).toContain("fairy-tale");
+  });
+
+  it("still honors an explicitly named base style alongside a theme", () => {
+    // The book reimagine path always names a style; it keeps both blocks.
+    const both = buildEnhancePrompt("comic", undefined, "fantasy", false);
+    expect(both).toContain("bold, colorful comic book");
+    expect(both).toContain("fairy-tale");
+  });
+
+  it("tells the model not to drift toward a generic cartoon look", () => {
+    expect(buildEnhancePrompt("storybook")).toContain(
+      "do not drift toward a generic soft cartoon look",
+    );
+  });
+});

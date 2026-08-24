@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  boostInkContrast,
+  luminance,
   medianRgb,
+  pickBackgroundSample,
   removeBackgroundColor,
+  removeSmallIslands,
   rgbStdDev,
   sampleBorderRgb,
 } from './cleanSketch'
@@ -208,5 +212,268 @@ describe('removeBackgroundColor', () => {
     // Every drawing-centre pixel still opaque
     const opaqueDrawingCentre = countTransparentInRect(data, w, [12, 12, 18, 18])
     expect(opaqueDrawingCentre).toBe(0)
+  })
+})
+
+// ── FEAT-158: cleanup that respects the paper ──────────────────────
+
+/** Paint a filled rect of `color` into an existing RGBA buffer. */
+function paint(
+  data: Uint8ClampedArray,
+  width: number,
+  rect: [number, number, number, number],
+  color: [number, number, number],
+  alpha = 255,
+) {
+  const [x0, y0, x1, y1] = rect
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 4
+      data[i] = color[0]
+      data[i + 1] = color[1]
+      data[i + 2] = color[2]
+      data[i + 3] = alpha
+    }
+  }
+}
+
+/**
+ * The reported case: a sheet of white-ish paper photographed on a patterned
+ * carpet. The outermost pixels are carpet; the paper is an inner frame; the
+ * drawing sits in the middle.
+ */
+function makeCarpetPhoto(size = 60): Uint8ClampedArray {
+  const data = new Uint8ClampedArray(size * size * 4)
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4
+      const dark = (x >> 1) % 2 === (y >> 1) % 2
+      const v = dark ? 60 : 120
+      data[i] = v + 20
+      data[i + 1] = v
+      data[i + 2] = v - 10
+      data[i + 3] = 255
+    }
+  }
+  // The sheet of paper, inset from the photo edge.
+  paint(data, size, [8, 8, size - 8, size - 8], [238, 236, 230])
+  // A faint pencil drawing in the middle of the paper.
+  paint(data, size, [24, 24, 36, 36], [186, 184, 180])
+  return data
+}
+
+describe('sampleBorderRgb — inset + region (FEAT-158)', () => {
+  it('skips the outermost pixels when an inset is given', () => {
+    const data = makeImage(20, 20, [255, 255, 255])
+    for (let y = 0; y < 20; y++) {
+      for (let x = 0; x < 20; x++) {
+        if (x < 2 || y < 2 || x > 17 || y > 17) {
+          const i = (y * 20 + x) * 4
+          data[i] = 255
+          data[i + 1] = 0
+          data[i + 2] = 0
+        }
+      }
+    }
+    // No inset → the red ring dominates the sample.
+    expect(medianRgb(sampleBorderRgb(data, 20, 20, 2))).toEqual([255, 0, 0])
+    // 15% inset (3px) starts the ring inside the red → pure white.
+    const inset = sampleBorderRgb(data, 20, 20, 2, { insetFraction: 0.15 })
+    expect(medianRgb(inset)).toEqual([255, 255, 255])
+  })
+
+  it('samples inside the crop box the parent drew, not the whole photo', () => {
+    const data = makeImage(40, 40, [120, 80, 50])
+    paint(data, 40, [10, 10, 30, 30], [60, 110, 200])
+    expect(medianRgb(sampleBorderRgb(data, 40, 40, 3))).toEqual([120, 80, 50])
+    const cropped = sampleBorderRgb(data, 40, 40, 3, {
+      region: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+    })
+    expect(medianRgb(cropped)).toEqual([60, 110, 200])
+  })
+})
+
+describe('pickBackgroundSample — bimodal ring (FEAT-158)', () => {
+  it('picks the paper, not the median of paper-and-carpet', () => {
+    const size = 60
+    const data = makeCarpetPhoto(size)
+    const samples = sampleBorderRgb(data, size, size, 10, { insetFraction: 0.02 })
+    const picked = pickBackgroundSample(samples)
+
+    // What the old path did: the plain median of the whole ring lands between
+    // the carpet and the paper — the wrong color for either surface, which is
+    // why the paper survived opaque in the reported case.
+    const oldMedian = medianRgb(samples)
+    expect(oldMedian[0]).toBeLessThan(200)
+
+    expect(picked.bimodal).toBe(true)
+    expect(picked.color[0]).toBeGreaterThan(200)
+    expect(picked.color[1]).toBeGreaterThan(200)
+    expect(picked.color[2]).toBeGreaterThan(200)
+
+    // The reported symptom: the *whole ring's* std dev trips the
+    // maxBackgroundStdDev gate (35) and drops us into the weak HSL fallback,
+    // while the chosen paper cluster's own std dev does not.
+    expect(rgbStdDev(samples)).toBeGreaterThan(35)
+    expect(picked.stdDev).toBeLessThan(35)
+  })
+
+  it('knocks the paper out and leaves the drawing standing', () => {
+    const size = 60
+    const data = makeCarpetPhoto(size)
+    const samples = sampleBorderRgb(data, size, size, 10, { insetFraction: 0.02 })
+    const picked = pickBackgroundSample(samples)
+    removeBackgroundColor(data, picked.color, 60, 1.5)
+
+    const paperIdx = (12 * size + 12) * 4
+    expect(data[paperIdx + 3]).toBe(0)
+    const inkIdx = (30 * size + 30) * 4
+    expect(data[inkIdx + 3]).toBeGreaterThan(200)
+  })
+
+  it('falls back to the median when the ring is one uniform surface', () => {
+    const data = makeImage(30, 30, [120, 80, 50])
+    const samples = sampleBorderRgb(data, 30, 30, 4)
+    const picked = pickBackgroundSample(samples)
+    expect(picked.bimodal).toBe(false)
+    expect(picked.color).toEqual([120, 80, 50])
+  })
+
+  it('does not treat a few stroke pixels at the edge as a second surface', () => {
+    const data = makeImage(40, 40, [250, 250, 250])
+    paint(data, 40, [18, 0, 22, 3], [10, 10, 10])
+    const samples = sampleBorderRgb(data, 40, 40, 3)
+    const picked = pickBackgroundSample(samples)
+    expect(picked.bimodal).toBe(false)
+    expect(picked.color).toEqual([250, 250, 250])
+  })
+
+  it('prefers a decisively flatter dark surface over a busy lighter one', () => {
+    const samples: number[] = []
+    for (let i = 0; i < 40; i++) samples.push(38, 36, 40) // flat dark paper
+    for (let i = 0; i < 40; i++) {
+      const v = i % 2 === 0 ? 150 : 245 // busy bright rug
+      samples.push(v, v, v)
+    }
+    const picked = pickBackgroundSample(new Uint8ClampedArray(samples))
+    expect(picked.bimodal).toBe(true)
+    expect(picked.color[0]).toBeLessThan(60)
+  })
+})
+
+describe('removeSmallIslands (FEAT-158)', () => {
+  it('drops dust specks but keeps a multi-stroke drawing whole', () => {
+    const w = 40
+    const h = 40
+    const data = new Uint8ClampedArray(w * h * 4) // all transparent
+    paint(data, w, [4, 4, 14, 14], [20, 20, 20]) // 100 px stroke
+    paint(data, w, [24, 24, 32, 32], [20, 20, 20]) // 64 px stroke
+    paint(data, w, [2, 36, 3, 37], [20, 20, 20]) // dust
+    paint(data, w, [36, 2, 37, 3], [20, 20, 20]) // dust
+
+    const removed = removeSmallIslands(data, w, h, 20)
+    expect(removed).toBe(2)
+    expect(data[(36 * w + 2) * 4 + 3]).toBe(0)
+    expect(data[(2 * w + 36) * 4 + 3]).toBe(0)
+    // Both strokes survive.
+    expect(data[(8 * w + 8) * 4 + 3]).toBe(255)
+    expect(data[(28 * w + 28) * 4 + 3]).toBe(255)
+  })
+
+  it('never removes the largest island, even below the threshold', () => {
+    const w = 20
+    const h = 20
+    const data = new Uint8ClampedArray(w * h * 4)
+    paint(data, w, [5, 5, 8, 8], [20, 20, 20]) // 9 px, the only island
+    expect(removeSmallIslands(data, w, h, 5000)).toBe(0)
+    expect(data[(6 * w + 6) * 4 + 3]).toBe(255)
+  })
+})
+
+describe('boostInkContrast (FEAT-158)', () => {
+  /** Mean luminance of pixels that survived the knockout. */
+  function meanInkLuminance(data: Uint8ClampedArray): number {
+    let sum = 0
+    let n = 0
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] === 0) continue
+      sum += luminance(data[i], data[i + 1], data[i + 2])
+      n++
+    }
+    return n ? sum / n : 0
+  }
+
+  it('measurably darkens faint pencil', () => {
+    const paper: [number, number, number] = [238, 236, 230]
+    const data = new Uint8ClampedArray([190, 188, 186, 255])
+    const before = meanInkLuminance(data)
+    boostInkContrast(data, paper, 1, 120)
+    expect(meanInkLuminance(data)).toBeLessThan(before - 15)
+  })
+
+  it('leaves marker-on-white byte-identical (the regression rail)', () => {
+    const white: [number, number, number] = [255, 255, 255]
+    const data = new Uint8ClampedArray([
+      15, 15, 15, 255,
+      220, 30, 30, 255,
+      30, 60, 200, 255,
+    ])
+    const before = Uint8ClampedArray.from(data)
+    boostInkContrast(data, white, 1, 120)
+    expect(Array.from(data)).toEqual(Array.from(before))
+  })
+
+  it('never lightens ink, and preserves hue when it does boost', () => {
+    const white: [number, number, number] = [255, 255, 255]
+    const data = new Uint8ClampedArray([240, 230, 30, 255])
+    boostInkContrast(data, white, 1, 120)
+    expect(luminance(data[0], data[1], data[2])).toBeLessThan(
+      luminance(240, 230, 30),
+    )
+    // Still yellow: red ≈ green, blue far below both.
+    expect(Math.abs(data[0] - data[1])).toBeLessThan(20)
+    expect(data[2]).toBeLessThan(data[1] - 100)
+  })
+
+  it('is a no-op at zero strength', () => {
+    const data = new Uint8ClampedArray([190, 188, 186, 255])
+    const before = Uint8ClampedArray.from(data)
+    boostInkContrast(data, [238, 236, 230], 0, 120)
+    expect(Array.from(data)).toEqual(Array.from(before))
+  })
+
+  it('skips fully transparent pixels', () => {
+    const data = new Uint8ClampedArray([200, 200, 200, 0])
+    boostInkContrast(data, [238, 236, 230], 1, 120)
+    expect(Array.from(data)).toEqual([200, 200, 200, 0])
+  })
+})
+
+describe('marker-on-white characterization (the regression rail)', () => {
+  it('cuts out marker on white paper at least as well as before', () => {
+    const w = 30
+    const h = 30
+    const data = makeImage(w, h, [252, 252, 250], {
+      rect: [10, 10, 20, 20],
+      color: [25, 40, 190], // blue marker
+    })
+    const samples = sampleBorderRgb(data, w, h, 4, { insetFraction: 0.05 })
+    const picked = pickBackgroundSample(samples)
+    // A single uniform surface — the same background the old median path found.
+    expect(picked.bimodal).toBe(false)
+    expect(picked.color).toEqual([252, 252, 250])
+
+    const beforeInk = Uint8ClampedArray.from(data)
+    removeBackgroundColor(data, picked.color, 60, 1.5)
+    removeSmallIslands(data, w, h, Math.max(2, Math.round(w * h * 0.0002)))
+    boostInkContrast(data, picked.color, 1, 120)
+
+    expect(data[3]).toBe(0)
+    const ink = (15 * w + 15) * 4
+    expect(data[ink + 3]).toBe(255)
+    // Marker pixels are far from the paper, so the boost leaves them identical.
+    expect(data[ink]).toBe(beforeInk[ink])
+    expect(data[ink + 1]).toBe(beforeInk[ink + 1])
+    expect(data[ink + 2]).toBe(beforeInk[ink + 2])
   })
 })

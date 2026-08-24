@@ -22,7 +22,11 @@ import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { useAI } from '../../core/ai/useAI'
 import CropIcon from '@mui/icons-material/Crop'
-import { cleanSketchBackground } from './cleanSketch'
+import {
+  cleanSketchBackground,
+  DEFAULT_BORDER_INSET_FRACTION,
+  WHOLE_IMAGE_BORDER_INSET_FRACTION,
+} from './cleanSketch'
 import SketchCropStage from './SketchCropStage'
 import { cropImageToRegion, type CropFraction } from './cropImage'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
@@ -170,12 +174,20 @@ export default function SketchScanner({
   )
 
   // Transparent cleanup → preview. Shared by both crop paths (cropped + whole).
+  // `fromCrop` says whether the parent already trimmed the surround: if they did,
+  // the file *is* the chosen region and a small inset is enough; on "use whole
+  // image" the outermost pixels are most likely table or carpet, so the
+  // background ring is pulled further in (FEAT-158).
   const runClean = useCallback(
-    async (file: File) => {
+    async (file: File, fromCrop: boolean) => {
       setStage('cleaning')
       setError(null)
       try {
-        const cleaned = await cleanSketchBackground(file)
+        const cleaned = await cleanSketchBackground(file, {
+          borderInsetFraction: fromCrop
+            ? DEFAULT_BORDER_INSET_FRACTION
+            : WHOLE_IMAGE_BORDER_INSET_FRACTION,
+        })
         setCleanedFile(cleaned)
         setCleanedUrl(URL.createObjectURL(cleaned))
         // Seed tags from the default label so saving is one tap if they don't edit.
@@ -192,7 +204,7 @@ export default function SketchScanner({
 
   // "Use whole image" — keeps today's behavior (clean the full capture).
   const handleUseWholeImage = useCallback(() => {
-    if (originalFile) void runClean(originalFile)
+    if (originalFile) void runClean(originalFile, false)
   }, [originalFile, runClean])
 
   // "Use this" — crop to the selected box, then clean. The cropped image
@@ -206,7 +218,7 @@ export default function SketchScanner({
       setOriginalUrl(URL.createObjectURL(cropped))
       // Force a re-upload of the cropped original if a fancy transform is requested.
       setOriginalStoragePath(null)
-      await runClean(cropped)
+      await runClean(cropped, true)
     } catch {
       setError('Failed to crop image. Please try again.')
     }

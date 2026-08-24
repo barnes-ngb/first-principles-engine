@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   FANCY_STYLE_OPTIONS,
   DEFAULT_FANCY_STYLE_ID,
+  fancyStyleLabel,
   resolveFancyEnhanceParams,
 } from './drawingStickerStyles'
 import { getPresetTheme } from '../../core/types/books'
@@ -82,5 +83,59 @@ describe('drawingStickerStyles', () => {
     expect(params.style).toBe('storybook')
     expect(params.theme).toBeUndefined()
     expect(params.transparent).toBe(true)
+  })
+})
+
+// ── FEAT-158: styles you can tell apart ────────────────────────────
+
+describe('drawingStickerStyles — distinctness (FEAT-158)', () => {
+  it('every option sends a distinct {style, theme} payload', () => {
+    // The test that would have caught a collapse: if two picker options resolve
+    // to the same enhanceSketch params, no prompt change can tell them apart.
+    const seen = new Map<string, string>()
+    for (const option of FANCY_STYLE_OPTIONS) {
+      const params = resolveFancyEnhanceParams(option.id)
+      const key = `${params.style ?? '-'}|${params.theme ?? '-'}`
+      expect(
+        seen.has(key),
+        `"${option.id}" sends the same payload as "${seen.get(key)}" (${key})`,
+      ).toBe(false)
+      seen.set(key, option.id)
+    }
+    expect(seen.size).toBe(FANCY_STYLE_OPTIONS.length)
+  })
+
+  it('keeps the existing option ids and default so saved stickers do not re-map', () => {
+    // Saved stickers store the option id in `Sticker.theme`; changing an id
+    // would orphan every version already in the library.
+    expect(DEFAULT_FANCY_STYLE_ID).toBe('cartoon')
+    expect(FANCY_STYLE_OPTIONS.map((o) => o.id)).toEqual([
+      'cartoon',
+      'fantasy',
+      'animals',
+      'adventure',
+      'space',
+      'science',
+      'faith',
+      'family',
+      'minecraft',
+    ])
+  })
+})
+
+describe('fancyStyleLabel (FEAT-158)', () => {
+  it('names the style that made a saved version', () => {
+    expect(fancyStyleLabel('cartoon')).toBe('🎨 Cartoon')
+    expect(fancyStyleLabel('minecraft')).toContain('Blocky')
+    expect(fancyStyleLabel('fantasy')).toContain('Fantasy')
+  })
+
+  it('labels every option distinctly, so three versions read apart', () => {
+    const labels = FANCY_STYLE_OPTIONS.map((o) => fancyStyleLabel(o.id))
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+
+  it('falls back to the raw id for an option no longer offered', () => {
+    expect(fancyStyleLabel('dinosaurs')).toBe('dinosaurs')
   })
 })
