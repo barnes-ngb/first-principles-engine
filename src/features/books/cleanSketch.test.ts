@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   boostInkContrast,
+  computeMinIslandPixels,
   luminance,
   medianRgb,
   pickBackgroundSample,
@@ -348,6 +349,18 @@ describe('pickBackgroundSample — bimodal ring (FEAT-158)', () => {
     expect(picked.color).toEqual([250, 250, 250])
   })
 
+  it('picks white paper over a solid dark table (Codex P1, PR #1701)', () => {
+    // Two *uniform* surfaces → std dev 0 for both clusters. A bare
+    // `darker * ratio <= lighter` comparison hands the tie to the table and
+    // leaves the sheet opaque — the exact failure this function exists to fix.
+    const samples: number[] = []
+    for (let i = 0; i < 40; i++) samples.push(248, 247, 244) // uniform white paper
+    for (let i = 0; i < 40; i++) samples.push(52, 44, 38) // uniform dark table
+    const picked = pickBackgroundSample(new Uint8ClampedArray(samples))
+    expect(picked.bimodal).toBe(true)
+    expect(picked.color[0]).toBeGreaterThan(200)
+  })
+
   it('prefers a decisively flatter dark surface over a busy lighter one', () => {
     const samples: number[] = []
     for (let i = 0; i < 40; i++) samples.push(38, 36, 40) // flat dark paper
@@ -378,6 +391,19 @@ describe('removeSmallIslands (FEAT-158)', () => {
     // Both strokes survive.
     expect(data[(8 * w + 8) * 4 + 3]).toBe(255)
     expect(data[(28 * w + 28) * 4 + 3]).toBe(255)
+  })
+
+  it('accepts a threshold computed from the largest island', () => {
+    const w = 40
+    const h = 40
+    const data = new Uint8ClampedArray(w * h * 4)
+    paint(data, w, [4, 4, 14, 14], [20, 20, 20]) // 100 px stroke
+    paint(data, w, [2, 36, 3, 37], [20, 20, 20]) // 1 px dust
+    // 20% of the largest island → 20 px, so the speck goes and the stroke stays.
+    const removed = removeSmallIslands(data, w, h, (largest) => largest * 0.2)
+    expect(removed).toBe(1)
+    expect(data[(36 * w + 2) * 4 + 3]).toBe(0)
+    expect(data[(8 * w + 8) * 4 + 3]).toBe(255)
   })
 
   it('never removes the largest island, even below the threshold', () => {
@@ -475,5 +501,36 @@ describe('marker-on-white characterization (the regression rail)', () => {
     expect(data[ink]).toBe(beforeInk[ink])
     expect(data[ink + 1]).toBe(beforeInk[ink + 1])
     expect(data[ink + 2]).toBe(beforeInk[ink + 2])
+  })
+})
+
+describe('computeMinIslandPixels (Codex P2, PR #1701)', () => {
+  it('does not scale the dust bound with the camera megapixels', () => {
+    // A 4000×3000 phone photo. The old area-only bound (0.0002) landed at
+    // 2,400 px — big enough to erase an eye dot, a period, or the dot of an "i".
+    const area = 4000 * 3000
+    expect(Math.round(area * 0.0002)).toBe(2400)
+    // The shipped bound is an order of magnitude smaller.
+    expect(computeMinIslandPixels(area, 500_000)).toBeLessThan(300)
+  })
+
+  it('keeps a small intentional mark on a high-resolution capture', () => {
+    const area = 4000 * 3000
+    // An eye dot roughly 30 px across on that capture ≈ 700 px of ink.
+    const eyeDot = 700
+    expect(computeMinIslandPixels(area, 500_000)).toBeLessThan(eyeDot)
+  })
+
+  it('tightens further for a sparse drawing, tracking content not frame', () => {
+    const area = 4000 * 3000
+    const sparse = computeMinIslandPixels(area, 20_000)
+    const full = computeMinIslandPixels(area, 500_000)
+    // The sparser the drawing, the lower the bar for keeping a mark.
+    expect(sparse).toBeLessThan(full)
+    expect(sparse).toBeGreaterThanOrEqual(2)
+  })
+
+  it('never drops below a 2px floor', () => {
+    expect(computeMinIslandPixels(100, 4)).toBe(2)
   })
 })

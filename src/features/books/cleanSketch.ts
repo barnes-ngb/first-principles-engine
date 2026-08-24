@@ -48,9 +48,13 @@ export interface CleanSketchOptions {
   /** Minimum luminance gap between the two ring clusters before we treat the ring
    *  as bimodal (paper + surface). Default 28. */
   bimodalSeparation?: number
-  /** Smallest opaque island kept, as a fraction of total pixels. Default 0.0002.
+  /** Smallest opaque island kept, as a fraction of total pixels. Default 0.00002.
    *  The largest island is always kept regardless. */
   minIslandFraction?: number
+  /** Second, usually tighter bound on the dust threshold: a fraction of the
+   *  largest island, so a sparse drawing keeps its small marks. Default 0.0005.
+   *  The lower of the two bounds wins — see {@link computeMinIslandPixels}. */
+  minIslandShareOfLargest?: number
   /** Ink-contrast boost strength (0 = off). Default 1. */
   inkContrastStrength?: number
   /** Ink already this far from the background luminance is left byte-identical.
@@ -212,22 +216,33 @@ function clusterStats(
  * 2-means) and, when they are genuinely separated, pick one:
  *
  *   **Prefer the lighter cluster** — paper is almost always lighter than the
- *   table or floor it sits on. **Unless the darker cluster is decisively
- *   flatter** (its std dev is `flatnessRatio`× smaller), in which case the
- *   darker-but-uniform surface is the paper and the lighter one is a busy rug.
- *   Lightness picks the paper; flatness is the tie-breaker that rescues dark
- *   construction paper on a bright patterned surface.
+ *   table or floor it sits on. **Unless the lighter cluster is actually busy
+ *   (std dev over `minNoisyStdDev`) and the darker one is materially flatter**
+ *   (`flatnessRatio`× smaller), in which case the darker-but-uniform surface is
+ *   the paper and the lighter one is a patterned rug.
+ *
+ *   Both halves of that override are load-bearing. Two *uniform* surfaces —
+ *   white paper on a solid dark table — give std dev 0 for each cluster, and a
+ *   bare ratio comparison would hand the tie to the darker table and leave the
+ *   sheet opaque. Lightness decides; flatness only overrides against a surface
+ *   that is visibly patterned.
  *
  * When the ring is not bimodal (one uniform surround) this is exactly the old
  * behavior: median + std dev of everything.
  */
 export function pickBackgroundSample(
   samples: Uint8ClampedArray,
-  opts?: { separation?: number; minShare?: number; flatnessRatio?: number },
+  opts?: {
+    separation?: number
+    minShare?: number
+    flatnessRatio?: number
+    minNoisyStdDev?: number
+  },
 ): BackgroundSample {
   const separation = opts?.separation ?? 28
   const minShare = opts?.minShare ?? 0.15
   const flatnessRatio = opts?.flatnessRatio ?? 1.6
+  const minNoisyStdDev = opts?.minNoisyStdDev ?? 10
 
   const n = samples.length / 3
   const whole = (): BackgroundSample => ({
@@ -280,8 +295,14 @@ export function pickBackgroundSample(
   const b = clusterStats(samples, idxB)
   const lighter = a.meanLum >= b.meanLum ? a : b
   const darker = a.meanLum >= b.meanLum ? b : a
-  const chosen =
-    darker.stdDev * flatnessRatio <= lighter.stdDev ? darker : lighter
+  // Lightness decides. The darker cluster only wins when the lighter one is
+  // *actually busy* and the darker is materially flatter — never on a tie.
+  // Both tests matter: white paper on a solid dark table gives two uniform
+  // clusters (std dev 0 each), and a bare ratio comparison would pick the table
+  // and leave the sheet opaque — the exact failure this function exists to fix.
+  const darkerIsDecisivelyFlatter =
+    lighter.stdDev > minNoisyStdDev && darker.stdDev * flatnessRatio < lighter.stdDev
+  const chosen = darkerIsDecisivelyFlatter ? darker : lighter
   return { color: chosen.color, stdDev: chosen.stdDev, bimodal: true }
 }
 
@@ -314,20 +335,54 @@ export function removeBackgroundColor(
 }
 
 /**
+ * How small an island has to be before it counts as dust.
+ *
+ * Keyed off the **drawing**, not the camera. A threshold that is only a fraction
+ * of the capture area scales with megapixels rather than with content: at
+ * 0.0002 of a 4000×3000 phone photo it lands at 2,400 px, which erases an eye
+ * dot, a period, or the dot of an "i" — legitimate marks, and exactly the kind
+ * of loss this pass must not cause. So the bound is the **smaller** of two:
+ * a very small fraction of the frame, and a small fraction of the largest
+ * island. The second is what makes a sparse drawing safe — the sparser the
+ * content, the lower the bar for keeping a mark.
+ *
+ * At 12 MP with a full-page drawing this resolves to a few hundred pixels — on
+ * the order of a 15×15 block, under a millimetre of pencil at that resolution.
+ * This is a heuristic with a real (if now much smaller) false-positive risk; it
+ * is deliberately tuned to under-remove.
+ */
+export function computeMinIslandPixels(
+  imageArea: number,
+  largestIslandPixels: number,
+  fractionOfArea = 0.00002,
+  fractionOfLargest = 0.0005,
+): number {
+  return Math.max(
+    2,
+    Math.round(
+      Math.min(imageArea * fractionOfArea, largestIslandPixels * fractionOfLargest),
+    ),
+  )
+}
+
+/**
  * Drop tiny disconnected opaque islands — dust, paper flecks, a speck of the
  * carpet that squeaked past the knockout — so they don't survive as sticker
  * content. Mutates `data` in place; returns how many islands were cleared.
  *
- * **The largest island is always kept, whatever `minPixels` says**, and so is
- * anything at or above the threshold: a drawing is legitimately several strokes
- * apart (a face and a separate hat), and losing one of them would be far worse
- * than leaving a speck.
+ * **The largest island is always kept, whatever the threshold says**, and so is
+ * anything at or above it: a drawing is legitimately several strokes apart (a
+ * face and a separate hat), and losing one of them would be far worse than
+ * leaving a speck.
+ *
+ * `minPixels` may be a function of the largest island's size, so the bound can
+ * scale with the drawing rather than the frame — see {@link computeMinIslandPixels}.
  */
 export function removeSmallIslands(
   data: Uint8ClampedArray,
   width: number,
   height: number,
-  minPixels: number,
+  minPixels: number | ((largestIslandPixels: number) => number),
   alphaThreshold = 10,
 ): number {
   const count = width * height
@@ -371,15 +426,17 @@ export function removeSmallIslands(
 
   let largest = 0
   for (let i = 1; i < sizes.length; i++) if (sizes[i] > sizes[largest]) largest = i
+  const threshold =
+    typeof minPixels === 'function' ? minPixels(sizes[largest]) : minPixels
   let removed = 0
   for (let i = 0; i < sizes.length; i++) {
-    if (i !== largest && sizes[i] < minPixels) removed++
+    if (i !== largest && sizes[i] < threshold) removed++
   }
   if (removed === 0) return 0
   for (let p = 0; p < count; p++) {
     const label = labels[p]
     if (label === -1 || label === largest) continue
-    if (sizes[label] < minPixels) data[p * 4 + 3] = 0
+    if (sizes[label] < threshold) data[p * 4 + 3] = 0
   }
   return removed
 }
@@ -547,7 +604,8 @@ export async function cleanSketchBackground(
   const insetFraction = options?.borderInsetFraction ?? DEFAULT_BORDER_INSET_FRACTION
   const sampleRegion = options?.sampleRegion
   const bimodalSeparation = options?.bimodalSeparation ?? 28
-  const minIslandFraction = options?.minIslandFraction ?? 0.0002
+  const minIslandFraction = options?.minIslandFraction ?? 0.00002
+  const minIslandShareOfLargest = options?.minIslandShareOfLargest ?? 0.0005
   const inkStrength = options?.inkContrastStrength ?? 1
   const inkFullRange = options?.inkContrastFullRange ?? 120
   const endTotal = startStep('cleanSketchBackground')
@@ -587,8 +645,12 @@ export async function cleanSketchBackground(
 
       // Drop dust/flecks, then strengthen what's left. Both run before the alpha
       // blur so specks aren't smeared into soft grey haze instead of removed.
-      const minIsland = Math.max(2, Math.round(canvas.width * canvas.height * minIslandFraction))
-      removeSmallIslands(data, canvas.width, canvas.height, minIsland)
+      // The dust bound is resolved against the largest island so it tracks the
+      // drawing, not the camera's megapixels.
+      const area = canvas.width * canvas.height
+      removeSmallIslands(data, canvas.width, canvas.height, (largest) =>
+        computeMinIslandPixels(area, largest, minIslandFraction, minIslandShareOfLargest),
+      )
       boostInkContrast(data, bgColor, inkStrength, inkFullRange)
 
       ctx.putImageData(imageData, 0, 0)
