@@ -86,9 +86,9 @@ describe('drawingStickerStyles', () => {
   })
 })
 
-// ── FEAT-158: styles you can tell apart ────────────────────────────
+// ── FEAT-159: styles you can tell apart ────────────────────────────
 
-describe('drawingStickerStyles — distinctness (FEAT-158)', () => {
+describe('drawingStickerStyles — distinctness (FEAT-159)', () => {
   it('every option sends a distinct {style, theme} payload', () => {
     // The test that would have caught a collapse: if two picker options resolve
     // to the same enhanceSketch params, no prompt change can tell them apart.
@@ -123,7 +123,7 @@ describe('drawingStickerStyles — distinctness (FEAT-158)', () => {
   })
 })
 
-describe('fancyStyleLabel (FEAT-158)', () => {
+describe('fancyStyleLabel (FEAT-159)', () => {
   it('names the style that made a saved version', () => {
     expect(fancyStyleLabel('cartoon')).toBe('🎨 Cartoon')
     expect(fancyStyleLabel('minecraft')).toContain('Blocky')

@@ -370,3 +370,82 @@ describe('LabReportForm — uploads to a saved report persist immediately (UX-82
     expect(screen.queryByText('capture-audio')).toBeNull()
   })
 })
+
+// UX-83 — a Save that rejects used to leave the parent believing the lab was
+// written: `useSaveState.withSave` catches, logs to the console, and flips to
+// 'error', and nothing rendered that state. The form already survives a failure
+// (the page only navigates on a resolved promise) — but silently, which is the
+// same class of dishonesty UX-82's attach alert closed.
+describe('LabReportForm — a failed Save says so (UX-83)', () => {
+  it('surfaces the failure, keeps the form open, and clears nothing', async () => {
+    const user = userEvent.setup({ delay: null })
+    const onSave = vi.fn().mockRejectedValue(new Error('offline'))
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={onSave} onCancel={vi.fn()} />,
+    )
+
+    // Type into the beat writing line so there is unsaved work to lose.
+    const writingLines = screen.getAllByPlaceholderText(WRITING_PLACEHOLDER)
+    await user.type(writingLines[0], 'it will roll fast')
+
+    await user.click(screen.getByRole('button', { name: 'Complete Lab' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+
+    // Said out loud, right above Save — what failed, that nothing was lost.
+    expect(await screen.findByText(/didn't save/i)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing was lost/i)).toBeInTheDocument()
+
+    // The form is still here, with every field the parent filled in.
+    expect(screen.getByDisplayValue('Ramp Lab')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('it will roll fast')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Complete Lab' })).toBeEnabled()
+  }, 20000)
+
+  it('a retry that succeeds saves the state that was held, and drops the alert', async () => {
+    const user = userEvent.setup({ delay: null })
+    const onSave = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(undefined)
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={onSave} onCancel={vi.fn()} />,
+    )
+
+    const writingLines = screen.getAllByPlaceholderText(WRITING_PLACEHOLDER)
+    await user.type(writingLines[0], 'it will roll fast')
+
+    await user.click(screen.getByRole('button', { name: 'Complete Lab' }))
+    expect(await screen.findByText(/didn't save/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Complete Lab' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+
+    // The retry carried the same work — nothing was dropped by the failure.
+    const saved = onSave.mock.calls[1][0] as DadLabReport
+    expect(saved.beats?.predict.text).toBe('it will roll fast')
+    await waitFor(() => expect(screen.queryByText(/didn't save/i)).toBeNull())
+  }, 20000)
+
+  it('a successful Save is unchanged — no alert, and the report is handed up once', async () => {
+    const user = userEvent.setup({ delay: null })
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={onSave} onCancel={vi.fn()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Complete Lab' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+
+    expect(screen.queryByText(/didn't save/i)).toBeNull()
+    expect((onSave.mock.calls[0][0] as DadLabReport).title).toBe('Ramp Lab')
+  }, 20000)
+
+  it('the read-only view never shows the Save-failure alert', () => {
+    // Same `!disabled` gate as the attach alerts — a view with no Save button
+    // must not carry a message about Save.
+    render(
+      <LabReportForm report={LEGACY_REPORT} children={KIDS} readOnly onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+    expect(screen.queryByText(/didn't save/i)).toBeNull()
+  })
+})

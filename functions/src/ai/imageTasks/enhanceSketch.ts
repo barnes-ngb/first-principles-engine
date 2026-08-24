@@ -36,7 +36,7 @@ export interface EnhanceSketchResponse {
 // ── Enhancement prompt ──────────────────────────────────────────
 
 /**
- * A look, spelled out (FEAT-158).
+ * A look, spelled out (FEAT-159).
  *
  * Every option the "Make it fancy" picker offers used to reach this builder with
  * `style` undefined, so eight of the nine surfaced options rendered the *same*
@@ -257,7 +257,7 @@ export function buildEnhancePrompt(
 
   // When a theme is picked and no base style was named, the theme owns the whole
   // look. Otherwise every themed option inherits the same watercolor sentence and
-  // nine distinct picker options collapse into one look (FEAT-158). An explicitly
+  // nine distinct picker options collapse into one look (FEAT-159). An explicitly
   // named style still wins the opening line and keeps its own detail block, so the
   // book reimagine path (which always names a style) is unchanged in shape.
   const baseRecipe =
@@ -268,9 +268,21 @@ export function buildEnhancePrompt(
     ? `The child described this as: "${caption}". `
     : "";
   const baseDetailClause = baseRecipe ? recipeDetail(baseRecipe) : "";
-  const themeClause = themeRecipe
-    ? `Visual theme: ${themeRecipe.summary} ${recipeDetail(themeRecipe)}`
-    : "";
+  // Exactly one full recipe reaches the model, ever. When the theme owns the
+  // look it spells itself out; when an explicit style is present the theme drops
+  // back to its one-line summary — the shape it had before FEAT-159 — and stays
+  // subordinate by its brevity. Emitting both would put two complete, competing
+  // palette/line/shading blocks under a single "follow the above exactly",
+  // which is an instruction to obey contradictory instructions. That case is not
+  // hypothetical: `useBackgroundReimagine` always sends a style AND the book's
+  // theme, so a minecraft-themed book at storybook intensity would ask for
+  // watercolor washes and flat per-face cube shading in the same breath.
+  const themeOwnsLook = !baseRecipe;
+  const themeClause = !themeRecipe
+    ? ""
+    : themeOwnsLook
+      ? `Visual theme: ${themeRecipe.summary} ${recipeDetail(themeRecipe)}`
+      : `Visual theme: ${themeRecipe.summary} `;
   const transparentClause = transparent
     ? "IMPORTANT: Render only the character/object on a fully TRANSPARENT background. " +
       "No background scene, no ground, no shadows on the ground, no environment, no border. " +

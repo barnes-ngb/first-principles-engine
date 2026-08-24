@@ -177,7 +177,7 @@ export default function SketchScanner({
   // `fromCrop` says whether the parent already trimmed the surround: if they did,
   // the file *is* the chosen region and a small inset is enough; on "use whole
   // image" the outermost pixels are most likely table or carpet, so the
-  // background ring is pulled further in (FEAT-158).
+  // background ring is pulled further in (FEAT-159).
   const runClean = useCallback(
     async (file: File, fromCrop: boolean) => {
       setStage('cleaning')

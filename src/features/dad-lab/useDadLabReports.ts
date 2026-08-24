@@ -124,8 +124,25 @@ export function useDadLabReports() {
         }
       }
 
-      // Reload list
-      await load()
+      // Reload list — a REDUNDANT refresh beside the live `onSnapshot` above,
+      // which is already subscribed to this exact query and has the new doc.
+      //
+      // Its failure must never be reported as a save failure (Codex P2, PR
+      // #1700). A brand-new lab is written with `addDoc`, so the form still
+      // holds no doc id: if a rejection here propagated, the parent would be
+      // told the save failed and — since UX-83 now tells them to tap Save again
+      // — a retry would `addDoc` a SECOND report. A create is the one case that
+      // cannot be retried idempotently, and this refetch is the one post-write
+      // step a create ever runs (a new report is always `Planned`, so the
+      // compliance/XP block below `status === 'complete'` is unreachable on
+      // that path). Swallowing it here leaves every remaining rejection a
+      // genuine primary-write failure, where "tap Save to try again" is both
+      // true and safe: an update is a `setDoc` on a known id, its hours sync
+      // deletes-then-recreates for that same `labReportId`, and XP/diamonds are
+      // deduped on `dadlab-${reportId}`.
+      //
+      // Not silent: the failure is logged, and the list is live regardless.
+      await load().catch((err) => console.error('Dad Lab list refresh failed', err))
       return reportId
     },
     [familyId, children, syncComplianceHours, load],

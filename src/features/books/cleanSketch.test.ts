@@ -216,7 +216,7 @@ describe('removeBackgroundColor', () => {
   })
 })
 
-// ── FEAT-158: cleanup that respects the paper ──────────────────────
+// ── FEAT-159: cleanup that respects the paper ──────────────────────
 
 /** Paint a filled rect of `color` into an existing RGBA buffer. */
 function paint(
@@ -263,7 +263,7 @@ function makeCarpetPhoto(size = 60): Uint8ClampedArray {
   return data
 }
 
-describe('sampleBorderRgb — inset + region (FEAT-158)', () => {
+describe('sampleBorderRgb — inset + region (FEAT-159)', () => {
   it('skips the outermost pixels when an inset is given', () => {
     const data = makeImage(20, 20, [255, 255, 255])
     for (let y = 0; y < 20; y++) {
@@ -294,7 +294,7 @@ describe('sampleBorderRgb — inset + region (FEAT-158)', () => {
   })
 })
 
-describe('pickBackgroundSample — bimodal ring (FEAT-158)', () => {
+describe('pickBackgroundSample — bimodal ring (FEAT-159)', () => {
   it('picks the paper, not the median of paper-and-carpet', () => {
     const size = 60
     const data = makeCarpetPhoto(size)
@@ -374,7 +374,7 @@ describe('pickBackgroundSample — bimodal ring (FEAT-158)', () => {
   })
 })
 
-describe('removeSmallIslands (FEAT-158)', () => {
+describe('removeSmallIslands (FEAT-159)', () => {
   it('drops dust specks but keeps a multi-stroke drawing whole', () => {
     const w = 40
     const h = 40
@@ -416,7 +416,7 @@ describe('removeSmallIslands (FEAT-158)', () => {
   })
 })
 
-describe('boostInkContrast (FEAT-158)', () => {
+describe('boostInkContrast (FEAT-159)', () => {
   /** Mean luminance of pixels that survived the knockout. */
   function meanInkLuminance(data: Uint8ClampedArray): number {
     let sum = 0

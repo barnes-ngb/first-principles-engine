@@ -118,7 +118,7 @@ describe("buildEnhancePrompt", () => {
   });
 });
 
-// ── FEAT-158: styles you can tell apart ────────────────────────────
+// ── FEAT-159: styles you can tell apart ────────────────────────────
 
 /**
  * The nine "Make it fancy" options exactly as the client sends them — mirrors
@@ -143,7 +143,7 @@ const FANCY_PAYLOADS: Array<{
   { id: "minecraft", style: "minecraft", theme: "minecraft" },
 ];
 
-describe("buildEnhancePrompt — style distinctness (FEAT-158)", () => {
+describe("buildEnhancePrompt — style distinctness (FEAT-159)", () => {
   const render = (p: (typeof FANCY_PAYLOADS)[number]) =>
     buildEnhancePrompt(p.style, undefined, p.theme, true);
 
@@ -161,7 +161,7 @@ describe("buildEnhancePrompt — style distinctness (FEAT-158)", () => {
   });
 
   it("gives every option its own opening style sentence", () => {
-    // Before FEAT-158 eight of nine options opened with the identical
+    // Before FEAT-159 eight of nine options opened with the identical
     // watercolor sentence, so the model had almost nothing to separate them by.
     const openings = FANCY_PAYLOADS.map(
       (p) => render(p).split(", inspired by")[0],
@@ -210,5 +210,62 @@ describe("buildEnhancePrompt — style distinctness (FEAT-158)", () => {
     expect(buildEnhancePrompt("storybook")).toContain(
       "do not drift toward a generic soft cartoon look",
     );
+  });
+});
+
+describe("buildEnhancePrompt — one recipe, never two (FEAT-159)", () => {
+  // `useBackgroundReimagine` always sends a style AND the book's theme, so this
+  // both-present case is the live reimagine path, not a hypothetical.
+  const MINECRAFT_RECIPE_STRINGS = [
+    "a limited 16-color palette of saturated greens",
+    "forms are stacked hard-edged cubes",
+    "flat per-face shading only — one solid tone per cube face",
+  ];
+
+  it("keeps the theme to its summary when a base style is named", () => {
+    const prompt = buildEnhancePrompt("storybook", undefined, "minecraft");
+    // The named style's own recipe is what the model follows...
+    expect(prompt).toContain("translucent watercolor washes");
+    // ...and the theme is present, but only as its one-line summary.
+    expect(prompt).toContain("Visual theme:");
+    expect(prompt).toContain("Blocky pixel-art Minecraft style");
+    for (const fragment of MINECRAFT_RECIPE_STRINGS) {
+      expect(prompt, `theme recipe leaked: ${fragment}`).not.toContain(fragment);
+    }
+  });
+
+  it("emits exactly one palette/line/shading block in the both-present case", () => {
+    const prompt = buildEnhancePrompt("comic", undefined, "fantasy", false);
+    const count = (needle: string) => prompt.split(needle).length - 1;
+    expect(count("Palette:")).toBe(1);
+    expect(count("Line work:")).toBe(1);
+    expect(count("Shading:")).toBe(1);
+  });
+
+  it("still spells the theme out in full when the theme owns the look", () => {
+    const prompt = buildEnhancePrompt(undefined, undefined, "minecraft", true);
+    for (const fragment of MINECRAFT_RECIPE_STRINGS) {
+      expect(prompt).toContain(fragment);
+    }
+    expect(prompt).not.toContain("warm hand-painted watercolor");
+  });
+
+  it("never asks the model to follow two competing recipes", () => {
+    // Every shape the builder can produce carries at most one full recipe.
+    const shapes: Array<[string | undefined, string | undefined]> = [
+      ["storybook", undefined],
+      ["storybook", "minecraft"],
+      ["comic", "fantasy"],
+      ["minecraft", "minecraft"],
+      [undefined, "fantasy"],
+      [undefined, undefined],
+    ];
+    for (const [style, theme] of shapes) {
+      const prompt = buildEnhancePrompt(style, undefined, theme, true);
+      expect(
+        prompt.split("Palette:").length - 1,
+        `style=${style} theme=${theme}`,
+      ).toBe(1);
+    }
   });
 });

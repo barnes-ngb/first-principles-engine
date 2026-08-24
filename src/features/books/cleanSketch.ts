@@ -10,7 +10,7 @@ import type { CropFraction } from './cropImage'
 // surround). Pixels close to that color become transparent; pixels
 // near the threshold get a feathered alpha for smooth edges.
 //
-// FEAT-158 — four changes so a photographed sheet on a busy surface
+// FEAT-159 — four changes so a photographed sheet on a busy surface
 // (Nathan's carpet case) cuts out as the paper, not the room:
 //   1. the ring is sampled *inset* from the edge (and inside the
 //      parent's crop when one is passed), never the outermost pixels;
@@ -627,7 +627,7 @@ export async function cleanSketchBackground(
       const data = imageData.data
 
       // Sample inside the crop / inset from the edge, then pick the paper
-      // cluster rather than the median of paper-and-carpet (FEAT-158).
+      // cluster rather than the median of paper-and-carpet (FEAT-159).
       const samples = sampleBorderRgb(data, canvas.width, canvas.height, border, {
         insetFraction,
         region: sampleRegion,
