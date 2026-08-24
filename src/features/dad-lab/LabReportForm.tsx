@@ -463,6 +463,22 @@ export default function LabReportForm({
     setBeats((prev) => ({ ...prev, [beat]: { ...prev[beat], textChild: child } }))
   }, [])
 
+  /**
+   * Per-item child re-assignment. DECIDED (the residual FEAT-156 left open,
+   * settled with UX-83): this stays **draft-until-Save**, unlike the upload
+   * itself.
+   *
+   * The upload earned its immediate narrow write because the artifact doc and
+   * the storage bytes are already written before the reference lands — losing
+   * the reference orphans real data. Re-assigning who a photo belongs to writes
+   * nothing outside this form: abandoning the form loses a dropdown change,
+   * exactly like the title, the minutes, or Dad's thoughts. Giving it its own
+   * write would make one control behave unlike every other field, and would put
+   * a narrow write in the path of Save's full-document `setDoc` for a field
+   * Save already composes — the stale-snapshot race the upload counter exists
+   * to prevent. Now that a failed Save says so out loud, draft-until-Save is an
+   * honest contract rather than a silent one.
+   */
   const setBeatItemChild = useCallback((beat: LabBeatId, artifactId: string, child: string) => {
     setBeats((prev) => ({
       ...prev,
@@ -656,18 +672,24 @@ export default function LabReportForm({
       arcStepIndex: arcId ? arcStepIndex : undefined,
     }
 
-    // Completing a linked lab: mark the arc step done (records completedReportId /
-    // completedDateKey). Runs before onSave (which may navigate away) so the write
-    // is dispatched regardless. Arc writes are entirely separate from the report /
-    // credit path — no hours/XP/diamond code is touched here.
-    if (isCompleting && markArcStepDone && linkedArc?.id && typeof arcStepIndex === 'number') {
-      await completeStep(linkedArc, arcStepIndex, {
-        completedReportId: report?.id,
-        completedDateKey: date,
-      })
-    }
-
+    // Save honesty (UX-83): the arc-step write and the report write share ONE
+    // guarded block, so a rejection from either one lands on `saveState` and is
+    // said out loud above the button. Nothing here clears form state or closes
+    // the form — the parent's `onSave` only navigates on a resolved promise —
+    // so a failed Save leaves the parent exactly where they were, with every
+    // word they typed still on screen and Save ready to try again.
     await withSave(async () => {
+      // Completing a linked lab: mark the arc step done (records completedReportId /
+      // completedDateKey). Runs before onSave (which may navigate away) so the write
+      // is dispatched regardless. Arc writes are entirely separate from the report /
+      // credit path — no hours/XP/diamond code is touched here.
+      if (isCompleting && markArcStepDone && linkedArc?.id && typeof arcStepIndex === 'number') {
+        await completeStep(linkedArc, arcStepIndex, {
+          completedReportId: report?.id,
+          completedDateKey: date,
+        })
+      }
+
       await onSave(reportData)
       // Save persisted every reference held in state — the drafts are attached.
       setUnattachedUploads(0)
@@ -1216,6 +1238,16 @@ export default function LabReportForm({
       {!disabled && !attachError && unattachedUploads > 0 && (
         <Alert severity="warning">
           Your photos aren&apos;t attached yet — save the report to keep them.
+        </Alert>
+      )}
+
+      {/* Save honesty (UX-83) — same voice and placement as the attach alert
+          above. A Save that rejects used to leave the parent believing the lab
+          was written; now it says so, and says nothing was lost. */}
+      {!disabled && saveState === 'error' && (
+        <Alert severity="error">
+          This lab didn&apos;t save. Nothing was lost — everything you entered is still
+          here on this form. Tap Save to try again.
         </Alert>
       )}
 

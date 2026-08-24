@@ -50,6 +50,7 @@ import {
   matchWorkbookBridge,
   resolveNativePosition,
 } from '../../core/foundations/workbookBridge'
+import { reportArtifactIds } from '../dad-lab/reportArtifacts'
 import {
   computeHoursSummary,
   computeSubjectDistribution,
@@ -385,17 +386,15 @@ export const OPEN_QUESTION_STALE_DAYS = 30
  * Resolving only the artifact side would flag every three-beat report as having
  * no evidence and would call its photos unlinked — false findings against
  * perfectly well-connected data, which is exactly what this export must not do.
+ *
+ * The report side of that union is the shared `dad-lab/reportArtifacts` helper
+ * (UX-85) — the same one the lab cards count and render from, so the export and
+ * the card can never disagree about what a report holds. Aliased under the name
+ * this module's own call sites and tests already use; there is one definition.
+ * The helper is pure — no React, no Firestore — so the module header's
+ * structural read-only guarantee is unchanged.
  */
-export const reportOwnedArtifactIds = (report: DadLabReport): string[] => {
-  const ids = new Set<string>()
-  for (const childReport of Object.values(report.childReports ?? {})) {
-    for (const id of childReport?.artifacts ?? []) if (id) ids.add(id)
-  }
-  for (const beat of Object.values(report.beats ?? {})) {
-    for (const item of beat?.items ?? []) if (item?.artifactId) ids.add(item.artifactId)
-  }
-  return Array.from(ids)
-}
+export const reportOwnedArtifactIds = reportArtifactIds
 
 /** How an artifact resolves to a Dad Lab report, if at all. */
 export type LabLinkKind = 'labSessionId' | 'report-owned' | 'none'
