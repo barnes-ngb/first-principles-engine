@@ -42,6 +42,7 @@ import { formatDateShort, todayKey } from '../../core/utils/dateKey'
 import { parseChildRoles } from './childRoles'
 import { groupReportsByMonth } from './dadLabGrouping'
 import { buildLabIdeaPrompt, DAD_LAB_SUGGESTION_MODEL } from './dadLabPrompts'
+import { reportArtifactIds } from './reportArtifacts'
 import { useCalibrationSources } from './useCalibrationSources'
 import { createPlannedLab } from './plannedLab'
 import { useConceptArcs } from './useConceptArcs'
@@ -837,10 +838,8 @@ function ActiveLabCard({
   onComplete: (report: DadLabReport) => void
   onDelete: (report: DadLabReport) => void
 }) {
-  const artifactCount = Object.values(report.childReports).reduce(
-    (acc, cr) => acc + (cr.artifacts?.length ?? 0),
-    0,
-  )
+  // Every artifact on the report — child-report captures AND beat items (UX-85).
+  const artifactCount = reportArtifactIds(report).length
 
   // Check what Lincoln has contributed
   const lincolnReport = report.childReports?.lincoln
@@ -1018,10 +1017,11 @@ function ReportCard({
   onView: (report: DadLabReport) => void
   onEdit: (report: DadLabReport) => void
 }) {
-  const artifactCount = Object.values(report.childReports).reduce(
-    (acc, cr) => acc + (cr.artifacts?.length ?? 0),
-    0,
-  )
+  // Every artifact on the report — child-report captures AND beat items, deduped
+  // (UX-85). FEAT-156 routes uploads to beats, so a card that reads only the
+  // child-report side shows a lab full of photos as empty.
+  const artifactIds = reportArtifactIds(report)
+  const artifactCount = artifactIds.length
 
   return (
     <Card variant="outlined">
@@ -1076,20 +1076,18 @@ function ReportCard({
                 &ldquo;{report.question}&rdquo;
               </Typography>
             )}
-            {/* Show up to 4 thumbnails in list view */}
-            {(() => {
-              const allArtifactIds = Object.values(report.childReports)
-                .flatMap(cr => cr.artifacts ?? [])
-              return allArtifactIds.length > 0 ? (
-                <Box sx={{ mt: 0.5 }}>
-                  <ArtifactGallery
-                    familyId={familyId}
-                    artifactIds={allArtifactIds.slice(0, 4)}
-                    thumbnailSize={48}
-                  />
-                </Box>
-              ) : null
-            })()}
+            {/* Show up to 4 thumbnails in list view. The cap is display-only —
+                the count above still reports the true total, so "5 artifacts"
+                over 4 thumbnails is correct, not a mismatch. */}
+            {artifactCount > 0 && (
+              <Box sx={{ mt: 0.5 }}>
+                <ArtifactGallery
+                  familyId={familyId}
+                  artifactIds={artifactIds.slice(0, 4)}
+                  thumbnailSize={48}
+                />
+              </Box>
+            )}
           </Box>
           <Stack direction="row" spacing={0.5}>
             <Button
