@@ -104,8 +104,10 @@ describe('StickerLibraryTab — make more versions (FEAT-33 slice 4)', () => {
 
     await waitFor(() => expect(updateDocMock).toHaveBeenCalledTimes(1))
     const [, patch] = updateDocMock.mock.calls[0] as [unknown, Record<string, unknown>]
-    // Only tags + childProfile are written — no whole-doc overwrite, so
-    // sourceDrawingId / theme / isOriginal can never be dropped.
-    expect(Object.keys(patch).sort()).toEqual(['childProfile', 'tags'])
+    // Only the field that actually moved is written — no whole-doc overwrite, so
+    // sourceDrawingId / theme / isOriginal can never be dropped. (FEAT-160
+    // narrowed this from tags+childProfile to just the changed field: an
+    // unchanged "For" is not a write.)
+    expect(Object.keys(patch).sort()).toEqual(['tags'])
   })
 })

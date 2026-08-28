@@ -9,6 +9,7 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
@@ -27,6 +28,7 @@ import { StickerCatalogButton, StickerCatalogPromoteDialog } from './StickerCata
 import { groupStickers } from '../books/stickerGrouping'
 import DrawingGroupCard from '../books/DrawingGroupCard'
 import { generateStickerVersion } from '../books/generateStickerVersion'
+import { planStickerEdit } from '../books/stickerLabelEdit'
 import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from '../books/drawingStickerStyles'
 import { CHECKERBOARD_BG } from '../books/DrawingChoiceDialog'
 import { printStickerSheet } from '../books/printStickerSheet'
@@ -112,6 +114,11 @@ export default function StickerLibraryTab({
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [loading, setLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<Sticker | null>(null)
+  // FEAT-160: the label is editable here too. One dialog, one more field — and
+  // for a sticker that belongs to a drawing group the new name lands on every
+  // version (one name per drawing), never on this version alone.
+  const [editLabel, setEditLabel] = useState('')
+  const [editError, setEditError] = useState<string | null>(null)
   const [editTags, setEditTags] = useState<StickerTag[]>([])
   const [editProfile, setEditProfile] = useState<'lincoln' | 'london' | 'both'>('both')
   // Big-preview dialog (FEAT-33): tapping a sticker opens it large with quick actions.
@@ -172,6 +179,8 @@ export default function StickerLibraryTab({
 
   const handleOpenEdit = useCallback((sticker: Sticker) => {
     setEditTarget(sticker)
+    setEditLabel(sticker.label)
+    setEditError(null)
     setEditTags(sticker.tags ?? ['other'])
     setEditProfile(sticker.childProfile ?? 'both')
     setMakeVersionsOpen(false)
@@ -195,19 +204,48 @@ export default function StickerLibraryTab({
   }, [handleOpenEdit])
 
   const handleSaveEdit = useCallback(async () => {
-    if (!editTarget?.id) return
+    if (!editTarget?.id || saving) return
+    // Every write is a partial update (never a bare setDoc): editing tags /
+    // profile / label must not drop link fields (sourceDrawingId / theme /
+    // isOriginal) or anything else. The plan also decides *which* docs move —
+    // a label change fans out to the drawing's other versions — and returns
+    // `noop` when nothing differs, so an unchanged Save writes nothing.
+    const plan = planStickerEdit({
+      target: editTarget,
+      nextLabel: editLabel,
+      nextTags: editTags,
+      nextProfile: editProfile,
+      library: stickers,
+    })
+    if (plan.kind === 'invalid') {
+      setEditError('Give the sticker a name.')
+      return
+    }
+    if (plan.kind === 'noop') {
+      setEditError(null)
+      setEditTarget(null)
+      return
+    }
     setSaving(true)
-    // Partial update (never a bare setDoc): editing tags/profile must not drop
-    // link fields (sourceDrawingId / theme / isOriginal) or anything else.
-    const patch = { tags: editTags, childProfile: editProfile }
+    setEditError(null)
     try {
-      await updateDoc(doc(stickerLibraryCollection(familyId), editTarget.id), patch)
-      setStickers((prev) => prev.map((s) => (s.id === editTarget.id ? { ...s, ...patch } : s)))
+      await Promise.all(
+        plan.writes.map((w) =>
+          updateDoc(doc(stickerLibraryCollection(familyId), w.id), w.patch),
+        ),
+      )
+      const patchById = new Map(plan.writes.map((w) => [w.id, w.patch]))
+      setStickers((prev) =>
+        prev.map((s) => (s.id && patchById.has(s.id) ? { ...s, ...patchById.get(s.id) } : s)),
+      )
+      setEditTarget(null)
+    } catch (err) {
+      // A failed save says so and keeps the dialog open with the typed text.
+      setEditError(err instanceof Error ? err.message : 'Could not save. Try again.')
     } finally {
       setSaving(false)
-      setEditTarget(null)
     }
-  }, [editTarget, editTags, editProfile, familyId])
+  }, [editTarget, editLabel, editTags, editProfile, familyId, saving, stickers])
 
   const handleMakeVersion = useCallback(async () => {
     if (!editTarget?.id || makingVersion) return
@@ -690,7 +728,12 @@ export default function StickerLibraryTab({
       </Dialog>
 
       {/* Edit dialog */}
-      <Dialog open={!!editTarget} onClose={() => setEditTarget(null)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={!!editTarget}
+        onClose={() => !saving && setEditTarget(null)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Edit Sticker</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
@@ -704,6 +747,19 @@ export default function StickerLibraryTab({
                 />
               </Box>
             )}
+
+            <TextField
+              label="Name"
+              value={editLabel}
+              onChange={(e) => setEditLabel(e.target.value)}
+              fullWidth
+              size="small"
+              helperText={
+                editTarget?.sourceDrawingId
+                  ? 'Renames every version of this drawing.'
+                  : undefined
+              }
+            />
 
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
@@ -753,14 +809,20 @@ export default function StickerLibraryTab({
             >
               Make more versions
             </Button>
+
+            {editError && (
+              <Typography variant="body2" color="error">
+                {editError}
+              </Typography>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditTarget(null)}>Cancel</Button>
+          <Button onClick={() => setEditTarget(null)} disabled={saving}>Cancel</Button>
           <Button
             variant="contained"
             onClick={() => { void handleSaveEdit() }}
-            disabled={saving}
+            disabled={saving || !editLabel.trim()}
           >
             {saving ? 'Saving...' : 'Save'}
           </Button>
