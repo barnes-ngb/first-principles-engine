@@ -115,3 +115,23 @@ describe('KidChecklist — a skip cannot strand the day (UX-72)', () => {
     expect(screen.queryByText(/quests? to go/i)).toBeNull()
   })
 })
+
+// ── FEAT-161 (UX-81): the count resolves instead of vanishing ───────────────
+
+describe('KidChecklist — the last checkbox is answered, not ignored', () => {
+  it('says "All done!" when the falling number reaches zero on real work', () => {
+    renderKid([quest({ completed: true }), quest({ completed: true })])
+
+    expect(screen.getByText('All done! 🎉')).toBeTruthy()
+    expect(screen.queryByText(/quests? to go/i)).toBeNull()
+  })
+
+  it('stays quiet on a day where nothing was actually done', () => {
+    // Same zero, different meaning — the UX-72 rule, held: a cleared day is a
+    // parent's choice, not an achievement to celebrate.
+    renderKid([quest({ skipped: true }), quest({ skipped: true })])
+
+    expect(screen.queryByText(/All done/i)).toBeNull()
+    expect(screen.queryByText(/quests? to go/i)).toBeNull()
+  })
+})

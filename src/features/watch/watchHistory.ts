@@ -104,3 +104,28 @@ export function summarizeWatchEntry(
   const repeat = entry.times > 1 ? ` · ${entry.times}×` : ''
   return `Watched by ${who} · ${entry.lastWatchedOn}${repeat}`
 }
+
+/**
+ * The "no watch found" wording for a library row (UX-03).
+ *
+ * `"Not watched in the last 90 days"` is technically true of a video vetted in
+ * yesterday, but on a fresh card it reads as a stale-shelf verdict about a
+ * shelf that has not existed long enough to go stale. When the video has been
+ * in the library for less time than the window covers, the honest sentence is
+ * simply that nobody has watched it yet.
+ *
+ * `vettedAt` is an ISO stamp; an absent or unparseable one falls back to the
+ * windowed wording, which is the claim that is always safe to make.
+ */
+export function notWatchedLine(
+  vettedAt: string | undefined,
+  windowDays: number,
+  now: Date = new Date(),
+): string {
+  const vetted = vettedAt ? new Date(vettedAt) : null
+  if (vetted && !Number.isNaN(vetted.getTime())) {
+    const ageDays = (now.getTime() - vetted.getTime()) / 86_400_000
+    if (ageDays < windowDays) return 'Not watched yet'
+  }
+  return `Not watched in the last ${windowDays} days`
+}

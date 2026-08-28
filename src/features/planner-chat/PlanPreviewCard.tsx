@@ -369,11 +369,23 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                 {weekStart ? formatDayCardLabel(weekStart, day.day) : day.day}
               </Typography>
+              {/* UX-71: an empty day rendered a GREEN `0m / 150m` over "No
+                  items" — the success colour saying "within budget" about a day
+                  that has no plan at all. A zero here is absence, not
+                  achievement, so it gets the neutral chip and says so. */}
               <Chip
-                label={`${total}m / ${budgetMinutes}m`}
+                label={total > 0 ? `${total}m / ${budgetMinutes}m` : 'Nothing planned yet'}
                 size="small"
                 variant="outlined"
-                color={total > budgetMinutes + 15 ? 'error' : total <= budgetMinutes ? 'success' : 'warning'}
+                color={
+                  total === 0
+                    ? 'default'
+                    : total > budgetMinutes + 15
+                      ? 'error'
+                      : total <= budgetMinutes
+                        ? 'success'
+                        : 'warning'
+                }
               />
             </Stack>
             {generatedOverBudget && (

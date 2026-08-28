@@ -78,6 +78,12 @@ import {
   removeChecklistItemFromDayLog,
 } from './liveDayEdit'
 import { buildGotItReinforcement, buildStuckBlock } from './masteryBlocker'
+import {
+  buildFinishLabel,
+  dayPlanTitle,
+  formatMinutes,
+  plannedMinutesClause,
+} from './dayProgressLabels'
 import { kidPalette } from '../../app/tokens'
 
 const subjectBucketColor: Record<string, string> = {
@@ -112,14 +118,6 @@ function getItemColor(item: ChecklistItemType): string | undefined {
   return bucket ? (subjectBucketColor[bucket] ?? '#6b7280') : undefined
 }
 
-function formatMinutes(mins: number): string {
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  if (h === 0) return `${m}m`
-  if (m === 0) return `${h}h`
-  return `${h}h ${m}m`
-}
-
 type SparkleMode = 'scan' | 'generate' | 'none'
 
 const scanPatterns = [
@@ -152,20 +150,21 @@ function isScannableWorkbook(item: ChecklistItemType): boolean {
   )
 }
 
-function formatTime12h(date: Date): string {
-  const h = date.getHours()
-  const m = date.getMinutes()
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const h12 = h % 12 || 12
-  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
-}
-
 interface TodayChecklistProps {
   dayLog: DayLog
   selectedChild: { name: string; id?: string }
   selectedChildId: string
   familyId: string
+  /** The day being VIEWED (`YYYY-MM-DD`) — not necessarily the real today. */
   today: string
+  /**
+   * Is `today` the real today (FEAT-161, UX-07/UX-28)? The component previously
+   * had no way to tell, so it titled every day "Today's Plan" and computed a
+   * clock-time finish estimate from the raw wall clock on past and upcoming
+   * days alike. The caller owns the comparison because it owns the civil-date
+   * helper that defines what "today" is for this family.
+   */
+  isToday: boolean
   planType: PlanType
   todaySnapshot: SkillSnapshot | null
   activeRoutineItems: RoutineItemKey[] | undefined
@@ -253,6 +252,7 @@ export default function TodayChecklist({
   selectedChildId,
   familyId,
   today,
+  isToday,
   planType,
   activeRoutineItems,
   persistDayLogImmediate,
@@ -400,16 +400,21 @@ export default function TodayChecklist({
   const xp = calculateXp(dayLog, activeRoutineItems)
   const isLincoln = selectedChild?.name?.toLowerCase() === 'lincoln'
 
-  const estimatedFinishLabel = (() => {
-    const remainingMinutes = checklist
-      .filter((ci) => !ci.completed && isItemVisible(ci))
-      .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
-    if (remainingMinutes > 0 && completedCount < visibleCount) {
-      const est = new Date(now + remainingMinutes * 60_000)
-      return ` \u00B7 Est. finish: ${formatTime12h(est)}`
-    }
-    return ''
-  })()
+  // UX-07: the estimate reads the day's own rows, NOT `isItemVisible` \u2014 a
+  // budget-deferred item isn't work the parent is about to do, and letting the
+  // deferred row's expander change what "left" means made the number jump on a
+  // tap that plans nothing. Whether the row is expanded is a way of looking,
+  // not a change to the day.
+  const undeferred = checklist.filter((item) => !item.deferredByBudget)
+  const remainingMinutes = undeferred
+    .filter((ci) => !ci.completed)
+    .reduce((sum, ci) => sum + (ci.plannedMinutes ?? ci.estimatedMinutes ?? parseMinutesFromLabel(ci.label)), 0)
+  const estimatedFinishLabel = buildFinishLabel({
+    isToday,
+    nowMs: now,
+    remainingMinutes,
+    allComplete: undeferred.length > 0 && undeferred.every((ci) => ci.completed),
+  })
 
   // Engagement pattern insights
   const itemsWithEngagement = checklist.filter((ci) => ci.engagement)
@@ -662,7 +667,7 @@ export default function TodayChecklist({
   }
 
   return (
-    <SectionCard title="Today's Plan" action={
+    <SectionCard title={dayPlanTitle(today, isToday)} action={
       hasPlanItems ? (
         <Stack direction="row" spacing={0.5} alignItems="center">
           <Button
@@ -686,7 +691,7 @@ export default function TodayChecklist({
           {/* Summary line with XP */}
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 0.5 }}>
             <Typography variant="body2" color="text.secondary">
-              {formatMinutes(totalPlannedMinutes)} planned{' \u00B7 '}
+              {plannedMinutesClause(totalPlannedMinutes)}
               {completedCount} of {visibleCount} done
               {completedMinutes > 0 && ` \u00B7 ${formatMinutes(completedMinutes)} logged`}
               {estimatedFinishLabel}

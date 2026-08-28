@@ -45,10 +45,21 @@ export default function WorkshopGameCards({ familyId, childId, children }: Works
 
   if (!newGame && !inProgressGame) return null
 
-  const getCreatorName = (game: StoryGame): string => {
+  /**
+   * UX-27: the creator's name, or `null` when the child can't be resolved.
+   * The old fallback printed "Someone" (and its lowercase twin "someone" four
+   * lines down), so an unresolved id became a made-up person in a sentence
+   * about the family's own kids. There is no placeholder now — the headline
+   * drops the attribution clause and still reads as English.
+   */
+  const getCreatorName = (game: StoryGame): string | null => {
     const child = children.find((c) => c.id === game.childId)
-    return child?.name ?? 'Someone'
+    return child?.name ?? null
   }
+
+  /** "1 card • 12 spaces • 15 min" — same one-line plural class as UX-46/71. */
+  const plural = (n: number, noun: string): string =>
+    `${n} ${noun}${n === 1 ? '' : 's'}`
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
@@ -98,15 +109,18 @@ export default function WorkshopGameCards({ familyId, childId, children }: Works
           )}
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-              🎮 {getCreatorName(newGame)} made a new game!
+              🎮{' '}
+              {getCreatorName(newGame)
+                ? `${getCreatorName(newGame)} made a new game!`
+                : 'A new game is ready!'}
             </Typography>
             <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
               {newGame.generatedGame?.title}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {newGame.generatedGame?.challengeCards.length} cards
+              {plural(newGame.generatedGame?.challengeCards.length ?? 0, 'card')}
               {' \u2022 '}
-              {newGame.generatedGame?.board.totalSpaces} spaces
+              {plural(newGame.generatedGame?.board.totalSpaces ?? 0, 'space')}
               {' \u2022 '}
               {newGame.generatedGame?.metadata.estimatedMinutes} min
             </Typography>
@@ -156,11 +170,17 @@ export default function WorkshopGameCards({ familyId, childId, children }: Works
               🎮 Continue {inProgressGame.generatedGame?.title}?
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              It&apos;s{' '}
+              {/* UX-27: no "someone" placeholder — with no resolved player the
+                  line says what is true instead of naming a stranger. */}
               {inProgressGame.activeSession?.players[
                 inProgressGame.activeSession.currentTurnIndex
-              ]?.name ?? 'someone'}
-              &apos;s turn!
+              ]?.name
+                ? `It's ${
+                    inProgressGame.activeSession.players[
+                      inProgressGame.activeSession.currentTurnIndex
+                    ].name
+                  }'s turn!`
+                : 'Pick up where you left off!'}
             </Typography>
           </Box>
           <Button

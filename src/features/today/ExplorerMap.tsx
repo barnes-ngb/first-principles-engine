@@ -112,6 +112,12 @@ export default function ExplorerMap({
   }, [weekDates, exploredDates, todayDate])
 
   const allExplored = exploredCount === 5
+  // UX-81: `remainingCount` only counts days from today forward, so on a
+  // Saturday (or any day after the last school day) it is zero without the week
+  // being full — which rendered "4 biomes explored! 0 biomes to go!". Zero left
+  // is not the same as all done, and neither of them is a scolding: the week
+  // simply wrapped where it wrapped.
+  const weekWrapped = !allExplored && remainingCount === 0
 
   // One remaining-count grammar across kid surfaces: "{n} {noun} to go" (UX-75)
   // — the bare "{n} to discover..." left the remaining count with no noun.
@@ -121,7 +127,13 @@ export default function ExplorerMap({
       : isLincoln
         ? 'Full map explored! Legendary week!'
         : 'Full week explored! What an adventure! 🎉'
-    : isLondon
+    : weekWrapped
+      ? isLondon
+        ? `${exploredCount} dino${exploredCount !== 1 ? 's' : ''} hatched this week!`
+        : isLincoln
+          ? `${exploredCount} biome${exploredCount !== 1 ? 's' : ''} explored this week!`
+          : `${exploredCount} day${exploredCount !== 1 ? 's' : ''} explored this week!`
+      : isLondon
       ? `${exploredCount} dino${exploredCount !== 1 ? 's' : ''} hatched! ${remainingCount} dino${remainingCount !== 1 ? 's' : ''} to go!`
       : isLincoln
         ? `${exploredCount} biome${exploredCount !== 1 ? 's' : ''} explored! ${remainingCount} biome${remainingCount !== 1 ? 's' : ''} to go!`

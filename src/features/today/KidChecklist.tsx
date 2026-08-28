@@ -328,7 +328,13 @@ export default function KidChecklist({
           {/* No "then you choose/craft!" tail: this count now includes rituals,
               which don't gate the unlock. The locked Workshop card carries the
               gate message ("Complete N more quests to unlock!"). */}
-          {listRemaining > 0 && (
+          {/* UX-81: the "to go" line used to vanish at zero, so the last
+              checkbox removed the only line tracking the day instead of
+              answering it. It resolves now — but only on real work
+              (`mustDoCompleted > 0`), by the same rule as the celebration
+              below: a day where nothing was done and nothing was planned has
+              nothing to say "All done!" about. */}
+          {listRemaining > 0 ? (
             <Typography
               variant="body1"
               color="text.secondary"
@@ -337,7 +343,16 @@ export default function KidChecklist({
             >
               {`${listRemaining} quest${listRemaining !== 1 ? 's' : ''} to go!`}
             </Typography>
-          )}
+          ) : mustDoCompleted > 0 ? (
+            <Typography
+              variant="body1"
+              color="success.main"
+              textAlign="center"
+              sx={{ fontWeight: 600 }}
+            >
+              All done! 🎉
+            </Typography>
+          ) : null}
         </Stack>
         {/* "Quests complete!" requires real work (UX-72): on a fully-skipped
             day the craft pool is open but nothing is celebrated. */}

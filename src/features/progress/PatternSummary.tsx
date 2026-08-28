@@ -2,6 +2,7 @@ import Box from '@mui/material/Box'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import type { PatternSummary as PatternSummaryType } from './useWordWall'
+import { patternProgressLine } from './wordWallCopy'
 import { kidPalette } from '../../app/tokens'
 
 const MC = {
@@ -99,9 +100,12 @@ export default function PatternSummary({ patterns }: PatternSummaryProps) {
                 mt: 0.5,
               }}
             >
-              {p.masteryPercent}%
-              {p.strugglingWords > 0 && ` · ${p.strugglingWords} still practicing`}
-              {p.emergingWords > 0 && ` · ${p.emergingWords} emerging`}
+              {/* UX-49: a pattern with no mastered words rendered a bare "0%" —
+                  the only percentage on a kid-facing wall, and it read as a
+                  score. Zero is absence, not a grade: the percent is dropped,
+                  and where there is nothing else to say the line names the
+                  absence instead ("Not started yet"), never a number. */}
+              {patternProgressLine(p)}
             </Typography>
           </Box>
         ))}

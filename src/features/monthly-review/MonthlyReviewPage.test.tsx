@@ -279,3 +279,63 @@ describe('formatSubjectMinutes', () => {
     expect(formatSubjectMinutes(61)).toBe('1.0h')
   })
 })
+
+// ── FEAT-161 (UX-60): one zero-suppression rule, both modes ─────────────────
+//
+// The suppression was written for kid mode only, so the parent's copy of the
+// same book rendered "0 Books made", "0 Dad Lab", "0 Blockers beat" — filler
+// where the kid's copy showed nothing. One book, one rule.
+
+describe('MonthlyReviewPage — stat tiles at zero (UX-60)', () => {
+  const statsPage = () =>
+    makePage({
+      id: 'stats',
+      sectionType: SectionType.ByTheNumbers,
+      kidMode: { headline: 'By the Numbers' },
+      parentMode: { headline: 'By the Numbers' },
+    })
+
+  const monthWithZeroes = () =>
+    makeReview({
+      stats: {
+        daysWithActivity: 12,
+        totalHours: 5.2,
+        hoursBySubject: {},
+        booksCompleted: 0,
+        booksRead: 3,
+        quests: 0,
+        blockersResolved: 0,
+        blockersActive: 0,
+        teachBackCount: 0,
+        dadLabCount: 0,
+        totalDiamonds: 40,
+      },
+    })
+
+  it('hides zero-value tiles in parent mode, exactly as kid mode already did', () => {
+    render(<MonthlyReviewPage page={statsPage()} review={monthWithZeroes()} mode="parent" />)
+
+    expect(screen.queryByText('Books made')).not.toBeInTheDocument()
+    expect(screen.queryByText('Dad Lab')).not.toBeInTheDocument()
+    expect(screen.queryByText('Blockers beat')).not.toBeInTheDocument()
+    // ...while the tiles that actually happened still render.
+    expect(screen.getByText('Books read')).toBeInTheDocument()
+    expect(screen.getByText('Diamonds')).toBeInTheDocument()
+  })
+
+  it('still always shows time, diamonds and quests — zero there is meaningful', () => {
+    render(<MonthlyReviewPage page={statsPage()} review={makeReview()} mode="parent" />)
+
+    expect(screen.getByText('Time')).toBeInTheDocument()
+    expect(screen.getByText('Diamonds')).toBeInTheDocument()
+    expect(screen.getByText('Quests')).toBeInTheDocument()
+  })
+
+  it('leaves kid mode behaving exactly as before', () => {
+    render(<MonthlyReviewPage page={statsPage()} review={monthWithZeroes()} mode="kid" />)
+
+    expect(screen.queryByText('Books made')).not.toBeInTheDocument()
+    expect(screen.getByText('Books read')).toBeInTheDocument()
+    expect(screen.getByText('Quests')).toBeInTheDocument()
+  })
+})
