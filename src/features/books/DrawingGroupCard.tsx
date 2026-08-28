@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { deleteDoc, doc } from 'firebase/firestore'
+import { deleteDoc, doc, writeBatch } from 'firebase/firestore'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -10,13 +10,15 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import EditIcon from '@mui/icons-material/Edit'
 
-import { stickerLibraryCollection } from '../../core/firebase/firestore'
+import { db, stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker } from '../../core/types'
 import {
@@ -25,6 +27,7 @@ import {
   fancyStyleLabel,
 } from './drawingStickerStyles'
 import { generateStickerVersion } from './generateStickerVersion'
+import { planDrawingRename } from './stickerLabelEdit'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import type { DrawingGroup } from './stickerGrouping'
 
@@ -44,6 +47,15 @@ interface DrawingGroupCardProps {
   selectedIds?: Set<string>
   /** Toggle a version's selection in select mode. */
   onToggleSelect?: (sticker: Sticker) => void
+  /**
+   * Every version of this drawing, including any the caller's active filters
+   * hide from `group.versions` (Codex P1, PR #1708). Tags and "For" are
+   * **per-version**, so a tag or child filter can split a group — and a rename
+   * that promised one name for every version would then write only the visible
+   * subset, leaving the stored drawing permanently split. Defaults to
+   * `group.versions` for callers that render the library unfiltered.
+   */
+  allVersions?: Sticker[]
 }
 
 /** Friendly label for a version chip — "Original", or the theme's emoji + name. */
@@ -67,6 +79,7 @@ export default function DrawingGroupCard({
   selectMode = false,
   selectedIds,
   onToggleSelect,
+  allVersions,
 }: DrawingGroupCardProps) {
   const { enhanceSketch } = useAI()
   const [picking, setPicking] = useState(false)
@@ -76,12 +89,23 @@ export default function DrawingGroupCard({
   // null = no pending delete; a sticker = delete that version; 'group' = delete all.
   const [deleteTarget, setDeleteTarget] = useState<Sticker | 'group' | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // Rename (FEAT-160): one name per drawing — every version is renamed together.
+  const [renaming, setRenaming] = useState(false)
+  const [renameText, setRenameText] = useState('')
+  const [renameBusy, setRenameBusy] = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
 
   // New versions transform the saved original image (its stored cutout), so a
   // drawing can grow new themed versions any time — not just in the capture
   // session. If the original was deleted, fall back to the card representative.
   const source = group.versions.find((v) => v.isOriginal) ?? group.representative
   const label = group.representative.label
+  // The rename is a group operation, so it must see the whole group — not the
+  // slice a tag/child filter left visible. Deleting deliberately still acts on
+  // the visible versions only; that the group *delete* and the version count
+  // also read a filtered group is a pre-existing gap, filed as UX-99 in
+  // `docs/review/UX_AUDIT_2026-08.md` §12 rather than widened into this change.
+  const renameTargets = allVersions ?? group.versions
 
   const handleAddVersion = useCallback(async () => {
     if (busy) return
@@ -109,6 +133,49 @@ export default function DrawingGroupCard({
       setBusy(false)
     }
   }, [busy, enhanceSketch, familyId, source, styleId, label, group.sourceDrawingId, onChanged])
+
+  const handleOpenRename = useCallback(() => {
+    setRenameText(label)
+    setRenameError(null)
+    setRenaming(true)
+  }, [label])
+
+  const handleConfirmRename = useCallback(async () => {
+    if (renameBusy) return
+    // A no-op is not a write: renaming to the name already showing plans no
+    // updateDoc at all, so the card never claims a change it did not make.
+    const plan = planDrawingRename(renameText, renameTargets)
+    if (plan.kind === 'invalid') {
+      setRenameError('Give the drawing a name.')
+      return
+    }
+    if (plan.kind === 'noop') {
+      setRenaming(false)
+      return
+    }
+    setRenameBusy(true)
+    setRenameError(null)
+    try {
+      // One batch, not N independent updates (Codex P2, PR #1708): a partial
+      // fan-out would leave the group with mixed names — exactly the invariant
+      // this dialog promises. Batched updates are all-or-nothing, and a member
+      // deleted from under us fails the whole commit rather than half of it.
+      // Still partial patches (never a bare setDoc) — a rename must not drop
+      // sourceDrawingId / theme / isOriginal.
+      const batch = writeBatch(db)
+      for (const w of plan.writes) {
+        batch.update(doc(stickerLibraryCollection(familyId), w.id), w.patch)
+      }
+      await batch.commit()
+      setRenaming(false)
+      onChanged()
+    } catch (err) {
+      // Failure says so and keeps the dialog open with the typed name intact.
+      setRenameError(err instanceof Error ? err.message : 'Could not rename. Try again.')
+    } finally {
+      setRenameBusy(false)
+    }
+  }, [renameBusy, renameText, renameTargets, familyId, onChanged])
 
   const handleConfirmDelete = useCallback(async () => {
     if (!deleteTarget) return
@@ -138,7 +205,7 @@ export default function DrawingGroupCard({
         bgcolor: 'background.paper',
       }}
     >
-      {/* Header: drawing label + delete-whole-drawing */}
+      {/* Header: drawing label + rename + delete-whole-drawing */}
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 700, flex: 1 }} noWrap>
           {label}
@@ -149,6 +216,11 @@ export default function DrawingGroupCard({
           variant="outlined"
           sx={{ fontSize: '0.65rem', height: 18 }}
         />
+        {!selectMode && (
+          <IconButton size="small" aria-label="Rename drawing" onClick={handleOpenRename}>
+            <EditIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        )}
         {!selectMode && (
           <IconButton size="small" aria-label="Delete drawing" onClick={() => setDeleteTarget('group')}>
             <DeleteOutlineIcon sx={{ fontSize: 18 }} />
@@ -268,6 +340,49 @@ export default function DrawingGroupCard({
           </Button>
         )}
       </Box>
+
+      {/* Rename dialog (FEAT-160) — one name for every version of the drawing. */}
+      <Dialog
+        open={renaming}
+        onClose={() => !renameBusy && setRenaming(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Name this drawing</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+            <TextField
+              label="Drawing name"
+              value={renameText}
+              onChange={(e) => setRenameText(e.target.value)}
+              fullWidth
+              size="small"
+              autoFocus
+            />
+            <Typography variant="body2" color="text.secondary">
+              Every version of this drawing gets the new name.
+            </Typography>
+            {renameError && (
+              <Typography variant="body2" color="error">
+                {renameError}
+              </Typography>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRenaming(false)} disabled={renameBusy}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleConfirmRename()}
+            disabled={renameBusy || !renameText.trim()}
+            sx={{ minHeight: 44 }}
+          >
+            {renameBusy ? 'Saving...' : 'Save name'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Theme picker dialog */}
       <Dialog open={picking} onClose={() => !busy && setPicking(false)} maxWidth="xs" fullWidth>

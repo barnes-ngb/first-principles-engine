@@ -5,7 +5,9 @@ import {
   luminance,
   medianRgb,
   pickBackgroundSample,
+  longestBorderRunFraction,
   removeBackgroundColor,
+  removeBorderConnectedColor,
   removeSmallIslands,
   rgbStdDev,
   sampleBorderRgb,
@@ -488,6 +490,10 @@ describe('marker-on-white characterization (the regression rail)', () => {
     // A single uniform surface — the same background the old median path found.
     expect(picked.bimodal).toBe(false)
     expect(picked.color).toEqual([252, 252, 250])
+    // FEAT-160: one surface means no rejected cluster, so the second
+    // (border-connected) knockout is unreachable on this path — marker-on-white
+    // stays byte-identical to the pre-FEAT-160 pipeline.
+    expect(picked.rejected).toBeUndefined()
 
     const beforeInk = Uint8ClampedArray.from(data)
     removeBackgroundColor(data, picked.color, 60, 1.5)
@@ -532,5 +538,167 @@ describe('computeMinIslandPixels (Codex P2, PR #1701)', () => {
 
   it('never drops below a 2px floor', () => {
     expect(computeMinIslandPixels(100, 4)).toBe(2)
+  })
+})
+
+// ── FEAT-160: both surfaces in a bimodal ring are background ────────
+
+/**
+ * The remaining reported case: after FEAT-159 correctly picks the paper, the
+ * carpet *inside the crop* is nowhere near paper colour, so it survives the
+ * primary knockout — as a strip down one edge, far too large for the island
+ * pass to call dust. Uniform-ish carpet strip along the left edge, paper
+ * everywhere else, drawing in the middle.
+ */
+function makeCarpetStripPhoto(size = 40): Uint8ClampedArray {
+  const data = makeImage(size, size, [238, 236, 230])
+  // The carpet the sheet did not cover — a strip touching the left frame.
+  paint(data, size, [0, 0, 6, size], [66, 58, 52])
+  // A pencil drawing in the middle of the paper.
+  paint(data, size, [16, 16, 26, 26], [120, 118, 114])
+  return data
+}
+
+describe('pickBackgroundSample — the rejected cluster (FEAT-160)', () => {
+  it('reports the surface it did not pick, so the caller can clear it too', () => {
+    const size = 40
+    const data = makeCarpetStripPhoto(size)
+    const samples = sampleBorderRgb(data, size, size, 4)
+    const picked = pickBackgroundSample(samples)
+    expect(picked.bimodal).toBe(true)
+    // Paper is chosen...
+    expect(picked.color[0]).toBeGreaterThan(200)
+    // ...and the carpet is reported rather than discarded.
+    expect(picked.rejected).toBeDefined()
+    expect(picked.rejected!.color[0]).toBeLessThan(120)
+  })
+
+  it('leaves the one-surface return shape unchanged — no rejected cluster', () => {
+    const data = makeImage(30, 30, [120, 80, 50])
+    const picked = pickBackgroundSample(sampleBorderRgb(data, 30, 30, 4))
+    expect(picked.bimodal).toBe(false)
+    expect(picked.rejected).toBeUndefined()
+    expect(picked.color).toEqual([120, 80, 50])
+  })
+
+  it('reports the lighter cluster when the darker, flatter one is the paper', () => {
+    const samples: number[] = []
+    for (let i = 0; i < 40; i++) samples.push(38, 36, 40) // flat dark paper
+    for (let i = 0; i < 40; i++) {
+      const v = i % 2 === 0 ? 150 : 245 // busy bright rug
+      samples.push(v, v, v)
+    }
+    const picked = pickBackgroundSample(new Uint8ClampedArray(samples))
+    expect(picked.color[0]).toBeLessThan(60)
+    expect(picked.rejected!.color[0]).toBeGreaterThan(120)
+  })
+})
+
+describe('removeBorderConnectedColor (FEAT-160)', () => {
+  it('clears the carpet strip the primary pass left behind, drawing intact', () => {
+    const size = 40
+    const data = makeCarpetStripPhoto(size)
+    const samples = sampleBorderRgb(data, size, size, 4)
+    const picked = pickBackgroundSample(samples)
+    removeBackgroundColor(data, picked.color, 60, 1.5)
+
+    // The strip is exactly the reported symptom: opaque after the paper pass.
+    const stripPixel = (20 * size + 2) * 4
+    expect(data[stripPixel + 3]).toBeGreaterThan(200)
+
+    removeBorderConnectedColor(data, size, size, picked.rejected!.color, 60)
+
+    // 6 columns × 40 rows of carpet, all gone.
+    expect(countTransparentInRect(data, size, [0, 0, 6, size])).toBe(6 * size)
+    // The drawing is untouched.
+    expect(countTransparentInRect(data, size, [17, 17, 25, 25])).toBe(0)
+  })
+
+  it('leaves an interior blob of the same colour alone — border connectivity is the rule', () => {
+    const size = 40
+    const data = makeCarpetStripPhoto(size)
+    // Ink that happens to be the same colour as the carpet, well inside the
+    // paper. It must survive: it is never reachable from the frame through
+    // same-coloured pixels.
+    paint(data, size, [20, 20, 26, 26], [66, 58, 52])
+    const picked = pickBackgroundSample(sampleBorderRgb(data, size, size, 4))
+    removeBackgroundColor(data, picked.color, 60, 1.5)
+    const cleared = removeBorderConnectedColor(data, size, size, picked.rejected!.color, 60)
+
+    expect(cleared).toBe(6 * size)
+    expect(countTransparentInRect(data, size, [0, 0, 6, size])).toBe(6 * size)
+    expect(countTransparentInRect(data, size, [21, 21, 25, 25])).toBe(0)
+  })
+
+  it('does not conduct through transparent pixels into the drawing', () => {
+    // A carpet-coloured blob touching the *knocked-out paper*, not the frame.
+    const size = 30
+    const data = makeImage(size, size, [240, 238, 232])
+    paint(data, size, [12, 12, 18, 18], [60, 55, 50])
+    removeBackgroundColor(data, [240, 238, 232], 60, 1.5)
+    const cleared = removeBorderConnectedColor(data, size, size, [60, 55, 50], 60)
+    expect(cleared).toBe(0)
+    expect(countTransparentInRect(data, size, [12, 12, 18, 18])).toBe(0)
+  })
+
+  it('is a no-op at zero tolerance', () => {
+    const size = 20
+    const data = makeImage(size, size, [60, 55, 50])
+    expect(removeBorderConnectedColor(data, size, size, [60, 55, 50], 0)).toBe(0)
+    expect(data[3]).toBe(255)
+  })
+})
+
+describe('longestBorderRunFraction — is the rejected colour actually a surface? (Codex P2, PR #1708)', () => {
+  /** A tightly cropped bold drawing: thick strokes crossing all four edges. */
+  function makeBoldDrawingToTheEdge(size = 40): Uint8ClampedArray {
+    const data = makeImage(size, size, [246, 244, 238])
+    paint(data, size, [0, 14, size, 22], [30, 30, 35])
+    paint(data, size, [16, 0, 24, size], [30, 30, 35])
+    return data
+  }
+
+  it('bold edge-touching ink really can pose as the rejected cluster', () => {
+    // The premise of the finding, asserted rather than assumed: this is not a
+    // hypothetical shape — pickBackgroundSample classifies the ink as the
+    // second surface, and it touches the frame, so connectivity alone would
+    // have erased both strokes whole.
+    const size = 40
+    const picked = pickBackgroundSample(
+      sampleBorderRgb(makeBoldDrawingToTheEdge(size), size, size, 4),
+    )
+    expect(picked.bimodal).toBe(true)
+    expect(picked.color[0]).toBeGreaterThan(200) // paper chosen
+    expect(picked.rejected!.color[0]).toBeLessThan(60) // ink rejected
+  })
+
+  it('separates a surface from strokes by contiguity, not coverage', () => {
+    const size = 40
+    const ink = makeBoldDrawingToTheEdge(size)
+    const inkRun = longestBorderRunFraction(ink, size, size, [30, 30, 35], 60)
+    const carpet = makeCarpetStripPhoto(size)
+    const carpetRun = longestBorderRunFraction(carpet, size, size, [66, 58, 52], 60)
+
+    // The strip is one long stretch of the frame; the strokes are four short
+    // ones, even though their total frame coverage is comparable.
+    expect(carpetRun).toBeGreaterThan(0.3)
+    expect(inkRun).toBeLessThan(0.1)
+    // The shipped default sits between them with margin on both sides.
+    expect(carpetRun).toBeGreaterThan(0.15)
+    expect(inkRun).toBeLessThan(0.15)
+  })
+
+  it('counts a run that wraps a corner as one', () => {
+    // The strip runs down the left edge and a little way along top and bottom.
+    const size = 40
+    const run = longestBorderRunFraction(makeCarpetStripPhoto(size), size, size, [66, 58, 52], 60)
+    const leftEdgeAlone = size / (4 * size - 4)
+    expect(run).toBeGreaterThan(leftEdgeAlone)
+  })
+
+  it('is 1 for a frame entirely of one colour, and 0 for none of it', () => {
+    const data = makeImage(20, 20, [60, 55, 50])
+    expect(longestBorderRunFraction(data, 20, 20, [60, 55, 50], 60)).toBe(1)
+    expect(longestBorderRunFraction(data, 20, 20, [250, 250, 250], 60)).toBe(0)
   })
 })

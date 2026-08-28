@@ -12,6 +12,7 @@ vi.mock('../../core/auth/useAuth', () => ({
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
+  db: {},
   stickerLibraryCollection: () => ({}),
 }))
 
@@ -23,6 +24,12 @@ vi.mock('../../core/ai/useAI', () => ({
 const updateDocMock = vi.fn()
 const addDocMock = vi.fn()
 const deleteDocMock = vi.fn()
+// The edit dialog's save commits as one batch (FEAT-160, Codex P2 on PR #1708),
+// so the group can never end up with mixed names. `batchUpdateMock` records the
+// same (ref, patch) pairs `updateDoc` used to; the adoption write below is still
+// a direct `updateDoc`.
+const batchUpdateMock = vi.fn()
+const batchCommitMock = vi.fn()
 
 // A single standalone sticker (no sourceDrawingId) — the legacy/text-made case.
 const standalone: Sticker = {
@@ -41,6 +48,7 @@ vi.mock('firebase/firestore', () => ({
   orderBy: () => 'orderBy',
   doc: (_col: unknown, id: string) => ({ id }),
   updateDoc: (...args: unknown[]) => updateDocMock(...args),
+  writeBatch: () => ({ update: batchUpdateMock, commit: batchCommitMock }),
   addDoc: (...args: unknown[]) => addDocMock(...args),
   deleteDoc: (...args: unknown[]) => deleteDocMock(...args),
   getDocs: () =>
@@ -57,6 +65,9 @@ describe('StickerLibraryTab — make more versions (FEAT-33 slice 4)', () => {
     deleteDocMock.mockReset()
     addDocMock.mockResolvedValue({ id: 'new-version' })
     updateDocMock.mockResolvedValue(undefined)
+    batchUpdateMock.mockReset()
+    batchCommitMock.mockReset()
+    batchCommitMock.mockResolvedValue(undefined)
   })
 
   it('adopts a standalone sticker (non-destructive write) and links a new version', async () => {
@@ -102,10 +113,12 @@ describe('StickerLibraryTab — make more versions (FEAT-33 slice 4)', () => {
     await user.click(within(editDialog).getByText('Minecraft'))
     await user.click(within(editDialog).getByRole('button', { name: /^save$/i }))
 
-    await waitFor(() => expect(updateDocMock).toHaveBeenCalledTimes(1))
-    const [, patch] = updateDocMock.mock.calls[0] as [unknown, Record<string, unknown>]
-    // Only tags + childProfile are written — no whole-doc overwrite, so
-    // sourceDrawingId / theme / isOriginal can never be dropped.
-    expect(Object.keys(patch).sort()).toEqual(['childProfile', 'tags'])
+    await waitFor(() => expect(batchUpdateMock).toHaveBeenCalledTimes(1))
+    const [, patch] = batchUpdateMock.mock.calls[0] as [unknown, Record<string, unknown>]
+    // Only the field that actually moved is written — no whole-doc overwrite, so
+    // sourceDrawingId / theme / isOriginal can never be dropped. (FEAT-160
+    // narrowed this from tags+childProfile to just the changed field: an
+    // unchanged "For" is not a write.)
+    expect(Object.keys(patch).sort()).toEqual(['tags'])
   })
 })
