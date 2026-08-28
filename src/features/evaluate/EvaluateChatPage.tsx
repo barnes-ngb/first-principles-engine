@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import AssessmentIcon from '@mui/icons-material/Assessment'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DownloadIcon from '@mui/icons-material/Download'
@@ -50,6 +50,7 @@ import type {
 } from '../../core/types'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
+import { PROGRESS_TABS, progressPath } from '../progress/progressNav'
 import FoundationsSection from './FoundationsSection'
 import { syncEvalFindingsToModel } from './evalModelWriteback'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
@@ -167,6 +168,7 @@ function findingStatusIcon(status: EvaluationFinding['status']) {
 export default function EvaluateChatPage() {
   const familyId = useFamilyId()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { activeChildId, activeChild, children, setActiveChildId } = useActiveChild()
   const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
 
@@ -1162,7 +1164,14 @@ export default function EvaluateChatPage() {
                 >
                   Download Report
                 </Button>
-                <Button variant="outlined" onClick={() => navigate('/progress')}>
+                {/* UX-52: the button names Skill Snapshot, so it lands there
+                    rather than on Foundations (tab 0), and carries `?diag=1`. */}
+                <Button
+                  variant="outlined"
+                  onClick={() =>
+                    navigate(progressPath(PROGRESS_TABS.SkillSnapshot, searchParams))
+                  }
+                >
                   View Skill Snapshot
                 </Button>
                 <Button variant="outlined" onClick={() => navigate('/planner/chat')}>

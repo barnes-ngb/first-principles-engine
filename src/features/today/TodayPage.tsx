@@ -59,6 +59,7 @@ import {
   UserProfile,
 } from '../../core/types/enums'
 import { getWeekRange } from '../../core/utils/time'
+import { weekdayName } from './dayProgressLabels'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import ChapterQuestionPool from './ChapterQuestionPool'
@@ -148,6 +149,11 @@ export default function TodayPage() {
       }),
     [selectedDate],
   )
+
+  // UX-28: the page heading names the day being viewed. It read "Today" over a
+  // banner saying "Viewing Monday, Aug 10 (past)"; the checklist card's title
+  // is guarded the same way (`dayPlanTitle`), so the two never disagree.
+  const pageHeading = isToday ? 'Today' : (weekdayName(selectedDate) ?? 'Day Plan')
 
   // Compute Mon-Fri dates for the week containing selectedDate
   const weekDayDates = useMemo(() => {
@@ -955,7 +961,7 @@ export default function TodayPage() {
           activeChild={activeChild}
           dateKey={today}
         />
-        <Typography variant="h4" component="h1">Today</Typography>
+        <Typography variant="h4" component="h1">{pageHeading}</Typography>
         <HelpStrip
           pageKey="today"
           text="Tap items off as you go — everything saves itself."
@@ -991,7 +997,7 @@ export default function TodayPage() {
         dateKey={today}
         onCaptureArtifact={scrollToArtifacts}
       />
-      <Typography variant="h4" component="h1">Today</Typography>
+      <Typography variant="h4" component="h1">{pageHeading}</Typography>
 
       {/* Day Switcher */}
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
@@ -1144,6 +1150,7 @@ export default function TodayPage() {
           selectedChildId={selectedChildId}
           familyId={familyId}
           today={today}
+          isToday={isToday}
           planType={planType}
           todaySnapshot={todaySnapshot}
           activeRoutineItems={activeRoutineItems}

@@ -65,6 +65,7 @@ function renderChecklist(opts: {
         selectedChildId="c1"
         familyId="f1"
         today="2026-08-11"
+        isToday
         planType={PlanType.Normal}
         todaySnapshot={null as SkillSnapshot | null}
         activeRoutineItems={undefined}

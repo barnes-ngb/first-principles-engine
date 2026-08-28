@@ -12,6 +12,7 @@ import {
   APPLY_RETAIN_RULES,
   civilTodayKey,
   describeApplyNextWeek,
+  describeDraftWeekHeading,
   describeDraftNextWeek,
   DRAFT_FOOTNOTE,
   formatNextWeekLabel,
@@ -202,6 +203,21 @@ describe('card wording', () => {
     expect(describeApplyNextWeek('Lincoln', 'Aug 24–28')).toBe(
       "Apply this plan to Lincoln's next week (Aug 24–28)",
     )
+    expect(describeDraftWeekHeading('Lincoln', 'Aug 24–28')).toBe("Lincoln's week of Aug 24–28")
+  })
+
+  // UX-34: the caller used to substitute `'this week'` for an unresolved child,
+  // producing "Apply this plan to this week's next week (Aug 24–28)" on the
+  // button for the largest write in the app.
+  it('reads as English with no resolved child, and invents no name', () => {
+    const apply = describeApplyNextWeek(undefined, 'Aug 24–28')
+    expect(apply).toBe('Apply this plan to next week (Aug 24–28)')
+    expect(apply).not.toMatch(/this week's next week/)
+    expect(apply).not.toMatch(/this child/)
+
+    const heading = describeDraftWeekHeading(undefined, 'Aug 24–28')
+    expect(heading).toBe('Next week — Aug 24–28')
+    expect(heading).not.toMatch(/'s week/)
   })
 
   it('states all three retain rules in parent language', () => {

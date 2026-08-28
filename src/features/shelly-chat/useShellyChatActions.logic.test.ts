@@ -1625,10 +1625,16 @@ describe('a repeat confirm never reaches a writer (FEAT-143 / Codex P1)', () => 
       result.current.stagePendingActions('m1', [CURRICULUM_ADD])
     })
 
+    // UX-33(c): the rejection used to escape into an `onClick` that discards
+    // it. It is caught now — the call resolves `false`, and the failure is a
+    // sentence on the card instead of nothing at all.
+    let failed: boolean | undefined
     await act(async () => {
-      await expect(result.current.applyChatAction(CURRICULUM_ADD)).rejects.toThrow('network')
+      failed = await result.current.applyChatAction(CURRICULUM_ADD)
     })
+    expect(failed).toBe(false)
     expect(result.current.pending[0].status).toBe('pending')
+    expect(result.current.pending[0].error).toMatch(/didn't save/)
 
     addActivityConfig.mockResolvedValue('new-cfg-id')
     let retried: boolean | undefined
@@ -2000,9 +2006,13 @@ describe('confirmed writes are serialized (Codex P1, PR #1676)', () => {
     const { result } = setup()
     act(() => result.current.stagePendingActions('m1', [PLAN_ACTION, second]))
 
+    // UX-33(c): the rejection is caught and reported on the card rather than
+    // thrown past the caller. The queue rail this test exists for is unchanged
+    // — the SECOND write still runs.
     await act(async () => {
-      await expect(result.current.applyChatAction(PLAN_ACTION)).rejects.toThrow('offline')
+      expect(await result.current.applyChatAction(PLAN_ACTION)).toBe(false)
     })
+    expect(result.current.pending[0].error).toMatch(/didn't save/)
     await act(async () => {
       expect(await result.current.applyChatAction(second)).toBe(true)
     })
@@ -2413,5 +2423,248 @@ describe('useShellyChatActions — Dad Lab (FEAT-157)', () => {
       ['lincoln1', 'london1'],
       expect.objectContaining({ childIds: ['london1'] }),
     )
+  })
+})
+
+// ── The confirm-card LIFECYCLE (FEAT-162 / UX-33) ────────────────────────
+//
+// The portal's promise is that the card is the only thing that writes. These
+// three moments broke it from the other end: a card that vanishes with no
+// account, a card that survives its context and does nothing when tapped, and
+// a write that fails behind a button that just comes back.
+describe('pending-card lifecycle (UX-33)', () => {
+  const WORD_A: ChatAction = { kind: 'addSightWord', childId: 'lincoln1', word: 'said' }
+  const WORD_B: ChatAction = { kind: 'addSightWord', childId: 'lincoln1', word: 'come' }
+  const WORD_C: ChatAction = { kind: 'addSightWord', childId: 'lincoln1', word: 'were' }
+
+  describe('(a) a new turn replaces the cards', () => {
+    it('accounts for the cards the new turn replaced — never a silent wipe', () => {
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A, WORD_B]))
+      expect(result.current.pending).toHaveLength(2)
+
+      act(() => result.current.stagePendingActions('msg2', [WORD_C]))
+
+      expect(result.current.pending).toHaveLength(1)
+      expect(result.current.suppressed.join(' ')).toContain('2 suggestions')
+      expect(result.current.suppressed.join(' ')).toContain('Nothing was changed')
+    })
+
+    it('says nothing when the previous turn had no cards left standing', () => {
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+      act(() => result.current.dismissAction(WORD_A))
+
+      act(() => result.current.stagePendingActions('msg2', [WORD_B]))
+
+      expect(result.current.suppressed).toEqual([])
+    })
+
+    it('carries the account even when every action in the new turn is dropped', () => {
+      const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+      expect(result.current.pending).toHaveLength(1)
+
+      // A parent-only proposal from a non-parent profile: dropped at the gate.
+      act(() => result.current.stagePendingActions('msg2', [MINUTES_ACTION]))
+
+      expect(result.current.pending).toHaveLength(0)
+      const said = result.current.suppressed.join(' ')
+      expect(said).toContain('1 suggestion')
+      // Both sentences survive — the drop reason AND what it replaced.
+      expect(said).toContain('grown-up does')
+    })
+  })
+
+  describe('(b) the context the cards were proposed in is gone', () => {
+    it('clears the cards on a child-tab switch and names the child they were for', () => {
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A, WORD_B]))
+
+      act(() => result.current.dropPendingForContext('context-switch'))
+
+      expect(result.current.pending).toHaveLength(0)
+      const said = result.current.suppressed.join(' ')
+      expect(said).toContain('Lincoln')
+      expect(said).toContain('can only be confirmed')
+    })
+
+    it('clears them on a thread switch, naming the conversation rather than the child', () => {
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+
+      act(() => result.current.dropPendingForContext('thread-switch'))
+
+      expect(result.current.pending).toHaveLength(0)
+      expect(result.current.suppressed.join(' ')).toContain('conversation')
+    })
+
+    it('says nothing when there were no cards to drop', () => {
+      const { result } = setup()
+      act(() => result.current.dropPendingForContext('context-switch'))
+      expect(result.current.suppressed).toEqual([])
+    })
+
+    it('leaves no card behind that a later tap could reach', async () => {
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+      act(() => result.current.dropPendingForContext('context-switch'))
+
+      // Nothing is on screen to tap; and the write lane is released too, so a
+      // fresh proposal for the same word is not treated as already applied.
+      expect(result.current.pending).toEqual([])
+      act(() => result.current.stagePendingActions('msg2', [WORD_A]))
+      await act(async () => {
+        await result.current.applyChatAction(WORD_A)
+      })
+      expect(addSightWord).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('(c) a confirmed write that fails', () => {
+    it('says so on the card, and still leaves it retryable', async () => {
+      addSightWord.mockRejectedValueOnce(new Error('offline'))
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+
+      let ok: boolean | undefined
+      await act(async () => {
+        ok = await result.current.applyChatAction(WORD_A)
+      })
+
+      expect(ok).toBe(false)
+      expect(result.current.pending[0].status).toBe('pending')
+      expect(result.current.pending[0].error).toMatch(/didn't save/)
+      expect(result.current.pending[0].error).toContain('nothing was changed')
+    })
+
+    it('never claims the write happened', async () => {
+      addSightWord.mockRejectedValueOnce(new Error('offline'))
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+      await act(async () => {
+        await result.current.applyChatAction(WORD_A)
+      })
+      expect(result.current.pending[0].status).not.toBe('applied')
+    })
+
+    it('clears the sentence when the retry succeeds', async () => {
+      addSightWord.mockRejectedValueOnce(new Error('offline'))
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+      await act(async () => {
+        await result.current.applyChatAction(WORD_A)
+      })
+      expect(result.current.pending[0].error).toBeTruthy()
+
+      await act(async () => {
+        await result.current.applyChatAction(WORD_A)
+      })
+      expect(result.current.pending[0].status).toBe('applied')
+      expect(result.current.pending[0].error).toBeUndefined()
+    })
+
+    it('a failed card does not abort the cards behind it in Confirm all', async () => {
+      addSightWord.mockRejectedValueOnce(new Error('offline'))
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A, WORD_B]))
+
+      await act(async () => {
+        await result.current.confirmAll()
+      })
+
+      expect(result.current.pending[0].status).toBe('pending')
+      expect(result.current.pending[0].error).toMatch(/didn't save/)
+      expect(result.current.pending[1].status).toBe('applied')
+      expect(addSightWord).toHaveBeenCalledTimes(2)
+    })
+
+    it('a rejected write never escapes applyChatAction as an unhandled rejection', async () => {
+      addSightWord.mockRejectedValueOnce(new Error('offline'))
+      const { result } = setup()
+      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+
+      // The old shape threw out of an `onClick` that discards the promise.
+      await expect(
+        act(async () => {
+          await result.current.applyChatAction(WORD_A)
+        }),
+      ).resolves.not.toThrow()
+    })
+  })
+})
+
+// ── A reply that outlived its context (Codex P1, PR #1706) ────────────────
+// `dropPendingForContext` clears what exists AT the moment of a switch. This is
+// the turn that was still in flight across it: the toolbar and thread drawer
+// stay live while `chat()` is awaited, so the response would otherwise stage
+// its cards in the conversation the parent moved to, carrying a
+// `pendingMessageId` from the one they left. Same child on both sides ⇒
+// `rejectReason` does not catch it and the write goes through.
+describe('a late reply cannot land cards in a context it was not asked in', () => {
+  const WORD: ChatAction = { kind: 'addSightWord', childId: 'lincoln1', word: 'said' }
+
+  it('withholds the cards when the scope moved under an in-flight turn', () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+
+    act(() => result.current.dropPendingForContext('thread-switch'))
+    act(() => result.current.stagePendingActions('msg_from_old_thread', [WORD], scope))
+
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed.join(' ')).toMatch(/already left/)
+  })
+
+  it('stages normally when the turn stayed inside its own context', () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+
+    act(() => result.current.stagePendingActions('msg1', [WORD], scope))
+
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('a child-tab switch moves the scope too', () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+    act(() => result.current.dropPendingForContext('context-switch'))
+    act(() => result.current.stagePendingActions('msg1', [WORD], scope))
+    expect(result.current.pending).toEqual([])
+  })
+
+  it('keeps the drop notice AND adds the late-reply one — both are true', () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+    act(() => result.current.stagePendingActions('msg1', [WORD], scope))
+    expect(result.current.pending).toHaveLength(1)
+
+    act(() => result.current.dropPendingForContext('context-switch'))
+    act(() => result.current.stagePendingActions('msg2', [WORD], scope))
+
+    const said = result.current.suppressed.join(' ')
+    expect(said).toContain('Lincoln')
+    expect(said).toMatch(/already left/)
+  })
+
+  it('never annotates the departed thread — no message id is adopted', async () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+    act(() => result.current.dropPendingForContext('thread-switch'))
+    act(() => result.current.stagePendingActions('msg_from_old_thread', [WORD], scope))
+
+    // Nothing to tap, so nothing to write and nothing to annotate.
+    await act(async () => {
+      await result.current.confirmAll()
+    })
+    expect(addSightWord).not.toHaveBeenCalled()
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('a caller that passes no scope is unaffected — the guard is opt-in', () => {
+    const { result } = setup()
+    act(() => result.current.dropPendingForContext('thread-switch'))
+    act(() => result.current.stagePendingActions('msg1', [WORD]))
+    expect(result.current.pending).toHaveLength(1)
   })
 })

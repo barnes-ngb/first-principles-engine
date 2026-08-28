@@ -153,9 +153,21 @@ export default function ChapterQuestionPool({
     return (
       <SectionCard title={`\u{1F4D6} ${book.title}`}>
         <Stack spacing={2} alignItems="center" sx={{ py: 2 }}>
-          <Typography variant="h6">{'\u{1F389}'} You finished {book.title}!</Typography>
+          {/* UX-11: a book skipped end to end used to get the same \uD83C\uDF89 heading
+              over "0 answered \u00B7 17 skipped". Nothing was discussed, so nothing
+              is celebrated \u2014 the book is wrapped up, which is true and is
+              said plainly. No shame either way: skipping is a real choice. */}
+          <Typography variant="h6">
+            {answered.length > 0
+              ? `\u{1F389} You finished ${book.title}!`
+              : `You wrapped up ${book.title}`}
+          </Typography>
           <Typography variant="body2" color="text.secondary">
-            {answered.length} answered{skipped.length > 0 ? ` \u00B7 ${skipped.length} skipped` : ''} \u00B7 {pool.length} chapters total
+            {answered.length > 0 ? `${answered.length} answered` : null}
+            {answered.length > 0 && skipped.length > 0 ? ' \u00B7 ' : null}
+            {skipped.length > 0 ? `${skipped.length} skipped` : null}
+            {answered.length > 0 || skipped.length > 0 ? ' \u00B7 ' : null}
+            {pool.length} chapter{pool.length === 1 ? '' : 's'} total
           </Typography>
           <Button
             variant="outlined"

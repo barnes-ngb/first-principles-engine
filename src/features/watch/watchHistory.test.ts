@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ChecklistItem } from '../../core/types'
-import { buildWatchHistory, summarizeWatchEntry, type WatchHistoryDayLog } from './watchHistory'
+import {
+  buildWatchHistory,
+  notWatchedLine,
+  summarizeWatchEntry,
+  type WatchHistoryDayLog,
+} from './watchHistory'
 
 const watchRow = (videoId: string, completed: boolean): ChecklistItem =>
   ({
@@ -108,5 +113,38 @@ describe('summarizeWatchEntry', () => {
     expect(summarizeWatchEntry(history.v1, childName)).toBe(
       'Watched by Lincoln & London · 2026-08-05 · 2×',
     )
+  })
+})
+
+// ── UX-03 (FEAT-161) ────────────────────────────────────────────────────────
+describe('notWatchedLine', () => {
+  const now = new Date('2026-08-28T12:00:00.000Z')
+
+  it('says "Not watched yet" for a video vetted in inside the window', () => {
+    expect(notWatchedLine('2026-08-27T09:00:00.000Z', 90, now)).toBe('Not watched yet')
+  })
+
+  it('names the window once the video is older than it', () => {
+    expect(notWatchedLine('2026-01-01T09:00:00.000Z', 90, now)).toBe(
+      'Not watched in the last 90 days',
+    )
+  })
+
+  it('treats the window edge as outside — the windowed claim is the safe one', () => {
+    // Exactly 90 days before `now`.
+    expect(notWatchedLine('2026-05-30T12:00:00.000Z', 90, now)).toBe(
+      'Not watched in the last 90 days',
+    )
+  })
+
+  it('falls back to the windowed wording with no usable vettedAt', () => {
+    expect(notWatchedLine(undefined, 90, now)).toBe('Not watched in the last 90 days')
+    expect(notWatchedLine('not-a-date', 90, now)).toBe('Not watched in the last 90 days')
+  })
+
+  it('never says "never"', () => {
+    for (const vetted of [undefined, '2026-08-27T09:00:00.000Z', '2025-01-01T00:00:00.000Z']) {
+      expect(notWatchedLine(vetted, 90, now)).not.toMatch(/never/i)
+    }
   })
 })

@@ -50,6 +50,11 @@ import { ActivityFrequencyLabel } from '../../core/types/enums'
 import AddActivityDialog from './AddActivityDialog'
 import EditRoutinesDialog from './EditRoutinesDialog'
 import { processScanBatch } from './multiPageScan'
+import {
+  buildDeleteActivityPrompt,
+  deleteFailureNotice,
+  DELETE_ACTIVITY_MENU_LABEL,
+} from './removeActivityCopy'
 
 export default function CurriculumTab() {
   const familyId = useFamilyId()
@@ -151,6 +156,9 @@ export default function CurriculumTab() {
 
   // Confirm complete dialog
   const [confirmComplete, setConfirmComplete] = useState<ActivityConfig | null>(null)
+  /** UX-48: the destructive tap now stops here first. See `removeActivityCopy`. */
+  const [confirmDelete, setConfirmDelete] = useState<ActivityConfig | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // Reassign-owner dialog (DATA-08): move a workbook to its real child owner.
   const [reassign, setReassign] = useState<ActivityConfig | null>(null)
@@ -205,9 +213,25 @@ export default function CurriculumTab() {
     setConfirmComplete(null)
   }
 
+  /**
+   * UX-48. Two changes from the unguarded original: it is reachable only
+   * through the confirm dialog, and a REJECTED delete now says so. The old
+   * `void handleDelete(config)` floated the promise and only the success snack
+   * existed, so a failed `deleteDoc` said nothing at all.
+   */
   const handleDelete = async (config: ActivityConfig) => {
-    await deleteConfig(config.id)
-    setSnack(`"${config.name}" removed`)
+    setDeleting(true)
+    try {
+      await deleteConfig(config.id)
+      setConfirmDelete(null)
+      setSnack(`"${config.name}" deleted`)
+    } catch (err) {
+      console.error('[Curriculum] Failed to delete activity config:', err)
+      setConfirmDelete(null)
+      setSnack(deleteFailureNotice(config.name))
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const handleReassign = async (config: ActivityConfig, childId: string) => {
@@ -686,14 +710,17 @@ export default function CurriculumTab() {
             Assign to a child
           </MenuItem>
         )}
+        {/* UX-48: the label names what the tap does, and the tap opens a
+            dialog rather than deleting the document where it stands. */}
         <MenuItem
           onClick={() => {
-            if (menuConfig) void handleDelete(menuConfig)
+            if (menuConfig) setConfirmDelete(menuConfig)
             closeMenu()
           }}
+          sx={{ color: 'error.main' }}
         >
           <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
-          Remove
+          {DELETE_ACTIVITY_MENU_LABEL}
         </MenuItem>
       </Menu>
 
@@ -723,6 +750,51 @@ export default function CurriculumTab() {
             Mark Complete
           </Button>
         </DialogActions>
+      </Dialog>
+
+      {/* Confirm Delete dialog (UX-48) — the same shape and weight as the
+          "Mark as complete" dialog above it, which is the point: the
+          reversible act had a full confirm and the irreversible one had none.
+          Copy is pure and tested in `removeActivityCopy`. */}
+      <Dialog
+        open={confirmDelete !== null}
+        onClose={() => {
+          if (!deleting) setConfirmDelete(null)
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        {confirmDelete &&
+          (() => {
+            const prompt = buildDeleteActivityPrompt(confirmDelete)
+            return (
+              <>
+                <DialogTitle>{prompt.title}</DialogTitle>
+                <DialogContent>
+                  <DialogContentText>{prompt.whatGoes}</DialogContentText>
+                  <DialogContentText sx={{ mt: 1.5 }}>{prompt.whatStays}</DialogContentText>
+                  {prompt.gentlerPath && (
+                    <DialogContentText sx={{ mt: 1.5 }}>{prompt.gentlerPath}</DialogContentText>
+                  )}
+                </DialogContent>
+                <DialogActions>
+                  <Button disabled={deleting} onClick={() => setConfirmDelete(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    disabled={deleting}
+                    onClick={() => {
+                      void handleDelete(confirmDelete)
+                    }}
+                  >
+                    {prompt.confirmLabel}
+                  </Button>
+                </DialogActions>
+              </>
+            )
+          })()}
       </Dialog>
 
       {/* Reassign workbook owner dialog (DATA-08) */}

@@ -16,6 +16,8 @@ import DataReviewExportPanel from '../records/DataReviewExportPanel'
 import FoundationsReviewLauncher from '../foundations-review/FoundationsReviewLauncher'
 import LearningMap from './learning-map/LearningMap'
 import MonthlyBooksTab from '../monthly-review/MonthlyBooksTab'
+import { PROGRESS_TABS } from './progressNav'
+import type { ProgressTabSlug } from './progressNav'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
 import WordWall from './WordWall'
 
@@ -25,13 +27,16 @@ import WordWall from './WordWall'
  * `{ label, render }` array replaces the old index-based `tab === N` guards so
  * future inserts don't require hand-renumbering (design §6.4).
  */
-const TABS: Array<{ label: string; slug: string; render: () => ReactNode }> = [
-  { label: 'Foundations', slug: 'foundations', render: () => <FoundationsTab /> },
-  { label: 'Monthly Books', slug: 'monthly-books', render: () => <MonthlyBooksTab /> },
-  { label: 'Learning Map', slug: 'learning-map', render: () => <LearningMap /> },
-  { label: 'Curriculum', slug: 'curriculum', render: () => <CurriculumTab /> },
-  { label: 'Skill Snapshot', slug: 'skill-snapshot', render: () => <SkillSnapshotPage /> },
-  { label: 'Word Wall', slug: 'word-wall', render: () => <WordWall /> },
+// Slugs come from `progressNav.PROGRESS_TABS` (UX-52) so the table that RESOLVES
+// `?tab=` and the table that BUILDS it are the same table — a link into a tab
+// that no longer exists would otherwise fail silently by landing on tab 0.
+const TABS: Array<{ label: string; slug: ProgressTabSlug; render: () => ReactNode }> = [
+  { label: 'Foundations', slug: PROGRESS_TABS.Foundations, render: () => <FoundationsTab /> },
+  { label: 'Monthly Books', slug: PROGRESS_TABS.MonthlyBooks, render: () => <MonthlyBooksTab /> },
+  { label: 'Learning Map', slug: PROGRESS_TABS.LearningMap, render: () => <LearningMap /> },
+  { label: 'Curriculum', slug: PROGRESS_TABS.Curriculum, render: () => <CurriculumTab /> },
+  { label: 'Skill Snapshot', slug: PROGRESS_TABS.SkillSnapshot, render: () => <SkillSnapshotPage /> },
+  { label: 'Word Wall', slug: PROGRESS_TABS.WordWall, render: () => <WordWall /> },
 ]
 
 export default function ProgressPage() {
