@@ -952,6 +952,20 @@ export default function ActionConfirmCard({
                   Dismissed
                 </Typography>
               )}
+              {/* UX-33(c) — a confirmed write that REJECTED. The card already
+                  reverted to "Confirm" so a retry was possible; what was
+                  missing was any account of why the button came back. Said in
+                  the card's own voice, under the buttons it belongs to, so a
+                  multi-card turn names the one that failed. */}
+              {item.error && (
+                <Typography
+                  variant="caption"
+                  color="error.main"
+                  sx={{ display: 'block', mt: 0.5 }}
+                >
+                  {item.error}
+                </Typography>
+              )}
             </Paper>
           )
         })}

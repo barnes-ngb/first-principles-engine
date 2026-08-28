@@ -229,6 +229,8 @@ export default function ShellyChatPage() {
     pending: pendingActions,
     suppressed: suppressedActionNotices,
     stagePendingActions,
+    currentContextScope,
+    dropPendingForContext,
     applyChatAction,
     dismissAction,
     confirmAll,
@@ -278,6 +280,8 @@ export default function ShellyChatPage() {
     lastErrorRef,
     setSearchParams,
     stagePendingActions,
+    dropPendingForContext,
+    currentContextScope,
   })
 
   const activeThread = threads.find((t) => t.id === activeThreadId)

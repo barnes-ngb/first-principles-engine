@@ -119,6 +119,13 @@ import {
   resolveDraftNextWeek,
   type DraftNextWeekAction,
 } from './nextWeekActions'
+import {
+  confirmFailureNotice,
+  lateReplyNotice,
+  PendingDropReason,
+  pendingDropNotice,
+  supersededNotice,
+} from './pendingLifecycle'
 import { stagePlanAdjustment } from './stagePlanAdjustment'
 import { createArc } from '../dad-lab/useConceptArcs'
 import { createPlannedLab } from '../dad-lab/plannedLab'
@@ -144,6 +151,14 @@ export interface PendingAction {
   id: string
   action: ChatAction
   status: ActionStatus
+  /**
+   * UX-33(c). Set when a confirmed write REJECTED. The card reverts to
+   * `'pending'` so a retry is possible — it always did — but the rejection was
+   * swallowed, so the button simply came back with no account of why. Carried
+   * per-card, not per-turn, because in a multi-card turn only one of them
+   * failed. Cleared on the next confirm tap.
+   */
+  error?: string
 }
 
 /**
@@ -639,6 +654,18 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   } = deps
 
   const [pending, setPending] = useState<PendingAction[]>([])
+  // UX-33(a)/(b): what was still awaiting a tap when a new turn, a tab switch
+  // or a thread switch arrived. A ref because `stagePendingActions` and the
+  // drop handler must keep a stable identity (the page threads them into
+  // `useShellyChatFlows`), for the same reason every other read below is one.
+  const pendingRef = useRef<PendingAction[]>([])
+  // Which CONTEXT the cards on screen belong to (Codex P1, PR #1706). Bumped by
+  // every context/thread switch. A turn captures it before its `await` and hands
+  // it back at stage time, so a reply that outlived its context cannot land its
+  // cards in the one the parent moved to. A counter, not the thread id, because
+  // the same thread re-entered after a detour is still a context the proposal
+  // was not made in.
+  const contextScopeRef = useRef(0)
   // The assistant message the current `pending` set was parsed from — applied
   // actions are recorded back onto it for inline audit.
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null)
@@ -724,9 +751,28 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
    * place, so the app never claims something it didn't do.
    */
   const stagePendingActions = useCallback(
-    (messageId: string, actions: ChatAction[]) => {
+    (messageId: string, actions: ChatAction[], scope?: number) => {
+      // A reply that outlived the context it was asked in (Codex P1, PR #1706).
+      // Returns BEFORE `setPendingMessageId`, because that id belongs to the
+      // thread the parent left. Nothing is staged and nothing is silent.
+      if (scope != null && scope !== contextScopeRef.current) {
+        console.warn(
+          '[shellyChat] withheld a late reply\'s actions — its context is gone',
+          actions,
+        )
+        if (actions.length > 0) {
+          setSuppressed((prev) => [...new Set([...prev, lateReplyNotice()])])
+        }
+        return
+      }
       setPendingMessageId(messageId)
+      // UX-33(a) — a new turn's cards replace the previous turn's, whole array
+      // at a time. Correct (a proposal belongs to the reply that made it) but
+      // it was silent. Recorded first so the sentence survives every branch
+      // below, including the General-tab drop and the all-dropped case.
       const notices: string[] = []
+      const superseded = supersededNotice(stillPendingCount())
+      if (superseded) notices.push(superseded)
       // FEAT-152 — the General tab writes nothing, and says so. No action
       // grammar is emitted without a childId, so an action block here is already
       // off-contract; it is dropped whole rather than resolved, because the one
@@ -738,10 +784,9 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
             '[shellyChat] dropped every action — the General tab has no write powers',
             actions,
           )
-          setSuppressed([generalTabDropNotice(allChildNamesRef.current)])
-        } else {
-          setSuppressed([])
+          notices.push(generalTabDropNotice(allChildNamesRef.current))
         }
+        setSuppressed([...new Set(notices)])
         setPending([])
         return
       }
@@ -924,6 +969,20 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     [],
   )
 
+  useEffect(() => {
+    pendingRef.current = pending
+  }, [pending])
+
+  /**
+   * A token for the context a turn is STARTING in. Capture before the `await`,
+   * hand back to {@link stagePendingActions}; a mismatch withholds the cards.
+   */
+  const currentContextScope = useCallback(() => contextScopeRef.current, [])
+
+  /** How many cards are still awaiting a tap right now. */
+  const stillPendingCount = () =>
+    pendingRef.current.filter((p) => p.status === 'pending').length
+
   const clearPending = useCallback(() => {
     setPending([])
     setPendingMessageId(null)
@@ -931,6 +990,36 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     // The guard is scoped to the cards on screen; a new turn starts clean.
     appliedOrInFlightRef.current = new Set()
   }, [])
+
+  /**
+   * UX-33(b) — drop the pending cards because the CONTEXT they were proposed in
+   * is gone: the parent switched child tabs, or moved to another conversation.
+   *
+   * Both were previously left standing. `clearPending` existed and was tested
+   * but was called from nowhere in the UI, so the only thing between a stale
+   * card and a write was `rejectReason` — which returns
+   * `'child mismatch with active context'` and `false`, silently, leaving a
+   * button that does nothing and says nothing. A thread switch was worse: the
+   * child still matches, so the write goes THROUGH, and the applied-action
+   * annotation lands on `pendingMessageId` under the NEW `activeThreadId` — a
+   * message id that does not exist in that thread.
+   *
+   * Clearing is the rail; the notice is the disclosure. Read the pending set
+   * and the acting child's name synchronously, before the switch re-renders
+   * this hook, so the sentence can name who the cards were for.
+   */
+  const dropPendingForContext = useCallback(
+    (reason: Exclude<PendingDropReason, typeof PendingDropReason.Superseded>) => {
+      const notice = pendingDropNotice(reason, stillPendingCount(), childNameRef.current)
+      // Any turn still in flight now belongs to a context that no longer exists.
+      contextScopeRef.current += 1
+      setPending([])
+      setPendingMessageId(null)
+      setSuppressed(notice ? [notice] : [])
+      appliedOrInFlightRef.current = new Set()
+    },
+    [],
+  )
 
   /**
    * Validate the active-child binding. Returns a rejection reason or null.
@@ -1181,11 +1270,21 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
 
       appliedOrInFlightRef.current.add(action)
       // Hide the buttons for the duration. Reverted to `'pending'` below if the
-      // write does not happen, so a genuine failure stays retryable.
+      // write does not happen, so a genuine failure stays retryable. The
+      // previous attempt's error clears here: a retry in flight must not still
+      // be showing the sentence from the try before it.
       setPending((prev) =>
-        prev.map((p) => (p.action === action ? { ...p, status: 'applying' } : p)),
+        prev.map((p) =>
+          p.action === action ? { ...p, status: 'applying', error: undefined } : p,
+        ),
       )
       let wrote = false
+      // UX-33(c). The rejection used to propagate out of `applyChatAction`
+      // into an `onClick` that discards it: no error, no toast, no sentence,
+      // just the button coming back. Caught here, turned into a sentence on
+      // the card itself, and swallowed so a failed card in a `confirmAll` run
+      // cannot abort the cards behind it.
+      let failed = false
       try {
         // Queue behind whatever write is already running. The tail is reset to a
         // resolved promise on failure so one rejected write cannot wedge the
@@ -1199,11 +1298,22 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
           () => undefined,
         )
         wrote = await queued
+      } catch (err) {
+        console.error('[shellyChat] a confirmed write failed', err, action)
+        failed = true
       } finally {
         if (!wrote) {
           appliedOrInFlightRef.current.delete(action)
           setPending((prev) =>
-            prev.map((p) => (p.action === action ? { ...p, status: 'pending' } : p)),
+            prev.map((p) =>
+              p.action === action
+                ? {
+                    ...p,
+                    status: 'pending',
+                    ...(failed ? { error: confirmFailureNotice() } : {}),
+                  }
+                : p,
+            ),
           )
         }
       }
@@ -1234,7 +1344,9 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     /** Plain-language reasons a proposal was dropped before becoming a card. */
     suppressed,
     stagePendingActions,
+    currentContextScope,
     clearPending,
+    dropPendingForContext,
     applyChatAction,
     dismissAction,
     confirmAll,
