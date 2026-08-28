@@ -18,6 +18,13 @@ import type { CropFraction } from './cropImage'
 //      than the median of both — see `pickBackgroundSample`;
 //   3. tiny disconnected islands (dust, paper flecks) are dropped;
 //   4. surviving faint ink is boosted so pencil reads like marker.
+//
+// FEAT-160 — the fifth: when the ring *is* bimodal, both surfaces are
+// background. Picking the paper knocks the paper out, but the carpet
+// inside the crop is far from paper colour, so it survived — as a strip
+// far too large for the island pass to call dust. So the rejected
+// cluster's colour is knocked out too, but only where it is connected
+// to the frame; see `removeBorderConnectedColor`.
 // ──────────────────────────────────────────────────────────────────
 
 /** Ring inset when the parent already cropped — they trimmed the surround for us. */
@@ -60,6 +67,14 @@ export interface CleanSketchOptions {
   /** Ink already this far from the background luminance is left byte-identical.
    *  Default 120 — this is the rail that keeps marker-on-white untouched. */
   inkContrastFullRange?: number
+  /** Also knock out the *rejected* cluster of a bimodal ring (the table or
+   *  carpet the paper sat on), where it touches the frame. Default true. Only
+   *  ever runs on the bimodal path — a one-surface ring is untouched. */
+  knockOutRejectedSurface?: boolean
+  /** Colour distance from the rejected surface that counts as that surface, for
+   *  the border-connected second pass. Default: the same {@link
+   *  CleanSketchOptions.tolerance} the primary pass uses. */
+  rejectedSurfaceTolerance?: number
 }
 
 // ── Pure helpers (exported for unit testing) ───────────────────────
@@ -183,6 +198,13 @@ export interface BackgroundSample {
   stdDev: number
   /** True when the ring split into two well-separated surfaces (paper + table). */
   bimodal: boolean
+  /**
+   * The cluster we did *not* pick, present only on the bimodal path (FEAT-160).
+   * It is background too — the table or carpet the paper was photographed on —
+   * so the caller can knock it out where it touches the frame. Absent when the
+   * ring holds a single surface: that return shape is unchanged.
+   */
+  rejected?: { color: [number, number, number]; stdDev: number }
 }
 
 /** Per-channel median + std dev of the sample rows listed in `idx`. */
@@ -303,7 +325,15 @@ export function pickBackgroundSample(
   const darkerIsDecisivelyFlatter =
     lighter.stdDev > minNoisyStdDev && darker.stdDev * flatnessRatio < lighter.stdDev
   const chosen = darkerIsDecisivelyFlatter ? darker : lighter
-  return { color: chosen.color, stdDev: chosen.stdDev, bimodal: true }
+  const rejectedCluster = darkerIsDecisivelyFlatter ? lighter : darker
+  return {
+    color: chosen.color,
+    stdDev: chosen.stdDev,
+    bimodal: true,
+    // Both surfaces in a bimodal ring are background (FEAT-160) — report the
+    // one we did not pick so the caller can clear it from the frame too.
+    rejected: { color: rejectedCluster.color, stdDev: rejectedCluster.stdDev },
+  }
 }
 
 /**
@@ -332,6 +362,86 @@ export function removeBackgroundColor(
       if (next < data[i + 3]) data[i + 3] = next
     }
   }
+}
+
+/**
+ * Clear the *other* background surface — but only where it reaches the frame.
+ *
+ * A bimodal ring means the photo holds two surfaces: the paper we knocked out,
+ * and the table or carpet it sat on. Whatever of that second surface falls
+ * inside the crop is still opaque after the primary pass (it is nowhere near
+ * paper colour) and a strip of it is far too large for the island pass to call
+ * dust — the sliver Nathan reported down the left edge.
+ *
+ * **The rule is border connectivity, and it is the whole safety story.** Fill
+ * inward from the image edge across pixels within `tolerance` of `color`,
+ * 4-connected (the `removeSmallIslands` idiom), and zero their alpha. A pixel
+ * near that colour but *not* reachable from the frame through same-coloured
+ * pixels is left alone — so a drawing whose ink happens to resemble the carpet
+ * can never be eaten from the inside. Only already-opaque pixels are walked;
+ * transparent ones neither clear nor conduct, so the fill cannot leak across
+ * the knocked-out paper into the drawing.
+ *
+ * Mutates `data` in place; returns how many pixels were cleared.
+ *
+ * Limitation, stated plainly: a single colour + tolerance describes a roughly
+ * uniform surface. A strongly *patterned* rug is only partly within tolerance of
+ * its own median, so this thins such an edge rather than erasing it.
+ */
+export function removeBorderConnectedColor(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  color: [number, number, number],
+  tolerance: number,
+  alphaThreshold = 0,
+): number {
+  const count = width * height
+  if (count === 0 || tolerance <= 0) return 0
+  const [cr, cg, cb] = color
+  const matches = (p: number): boolean => {
+    const i = p * 4
+    if (data[i + 3] <= alphaThreshold) return false
+    const dr = data[i] - cr
+    const dg = data[i + 1] - cg
+    const db = data[i + 2] - cb
+    return Math.sqrt(dr * dr + dg * dg + db * db) < tolerance
+  }
+
+  const seen = new Uint8Array(count)
+  const stack: number[] = []
+  const seed = (p: number) => {
+    if (seen[p]) return
+    seen[p] = 1
+    if (matches(p)) stack.push(p)
+  }
+  for (let x = 0; x < width; x++) {
+    seed(x)
+    seed((height - 1) * width + x)
+  }
+  for (let y = 0; y < height; y++) {
+    seed(y * width)
+    seed(y * width + width - 1)
+  }
+
+  let cleared = 0
+  while (stack.length) {
+    const p = stack.pop() as number
+    data[p * 4 + 3] = 0
+    cleared++
+    const x = p % width
+    const y = (p - x) / width
+    const visit = (q: number) => {
+      if (seen[q]) return
+      seen[q] = 1
+      if (matches(q)) stack.push(q)
+    }
+    if (x > 0) visit(p - 1)
+    if (x < width - 1) visit(p + 1)
+    if (y > 0) visit(p - width)
+    if (y < height - 1) visit(p + width)
+  }
+  return cleared
 }
 
 /**
@@ -608,6 +718,8 @@ export async function cleanSketchBackground(
   const minIslandShareOfLargest = options?.minIslandShareOfLargest ?? 0.0005
   const inkStrength = options?.inkContrastStrength ?? 1
   const inkFullRange = options?.inkContrastFullRange ?? 120
+  const knockOutRejected = options?.knockOutRejectedSurface ?? true
+  const rejectedTolerance = options?.rejectedSurfaceTolerance ?? tolerance
   const endTotal = startStep('cleanSketchBackground')
 
   return new Promise((resolve, reject) => {
@@ -641,6 +753,21 @@ export async function cleanSketchBackground(
         applyHslPaperFallback(data)
       } else {
         removeBackgroundColor(data, bgColor, tolerance, featherMultiplier)
+        // Both surfaces in a bimodal ring are background (FEAT-160). The primary
+        // pass knocked out the paper; the table/carpet inside the crop is
+        // nowhere near paper colour, so it survives as a strip the island pass
+        // will never call dust. Clear it too — but only where it reaches the
+        // frame, so interior ink that happens to resemble it is untouched.
+        // Bimodal path only: a one-surface ring never reaches this.
+        if (knockOutRejected && background.bimodal && background.rejected) {
+          removeBorderConnectedColor(
+            data,
+            canvas.width,
+            canvas.height,
+            background.rejected.color,
+            rejectedTolerance,
+          )
+        }
       }
 
       // Drop dust/flecks, then strengthen what's left. Both run before the alpha
