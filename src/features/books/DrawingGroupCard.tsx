@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { deleteDoc, doc, updateDoc } from 'firebase/firestore'
+import { deleteDoc, doc, writeBatch } from 'firebase/firestore'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -18,7 +18,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
 
-import { stickerLibraryCollection } from '../../core/firebase/firestore'
+import { db, stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker } from '../../core/types'
 import {
@@ -47,6 +47,15 @@ interface DrawingGroupCardProps {
   selectedIds?: Set<string>
   /** Toggle a version's selection in select mode. */
   onToggleSelect?: (sticker: Sticker) => void
+  /**
+   * Every version of this drawing, including any the caller's active filters
+   * hide from `group.versions` (Codex P1, PR #1708). Tags and "For" are
+   * **per-version**, so a tag or child filter can split a group — and a rename
+   * that promised one name for every version would then write only the visible
+   * subset, leaving the stored drawing permanently split. Defaults to
+   * `group.versions` for callers that render the library unfiltered.
+   */
+  allVersions?: Sticker[]
 }
 
 /** Friendly label for a version chip — "Original", or the theme's emoji + name. */
@@ -70,6 +79,7 @@ export default function DrawingGroupCard({
   selectMode = false,
   selectedIds,
   onToggleSelect,
+  allVersions,
 }: DrawingGroupCardProps) {
   const { enhanceSketch } = useAI()
   const [picking, setPicking] = useState(false)
@@ -90,6 +100,12 @@ export default function DrawingGroupCard({
   // session. If the original was deleted, fall back to the card representative.
   const source = group.versions.find((v) => v.isOriginal) ?? group.representative
   const label = group.representative.label
+  // The rename is a group operation, so it must see the whole group — not the
+  // slice a tag/child filter left visible. Deleting deliberately still acts on
+  // the visible versions only; that the group *delete* and the version count
+  // also read a filtered group is a pre-existing gap, filed as UX-99 in
+  // `docs/review/UX_AUDIT_2026-08.md` §12 rather than widened into this change.
+  const renameTargets = allVersions ?? group.versions
 
   const handleAddVersion = useCallback(async () => {
     if (busy) return
@@ -128,7 +144,7 @@ export default function DrawingGroupCard({
     if (renameBusy) return
     // A no-op is not a write: renaming to the name already showing plans no
     // updateDoc at all, so the card never claims a change it did not make.
-    const plan = planDrawingRename(renameText, group.versions)
+    const plan = planDrawingRename(renameText, renameTargets)
     if (plan.kind === 'invalid') {
       setRenameError('Give the drawing a name.')
       return
@@ -140,13 +156,17 @@ export default function DrawingGroupCard({
     setRenameBusy(true)
     setRenameError(null)
     try {
-      // Partial patches only (never a bare setDoc) — a rename must not drop
+      // One batch, not N independent updates (Codex P2, PR #1708): a partial
+      // fan-out would leave the group with mixed names — exactly the invariant
+      // this dialog promises. Batched updates are all-or-nothing, and a member
+      // deleted from under us fails the whole commit rather than half of it.
+      // Still partial patches (never a bare setDoc) — a rename must not drop
       // sourceDrawingId / theme / isOriginal.
-      await Promise.all(
-        plan.writes.map((w) =>
-          updateDoc(doc(stickerLibraryCollection(familyId), w.id), w.patch),
-        ),
-      )
+      const batch = writeBatch(db)
+      for (const w of plan.writes) {
+        batch.update(doc(stickerLibraryCollection(familyId), w.id), w.patch)
+      }
+      await batch.commit()
       setRenaming(false)
       onChanged()
     } catch (err) {
@@ -155,7 +175,7 @@ export default function DrawingGroupCard({
     } finally {
       setRenameBusy(false)
     }
-  }, [renameBusy, renameText, group.versions, familyId, onChanged])
+  }, [renameBusy, renameText, renameTargets, familyId, onChanged])
 
   const handleConfirmDelete = useCallback(async () => {
     if (!deleteTarget) return

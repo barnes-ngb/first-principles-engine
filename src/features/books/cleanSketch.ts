@@ -24,7 +24,9 @@ import type { CropFraction } from './cropImage'
 // inside the crop is far from paper colour, so it survived — as a strip
 // far too large for the island pass to call dust. So the rejected
 // cluster's colour is knocked out too, but only where it is connected
-// to the frame; see `removeBorderConnectedColor`.
+// to the frame — and only once that colour has shown it is an external
+// surface at all (`longestBorderRunFraction`), so bold ink touching the
+// frame is not mistaken for the floor; see `removeBorderConnectedColor`.
 // ──────────────────────────────────────────────────────────────────
 
 /** Ring inset when the parent already cropped — they trimmed the surround for us. */
@@ -75,6 +77,11 @@ export interface CleanSketchOptions {
    *  the border-connected second pass. Default: the same {@link
    *  CleanSketchOptions.tolerance} the primary pass uses. */
   rejectedSurfaceTolerance?: number
+  /** Evidence required before the rejected cluster is treated as an external
+   *  surface rather than the drawing's own ink: the longest *contiguous* run of
+   *  the image's frame matching it, as a fraction of the perimeter. Default
+   *  0.15 — see {@link longestBorderRunFraction}. */
+  minRejectedBorderRun?: number
 }
 
 // ── Pure helpers (exported for unit testing) ───────────────────────
@@ -365,6 +372,73 @@ export function removeBackgroundColor(
 }
 
 /**
+ * How much of the image's frame is *one continuous stretch* of `color`, as a
+ * fraction of the perimeter — the evidence that a colour is a surface the paper
+ * sits on rather than the drawing's own ink.
+ *
+ * Border connectivity alone is not enough to tell those apart (Codex P2, PR
+ * #1708). A tightly cropped bold drawing whose thick strokes reach the sampling
+ * ring can supply the 15% second luminance cluster `pickBackgroundSample`
+ * needs, get classified as the *rejected* surface, and — because those strokes
+ * also touch the frame — be flood-filled away in full. Interior ink is safe;
+ * edge-touching ink was not.
+ *
+ * What separates them is **contiguity, not coverage**. A surface the sheet sits
+ * on is the region *outside* the paper, so it presents as one long unbroken
+ * stretch of the frame; strokes crossing the frame present as several short
+ * ones. On the reported carpet strip that stretch is ~0.32 of the perimeter; on
+ * a drawing whose bands cross all four edges the longest run is ~0.05, even
+ * though its total frame coverage (~0.21) is comparable.
+ *
+ * The perimeter is walked as a **cycle**, so a strip running down one edge and
+ * a little way along its two neighbours counts as the single run it looks like.
+ *
+ * Failing this test only *skips* the second knockout — the output is then
+ * exactly the pre-FEAT-160 pipeline. Under-removing is the safe direction: a
+ * surviving sliver is a blemish, an erased stroke is the drawing.
+ */
+export function longestBorderRunFraction(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  color: [number, number, number],
+  tolerance: number,
+): number {
+  if (width <= 0 || height <= 0) return 0
+  const [cr, cg, cb] = color
+  const ring: boolean[] = []
+  const push = (x: number, y: number) => {
+    const i = (y * width + x) * 4
+    const dr = data[i] - cr
+    const dg = data[i + 1] - cg
+    const db = data[i + 2] - cb
+    ring.push(Math.sqrt(dr * dr + dg * dg + db * db) < tolerance)
+  }
+  // One lap of the frame, corner to corner, with no pixel visited twice.
+  for (let x = 0; x < width; x++) push(x, 0)
+  for (let y = 1; y < height; y++) push(width - 1, y)
+  for (let x = width - 2; x >= 0; x--) push(x, height - 1)
+  for (let y = height - 2; y >= 1; y--) push(0, y)
+
+  const n = ring.length
+  if (n === 0) return 0
+  if (ring.every(Boolean)) return 1
+  // Two laps finds a run that wraps the start of the cycle; the all-true case
+  // above is what stops that doubling from over-counting.
+  let best = 0
+  let run = 0
+  for (let i = 0; i < n * 2; i++) {
+    if (ring[i % n]) {
+      run++
+      if (run > best) best = run
+    } else {
+      run = 0
+    }
+  }
+  return Math.min(best, n) / n
+}
+
+/**
  * Clear the *other* background surface — but only where it reaches the frame.
  *
  * A bimodal ring means the photo holds two surfaces: the paper we knocked out,
@@ -381,6 +455,10 @@ export function removeBackgroundColor(
  * can never be eaten from the inside. Only already-opaque pixels are walked;
  * transparent ones neither clear nor conduct, so the fill cannot leak across
  * the knocked-out paper into the drawing.
+ *
+ * Border connectivity keeps *interior* ink safe; it says nothing about ink that
+ * touches the frame, so the caller must first establish that this colour is an
+ * external surface at all — see {@link longestBorderRunFraction}.
  *
  * Mutates `data` in place; returns how many pixels were cleared.
  *
@@ -720,6 +798,7 @@ export async function cleanSketchBackground(
   const inkFullRange = options?.inkContrastFullRange ?? 120
   const knockOutRejected = options?.knockOutRejectedSurface ?? true
   const rejectedTolerance = options?.rejectedSurfaceTolerance ?? tolerance
+  const minRejectedBorderRun = options?.minRejectedBorderRun ?? 0.15
   const endTotal = startStep('cleanSketchBackground')
 
   return new Promise((resolve, reject) => {
@@ -759,14 +838,28 @@ export async function cleanSketchBackground(
         // will never call dust. Clear it too — but only where it reaches the
         // frame, so interior ink that happens to resemble it is untouched.
         // Bimodal path only: a one-surface ring never reaches this.
+        // ...and only once the rejected colour has shown it IS an external
+        // surface: one long continuous stretch of the frame. Bold strokes that
+        // reach the ring can otherwise pose as the second cluster, and they
+        // touch the frame too, so connectivity alone would erase them whole
+        // (Codex P2, PR #1708). Failing this leaves the pre-FEAT-160 output.
         if (knockOutRejected && background.bimodal && background.rejected) {
-          removeBorderConnectedColor(
+          const borderRun = longestBorderRunFraction(
             data,
             canvas.width,
             canvas.height,
             background.rejected.color,
             rejectedTolerance,
           )
+          if (borderRun >= minRejectedBorderRun) {
+            removeBorderConnectedColor(
+              data,
+              canvas.width,
+              canvas.height,
+              background.rejected.color,
+              rejectedTolerance,
+            )
+          }
         }
       }
 

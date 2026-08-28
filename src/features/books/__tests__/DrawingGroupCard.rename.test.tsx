@@ -6,19 +6,29 @@ import type { Sticker } from '../../../core/types'
 import { StickerCategory } from '../../../core/types/enums'
 import type { DrawingGroup } from '../stickerGrouping'
 
-const { updateDocMock, deleteDocMock } = vi.hoisted(() => ({
-  updateDocMock: vi.fn<(ref: { id: string }, patch: Record<string, unknown>) => Promise<void>>(),
-  deleteDocMock: vi.fn<(ref: { id: string }) => Promise<void>>(),
-}))
+// A rename commits as ONE batch (Codex P2, PR #1708) — the spies below record
+// the batched updates, so "how many docs moved" is still directly assertable.
+const { updateDocMock, deleteDocMock, commitMock, writeBatchMock } = vi.hoisted(() => {
+  const updateDocMock =
+    vi.fn<(ref: { id: string }, patch: Record<string, unknown>) => void>()
+  const commitMock = vi.fn<() => Promise<void>>()
+  return {
+    updateDocMock,
+    deleteDocMock: vi.fn<(ref: { id: string }) => Promise<void>>(),
+    commitMock,
+    writeBatchMock: vi.fn(() => ({ update: updateDocMock, commit: commitMock })),
+  }
+})
 
 vi.mock('firebase/firestore', () => ({
-  updateDoc: updateDocMock,
+  writeBatch: writeBatchMock,
   deleteDoc: deleteDocMock,
   doc: vi.fn((_col: unknown, id: string) => ({ id })),
   collection: vi.fn(),
 }))
 
 vi.mock('../../../core/firebase/firestore', () => ({
+  db: {},
   stickerLibraryCollection: vi.fn(() => ({})),
 }))
 
@@ -56,7 +66,8 @@ async function openRename(user: ReturnType<typeof userEvent.setup>) {
 describe('DrawingGroupCard rename (FEAT-160)', () => {
   beforeEach(() => {
     updateDocMock.mockReset()
-    updateDocMock.mockResolvedValue(undefined)
+    commitMock.mockReset()
+    commitMock.mockResolvedValue(undefined)
     deleteDocMock.mockReset()
   })
 
@@ -76,6 +87,36 @@ describe('DrawingGroupCard rename (FEAT-160)', () => {
       expect(call[1]).toEqual({ label: 'Ender dragon' })
     }
     expect(updateDocMock.mock.calls.map((c) => c[0].id).sort()).toEqual(['a', 'b'])
+    // All-or-nothing: one batch, one commit — never N independent writes that
+    // could half-apply and leave the drawing with mixed names.
+    expect(writeBatchMock).toHaveBeenCalledTimes(1)
+    expect(commitMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('renames versions the active filters hide from the card', async () => {
+    const user = userEvent.setup()
+    const onChanged = vi.fn()
+    const group = makeGroup()
+    // What a tag/child filter leaves visible is a SUBSET: tags and "For" are
+    // per-version, so a filter can split a group. The rename must still cover
+    // the whole drawing, or the stored group is left permanently split.
+    const hidden = sticker({ id: 'c', label: 'My drawing', theme: 'cartoon' })
+    render(
+      <DrawingGroupCard
+        group={{ ...group, versions: [group.versions[0]] }}
+        allVersions={[...group.versions, hidden]}
+        familyId="f1"
+        onChanged={onChanged}
+      />,
+    )
+
+    const field = await openRename(user)
+    await user.clear(field)
+    await user.type(field, 'Ender dragon')
+    await user.click(screen.getByRole('button', { name: 'Save name' }))
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+    expect(updateDocMock.mock.calls.map((c) => c[0].id).sort()).toEqual(['a', 'b', 'c'])
   })
 
   it('seeds the dialog with the name already showing', async () => {
@@ -103,7 +144,7 @@ describe('DrawingGroupCard rename (FEAT-160)', () => {
   it('a failed rename says so and keeps the dialog open with the typed name', async () => {
     const user = userEvent.setup()
     const onChanged = vi.fn()
-    updateDocMock.mockRejectedValue(new Error('offline'))
+    commitMock.mockRejectedValue(new Error('offline'))
     render(<DrawingGroupCard group={makeGroup()} familyId="f1" onChanged={onChanged} />)
 
     const field = await openRename(user)

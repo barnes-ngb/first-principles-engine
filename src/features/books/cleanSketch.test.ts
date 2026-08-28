@@ -5,6 +5,7 @@ import {
   luminance,
   medianRgb,
   pickBackgroundSample,
+  longestBorderRunFraction,
   removeBackgroundColor,
   removeBorderConnectedColor,
   removeSmallIslands,
@@ -645,5 +646,59 @@ describe('removeBorderConnectedColor (FEAT-160)', () => {
     const data = makeImage(size, size, [60, 55, 50])
     expect(removeBorderConnectedColor(data, size, size, [60, 55, 50], 0)).toBe(0)
     expect(data[3]).toBe(255)
+  })
+})
+
+describe('longestBorderRunFraction — is the rejected colour actually a surface? (Codex P2, PR #1708)', () => {
+  /** A tightly cropped bold drawing: thick strokes crossing all four edges. */
+  function makeBoldDrawingToTheEdge(size = 40): Uint8ClampedArray {
+    const data = makeImage(size, size, [246, 244, 238])
+    paint(data, size, [0, 14, size, 22], [30, 30, 35])
+    paint(data, size, [16, 0, 24, size], [30, 30, 35])
+    return data
+  }
+
+  it('bold edge-touching ink really can pose as the rejected cluster', () => {
+    // The premise of the finding, asserted rather than assumed: this is not a
+    // hypothetical shape — pickBackgroundSample classifies the ink as the
+    // second surface, and it touches the frame, so connectivity alone would
+    // have erased both strokes whole.
+    const size = 40
+    const picked = pickBackgroundSample(
+      sampleBorderRgb(makeBoldDrawingToTheEdge(size), size, size, 4),
+    )
+    expect(picked.bimodal).toBe(true)
+    expect(picked.color[0]).toBeGreaterThan(200) // paper chosen
+    expect(picked.rejected!.color[0]).toBeLessThan(60) // ink rejected
+  })
+
+  it('separates a surface from strokes by contiguity, not coverage', () => {
+    const size = 40
+    const ink = makeBoldDrawingToTheEdge(size)
+    const inkRun = longestBorderRunFraction(ink, size, size, [30, 30, 35], 60)
+    const carpet = makeCarpetStripPhoto(size)
+    const carpetRun = longestBorderRunFraction(carpet, size, size, [66, 58, 52], 60)
+
+    // The strip is one long stretch of the frame; the strokes are four short
+    // ones, even though their total frame coverage is comparable.
+    expect(carpetRun).toBeGreaterThan(0.3)
+    expect(inkRun).toBeLessThan(0.1)
+    // The shipped default sits between them with margin on both sides.
+    expect(carpetRun).toBeGreaterThan(0.15)
+    expect(inkRun).toBeLessThan(0.15)
+  })
+
+  it('counts a run that wraps a corner as one', () => {
+    // The strip runs down the left edge and a little way along top and bottom.
+    const size = 40
+    const run = longestBorderRunFraction(makeCarpetStripPhoto(size), size, size, [66, 58, 52], 60)
+    const leftEdgeAlone = size / (4 * size - 4)
+    expect(run).toBeGreaterThan(leftEdgeAlone)
+  })
+
+  it('is 1 for a frame entirely of one colour, and 0 for none of it', () => {
+    const data = makeImage(20, 20, [60, 55, 50])
+    expect(longestBorderRunFraction(data, 20, 20, [60, 55, 50], 60)).toBe(1)
+    expect(longestBorderRunFraction(data, 20, 20, [250, 250, 250], 60)).toBe(0)
   })
 })
