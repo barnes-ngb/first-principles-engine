@@ -12,6 +12,7 @@ import { render, screen } from '@testing-library/react'
 import type { Child } from '../../core/types'
 import ActionConfirmCard from './ActionConfirmCard'
 import { describeActivityAudience } from './activityMinutesView'
+import { confirmFailureNotice } from './pendingLifecycle'
 import { SubjectBucket } from '../../core/types/enums'
 import type { ChatWeekDay } from './dayItemActions'
 import type { ChatWatchVideo } from './watchActions'
@@ -836,5 +837,44 @@ describe('ActionConfirmCard — planLab (FEAT-157)', () => {
 
     expect(screen.getByText(/Plan the Science lab "Make a bulb light up"/)).toBeInTheDocument()
     expect(screen.getByText('Done')).toBeInTheDocument()
+  })
+})
+
+describe('ActionConfirmCard — a failed write says so (FEAT-162 / UX-33c)', () => {
+  const failed = (error?: string): PendingAction[] => [
+    {
+      id: 'msg1_0',
+      status: 'pending',
+      action: { kind: 'addSightWord', childId: 'lincoln1', word: 'said' },
+      ...(error ? { error } : {}),
+    },
+  ]
+
+  it('renders the failure sentence on the card that failed', () => {
+    renderCard(failed(confirmFailureNotice()))
+    expect(screen.getByText(confirmFailureNotice())).toBeInTheDocument()
+  })
+
+  it('keeps the card retryable — Confirm is still there beside the sentence', () => {
+    renderCard(failed(confirmFailureNotice()))
+    expect(screen.getByRole('button', { name: /confirm/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /dismiss/i })).toBeInTheDocument()
+  })
+
+  it('shows nothing extra on a card that has not failed', () => {
+    renderCard(failed())
+    expect(screen.queryByText(confirmFailureNotice())).not.toBeInTheDocument()
+  })
+
+  it('names only the card that failed in a multi-card turn', () => {
+    renderCard([
+      ...failed(confirmFailureNotice()),
+      {
+        id: 'msg1_1',
+        status: 'applied',
+        action: { kind: 'addSightWord', childId: 'lincoln1', word: 'come' },
+      },
+    ])
+    expect(screen.getAllByText(confirmFailureNotice())).toHaveLength(1)
   })
 })

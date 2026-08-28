@@ -58,6 +58,15 @@ export interface ShellyChatFlowsDeps {
    * without this hook taking on any write capability.
    */
   stagePendingActions: (messageId: string, actions: ChatAction[]) => void
+  /**
+   * UX-33(b) — drop the still-pending confirm cards, with a sentence, because
+   * the context they were proposed in is gone. Owned by `useShellyChatActions`;
+   * this hook holds the two handlers that end a context (a child-tab switch and
+   * a thread switch) and so is where it has to be called. Passed through like
+   * `stagePendingActions`, and for the same reason: no write capability moves
+   * here, only the ability to clear a proposal.
+   */
+  dropPendingForContext: (reason: 'context-switch' | 'thread-switch') => void
 }
 
 /**
@@ -71,7 +80,7 @@ export interface ShellyChatFlowsDeps {
  * keeping its external prop/route contract identical.
  */
 export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlowsDeps) {
-  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, setSearchParams, stagePendingActions } = deps
+  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, setSearchParams, stagePendingActions, dropPendingForContext } = deps
 
   const {
     chatContext, setChatContext,
@@ -188,13 +197,18 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
   // ── Context change handler ────────────────────────────────────
   const handleContextChange = useCallback((_: unknown, val: ChatContext | null) => {
     if (!val) return
+    // UX-33(b) — FIRST, while `activeChildId` still names the child the cards
+    // were proposed for. A card that outlived its tab was a dead button:
+    // `rejectReason` refused it on the child mismatch and returned false with
+    // nothing said. Now it is cleared, and the clearing is said out loud.
+    dropPendingForContext('context-switch')
     setChatContext(val)
     setActiveThreadId(null)
     setMessages([])
     setFollowUps([])
     setSearchParams({})
     autoSendTriggered.current = false
-  }, [setSearchParams, setChatContext, setActiveThreadId, setMessages, setFollowUps, autoSendTriggered])
+  }, [dropPendingForContext, setSearchParams, setChatContext, setActiveThreadId, setMessages, setFollowUps, autoSendTriggered])
 
   // ── Map chatContext to childId for AI calls ───────────────────
   const getChildIdForContext = useCallback((): string => {
@@ -1048,24 +1062,31 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
 
   // ── New thread ─────────────────────────────────────────────────
   const handleNewThread = useCallback(() => {
+    // UX-33(b), the sharper half: on a thread switch the CHILD still matches,
+    // so a stale card's Confirm does not bounce off `rejectReason` — it writes,
+    // and then annotates `pendingMessageId` under the new `activeThreadId`,
+    // a message id that does not exist there. Cleared with a sentence.
+    dropPendingForContext('thread-switch')
     setActiveThreadId(null)
     setMessages([])
     setSearchParams({})
     setDrawerOpen(false)
     setFollowUps([])
     autoSendTriggered.current = false
-  }, [setSearchParams, setActiveThreadId, setMessages, setDrawerOpen, setFollowUps, autoSendTriggered])
+  }, [dropPendingForContext, setSearchParams, setActiveThreadId, setMessages, setDrawerOpen, setFollowUps, autoSendTriggered])
 
   // ── Select thread ──────────────────────────────────────────────
   const handleSelectThread = useCallback(
     (threadId: string) => {
+      // Same rail as `handleNewThread` — see the note there.
+      dropPendingForContext('thread-switch')
       setActiveThreadId(threadId)
       setSearchParams({ thread: threadId })
       setDrawerOpen(false)
       setFollowUps([])
       autoSendTriggered.current = false
     },
-    [setSearchParams, setActiveThreadId, setDrawerOpen, setFollowUps, autoSendTriggered],
+    [dropPendingForContext, setSearchParams, setActiveThreadId, setDrawerOpen, setFollowUps, autoSendTriggered],
   )
 
   // ── Archive thread ─────────────────────────────────────────────
