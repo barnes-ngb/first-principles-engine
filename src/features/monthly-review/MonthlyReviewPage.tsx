@@ -178,11 +178,15 @@ const PARENT_MODE_TILE_ORDER: Array<keyof MonthStats> = [
   'blockersResolved',
 ]
 
-// In kid mode, zero-value tiles are a soft anti-pattern on a celebration
-// artifact — a 10-year-old reading "0 Dad Lab" or "0 Blockers beat" reads
-// as scolding. Always show diamonds/hours/quests (zero there is meaningful
-// or improbable); hide the rest when they're zero.
-const KID_MODE_ALWAYS_SHOW: ReadonlyArray<keyof MonthStats> = [
+// Zero-value tiles are a soft anti-pattern on a celebration artifact — "0 Dad
+// Lab" or "0 Blockers beat" reads as scolding to a 10-year-old, and as filler
+// to a parent. Always show diamonds/hours/quests (zero there is meaningful or
+// improbable); hide the rest when they're zero.
+//
+// UX-60 (FEAT-161): this rule used to apply in kid mode ONLY — the parent's
+// copy of the same book rendered every tile including the zeroes. One book, one
+// rule: the suppression now runs in both modes.
+const ALWAYS_SHOW_TILES: ReadonlyArray<keyof MonthStats> = [
   'totalDiamonds',
   'totalHours',
   'quests',
@@ -195,8 +199,7 @@ function StatsLayout({ page, review, mode }: MonthlyReviewPageProps) {
   const orderedKeys =
     mode === 'kid' ? KID_MODE_TILE_ORDER : PARENT_MODE_TILE_ORDER
   const visibleKeys = orderedKeys.filter((key) => {
-    if (mode === 'parent') return true
-    if (KID_MODE_ALWAYS_SHOW.includes(key)) return true
+    if (ALWAYS_SHOW_TILES.includes(key)) return true
     const raw = stats[key]
     return typeof raw === 'number' && raw > 0
   })

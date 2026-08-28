@@ -464,7 +464,16 @@ function ModelPreview({ model }: { model: LearnerModel }) {
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
         <Chip size="small" label={`status: ${model.status}`} />
         <Chip size="small" label={`graph ${model.graphVersion}`} />
-        <Chip size="small" label={`seededAt ${model.seededAt.slice(0, 19)}`} />
+        {/* UX-60: the TYPE says `seededAt: string`, but documents written
+            before the field existed carry no value — and the unguarded `.slice`
+            threw, taking the whole diag panel down for exactly the oldest model
+            a parent would open it on. The cast is deliberate: it records that
+            the type is optimistic about stored data, not that the read is
+            careless. */}
+        <Chip
+          size="small"
+          label={`seededAt ${(model.seededAt as string | undefined)?.slice(0, 19) ?? '—'}`}
+        />
         {STATE_GROUPS.map((g) => (
           <Chip
             key={g.state}

@@ -616,10 +616,15 @@ export default function ShellyChatPage() {
         />
       )}
 
-      {/* The drafted week, in full, plus its own separate Apply (FEAT-150) */}
+      {/* The drafted week, in full, plus its own separate Apply (FEAT-150).
+          UX-34: no `??` on `childName` on purpose. The old fallback was
+          `'this week'` — a week noun standing in for a child — and it fed every
+          sentence on the card, including the apply button for the largest write
+          in the app. An unresolved child passes through as undefined and the
+          card drops the possessive rather than inventing a name. */}
       <NextWeekDraftCard
         view={nextWeek}
-        childName={children.find((c) => c.id === contextChildId)?.name ?? 'this week'}
+        childName={children.find((c) => c.id === contextChildId)?.name}
         hoursPerDay={hoursPerDay}
         onApply={() => void applyNextWeek()}
         onDismiss={dismissNextWeek}

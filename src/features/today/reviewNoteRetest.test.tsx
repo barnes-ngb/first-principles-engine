@@ -82,6 +82,7 @@ function renderChecklist(
         selectedChildId={opts.selectedChildId ?? 'c1'}
         familyId={opts.familyId ?? 'f1'}
         today="2026-07-26"
+        isToday
         planType={PlanType.Normal}
         todaySnapshot={null as SkillSnapshot | null}
         activeRoutineItems={undefined}

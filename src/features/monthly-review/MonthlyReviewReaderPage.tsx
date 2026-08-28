@@ -1,14 +1,16 @@
 import { useMemo } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useMonthlyReview } from '../../core/hooks/useMonthlyReviews'
+import { PROGRESS_TABS, progressPath } from '../progress/progressNav'
 import { MonthlyReviewReader } from './MonthlyReviewReader'
 
 export default function MonthlyReviewReaderPage() {
   const { reviewId } = useParams<{ reviewId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const familyId = useFamilyId()
   const { children } = useActiveChild()
 
@@ -26,7 +28,10 @@ export default function MonthlyReviewReaderPage() {
       reviewId={reviewId}
       defaultMode="parent"
       childName={childName}
-      onExit={() => navigate('/progress')}
+      // UX-52: exit lands back on Monthly Books — the tab she came from —
+      // instead of resetting to Foundations, and carries `?diag=1` through so
+      // the reader's own diagnostic panel stays reachable by navigation.
+      onExit={() => navigate(progressPath(PROGRESS_TABS.MonthlyBooks, searchParams))}
     />
   )
 }

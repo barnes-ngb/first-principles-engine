@@ -588,10 +588,33 @@ describe('WatchLibraryTab watch history (FEAT-139)', () => {
   })
 
   it('names the window instead of claiming a video was never watched', () => {
+    // UX-03: the windowed negative is for a video that has BEEN on the shelf
+    // longer than the window — otherwise it reads as a stale-shelf verdict on a
+    // card that just appeared. Vet these two in a year ago to get that wording.
+    videosRef.current = [
+      video('a', 'Ancient cities', undefined, { vettedAt: '2025-06-01T00:00:00.000Z' }),
+      video('b', 'The water cycle', undefined, { vettedAt: '2025-06-01T00:00:00.000Z' }),
+    ]
     historyRef.current = {}
     render(<WatchLibraryTab />)
     expect(screen.getAllByText('Not watched in the last 90 days')).toHaveLength(2)
     expect(screen.queryByText(/never watched/i)).not.toBeInTheDocument()
+  })
+
+  // UX-03 (FEAT-161): "Not watched in the last 90 days" is technically true of a
+  // video vetted in yesterday, and reads as a verdict on a shelf that has not
+  // existed long enough to go stale.
+  it('says "Not watched yet" for a video vetted in inside the window', () => {
+    videosRef.current = [
+      video('a', 'Ancient cities', undefined, {
+        vettedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      }),
+    ]
+    historyRef.current = {}
+    render(<WatchLibraryTab />)
+
+    expect(screen.getByText('Not watched yet')).toBeInTheDocument()
+    expect(screen.queryByText(/not watched in the last/i)).not.toBeInTheDocument()
   })
 
   it('reports both boys for a shared video', () => {
@@ -637,6 +660,10 @@ describe('WatchLibraryTab watch history (FEAT-139)', () => {
 
   it('a successful read that found nothing DOES say so (the guard is not vacuous)', () => {
     historyStateRef.current = { loading: false, error: null }
+    videosRef.current = [
+      video('a', 'Ancient cities', undefined, { vettedAt: '2025-06-01T00:00:00.000Z' }),
+      video('b', 'The water cycle', undefined, { vettedAt: '2025-06-01T00:00:00.000Z' }),
+    ]
     historyRef.current = {}
     render(<WatchLibraryTab />)
 

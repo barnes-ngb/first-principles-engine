@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import Alert from '@mui/material/Alert'
 import ExploreOutlinedIcon from '@mui/icons-material/ExploreOutlined'
 import Typography from '@mui/material/Typography'
@@ -6,6 +6,7 @@ import Typography from '@mui/material/Typography'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useLearnerModel } from '../../core/hooks/useLearnerModel'
 import { scrubDisplayJargon } from '../progress/foundationsView'
+import { PROGRESS_TABS, progressPath } from '../progress/progressNav'
 
 /**
  * The one-line ambient planner surface (FEAT-65, Phase 3b / design §7.3): *"This
@@ -19,6 +20,7 @@ import { scrubDisplayJargon } from '../progress/foundationsView'
 export default function FoundationsFocusLine({ childId }: { childId: string }) {
   const familyId = useFamilyId()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { model, loading } = useLearnerModel(familyId, childId)
 
   if (loading || !model || model.status === 'no-data') return null
@@ -29,7 +31,9 @@ export default function FoundationsFocusLine({ childId }: { childId: string }) {
     <Alert
       severity="info"
       icon={<ExploreOutlinedIcon fontSize="inherit" />}
-      onClick={() => navigate('/progress')}
+      // UX-52: name the tab this line is about rather than relying on
+      // Foundations happening to be index 0, and carry `?diag=1` through.
+      onClick={() => navigate(progressPath(PROGRESS_TABS.Foundations, searchParams))}
       sx={{ mb: 1, cursor: 'pointer' }}
     >
       <Typography variant="body2">

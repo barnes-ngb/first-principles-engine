@@ -195,3 +195,66 @@ describe('NextWeekDraftCard — honesty across phases', () => {
     expect(container.firstChild).toBeNull()
   })
 })
+
+// ── FEAT-161 (UX-46 / UX-34): the zero draft, and the missing name ──────────
+
+describe('NextWeekDraftCard — a draft with nothing accepted (UX-46)', () => {
+  const emptyWeek: DraftWeeklyPlan = {
+    days: WEEKDAYS.map((day, i) => ({
+      day,
+      timeBudgetMinutes: 120,
+      items: [
+        {
+          id: `m${i}`,
+          title: `${day} math`,
+          subjectBucket: SubjectBucket.Math,
+          estimatedMinutes: 15,
+          skillTags: [],
+          accepted: false,
+        },
+      ],
+    })),
+    skipSuggestions: [],
+    minimumWin: 'Read together',
+  }
+
+  it('says nothing is planned rather than "0h planned" — header AND every day chip', () => {
+    renderCard({ draft: emptyWeek })
+    // One header chip (UX-46) + five day chips (UX-71, the green `0m / 120m`).
+    expect(screen.getAllByText('Nothing planned yet')).toHaveLength(6)
+    expect(screen.queryByText(/0h planned/)).toBeNull()
+    expect(screen.queryByText(/^0m \//)).toBeNull()
+  })
+
+  it('disables Apply — applying an empty week CLEARS five days and writes nothing back', () => {
+    renderCard({ draft: emptyWeek })
+    const button = screen.getByRole('button', {
+      name: /Nothing to apply yet/i,
+    }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: /Apply this plan/i })).toBeNull()
+  })
+
+  it('leaves a draft with real accepted items fully applicable', () => {
+    renderCard()
+    const button = screen.getByRole('button', {
+      name: /Apply this plan/i,
+    }) as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+  })
+})
+
+describe('NextWeekDraftCard — no resolved child name (UX-34)', () => {
+  it('drops the possessive instead of printing a placeholder', () => {
+    renderCard({}, { childName: undefined })
+    expect(screen.getByText('Next week — Aug 24–28')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Apply this plan to next week (Aug 24–28)' }))
+      .toBeTruthy()
+  })
+
+  it('never renders the old "this week\'s next week" construction', () => {
+    const { container } = renderCard({}, { childName: undefined })
+    expect(container.textContent).not.toMatch(/this week's next week/)
+    expect(container.textContent).not.toMatch(/this child/)
+  })
+})

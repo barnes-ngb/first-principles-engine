@@ -10,6 +10,7 @@ import type { WatchVideo } from '../../core/types'
 import WatchVetInForm from './WatchVetInForm'
 import { isRetired } from './watchLibraryStatus'
 import { watchCuratorLabel } from './watchCuratorLabel'
+import { notWatchedLine } from './watchHistory'
 
 export interface WatchVideoCardProps {
   video: WatchVideo
@@ -113,13 +114,15 @@ export default function WatchVideoCard({
             {retired && <Chip size="small" color="default" label="Retired" />}
           </Box>
 
-          {/* Watch history (FEAT-139). Both wordings name the window: a video
-              last watched before it is "not in the last N days", never "never".
-              Rendered only once the look-back has actually answered — see
-              `historyUnavailable`. */}
+          {/* Watch history (FEAT-139). A video last watched before the window
+              is "not in the last N days", never "never". Rendered only once the
+              look-back has actually answered — see `historyUnavailable`.
+              UX-03: a video vetted in more recently than the window is "Not
+              watched yet" — the windowed negative reads as a stale-shelf
+              verdict on a card that has only just appeared. */}
           {!historyUnavailable && (
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
-              {historyLine ?? `Not watched in the last ${historyWindowDays} days`}
+              {historyLine ?? notWatchedLine(video.vettedAt, historyWindowDays)}
             </Typography>
           )}
 

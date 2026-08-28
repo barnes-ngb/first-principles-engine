@@ -192,9 +192,33 @@ export const APPLY_RETAIN_RULES = [
   'Unfinished leftovers from an earlier plan are cleared and replaced by this one.',
 ] as const
 
-/** The apply card's one-line preview. */
-export function describeApplyNextWeek(childName: string, weekLabel: string): string {
+/**
+ * The apply card's one-line preview.
+ *
+ * UX-34: the caller used to hand this `?? 'this week'` when a child could not
+ * be resolved, so the biggest write in the app was labelled "Apply this plan to
+ * this week's next week (Aug 24–28)" — a week noun standing in for a child.
+ * There is no placeholder now: an unresolved name drops the possessive and the
+ * sentence still reads as English.
+ */
+export function describeApplyNextWeek(
+  childName: string | undefined,
+  weekLabel: string,
+): string {
+  if (!childName) return `Apply this plan to next week (${weekLabel})`
   return `Apply this plan to ${childName}'s next week (${weekLabel})`
+}
+
+/**
+ * The draft card's header — "Lincoln's week of Aug 24–28", or, with no resolved
+ * name, "Next week — Aug 24–28". Same UX-34 rule as {@link describeApplyNextWeek}.
+ */
+export function describeDraftWeekHeading(
+  childName: string | undefined,
+  weekLabel: string,
+): string {
+  if (!childName) return `Next week — ${weekLabel}`
+  return `${childName}'s week of ${weekLabel}`
 }
 
 /**

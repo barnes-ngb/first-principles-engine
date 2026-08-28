@@ -34,12 +34,21 @@ import PlanDayCards from '../planner-chat/PlanDayCards'
 import {
   APPLY_RETAIN_RULES,
   describeApplyNextWeek,
+  describeDraftWeekHeading,
 } from './nextWeekActions'
 import type { NextWeekDraftView } from './useNextWeekDraft'
 
 interface NextWeekDraftCardProps {
   view: NextWeekDraftView
-  childName: string
+  /**
+   * The child this week belongs to. **Optional on purpose** (UX-34): the caller
+   * used to substitute a placeholder when no child resolved, and the
+   * placeholder it reached for was `'this week'` — a week noun standing in for
+   * a child, on the apply button for the largest write in the app. An
+   * unresolved name now reaches this card as `undefined` and every sentence
+   * that would have named the child drops the possessive instead.
+   */
+  childName?: string
   /** Minutes/day budget, for the planner renderer's header. */
   hoursPerDay: number
   onApply: () => void
@@ -51,6 +60,19 @@ function totalMinutes(view: NextWeekDraftView): number {
   return (view.draft?.days ?? []).reduce(
     (sum, day) =>
       sum + day.items.filter((i) => i.accepted).reduce((s, i) => s + i.estimatedMinutes, 0),
+    0,
+  )
+}
+
+/**
+ * How many items the parent has actually accepted — the number that decides
+ * whether there is anything to apply (UX-46). Deliberately NOT the minute total:
+ * an accepted item with no estimate is still a real row that would be written,
+ * and gating Apply on minutes would refuse to write it.
+ */
+function acceptedItemCount(view: NextWeekDraftView): number {
+  return (view.draft?.days ?? []).reduce(
+    (sum, day) => sum + day.items.filter((i) => i.accepted).length,
     0,
   )
 }
@@ -72,7 +94,8 @@ export default function NextWeekDraftCard({
         <Stack direction="row" spacing={1.5} alignItems="center">
           <CircularProgress size={20} />
           <Typography variant="body2" color="text.secondary">
-            Drafting {childName}'s week of {view.weekLabel}… nothing is written yet.
+            Drafting {describeDraftWeekHeading(childName, view.weekLabel)}… nothing is written
+            yet.
           </Typography>
         </Stack>
       </Paper>
@@ -104,6 +127,7 @@ export default function NextWeekDraftCard({
   // half-written week is how a day ends up planned twice.
   const halfWritten = view.phase === 'error' && view.draft !== null
   const minutes = totalMinutes(view)
+  const acceptedCount = acceptedItemCount(view)
 
   return (
     <Paper variant="outlined" sx={{ p: 1.5, mx: 1, mb: 1, borderRadius: 2 }}>
@@ -112,9 +136,20 @@ export default function NextWeekDraftCard({
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
           <CalendarMonthOutlinedIcon fontSize="small" color="primary" />
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-            {childName}'s week of {view.weekLabel}
+            {describeDraftWeekHeading(childName, view.weekLabel)}
           </Typography>
-          <Chip size="small" variant="outlined" label={`${Math.round(minutes / 6) / 10}h planned`} />
+          {/* UX-46: a draft with nothing accepted rendered "0h planned" beside a
+              live Apply that would write five empty days. A zero here means
+              nothing was accepted, so it says that instead of a quantity. */}
+          <Chip
+            size="small"
+            variant="outlined"
+            label={
+              acceptedCount === 0
+                ? 'Nothing planned yet'
+                : `${Math.round(minutes / 6) / 10}h planned`
+            }
+          />
         </Stack>
 
         {/* What was asked for — so the parent can check the week against it */}
@@ -184,14 +219,23 @@ export default function NextWeekDraftCard({
               Week to build it there.
             </Typography>
             <Stack direction="row" spacing={1}>
+              {/* UX-46: nothing accepted ⇒ nothing to apply. Applying an empty
+                  draft is not a no-op — it clears unfinished leftovers off five
+                  days (rule 3 above) and writes nothing back, so the button is
+                  disabled and says why rather than reporting "Plan applied!"
+                  over five empty days. */}
               <Button
                 size="small"
                 variant="contained"
                 onClick={onApply}
-                disabled={busy}
+                disabled={busy || acceptedCount === 0}
                 startIcon={busy ? <CircularProgress size={14} /> : undefined}
               >
-                {busy ? 'Applying…' : describeApplyNextWeek(childName, view.weekLabel)}
+                {busy
+                  ? 'Applying…'
+                  : acceptedCount === 0
+                    ? 'Nothing to apply yet'
+                    : describeApplyNextWeek(childName, view.weekLabel)}
               </Button>
               <Button size="small" variant="text" onClick={onDismiss} disabled={busy}>
                 Discard this draft

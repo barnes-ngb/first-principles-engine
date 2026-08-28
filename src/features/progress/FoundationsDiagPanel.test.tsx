@@ -275,3 +275,42 @@ describe('FoundationsDiagPanel — parent capability gate (FEAT-122)', () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+// ── FEAT-161 (UX-60): the diag panel survives a model seeded before the field ─
+//
+// `LearnerModel.seededAt` is typed `string`, but documents written before the
+// field existed carry no value — and `model.seededAt.slice(0, 19)` threw, taking
+// the whole panel down for exactly the oldest model a parent would open it on.
+
+describe('FoundationsDiagPanel — a model with no seededAt (UX-60)', () => {
+  beforeEach(() => {
+    modelsByChild = {}
+    mockSynthesize.mockReset()
+    mockUseChildren.mockReturnValue({
+      children: [{ id: 'lincoln', name: 'Lincoln' }],
+    })
+  })
+
+  it('renders the panel instead of crashing', async () => {
+    // The TYPE says `seededAt: string`; a pre-field document does not carry
+    // one. Building the fixture through a partial is how the stored truth,
+    // rather than the optimistic type, reaches the component.
+    const { seededAt: _dropped, ...legacy } = minimalModel('lincoln')
+    void _dropped
+    modelsByChild = { lincoln: legacy as LearnerModel }
+
+    render(<FoundationsDiagPanel />)
+
+    // The model chips render, with an em-dash where the stamp would be...
+    expect(await screen.findByText('seededAt —')).toBeInTheDocument()
+    // ...and the rest of the panel is intact, which is the actual point.
+    expect(screen.getByText('graph reading@1+math@1')).toBeInTheDocument()
+    await waitFor(() => expect(synthBtn()).toBeEnabled())
+  })
+
+  it('still shows the stamp when the model has one', async () => {
+    modelsByChild = { lincoln: minimalModel('lincoln') }
+    render(<FoundationsDiagPanel />)
+    expect(await screen.findByText('seededAt 2026-07-01T00:00:00')).toBeInTheDocument()
+  })
+})
