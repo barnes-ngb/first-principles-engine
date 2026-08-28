@@ -31,6 +31,7 @@ import SketchCropStage from './SketchCropStage'
 import { cropImageToRegion, type CropFraction } from './cropImage'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
+import { useStickerLabel } from './useStickerLabel'
 import {
   FANCY_STYLE_OPTIONS,
   DEFAULT_FANCY_STYLE_ID,
@@ -86,7 +87,10 @@ export default function SketchScanner({
   childName,
   onSaved,
 }: SketchScannerProps) {
-  const defaultLabel = childName ? `${childName}'s drawing` : 'My drawing'
+  // The active child can resolve *after* this dialog mounts with its page, so
+  // the default label follows `childName` until the kid types their own — a
+  // plain useState initializer froze it at "My drawing" (FEAT-160).
+  const { label, setLabel, resetLabel, defaultLabel } = useStickerLabel(childName)
 
   const [stage, setStage] = useState<Stage>('capture')
   const [previewTab, setPreviewTab] = useState<PreviewTab>('cleaned')
@@ -109,7 +113,6 @@ export default function SketchScanner({
   const [enhanceError, setEnhanceError] = useState<string | null>(null)
 
   // Shared tagging (applies to whichever version is saved)
-  const [label, setLabel] = useState(defaultLabel)
   const [tags, setTags] = useState<StickerTag[]>([])
   const [profile, setProfile] = useState<'lincoln' | 'london' | 'both'>(childProfile ?? 'both')
 
@@ -139,14 +142,14 @@ export default function SketchScanner({
     setFancyStoragePath(null)
     setEnhancing(false)
     setEnhanceError(null)
-    setLabel(defaultLabel)
+    resetLabel()
     setTags([])
     setProfile(childProfile ?? 'both')
     setSavingVersion(null)
     setSavedVersions(new Set())
     setError(null)
     sourceDrawingIdRef.current = null
-  }, [defaultLabel, childProfile])
+  }, [resetLabel, childProfile])
 
   const handleClose = useCallback(() => {
     reset()
