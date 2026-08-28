@@ -57,7 +57,14 @@ export interface ShellyChatFlowsDeps {
    * passes it through so the response handlers can hand off parsed actions
    * without this hook taking on any write capability.
    */
-  stagePendingActions: (messageId: string, actions: ChatAction[]) => void
+  stagePendingActions: (messageId: string, actions: ChatAction[], scope?: number) => void
+  /**
+   * A token for the context a turn is STARTING in (Codex P1, PR #1706).
+   * Captured before the `await` on `chat()` and handed back at stage time, so a
+   * reply that outlived a thread or tab switch cannot land its cards in the
+   * context the parent moved to.
+   */
+  currentContextScope: () => number
   /**
    * UX-33(b) — drop the still-pending confirm cards, with a sentence, because
    * the context they were proposed in is gone. Owned by `useShellyChatActions`;
@@ -80,7 +87,7 @@ export interface ShellyChatFlowsDeps {
  * keeping its external prop/route contract identical.
  */
 export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlowsDeps) {
-  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, setSearchParams, stagePendingActions, dropPendingForContext } = deps
+  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope } = deps
 
   const {
     chatContext, setChatContext,
@@ -291,6 +298,8 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
   const sendToAI = useCallback(
     async (currentMessages: ShellyChatMessage[]) => {
       if (!activeThreadId) return
+      // The context this turn belongs to, captured before the await below.
+      const scope = currentContextScope()
       setSending(true)
       try {
         const aiMessages = currentMessages.slice(-20).map((m) => ({
@@ -323,7 +332,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
             content: cleanText,
             timestamp: new Date().toISOString(),
           })
-          if (actions.length) stagePendingActions(msgRef.id, actions)
+          if (actions.length) stagePendingActions(msgRef.id, actions, scope)
           if (friction) {
             void logFeatureRequest(familyId, {
               quote: friction.quote,
@@ -361,7 +370,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         setSending(false)
       }
     },
-    [activeThreadId, chat, familyId, getChildIdForContext, setFollowUps, setSending, stagePendingActions],
+    [currentContextScope, activeThreadId, chat, familyId, getChildIdForContext, setFollowUps, setSending, stagePendingActions],
   )
 
   // ── Send handler ───────────────────────────────────────────────
@@ -373,6 +382,10 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     setFollowUps([])
     setSending(true)
 
+    // The context this turn belongs to, captured before any await (Codex P1).
+    // A new thread minted below stays inside the SAME scope — the parent has
+    // not gone anywhere; only a switch bumps it.
+    const scope = currentContextScope()
     let threadId = activeThreadId
     try {
 
@@ -468,7 +481,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           content: cleanText,
           timestamp: new Date().toISOString(),
         })
-        if (actions.length) stagePendingActions(msgRef.id, actions)
+        if (actions.length) stagePendingActions(msgRef.id, actions, scope)
         if (friction) {
           void logFeatureRequest(familyId, {
             quote: friction.quote,
@@ -507,7 +520,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     } finally {
       setSending(false)
     }
-  }, [input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachments, chatContext, setActiveThreadId, setFollowUps, setInput, setPendingAttachments, setSending, stagePendingActions])
+  }, [currentContextScope, input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachments, chatContext, setActiveThreadId, setFollowUps, setInput, setPendingAttachments, setSending, stagePendingActions])
 
   // ── Image generation (refactored for Prompt 9) ─────────────────
   const handleGenerateImageDirect = useCallback(async (prompt: string) => {
@@ -882,6 +895,8 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     setUploadDialogOpen(false)
     setUploading(true)
 
+    // The context this turn belongs to, captured before any await (Codex P1).
+    const scope = currentContextScope()
     try {
       const compressed = await compressIfNeeded(uploadFiles[0], 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
 
@@ -966,7 +981,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           content: cleanText,
           timestamp: new Date().toISOString(),
         })
-        if (actions.length) stagePendingActions(msgRef.id, actions)
+        if (actions.length) stagePendingActions(msgRef.id, actions, scope)
         if (friction) {
           void logFeatureRequest(familyId, {
             quote: friction.quote,
@@ -1008,7 +1023,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       setUploading(false)
       setSending(false)
     }
-  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, stagePendingActions])
+  }, [currentContextScope, uploadFiles, uploadPreviews, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, stagePendingActions])
 
   const handleUploadGenerate = useCallback(async () => {
     // Single-image path — reference generation uses exactly one image.
@@ -1078,15 +1093,22 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
   // ── Select thread ──────────────────────────────────────────────
   const handleSelectThread = useCallback(
     (threadId: string) => {
-      // Same rail as `handleNewThread` — see the note there.
-      dropPendingForContext('thread-switch')
+      // Same rail as `handleNewThread` — see the note there. Guarded on the
+      // thread actually CHANGING (Codex P2, PR #1706): the drawer renders the
+      // active conversation as a live `ListItemButton`, so tapping the row you
+      // are already in reaches this handler. Dropping there would delete every
+      // pending card and report a context change that did not happen — the
+      // silent-eat this fix exists to stop, in a new place.
+      if (threadId !== activeThreadId) {
+        dropPendingForContext('thread-switch')
+      }
       setActiveThreadId(threadId)
       setSearchParams({ thread: threadId })
       setDrawerOpen(false)
       setFollowUps([])
       autoSendTriggered.current = false
     },
-    [dropPendingForContext, setSearchParams, setActiveThreadId, setDrawerOpen, setFollowUps, autoSendTriggered],
+    [activeThreadId, dropPendingForContext, setSearchParams, setActiveThreadId, setDrawerOpen, setFollowUps, autoSendTriggered],
   )
 
   // ── Archive thread ─────────────────────────────────────────────

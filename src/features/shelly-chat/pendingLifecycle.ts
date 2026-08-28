@@ -83,6 +83,23 @@ export function pendingDropNotice(
 }
 
 /**
+ * A reply that came back for a context the parent has already left (Codex P1,
+ * PR #1706). `pendingDropNotice` clears what exists AT the moment of a switch;
+ * this covers the turn that was still in flight across it. The toolbar and the
+ * thread drawer stay live while `chat()` is awaited, so a parent can switch
+ * threads mid-send, and the response would otherwise stage its cards in the
+ * conversation they landed in — carrying a `pendingMessageId` that belongs to
+ * the thread they left. When both threads are the same child's, `rejectReason`
+ * does not catch it: the write goes through.
+ *
+ * The assistant's REPLY still lands in the conversation it was asked in — that
+ * is where it belongs. Only the cards are withheld, and said out loud.
+ */
+export function lateReplyNotice(): string {
+  return "A reply came back for the conversation you'd already left, so its suggestions weren't carried over here. Nothing was changed. Ask again if you still want them."
+}
+
+/**
  * (c) A confirmed write that rejects. `applyChatAction`'s `finally` already
  * reverted the card to `'pending'` so a retry was possible, but the rejection
  * propagated out of an `onClick` that discards it: the parent saw the button

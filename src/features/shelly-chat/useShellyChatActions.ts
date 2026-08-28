@@ -121,6 +121,7 @@ import {
 } from './nextWeekActions'
 import {
   confirmFailureNotice,
+  lateReplyNotice,
   PendingDropReason,
   pendingDropNotice,
   supersededNotice,
@@ -658,6 +659,13 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   // drop handler must keep a stable identity (the page threads them into
   // `useShellyChatFlows`), for the same reason every other read below is one.
   const pendingRef = useRef<PendingAction[]>([])
+  // Which CONTEXT the cards on screen belong to (Codex P1, PR #1706). Bumped by
+  // every context/thread switch. A turn captures it before its `await` and hands
+  // it back at stage time, so a reply that outlived its context cannot land its
+  // cards in the one the parent moved to. A counter, not the thread id, because
+  // the same thread re-entered after a detour is still a context the proposal
+  // was not made in.
+  const contextScopeRef = useRef(0)
   // The assistant message the current `pending` set was parsed from — applied
   // actions are recorded back onto it for inline audit.
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null)
@@ -743,7 +751,20 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
    * place, so the app never claims something it didn't do.
    */
   const stagePendingActions = useCallback(
-    (messageId: string, actions: ChatAction[]) => {
+    (messageId: string, actions: ChatAction[], scope?: number) => {
+      // A reply that outlived the context it was asked in (Codex P1, PR #1706).
+      // Returns BEFORE `setPendingMessageId`, because that id belongs to the
+      // thread the parent left. Nothing is staged and nothing is silent.
+      if (scope != null && scope !== contextScopeRef.current) {
+        console.warn(
+          '[shellyChat] withheld a late reply\'s actions — its context is gone',
+          actions,
+        )
+        if (actions.length > 0) {
+          setSuppressed((prev) => [...new Set([...prev, lateReplyNotice()])])
+        }
+        return
+      }
       setPendingMessageId(messageId)
       // UX-33(a) — a new turn's cards replace the previous turn's, whole array
       // at a time. Correct (a proposal belongs to the reply that made it) but
@@ -952,6 +973,12 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     pendingRef.current = pending
   }, [pending])
 
+  /**
+   * A token for the context a turn is STARTING in. Capture before the `await`,
+   * hand back to {@link stagePendingActions}; a mismatch withholds the cards.
+   */
+  const currentContextScope = useCallback(() => contextScopeRef.current, [])
+
   /** How many cards are still awaiting a tap right now. */
   const stillPendingCount = () =>
     pendingRef.current.filter((p) => p.status === 'pending').length
@@ -984,6 +1011,8 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
   const dropPendingForContext = useCallback(
     (reason: Exclude<PendingDropReason, typeof PendingDropReason.Superseded>) => {
       const notice = pendingDropNotice(reason, stillPendingCount(), childNameRef.current)
+      // Any turn still in flight now belongs to a context that no longer exists.
+      contextScopeRef.current += 1
       setPending([])
       setPendingMessageId(null)
       setSuppressed(notice ? [notice] : [])
@@ -1315,6 +1344,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     /** Plain-language reasons a proposal was dropped before becoming a card. */
     suppressed,
     stagePendingActions,
+    currentContextScope,
     clearPending,
     dropPendingForContext,
     applyChatAction,

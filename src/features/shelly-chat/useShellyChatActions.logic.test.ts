@@ -2593,3 +2593,78 @@ describe('pending-card lifecycle (UX-33)', () => {
     })
   })
 })
+
+// ── A reply that outlived its context (Codex P1, PR #1706) ────────────────
+// `dropPendingForContext` clears what exists AT the moment of a switch. This is
+// the turn that was still in flight across it: the toolbar and thread drawer
+// stay live while `chat()` is awaited, so the response would otherwise stage
+// its cards in the conversation the parent moved to, carrying a
+// `pendingMessageId` from the one they left. Same child on both sides ⇒
+// `rejectReason` does not catch it and the write goes through.
+describe('a late reply cannot land cards in a context it was not asked in', () => {
+  const WORD: ChatAction = { kind: 'addSightWord', childId: 'lincoln1', word: 'said' }
+
+  it('withholds the cards when the scope moved under an in-flight turn', () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+
+    act(() => result.current.dropPendingForContext('thread-switch'))
+    act(() => result.current.stagePendingActions('msg_from_old_thread', [WORD], scope))
+
+    expect(result.current.pending).toEqual([])
+    expect(result.current.suppressed.join(' ')).toMatch(/already left/)
+  })
+
+  it('stages normally when the turn stayed inside its own context', () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+
+    act(() => result.current.stagePendingActions('msg1', [WORD], scope))
+
+    expect(result.current.pending).toHaveLength(1)
+    expect(result.current.suppressed).toEqual([])
+  })
+
+  it('a child-tab switch moves the scope too', () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+    act(() => result.current.dropPendingForContext('context-switch'))
+    act(() => result.current.stagePendingActions('msg1', [WORD], scope))
+    expect(result.current.pending).toEqual([])
+  })
+
+  it('keeps the drop notice AND adds the late-reply one — both are true', () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+    act(() => result.current.stagePendingActions('msg1', [WORD], scope))
+    expect(result.current.pending).toHaveLength(1)
+
+    act(() => result.current.dropPendingForContext('context-switch'))
+    act(() => result.current.stagePendingActions('msg2', [WORD], scope))
+
+    const said = result.current.suppressed.join(' ')
+    expect(said).toContain('Lincoln')
+    expect(said).toMatch(/already left/)
+  })
+
+  it('never annotates the departed thread — no message id is adopted', async () => {
+    const { result } = setup()
+    const scope = result.current.currentContextScope()
+    act(() => result.current.dropPendingForContext('thread-switch'))
+    act(() => result.current.stagePendingActions('msg_from_old_thread', [WORD], scope))
+
+    // Nothing to tap, so nothing to write and nothing to annotate.
+    await act(async () => {
+      await result.current.confirmAll()
+    })
+    expect(addSightWord).not.toHaveBeenCalled()
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('a caller that passes no scope is unaffected — the guard is opt-in', () => {
+    const { result } = setup()
+    act(() => result.current.dropPendingForContext('thread-switch'))
+    act(() => result.current.stagePendingActions('msg1', [WORD]))
+    expect(result.current.pending).toHaveLength(1)
+  })
+})

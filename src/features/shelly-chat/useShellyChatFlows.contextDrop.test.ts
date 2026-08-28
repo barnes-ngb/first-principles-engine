@@ -50,6 +50,7 @@ const CHILDREN: Child[] = [
 
 const dropPendingForContext = vi.fn()
 const stagePendingActions = vi.fn()
+const currentContextScope = vi.fn(() => 0)
 
 function setup() {
   return renderHook(() => {
@@ -64,6 +65,7 @@ function setup() {
       setSearchParams: vi.fn(),
       stagePendingActions,
       dropPendingForContext,
+      currentContextScope,
     } as unknown as Parameters<typeof useShellyChatFlows>[1])
     return { state, flows }
   })
@@ -96,5 +98,20 @@ describe('useShellyChatFlows — a card never outlives its context (UX-33b)', ()
     const { result } = setup()
     act(() => result.current.flows.handleSelectThread('thread-9'))
     expect(dropPendingForContext).toHaveBeenCalledWith('thread-switch')
+  })
+
+  // Codex P2, PR #1706. The drawer renders the active conversation as a live
+  // `ListItemButton` (`ChatThreadDrawer.tsx`, `selected` styles it but does not
+  // disable it), so tapping the row you are already in reaches this handler. An
+  // unconditional drop there would delete every pending card and report a
+  // context change that did not happen — the silent-eat this fix exists to
+  // stop, in a new place.
+  it('does NOT drop them when the parent taps the conversation they are already in', () => {
+    const { result } = setup()
+    act(() => result.current.flows.handleSelectThread('thread-9'))
+    expect(dropPendingForContext).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.flows.handleSelectThread('thread-9'))
+    expect(dropPendingForContext).toHaveBeenCalledTimes(1)
   })
 })

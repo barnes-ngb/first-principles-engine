@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   confirmFailureNotice,
+  lateReplyNotice,
   PendingDropReason,
   pendingDropNotice,
   supersededNotice,
@@ -67,5 +68,18 @@ describe('confirmFailureNotice (UX-33c)', () => {
     expect(notice).toMatch(/didn't save/)
     expect(notice).toContain('nothing was changed')
     expect(notice).toMatch(/try again/)
+  })
+})
+
+describe('lateReplyNotice (Codex P1, PR #1706)', () => {
+  it('says the reply outlived its conversation, that nothing changed, and what to do', () => {
+    const notice = lateReplyNotice()
+    expect(notice).toMatch(/already left/)
+    expect(notice).toContain('Nothing was changed')
+    expect(notice).toContain('Ask again')
+  })
+
+  it('withholds the SUGGESTIONS, never claiming the reply itself was lost', () => {
+    expect(lateReplyNotice()).toContain('suggestions')
   })
 })
