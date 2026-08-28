@@ -2,7 +2,7 @@
 
 > Generated from source: `functions/src/ai/` — chat.ts, chatTypes.ts, contextSlices.ts, tasks/\*, evaluate.ts, generate.ts, imageGen.ts
 >
-> Last updated: 2026-07-06 (health audit auto-fix: added foundationsReview, helpCard to CHAT_TASKS registry diagram and model table; added generateLearnerSynthesisNow + the 5 monthlyReview.ts standalone CFs + fileFeatureRequests to the Standalone Cloud Functions table; section 4 prose still lags — missing dedicated write-ups for reviseStory, chapterQuestions, bookLookup, lessonVideo, monthlyReview, foundationsReview, helpCard)
+> Last updated: 2026-08-28 (AI-docs↔code validation run: Opus 4.8 pilot marked suspended (evaluate + learnerSynthesis back on Sonnet 5, per `models.ts` 2026-07-16); §3 slice table + task→slice mapping re-synced against `contextSlices.ts` TASK_CONTEXT (9 newer slices added; plan/quest/scan/disposition/shellyChat rows were stale — disposition and shellyChat DO use buildContextForTask now); generateStory maxTokens is `maxTokensForPageCount()` (scaled), not a fixed 6144; added generateCompliancePack/sweepCompliancePacks/submitCatalogOrder to the Standalone CFs table; section 4 prose still lags — missing dedicated write-ups for reviseStory, chapterQuestions, bookLookup, lessonVideo, monthlyReview, foundationsReview, helpCard)
 
 ---
 
@@ -91,6 +91,9 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `unpublishMonthlyReview` | monthlyReview.ts | onCall — revert publish |
 | `auditMonthlyReviewSources` | monthlyReview.ts | onCall — diagnostic, inspect photo sources for a monthly review |
 | `fileFeatureRequests` | feedback/fileFeatureRequests.ts | onSchedule (daily 08:00 CT) — files Shelly-portal feedback as GitHub issues |
+| `generateCompliancePack` | records/generateCompliancePack.ts | onCall — compliance evidence zip archive (FEAT-126; non-AI, listed for completeness) |
+| `sweepCompliancePacks` | records/generateCompliancePack.ts | onSchedule (daily 04:00 CT) — 24 h retention sweep for generated packs (non-AI) |
+| `submitCatalogOrder` | business/submitCatalogOrder.ts | onRequest — the public catalog order endpoint (FEAT-89; the only unauthenticated HTTP function; non-AI) |
 
 ---
 
@@ -98,11 +101,13 @@ src/core/ai/useAI.ts              functions/src/ai/
 
 ### `modelForTask()` (chat.ts)
 
+Since FEAT-58 the model strings live in one table — `functions/src/ai/models.ts` (`MODEL_BY_TASK` + `resolveModelForTask`); `modelForTask()` in chat.ts is a thin adapter over it so the ~20 existing call sites are unchanged. `models.ts` also owns the `temperature` allowlist (Sonnet 5 / Opus 4.6+ reject the param — only Haiku still receives it) and the per-task reasoning-effort table (`EFFORT_BY_TASK`: `learnerSynthesis` + `monthlyReview` run at `low`).
+
 | Task Type | Model | Use Case |
 |-----------|-------|----------|
 | `plan` | `claude-sonnet-5` | Weekly plan generation |
-| `evaluate` | `claude-opus-4-8` | Reading/math diagnostic evaluation (**Opus 4.8 pilot** — owner review after 2 weeks) |
-| `learnerSynthesis` | `claude-opus-4-8` | Learner Model synthesis beat (**Opus 4.8 pilot** — owner review after 2 weeks) |
+| `evaluate` | `claude-sonnet-5` | Reading/math diagnostic evaluation (Opus 4.8 pilot **suspended 2026-07-16** — first live call failed before quality could be assessed; see `models.ts`) |
+| `learnerSynthesis` | `claude-sonnet-5` | Learner Model synthesis beat (Opus 4.8 pilot **suspended 2026-07-16** — same; runs at `low` reasoning effort per `EFFORT_BY_TASK`) |
 | `quest` | `claude-sonnet-5` | Interactive Knowledge Mine quests |
 | `generateStory` | `claude-sonnet-5` | Sight word story generation |
 | `revisePage` | `claude-sonnet-5` | Per-Page Review single-page revision (V2 PR-B) |
@@ -160,22 +165,32 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `wordMastery` | loadWordMasterySummary() | Quest word progress — mastery levels, struggling patterns |
 | `generatedContent` | loadGeneratedContent() | Two buckets: **MOM'S BOOKS** (createdBy='parent' + createdFor=childId, last 30 days) prompts "Read: {title}" as a reading choose-item, and AVAILABLE GENERATED CONTENT (legacy / AI-generated books the child owns, de-duped) with the same pattern. Both include `bookId` inline so the AI can echo it on plan items for deep-linking. |
 | `workshopGames` | (from chatTypes) | Workshop game state for story continuation |
+| `mastery` | loadMasterySummary() | Per-item mastery chip summary from recent day logs |
+| `skillSnapshot` | loadSkillSnapshotContext() | Skill snapshot detail incl. ADDRESS_NOW / RESOLVING / DEFER conceptual blocks |
+| `childSkillMap` | loadChildSkillMapContext() | Per-child curriculum knowledge map coverage (read-only, owned by `updateSkillMapFromFindings`) |
+| `learnerModel` | loadLearnerModelContext() | Stored `learnerModels/{childId}` synthesis (concept states, whatMattersNext) — never regenerates |
+| `recentScans` | loadRecentScansContext() | Recent workbook photo-scan records |
+| `activityConfigs` | loadActivityConfigsContext() | Structured activity definitions (workbook pace/config successor) |
+| `recentHistoryByDomain` | loadRecentEvalHistoryByDomain() (chatTypes) | Recent eval/quest session history grouped by domain |
+| `dayToday` | loadTodayDayLogContext() | Today's day log (checklist state) |
+| `dadLabReports` | loadRecentDadLabReportsContext() | Recent Dad Lab reports |
 
 ### Task → Slice Mapping
 
 | Task Type | Slices Loaded |
 |-----------|--------------|
-| `plan` | charter, childProfile, workbookPaces, weekFocus, hoursProgress, engagement, gradeResults, bookStatus, sightWords, recentEval, wordMastery, generatedContent, workshopGames |
+| `plan` | charter, childProfile, learnerModel, workbookPaces, weekFocus, hoursProgress, engagement, gradeResults, bookStatus, sightWords, recentEval, recentHistoryByDomain, wordMastery, generatedContent, workshopGames, mastery, skillSnapshot, recentScans, activityConfigs |
 | `chat` | charter, childProfile |
 | `generate` | charter, childProfile |
 | `evaluate` | charter, childProfile, sightWords, wordMastery |
-| `quest` | childProfile, sightWords, recentEval, wordMastery |
-| `generateStory` | childProfile, sightWords, wordMastery, skillSnapshot |
-| `reviseStory` | childProfile, sightWords, wordMastery, skillSnapshot |
-| `revisePage` | childProfile, sightWords, wordMastery, skillSnapshot |
+| `quest` | charter, childProfile, sightWords, recentHistoryByDomain, wordMastery, skillSnapshot, workbookPaces, recentScans |
+| `generateStory` | charter, childProfile, sightWords, wordMastery, skillSnapshot |
+| `reviseStory` | charter, childProfile, sightWords, wordMastery, skillSnapshot |
+| `revisePage` | charter, childProfile, sightWords, wordMastery, skillSnapshot |
 | `workshop` | charter, childProfile, workshopGames |
+| `analyzeWorkbook` | charter, childProfile |
 | `analyzePatterns` | childProfile |
-| `scan` | childProfile, recentEval |
+| `scan` | charter, childProfile, recentEval, recentHistoryByDomain, skillSnapshot, activityConfigs |
 | `chapterQuestions` | _(self-loading)_ chapter book content + child profile |
 | `bookLookup` | _(self-loading)_ CHARTER_PREAMBLE + raw title + optional child name/age |
 | `lessonVideo` | _(self-loading)_ CHARTER_PREAMBLE + child profile (age + motivators + interests) |
@@ -183,10 +198,10 @@ src/core/ai/useAI.ts              functions/src/ai/
 | `helpCard` | charter, childProfile, skillSnapshot, wordMastery, recentScans, recentHistoryByDomain, weekFocus |
 | `weeklyReview` | charter, childProfile, learnerModel, skillSnapshot, activityConfigs, recentHistoryByDomain, recentScans, wordMastery, dadLabReports (+ week-scoped context from `assembleWeekContext`). FEAT-74: `learnerModel` grounds pace-adjustments/recommendations in the synthesized frontier; the Sunday cron synthesizes-if-stale **before** generating so the review reads a fresh model. |
 | `monthlyReview` | _(self-loading)_ CHARTER_PREAMBLE + aggregated month data (day logs, photos, milestones) |
-| `disposition` | _(self-loading)_ charter preamble + 4 weeks day logs + 3 recent evals + 5 recent lab reports |
+| `disposition` | charter, childProfile, engagement, gradeResults, recentHistoryByDomain, skillSnapshot, wordMastery — **plus** specialized self-loaded data beyond the slices (4 weeks day logs, 3 recent evals, 5 recent lab reports) |
 | `conundrum` | _(self-loading)_ charter preamble + week focus + recent subjects + child profiles |
 | `weeklyFocus` | _(self-loading)_ charter preamble + previous 4 weeks' themes + recent subjects + user input |
-| `shellyChat` | _(self-loading)_ family charter summary + all children profiles + week theme/virtue + conundrum title |
+| `shellyChat` | charter, childProfile, learnerModel, engagement, gradeResults, recentEval, sightWords, weekFocus, wordMastery, workbookPaces, skillSnapshot, childSkillMap, recentHistoryByDomain, recentScans, hoursProgress, dayToday, dadLabReports (per-child; the no-childId general branch loads family-level context instead) |
 
 ---
 
@@ -258,7 +273,7 @@ src/core/ai/useAI.ts              functions/src/ai/
 
 **Output:** JSON with `title`, `pages[]` (`pageNumber`, `text`, `sceneDescription`, `wordsOnPage`), `allWordsUsed`, `missedWords`, plus new optional `qualityNotes` field (debug-only — logged to aiUsage, not rendered in the book).
 
-**Model:** `claude-sonnet-5` · **maxTokens:** 6144 · **temperature:** 0.7
+**Model:** `claude-sonnet-5` · **maxTokens:** `maxTokensForPageCount(pageCount)` (scales with the target — 10 pages → 7168; the old fixed 6144 truncated longer books, see `storyPageBudget.ts`) · **temperature:** 0.7 (gated — Sonnet 5 rejects the param, so `callClaude` omits it for this model)
 
 ### `revisePage` (tasks/revisePage.ts)
 
@@ -328,12 +343,12 @@ page at a time, in response to TTS-read-aloud listener feedback.
 ### `disposition` (tasks/disposition.ts)
 
 **System prompt assembly:**
-1. CHARTER_PREAMBLE (self-loaded, does not use buildContextForTask)
+1. Context slices for "disposition" via buildContextForTask (charter, childProfile, engagement, gradeResults, recentHistoryByDomain, skillSnapshot, wordMastery)
 2. Custom narrative prompt: assess HOW a child approaches learning (portfolio over grades)
 3. 5 dispositions: Curiosity, Persistence, Articulation, Self-Awareness, Ownership
 4. Levels: growing / steady / emerging / not-yet-visible; Trends: up / stable / down / insufficient-data
 
-**Data loading (4-week window):**
+**Specialized data loading beyond the slices (4-week window):**
 - Recent day logs (4 weeks) aggregated by week: completion rates, engagement patterns, evidence, subject minutes
 - Recent evaluation sessions (3 most recent completed)
 - Recent Dad Lab reports (5 most recent) with child contributions
@@ -401,9 +416,9 @@ page at a time, in response to TTS-read-aloud listener feedback.
 ### `shellyChat` (tasks/shellyChat.ts)
 
 **System prompt assembly:**
-1. Self-loaded context (does not use buildContextForTask)
-2. Loads: family charter summary, all children profiles, current week theme/virtue, conundrum title
-3. Builds a parent-focused assistant prompt with full family context
+1. Per-child branch: buildContextForTask("shellyChat") — a 17-slice set (second only to `plan`'s 19; incl. learnerModel, skillSnapshot, childSkillMap, dayToday, dadLabReports)
+2. General branch (no childId): loads family-level context (charter summary, all children profiles, week theme/virtue, conundrum title)
+3. Builds a parent-focused assistant prompt with full family context + the portal action grammars (confirm-gated `ChatAction` kinds — see `docs/barnes-shelly-chat-portal-design.md`)
 
 **Key behaviors:**
 - General-purpose AI assistant for Shelly (parent user)

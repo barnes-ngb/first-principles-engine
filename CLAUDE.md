@@ -332,7 +332,7 @@ All under `families/{familyId}/`:
 5. **Cost tracking:** Log token usage and model used to Firestore for monitoring.
 6. **Model selection by task** (all model strings live in one table: `functions/src/ai/models.ts`):
    - Complex reasoning (plan, quest, generateStory, reviseStory, revisePage, workshop, analyzeWorkbook, disposition, conundrum, weeklyFocus, scan, shellyChat, foundationsReview, chapterQuestions, bookLookup, lessonVideo, helpCard, monthlyReview, weeklyReview, analyzePatterns): Claude Sonnet 5 (`claude-sonnet-5`)
-   - **Opus 4.8 pilot** (`claude-opus-4-8`): `evaluate` + `learnerSynthesis` only — one-line reversible via the table (owner review after 2 weeks). Fable 5 was considered and rejected (2x Opus cost + refusal/stop_reason fallback handling).
+   - **Opus 4.8 pilot suspended (2026-07-16)**: `evaluate` + `learnerSynthesis` are back on Sonnet 5 — the first live call failed before quality could be assessed. `CLAUDE_OPUS` (`claude-opus-4-8`) is retained in `models.ts` for the expected re-pilot, which requires verifying the model ID via a live `GET /v1/models` (or one successful live call) from the deployed environment first. Fable 5 was considered and rejected (2x Opus cost + refusal/stop_reason fallback handling).
    - Routine generation (generate, chat): Claude Haiku (`claude-haiku-4-5-20251001`)
    - Image generation: gpt-image-1.5 (scenes, armor sheets, base character, starter avatar, transparent stickers, photo transform, armor pieces, sketch enhancement)
    - Note: token counts on Sonnet-5 / Opus-4.8 tasks run ~30% higher than the retired Sonnet-4.6 tasks (new tokenizer) — expected, not a regression.

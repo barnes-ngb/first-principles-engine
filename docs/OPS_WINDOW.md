@@ -89,10 +89,12 @@ against a **live Firestore export** (repo-only work can't resolve them):
   carry a Missouri heading. Small PROMPT_FIX — hand to Claude Code.
 
 ### Recurring reviews
-- [ ] **Opus pilot review** (due ~**Jul 19**) — `evaluate` + `learnerSynthesis`
-  run on `claude-opus-4-8` (FEAT-58). After ~2 weeks decide keep vs. revert to
-  Sonnet 5 (one-line change in `functions/src/ai/models.ts`); judge on quality
-  delta vs. cost.
+- [ ] **Opus pilot review** (FEAT-58) — pilot **suspended 2026-07-16**:
+  `evaluate` + `learnerSynthesis` reverted to Sonnet 5 after the first live
+  `claude-opus-4-8` call failed before quality could be assessed. Standing item
+  is now: decide whether to re-pilot — requires verifying the model ID via a
+  live `GET /v1/models` (or one successful live call) from the deployed
+  environment first (see the suspended rows in `functions/src/ai/models.ts`).
 - [ ] **Allowlist re-review** — walk `scripts/docs-alignment.allow.json`. Each
   entry still justified? The `rawRefsAllow` (xpLedger/days raw refs) and the new
   `remoteCallAllow` / `imageDownscaleAllow` seeds — any that a fix has made
