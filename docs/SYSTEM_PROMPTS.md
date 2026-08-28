@@ -416,7 +416,7 @@ page at a time, in response to TTS-read-aloud listener feedback.
 ### `shellyChat` (tasks/shellyChat.ts)
 
 **System prompt assembly:**
-1. Per-child branch: buildContextForTask("shellyChat") — the richest slice set in TASK_CONTEXT (17 slices incl. learnerModel, skillSnapshot, childSkillMap, dayToday, dadLabReports)
+1. Per-child branch: buildContextForTask("shellyChat") — a 17-slice set (second only to `plan`'s 19; incl. learnerModel, skillSnapshot, childSkillMap, dayToday, dadLabReports)
 2. General branch (no childId): loads family-level context (charter summary, all children profiles, week theme/virtue, conundrum title)
 3. Builds a parent-focused assistant prompt with full family context + the portal action grammars (confirm-gated `ChatAction` kinds — see `docs/barnes-shelly-chat-portal-design.md`)
 
