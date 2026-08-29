@@ -6,7 +6,9 @@ import {
   getPreviousMonth,
   loadDadLabReportsInMonth,
   loadDayLogsForMonth,
+  loadHoursForMonth,
   loadPhotosForMonth,
+  loadRawDayLogsForMonth,
   loadReadingForMonth,
   type DadLabEntry,
 } from "./monthlyReviewData.js";
@@ -1086,5 +1088,215 @@ describe("aggregateMonthData — FEAT-163 end-to-end: a beat-era lab reaches the
     expect(labPhotos).toHaveLength(1);
     expect(labPhotos[0].sourceDocId).toBe("art-beat-photo");
     expect(labPhotos[0].sourceMetadata?.reportTitle).toBe("The Great Rock Drop");
+  });
+});
+
+// ── FEAT-164: the book's hours figure counts all three sources ───────────────
+describe("loadHoursForMonth — the book agrees with the Records page", () => {
+  // A month shaped like a real one: some time logged as `hours` docs, most of
+  // it in day logs, and a family-wide Dad Lab adjustment. Pre-FEAT-164 the
+  // loader summed the `hours` collection alone, so the book narrated a smaller
+  // month — and could rank the wrong subject as its biggest.
+  const collections = {
+    "families/fam/hours": [
+      {
+        id: "h-1",
+        data: {
+          childId: "child-1",
+          date: "2026-08-06",
+          minutes: 45,
+          subjectBucket: "Science",
+        },
+      },
+      {
+        id: "h-2",
+        data: {
+          childId: "child-2",
+          date: "2026-08-06",
+          minutes: 500,
+          subjectBucket: "Math",
+        },
+      },
+    ],
+    "families/fam/days": [
+      {
+        id: "2026-08-03",
+        data: {
+          childId: "child-1",
+          date: "2026-08-03",
+          blocks: [
+            { title: "Math Workbook", subjectBucket: "Math", location: "Home", actualMinutes: 30 },
+          ],
+          checklist: [
+            { label: "Math Workbook (30m)", completed: true, estimatedMinutes: 30 },
+            {
+              label: "Handwriting practice (15m)",
+              completed: true,
+              estimatedMinutes: 15,
+              subjectBucket: "LanguageArts",
+            },
+          ],
+        },
+      },
+      {
+        id: "2026-08-05",
+        data: {
+          childId: "child-2",
+          date: "2026-08-05",
+          blocks: [{ subjectBucket: "Math", actualMinutes: 99 }],
+        },
+      },
+    ],
+    "families/fam/hoursAdjustments": [
+      {
+        id: "adj-1",
+        data: {
+          childId: "both",
+          date: "2026-08-10",
+          minutes: 60,
+          reason: "Dad Lab",
+          subjectBucket: "Science",
+        },
+      },
+      {
+        id: "adj-2",
+        data: {
+          childId: "child-2",
+          date: "2026-08-11",
+          minutes: 120,
+          reason: "sibling only",
+          subjectBucket: "Math",
+        },
+      },
+    ],
+  };
+
+  it("adds day-log and adjustment minutes to the hours collection", async () => {
+    const hours = await loadHoursForMonth(
+      makeFakeDb(collections),
+      "fam",
+      "child-1",
+      "2026-08-01",
+      "2026-08-31",
+    );
+
+    // 45 (hours doc) + 30 (block actual) + 15 (unmatched carried item) + 60
+    // (family-wide adjustment). The pre-fix loader returned 45.
+    expect(hours.totalMinutes).toBe(150);
+    expect(hours.minutesBySubject).toEqual({
+      Science: 105,
+      Math: 30,
+      LanguageArts: 15,
+    });
+  });
+
+  it("keeps another child's time out of this child's total", async () => {
+    const hours = await loadHoursForMonth(
+      makeFakeDb(collections),
+      "fam",
+      "child-2",
+      "2026-08-01",
+      "2026-08-31",
+    );
+    // 500 (own hours doc) + 99 (own day log) + 60 ('both') + 120 (own tag).
+    expect(hours.totalMinutes).toBe(779);
+    expect(hours.minutesBySubject.Science).toBe(60);
+  });
+
+  it("reaches the aggregate the book is generated from", async () => {
+    const data = await aggregateMonthData(
+      makeFakeDb(collections),
+      "fam",
+      "child-1",
+      "2026-08",
+    );
+    expect(data.hours.totalMinutes).toBe(150);
+    // The day-log projection is unchanged — its own minutesBySubject stays the
+    // completed-checklist rollup used for narrative colour, not the hours math.
+    expect(data.dayLogs).toHaveLength(1);
+    expect(data.dayLogs[0].date).toBe("2026-08-03");
+  });
+});
+
+// ── FEAT-164 (Codex P2, PR #1711) ───────────────────────────────────────────
+describe("loadRawDayLogsForMonth — legacy day logs carry the child in the doc id", () => {
+  // `days/{date}_{childId}` documents written before the `childId` field
+  // existed. Both Records read paths derive the child from the id before
+  // counting, so a book that drops them undercounts exactly the day-log
+  // minutes FEAT-164 exists to include.
+  const legacy = {
+    "families/fam/days": [
+      {
+        id: "2026-08-03_child-1",
+        data: {
+          date: "2026-08-03",
+          blocks: [{ subjectBucket: "Math", location: "Home", actualMinutes: 40 }],
+        },
+      },
+      {
+        id: "child-1_2026-08-04",
+        data: {
+          date: "2026-08-04",
+          blocks: [{ subjectBucket: "Reading", location: "Home", actualMinutes: 20 }],
+        },
+      },
+      {
+        id: "2026-08-05_child-2",
+        data: {
+          date: "2026-08-05",
+          blocks: [{ subjectBucket: "Math", location: "Home", actualMinutes: 99 }],
+        },
+      },
+    ],
+  };
+
+  it("resolves the child from the doc id, in both composite orders", async () => {
+    const logs = await loadRawDayLogsForMonth(
+      makeFakeDb(legacy),
+      "fam",
+      "child-1",
+      "2026-08-01",
+      "2026-08-31",
+    );
+    expect(logs.map((l) => l.date)).toEqual(["2026-08-03", "2026-08-04"]);
+    expect(logs.every((l) => l.childId === "child-1")).toBe(true);
+  });
+
+  it("counts those minutes in the book's hours total", async () => {
+    const hours = await loadHoursForMonth(
+      makeFakeDb(legacy),
+      "fam",
+      "child-1",
+      "2026-08-01",
+      "2026-08-31",
+    );
+    expect(hours.totalMinutes).toBe(60);
+    expect(hours.minutesBySubject).toEqual({ Math: 40, Reading: 20 });
+  });
+
+  it("still keeps another child's legacy day out of this child's total", async () => {
+    const hours = await loadHoursForMonth(
+      makeFakeDb(legacy),
+      "fam",
+      "child-2",
+      "2026-08-01",
+      "2026-08-31",
+    );
+    expect(hours.totalMinutes).toBe(99);
+  });
+
+  it("drops a day log whose child cannot be resolved at all", async () => {
+    const logs = await loadRawDayLogsForMonth(
+      makeFakeDb({
+        "families/fam/days": [
+          { id: "2026-08-06", data: { date: "2026-08-06", blocks: [] } },
+        ],
+      }),
+      "fam",
+      "child-1",
+      "2026-08-01",
+      "2026-08-31",
+    );
+    expect(logs).toEqual([]);
   });
 });

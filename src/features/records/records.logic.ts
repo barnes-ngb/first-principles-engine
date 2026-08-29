@@ -220,6 +220,16 @@ export type HoursContribution = DayLogContribution & {
  * `computeHoursSummary` (compliance totals) and `computeMonthlyTrend` (the
  * trend chart) both consume this list and only differ in how they fold it, so
  * the surfaces cannot drift.
+ *
+ * ⚠️ PORTED (FEAT-164). This rule — and its helpers `entryMinutes`,
+ * `dayLogMinuteContributions` and `itemMatchesBlock` — exists a SECOND time in
+ * `functions/src/ai/tasks/monthlyHours.ts`, because the monthly review book is
+ * generated in a Cloud Function and `functions/` cannot import from `src/`
+ * (TS6059 `rootDir` + TS2835 node16 resolution — measured, see that module's
+ * header). The book's hours figure must equal the Records figure, so the two
+ * copies are pinned by a PARITY FIXTURE repeated verbatim in
+ * `records.logic.test.ts` and `functions/src/ai/tasks/monthlyHours.test.ts`:
+ * change the rule here and that pair fails until the port changes too.
  */
 export const collectHoursContributions = (
   dayLogs: DayLog[],

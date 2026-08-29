@@ -5,6 +5,13 @@ import {
   labBeatsHaveContent,
   reportArtifactIds,
 } from "./dadLabReportArtifacts.js";
+import {
+  computeMonthHours,
+  deriveChildIdFromDocId,
+  type RawDayLog,
+  type RawHoursAdjustment,
+  type RawHoursEntry,
+} from "./monthlyHours.js";
 
 /**
  * Firestore composite indexes required by this module.
@@ -48,8 +55,12 @@ import {
  *     callers but is no longer required by this loader.
  *   hours:
  *     (childId ASC, date ASC) — loadHoursForMonth — already present
+ *   hoursAdjustments:
+ *     `date` single-field (fieldOverride) — loadHoursForMonth (FEAT-164 reads
+ *     the adjustments source; range only, the DATA-09 child/'both' attribution
+ *     runs in memory) — already present
  *   days:
- *     date single-field (fieldOverride) — loadDayLogsForMonth — already present
+ *     date single-field (fieldOverride) — loadRawDayLogsForMonth — already present
  *   weeks:
  *     startDate single-field (auto) — loadConundrumsForMonth — no entry needed
  *   skillSnapshots:
@@ -306,6 +317,45 @@ export function getPreviousMonth(today: Date): string {
 
 // ── Loaders ───────────────────────────────────────────────────
 
+/**
+ * The raw `days` docs for one child and month — the SINGLE `days` read for the
+ * whole aggregate (FEAT-164). Two consumers want different slices of the same
+ * documents and neither should re-query for them:
+ *  - `projectDayLogEntries` (the engagement / evidence / curation projection);
+ *  - `loadHoursForMonth`, which needs the `blocks` array that projection drops.
+ *
+ * Legacy day logs carry no `childId` FIELD — the child is encoded only in the
+ * doc id — so the id is resolved before filtering, exactly as both Records read
+ * paths do (`RecordsPage.tsx`, `dataReviewExportLoader.ts`). Dropping those
+ * documents here would undercount a regenerated historical book against Records
+ * on the very minutes FEAT-164 exists to include (Codex P2, PR #1711).
+ */
+export async function loadRawDayLogsForMonth(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  start: string,
+  end: string,
+): Promise<RawDayLog[]> {
+  const snap = await db
+    .collection(`families/${familyId}/days`)
+    .where("date", ">=", start)
+    .where("date", "<=", end)
+    .get();
+
+  return snap.docs
+    .map((doc) => {
+      const raw = doc.data() as RawDayLog;
+      // Normalize on read so every consumer — the projection and the ported
+      // counting path's own safety-net filter alike — sees a resolved child.
+      return {
+        ...raw,
+        childId: raw.childId ?? deriveChildIdFromDocId(doc.id),
+      } as RawDayLog;
+    })
+    .filter((d) => d.childId === childId);
+}
+
 export async function loadDayLogsForMonth(
   db: Firestore,
   familyId: string,
@@ -313,16 +363,19 @@ export async function loadDayLogsForMonth(
   start: string,
   end: string,
 ): Promise<DayLogEntry[]> {
-  const snap = await db
-    .collection(`families/${familyId}/days`)
-    .where("date", ">=", start)
-    .where("date", "<=", end)
-    .get();
+  return projectDayLogEntries(
+    await loadRawDayLogsForMonth(db, familyId, childId, start, end),
+  );
+}
 
+/** Pure projection of raw `days` docs into the curation-facing `DayLogEntry`.
+ *  Note its `minutesBySubject` is a completed-checklist rollup for narrative
+ *  colour (`dominantSubject`) — it is NOT the counted-hours figure, which comes
+ *  from `loadHoursForMonth` / the ported `collectHoursContributions`. */
+export function projectDayLogEntries(rawLogs: RawDayLog[]): DayLogEntry[] {
   const logs: DayLogEntry[] = [];
-  for (const doc of snap.docs) {
-    const d = doc.data();
-    if (d.childId !== childId) continue;
+  for (const raw of rawLogs) {
+    const d = raw as Record<string, unknown>;
     const checklist = (d.checklist ?? []) as Array<{
       id?: string;
       label: string;
@@ -923,31 +976,53 @@ function dominantSubject(byBucket: Record<string, number>): string | undefined {
   return best;
 }
 
+/**
+ * The month's counted hours, by the SAME rule the Records page uses (FEAT-164).
+ *
+ * This used to sum the `hours` collection alone, so the book narrated a smaller
+ * month than the record it belongs to — and, because the shortfall is
+ * per-subject, it could name the wrong subject as the month's biggest. All
+ * three additive sources now flow through the ported counting path
+ * (`monthlyHours.ts` → `collectHoursContributions`), which owns the DATA-09
+ * attribution filter and the DATA-14 partial-day rule. The rule itself is not
+ * re-implemented here; do not add arithmetic to this loader.
+ *
+ * `rawDayLogs` lets the caller hand over the `days` docs it has already read
+ * (`loadRawDayLogsForMonth`); when omitted they are loaded here, so the
+ * signature stays a drop-in for `auditMonthlyReviewSources`.
+ */
 export async function loadHoursForMonth(
   db: Firestore,
   familyId: string,
   childId: string,
   start: string,
   end: string,
+  rawDayLogs?: RawDayLog[],
 ): Promise<HoursSummary> {
-  const snap = await db
-    .collection(`families/${familyId}/hours`)
-    .where("childId", "==", childId)
-    .where("date", ">=", start)
-    .where("date", "<=", end)
-    .get();
+  const [entriesSnap, adjustmentsSnap, dayLogs] = await Promise.all([
+    db
+      .collection(`families/${familyId}/hours`)
+      .where("childId", "==", childId)
+      .where("date", ">=", start)
+      .where("date", "<=", end)
+      .get(),
+    // DATA-09: an adjustment counts for this child when it is tagged to them
+    // OR to 'both'. That disjunction is applied in memory by the ported
+    // counting path, so this query stays a plain date range (no new index).
+    db
+      .collection(`families/${familyId}/hoursAdjustments`)
+      .where("date", ">=", start)
+      .where("date", "<=", end)
+      .get(),
+    rawDayLogs ?? loadRawDayLogsForMonth(db, familyId, childId, start, end),
+  ]);
 
-  let totalMinutes = 0;
-  const minutesBySubject: Record<string, number> = {};
-  for (const doc of snap.docs) {
-    const d = doc.data() as { minutes?: number; subjectBucket?: string };
-    const mins = d.minutes ?? 0;
-    totalMinutes += mins;
-    const bucket = d.subjectBucket ?? "Other";
-    minutesBySubject[bucket] = (minutesBySubject[bucket] ?? 0) + mins;
-  }
+  const entries = entriesSnap.docs.map((doc) => doc.data() as RawHoursEntry);
+  const adjustments = adjustmentsSnap.docs.map(
+    (doc) => doc.data() as RawHoursAdjustment,
+  );
 
-  return { totalMinutes, minutesBySubject };
+  return computeMonthHours(dayLogs, entries, adjustments, childId);
 }
 
 export async function loadDiamondsForMonth(
@@ -1105,10 +1180,20 @@ export async function aggregateMonthData(
 ): Promise<MonthAggregate> {
   const { start, end } = getMonthBounds(month);
 
+  // FEAT-164: ONE `days` read feeds both consumers — the curation projection
+  // and the hours total, which needs the `blocks` the projection drops.
+  const rawDayLogs = await loadRawDayLogsForMonth(
+    db,
+    familyId,
+    childId,
+    start,
+    end,
+  );
+  const dayLogs = projectDayLogEntries(rawDayLogs);
+
   // dadLabReports must resolve before loadPhotosForMonth so the photo loader
   // can extract Dad Lab artifact IDs from `childReports[name].artifacts`.
   const [
-    dayLogs,
     weeklyReviews,
     blockers,
     completedBooks,
@@ -1119,13 +1204,12 @@ export async function aggregateMonthData(
     questCount,
     reading,
   ] = await Promise.all([
-    loadDayLogsForMonth(db, familyId, childId, start, end),
     loadWeeklyReviewsForMonth(db, familyId, childId, start, end),
     loadBlockers(db, familyId, childId, start, end),
     loadCompletedBooksInMonth(db, familyId, childId, start, end),
     loadDadLabReportsInMonth(db, familyId, childId, start, end, childName),
     loadConundrumsForMonth(db, familyId, start, end),
-    loadHoursForMonth(db, familyId, childId, start, end),
+    loadHoursForMonth(db, familyId, childId, start, end, rawDayLogs),
     loadDiamondsForMonth(db, familyId, childId, start, end),
     loadQuestCountForMonth(db, familyId, childId, start, end),
     loadReadingForMonth(db, familyId, childId, start, end),
