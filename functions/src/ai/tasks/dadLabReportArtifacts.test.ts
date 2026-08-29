@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  beatText,
+  beatTextForChild,
   labBeatsHaveContent,
   reportArtifactIds,
 } from "./dadLabReportArtifacts.js";
@@ -135,16 +135,60 @@ describe("labBeatsHaveContent — the beat-era 'did this lab happen?' witness", 
   });
 });
 
-describe("beatText", () => {
-  it("reads and trims one beat's writing line", () => {
-    expect(beatText({ predict: { text: "  it will pop  " } }, "predict")).toBe("it will pop");
+describe("beatTextForChild — the writing line, only when it is this child's to claim", () => {
+  const LINCOLN = "c-lincoln";
+
+  it("reads and trims a line with no attribution (shared by default)", () => {
+    expect(beatTextForChild({ predict: { text: "  it will pop  " } }, "predict", LINCOLN)).toBe(
+      "it will pop",
+    );
+  });
+
+  it("reads a line attributed to 'both'", () => {
+    expect(
+      beatTextForChild({ predict: { text: "it will pop", textChild: "both" } }, "predict", LINCOLN),
+    ).toBe("it will pop");
+  });
+
+  it("reads a line attributed to this child", () => {
+    expect(
+      beatTextForChild(
+        { predict: { text: "it will pop", textChild: LINCOLN } },
+        "predict",
+        LINCOLN,
+      ),
+    ).toBe("it will pop");
+  });
+
+  it("does NOT read a line attributed to a sibling (Codex P2, PR #1710)", () => {
+    // The prompt renders these as a per-child [predicted] tag, so a sibling's
+    // sentence must never be presented as this child's contribution.
+    expect(
+      beatTextForChild(
+        { predict: { text: "it will pop", textChild: "c-london" } },
+        "predict",
+        LINCOLN,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("treats an unrecognized attribution as not-this-child (under-claim, never misattribute)", () => {
+    expect(
+      beatTextForChild({ saw: { text: "it popped", textChild: 42 } }, "saw", LINCOLN),
+    ).toBeUndefined();
+  });
+
+  it("treats a blank attribution string as shared", () => {
+    expect(
+      beatTextForChild({ saw: { text: "it popped", textChild: "  " } }, "saw", LINCOLN),
+    ).toBe("it popped");
   });
 
   it("returns undefined for a missing, blank or malformed line", () => {
-    expect(beatText({ predict: { text: "   " } }, "predict")).toBeUndefined();
-    expect(beatText({ predict: { items: [] } }, "predict")).toBeUndefined();
-    expect(beatText({}, "predict")).toBeUndefined();
-    expect(beatText(undefined, "predict")).toBeUndefined();
-    expect(beatText("nope", "predict")).toBeUndefined();
+    expect(beatTextForChild({ predict: { text: "   " } }, "predict", LINCOLN)).toBeUndefined();
+    expect(beatTextForChild({ predict: { items: [] } }, "predict", LINCOLN)).toBeUndefined();
+    expect(beatTextForChild({}, "predict", LINCOLN)).toBeUndefined();
+    expect(beatTextForChild(undefined, "predict", LINCOLN)).toBeUndefined();
+    expect(beatTextForChild("nope", "predict", LINCOLN)).toBeUndefined();
   });
 });

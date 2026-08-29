@@ -1,7 +1,7 @@
 import type { Firestore } from "firebase-admin/firestore";
 
 import {
-  beatText,
+  beatTextForChild,
   labBeatsHaveContent,
   reportArtifactIds,
 } from "./dadLabReportArtifacts.js";
@@ -618,8 +618,14 @@ export async function loadDadLabReportsInMonth(
       // prediction, "What we saw" is where the family says what happened.
       // Without this a fully-written three-beat lab reads as [not predicted,
       // not explained] in the prompt, which is the opposite of the truth.
-      hasPrediction: !!childContrib?.prediction || !!beatText(d.beats, "predict"),
-      hasExplanation: !!childContrib?.explanation || !!beatText(d.beats, "saw"),
+      //
+      // Attribution-gated, unlike participation above: `textChild` credits a
+      // writing line to 'both' or to one child, and these flags become a
+      // per-child `[predicted]`/`[explained]` claim in the prompt (Codex P2).
+      hasPrediction:
+        !!childContrib?.prediction || !!beatTextForChild(d.beats, "predict", childId),
+      hasExplanation:
+        !!childContrib?.explanation || !!beatTextForChild(d.beats, "saw", childId),
       artifactIds: reportArtifactIds(d),
     });
   }

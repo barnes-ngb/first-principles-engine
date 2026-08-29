@@ -92,10 +92,41 @@ export function labBeatsHaveContent(beats: unknown): boolean {
   });
 }
 
-/** Read one beat's writing line, or `undefined` when it has none. */
-export function beatText(beats: unknown, beatId: string): string | undefined {
+/** The `child` sentinel meaning "the whole family" — `BEAT_BOTH` in `src/core/types/dadlab.ts`. */
+export const BEAT_BOTH = "both";
+
+/**
+ * One beat's writing line, but ONLY when it is this child's to claim.
+ *
+ * Unlike lab participation — which is whole-family and has no per-child signal
+ * (see `loadDadLabReportsInMonth`) — the writing line DOES carry attribution:
+ * `LabBeat.textChild` is `'both'` or a specific child **doc id** (ARCH-40, so
+ * never a name), chosen in `LabCaptureBeats`' attribution control and defaulting
+ * to `'both'`. The monthly-review prompt turns this into a `[predicted]` /
+ * `[explained]` tag in a book written for ONE child, so ignoring the attribution
+ * would present a sibling's sentence as this child's own (Codex P2, PR #1710).
+ *
+ * Missing or `'both'` → shared, counts for everyone. Anything else must match
+ * `childId` exactly; an unrecognized value is child-specific and not this child,
+ * so it does not count — the direction that can only under-claim, never
+ * misattribute.
+ */
+export function beatTextForChild(
+  beats: unknown,
+  beatId: string,
+  childId: string,
+): string | undefined {
   if (!beats || typeof beats !== "object" || Array.isArray(beats)) return undefined;
   const beat = (beats as Record<string, unknown>)[beatId] as RawLabBeat | undefined;
+
   const text = typeof beat?.text === "string" ? beat.text.trim() : "";
-  return text ? text : undefined;
+  if (!text) return undefined;
+
+  const attribution = (beat as { textChild?: unknown } | undefined)?.textChild;
+  const shared =
+    attribution == null ||
+    (typeof attribution === "string" && (!attribution.trim() || attribution === BEAT_BOTH));
+  if (!shared && attribution !== childId) return undefined;
+
+  return text;
 }

@@ -373,6 +373,57 @@ describe("loadDadLabReportsInMonth", () => {
     expect(result[0].hasExplanation).toBe(true);
   });
 
+  it("does not credit a sibling's attributed beat line to this child (Codex P2, PR #1710)", async () => {
+    // `LabBeat.textChild` credits the writing line to 'both' or one child doc
+    // id. The prompt turns these flags into a per-child [predicted]/[explained]
+    // tag, so London's sentence must not appear as Lincoln's contribution —
+    // even though the LAB itself still counts for both (DATA-04).
+    const labs = {
+      [path]: [
+        {
+          id: "lab-attributed",
+          data: {
+            date: "2026-04-12",
+            status: "complete",
+            title: "Attributed lab",
+            childReports: {},
+            beats: {
+              predict: { text: "it will bounce", textChild: "child_london", items: [] },
+              saw: { text: "it bounced", textChild: "both", items: [] },
+            },
+          },
+        },
+      ],
+    };
+
+    const forLincoln = await loadDadLabReportsInMonth(
+      makeFakeDb(labs),
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
+    const forLondon = await loadDadLabReportsInMonth(
+      makeFakeDb(labs),
+      "fam",
+      "child_london",
+      "2026-04-01",
+      "2026-04-30",
+      "London",
+    );
+
+    // The lab still counts for both — only the per-child claim is gated.
+    expect(forLincoln).toHaveLength(1);
+    expect(forLondon).toHaveLength(1);
+
+    expect(forLincoln[0].hasPrediction).toBe(false);
+    expect(forLondon[0].hasPrediction).toBe(true);
+    // 'both' stays shared.
+    expect(forLincoln[0].hasExplanation).toBe(true);
+    expect(forLondon[0].hasExplanation).toBe(true);
+  });
+
   it("still excludes a Planned backlog entry with nothing captured on it", async () => {
     // FEAT-157 lets the Shelly chat create `Planned` labs. Dropping the filter
     // outright would turn those into "Dad Lab sessions completed" in the book —
