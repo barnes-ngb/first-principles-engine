@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Firestore } from "firebase-admin/firestore";
 import {
+  aggregateMonthData,
   getMonthBounds,
   getPreviousMonth,
   loadDadLabReportsInMonth,
@@ -219,6 +220,187 @@ describe("loadDadLabReportsInMonth", () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0].hasPrediction).toBe(true);
+  });
+
+  // ── FEAT-163: the beat-era shape ──────────────────────────────────────────
+  //
+  // Nathan's August book counted 1 of 3 labs and reported "no photos". The
+  // participation filter read `childReports` alone, and the FEAT-56 three-beat
+  // capture (today's default, where FEAT-156 routes uploads) writes no
+  // `childReports` key at all — so a modern lab was dropped whole, taking its
+  // photos with it (`loadPhotosForMonth` resolves them through `artifactIds`).
+
+  it("counts a beat-era lab that has no childReports key at all", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-rock-drop",
+          data: {
+            date: "2026-04-12",
+            status: "complete",
+            title: "The Great Rock Drop",
+            question: "Which lands first?",
+            childReports: {},
+            beats: {
+              predict: { items: [{ artifactId: "art-p", child: "both" }] },
+              try: { text: "we dropped them", items: [] },
+              saw: { items: [] },
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("The Great Rock Drop");
+  });
+
+  it("counts a beat-era lab for BOTH children — a lab is whole-family (DATA-04)", async () => {
+    // The beat shape carries no per-child participation signal by design:
+    // `items[].child` defaults to the 'both' sentinel, the artifacts are
+    // written `childId: 'both'`, the report has no `childId` field, and
+    // completion credits hours + XP to every child. Filtering it per-child
+    // would contradict the hours, XP and portfolio surfaces at once.
+    const labs = {
+      [path]: [
+        {
+          id: "lab-family",
+          data: {
+            date: "2026-04-12",
+            status: "complete",
+            title: "Family lab",
+            childReports: {},
+            beats: { saw: { items: [{ artifactId: "art-1", child: "c-london" }] } },
+          },
+        },
+      ],
+    };
+
+    const forLincoln = await loadDadLabReportsInMonth(
+      makeFakeDb(labs),
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
+    const forLondon = await loadDadLabReportsInMonth(
+      makeFakeDb(labs),
+      "fam",
+      "child_london",
+      "2026-04-01",
+      "2026-04-30",
+      "London",
+    );
+
+    expect(forLincoln).toHaveLength(1);
+    expect(forLondon).toHaveLength(1);
+    expect(forLincoln[0].artifactIds).toEqual(["art-1"]);
+    expect(forLondon[0].artifactIds).toEqual(["art-1"]);
+  });
+
+  it("unions beat artifacts with child-report artifacts, de-duped by id", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-mixed",
+          data: {
+            date: "2026-04-12",
+            status: "complete",
+            title: "Mixed capture",
+            childReports: { lincoln: { artifacts: ["art-shared", "art-child"] } },
+            beats: {
+              predict: {
+                items: [
+                  { artifactId: "art-shared", child: "both" },
+                  { artifactId: "art-beat", child: "both" },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
+    expect(result[0].artifactIds).toEqual(["art-shared", "art-child", "art-beat"]);
+  });
+
+  it("reads predicted/explained from the beats when there is no legacy contribution", async () => {
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-written",
+          data: {
+            date: "2026-04-12",
+            status: "complete",
+            title: "Written lab",
+            childReports: {},
+            beats: {
+              predict: { text: "the rock lands first", items: [] },
+              try: { items: [] },
+              saw: { text: "they landed together", items: [] },
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
+    expect(result[0].hasPrediction).toBe(true);
+    expect(result[0].hasExplanation).toBe(true);
+  });
+
+  it("still excludes a Planned backlog entry with nothing captured on it", async () => {
+    // FEAT-157 lets the Shelly chat create `Planned` labs. Dropping the filter
+    // outright would turn those into "Dad Lab sessions completed" in the book —
+    // the opposite overcount, in the same number.
+    const db = makeFakeDb({
+      [path]: [
+        {
+          id: "lab-planned",
+          data: {
+            date: "2026-04-18",
+            status: "planned",
+            title: "Someday lab",
+            childReports: {},
+            beats: { predict: { items: [] }, try: { items: [] }, saw: { items: [] } },
+          },
+        },
+      ],
+    });
+
+    const result = await loadDadLabReportsInMonth(
+      db,
+      "fam",
+      LINCOLN_DOC_ID,
+      "2026-04-01",
+      "2026-04-30",
+      "Lincoln",
+    );
+    expect(result).toHaveLength(0);
   });
 
   it("excludes sessions where the queried child did not contribute", async () => {
@@ -795,5 +977,63 @@ describe("loadPhotosForMonth — FEAT-141 planItem index (Codex P1)", () => {
 
     const result = await loadPhotosForMonth(db, "fam", "child-1", "2026-07-01", "2026-07-31");
     expect(result.artifactPlanItems).toEqual({ "art-1": "GATB Math (30m)" });
+  });
+});
+
+describe("aggregateMonthData — FEAT-163 end-to-end: a beat-era lab reaches the book with its photos", () => {
+  const LINCOLN_DOC_ID = "child_abc123";
+
+  /**
+   * The reported symptom, whole: August's book named one lab and printed "No
+   * photos" for the section. Both halves came from the same dropped report —
+   * the count from `dadLabReports.length`, the photos from `artifactIds` — so
+   * this pins the chain the two share rather than either loader alone.
+   *
+   * The beat photo deliberately carries `childId: 'both'` (BEAT_BOTH), which is
+   * what every FEAT-56 capture writes: the childId-filtered artifacts query
+   * cannot see it, so the report doc is its ONLY route into the book.
+   */
+  it("counts the beat-era lab and surfaces its 'both'-attributed photo", async () => {
+    const db = makeFakeDb({
+      "families/fam/dadLabReports": [
+        {
+          id: "lab-rock-drop",
+          data: {
+            date: "2026-04-12",
+            status: "complete",
+            title: "The Great Rock Drop",
+            question: "Which lands first?",
+            updatedAt: "2026-04-12T18:00:00.000Z",
+            childReports: {},
+            beats: {
+              predict: { text: "the heavy one", items: [] },
+              try: { items: [{ artifactId: "art-beat-photo", child: "both" }] },
+              saw: { items: [] },
+            },
+          },
+        },
+      ],
+      "families/fam/artifacts": [
+        {
+          id: "art-beat-photo",
+          data: {
+            childId: "both",
+            type: "Photo",
+            storagePath: "families/fam/artifacts/rock.jpg",
+            createdAt: "2026-04-12T17:30:00.000Z",
+          },
+        },
+      ],
+    });
+
+    const data = await aggregateMonthData(db, "fam", LINCOLN_DOC_ID, "2026-04", "Lincoln");
+
+    expect(data.dadLabReports).toHaveLength(1);
+    expect(data.dadLabReports[0].title).toBe("The Great Rock Drop");
+
+    const labPhotos = data.photos.filter((p) => p.sourceMetadata?.type === "dadLab");
+    expect(labPhotos).toHaveLength(1);
+    expect(labPhotos[0].sourceDocId).toBe("art-beat-photo");
+    expect(labPhotos[0].sourceMetadata?.reportTitle).toBe("The Great Rock Drop");
   });
 });
