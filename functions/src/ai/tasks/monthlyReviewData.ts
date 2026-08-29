@@ -7,6 +7,7 @@ import {
 } from "./dadLabReportArtifacts.js";
 import {
   computeMonthHours,
+  deriveChildIdFromDocId,
   type RawDayLog,
   type RawHoursAdjustment,
   type RawHoursEntry,
@@ -322,6 +323,12 @@ export function getPreviousMonth(today: Date): string {
  * documents and neither should re-query for them:
  *  - `projectDayLogEntries` (the engagement / evidence / curation projection);
  *  - `loadHoursForMonth`, which needs the `blocks` array that projection drops.
+ *
+ * Legacy day logs carry no `childId` FIELD — the child is encoded only in the
+ * doc id — so the id is resolved before filtering, exactly as both Records read
+ * paths do (`RecordsPage.tsx`, `dataReviewExportLoader.ts`). Dropping those
+ * documents here would undercount a regenerated historical book against Records
+ * on the very minutes FEAT-164 exists to include (Codex P2, PR #1711).
  */
 export async function loadRawDayLogsForMonth(
   db: Firestore,
@@ -337,7 +344,15 @@ export async function loadRawDayLogsForMonth(
     .get();
 
   return snap.docs
-    .map((doc) => doc.data() as RawDayLog)
+    .map((doc) => {
+      const raw = doc.data() as RawDayLog;
+      // Normalize on read so every consumer — the projection and the ported
+      // counting path's own safety-net filter alike — sees a resolved child.
+      return {
+        ...raw,
+        childId: raw.childId ?? deriveChildIdFromDocId(doc.id),
+      } as RawDayLog;
+    })
     .filter((d) => d.childId === childId);
 }
 

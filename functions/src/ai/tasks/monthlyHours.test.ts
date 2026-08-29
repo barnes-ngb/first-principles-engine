@@ -4,6 +4,7 @@ import {
   collectHoursContributions,
   computeMonthHours,
   dayLogMinuteContributions,
+  deriveChildIdFromDocId,
   entryMinutes,
   itemMatchesBlock,
 } from "./monthlyHours.js";
@@ -365,5 +366,22 @@ describe("itemMatchesBlock — the shared DATA-14 correspondence rule", () => {
       false,
     );
     expect(itemMatchesBlock({ label: "Handwriting practice" }, {})).toBe(false);
+  });
+});
+
+describe("deriveChildIdFromDocId — the port of src/core/utils/docId.ts", () => {
+  it("reads both composite orders", () => {
+    expect(deriveChildIdFromDocId("2026-01-10_child123")).toBe("child123");
+    expect(deriveChildIdFromDocId("child123_2026-01-10")).toBe("child123");
+  });
+
+  it("returns undefined when no child id is encoded", () => {
+    expect(deriveChildIdFromDocId("2026-01-10")).toBeUndefined();
+    expect(deriveChildIdFromDocId("")).toBeUndefined();
+    expect(deriveChildIdFromDocId("abc_def")).toBeUndefined();
+  });
+
+  it("keeps a child id that itself contains underscores", () => {
+    expect(deriveChildIdFromDocId("2026-01-10_child_123")).toBe("child_123");
   });
 });
