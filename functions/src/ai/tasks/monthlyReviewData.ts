@@ -1,5 +1,11 @@
 import type { Firestore } from "firebase-admin/firestore";
 
+import {
+  beatTextForChild,
+  labBeatsHaveContent,
+  reportArtifactIds,
+} from "./dadLabReportArtifacts.js";
+
 /**
  * Firestore composite indexes required by this module.
  *
@@ -78,7 +84,8 @@ export interface PhotoRef {
   /**
    * Tags photos whose origin is not directly inferable from the source
    * collection — e.g. Dad Lab photos stored in `artifacts` but referenced
-   * via `dadLabReports[*].childReports[name].artifacts`.
+   * via a `dadLabReports` doc, from either `childReports[*].artifacts` or
+   * `beats[*].items[].artifactId` (FEAT-163 — see `reportArtifactIds`).
    */
   sourceMetadata?: PhotoSourceMetadata;
   /**
@@ -160,12 +167,19 @@ export interface DadLabEntry {
   hasPrediction: boolean;
   hasExplanation: boolean;
   /**
-   * Artifact doc IDs the queried child attached to this session (photos +
-   * audio recordings). Populated from `childReports[name].artifacts`. Used by
-   * `loadPhotosForMonth` to surface Dad Lab photos that the artifacts query
-   * may miss (the KidLabView writer keys artifacts by lowercase child name
-   * rather than the Firestore child doc id, so the standard `childId == X`
-   * filter misses them).
+   * Every artifact doc ID this session owns (photos + audio recordings), from
+   * the UNION of `childReports[*].artifacts` and `beats[*].items[].artifactId`,
+   * de-duped by id — see `reportArtifactIds` in `dadLabReportArtifacts.ts`.
+   *
+   * Used by `loadPhotosForMonth` to surface Dad Lab photos the artifacts query
+   * cannot see. It misses them two ways: the KidLabView writer keys artifacts
+   * by lowercase child name rather than the Firestore child doc id, and the
+   * FEAT-56 beat capture writes `childId: 'both'` (BEAT_BOTH) by design — so
+   * a `childId == X` filter matches neither.
+   *
+   * NOT filtered to the queried child (FEAT-163): a lab is a whole-family
+   * activity (DATA-04) whose evidence is written as `'both'`, which is why the
+   * portfolio shows it on every child's page (`DAD_LAB_FAMILY_SCOPE_NOTE`).
    */
   artifactIds: string[];
 }
@@ -548,8 +562,28 @@ export async function loadDadLabReportsInMonth(
 ): Promise<DadLabEntry[]> {
   // No `status` filter: the lifecycle is planned → active → complete, but
   // families don't always mark a session 'complete' even after the kid did
-  // the work. The child's contribution in `childReports` is the real
-  // participation signal — that filter runs below.
+  // the work. What runs below instead is a "did this lab happen?" test, so a
+  // never-run backlog entry (FEAT-157 lets the chat create `Planned` labs)
+  // still stays out of the book.
+  //
+  // FEAT-163 — the THIRD occurrence of the UX-85 bug. That test used to be
+  // `childReports` alone, and a beat-era lab can carry no `childReports` key
+  // at all, so it was dropped whole: August's book counted 1 of Nathan's 3
+  // labs (only the pre-beats one) and reported "no photos" for the section,
+  // because `loadPhotosForMonth` resolves lab photos through `artifactIds`
+  // below. A lab expresses that it happened in TWO shapes now:
+  //
+  //   - legacy: a `childReports` entry — a per-child signal, kept as-is, so a
+  //     legacy lab naming only the other child stays out of this child's book;
+  //   - FEAT-56 beats: a writing line or a captured item in any beat. This
+  //     shape carries NO per-child participation signal to filter on, and that
+  //     is by design, not an omission — `beats[*].items[].child` defaults to
+  //     the `BEAT_BOTH` sentinel, the artifacts are written `childId: 'both'`,
+  //     `DadLabReport` has no `childId`/`childIds` field at all (FEAT-157's
+  //     `planLab` carries none either), and `useDadLabReports` credits hours,
+  //     XP and diamonds to EVERY child on completion. So a beat-era lab counts
+  //     for both children, exactly as the portfolio already treats it
+  //     (`DAD_LAB_FAMILY_SCOPE_NOTE`). All three are DATA-04.
   //
   // Key shape: the writer (LabReportForm + KidLabView) keys `childReports`
   // by `childName.toLowerCase()` ("lincoln" / "london"), not by Firestore
@@ -572,18 +606,27 @@ export async function loadDadLabReportsInMonth(
     >;
     const childContrib =
       (nameKey ? childReports[nameKey] : undefined) ?? childReports[childId];
-    if (!childContrib) continue;
+    const hasBeatContent = labBeatsHaveContent(d.beats);
+    if (!childContrib && !hasBeatContent) continue;
 
     reports.push({
       id: doc.id,
       title: (d.title as string) ?? "Untitled lab",
       question: (d.question as string) ?? "",
       completedAt: (d.updatedAt as string) ?? (d.date as string) ?? "",
-      hasPrediction: !!childContrib.prediction,
-      hasExplanation: !!childContrib.explanation,
-      artifactIds: Array.isArray(childContrib.artifacts)
-        ? childContrib.artifacts.filter((a): a is string => typeof a === "string")
-        : [],
+      // The beat-era counterparts of the legacy fields: "Predict" is the
+      // prediction, "What we saw" is where the family says what happened.
+      // Without this a fully-written three-beat lab reads as [not predicted,
+      // not explained] in the prompt, which is the opposite of the truth.
+      //
+      // Attribution-gated, unlike participation above: `textChild` credits a
+      // writing line to 'both' or to one child, and these flags become a
+      // per-child `[predicted]`/`[explained]` claim in the prompt (Codex P2).
+      hasPrediction:
+        !!childContrib?.prediction || !!beatTextForChild(d.beats, "predict", childId),
+      hasExplanation:
+        !!childContrib?.explanation || !!beatTextForChild(d.beats, "saw", childId),
+      artifactIds: reportArtifactIds(d),
     });
   }
 
@@ -695,13 +738,15 @@ export async function loadPhotosForMonth(
 
   // Dad Lab photos
   //
-  // Dad Lab photo writes go to the `artifacts` collection, but the writer in
-  // `KidLabView` sets `childId` to `childName.toLowerCase()` instead of the
-  // Firestore child doc id (LabReportForm uses the doc id). So the
-  // childId-filtered artifact query above misses any photo a kid uploaded
-  // themselves. The `childReports[name].artifacts` array on each Dad Lab
-  // report is the authoritative list — we fetch those artifact docs directly
-  // by id and add the ones we haven't already seen.
+  // Dad Lab photo writes go to the `artifacts` collection, but nothing there
+  // carries the queried child's doc id, so the childId-filtered artifact query
+  // above misses them twice over: `KidLabView` sets `childId` to
+  // `childName.toLowerCase()` (LabReportForm's legacy path uses the doc id),
+  // and the FEAT-56 beat capture writes `childId: BEAT_BOTH` ('both') by
+  // design — every modern lab photo. The report doc is therefore the ONLY
+  // route these photos have into the book; `DadLabEntry.artifactIds` is the
+  // authoritative list (both sources, de-duped — FEAT-163), and we fetch those
+  // artifact docs directly by id and add the ones we haven't already seen.
   try {
     const dadLabArtifactRefs: Array<{ reportId: string; reportTitle: string; reportDate: string; artifactId: string }> = [];
     for (const report of dadLabReports) {
