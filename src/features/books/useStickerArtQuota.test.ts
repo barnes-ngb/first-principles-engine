@@ -37,7 +37,11 @@ describe('useStickerArtQuota (FEAT-165)', () => {
   })
 
   it('caps a kid profile against the shared per-child art counter', () => {
-    useActiveChildMock.mockReturnValue({ activeChildId: 'child-1', isChildProfile: true })
+    useActiveChildMock.mockReturnValue({
+      activeChildId: 'child-1',
+      activeChild: { id: 'child-1', name: 'Lincoln' },
+      isChildProfile: true,
+    })
 
     renderHook(() => useStickerArtQuota())
 
@@ -45,7 +49,11 @@ describe('useStickerArtQuota (FEAT-165)', () => {
   })
 
   it('leaves a parent uncapped (capability, never a name)', () => {
-    useActiveChildMock.mockReturnValue({ activeChildId: 'child-1', isChildProfile: false })
+    useActiveChildMock.mockReturnValue({
+      activeChildId: 'child-1',
+      activeChild: { id: 'child-1', name: 'Lincoln' },
+      isChildProfile: false,
+    })
 
     renderHook(() => useStickerArtQuota())
 
@@ -53,15 +61,44 @@ describe('useStickerArtQuota (FEAT-165)', () => {
   })
 
   it('passes a null child when none has resolved yet, so the cap fails open', () => {
-    useActiveChildMock.mockReturnValue({ activeChildId: '', isChildProfile: true })
+    useActiveChildMock.mockReturnValue({
+      activeChildId: '',
+      activeChild: undefined,
+      isChildProfile: true,
+    })
 
     renderHook(() => useStickerArtQuota())
 
     expect(useArtQuotaMock).toHaveBeenCalledWith(null, { capped: true })
   })
 
+  // Codex P2, PR #1713: `selectedChildId` is seeded from localStorage and
+  // shared across profiles, and `useActiveChild` only resolves a kid to their
+  // OWN child once the roster loads — so mid-load a kid profile can still be
+  // holding the sibling a parent picked last. Binding to the resolved `Child`
+  // (not the raw id) keeps a capped actor off the wrong kid's counter.
+  it('never binds a capped kid to a sibling id left over from a parent session', () => {
+    useActiveChildMock.mockReturnValue({
+      activeChildId: 'sibling-from-localstorage',
+      activeChild: undefined, // roster still loading — nothing resolved yet
+      isChildProfile: true,
+    })
+
+    renderHook(() => useStickerArtQuota())
+
+    expect(useArtQuotaMock).toHaveBeenCalledWith(null, { capped: true })
+    expect(useArtQuotaMock).not.toHaveBeenCalledWith(
+      'sibling-from-localstorage',
+      expect.anything(),
+    )
+  })
+
   it('returns the shared hook result unchanged (no second allowance)', () => {
-    useActiveChildMock.mockReturnValue({ activeChildId: 'child-1', isChildProfile: true })
+    useActiveChildMock.mockReturnValue({
+      activeChildId: 'child-1',
+      activeChild: { id: 'child-1', name: 'Lincoln' },
+      isChildProfile: true,
+    })
 
     const { result } = renderHook(() => useStickerArtQuota())
 

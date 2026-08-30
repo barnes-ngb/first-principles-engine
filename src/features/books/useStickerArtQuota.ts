@@ -23,10 +23,20 @@ import type { UseArtQuotaResult } from '../business/useArtQuota'
  * Fails open by construction: with no resolved child the underlying hook stays
  * inactive, so `atLimit` is false and a kid's drawing is never blocked by a
  * counter we could not read.
+ *
+ * **The counter binds to `activeChild`, not `activeChildId`** (Codex P2, PR
+ * #1713). `useActiveChild` resolves a kid profile to their *own* child only
+ * once `useChildren` has loaded the roster; until then it falls through to the
+ * shared `selectedChildId`, which is seeded from localStorage and may still
+ * hold the **sibling** a parent picked last on the same device. Reading the id
+ * off the resolved `Child` means a capped actor passes `null` during that
+ * window rather than a stranger's id — so a fast first tap can never test or
+ * increment the wrong kid's budget. Null there fails open, which is the
+ * correct direction for a courtesy cap.
  */
 export function useStickerArtQuota(): UseArtQuotaResult {
-  const { activeChildId, isChildProfile } = useActiveChild()
-  return useArtQuota(activeChildId || null, { capped: isChildProfile })
+  const { activeChild, isChildProfile } = useActiveChild()
+  return useArtQuota(activeChild?.id ?? null, { capped: isChildProfile })
 }
 
 /**
