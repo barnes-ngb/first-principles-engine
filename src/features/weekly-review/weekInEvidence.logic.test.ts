@@ -32,7 +32,7 @@ describe('hasAnyEvidenceToShow', () => {
   it('returns true when booksCreated is non-empty', () => {
     const evidence = emptyEvidence()
     evidence.books.booksCreated = [
-      { title: 'My Story', pageCount: 4, createdAt: '2026-08-01' },
+      { title: 'My Story', pages: 4, isAiGenerated: false },
     ]
     expect(hasAnyEvidenceToShow(evidence)).toBe(true)
   })
@@ -68,7 +68,7 @@ describe('hasAnyEvidenceToShow', () => {
   it('returns true when multiple evidence fields are populated', () => {
     const evidence = emptyEvidence()
     evidence.books.booksCreated = [
-      { title: 'Dino Book', pageCount: 6, createdAt: '2026-08-02' },
+      { title: 'Dino Book', pages: 6, isAiGenerated: false },
     ]
     evidence.teachBacks = {
       count: 1,
