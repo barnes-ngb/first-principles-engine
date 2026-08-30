@@ -18,8 +18,10 @@ import { useAI } from '../../core/ai/useAI'
 import type { Sticker, StickerTag } from '../../core/types'
 import { STICKER_TAG_LABELS } from '../../core/types'
 import { StickerCategory } from '../../core/types/enums'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
+import { recordStickerArtGeneration } from './useStickerArtQuota'
 
 interface MakeStickerDialogProps {
   open: boolean
@@ -29,6 +31,18 @@ interface MakeStickerDialogProps {
   childProfile?: 'lincoln' | 'london'
   /** Fired after a sticker is generated/saved to the library. */
   onSaved?: (sticker: Sticker) => void
+  /**
+   * The actor has spent today's art budget (FEAT-165). Generating is a paid
+   * call, so a kid gets the same light daily cap the Kit Builder uses — a warm
+   * nudge in place of the Create button, never an error and never a lock. The
+   * default keeps uncapped callers (the parent-only Settings render) unchanged.
+   */
+  capReached?: boolean
+  /**
+   * Count one paid generation against the day's counter (FEAT-165). Omitted by
+   * uncapped callers; a no-op for a parent.
+   */
+  recordGeneration?: () => Promise<void>
 }
 
 /**
@@ -43,6 +57,8 @@ export default function MakeStickerDialog({
   familyId,
   childProfile,
   onSaved,
+  capReached = false,
+  recordGeneration,
 }: MakeStickerDialogProps) {
   const [prompt, setPrompt] = useState('')
   const [generationPreview, setGenerationPreview] = useState<{ url: string; storagePath: string } | null>(null)
@@ -72,7 +88,9 @@ export default function MakeStickerDialog({
   }, [generating, saving, resetAll, onClose])
 
   const handleGenerate = useCallback(async () => {
-    if (!prompt.trim()) return
+    // At the cap, refuse *before* spending — the paid call never goes out
+    // (FEAT-165). The nudge below says so; nothing here is styled as an error.
+    if (!prompt.trim() || capReached) return
     setGenerationError(false)
     const result = await generateImage({
       familyId,
@@ -81,11 +99,15 @@ export default function MakeStickerDialog({
       size: '1024x1024',
     })
     if (!result) {
+      // Nothing came back — don't charge the kid's daily budget for it.
       setGenerationError(true)
       return
     }
     setGenerationPreview({ url: result.url, storagePath: result.storagePath })
-  }, [prompt, familyId, generateImage])
+    // A real image arrived, so a real call was made: count it. "Try Again"
+    // counts too — each retry is another paid call (FEAT-94's rule).
+    await recordStickerArtGeneration(recordGeneration)
+  }, [prompt, capReached, familyId, generateImage, recordGeneration])
 
   const handleTryAgain = useCallback(() => {
     setGenerationPreview(null)
@@ -255,6 +277,13 @@ export default function MakeStickerDialog({
               Try Again
             </Button>
           </Stack>
+        ) : capReached ? (
+          /* Daily cap reached (FEAT-165): a warm nudge, never an error styling
+             — the same copy and posture as the Kit Builder's cap. The prompt
+             field and Create button are simply not offered. */
+          <Typography variant="body2" color="text.secondary" sx={{ pt: 1 }}>
+            {ART_QUOTA_MESSAGE}
+          </Typography>
         ) : (
           <>
             <TextField
@@ -290,15 +319,19 @@ export default function MakeStickerDialog({
         {!generationPreview && !generationError && (
           <>
             <Button onClick={handleClose} disabled={generating}>
-              Cancel
+              {capReached ? 'Close' : 'Cancel'}
             </Button>
-            <Button
-              variant="contained"
-              onClick={() => { void handleGenerate() }}
-              disabled={!prompt.trim() || generating}
-            >
-              Create!
-            </Button>
+            {/* No Create button at the cap — refusing before the spend, not
+                after it (FEAT-165). */}
+            {!capReached && (
+              <Button
+                variant="contained"
+                onClick={() => { void handleGenerate() }}
+                disabled={!prompt.trim() || generating}
+              >
+                Create!
+              </Button>
+            )}
           </>
         )}
       </DialogActions>
