@@ -2,8 +2,10 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 // The page is the ONE place the Stickers surface asks "is there budget?"
-// (FEAT-165). These probes prove the answer actually reaches all three doors —
-// the dialog and the library (which forwards it to every drawing card).
+// (FEAT-165). These probes prove the answer actually reaches all four doors —
+// the dialog, the library (which forwards it to every drawing card), and the
+// From a Drawing scanner (FEAT-166, the door FEAT-165's hand-listed three
+// missed because it does not route through `generateStickerVersion.ts`).
 const { useStickerArtQuotaMock, recordGenerationMock } = vi.hoisted(() => ({
   useStickerArtQuotaMock: vi.fn(),
   recordGenerationMock: vi.fn(),
@@ -34,7 +36,21 @@ vi.mock('../../../components/Page', () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
-vi.mock('../SketchScanner', () => ({ default: () => null }))
+vi.mock('../SketchScanner', () => ({
+  default: ({
+    capReached,
+    recordGeneration,
+  }: {
+    capReached?: boolean
+    recordGeneration?: () => Promise<void>
+  }) => (
+    <div
+      data-testid="sketch-scanner"
+      data-cap={String(Boolean(capReached))}
+      data-has-recorder={String(recordGeneration === recordGenerationMock)}
+    />
+  ),
+}))
 
 vi.mock('../MakeStickerDialog', () => ({
   default: ({
@@ -90,6 +106,8 @@ describe('StickersPage — art cap plumbing (FEAT-165 / UX-95)', () => {
     expect(screen.getByTestId('make-dialog')).toHaveAttribute('data-has-recorder', 'true')
     expect(screen.getByTestId('library')).toHaveAttribute('data-cap', 'true')
     expect(screen.getByTestId('library')).toHaveAttribute('data-has-recorder', 'true')
+    expect(screen.getByTestId('sketch-scanner')).toHaveAttribute('data-cap', 'true')
+    expect(screen.getByTestId('sketch-scanner')).toHaveAttribute('data-has-recorder', 'true')
   })
 
   it('leaves the doors open below the cap', () => {
@@ -105,5 +123,6 @@ describe('StickersPage — art cap plumbing (FEAT-165 / UX-95)', () => {
 
     expect(screen.getByTestId('make-dialog')).toHaveAttribute('data-cap', 'false')
     expect(screen.getByTestId('library')).toHaveAttribute('data-cap', 'false')
+    expect(screen.getByTestId('sketch-scanner')).toHaveAttribute('data-cap', 'false')
   })
 })

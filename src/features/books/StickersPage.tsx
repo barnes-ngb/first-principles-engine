@@ -203,6 +203,8 @@ export default function StickersPage() {
         childProfile={childProfile}
         childName={childName}
         onSaved={() => setRefreshSignal((n) => n + 1)}
+        capReached={artCapReached}
+        recordGeneration={recordGeneration}
       />
     </Page>
   )

@@ -6,8 +6,9 @@ import type { UseArtQuotaResult } from '../business/useArtQuota'
  * The Stickers surface's answer to "is there budget for another image?" (FEAT-165).
  *
  * Every control on the Stickers page that spends a paid image call — "Create!",
- * "Add version", "Make more versions" — asks this **once, here**, and the page
- * hands the answer down to the three doors. It is a thin wrapper over the
+ * "Add version", "Make more versions", and "Make it fancy" in the From a
+ * Drawing flow (FEAT-166) — asks this **once, here**, and the page hands the
+ * answer down to the four doors. It is a thin wrapper over the
  * existing FEAT-94 `useArtQuota`, deliberately **not** a second allowance: the
  * counter is the same per-child, per-day doc the Kit Builder writes
  * (`artQuota/{childId}-{YYYY-MM-DD}`), so a kid's daily number is the honest
@@ -43,7 +44,7 @@ export function useStickerArtQuota(): UseArtQuotaResult {
  * Count one paid generation against the day's counter, without ever letting the
  * counting break the art (FEAT-165).
  *
- * The three sticker doors call this instead of awaiting `recordGeneration`
+ * The four sticker doors call this instead of awaiting `recordGeneration`
  * directly: the sticker is already generated and saved by the time we count, so
  * a failed counter write must not surface as "something went wrong" on a flow
  * that in fact succeeded. Under-counting is the safe direction (FEAT-94's

@@ -37,6 +37,8 @@ import {
   DEFAULT_FANCY_STYLE_ID,
   resolveFancyEnhanceParams,
 } from './drawingStickerStyles'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import { recordStickerArtGeneration } from './useStickerArtQuota'
 import { StickerCategory } from '../../core/types/enums'
 import type { Sticker, StickerTag } from '../../core/types'
 import { STICKER_TAG_LABELS } from '../../core/types'
@@ -51,6 +53,17 @@ interface SketchScannerProps {
   childName?: string
   /** Fired after each sticker (raw cleaned or fancy) is saved to the library. */
   onSaved?: () => void
+  /**
+   * The actor has spent today's art budget (FEAT-166). "Make it fancy" is the
+   * fourth paid door on the Stickers page and the most-tapped one — this flow's
+   * whole invitation is "try another style", and every tap is a real
+   * `enhanceSketch` call. At the cap the style controls swap for the same warm
+   * nudge the other three doors show. Defaults to uncapped, so any other mount
+   * of this dialog (and every parent path) is unchanged.
+   */
+  capReached?: boolean
+  /** Count one paid transform against the day's counter (FEAT-166). */
+  recordGeneration?: () => Promise<void>
 }
 
 type Stage = 'capture' | 'crop' | 'cleaning' | 'preview'
@@ -86,6 +99,8 @@ export default function SketchScanner({
   childProfile,
   childName,
   onSaved,
+  capReached = false,
+  recordGeneration,
 }: SketchScannerProps) {
   // The active child can resolve *after* this dialog mounts with its page, so
   // the default label follows `childName` until the kid types their own — a
@@ -241,7 +256,11 @@ export default function SketchScanner({
   }, [originalFile, originalStoragePath, familyId])
 
   const handleMakeFancy = useCallback(async () => {
-    if (enhancing) return
+    // At the cap the paid call never goes out (FEAT-166) — and neither does the
+    // Storage upload behind it: the guard sits ahead of `ensureOriginalUploaded`
+    // so a capped tap costs nothing at all. The style controls already show the
+    // nudge instead of a button; this holds the rule for real.
+    if (enhancing || capReached) return
     setEnhancing(true)
     setEnhanceError(null)
     setPreviewTab('fancy')
@@ -262,6 +281,10 @@ export default function SketchScanner({
       if (result?.url) {
         setFancyUrl(result.url)
         setFancyStoragePath(result.storagePath)
+        // A real image came back: count the paid call (FEAT-166). A redo with
+        // another style counts again — each is another real call. Counting
+        // never breaks the art, so this is awaited but cannot throw.
+        await recordStickerArtGeneration(recordGeneration)
         // A fresh transform replaces any previously-saved fancy version.
         setSavedVersions((prev) => {
           if (!prev.has('fancy')) return prev
@@ -277,7 +300,15 @@ export default function SketchScanner({
     } finally {
       setEnhancing(false)
     }
-  }, [enhancing, ensureOriginalUploaded, enhanceSketch, familyId, styleId])
+  }, [
+    enhancing,
+    capReached,
+    ensureOriginalUploaded,
+    enhanceSketch,
+    familyId,
+    styleId,
+    recordGeneration,
+  ])
 
   const saveSticker = useCallback(
     async (version: SaveVersion) => {
@@ -505,29 +536,41 @@ export default function SketchScanner({
                   )}
                   {!enhancing && !fancyUrl && (
                     <Stack alignItems="center" spacing={1.5} sx={{ py: 3, px: 2, width: '100%' }}>
-                      <Typography variant="body2" color="text.secondary" textAlign="center">
-                        Pick a style, then make a polished version of the drawing.
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, justifyContent: 'center' }}>
-                        {FANCY_STYLE_OPTIONS.map((option) => (
-                          <Chip
-                            key={option.id}
-                            label={`${option.emoji} ${option.label}`}
-                            size="small"
-                            variant={styleId === option.id ? 'filled' : 'outlined'}
-                            color={styleId === option.id ? 'primary' : 'default'}
-                            onClick={() => setStyleId(option.id)}
-                          />
-                        ))}
-                      </Box>
-                      <Button
-                        variant="contained"
-                        startIcon={<AutoAwesomeIcon />}
-                        onClick={() => void handleMakeFancy()}
-                        sx={{ minHeight: 44, textTransform: 'none' }}
-                      >
-                        Make it fancy
-                      </Button>
+                      {capReached ? (
+                        /* Daily cap reached (FEAT-166): the same warm nudge the
+                           other three sticker doors show — no style picker, no
+                           button, no error styling, no lock. The cleaned sticker
+                           they already made stays saveable. */
+                        <Typography variant="body2" color="text.secondary" textAlign="center">
+                          {ART_QUOTA_MESSAGE}
+                        </Typography>
+                      ) : (
+                        <>
+                          <Typography variant="body2" color="text.secondary" textAlign="center">
+                            Pick a style, then make a polished version of the drawing.
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, justifyContent: 'center' }}>
+                            {FANCY_STYLE_OPTIONS.map((option) => (
+                              <Chip
+                                key={option.id}
+                                label={`${option.emoji} ${option.label}`}
+                                size="small"
+                                variant={styleId === option.id ? 'filled' : 'outlined'}
+                                color={styleId === option.id ? 'primary' : 'default'}
+                                onClick={() => setStyleId(option.id)}
+                              />
+                            ))}
+                          </Box>
+                          <Button
+                            variant="contained"
+                            startIcon={<AutoAwesomeIcon />}
+                            onClick={() => void handleMakeFancy()}
+                            sx={{ minHeight: 44, textTransform: 'none' }}
+                          >
+                            Make it fancy
+                          </Button>
+                        </>
+                      )}
                       {enhanceError && (
                         <Typography variant="body2" color="error" textAlign="center">
                           {enhanceError}
@@ -542,26 +585,37 @@ export default function SketchScanner({
             {/* Re-style controls once a fancy version exists */}
             {previewTab === 'fancy' && fancyUrl && !enhancing && (
               <Stack spacing={1}>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-                  {FANCY_STYLE_OPTIONS.map((option) => (
-                    <Chip
-                      key={option.id}
-                      label={`${option.emoji} ${option.label}`}
+                {capReached ? (
+                  /* "Try another style" is the same paid call as the first one,
+                     so the cap closes this door too (FEAT-166). The fancy
+                     version already made stays visible and saveable. */
+                  <Typography variant="body2" color="text.secondary">
+                    {ART_QUOTA_MESSAGE}
+                  </Typography>
+                ) : (
+                  <>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                      {FANCY_STYLE_OPTIONS.map((option) => (
+                        <Chip
+                          key={option.id}
+                          label={`${option.emoji} ${option.label}`}
+                          size="small"
+                          variant={styleId === option.id ? 'filled' : 'outlined'}
+                          color={styleId === option.id ? 'primary' : 'default'}
+                          onClick={() => setStyleId(option.id)}
+                        />
+                      ))}
+                    </Box>
+                    <Button
                       size="small"
-                      variant={styleId === option.id ? 'filled' : 'outlined'}
-                      color={styleId === option.id ? 'primary' : 'default'}
-                      onClick={() => setStyleId(option.id)}
-                    />
-                  ))}
-                </Box>
-                <Button
-                  size="small"
-                  startIcon={<AutoAwesomeIcon />}
-                  onClick={() => void handleMakeFancy()}
-                  sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
-                >
-                  Redo with this style
-                </Button>
+                      startIcon={<AutoAwesomeIcon />}
+                      onClick={() => void handleMakeFancy()}
+                      sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+                    >
+                      Redo with this style
+                    </Button>
+                  </>
+                )}
                 {enhanceError && (
                   <Typography variant="body2" color="error">
                     {enhanceError}
