@@ -405,9 +405,9 @@ Shelly's direct attention is the primary schedulable resource. Kids need split-b
 ## Known Technical Debt
 
 - **PlannerChatPage.tsx (3,295L)** — Grew through the chat arc (live-week edit, watch picker, plan handoff), then **shrank ~120L when FEAT-150 extracted Apply** into `planner-chat/applyWeekPlan.ts` (PR #1679) so the planner and Ask AI share one week-write instead of two. The interconnected wizard/chat/plan/apply state is still the hard part. The 2026-08-16 audit named the next clean seam: the three near-identical live-day-edit handlers (`handleRemoveItem` / `handleMoveItemToDay` / `handleSwapWatchItem`) lift into a `useLiveDayEditHandlers` hook mirroring the already-extracted `useAppliedWeekDays` — ~230L out without touching the tangled core. Tracked as ARCH-02.
-- **chat.ts CF (2,548L)** — `buildQuestPrompt` alone is 400+ lines. Highest-leverage decomposition target: extract prompt builders to separate files.
-- **BookEditorPage.tsx (2,103L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
-- **useQuestSession.ts (2,161L)** — Quest, comprehension, fluency, encoding (build-word/spell-word/build-sentence) all in one hook. Consider splitting by quest domain.
+- **chat.ts CF (2,641L)** — `buildQuestPrompt` alone is 400+ lines. Highest-leverage decomposition target: extract prompt builders to separate files.
+- **BookEditorPage.tsx (2,113L)** — Grew from themes + drawing flows. Handlers interleaved but clear section boundaries. Could extract sketch/voice/sticker panels later.
+- **useQuestSession.ts (2,218L)** — Quest, comprehension, fluency, encoding (build-word/spell-word/build-sentence) all in one hook. Consider splitting by quest domain.
 - **MyAvatarPage.tsx (1,876L)** — Decomposed from 1,862L. Grew from forge + portal + Stonebridge Banner Rally. State management + ceremony flow. Stable.
 - **ShellyChatPage.tsx (647L)** — ARCH-09 FIXED (1,632→647L). Decomposed into `useShellyChatState`, `useShellyChatFlows`, `useShellyChatActions`, plus pure modules (`reflectionSuggestions`, `parseFollowups`, `parseChatActions`, `parseFriction`). Portal write layer (Tiers A+B+C Option 2) is live and confirm-gated. Stable.
 - **WorkshopPage.tsx (1,623L)** — Phase-based rendering delegates to sub-components. Handlers share `currentGame` state across 3 game types. Not urgent.
