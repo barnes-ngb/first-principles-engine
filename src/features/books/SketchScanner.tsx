@@ -282,9 +282,17 @@ export default function SketchScanner({
         setFancyUrl(result.url)
         setFancyStoragePath(result.storagePath)
         // A real image came back: count the paid call (FEAT-166). A redo with
-        // another style counts again — each is another real call. Counting
-        // never breaks the art, so this is awaited but cannot throw.
-        await recordStickerArtGeneration(recordGeneration)
+        // another style counts again — each is another real call.
+        //
+        // Deliberately NOT awaited (Codex P2, PR #1717). The wrapper swallows a
+        // rejection, but nothing can bound a promise that never *settles* — and
+        // a Firestore write resolves only on server ack, so offline it stays
+        // pending indefinitely rather than failing. Awaited, that left
+        // `enhancing` true forever (the `finally` never ran): the spinner sat on
+        // top of an image the kid had already paid for, and the Save button
+        // never came back. Failing open has to mean the art does not wait on the
+        // counter at all, not merely that a *thrown* counter is ignored.
+        void recordStickerArtGeneration(recordGeneration)
         // A fresh transform replaces any previously-saved fancy version.
         setSavedVersions((prev) => {
           if (!prev.has('fancy')) return prev

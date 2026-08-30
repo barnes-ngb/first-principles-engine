@@ -194,6 +194,29 @@ describe('SketchScanner — daily art cap on "Make it fancy" (FEAT-166 / UX-95)'
     errorSpy.mockRestore()
   })
 
+  it('never blocks the art on the counter: a write that hangs still reveals the fancy version', async () => {
+    // Codex P2 (PR #1717): `recordStickerArtGeneration` swallows a *rejection*,
+    // but it cannot bound a promise that simply never settles — and Firestore's
+    // write promise resolves only on server ack, so offline it stays pending
+    // rather than rejecting. Awaited, that left `enhancing` true forever: the
+    // spinner covered an image the kid had already paid for and could not save.
+    // Counting is fire-and-forget for exactly this reason.
+    const user = userEvent.setup()
+    const recordGeneration = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+    renderScanner({ recordGeneration })
+
+    await reachFancyTab(user)
+    await user.click(await screen.findByRole('button', { name: /make it fancy/i }))
+
+    await waitFor(() => expect(screen.getByAltText('Fancy version')).toBeInTheDocument())
+    expect(screen.queryByText(/making it fancy/i)).toBeNull()
+    // The counter was still asked — under-counting is the safe direction, but
+    // this path does not under-count, it just refuses to wait.
+    expect(recordGeneration).toHaveBeenCalledTimes(1)
+    // And the paid control is live again, so a redo is not wedged either.
+    expect(await screen.findByRole('button', { name: /redo with this style/i })).toBeInTheDocument()
+  })
+
   it('leaves the free controls working at the cap — the cleaned sticker still saves', async () => {
     const user = userEvent.setup()
     renderScanner({ capReached: true, recordGeneration: vi.fn() })
