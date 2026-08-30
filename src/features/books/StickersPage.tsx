@@ -21,6 +21,7 @@ import StickerLibraryTab from '../settings/StickerLibraryTab'
 import { STICKER_TAGS_ORDERED } from './stickerTagging'
 import MakeStickerDialog from './MakeStickerDialog'
 import SketchScanner from './SketchScanner'
+import { useStickerArtQuota } from './useStickerArtQuota'
 
 /**
  * Stickers page in Books — accessible to kids and parents alike (no parent
@@ -44,6 +45,13 @@ export default function StickersPage() {
         ? 'london'
         : undefined
   const isLincoln = childProfile === 'lincoln'
+
+  // Cost guard (FEAT-165 / UX-95): every control on this page that spends a
+  // paid image call asks the budget question exactly once, here, and the answer
+  // is handed to the three doors below ("Create!", "Add version", "Make more
+  // versions"). Same counter as the Kit Builder — one honest daily total per
+  // child — and capped by capability (a kid profile), never by name.
+  const { atLimit: artCapReached, recordGeneration } = useStickerArtQuota()
 
   const [showMake, setShowMake] = useState(false)
   const [showDrawing, setShowDrawing] = useState(false)
@@ -161,6 +169,8 @@ export default function StickersPage() {
         groupByDrawing
         enableSelectToPrint
         canEdit={isParent}
+        capReached={artCapReached}
+        recordGeneration={recordGeneration}
       />
 
       {familyId && (
@@ -182,6 +192,8 @@ export default function StickersPage() {
         familyId={familyId}
         childProfile={childProfile}
         onSaved={() => setRefreshSignal((n) => n + 1)}
+        capReached={artCapReached}
+        recordGeneration={recordGeneration}
       />
 
       <SketchScanner

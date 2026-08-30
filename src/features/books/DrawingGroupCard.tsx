@@ -21,6 +21,8 @@ import EditIcon from '@mui/icons-material/Edit'
 import { db, stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker } from '../../core/types'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import { recordStickerArtGeneration } from './useStickerArtQuota'
 import {
   FANCY_STYLE_OPTIONS,
   DEFAULT_FANCY_STYLE_ID,
@@ -56,6 +58,16 @@ interface DrawingGroupCardProps {
    * `group.versions` for callers that render the library unfiltered.
    */
   allVersions?: Sticker[]
+  /**
+   * The actor has spent today's art budget (FEAT-165). "Add version" is this
+   * card's whole invitation and each tap is a paid `enhanceSketch` call, so a
+   * kid gets the Kit Builder's light daily cap here: the theme picker swaps
+   * "Make it" for a warm nudge. Defaults to uncapped so the parent-only
+   * Settings render is unchanged.
+   */
+  capReached?: boolean
+  /** Count one paid generation against the day's counter (FEAT-165). */
+  recordGeneration?: () => Promise<void>
 }
 
 /** Friendly label for a version chip — "Original", or the theme's emoji + name. */
@@ -80,6 +92,8 @@ export default function DrawingGroupCard({
   selectedIds,
   onToggleSelect,
   allVersions,
+  capReached = false,
+  recordGeneration,
 }: DrawingGroupCardProps) {
   const { enhanceSketch } = useAI()
   const [picking, setPicking] = useState(false)
@@ -108,7 +122,9 @@ export default function DrawingGroupCard({
   const renameTargets = allVersions ?? group.versions
 
   const handleAddVersion = useCallback(async () => {
-    if (busy) return
+    // At the cap the paid call never goes out (FEAT-165) — the picker shows the
+    // nudge instead of "Make it", and this guard holds the rule for real.
+    if (busy || capReached) return
     setBusy(true)
     setError(null)
     try {
@@ -122,9 +138,14 @@ export default function DrawingGroupCard({
         enhanceSketch,
       })
       if (!res.ok) {
+        // The model produced nothing usable — no image, so no charge to the
+        // kid's daily budget.
         setError(res.error)
         return
       }
+      // A real version came back: count the paid call (FEAT-165). Repeating a
+      // theme counts again — each is another real call.
+      await recordStickerArtGeneration(recordGeneration)
       setPicking(false)
       onChanged()
     } catch (err) {
@@ -132,7 +153,18 @@ export default function DrawingGroupCard({
     } finally {
       setBusy(false)
     }
-  }, [busy, enhanceSketch, familyId, source, styleId, label, group.sourceDrawingId, onChanged])
+  }, [
+    busy,
+    capReached,
+    enhanceSketch,
+    familyId,
+    source,
+    styleId,
+    label,
+    group.sourceDrawingId,
+    onChanged,
+    recordGeneration,
+  ])
 
   const handleOpenRename = useCallback(() => {
     setRenameText(label)
@@ -389,21 +421,31 @@ export default function DrawingGroupCard({
         <DialogTitle>Make another version</DialogTitle>
         <DialogContent>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
-            <Typography variant="body2" color="text.secondary">
-              Pick a style — we'll imagine "{label}" that way and keep it with the others.
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-              {FANCY_STYLE_OPTIONS.map((option) => (
-                <Chip
-                  key={option.id}
-                  label={`${option.emoji} ${option.label}`}
-                  size="small"
-                  variant={styleId === option.id ? 'filled' : 'outlined'}
-                  color={styleId === option.id ? 'primary' : 'default'}
-                  onClick={() => setStyleId(option.id)}
-                />
-              ))}
-            </Box>
+            {capReached ? (
+              /* Daily cap reached (FEAT-165): the same warm nudge the Kit
+                 Builder shows — no style picker, no error styling, no lock. */
+              <Typography variant="body2" color="text.secondary">
+                {ART_QUOTA_MESSAGE}
+              </Typography>
+            ) : (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  Pick a style — we'll imagine "{label}" that way and keep it with the others.
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                  {FANCY_STYLE_OPTIONS.map((option) => (
+                    <Chip
+                      key={option.id}
+                      label={`${option.emoji} ${option.label}`}
+                      size="small"
+                      variant={styleId === option.id ? 'filled' : 'outlined'}
+                      color={styleId === option.id ? 'primary' : 'default'}
+                      onClick={() => setStyleId(option.id)}
+                    />
+                  ))}
+                </Box>
+              </>
+            )}
             {error && (
               <Typography variant="body2" color="error">
                 {error}
@@ -413,17 +455,20 @@ export default function DrawingGroupCard({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPicking(false)} disabled={busy}>
-            Cancel
+            {capReached ? 'Close' : 'Cancel'}
           </Button>
-          <Button
-            variant="contained"
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
-            onClick={() => void handleAddVersion()}
-            disabled={busy}
-            sx={{ minHeight: 44 }}
-          >
-            {busy ? 'Making...' : 'Make it'}
-          </Button>
+          {/* No "Make it" at the cap — refuse before the spend (FEAT-165). */}
+          {!capReached && (
+            <Button
+              variant="contained"
+              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
+              onClick={() => void handleAddVersion()}
+              disabled={busy}
+              sx={{ minHeight: 44 }}
+            >
+              {busy ? 'Making...' : 'Make it'}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
