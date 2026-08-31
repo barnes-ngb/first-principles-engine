@@ -20,6 +20,7 @@ import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import VoiceInput from '../../components/VoiceInput'
 import { LoadingState } from '../../components/states'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { useBookReview } from './useBookReview'
 
 // ── Age helper (mirrors BookGenerateChat) ─────────────────────────
@@ -69,6 +70,7 @@ export default function BookReviewChat() {
     error,
     reviewedCount,
     imageRegenerating,
+    imageCapReached,
     playCurrentPage,
     approveCurrentPage,
     reviseCurrentPage,
@@ -254,6 +256,15 @@ export default function BookReviewChat() {
           </Box>
         )}
       </Box>
+
+      {/* The day's art budget refused the picture change (FEAT-168). The text
+          revision still landed — only the paid image has a ceiling — so this is
+          a warm nudge in `text.secondary`, never the error Alert below. */}
+      {imageCapReached && (
+        <Typography variant="body2" color="text.secondary" aria-live="polite">
+          Your words are saved! {ART_QUOTA_MESSAGE}
+        </Typography>
+      )}
 
       {/* Page text */}
       <Typography variant="h6" sx={{ lineHeight: 1.5, fontWeight: 500, minHeight: 48 }}>

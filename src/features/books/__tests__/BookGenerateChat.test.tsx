@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -37,6 +37,7 @@ interface HookState {
     currentPage: number
     totalPages: number
     lastImageUrl?: string
+    capReached?: boolean
   }
 }
 
@@ -436,6 +437,66 @@ describe('BookGenerateChat', () => {
     expect(ttsSpeakMock).toHaveBeenCalledWith(
       expect.stringMatching(/here's what i heard/i),
     )
+  })
+
+  // ── The daily art budget's hand-off (FEAT-168, Codex P2 on PR #1720) ──
+
+  const storyState = {
+    currentStory: {
+      title: 'A Story',
+      pages: [
+        { pageNumber: 1, text: 'Page 1.', sceneDescription: 'a field' },
+      ],
+    },
+    chatHistory: [
+      { role: 'kid' as const, content: 'a dragon', ts: 1 },
+      { role: 'ai' as const, content: 'Here you go!', ts: 2 },
+    ],
+  }
+
+  it('hands off to the book immediately when the pictures were made', async () => {
+    const user = userEvent.setup()
+    const onCommit = vi.fn()
+    hookState = { ...hookState, ...storyState }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={onCommit} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+
+    await user.click(screen.getByRole('button', { name: /i like the whole story/i }))
+
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith('book-1'))
+  })
+
+  it('holds the hand-off on the cap notice, so the kid is not navigated past it', async () => {
+    const user = userEvent.setup()
+    const onCommit = vi.fn()
+    hookState = {
+      ...hookState,
+      ...storyState,
+      illustrationProgress: {
+        phase: 'done',
+        currentPage: 0,
+        totalPages: 0,
+        capReached: true,
+      },
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={onCommit} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+
+    await user.click(screen.getByRole('button', { name: /i like the whole story/i }))
+
+    // The story is saved, the notice is on screen — and navigation waits.
+    expect(await screen.findByText(/ask a grown-up if you need more/i)).toBeTruthy()
+    expect(onCommit).not.toHaveBeenCalled()
+
+    // The kid acknowledges, and only then does the hand-off happen.
+    await user.click(screen.getByRole('button', { name: /take me to my book/i }))
+    expect(onCommit).toHaveBeenCalledWith('book-1')
   })
 
   it('shows an "Illustrating page X of Y…" strip and disables the composer/commit during illustration', () => {

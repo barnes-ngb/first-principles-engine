@@ -60,7 +60,9 @@ import { useAI } from '../../core/ai/useAI'
 import type { Book, BookPage, BookTheme, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
 import type { ImageGenRequest } from '../../core/ai/useAI'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import PageEditor from './PageEditor'
+import { recordBookArtGeneration, useBookArtQuota } from './useBookArtQuota'
 import StickerPicker from './StickerPicker'
 import DrawingChoiceDialog from './DrawingChoiceDialog'
 import type { DrawingChoice, PostCleanupChoice } from './DrawingChoiceDialog'
@@ -163,6 +165,15 @@ export default function BookEditorPage() {
 
   const { generateImage, loading: aiLoading, error: aiError } = useAI()
 
+  // Cost guard (FEAT-168 / UX-100): every control in this editor that spends a
+  // paid image call asks the budget question exactly once, here, and the answer
+  // is handed to the three doors below — the AI scene generator, the reimagine
+  // flow, and the sticker picker. Same counter as the Stickers page and the Kit
+  // Builder — one honest daily total per child — and capped by capability (a
+  // kid profile), never by name. The illustrate-the-whole-book loop asks for
+  // itself in `useBookIllustrator`, which this page does not use.
+  const { atLimit: artCapReached, recordGeneration } = useBookArtQuota()
+
   // ── Themed child (drives editor palette / font / world chips) ───
   // Reads from book.createdFor so Shelly can re-theme the editor without
   // switching profiles. Falls back to the currently active child.
@@ -188,6 +199,8 @@ export default function BookEditorPage() {
     onAddSticker: (pageId, url, storagePath, label) => {
       addStickerToPage(pageId, url, storagePath, label)
     },
+    capReached: artCapReached,
+    recordGeneration,
   })
 
   const [activePageIndex, setActivePageIndex] = useState(0)
@@ -472,6 +485,13 @@ export default function BookEditorPage() {
     }
 
     if (choice === 'reimagine') {
+      // At the cap, refuse *before* the preparatory sketch upload (FEAT-168) —
+      // a capped tap must cost neither the paid call nor the Storage write
+      // behind it. The choice isn't offered at the cap; this is the backstop.
+      if (artCapReached) {
+        resetDrawingFlow()
+        return
+      }
       // Upload sketch first (blocking — fast), then process reimagine in background
       setReimagineError(null)
       try {
@@ -541,7 +561,7 @@ export default function BookEditorPage() {
       setShowAiDialog(true)
       return
     }
-  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, resetDrawingFlow, bgReimagine])
+  }, [activePage, drawingFile, drawingPreviewUrl, addImageToPage, addSketchToPage, resetDrawingFlow, bgReimagine, artCapReached])
 
   const handleAcceptDrawingResult = useCallback(() => {
     if (!activePage || !drawingResultFile) return
@@ -617,6 +637,12 @@ export default function BookEditorPage() {
       // a transparent cutout (sticker) or a full illustrated scene. The dialog
       // defaults: sticker path → transparent ON, scene path → transparent OFF.
       const wantTransparent = transparent ?? (choice === 'reimagine-sticker')
+      // Same rule as the raw-photo path: at the cap, refuse ahead of the
+      // preparatory sketch upload, not after it (FEAT-168).
+      if (artCapReached) {
+        resetDrawingFlow()
+        return
+      }
       setReimagineError(null)
       try {
         const sketchResult = await addSketchToPage(activePage.id, drawingResultFile)
@@ -651,7 +677,7 @@ export default function BookEditorPage() {
       }
       return
     }
-  }, [activePage, drawingResultFile, drawingResultUrl, drawingFile, addStickerFileToPage, addSketchToPage, bgReimagine, familyId, themedChild?.id, childName, resetDrawingFlow])
+  }, [activePage, drawingResultFile, drawingResultUrl, drawingFile, addStickerFileToPage, addSketchToPage, bgReimagine, familyId, themedChild?.id, childName, resetDrawingFlow, artCapReached])
 
   // ── Voice: Audio recording ──────────────────────────────────────
   const handleAudioCapture = useCallback(
@@ -770,7 +796,9 @@ export default function BookEditorPage() {
   }, [activePage])
 
   const handleGenerateScene = useCallback(async () => {
-    if (!aiPrompt.trim()) return
+    // At the cap, refuse *before* spending — the paid call never goes out
+    // (FEAT-168). The nudge in the dialog says so; nothing is styled as an error.
+    if (!aiPrompt.trim() || artCapReached) return
     const result = await generateImage({
       familyId,
       prompt: aiPrompt.trim(),
@@ -779,8 +807,11 @@ export default function BookEditorPage() {
     })
     if (result) {
       setAiResult({ url: result.url, storagePath: result.storagePath })
+      // A real image arrived, so a real call was made: count it. "Try again"
+      // counts too — each retry is another paid call. Never awaited (FEAT-167).
+      recordBookArtGeneration(recordGeneration)
     }
-  }, [aiPrompt, aiStyle, familyId, generateImage])
+  }, [aiPrompt, aiStyle, artCapReached, familyId, generateImage, recordGeneration])
 
   const handleUseAiImage = useCallback(() => {
     if (!activePage || !aiResult) return
@@ -1311,6 +1342,7 @@ export default function BookEditorPage() {
         onAcceptResult={handleAcceptDrawingResult}
         onPickPostCleanup={(choice, intensity, transparent) => { void handlePostCleanupChoice(choice, intensity, transparent) }}
         onRetryResult={handleRetryDrawingResult}
+        capReached={artCapReached}
       />
 
       {/* Page strip */}
@@ -1830,6 +1862,16 @@ export default function BookEditorPage() {
               </Alert>
             )}
 
+            {/* Daily cap reached (FEAT-168): a warm nudge in place of the Create
+                button — the same copy and posture as the Stickers page's caps.
+                Everything free in the editor keeps working: writing, editing,
+                page layout, saving, reading and printing. */}
+            {artCapReached && !aiResult && (
+              <Typography variant="body2" color="text.secondary">
+                {ART_QUOTA_MESSAGE}
+              </Typography>
+            )}
+
             {aiResult && (
               <Box sx={{ textAlign: 'center' }}>
                 <Box
@@ -1862,13 +1904,17 @@ export default function BookEditorPage() {
               </Button>
             </>
           ) : (
-            <Button
-              variant="contained"
-              onClick={() => { void handleGenerateScene() }}
-              disabled={!aiPrompt.trim() || aiLoading}
-            >
-              Create!
-            </Button>
+            /* No Create button at the cap — refusing before the spend, not
+               after it (FEAT-168). The nudge sits in the dialog body. */
+            !artCapReached && (
+              <Button
+                variant="contained"
+                onClick={() => { void handleGenerateScene() }}
+                disabled={!aiPrompt.trim() || aiLoading}
+              >
+                Create!
+              </Button>
+            )
           )}
         </DialogActions>
       </Dialog>
@@ -1881,6 +1927,8 @@ export default function BookEditorPage() {
         childName={childName}
         childProfile={isLincoln ? 'lincoln' : 'london'}
         onSelectSticker={handleSelectSticker}
+        capReached={artCapReached}
+        recordGeneration={recordGeneration}
       />
 
       {/* Finish dialog */}

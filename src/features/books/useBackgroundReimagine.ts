@@ -5,6 +5,7 @@ import { useAI } from '../../core/ai/useAI'
 import type { EnhanceSketchRequest } from '../../core/ai/useAI'
 import type { Artifact } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import { recordBookArtGeneration } from './useBookArtQuota'
 
 export interface ReimagineJob {
   id: string
@@ -31,6 +32,19 @@ interface UseBackgroundReimagineOptions {
   onReplaceBackground: (pageId: string, imageId: string, url: string, storagePath: string) => void
   /** Called to add a sticker to the current page */
   onAddSticker: (pageId: string, url: string, storagePath: string, label: string) => void
+  /**
+   * The actor has spent today's art budget (FEAT-168). A reimagine is a paid
+   * `enhanceSketch` call, so a kid gets the same light daily cap the Stickers
+   * page and the Kit Builder use. The page refuses ahead of the *sketch upload*
+   * that precedes this — the guard here is the backstop, so no future caller can
+   * reach the paid call around it. Defaults to uncapped.
+   */
+  capReached?: boolean
+  /**
+   * Count one paid transform against the day's counter (FEAT-168). Omitted by
+   * uncapped callers; a no-op for a parent.
+   */
+  recordGeneration?: () => Promise<void>
 }
 
 /** Auto-dismiss timeout: save to gallery after 5 minutes of no interaction. */
@@ -45,6 +59,8 @@ export function useBackgroundReimagine({
   bookTheme,
   onReplaceBackground,
   onAddSticker,
+  capReached = false,
+  recordGeneration,
 }: UseBackgroundReimagineOptions) {
   const [job, setJob] = useState<ReimagineJob | null>(null)
   const [showChoiceDialog, setShowChoiceDialog] = useState(false)
@@ -112,6 +128,11 @@ export function useBackgroundReimagine({
       caption?: string,
       transparent?: boolean,
     ) => {
+      // At the cap, refuse *before* spending — the paid call never goes out and
+      // no job is started, so nothing spins (FEAT-168). The page shows the
+      // nudge; nothing here is styled as an error.
+      if (capReached) return
+
       const jobId = `reimagine_${Date.now()}`
       const intensityLabel: ReimagineJob['intensity'] =
         intensity <= 25 ? 'light' : intensity >= 75 ? 'full' : 'medium'
@@ -141,6 +162,10 @@ export function useBackgroundReimagine({
         })
 
         if (result?.url) {
+          // A real image came back, so a real call was made: count it
+          // (FEAT-168). Fire-and-forget by construction — the counter never
+          // stands between the kid and art they already have.
+          recordBookArtGeneration(recordGeneration)
           setJob((prev) =>
             prev?.id === jobId
               ? { ...prev, status: 'done', resultUrl: result.url, resultStoragePath: result.storagePath }
@@ -160,7 +185,7 @@ export function useBackgroundReimagine({
         )
       }
     },
-    [enhanceSketch, familyId, bookTheme],
+    [enhanceSketch, familyId, bookTheme, capReached, recordGeneration],
   )
 
   // ── Actions on the result ────────────────────────────────────────

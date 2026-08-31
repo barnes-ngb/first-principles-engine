@@ -6,7 +6,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 const { chatMock, illustrateMock, speakMock, cancelMock, getDocMock, setDocMock } =
   vi.hoisted(() => ({
     chatMock: vi.fn(),
-    illustrateMock: vi.fn(async () => ({ failedPages: [] })),
+    illustrateMock: vi.fn<
+      () => Promise<{ failedPages: number[]; capReached: boolean; unillustratedPages: number[] }>
+    >(async () => ({ failedPages: [], capReached: false, unillustratedPages: [] })),
     speakMock: vi.fn(),
     cancelMock: vi.fn(),
     getDocMock: vi.fn(),
@@ -144,7 +146,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   ttsSpeaking = false
   persisted = null
-  illustrateMock.mockResolvedValue({ failedPages: [] })
+  illustrateMock.mockResolvedValue({ failedPages: [], capReached: false, unillustratedPages: [] })
 })
 
 // ── Pure helpers ─────────────────────────────────────────────────
@@ -285,6 +287,57 @@ describe('useBookReview', () => {
     // Only the target page (index 0) carries a scene description.
     expect(illustrateArg.pages[0].sceneDescription).toBe('a sparkly girl dragon')
     expect(illustrateArg.pages[1].sceneDescription).toBe('')
+  })
+
+  it('surfaces a quota refusal instead of silently discarding the regeneration (FEAT-168, Codex P2 on PR #1720)', async () => {
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({
+        newText: 'Sparkle could not fly.',
+        newSceneDescription: 'a sparkly girl dragon',
+        regenerateImage: 'yes',
+      }),
+    })
+    // The day's art budget refuses the picture; the text revision still lands.
+    illustrateMock.mockResolvedValue({
+      failedPages: [],
+      capReached: true,
+      unillustratedPages: [1],
+    })
+
+    const { result } = await renderLoaded(makeBook())
+    await act(async () => {
+      await result.current.reviseCurrentPage('make the dragon a girl named Sparkle')
+    })
+
+    expect(result.current.book?.pages[0].text).toBe('Sparkle could not fly.')
+    // The refusal is reported, not dressed up as a successful regeneration...
+    expect(result.current.imageCapReached).toBe(true)
+    expect(result.current.imageRegenerating).toBe(false)
+    // ...and never through `error`, whose Alert offers a "Try again" that would
+    // only refuse a second time.
+    expect(result.current.error).toBeNull()
+  })
+
+  it('a regeneration that fits leaves the quota notice off', async () => {
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({
+        newText: 'Sparkle could not fly.',
+        newSceneDescription: 'a sparkly girl dragon',
+        regenerateImage: 'yes',
+      }),
+    })
+    illustrateMock.mockResolvedValue({
+      failedPages: [],
+      capReached: false,
+      unillustratedPages: [],
+    })
+
+    const { result } = await renderLoaded(makeBook())
+    await act(async () => {
+      await result.current.reviseCurrentPage('make the dragon a girl named Sparkle')
+    })
+
+    expect(result.current.imageCapReached).toBe(false)
   })
 
   it('reviseCurrentPage failure: phase returns to awaiting and error is set', async () => {
