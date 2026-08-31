@@ -55,6 +55,8 @@ export interface UseBookReview {
   reviewedCount: number
   /** True while an illustration is being regenerated in the background. */
   imageRegenerating: boolean
+  /** The day's art budget refused a page's image regeneration (FEAT-168). */
+  imageCapReached: boolean
 
   playCurrentPage: () => Promise<void>
   approveCurrentPage: () => Promise<void>
@@ -118,6 +120,12 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
   const [isLoading, setIsLoading] = useState(!!familyId && !!bookId)
   const [error, setError] = useState<string | null>(null)
   const [imageRegenerating, setImageRegenerating] = useState(false)
+  /**
+   * The day's art budget refused this page's image regeneration (FEAT-168).
+   * A separate signal from `error`, which renders a warning Alert — the cap is
+   * a nudge to a grown-up, not a failure, and retrying would only refuse again.
+   */
+  const [imageCapReached, setImageCapReached] = useState(false)
 
   const phaseRef = useRef<ReviewPhase>('idle')
   useEffect(() => {
@@ -366,7 +374,7 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
           setImageRegenerating(true)
           void (async () => {
             try {
-              await illustrate({
+              const { capReached } = await illustrate({
                 bookId: updatedBook.id ?? (bookId as string),
                 familyId,
                 // Full-length array; only the target index carries a scene so
@@ -378,6 +386,15 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
                 style: rawStyle,
                 ...(updatedBook.theme ? { bookTheme: updatedBook.theme } : {}),
               })
+              // The day's art budget refused the regeneration (FEAT-168, Codex
+              // P2 on PR #1720). Without this the spinner just clears over an
+              // unchanged picture and the kid is never told why — a refusal
+              // dressed as a success. Surfaced as its own warm notice, not
+              // through `error`: that renders a warning Alert whose "Try again"
+              // would only refuse a second time.
+              setImageCapReached(capReached)
+              if (capReached) return
+
               // Re-read so the new image URL surfaces on the page.
               const refreshed = await loadBook()
               if (refreshed) setBook(refreshed)
@@ -466,6 +483,7 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
     error,
     reviewedCount: book?.reviewState?.reviewedPages?.length ?? 0,
     imageRegenerating,
+    imageCapReached,
     playCurrentPage,
     approveCurrentPage,
     reviseCurrentPage,

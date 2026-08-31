@@ -145,7 +145,14 @@ export default function DrawingGroupCard({
       }
       // A real version came back: count the paid call (FEAT-165). Repeating a
       // theme counts again — each is another real call.
-      await recordStickerArtGeneration(recordGeneration)
+      //
+      // Never awaited (FEAT-167): the counter is fire-and-forget by
+      // construction, so the three lines below — closing the picker, refreshing
+      // the card, and the `finally`'s `setBusy(false)` — can never be held
+      // hostage by a Firestore write that is merely pending (offline it never
+      // settles at all). The kid's new version is already made and saved by
+      // this point; it must not sit behind a spinner waiting on a counter.
+      recordStickerArtGeneration(recordGeneration)
       setPicking(false)
       onChanged()
     } catch (err) {

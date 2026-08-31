@@ -21,8 +21,10 @@ import { storage } from '../../core/firebase/storage'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker, StickerTag } from '../../core/types'
 import { StickerCategory } from '../../core/types/enums'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
+import { recordBookArtGeneration } from './useBookArtQuota'
 
 interface StickerPickerProps {
   open: boolean
@@ -31,6 +33,20 @@ interface StickerPickerProps {
   childName?: string
   childProfile?: 'lincoln' | 'london'
   onSelectSticker: (sticker: Sticker) => void
+  /**
+   * The actor has spent today's art budget (FEAT-168). "Generate" is a paid
+   * call, so a kid gets the same light daily cap the Stickers page uses — a warm
+   * nudge in place of the button, never an error and never a lock. Everything
+   * free here stays free at the cap: browsing, filtering, picking an existing
+   * sticker, and **Upload**. Defaults to uncapped so any other mount is
+   * unchanged.
+   */
+  capReached?: boolean
+  /**
+   * Count one paid generation against the day's counter (FEAT-168). Omitted by
+   * uncapped callers; a no-op for a parent.
+   */
+  recordGeneration?: () => Promise<void>
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -72,6 +88,8 @@ export default function StickerPicker({
   childName,
   childProfile,
   onSelectSticker,
+  capReached = false,
+  recordGeneration,
 }: StickerPickerProps) {
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [loadingStickers, setLoadingStickers] = useState(false)
@@ -132,7 +150,9 @@ export default function StickerPicker({
   )
 
   const handleCreateSticker = useCallback(async () => {
-    if (!createPrompt.trim()) return
+    // At the cap, refuse *before* spending — the paid call never goes out
+    // (FEAT-168). The nudge below says so; nothing here is styled as an error.
+    if (!createPrompt.trim() || capReached) return
     setGenerationError(false)
     const result = await generateImage({
       familyId,
@@ -141,12 +161,16 @@ export default function StickerPicker({
       size: '1024x1024',
     })
     if (!result) {
+      // Nothing came back — don't charge the kid's daily budget for it.
       setGenerationError(true)
       return
     }
     // Show preview instead of saving immediately
     setGenerationPreview({ url: result.url, storagePath: result.storagePath })
-  }, [createPrompt, familyId, generateImage])
+    // A real image arrived, so a real call was made: count it. "Try Again"
+    // counts too — each retry is another paid call. Never awaited (FEAT-167).
+    recordBookArtGeneration(recordGeneration)
+  }, [createPrompt, capReached, familyId, generateImage, recordGeneration])
 
   const handleUseGeneratedSticker = useCallback(async () => {
     if (!generationPreview) return
@@ -443,15 +467,25 @@ export default function StickerPicker({
             >
               {uploading ? 'Uploading...' : 'Upload'}
             </Button>
-            <Button
-              variant="outlined"
-              startIcon={<AddIcon />}
-              onClick={() => setShowCreateDialog(true)}
-              sx={{ minHeight: 48, flex: 1 }}
-            >
-              Generate
-            </Button>
+            {/* No Generate button at the cap — refusing before the spend, not
+                after it (FEAT-168). Upload stays available: it costs nothing. */}
+            {!capReached && (
+              <Button
+                variant="outlined"
+                startIcon={<AddIcon />}
+                onClick={() => setShowCreateDialog(true)}
+                sx={{ minHeight: 48, flex: 1 }}
+              >
+                Generate
+              </Button>
+            )}
           </Stack>
+
+          {capReached && (
+            <Typography variant="body2" color="text.secondary">
+              {ART_QUOTA_MESSAGE}
+            </Typography>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>
@@ -503,6 +537,15 @@ export default function StickerPicker({
                 Try Again
               </Button>
             </Stack>
+          ) : capReached ? (
+            /* The cap can arrive while this nested dialog is already open —
+               the generation that just succeeded may have spent the last of
+               the day's budget, and "Try Again" returns here (FEAT-168, Codex
+               P2 on PR #1720). Swap the prompt field for the nudge rather than
+               leave an enabled Create button that would silently do nothing. */
+            <Typography variant="body2" color="text.secondary" sx={{ pt: 1 }}>
+              {ART_QUOTA_MESSAGE}
+            </Typography>
           ) : (
             <>
               <TextField
@@ -537,15 +580,19 @@ export default function StickerPicker({
           {!generationPreview && !generationError && (
             <>
               <Button onClick={() => { setShowCreateDialog(false); setGenerationError(false) }} disabled={generating}>
-                Cancel
+                {capReached ? 'Close' : 'Cancel'}
               </Button>
-              <Button
-                variant="contained"
-                onClick={() => { void handleCreateSticker() }}
-                disabled={!createPrompt.trim() || generating}
-              >
-                Create!
-              </Button>
+              {/* No Create button at the cap — refusing before the spend, not
+                  after it, and never a visible control that does nothing. */}
+              {!capReached && (
+                <Button
+                  variant="contained"
+                  onClick={() => { void handleCreateSticker() }}
+                  disabled={!createPrompt.trim() || generating}
+                >
+                  Create!
+                </Button>
+              )}
             </>
           )}
         </DialogActions>

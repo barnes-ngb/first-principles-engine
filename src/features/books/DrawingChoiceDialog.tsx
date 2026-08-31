@@ -17,6 +17,8 @@ import BrushIcon from '@mui/icons-material/Brush'
 import StarIcon from '@mui/icons-material/Star'
 import WallpaperIcon from '@mui/icons-material/Wallpaper'
 
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+
 /** Checkerboard background to make transparent regions visible in previews. */
 export const CHECKERBOARD_BG =
   'repeating-conic-gradient(#e0e0e0 0% 25%, #fff 0% 50%) 50% / 16px 16px'
@@ -58,6 +60,16 @@ interface DrawingChoiceDialogProps {
     transparent?: boolean,
   ) => void
   onRetryResult?: () => void
+  /**
+   * The actor has spent today's art budget (FEAT-168). Every "Reimagine" choice
+   * here is a paid `enhanceSketch` call, so at the cap they are simply not
+   * offered and a warm nudge takes their place — refusing before the spend, and
+   * before the sketch upload the page performs on the way to it. "Make a scene"
+   * routes to the page's own AI dialog, which carries the same cap. Everything
+   * free — use as-is, clean up, make a sticker, add, save to gallery — is
+   * untouched. Defaults to uncapped.
+   */
+  capReached?: boolean
 }
 
 const CHOICES: { value: DrawingChoice; icon: React.ReactNode; label: string; description: string }[] = [
@@ -73,6 +85,18 @@ const POST_CLEANUP_CHOICES: { value: PostCleanupChoice; icon: React.ReactNode; l
   { value: 'add-sticker', icon: <StarIcon />, label: 'Add as sticker', description: 'Use cleaned version as-is' },
   { value: 'reimagine-scene', icon: <WallpaperIcon />, label: 'Reimagine as scene', description: 'AI creates full background' },
   { value: 'save-sticker', icon: <DescriptionIcon />, label: 'Save to gallery', description: 'Save to your sticker library' },
+]
+
+/**
+ * The choices that spend a paid `enhanceSketch` call (FEAT-168). `'scene'` is
+ * deliberately absent: it opens the page's own AI scene dialog, which carries
+ * the same cap and refuses there — listing it here would hide the door rather
+ * than close it.
+ */
+const PAID_CHOICES: readonly DrawingChoice[] = ['reimagine']
+const PAID_POST_CLEANUP_CHOICES: readonly PostCleanupChoice[] = [
+  'reimagine-sticker',
+  'reimagine-scene',
 ]
 
 const REIMAGINE_MARKS = [
@@ -95,6 +119,7 @@ export default function DrawingChoiceDialog({
   onAcceptResult,
   onPickPostCleanup,
   onRetryResult,
+  capReached = false,
 }: DrawingChoiceDialogProps) {
   const [selectedChoice, setSelectedChoice] = useState<DrawingChoice | null>(null)
   const [reimagineIntensity, setReimagineIntensity] = useState(50)
@@ -110,6 +135,9 @@ export default function DrawingChoiceDialog({
   const [transparent, setTransparent] = useState(false)
 
   const handleChoiceClick = useCallback((choice: DrawingChoice) => {
+    // Backstop for the paid choices — they aren't rendered at the cap, so this
+    // can only fire if something else routes here (FEAT-168).
+    if (capReached && PAID_CHOICES.includes(choice)) return
     if (choice === 'as-is') {
       onChoose('as-is')
       return
@@ -122,7 +150,7 @@ export default function DrawingChoiceDialog({
     }
     setSelectedChoice(choice)
     onChoose(choice)
-  }, [onChoose])
+  }, [onChoose, capReached])
 
   const handleReimaginGo = useCallback(() => {
     onChoose('reimagine', reimagineIntensity, transparent)
@@ -130,6 +158,8 @@ export default function DrawingChoiceDialog({
 
   const handlePostCleanupClick = useCallback((choice: PostCleanupChoice) => {
     if (!onPickPostCleanup) return
+    // Same backstop on the post-cleanup grid (FEAT-168).
+    if (capReached && PAID_POST_CLEANUP_CHOICES.includes(choice)) return
     if (choice === 'reimagine-sticker') {
       // Sticker path → default transparent toggle ON.
       setTransparent(true)
@@ -143,7 +173,7 @@ export default function DrawingChoiceDialog({
       return
     }
     onPickPostCleanup(choice)
-  }, [onPickPostCleanup])
+  }, [onPickPostCleanup, capReached])
 
   const handlePostCleanupReimagineGo = useCallback(() => {
     if (!onPickPostCleanup) return
@@ -163,6 +193,13 @@ export default function DrawingChoiceDialog({
   }, [onClose])
 
   if (!capturedFile || !capturedPreviewUrl) return null
+
+  // At the cap the paid choices are not rendered at all — the kid never taps a
+  // control that would refuse them (FEAT-168).
+  const choices = capReached ? CHOICES.filter((c) => !PAID_CHOICES.includes(c.value)) : CHOICES
+  const postCleanupChoices = capReached
+    ? POST_CLEANUP_CHOICES.filter((c) => !PAID_POST_CLEANUP_CHOICES.includes(c.value))
+    : POST_CLEANUP_CHOICES
 
   // Post-cleanup reimagine intensity slider (sticker or scene path)
   if (resultPreviewUrl && resultIsCleaned && postCleanupReimagineMode) {
@@ -258,7 +295,7 @@ export default function DrawingChoiceDialog({
               gap: 1.5,
             }}
           >
-            {POST_CLEANUP_CHOICES.map((c) => (
+            {postCleanupChoices.map((c) => (
               <Box
                 key={c.value}
                 onClick={() => handlePostCleanupClick(c.value)}
@@ -290,6 +327,11 @@ export default function DrawingChoiceDialog({
               </Box>
             ))}
           </Box>
+          {capReached && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              {ART_QUOTA_MESSAGE}
+            </Typography>
+          )}
         </DialogContent>
         <DialogActions>
           {onRetryResult && (
@@ -427,7 +469,7 @@ export default function DrawingChoiceDialog({
             gap: 1.5,
           }}
         >
-          {CHOICES.map((c) => (
+          {choices.map((c) => (
             <Box
               key={c.value}
               onClick={() => handleChoiceClick(c.value)}
@@ -466,6 +508,11 @@ export default function DrawingChoiceDialog({
             </Box>
           ))}
         </Box>
+        {capReached && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            {ART_QUOTA_MESSAGE}
+          </Typography>
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={handleClose}>Cancel</Button>

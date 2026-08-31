@@ -144,4 +144,41 @@ describe('DrawingGroupCard — daily art cap (FEAT-165 / UX-95)', () => {
     expect(screen.queryByText('offline')).toBeNull()
     errorSpy.mockRestore()
   })
+
+  it('never waits on the counter: a write that hangs still closes the picker and refreshes the card', async () => {
+    // FEAT-167. Failing open cannot mean "the counter may not throw" — a
+    // Firestore write resolves only on server ack, so offline it stays *pending*
+    // rather than rejecting, and an awaited counter never settles at all.
+    // Awaited (FEAT-165's shape), this door's three following lines were
+    // unreachable: the version was generated, paid for and saved, and the kid
+    // was left staring at "Making..." over a picker that would not close and a
+    // card that never showed the thing they made.
+    const user = userEvent.setup()
+    const onChanged = vi.fn()
+    const recordGeneration = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+    render(
+      <DrawingGroupCard
+        group={makeGroup()}
+        familyId="f1"
+        onChanged={onChanged}
+        recordGeneration={recordGeneration}
+      />,
+    )
+
+    await openPicker(user)
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
+
+    // The card refreshes...
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+    // ...the picker closes...
+    await waitFor(() => expect(screen.queryByText('Make another version')).toBeNull())
+    // ...and the busy flag cleared, so the door is live again rather than stuck
+    // on "Making...".
+    await openPicker(user)
+    const makeIt = await screen.findByRole('button', { name: 'Make it' })
+    expect(makeIt).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /making\.\.\./i })).toBeNull()
+    // The counter was still asked — this refuses to wait, it does not skip.
+    expect(recordGeneration).toHaveBeenCalledTimes(1)
+  })
 })

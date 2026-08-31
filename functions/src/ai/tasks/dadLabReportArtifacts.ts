@@ -1,80 +1,44 @@
 /**
- * "What is on this Dad Lab report" — the functions-side PORT of
- * `src/features/dad-lab/reportArtifacts.ts` (UX-85) and of `labBeatsHaveContent`
- * from `src/core/types/dadlab.ts`.
+ * The functions-side reads of a Dad Lab report's BEATS — `labBeatsHaveContent`
+ * and `beatTextForChild`, ports of `src/core/types/dadlab.ts`.
+ *
+ * ── What moved out of here, and why ──────────────────────────────────────────
+ * `reportArtifactIds` (UX-85) used to be implemented here a second time, kept in
+ * lockstep with `src/features/dad-lab/reportArtifacts.ts` by a parity fixture
+ * repeated verbatim in both test files. ARCH-47 gave it ONE definition, in
+ * `functions/src/shared/dadLabReportArtifacts.ts`, which both projects compile —
+ * so a change that breaks a caller now fails to compile rather than failing a
+ * fixture someone has to remember. It is re-exported below so this module's
+ * callers (`monthlyReviewData.ts`) keep their import path.
+ *
+ * The two functions still defined here are ports of a DIFFERENT original
+ * (`src/core/types/dadlab.ts`, not `reportArtifacts.ts`) and are deliberately out
+ * of ARCH-47 slice 1's scope. `functions/src/shared/README.md` names the
+ * remaining duplicated rules and the order they should follow.
  *
  * ── Why a port and not an import ─────────────────────────────────────────────
  * `functions/` cannot import from `src/`. Two independent walls, both measured
- * against this exact import (FEAT-163):
+ * against this exact import (FEAT-163, re-measured in the ARCH-47 spike):
  *   - `functions/tsconfig.json` sets `rootDir: "./src"`, so any file outside
  *     `functions/src` in the program is TS6059 ("not under rootDir");
  *   - functions compiles with `moduleResolution: "node16"`, under which the
  *     app's own extensionless relative imports (`./enums`) are TS2835.
- * So this is a deliberate second implementation, like `sanitizeJson`. It MUST
- * stay rule-identical to the app-side helper; a fixture shared verbatim with
- * `src/features/dad-lab/reportArtifacts.test.ts` pins the two together — see
- * `PARITY_FIXTURE` in `dadLabReportArtifacts.test.ts`, and the mirrored
- * "functions-side port" case in the app-side test.
- *
- * ── The rule ─────────────────────────────────────────────────────────────────
- * A lab's evidence lives in **two** places depending on which capture flow
- * wrote it:
- *   - `childReports[*].artifacts[]` — the legacy per-child capture;
- *   - `beats[*].items[].artifactId` — the FEAT-56 three-beat capture, today's
- *     DEFAULT and where FEAT-156 routes uploads.
- * Reading only the child-report side makes a modern lab look empty. Ids are
- * de-duplicated (the two sets legitimately overlap) and ordered child-reports
- * first, then beats in beat order — byte-identical to the app-side helper.
+ * The shared directory answers both without moving `functions/lib/index.js`: it
+ * lives inside `functions/src` (so `rootDir` holds) and writes explicit `.js`
+ * extensions (so Node16 resolution holds).
  */
 
-/** One captured item within a beat. Loosely typed — this reads raw Firestore data. */
-export interface RawLabBeatItem {
-  artifactId?: unknown;
-  child?: unknown;
-}
+import {
+  objectValues,
+  type RawLabBeat,
+} from "../../shared/dadLabReportArtifacts.js";
 
-/** One beat: an optional writing line plus captured items. */
-export interface RawLabBeat {
-  text?: unknown;
-  items?: unknown;
-}
-
-/** The subset of a `DadLabReport` doc this module reads. */
-export interface RawDadLabReport {
-  childReports?: unknown;
-  beats?: unknown;
-}
-
-/** Narrow an unknown value to a plain object's values, or `[]`. */
-function objectValues(value: unknown): unknown[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-  return Object.values(value as Record<string, unknown>);
-}
-
-/**
- * Every artifact id a Dad Lab report OWNS. Port of `reportArtifactIds`
- * (`src/features/dad-lab/reportArtifacts.ts`) — keep the two in lockstep.
- */
-export function reportArtifactIds(report: RawDadLabReport): string[] {
-  const ids = new Set<string>();
-
-  for (const childReport of objectValues(report?.childReports)) {
-    const artifacts = (childReport as { artifacts?: unknown } | null)?.artifacts;
-    if (!Array.isArray(artifacts)) continue;
-    for (const id of artifacts) if (typeof id === "string" && id) ids.add(id);
-  }
-
-  for (const beat of objectValues(report?.beats)) {
-    const items = (beat as RawLabBeat | null)?.items;
-    if (!Array.isArray(items)) continue;
-    for (const item of items) {
-      const id = (item as RawLabBeatItem | null)?.artifactId;
-      if (typeof id === "string" && id) ids.add(id);
-    }
-  }
-
-  return Array.from(ids);
-}
+export {
+  reportArtifactIds,
+  type RawDadLabReport,
+  type RawLabBeat,
+  type RawLabBeatItem,
+} from "../../shared/dadLabReportArtifacts.js";
 
 /**
  * True when any beat carries a writing line or a captured item. Port of

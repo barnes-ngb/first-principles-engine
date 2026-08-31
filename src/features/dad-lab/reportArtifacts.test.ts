@@ -91,15 +91,17 @@ describe('reportArtifactIds — one answer to "what is on this report" (UX-85)',
     ).toEqual([])
   })
 
-  it('agrees with the functions-side port on the shared PARITY FIXTURE', () => {
-    // THE PARITY FIXTURE (FEAT-163). `functions/` cannot import from `src/`
-    // (TS6059 `rootDir` + TS2835 node16 resolution), so the monthly-review
-    // Cloud Function carries a second implementation of this exact rule in
-    // `functions/src/ai/tasks/dadLabReportArtifacts.ts`. This fixture and its
-    // expectation are repeated VERBATIM in that module's test (search it for
-    // "PARITY FIXTURE"); change one implementation and this pair fails until
-    // you change the other.
-    const parityFixture = {
+  it('unions both sources in order, skipping empty ids — the whole rule at once', () => {
+    // This used to be THE PARITY FIXTURE (FEAT-163), repeated verbatim in
+    // `functions/src/ai/tasks/dadLabReportArtifacts.test.ts` because the app
+    // helper and the Cloud Function's copy of this rule could not be imported
+    // together and only a hand-kept fixture held them in lockstep. ARCH-47 gave
+    // the rule ONE definition (`functions/src/shared/dadLabReportArtifacts.ts`,
+    // compiled by both projects), so the fixture's job now belongs to the
+    // compiler. The case itself is worth keeping — it exercises both sources, an
+    // id referenced from both, an empty id and the ordering, through a real
+    // `DadLabReport` — so it stays, as an ordinary test of this helper.
+    const fixture = {
       childReports: {
         lincoln: { prediction: 'it pops', artifacts: ['art-shared', 'art-child', ''] },
         london: { observation: 'loud', artifacts: ['art-london'] },
@@ -115,11 +117,13 @@ describe('reportArtifactIds — one answer to "what is on this report" (UX-85)',
         saw: { items: [{ artifactId: 'art-saw', child: 'c-lincoln' }] },
       },
     }
-    const parityExpected = ['art-shared', 'art-child', 'art-london', 'art-beat', 'art-saw']
-
-    expect(reportArtifactIds({ ...report({}), ...parityFixture } as unknown as DadLabReport)).toEqual(
-      parityExpected,
-    )
+    expect(reportArtifactIds({ ...report({}), ...fixture } as unknown as DadLabReport)).toEqual([
+      'art-shared',
+      'art-child',
+      'art-london',
+      'art-beat',
+      'art-saw',
+    ])
   })
 
   it('is defensive about malformed docs — missing sides and empty ids', () => {

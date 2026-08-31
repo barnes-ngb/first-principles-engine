@@ -50,14 +50,35 @@ export function useStickerArtQuota(): UseArtQuotaResult {
  * that in fact succeeded. Under-counting is the safe direction (FEAT-94's
  * fail-open rule); the failure is logged, not shown. A no-op when the caller
  * passes nothing (an uncapped surface, e.g. the parent-only Settings tab).
+ *
+ * **Fire-and-forget by construction, not by convention (FEAT-167).** This
+ * returns `void`, synchronously, and never a promise — so a door *cannot*
+ * accidentally wait on the counter, however it is written. That is the whole
+ * point: swallowing a rejection is not enough, because nothing can bound a
+ * promise that never *settles*, and a Firestore write resolves only on server
+ * ack — offline it stays pending indefinitely rather than failing. Awaited
+ * (FEAT-165's shape, fixed in one door by FEAT-166 and in the other three by
+ * FEAT-167), that left the door's `finally` unreachable: the busy flag never
+ * cleared, the picker never closed, the list never refreshed — on top of an
+ * image the kid had already generated, paid for and saved. A real success
+ * dressed as a hang. Returning `void` removes the hazard rather than asking
+ * four call sites to remember `void`; a stray `await` here waits one microtask
+ * and nothing more.
+ *
+ * Both failure shapes are still caught and logged, exactly as before: a
+ * rejected promise (the `.catch`) and a recorder that throws synchronously
+ * (the `try`).
  */
-export async function recordStickerArtGeneration(
-  recordGeneration?: () => Promise<void>,
-): Promise<void> {
+export function recordStickerArtGeneration(recordGeneration?: () => Promise<void>): void {
   if (!recordGeneration) return
   try {
-    await recordGeneration()
+    // `Promise.resolve` so a recorder that returns nothing is still handled.
+    void Promise.resolve(recordGeneration()).catch(logCounterFailure)
   } catch (err) {
-    console.error('[StickerArtQuota] Could not record a generation (failing open):', err)
+    logCounterFailure(err)
   }
+}
+
+function logCounterFailure(err: unknown): void {
+  console.error('[StickerArtQuota] Could not record a generation (failing open):', err)
 }
