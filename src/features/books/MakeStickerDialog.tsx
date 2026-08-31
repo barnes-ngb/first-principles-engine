@@ -106,7 +106,12 @@ export default function MakeStickerDialog({
     setGenerationPreview({ url: result.url, storagePath: result.storagePath })
     // A real image arrived, so a real call was made: count it. "Try Again"
     // counts too — each retry is another paid call (FEAT-94's rule).
-    await recordStickerArtGeneration(recordGeneration)
+    //
+    // Never awaited (FEAT-167). Nothing follows it today, and `generating` is
+    // `useAI`'s own flag, so this door was the mild one — but leaving the
+    // `await` here means the next line added below it silently reintroduces the
+    // wedge the other two doors had. The counter is fire-and-forget everywhere.
+    recordStickerArtGeneration(recordGeneration)
   }, [prompt, capReached, familyId, generateImage, recordGeneration])
 
   const handleTryAgain = useCallback(() => {

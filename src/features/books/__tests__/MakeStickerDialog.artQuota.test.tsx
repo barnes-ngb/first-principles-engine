@@ -92,6 +92,35 @@ describe('MakeStickerDialog — daily art cap (FEAT-165 / UX-95)', () => {
     expect(recordGeneration).not.toHaveBeenCalled()
   })
 
+  it('never waits on the counter: a write that hangs still leaves the preview usable', async () => {
+    // FEAT-167. This is the mild door — the awaited counter was the *last*
+    // statement in `handleGenerate`, and `generating` is `useAI`'s own flag, so
+    // nothing observable was stranded by it. The assertion is a guard, not a
+    // reproduction: it pins the surface's behaviour so that the next line added
+    // below the counter cannot silently re-open the wedge the other two doors
+    // had. Held here for the same reason the counter is fire-and-forget
+    // everywhere rather than at three call sites that each remember.
+    const user = userEvent.setup()
+    const recordGeneration = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+    render(
+      <MakeStickerDialog
+        open
+        onClose={() => {}}
+        familyId="f1"
+        recordGeneration={recordGeneration}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('Describe your sticker'), 'a dragon')
+    await user.click(screen.getByRole('button', { name: 'Create!' }))
+
+    await waitFor(() => expect(recordGeneration).toHaveBeenCalledTimes(1))
+    // The preview and both of its controls are live — the image the kid paid
+    // for is reachable and saveable.
+    expect(await screen.findByRole('button', { name: 'Use This' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /try again/i })).toBeEnabled()
+  })
+
   it('is unchanged for an uncapped caller that passes no quota props', async () => {
     const user = userEvent.setup()
     render(<MakeStickerDialog open onClose={() => {}} familyId="f1" />)

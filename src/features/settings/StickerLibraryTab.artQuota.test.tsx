@@ -23,6 +23,9 @@ vi.mock('../../core/ai/useAI', () => ({
 
 const updateDocMock = vi.fn()
 const addDocMock = vi.fn()
+// `load()` is the tab's list refresh; a spy is the only way to see that the
+// version the parent just paid for actually came back into view (FEAT-167).
+const getDocsMock = vi.fn()
 
 // A standalone sticker: "Make more versions" on one of these ADOPTS it into a
 // drawing group (a real Firestore write) before generating — so the cap has to
@@ -46,8 +49,7 @@ vi.mock('firebase/firestore', () => ({
   writeBatch: () => ({ update: vi.fn(), commit: vi.fn().mockResolvedValue(undefined) }),
   addDoc: (...args: unknown[]) => addDocMock(...args),
   deleteDoc: vi.fn(),
-  getDocs: () =>
-    Promise.resolve({ docs: [{ id: standalone.id, data: () => standalone }] }),
+  getDocs: (...args: unknown[]) => getDocsMock(...args),
 }))
 
 const CAP_MESSAGE = /that's a lot of art today/i
@@ -65,6 +67,8 @@ describe('StickerLibraryTab — daily art cap (FEAT-165 / UX-95)', () => {
     updateDocMock.mockResolvedValue(undefined)
     addDocMock.mockReset()
     addDocMock.mockResolvedValue({ id: 'v1' })
+    getDocsMock.mockReset()
+    getDocsMock.mockResolvedValue({ docs: [{ id: standalone.id, data: () => standalone }] })
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111')
   })
 
@@ -107,6 +111,33 @@ describe('StickerLibraryTab — daily art cap (FEAT-165 / UX-95)', () => {
 
     await waitFor(() => expect(enhanceSketchMock).toHaveBeenCalledTimes(1))
     expect(recordGeneration).not.toHaveBeenCalled()
+  })
+
+  it('never waits on the counter: a write that hangs still closes the dialogs and reloads the list', async () => {
+    // FEAT-167. This was the worst of the three doors: `setMakeVersionsOpen(false)`,
+    // `setEditTarget(null)` and `load()` all sat *below* the awaited counter,
+    // and `setMakingVersion(false)` in the unreachable `finally`. Offline, a
+    // Firestore write never settles (it resolves on server ack, it does not
+    // reject), so the version was generated, paid for and written — and the
+    // dialog stayed open on "Making..." with the list never showing it.
+    const user = userEvent.setup()
+    const recordGeneration = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+    render(<StickerLibraryTab recordGeneration={recordGeneration} />)
+
+    await openMakeVersions(user)
+    const loadsBefore = getDocsMock.mock.calls.length
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
+
+    await waitFor(() => expect(recordGeneration).toHaveBeenCalledTimes(1))
+    // Both dialogs close...
+    await waitFor(() => expect(screen.queryByText('Make another version')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Edit Sticker')).toBeNull())
+    // ...and the list reloads, so the new version is actually visible.
+    await waitFor(() => expect(getDocsMock.mock.calls.length).toBeGreaterThan(loadsBefore))
+    // The busy flag cleared too: reopening offers "Make it", not "Making...".
+    await openMakeVersions(user)
+    expect(await screen.findByRole('button', { name: 'Make it' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /making\.\.\./i })).toBeNull()
   })
 
   it('is unchanged for an uncapped caller (the parent-only Settings tab)', async () => {

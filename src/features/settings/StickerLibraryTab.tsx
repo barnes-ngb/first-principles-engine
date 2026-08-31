@@ -321,8 +321,12 @@ export default function StickerLibraryTab({
         setMakeError(res.error)
         return
       }
-      // A real version came back: count the paid call (FEAT-165).
-      await recordStickerArtGeneration(recordGeneration)
+      // A real version came back: count the paid call (FEAT-165). Never
+      // awaited (FEAT-167) — a counter write that is merely pending (offline it
+      // never settles) must not hold the dialog open, strand `makingVersion`
+      // true in the unreachable `finally`, or keep the list from reloading the
+      // version the parent just paid for.
+      recordStickerArtGeneration(recordGeneration)
       setMakeVersionsOpen(false)
       setEditTarget(null)
       void load()
