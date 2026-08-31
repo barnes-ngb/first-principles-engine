@@ -38,6 +38,19 @@ vi.mock('./bookTypes', () => ({
   generateImageId: () => 'image-id',
 }))
 
+// The daily art budget the illustrator now asks for itself (FEAT-168).
+// `Infinity` = uncapped, so this hook's existing behaviour is unchanged.
+vi.mock('./useBookArtQuota', () => ({
+  useBookArtQuota: () => ({
+    count: 0,
+    limit: 25,
+    remaining: Infinity,
+    atLimit: false,
+    recordGeneration: vi.fn(async () => undefined),
+  }),
+  recordBookArtGeneration: () => undefined,
+}))
+
 // ── Subject under test ──────────────────────────────────────────
 
 import { joinIdeas, useBookGenerateChat } from './useBookGenerateChat'

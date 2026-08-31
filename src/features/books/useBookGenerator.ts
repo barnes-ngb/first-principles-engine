@@ -6,6 +6,7 @@ import type { TaskType } from '../../core/ai/useAI'
 import { booksCollection } from '../../core/firebase/firestore'
 import type { Book, BookPage, BookTheme } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { generatePageId } from './bookTypes'
 import { useBookIllustrator } from './useBookIllustrator'
 
@@ -252,7 +253,7 @@ export function useBookGenerator() {
       const totalPages = story.pages.length
       let lastImageUrl: string | undefined
 
-      const { failedPages } = await illustrate({
+      const { failedPages, capReached } = await illustrate({
         bookId,
         familyId,
         style,
@@ -282,9 +283,15 @@ export function useBookGenerator() {
         currentPage: 0,
         totalPages: 0,
         message:
-          failedPages.length > 0
-            ? `Book created! ${failedPages.length} page${failedPages.length > 1 ? 's' : ''} need illustrations — you can add photos or drawings in the editor.`
-            : 'Your book is ready!',
+          // The day's art budget refused the pictures, or ran out part-way
+          // (FEAT-168). The story is written and saved either way — only the
+          // paid illustrations have a ceiling — so this reads as a nudge to a
+          // grown-up, never as a failure, and it points at what still works.
+          capReached
+            ? `Your story is saved! ${ART_QUOTA_MESSAGE} You can add photos or drawings in the editor.`
+            : failedPages.length > 0
+              ? `Book created! ${failedPages.length} page${failedPages.length > 1 ? 's' : ''} need illustrations — you can add photos or drawings in the editor.`
+              : 'Your book is ready!',
         lastImageUrl,
       })
       setGenerating(false)

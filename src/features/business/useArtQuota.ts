@@ -9,8 +9,16 @@ import { todayKey } from '../../core/utils/dateKey'
  * Default per-child daily art-generation cap (FEAT-94). A named constant so it's
  * parent-adjustable later; today it's a fixed, light courtesy cap. Regenerate
  * counts toward it (each is a real paid call).
+ *
+ * **Raised 10 → 25 by FEAT-168**, when the Book Editor's generators joined this
+ * counter. A generated book spends **one paid call per illustrated page**, and a
+ * book is 6 / 10 / 14 pages (`books/storyPageTargets.ts`), so at 10 a "Long"
+ * book could never finish — the cap would have broken the feature rather than
+ * bounded it. 25 clears one Long book (14) plus a normal day's stickers and is
+ * still a real ceiling. It stays one number in one place: the reversible part
+ * of that change.
  */
-export const DEFAULT_DAILY_ART_QUOTA = 10
+export const DEFAULT_DAILY_ART_QUOTA = 25
 
 /**
  * The friendly, non-shaming message shown when a kid hits the cap (charter: no

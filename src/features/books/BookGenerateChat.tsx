@@ -20,6 +20,7 @@ import VoiceInput from '../../components/VoiceInput'
 import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { ChatTurn } from '../../core/types'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { useBookGenerateChat } from './useBookGenerateChat'
 import StoryLengthSelector from './StoryLengthSelector'
 import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
@@ -403,6 +404,15 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
       </Box>
 
       {error && <Alert severity="warning">{error}</Alert>}
+
+      {/* The day's art budget refused or cut short the pictures (FEAT-168). The
+          story itself is written and saved — only the paid illustrations have a
+          ceiling — so this is a warm nudge in `text.secondary`, never an error. */}
+      {illustrationProgress.capReached && (
+        <Typography variant="body2" color="text.secondary" aria-live="polite">
+          Your story is saved! {ART_QUOTA_MESSAGE}
+        </Typography>
+      )}
 
       {isIllustrating && (
         <Box

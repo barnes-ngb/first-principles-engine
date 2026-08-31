@@ -206,6 +206,8 @@ export function useBookGenerateChat(
       currentPage: 0,
       totalPages: 0,
       failedPages: [],
+      capReached: false,
+      unillustratedPages: [],
     })
 
   // Track whether we've initialized from a resume so we don't keep refetching.

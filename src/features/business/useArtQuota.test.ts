@@ -32,6 +32,7 @@ vi.mock('../../core/utils/dateKey', () => ({
   todayKey: () => dayHolder.value,
 }))
 
+import { MAX_TARGET_PAGE_COUNT } from '../books/storyPageTargets'
 import { ART_QUOTA_MESSAGE, DEFAULT_DAILY_ART_QUOTA, useArtQuota } from './useArtQuota'
 
 /** Drive the stored onSnapshot success callback with a given count. */
@@ -50,8 +51,14 @@ beforeEach(() => {
 })
 
 describe('useArtQuota', () => {
-  it('the default cap is 10 and the message is warm + non-shaming', () => {
-    expect(DEFAULT_DAILY_ART_QUOTA).toBe(10)
+  it('the default cap is 25 and the message is warm + non-shaming', () => {
+    // Raised 10 → 25 by FEAT-168: a book spends one paid call per illustrated
+    // page and a "Long" book is 14, so 10 could not fit one book.
+    expect(DEFAULT_DAILY_ART_QUOTA).toBe(25)
+    // Still a real ceiling, and still enough for the longest book plus a
+    // normal day's stickers.
+    expect(DEFAULT_DAILY_ART_QUOTA).toBeGreaterThanOrEqual(MAX_TARGET_PAGE_COUNT)
+    expect(DEFAULT_DAILY_ART_QUOTA).toBeLessThan(100)
     expect(ART_QUOTA_MESSAGE).toMatch(/ask a grown-up/i)
     expect(ART_QUOTA_MESSAGE).not.toMatch(/error|fail|denied|not allowed/i)
   })
@@ -74,13 +81,15 @@ describe('useArtQuota', () => {
 
     emitCount(3)
     await waitFor(() => expect(result.current.count).toBe(3))
-    expect(result.current.remaining).toBe(7)
+    // Derived from the constant, not a literal — the cap moved once (FEAT-168)
+    // and these assertions are about the arithmetic, not the number.
+    expect(result.current.remaining).toBe(DEFAULT_DAILY_ART_QUOTA - 3)
     expect(result.current.atLimit).toBe(false)
   })
 
   it('atLimit flips true once the count reaches the cap', async () => {
     const { result } = renderHook(() => useArtQuota('lincoln', { capped: true }))
-    emitCount(10)
+    emitCount(DEFAULT_DAILY_ART_QUOTA)
     await waitFor(() => expect(result.current.atLimit).toBe(true))
     expect(result.current.remaining).toBe(0)
   })
@@ -89,7 +98,7 @@ describe('useArtQuota', () => {
     const { result } = renderHook(() => useArtQuota('lincoln', { capped: true }))
     emitCount(undefined)
     await waitFor(() => expect(result.current.count).toBe(0))
-    expect(result.current.remaining).toBe(10)
+    expect(result.current.remaining).toBe(DEFAULT_DAILY_ART_QUOTA)
   })
 
   it('recordGeneration writes an atomic increment merge to the per-day doc', async () => {
