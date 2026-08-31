@@ -107,23 +107,68 @@ describe('useStickerArtQuota (FEAT-165)', () => {
 })
 
 describe('recordStickerArtGeneration (FEAT-165)', () => {
-  it('counts one generation when a recorder is supplied', async () => {
+  it('counts one generation when a recorder is supplied', () => {
     const record = vi.fn().mockResolvedValue(undefined)
 
-    await recordStickerArtGeneration(record)
+    recordStickerArtGeneration(record)
 
     expect(record).toHaveBeenCalledTimes(1)
   })
 
-  it('is a no-op for an uncapped surface that passes nothing', async () => {
-    await expect(recordStickerArtGeneration(undefined)).resolves.toBeUndefined()
+  it('is a no-op for an uncapped surface that passes nothing', () => {
+    expect(recordStickerArtGeneration(undefined)).toBeUndefined()
   })
 
   it('fails open: a counter write that rejects never breaks the art flow', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const record = vi.fn().mockRejectedValue(new Error('offline'))
 
-    await expect(recordStickerArtGeneration(record)).resolves.toBeUndefined()
+    expect(recordStickerArtGeneration(record)).toBeUndefined()
+    // The rejection is handled asynchronously, and never reaches the caller.
+    await Promise.resolve()
+
+    expect(errorSpy).toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  // ── FEAT-167: fire-and-forget by construction ───────────────────────────
+  // The wrapper cannot merely *not throw* — nothing bounds a promise that never
+  // settles, and a Firestore write resolves only on server ack, so offline it
+  // stays pending forever. These hold the shape that makes an awaiting caller
+  // impossible rather than merely discouraged.
+
+  it('returns void, not a promise — a door cannot wait on the counter', () => {
+    const record = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+
+    const returned: unknown = recordStickerArtGeneration(record)
+
+    expect(returned).toBeUndefined()
+    // Not thenable: even `await recordStickerArtGeneration(...)` resumes on the
+    // next microtask instead of waiting on the write.
+    expect(typeof (returned as { then?: unknown } | undefined)?.then).toBe('undefined')
+    expect(record).toHaveBeenCalledTimes(1)
+  })
+
+  it('a counter write that never settles still lets an awaiting caller continue', async () => {
+    const record = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+    let reachedTheLineAfter = false
+
+    // Written the *wrong* way on purpose: this is the shape FEAT-165 shipped
+    // and FEAT-167 makes harmless.
+    await recordStickerArtGeneration(record)
+    reachedTheLineAfter = true
+
+    expect(reachedTheLineAfter).toBe(true)
+    expect(record).toHaveBeenCalledTimes(1)
+  })
+
+  it('still logs — and never rethrows — a recorder that throws synchronously', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const record = vi.fn(() => {
+      throw new Error('no auth')
+    }) as unknown as () => Promise<void>
+
+    expect(() => recordStickerArtGeneration(record)).not.toThrow()
 
     expect(errorSpy).toHaveBeenCalled()
     errorSpy.mockRestore()

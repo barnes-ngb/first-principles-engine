@@ -292,7 +292,10 @@ export default function SketchScanner({
         // top of an image the kid had already paid for, and the Save button
         // never came back. Failing open has to mean the art does not wait on the
         // counter at all, not merely that a *thrown* counter is ignored.
-        void recordStickerArtGeneration(recordGeneration)
+        //
+        // FEAT-167 moved that discipline into the wrapper itself — it returns
+        // `void` now, so the `void` operator here would be meaningless.
+        recordStickerArtGeneration(recordGeneration)
         // A fresh transform replaces any previously-saved fancy version.
         setSavedVersions((prev) => {
           if (!prev.has('fancy')) return prev
