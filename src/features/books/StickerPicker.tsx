@@ -537,6 +537,15 @@ export default function StickerPicker({
                 Try Again
               </Button>
             </Stack>
+          ) : capReached ? (
+            /* The cap can arrive while this nested dialog is already open —
+               the generation that just succeeded may have spent the last of
+               the day's budget, and "Try Again" returns here (FEAT-168, Codex
+               P2 on PR #1720). Swap the prompt field for the nudge rather than
+               leave an enabled Create button that would silently do nothing. */
+            <Typography variant="body2" color="text.secondary" sx={{ pt: 1 }}>
+              {ART_QUOTA_MESSAGE}
+            </Typography>
           ) : (
             <>
               <TextField
@@ -571,15 +580,19 @@ export default function StickerPicker({
           {!generationPreview && !generationError && (
             <>
               <Button onClick={() => { setShowCreateDialog(false); setGenerationError(false) }} disabled={generating}>
-                Cancel
+                {capReached ? 'Close' : 'Cancel'}
               </Button>
-              <Button
-                variant="contained"
-                onClick={() => { void handleCreateSticker() }}
-                disabled={!createPrompt.trim() || generating}
-              >
-                Create!
-              </Button>
+              {/* No Create button at the cap — refusing before the spend, not
+                  after it, and never a visible control that does nothing. */}
+              {!capReached && (
+                <Button
+                  variant="contained"
+                  onClick={() => { void handleCreateSticker() }}
+                  disabled={!createPrompt.trim() || generating}
+                >
+                  Create!
+                </Button>
+              )}
             </>
           )}
         </DialogActions>

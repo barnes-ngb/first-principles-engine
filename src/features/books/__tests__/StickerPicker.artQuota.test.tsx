@@ -116,6 +116,34 @@ describe('StickerPicker — daily art budget (FEAT-168)', () => {
     expect(screen.getByRole('button', { name: 'Use This' })).toBeTruthy()
   })
 
+  it('the cap arriving while the create dialog is open replaces Create with the nudge (Codex P2, PR #1720)', async () => {
+    const user = userEvent.setup()
+    const { rerender } = renderPicker({ capReached: false, recordGeneration: recordGenerationMock })
+
+    // Open the nested create dialog below the cap.
+    await user.click(await screen.findByRole('button', { name: /generate/i }))
+    expect(screen.getByRole('button', { name: 'Create!' })).toBeTruthy()
+
+    // The generation that just landed spent the last of the day's budget.
+    rerender(
+      <StickerPicker
+        open
+        onClose={vi.fn()}
+        familyId="family-1"
+        onSelectSticker={vi.fn()}
+        capReached
+        recordGeneration={recordGenerationMock}
+      />,
+    )
+
+    // No visible button that would silently do nothing.
+    expect(screen.queryByRole('button', { name: 'Create!' })).toBeNull()
+    expect(screen.queryByLabelText(/describe your sticker/i)).toBeNull()
+    expect(screen.getAllByText(ART_QUOTA_MESSAGE).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
+    expect(generateImageMock).not.toHaveBeenCalled()
+  })
+
   it('uncapped by default — a mount that passes neither prop is unchanged', async () => {
     renderPicker()
 

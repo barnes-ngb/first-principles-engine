@@ -209,11 +209,31 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
 
   // ── Commit / abandon ──────────────────────────────────────────
 
+  /**
+   * The finished book, held back from the hand-off while the cap notice is on
+   * screen (FEAT-168, Codex P2 on PR #1720).
+   *
+   * `commitAndClose` sets `illustrationProgress` as it finishes, so a notice
+   * rendered off that state used to be unmounted by `onCommit`'s navigation in
+   * the same tick — a kid landed in an unillustrated book with no explanation.
+   * Parking the id here lets the effect below decide: navigate as before when
+   * the pictures were made, or wait for a tap when the budget refused them.
+   */
+  const [pendingCommitId, setPendingCommitId] = useState<string | null>(null)
+
   const handleCommit = useCallback(async () => {
     tts.cancel()
     const id = await commitAndClose()
-    if (id) onCommit(id)
-  }, [commitAndClose, onCommit, tts])
+    if (id) setPendingCommitId(id)
+  }, [commitAndClose, tts])
+
+  // Hand off immediately unless the day's art budget has something to say.
+  // Reading `capReached` here rather than inside `handleCommit` keeps it off a
+  // closure captured before `commitAndClose` ran.
+  useEffect(() => {
+    if (!pendingCommitId || illustrationProgress.capReached) return
+    onCommit(pendingCommitId)
+  }, [pendingCommitId, illustrationProgress.capReached, onCommit])
 
   const handleAbandon = useCallback(async () => {
     tts.cancel()
@@ -407,11 +427,27 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
 
       {/* The day's art budget refused or cut short the pictures (FEAT-168). The
           story itself is written and saved — only the paid illustrations have a
-          ceiling — so this is a warm nudge in `text.secondary`, never an error. */}
+          ceiling — so this is a warm nudge in `text.secondary`, never an error.
+          The hand-off to the book waits on the tap, so the kid actually reads
+          it instead of being navigated past it. */}
       {illustrationProgress.capReached && (
-        <Typography variant="body2" color="text.secondary" aria-live="polite">
-          Your story is saved! {ART_QUOTA_MESSAGE}
-        </Typography>
+        <Stack spacing={1} sx={{ py: 1 }} aria-live="polite">
+          <Typography variant="body2" color="text.secondary">
+            Your story is saved! {ART_QUOTA_MESSAGE} You can add photos or
+            drawings in the editor.
+          </Typography>
+          {pendingCommitId && (
+            <Box>
+              <Button
+                variant="contained"
+                onClick={() => onCommit(pendingCommitId)}
+                sx={{ minHeight: 44, textTransform: 'none' }}
+              >
+                Okay — take me to my book
+              </Button>
+            </Box>
+          )}
+        </Stack>
       )}
 
       {isIllustrating && (
