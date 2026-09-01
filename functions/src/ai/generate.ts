@@ -3,7 +3,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { claudeApiKey } from "./aiConfig.js";
 import { requireEmailAuth } from "./authGuard.js";
 import { CHARTER_PREAMBLE } from "./contextSlices.js";
-import { sanitizeAndParseJson } from "./sanitizeJson.js";
+import { sanitizeAndParseJson } from "../shared/sanitizeJson.js";
 import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
 

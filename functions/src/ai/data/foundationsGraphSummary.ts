@@ -6,7 +6,8 @@
  * which cannot import the client TS module — can name concepts in plain words when
  * they synthesize (`learnerSynthesis`) and format the `learnerModel` context slice.
  *
- * DELIBERATE DUPLICATION (same pattern as `sanitizeJson.ts`). This file is
+ * DELIBERATE DUPLICATION (the pattern `sanitizeJson.ts` carried until ARCH-47
+ * slice 3 gave it one definition in `functions/src/shared/`). This file is
  * MACHINE-GENERATED from the client graphs by `scripts/genFoundationsSummary.ts` —
  * do not hand-edit. If the client graph changes, re-run the generator and commit
  * the result; `foundationsGraphSummary.test.ts` pins internal consistency.
