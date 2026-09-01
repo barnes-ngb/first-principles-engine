@@ -11,6 +11,20 @@ import { UserProfile } from '../../core/types/enums'
 
 let mockReports: DadLabReport[] = []
 
+// Pin "today" to the month the fixtures live in (FEAT-170). The page opens a
+// completed-labs month group by default only when it IS the current month
+// (`todayKey().slice(0, 7)`, DadLabPage.tsx), and the group renders inside
+// `<Collapse unmountOnExit>` — so with the real clock these cards were mounted
+// in August 2026 and gone on September 1, and four assertions below fired at
+// midnight with no code change. Mocking the clock SOURCE (not timers) keeps
+// React Testing Library's queries synchronous and matches the file's idiom;
+// `formatDateShort` and the rest of the module stay real.
+const FIXTURE_DAY = vi.hoisted(() => '2026-08-22')
+vi.mock('../../core/utils/dateKey', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../core/utils/dateKey')>()),
+  todayKey: () => FIXTURE_DAY,
+}))
+
 vi.mock('../../core/profile/useProfile', () => ({
   useProfile: () => ({ profile: UserProfile.Parents, canEdit: true }),
 }))
@@ -56,12 +70,14 @@ vi.mock('../../components/ArtifactGallery', () => ({
 
 import DadLabPage from './DadLabPage'
 
-const NOW = '2026-08-22T00:00:00.000Z'
+// Fixture timestamps are DATA (createdAt/updatedAt); the clock the page reads
+// is pinned above so both describe the same day.
+const NOW = `${FIXTURE_DAY}T00:00:00.000Z`
 
 function completedReport(overrides: Partial<DadLabReport>): DadLabReport {
   return {
     id: 'lab-aug-22',
-    date: '2026-08-22',
+    date: FIXTURE_DAY,
     weekKey: '2026-W34',
     title: 'Balloon Lab',
     labType: 'science',
