@@ -3,9 +3,12 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 // ── Hoisted mocks ───────────────────────────────────────────────
 
-const { chatMock, generateImageMock } = vi.hoisted(() => ({
+const { chatMock, generateImageMock, sightWordState } = vi.hoisted(() => ({
   chatMock: vi.fn(),
   generateImageMock: vi.fn(),
+  // The child's sight-word list the hook reads (FEAT-169). Default: nothing to
+  // practise, so every pre-existing test runs exactly as before (`words: []`).
+  sightWordState: { progressMap: new Map<string, unknown>() },
 }))
 
 vi.mock('../../core/ai/useAI', () => ({
@@ -38,6 +41,18 @@ vi.mock('./bookTypes', () => ({
   generateImageId: () => 'image-id',
 }))
 
+// Read-only: the hook only ever reads `progressMap` (FEAT-169).
+vi.mock('./useSightWordProgress', () => ({
+  useSightWordProgress: () => ({
+    progressMap: sightWordState.progressMap,
+    allProgress: [...sightWordState.progressMap.values()],
+    loading: false,
+    recordInteraction: vi.fn(),
+    confirmMastery: vi.fn(),
+    getWeakWords: () => [],
+  }),
+}))
+
 // The daily art budget the illustrator now asks for itself (FEAT-168).
 // `Infinity` = uncapped, so this hook's existing behaviour is unchanged.
 vi.mock('./useBookArtQuota', () => ({
@@ -67,7 +82,27 @@ const baseOpts = {
 beforeEach(() => {
   chatMock.mockReset()
   generateImageMock.mockReset()
+  sightWordState.progressMap = new Map()
 })
+
+/** A `sightWordProgress` doc for the mocked child list. */
+function wordDoc(word: string, masteryLevel: 'new' | 'practicing' | 'familiar' | 'mastered', helpRequested = 0) {
+  return {
+    word,
+    masteryLevel,
+    helpRequested,
+    encounters: 0,
+    selfReportedKnown: 0,
+    shellyConfirmed: false,
+    firstSeen: '2026-01-01T00:00:00.000Z',
+    lastSeen: '2026-01-01T00:00:00.000Z',
+    lastLevelChange: '2026-01-01T00:00:00.000Z',
+  }
+}
+
+function setChildWords(...docs: ReturnType<typeof wordDoc>[]) {
+  sightWordState.progressMap = new Map(docs.map((d) => [d.word, d]))
+}
 
 describe('joinIdeas', () => {
   it('inserts "and" when refinement does not start with a chaining word', () => {
@@ -568,5 +603,153 @@ describe('useBookGenerateChat clarification state machine', () => {
     await waitFor(() => {
       expect(result.current.pageCount).toBe(14)
     })
+  })
+})
+
+// ── FEAT-169: sight words reach generateStory, and a failure names itself ──
+
+describe('useBookGenerateChat sight-word channel (FEAT-169)', () => {
+  const fakeStory = {
+    title: 'Cave Cat',
+    pages: [
+      { pageNumber: 1, text: 'The cat found water again.', sceneDescription: 'a cave' },
+      { pageNumber: 2, text: 'People came to see.', sceneDescription: 'a crowd' },
+    ],
+  }
+
+  it("sends the child's practice words as the structured `words` list, not `[]`", async () => {
+    setChildWords(wordDoc('water', 'practicing', 2), wordDoc('again', 'new'), wordDoc('the', 'mastered'))
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+
+    await waitFor(() => expect(result.current.storyWords).toEqual(['water', 'again']))
+    await act(async () => {
+      await result.current.sendKidMessage('a cat in a cave')
+    })
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+
+    expect(chatMock).toHaveBeenCalledTimes(1)
+    const payload = JSON.parse(chatMock.mock.calls[0][0].messages[0].content)
+    expect(payload.words).toEqual(['water', 'again'])
+    expect(payload.storyIdea).toBe('a cat in a cave')
+    // The picked style's theme is kept — words are not fed to inferBookTheme.
+    expect(payload.theme).toBe('fantasy')
+  })
+
+  it('records the same list on the draft book (generationConfig.words), so the book says what was asked for', async () => {
+    setChildWords(wordDoc('water', 'practicing'))
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { addDoc } = await import('firebase/firestore')
+    const addDocMock = vi.mocked(addDoc)
+    addDocMock.mockClear()
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await waitFor(() => expect(result.current.storyWords).toEqual(['water']))
+
+    await act(async () => {
+      await result.current.sendKidMessage('a cat in a cave')
+    })
+    const clarificationDoc = addDocMock.mock.calls[0]?.[1] as { generationConfig?: { words: string[] } }
+    expect(clarificationDoc.generationConfig?.words).toEqual(['water'])
+  })
+
+  it('sends `words: []` and makes no claim for a child with nothing to practise', async () => {
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    expect(result.current.storyWords).toEqual([])
+    await act(async () => {
+      await result.current.sendKidMessage('a cat')
+    })
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    const payload = JSON.parse(chatMock.mock.calls[0][0].messages[0].content)
+    expect(payload.words).toEqual([])
+    const lastAi = result.current.chatHistory[result.current.chatHistory.length - 1]
+    expect(lastAi.content).toBe('Here\'s your story! "Cave Cat"')
+  })
+
+  it('the story-draft turn reports which practice words actually landed on a page', async () => {
+    setChildWords(wordDoc('water', 'practicing'), wordDoc('again', 'new'), wordDoc('yellow', 'new'))
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await waitFor(() => expect(result.current.storyWords).toHaveLength(3))
+    await act(async () => {
+      await result.current.sendKidMessage('a cat')
+    })
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    const lastAi = result.current.chatHistory[result.current.chatHistory.length - 1]
+    expect(lastAi).toMatchObject({ role: 'ai', kind: 'story-draft' })
+    // "yellow" was sent but is on no page — it is not claimed.
+    expect(lastAi.content).toBe(
+      'Here\'s your story! "Cave Cat" — it uses your practice words: water, again.',
+    )
+  })
+})
+
+describe('useBookGenerateChat failure messages (FEAT-169 — a failure that names itself)', () => {
+  async function startAndConfirm() {
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await act(async () => {
+      await result.current.sendKidMessage('a cat')
+    })
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    return result
+  }
+
+  it('a call that returned nothing says the story did not come back and points at the connection', async () => {
+    chatMock.mockResolvedValueOnce(null)
+    const result = await startAndConfirm()
+    expect(result.current.error).toMatch(/didn't come back/i)
+    expect(result.current.error).toMatch(/connection/i)
+    expect(result.current.error).toMatch(/nothing was lost/i)
+    expect(result.current.clarificationPhase).toBe('clarifying')
+    expect(result.current.canStartStory).toBe(true)
+  })
+
+  it('a reply the budget cut short (stopReason max_tokens) says so and suggests a Short book', async () => {
+    const truncated = JSON.stringify({ title: 'T', pages: [{ pageNumber: 1, text: 'x' }] }).slice(0, -12)
+    chatMock.mockResolvedValueOnce({ message: truncated, stopReason: 'max_tokens' })
+    const result = await startAndConfirm()
+    expect(result.current.error).toMatch(/too long to finish/i)
+    expect(result.current.error).toMatch(/short book/i)
+    expect(result.current.error).toMatch(/nothing was lost/i)
+    expect(result.current.clarificationPhase).toBe('clarifying')
+  })
+
+  it('a truncated JSON reply with no stopReason (older deploy) is still recognised as cut short', async () => {
+    const truncated = JSON.stringify({ title: 'T', pages: [{ pageNumber: 1, text: 'x' }] }).slice(0, -12)
+    chatMock.mockResolvedValueOnce({ message: truncated })
+    const result = await startAndConfirm()
+    expect(result.current.error).toMatch(/too long to finish/i)
+  })
+
+  it('a complete but unreadable reply says so and suggests a plain retry — not the connection', async () => {
+    chatMock.mockResolvedValueOnce({ message: 'Sorry, I cannot write that.', stopReason: 'end_turn' })
+    const result = await startAndConfirm()
+    expect(result.current.error).toMatch(/shape I couldn't read/i)
+    expect(result.current.error).toMatch(/nothing was lost/i)
+    expect(result.current.error).not.toMatch(/connection/i)
+    expect(result.current.clarificationPhase).toBe('clarifying')
+  })
+
+  it('the three failures never share a message', async () => {
+    const seen = new Set<string>()
+    for (const reply of [
+      null,
+      { message: '{"title":"T","pages":[', stopReason: 'max_tokens' },
+      { message: 'nope', stopReason: 'end_turn' },
+    ]) {
+      chatMock.mockResolvedValueOnce(reply)
+      const result = await startAndConfirm()
+      expect(result.current.error).toBeTruthy()
+      seen.add(result.current.error as string)
+    }
+    expect(seen.size).toBe(3)
   })
 })

@@ -21,6 +21,7 @@ import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { ChatTurn } from '../../core/types'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import { practiceWordsPreviewLine } from './storyPracticeWords'
 import { useBookGenerateChat } from './useBookGenerateChat'
 import StoryLengthSelector from './StoryLengthSelector'
 import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
@@ -104,6 +105,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     canStartStory,
     pageCount,
     setPageCount,
+    storyWords,
     illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,
@@ -326,6 +328,19 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
                 >
                   <Typography variant="body2">{turn.content}</Typography>
                 </Box>
+                {/* Which sight words the story will carry, said before the tap
+                    (FEAT-169) — so the parent can see the list is in play, and
+                    a child with nothing to practise sees no claim at all. */}
+                {showYesHere && storyWords.length > 0 && (
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    data-testid="story-practice-words"
+                    sx={{ mt: 1, alignSelf: 'stretch' }}
+                  >
+                    {practiceWordsPreviewLine(childName, storyWords)}
+                  </Typography>
+                )}
                 {showYesHere && (
                   <Button
                     variant="contained"
