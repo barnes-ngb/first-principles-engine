@@ -12,11 +12,22 @@
  *     `functions/src` in the program is TS6059 ("not under rootDir");
  *   - functions compiles with `moduleResolution: "node16"`, under which the
  *     app's own extensionless relative imports (`./enums`) are TS2835.
- * So this is a deliberate second implementation, like `sanitizeJson` and
- * `dadLabReportArtifacts`. It MUST stay rule-identical to the app-side path; a
- * fixture shared verbatim with `src/features/records/records.logic.test.ts`
- * pins the two together — see `PARITY_FIXTURE` in `monthlyHours.test.ts`, and
- * the mirrored "functions-side port" case in the app-side test.
+ * So this is a deliberate second implementation, like `sanitizeJson`. It MUST
+ * stay rule-identical to the app-side path; a fixture shared verbatim with
+ * `src/features/records/records.logic.test.ts` pins the two together — see
+ * `PARITY_FIXTURE` in `monthlyHours.test.ts`, and the mirrored "functions-side
+ * port" case in the app-side test.
+ *
+ * ── The walls are real, but they are not the whole story (ARCH-47) ───────────
+ * `functions/src/shared/` now holds rules with exactly ONE definition, compiled
+ * by both projects: the shared directory sits INSIDE `functions/src` (so
+ * `rootDir` is satisfied and `functions/lib/index.js` never moves) and the app
+ * reaches in. `dadLabReportArtifacts` moved there in slice 1, and the doc-id
+ * helper this file used to carry inline moved there in slice 2 — it is now
+ * `functions/src/shared/docId.ts`, imported by `monthlyReviewData.ts` directly.
+ * THIS rule is slice 4, deliberately last: it is the largest, and it is
+ * compliance math, which `CLAUDE.md` names propose-and-confirm. Until then the
+ * parity fixture above is still the only thing holding the two copies together.
  *
  * ── Why it exists (FEAT-164) ─────────────────────────────────────────────────
  * The monthly review book used to total the `hours` collection ALONE, while the
@@ -47,33 +58,6 @@
 
 /** The `'Home'` member of `LearningLocation` (`src/core/types/enums.ts`). */
 export const LOCATION_HOME = "Home";
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * A child id recovered from a composite day-log doc id. Port of
- * `deriveChildIdFromDocId` (`src/core/utils/docId.ts`) — keep the two in
- * lockstep.
- *
- * Legacy `days` documents carry no `childId` FIELD; the child is encoded only
- * in the doc id, in either `{date}_{childId}` or the older `{childId}_{date}`
- * order. Both Records read paths normalize with this before counting
- * (`RecordsPage.tsx` line ~309 and `dataReviewExportLoader.ts` line ~261,
- * whose comment reads "so those days still count"), so the monthly book must
- * too — otherwise a regenerated historical book silently drops exactly the
- * day-log minutes FEAT-164 exists to include (Codex P2, PR #1711).
- */
-export function deriveChildIdFromDocId(docId: string): string | undefined {
-  const idx = docId.indexOf("_");
-  if (idx === -1) return undefined;
-
-  const first = docId.slice(0, idx);
-  const rest = docId.slice(idx + 1);
-
-  if (DATE_RE.test(first) && rest.length > 0) return rest;
-  if (DATE_RE.test(rest) && first.length > 0) return first;
-  return undefined;
-}
 
 /** The DATA-09 sentinel meaning "family-wide time, counts for every child". */
 export const ADJUSTMENT_BOTH = "both";

@@ -1,31 +1,12 @@
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-
 /**
- * Extract the `date` portion from a composite Firestore document ID.
- * Handles both `{date}_{childId}` (new) and `{childId}_{date}` (legacy)
- * formats by checking which segment looks like a YYYY-MM-DD date.
+ * Composite day-log doc-id parsing.
+ *
+ * THE definition now lives in `functions/src/shared/docId.ts`, compiled by BOTH
+ * this app and the Cloud Functions project (ARCH-47 slice 2) — it used to exist
+ * here and again, hand-ported, inside `functions/src/ai/tasks/monthlyHours.ts`.
+ *
+ * This file keeps its path and re-exports, so every consumer
+ * (`records/dataReviewExportLoader.ts`, `records/records.logic.ts` — which
+ * re-exports it again — and `today/daylog.model.ts`) is untouched.
  */
-export const parseDateFromDocId = (docId: string): string => {
-  const prefix = docId.slice(0, 10)
-  if (DATE_RE.test(prefix)) return prefix
-  const suffix = docId.slice(-10)
-  if (DATE_RE.test(suffix)) return suffix
-  return docId
-}
-
-/**
- * Derive a childId from a Firestore document ID that encodes both date and
- * childId separated by `_`.  Handles both `${date}_${childId}` and
- * `${childId}_${date}` formats.
- */
-export function deriveChildIdFromDocId(docId: string): string | undefined {
-  const idx = docId.indexOf('_')
-  if (idx === -1) return undefined
-
-  const first = docId.slice(0, idx)
-  const rest = docId.slice(idx + 1)
-
-  if (DATE_RE.test(first) && rest.length > 0) return rest
-  if (DATE_RE.test(rest) && first.length > 0) return first
-  return undefined
-}
+export { deriveChildIdFromDocId, parseDateFromDocId } from '../../../functions/src/shared/docId'
