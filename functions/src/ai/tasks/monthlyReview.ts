@@ -5,7 +5,7 @@ import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { resolveEffortForTask, type ReasoningEffort } from "../models.js";
 import { CHARTER_PREAMBLE } from "../contextSlices.js";
-import { sanitizeAndParseJson } from "../sanitizeJson.js";
+import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
 import {
   aggregateMonthData,
   type MonthAggregate,

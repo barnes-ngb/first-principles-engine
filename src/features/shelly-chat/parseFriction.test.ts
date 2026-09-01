@@ -57,6 +57,20 @@ describe('parseFriction', () => {
     expect(result?.cleanText).not.toContain('<friction>')
   })
 
+  // ARCH-47 slice 3: the app's sanitizer gained the server copy's
+  // preamble/suffix fallback. This case FAILED against the pre-slice app copy —
+  // the throw was swallowed above and the friction silently returned null.
+  it('recovers a friction payload that carries a conversational preamble', () => {
+    const raw =
+      '<friction>Sure — here you go:\n{"quote": "I keep losing the week view", "interpretedWant": "A pinned week summary"}</friction>'
+    const { friction, cleanText } = parseFriction(raw)
+    expect(friction).toEqual({
+      quote: 'I keep losing the week view',
+      interpretedWant: 'A pinned week summary',
+    })
+    expect(cleanText).toBe('')
+  })
+
   it('returns { friction: null, cleanText: raw } when there is no block', () => {
     const raw = 'Just a normal reply, no friction here.'
     const { friction, cleanText } = parseFriction(raw)

@@ -66,12 +66,23 @@ Migrated:
   split `DATE_RE` across the wall. `src/core/utils/docId.ts` keeps its path and
   re-exports, so its consumers (and the further re-export in `records.logic.ts`) are
   untouched; on the functions side `monthlyReviewData.ts` imports it directly.
+- `sanitizeJson.ts` (slice 3) — `sanitizeAndParseJson`, the LLM-JSON parser: fence
+  stripping, trailing commas, control characters and interior quotes inside strings,
+  and the preamble/suffix fallback (`candidateJsonSpans`). Previously
+  `functions/src/ai/sanitizeJson.ts` plus a "deliberate client-side port" at
+  `src/core/utils/sanitizeJson.ts`, each with a `// TODO: consolidate`. **This was
+  the slice where the copies had DRIFTED**: the functions copy had gained the
+  preamble/suffix fallback and the app copy never received it, so `Here is the
+  JSON:\n{ … }` parsed on the server and threw in the browser — where every
+  consumer swallows the throw and silently drops the payload. Consolidated on the
+  fuller behaviour, so the app side *gained* the fallback; declared and tested as a
+  behaviour change, not a refactor. `src/core/utils/sanitizeJson.ts` keeps its path
+  and re-exports, so its three consumers are untouched; the functions-side copy is
+  deleted and its nine consumers import the shared module directly.
 
-Still hand-kept copies, in the order they should follow:
+Still hand-kept copies:
 
-1. `sanitizeJson` — `functions/src/ai/sanitizeJson.ts` vs `src/core/utils/sanitizeJson.ts`
-   (carries its own `// TODO: consolidate`).
-2. `collectHoursContributions` — `functions/src/ai/tasks/monthlyHours.ts` vs
+1. `collectHoursContributions` — `functions/src/ai/tasks/monthlyHours.ts` vs
    `src/features/records/records.logic.ts`. Last, deliberately: it is the largest and it
    is compliance math, which `CLAUDE.md` names propose-and-confirm.
 

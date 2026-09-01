@@ -6,7 +6,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { claudeApiKey } from "./aiConfig.js";
 import { buildContextForTask } from "./contextSlices.js";
 import type { SnapshotData } from "./chatTypes.js";
-import { sanitizeAndParseJson } from "./sanitizeJson.js";
+import { sanitizeAndParseJson } from "../shared/sanitizeJson.js";
 import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
 import { synthesizeIfStale } from "./learnerSynthesis.js";

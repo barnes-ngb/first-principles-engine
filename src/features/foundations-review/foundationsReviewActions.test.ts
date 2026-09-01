@@ -69,6 +69,17 @@ describe('parseFoundationsReviewActions', () => {
     const raw = `<action>{"kind":"attest","childId":"c1","conceptId":"${CVC}","state":"not-yet"}</action>`
     expect(parseFoundationsReviewActions(raw).actions).toHaveLength(0)
   })
+
+  // ARCH-47 slice 3: the app's sanitizer gained the server copy's
+  // preamble/suffix fallback. This case FAILED against the pre-slice app copy —
+  // the throw was swallowed and the attest silently dropped.
+  it('recovers an attest whose payload carries a conversational preamble', () => {
+    const raw = `<action>Here is the JSON:\n{"kind":"attest","childId":"c1","conceptId":"${CVC}","state":"solid","note":"reads cat, run"}</action>`
+    const { actions } = parseFoundationsReviewActions(raw)
+    expect(actions).toEqual([
+      { kind: 'attest', childId: 'c1', conceptId: CVC, state: 'solid', note: 'reads cat, run' },
+    ])
+  })
 })
 
 describe('applyReviewActionToModel — attest', () => {

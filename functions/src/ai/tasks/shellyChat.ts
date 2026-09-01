@@ -283,8 +283,10 @@ export interface ChatWeekDayRow {
  * parent sees "I couldn't find that item" for rows plainly in front of her.
  *
  * Duplicated rather than shared because `functions/` is a separate TypeScript
- * project with no import path into `src/` (the same deliberate duplication
- * `sanitizeJson` carries). Two lines, pinned by a test on each side.
+ * project with no import path into `src/`. Two lines, pinned by a test on each
+ * side. (`sanitizeJson` used to be the reference example of this pattern; it now
+ * has one definition in `functions/src/shared/` — ARCH-47 — which is the path
+ * this pair should take if a third line ever appears.)
  */
 export function chatChecklistItemKey(item: ChatWeekChecklistRow): string {
   return item.id ?? `${item.label ?? ""}::${item.subjectBucket ?? ""}`;

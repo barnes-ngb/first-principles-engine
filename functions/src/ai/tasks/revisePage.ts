@@ -4,7 +4,7 @@ import { callClaude, logAiUsage } from "../chatTypes.js";
 import { buildRevisePagePrompt, modelForTask } from "../chat.js";
 import type { RevisePageInput, RevisePageOutput } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
-import { sanitizeAndParseJson } from "../sanitizeJson.js";
+import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
 
 /**
  * Task: revisePage

@@ -85,6 +85,26 @@ describe('parseChatActions', () => {
     ])
   })
 
+  // ── ARCH-47 slice 3: the app's parser gained the preamble/suffix fallback ──
+  //
+  // Before the sanitizer was consolidated, the app copy threw on a payload with
+  // conversational text around the JSON, and this loop swallowed the throw —
+  // a confirm card silently dropped with no sentence (the UX-33 / FEAT-162
+  // failure class). The server copy already recovered these. Now there is one
+  // parser, and this case pins the app side end to end: it FAILED against the
+  // pre-slice app copy.
+  it('recovers an action whose payload carries a conversational preamble and suffix', () => {
+    const raw = [
+      'Adding that now.',
+      '<action>Here is the action:\n{"kind": "addSightWord", "childId": "lincoln", "word": "was"}\nHope that helps!</action>',
+    ].join('\n')
+    const { actions, cleanText } = parseChatActions(raw)
+    expect(actions).toEqual([
+      { kind: 'addSightWord', childId: 'lincoln', word: 'was' },
+    ])
+    expect(cleanText).toBe('Adding that now.')
+  })
+
   it('extracts an editProfileField block with an allowed field', () => {
     const raw =
       'Sounds good.\n<action>{"kind": "editProfileField", "childId": "lincoln", "field": "motivators", "value": "Minecraft, Lego, Art"}</action>'
