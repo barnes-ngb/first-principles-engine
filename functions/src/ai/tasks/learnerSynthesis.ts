@@ -21,7 +21,7 @@
  * - **No-shame rails:** terrain not deficit, never "behind," never logging-guilt.
  */
 import { CHARTER_PREAMBLE } from "../contextSlices.js";
-import { sanitizeAndParseJson } from "../sanitizeJson.js";
+import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
 import {
   FOUNDATION_SUMMARY_MAP,
   FOUNDATION_SUMMARY_NODES,

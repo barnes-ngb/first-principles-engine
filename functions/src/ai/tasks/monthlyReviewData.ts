@@ -5,13 +5,13 @@ import {
   labBeatsHaveContent,
   reportArtifactIds,
 } from "./dadLabReportArtifacts.js";
+import { computeMonthHours } from "./monthlyHours.js";
+import { deriveChildIdFromDocId } from "../../shared/docId.js";
 import {
-  computeMonthHours,
   type RawDayLog,
   type RawHoursAdjustment,
   type RawHoursEntry,
-} from "./monthlyHours.js";
-import { deriveChildIdFromDocId } from "../../shared/docId.js";
+} from "../../shared/hoursContributions.js";
 
 /**
  * Firestore composite indexes required by this module.

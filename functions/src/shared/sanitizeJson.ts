@@ -1,12 +1,28 @@
 /**
- * Sanitize JSON strings returned by LLMs that may contain minor formatting
- * issues such as trailing commas, unescaped control characters inside strings,
- * or markdown code fences.
+ * The LLM-JSON parser — THE definition (ARCH-47 slice 3).
  *
- * NOTE: A deliberate client-side port lives at `src/core/utils/sanitizeJson.ts`
- * (separate build root — `functions/` cannot be imported from `src/`).
- * TODO: consolidate the two sanitizeJson copies behind a shared package
- * (future ARCH item) once cross-root sharing is set up.
+ * ── One rule, two compilers ──────────────────────────────────────────────────
+ * This rule used to exist twice: once as `functions/src/ai/sanitizeJson.ts` and
+ * once as a hand-kept "deliberate client-side port" at
+ * `src/core/utils/sanitizeJson.ts`, each carrying a `// TODO: consolidate`. The
+ * two had DRIFTED: the functions copy gained the preamble/suffix fallback
+ * (`candidateJsonSpans`, below) and the app copy never received it, so
+ * `Here is the JSON:\n{ … }` parsed on the server and threw in the browser —
+ * where every caller swallows the throw and silently drops the payload.
+ *
+ * It now has one definition, compiled by BOTH projects, on the fuller
+ * behaviour. The app reaches in from `src/core/utils/sanitizeJson.ts` (which
+ * keeps its path and re-exports, so its three consumers are untouched); the
+ * functions-side callers import this module directly. Change the rule and
+ * break a caller, and it fails to COMPILE on the side that broke. See
+ * `functions/src/shared/README.md` for why the shared directory lives under
+ * `functions/` and the four conventions it must honour.
+ *
+ * ── The rule ─────────────────────────────────────────────────────────────────
+ * Sanitize JSON strings returned by LLMs that may contain minor formatting
+ * issues such as trailing commas, unescaped control characters or interior
+ * quotes inside strings, markdown code fences, or conversational text around
+ * the payload — then parse. Pure string handling; no I/O, no environment.
  */
 
 /**
@@ -174,6 +190,9 @@ function escapeControlCharsInStrings(text: string): string {
  * 4. Parse with JSON.parse
  * 5. On failure, strip a leading/trailing preamble by extracting the outermost
  *    JSON span and retry once (fences don't cover `Here is the JSON: { ... }`).
+ *
+ * Throws if no step yields valid JSON. Callers that must never throw (the
+ * app's `<action>` / `<friction>` extractors) wrap the call themselves.
  */
 export function sanitizeAndParseJson<T = unknown>(raw: string): T {
   let text = stripCodeFences(raw);

@@ -2,8 +2,6 @@ import JSZip from 'jszip'
 
 import type {
   Artifact,
-  ChecklistItem,
-  DayBlock,
   DayLog,
   Evaluation,
   HoursAdjustment,
@@ -17,7 +15,13 @@ import {
 } from '../../core/types/enums'
 import { formatDateForCsv, toCsvValue } from '../../core/utils/format'
 import { deriveChildIdFromDocId } from '../../core/utils/docId'
-import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
+import {
+  collectHoursContributions as sharedCollectHoursContributions,
+  dayLogMinuteContributions as sharedDayLogMinuteContributions,
+  entryMinutes as sharedEntryMinutes,
+  type DayLogContribution as SharedDayLogContribution,
+  type HoursContribution as SharedHoursContribution,
+} from '../../../functions/src/shared/hoursContributions'
 import {
   getStateConfig,
   type HomeschoolState,
@@ -89,45 +93,17 @@ export const assertAttributed = <T extends { childId: string }>(entry: T): T => 
   return entry
 }
 
-export const entryMinutes = (entry: HoursEntry): number => {
-  if (entry.minutes != null) return entry.minutes
-  if (entry.hours != null) return Math.round(entry.hours * 60)
-  return 0
-}
-
-function parseMinutesFromChecklist(label: string): number {
-  const match = label.match(/\((\d+)m\)/)
-  return match ? parseInt(match[1]) : 0
-}
+/**
+ * Minutes on an hours entry: explicit `minutes` wins, else `hours * 60` rounded,
+ * else zero. Typed wrapper over the shared rule.
+ */
+export const entryMinutes = (entry: HoursEntry): number =>
+  sharedEntryMinutes(entry)
 
 /** A single minute contribution from one day log, after the canonical
  *  block-vs-checklist rule has been applied. `location` is the block's location
  *  (or `Home` for checklist items, which are assumed at-home). */
-export type DayLogContribution = {
-  subjectBucket: string
-  minutes: number
-  location?: string
-}
-
-/** Item-level half of the partial-day rule, for a day block: ACTUAL minutes if
- *  logged, else zero. A block's `plannedMinutes` never count — an untracked
- *  block on a tracked day contributes nothing (the documented partial-day
- *  edge). */
-const blockCountedMinutes = (block: DayBlock): number => block.actualMinutes ?? 0
-
-/** Item-level half of the partial-day rule, for a checklist item: PLANNED
- *  minutes for a COMPLETED item (`estimatedMinutes ?? plannedMinutes ?? "(Nm)"
- *  parsed from the label`), else zero. An item's own `actualMinutes`
- *  (quest/fluency auto-complete) is deliberately NOT consulted — counting it
- *  would move stored compliance totals (DATA-11). */
-const checklistItemCountedMinutes = (item: ChecklistItem): number => {
-  if (!item.completed) return 0
-  return (
-    item.estimatedMinutes ??
-    item.plannedMinutes ??
-    parseMinutesFromChecklist(item.label)
-  )
-}
+export type DayLogContribution = SharedDayLogContribution
 
 /**
  * Canonical per-day-log minute extraction — the SINGLE source of truth for how a
@@ -135,76 +111,29 @@ const checklistItemCountedMinutes = (item: ChecklistItem): number => {
  * (totals / compliance) and `computeMonthlyTrend` (the trend chart) so the two
  * can never diverge (DATA-01).
  *
- * Partial-day rule (codified HERE, nowhere else): an item counts its ACTUAL
- * minutes if logged, else its PLANNED minutes if it is a completed checklist
- * item, else ZERO. Concretely: if ANY block has tracked `actualMinutes`, the
- * day is in block-actuals mode — untracked blocks count zero, and each block
- * actual is emitted. DATA-14: in that mode we ALSO emit any COMPLETED checklist
- * item that does NOT correspond (via the shared `itemMatchesBlock` matcher) to
- * a block that already carries `actualMinutes`. A matched item is skipped — its
- * time is already represented by the block it auto-stamped, so it is not
- * double-counted — while an unmatched carried-over item (e.g. rolled over from
- * a prior day, which has no block) is no longer silently dropped. Unmatched
- * items count at Home (checklist work is assumed at the regular place of
- * instruction; this also repairs the Core-at-home figure). Only when NO block
- * tracked time does the day fall back entirely to completed checklist items via
- * `checklistItemCountedMinutes`.
+ * Partial-day rule (DATA-14): an item counts its ACTUAL minutes if logged, else
+ * its PLANNED minutes if it is a completed checklist item, else ZERO. If ANY
+ * block has tracked `actualMinutes`, the day is in block-actuals mode —
+ * untracked blocks count zero, each block actual is emitted, and any COMPLETED
+ * checklist item that does NOT correspond (via the shared `itemMatchesBlock`
+ * matcher) to a block already carrying actuals is ALSO emitted, at Home. A
+ * matched item is skipped — its time is already represented by the block it
+ * auto-stamped — while an unmatched carried-over item is not silently dropped.
+ * Only when NO block tracked time does the day fall back entirely to completed
+ * checklist items.
+ *
+ * Typed wrapper: the rule itself lives in `functions/src/shared` (see
+ * `collectHoursContributions` below).
  */
-export const dayLogMinuteContributions = (log: DayLog): DayLogContribution[] => {
-  const out: DayLogContribution[] = []
-  const blocksWithActuals = log.blocks.filter((b) => blockCountedMinutes(b) > 0)
-  const hasActualBlockMinutes = blocksWithActuals.length > 0
-
-  if (hasActualBlockMinutes) {
-    for (const block of log.blocks) {
-      const minutes = blockCountedMinutes(block)
-      if (minutes <= 0) continue
-      out.push({
-        subjectBucket: block.subjectBucket ?? 'Other',
-        minutes,
-        location: block.location,
-      })
-    }
-    // DATA-14: carry completed checklist items that have no counterpart among
-    // the blocks-with-actuals. Deduped via the SAME matcher TodayChecklist uses
-    // to auto-stamp block minutes, so matched items stay represented by their
-    // block (no double-count) and only genuinely-unmatched work is added.
-    for (const item of log.checklist ?? []) {
-      const minutes = checklistItemCountedMinutes(item)
-      if (minutes <= 0) continue
-      if (blocksWithActuals.some((block) => itemMatchesBlock(item, block))) continue
-      out.push({
-        subjectBucket: item.subjectBucket ?? 'Other',
-        minutes,
-        // Checklist completions are assumed at the regular place of instruction.
-        location: LearningLocation.Home,
-      })
-    }
-  } else if (log.checklist) {
-    for (const item of log.checklist) {
-      const minutes = checklistItemCountedMinutes(item)
-      if (minutes <= 0) continue
-      out.push({
-        subjectBucket: item.subjectBucket ?? 'Other',
-        minutes,
-        // Checklist completions are assumed at the regular place of instruction.
-        location: LearningLocation.Home,
-      })
-    }
-  }
-
-  return out
-}
+export const dayLogMinuteContributions = (log: DayLog): DayLogContribution[] =>
+  sharedDayLogMinuteContributions(log)
 
 // ─── Shared counting path (DATA-11) ─────────────────────────────────────────
 
 /** One counted minute contribution from any hours source, with the source it
  *  came from. The full additive model is: hours entries + day logs +
  *  adjustments. */
-export type HoursContribution = DayLogContribution & {
-  date: string
-  kind: 'entry' | 'day-log' | 'adjustment'
-}
+export type HoursContribution = SharedHoursContribution
 
 /**
  * THE single counting path for hours (DATA-11). Applies the child-id
@@ -221,73 +150,29 @@ export type HoursContribution = DayLogContribution & {
  * trend chart) both consume this list and only differ in how they fold it, so
  * the surfaces cannot drift.
  *
- * ⚠️ PORTED (FEAT-164). This rule — and its helpers `entryMinutes`,
- * `dayLogMinuteContributions` and `itemMatchesBlock` — exists a SECOND time in
+ * ── ONE definition, two compilers (ARCH-47 slice 4) ─────────────────────────
+ * This rule — with `entryMinutes`, `dayLogMinuteContributions` and
+ * `itemMatchesBlock` — used to exist a SECOND time in
  * `functions/src/ai/tasks/monthlyHours.ts`, because the monthly review book is
- * generated in a Cloud Function and `functions/` cannot import from `src/`
- * (TS6059 `rootDir` + TS2835 node16 resolution — measured, see that module's
- * header). The book's hours figure must equal the Records figure, so the two
- * copies are pinned by a PARITY FIXTURE repeated verbatim in
- * `records.logic.test.ts` and `functions/src/ai/tasks/monthlyHours.test.ts`:
- * change the rule here and that pair fails until the port changes too.
+ * generated in a Cloud Function; the two copies were pinned by a PARITY FIXTURE
+ * repeated verbatim in both test files. It now lives ONCE, in
+ * `functions/src/shared/hoursContributions.ts`, compiled by BOTH projects — the
+ * app reaches in (the shared directory sits inside `functions/src` so
+ * `functions/lib/index.js` never moves) and the book imports it directly. Change
+ * the rule and break a caller, and it fails to COMPILE on the side that broke;
+ * the fixture is retired because the compiler replaced it.
+ *
+ * These wrappers keep the TYPED signatures every app call site already uses —
+ * nothing here was loosened to `unknown` to fit the shared module's structural
+ * `Raw*` shapes.
  */
 export const collectHoursContributions = (
   dayLogs: DayLog[],
   hoursEntries: HoursEntry[],
   adjustments: HoursAdjustment[],
   childId?: string,
-): HoursContribution[] => {
-  // When childId is provided, enforce filtering as a safety net.
-  const filteredLogs = childId
-    ? dayLogs.filter((l) => l.childId === childId)
-    : dayLogs
-  const filteredEntries = childId
-    ? hoursEntries.filter((e) => e.childId === childId)
-    : hoursEntries
-  // DATA-09: explicit attribution — an adjustment counts for this child only
-  // when it is tagged to them or to 'both' (legitimate family-wide time, e.g.
-  // Dad Lab). The former `!a.childId` clause silently widened unattributed docs
-  // onto BOTH kids (the DATA-05 leak); those legacy docs are migrated to 'both'.
-  const filteredAdj = childId
-    ? adjustments.filter((a) => a.childId === childId || a.childId === 'both')
-    : adjustments
-
-  const out: HoursContribution[] = []
-
-  // ── SOURCE 1: Hours entries (Dad Lab, manual entries, etc.) ──
-  for (const entry of filteredEntries) {
-    const minutes = entryMinutes(entry)
-    if (minutes <= 0) continue
-    out.push({
-      kind: 'entry',
-      date: entry.date,
-      subjectBucket: entry.subjectBucket ?? 'Other',
-      minutes,
-      location: entry.location,
-    })
-  }
-
-  // ── SOURCE 2: Day logs (block actuals preferred, else completed checklist) ──
-  for (const log of filteredLogs) {
-    for (const contribution of dayLogMinuteContributions(log)) {
-      out.push({ kind: 'day-log', date: log.date, ...contribution })
-    }
-  }
-
-  // ── SOURCE 3: Adjustments — every doc counts, including negative corrections
-  // (no minutes guard, unlike entries). ──
-  for (const adj of filteredAdj) {
-    out.push({
-      kind: 'adjustment',
-      date: adj.date,
-      subjectBucket: adj.subjectBucket ?? 'Other',
-      minutes: adj.minutes,
-      location: adj.location,
-    })
-  }
-
-  return out
-}
+): HoursContribution[] =>
+  sharedCollectHoursContributions(dayLogs, hoursEntries, adjustments, childId)
 
 export const computeHoursSummary = (
   dayLogs: DayLog[],

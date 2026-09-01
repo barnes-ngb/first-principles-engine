@@ -2,7 +2,7 @@ import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { modelForTask } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
-import { sanitizeAndParseJson } from "../sanitizeJson.js";
+import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
 
 /**
  * Task: helpCard (FEAT-43, slice 1 of FEAT-40)

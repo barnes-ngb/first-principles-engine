@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
+
 import { sanitizeAndParseJson } from "./sanitizeJson.js";
 
+/**
+ * The rule's own tests, next to its one definition (ARCH-47 slice 3).
+ *
+ * These are the UNION of the two suites the duplication left behind:
+ * `functions/src/ai/sanitizeJson.test.ts` and `src/core/utils/sanitizeJson.test.ts`.
+ * Compared case by case before the merge, the app suite was a strict SUBSET of
+ * the functions suite — every one of its 19 cases appears here with the same
+ * literal — and the functions suite carried five the app never had: the
+ * preamble / suffix / bracketed-aside cases under "strips a one-line preamble"
+ * … "recovers an object … behind a bracketed aside". That gap is not an
+ * accident of test authoring; it is the behavioural DRIFT the duplication hid.
+ * The app copy never received `candidateJsonSpans`, so it had nothing to test.
+ * Those five cases now run against the app's parser too (this file runs in BOTH
+ * vitest projects — the root run executes `functions/src/**`, ARCH-45), and the
+ * app-side consumers pin the same behaviour end to end in their own suites.
+ */
 describe("sanitizeAndParseJson", () => {
   it("parses valid JSON as-is", () => {
     const result = sanitizeAndParseJson<{ a: number }>(

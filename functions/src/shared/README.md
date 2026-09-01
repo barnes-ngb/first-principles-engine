@@ -50,7 +50,12 @@ of not touching the deploy entrypoint.
    `window`. Pure functions only. This code is bundled into the browser app *and*
    deployed to Cloud Functions.
 
-## What is here, and what is still duplicated
+## What is here, and the one leftover
+
+All four ARCH-47 slices have landed. Every rule the work set out to consolidate —
+Dad Lab report artifacts, the day-log doc id, the LLM-JSON parser and the hours
+counting path — now has exactly one definition, so the `functions/`↔`src/` wall no
+longer hides a copy of any of them.
 
 Migrated:
 
@@ -66,14 +71,60 @@ Migrated:
   split `DATE_RE` across the wall. `src/core/utils/docId.ts` keeps its path and
   re-exports, so its consumers (and the further re-export in `records.logic.ts`) are
   untouched; on the functions side `monthlyReviewData.ts` imports it directly.
+- `sanitizeJson.ts` (slice 3) — `sanitizeAndParseJson`, the LLM-JSON parser: fence
+  stripping, trailing commas, control characters and interior quotes inside strings,
+  and the preamble/suffix fallback (`candidateJsonSpans`). Previously
+  `functions/src/ai/sanitizeJson.ts` plus a "deliberate client-side port" at
+  `src/core/utils/sanitizeJson.ts`, each with a `// TODO: consolidate`. **This was
+  the slice where the copies had DRIFTED**: the functions copy had gained the
+  preamble/suffix fallback and the app copy never received it, so `Here is the
+  JSON:\n{ … }` parsed on the server and threw in the browser — where every
+  consumer swallows the throw and silently drops the payload. Consolidated on the
+  fuller behaviour, so the app side *gained* the fallback; declared and tested as a
+  behaviour change, not a refactor. `src/core/utils/sanitizeJson.ts` keeps its path
+  and re-exports, so its three consumers are untouched; the functions-side copy is
+  deleted and its nine consumers import the shared module directly.
 
-Still hand-kept copies, in the order they should follow:
+- `hoursContributions.ts` (slice 4) — `collectHoursContributions` with
+  `entryMinutes`, `dayLogMinuteContributions` and `itemMatchesBlock`: the counting path
+  behind every hours figure the family has (Records, the MO compliance dashboard, the
+  compliance pack, the monthly trend chart, the monthly review book). Previously
+  `src/features/records/records.logic.ts` plus `src/core/utils/itemBlockMatch.ts`, and a
+  hand-kept port in `functions/src/ai/tasks/monthlyHours.ts` written for FEAT-164 so the
+  book would stop narrating a smaller month than the record it belongs to. Last,
+  deliberately: it is the largest and it is compliance math, which `CLAUDE.md` names
+  propose-and-confirm.
 
-1. `sanitizeJson` — `functions/src/ai/sanitizeJson.ts` vs `src/core/utils/sanitizeJson.ts`
-   (carries its own `// TODO: consolidate`).
-2. `collectHoursContributions` — `functions/src/ai/tasks/monthlyHours.ts` vs
-   `src/features/records/records.logic.ts`. Last, deliberately: it is the largest and it
-   is compliance math, which `CLAUDE.md` names propose-and-confirm.
+  **The copies had NOT drifted.** Unlike slice 3, a differential probe over 40 000
+  randomized well-typed corpora plus a hand-built edge battery found the two
+  rule-identical: **no compliance figure moved** (`computeHoursSummary` over the
+  retiring parity fixture is byte-identical before and after — 285 min, and the same
+  per-subject, per-date, home and core splits). The port differed only in that it
+  NARROWS its inputs (this directory's rule 3) because it reads unvalidated Firestore
+  documents, so where a stored field holds a value its declared type forbids — a `NaN`,
+  a string where a number is declared, a missing required `blocks` — the consolidated
+  rule now yields a defined number instead of propagating `NaN` into a total or throwing.
+  That is the one behavioural delta and it is pinned by tests on both sides.
+
+  Both app files keep their paths and their TYPED signatures and delegate, so no call
+  site was loosened to `unknown`. `monthlyHours.ts` survives, but holding only what is
+  genuinely the book's own — `summarizeHoursContributions` / `computeMonthHours`, the
+  fold to the two numbers the prose reads; the app's `computeHoursSummary` folds the same
+  list into a larger compliance shape. The PARITY FIXTURE that used to pin the two copies
+  is retired: the compiler replaced it, and its coverage lives on in
+  `hoursContributions.test.ts` as the union of both old suites.
+
+Still a hand-kept copy (named while consolidating slice 4, out of all four slices'
+scope):
+
+- `labBeatsHaveContent`, `beatTextForChild` and `BEAT_BOTH` in
+  `functions/src/ai/tasks/dadLabReportArtifacts.ts` are ports of
+  `src/core/types/dadlab.ts` — a DIFFERENT original from the `reportArtifacts.ts` that
+  slice 1 consolidated, which is why they were left behind. That file is therefore not
+  a pass-through: it still owns three real functions, and only its `reportArtifactIds`
+  re-export (kept so `monthlyReviewData.ts`'s import path is untouched) is one. They are
+  a good candidate for a fifth slice; the app-side original carries React-free plain
+  types, so it should move cleanly.
 
 Not a duplicate, despite appearances: `functions/src/records/compliancePack.logic.ts` also
 defines a `DATE_RE` with identical regex text. It is the same *regex*, not the same *rule* —
