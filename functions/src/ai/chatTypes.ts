@@ -68,6 +68,14 @@ export interface ChatTaskResult {
   message: string;
   model: string;
   usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Why the model stopped (`end_turn`, `max_tokens`, `refusal`, …), passed
+   * through from `callClaude` so a client can tell "the reply was cut short by
+   * the output budget" from "the reply was unreadable" (FEAT-169). Optional and
+   * additive: handlers that don't set it are unchanged, and a client reading it
+   * must treat `undefined` as "unknown", never as success.
+   */
+  stopReason?: string;
 }
 
 /** A function that handles a specific chat task type. */

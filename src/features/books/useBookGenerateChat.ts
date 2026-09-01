@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { addDoc, doc, getDoc, setDoc } from 'firebase/firestore'
 
 import { useAI } from '../../core/ai/useAI'
@@ -9,7 +9,13 @@ import type { SubjectBucket } from '../../core/types/enums'
 import { generatePageId } from './bookTypes'
 import { inferBookTheme } from './useBookGenerator'
 import { clampTargetPageCount } from './storyPageTargets'
+import {
+  classifyStoryGenerationFailure,
+  storyGenerationFailureMessage,
+} from './storyGenerationFailure'
+import { selectStoryPracticeWords, storyDraftMessage } from './storyPracticeWords'
 import { useBookIllustrator } from './useBookIllustrator'
+import { useSightWordProgress } from './useSightWordProgress'
 import type { IllustrationProgress as IllustratorProgress } from './useBookIllustrator'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -72,6 +78,24 @@ export interface UseBookGenerateChat {
   /** Live target page count (FEAT-97) — hydrated from a resumed draft. */
   pageCount: number
   setPageCount: (pages: number) => void
+
+  /**
+   * The sight words this flow will send to `generateStory` as the structured
+   * `words` list (FEAT-169): the child's own practice words (`practicing` /
+   * `new` in `sightWordProgress`), capped. Read-only here — this surface never
+   * writes a sight word. `[]` until the child's list has loaded, and `[]` for a
+   * child with nothing to practise; the UI shows the list before the tap so a
+   * silent miss is impossible.
+   */
+  storyWords: string[]
+  /**
+   * True until the child's sight-word list has settled (loaded, or failed and
+   * fell open to `[]`). While true, `canStartStory` is false and
+   * `confirmStartStory` is a no-op, so a fast tap can never send `words: []`
+   * for a child who does have practice words and record that on the draft
+   * (Codex P1 on PR #1724). Never sticks: a rejected read still settles it.
+   */
+  storyWordsLoading: boolean
 
   illustrationProgress: IllustrationProgress
 
@@ -184,6 +208,16 @@ export function useBookGenerateChat(
 
   const { chat } = useAI()
   const { illustrate } = useBookIllustrator()
+  // The child's real list, read-only (FEAT-169). `progressMap` is the hook's
+  // stable state — `allProgress` is a fresh array per render.
+  const { progressMap, loading: storyWordsLoading } = useSightWordProgress(
+    familyId,
+    childId,
+  )
+  const storyWords = useMemo(
+    () => selectStoryPracticeWords(progressMap.values()),
+    [progressMap],
+  )
 
   const [chatHistory, setChatHistory] = useState<ChatTurn[]>([])
   const [currentStory, setCurrentStory] = useState<GeneratedStory | null>(null)
@@ -329,7 +363,11 @@ export function useBookGenerateChat(
         createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
           storyIdea: idea,
-          words: [],
+          // The words this flow sends to generateStory (FEAT-169) — recorded so
+          // the book says what was asked for. `theme` above stays `[]`-based on
+          // purpose: `inferBookTheme` with words returns `sight_words` and would
+          // drop the picked illustration style's theme.
+          words: storyWords,
           style,
           pageCount,
         },
@@ -351,7 +389,7 @@ export function useBookGenerateChat(
         return null
       }
     },
-    [familyId, childId, bookId, attribution, pageCount],
+    [familyId, childId, bookId, attribution, pageCount, storyWords],
   )
 
   /**
@@ -408,7 +446,11 @@ export function useBookGenerateChat(
         createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
           storyIdea: idea,
-          words: [],
+          // The words this flow sends to generateStory (FEAT-169) — recorded so
+          // the book says what was asked for. `theme` above stays `[]`-based on
+          // purpose: `inferBookTheme` with words returns `sight_words` and would
+          // drop the picked illustration style's theme.
+          words: storyWords,
           style,
           pageCount,
         },
@@ -428,7 +470,7 @@ export function useBookGenerateChat(
         console.error('Failed to create draft clarification book:', err)
       }
     },
-    [familyId, childId, bookId, attribution, pageCount],
+    [familyId, childId, bookId, attribution, pageCount, storyWords],
   )
 
   // ── Send a kid message ───────────────────────────────────────
@@ -606,6 +648,9 @@ export function useBookGenerateChat(
     if (clarificationPhase !== 'clarifying') return
     if (pendingRefinement !== null) return
     if (!pendingIdea) return
+    // Wait for the list to settle so the call carries the child's real words
+    // (or a settled, honest `[]`) — never a not-yet-loaded one.
+    if (storyWordsLoading) return
 
     setIsLoading(true)
     setError(null)
@@ -621,27 +666,32 @@ export function useBookGenerateChat(
             role: 'user',
             content: JSON.stringify({
               storyIdea: pendingIdea,
-              words: [],
+              // The child's practice words, as the structured list the server
+              // threads into the prompt's "weave 3-5 of these in" instruction
+              // (FEAT-169). Prose in the idea was never read as a word list.
+              words: storyWords,
               pageCount,
+              // Deliberately `[]`: with words, inferBookTheme returns
+              // `sight_words` and the picked style's theme guidance is lost.
               theme: inferBookTheme(pendingIdea, [], illustrationStyle),
             }),
           },
         ],
       })
-      if (!result?.message) {
-        setError('I had trouble writing that. Try again?')
-        setClarificationPhase(priorPhase)
-        return
-      }
-      const story = parseGeneratedStory(result.message)
-      if (!story) {
-        setError('I had trouble writing that. Try again?')
+      const story = result?.message ? parseGeneratedStory(result.message) : null
+      // A failure that names itself (FEAT-169): no reply, cut short by the
+      // output budget, or unreadable — each with its own next step.
+      const failure = classifyStoryGenerationFailure(result, story)
+      if (failure || !story) {
+        setError(storyGenerationFailureMessage(failure ?? 'unreadable'))
         setClarificationPhase(priorPhase)
         return
       }
       const aiTurn: ChatTurn = {
         role: 'ai',
-        content: `Here's your story! "${story.title}"`,
+        // Reports which practice words actually landed on a page, checked
+        // against the text — never the model's own claim (FEAT-169).
+        content: storyDraftMessage(story.title, storyWords, story.pages),
         ts: Date.now(),
         kind: 'story-draft',
       }
@@ -671,6 +721,8 @@ export function useBookGenerateChat(
     pendingIdea,
     pendingRefinement,
     persistStory,
+    storyWords,
+    storyWordsLoading,
   ])
 
   // ── Confirm add refinement ───────────────────────────────────
@@ -789,7 +841,8 @@ export function useBookGenerateChat(
   const canStartStory =
     clarificationPhase === 'clarifying' &&
     pendingRefinement === null &&
-    pendingIdea.trim().length > 0
+    pendingIdea.trim().length > 0 &&
+    !storyWordsLoading
 
   return {
     chatHistory,
@@ -804,6 +857,8 @@ export function useBookGenerateChat(
     canStartStory,
     pageCount,
     setPageCount,
+    storyWords,
+    storyWordsLoading,
     illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,

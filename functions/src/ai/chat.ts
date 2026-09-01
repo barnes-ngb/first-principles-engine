@@ -78,6 +78,8 @@ interface ChatResponse {
   message: string;
   model: string;
   usage: { inputTokens: number; outputTokens: number };
+  /** Model stop reason, when the task handler reports it (FEAT-169). */
+  stopReason?: string;
 }
 
 // ── Model mapping ───────────────────────────────────────────────

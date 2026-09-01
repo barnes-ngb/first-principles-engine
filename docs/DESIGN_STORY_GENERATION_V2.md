@@ -223,6 +223,8 @@ Pulling the practicing tier from `wordMastery` (filter `masteryLevel === "practi
 
 The `wordsOnPage` array in the output JSON stays — that's used by `SightWordChip` rendering in the reader. Just becomes accurate-to-what-was-used instead of contortionist coverage.
 
+> **Status (FEAT-169, 2026-09-01).** The prompt half of this section shipped long ago (`buildStoryPrompt`'s "weave 3-5 of them" block), but the Generate Chat (Path A) never sent a word list — `useBookGenerateChat` passed `words: []`, so the block was never rendered from that surface and a parent's "include these sight words: …" typed into the idea was only prose. FEAT-169 wires the channel as this section and §6.3 planned: the chat reads the child's `practicing` + `new` words from `sightWordProgress` (`storyPracticeWords.ts` → `selectStoryPracticeWords`, capped at 15 to match the server slice), sends them as the structured `words` list, **says which words it will try to weave in before the tap**, and after generation **reports which of them actually landed, checked against the page text** rather than the model's own `wordsOnPage` claim. Read-only: nothing on this path writes a sight word. Path C (`CreateSightWordBook`) is unchanged and remains the door for an exact, typed list.
+
 ### 4.3 Craft-of-writing guardrails — what the current prompt is missing
 
 Add a new section to the prompt:
@@ -636,7 +638,7 @@ What stays:
 - `useStoryGuide`, `StoryGuideQuestion`, `StoryGuidePage` — the wizard itself. Accessed only from the buried button in the dialog.
 - The `/books/story-guide` route.
 - The CTA name "Tell a Story" is repurposed as the secondary button label inside the dialog ("Use Story Guide (guided questions)").
-- All sight-word loading logic (`useSightWordProgress.getWeakWords`) — moves into the Generate Chat's preflight context.
+- All sight-word loading logic (`useSightWordProgress.getWeakWords`) — moves into the Generate Chat's preflight context. *(Landed in FEAT-169 via `storyPracticeWords.selectStoryPracticeWords` over the same `progressMap` — see the §4.2 status note.)*
 
 ### 6.4 What about the AI-shaping step?
 

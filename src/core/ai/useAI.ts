@@ -53,6 +53,12 @@ export interface ChatResponse {
   message: string
   model: string
   usage: { inputTokens: number; outputTokens: number }
+  /**
+   * Why the model stopped (`end_turn`, `max_tokens`, …) when the task handler
+   * reports it — `generateStory` does since FEAT-169. `undefined` from tasks
+   * that don't, and from an older deploy; treat it as "unknown", never success.
+   */
+  stopReason?: string
 }
 
 // ── Generate types (mirrored from functions/src/ai/generate.ts) ──
