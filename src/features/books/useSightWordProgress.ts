@@ -77,20 +77,29 @@ export function useSightWordProgress(familyId: string, childId: string) {
     let cancelled = false
 
     const load = async () => {
-      const snap = await getDocs(
-        query(sightWordProgressCollection(familyId)),
-      )
-      if (cancelled) return
+      try {
+        const snap = await getDocs(
+          query(sightWordProgressCollection(familyId)),
+        )
+        if (cancelled) return
 
-      const map = new Map<string, SightWordProgress>()
-      for (const d of snap.docs) {
-        // Only include docs for this child (doc ID starts with childId_)
-        if (d.id.startsWith(`${childId}_`)) {
-          map.set(d.data().word.toLowerCase(), { ...d.data(), word: d.data().word.toLowerCase() })
+        const map = new Map<string, SightWordProgress>()
+        for (const d of snap.docs) {
+          // Only include docs for this child (doc ID starts with childId_)
+          if (d.id.startsWith(`${childId}_`)) {
+            map.set(d.data().word.toLowerCase(), { ...d.data(), word: d.data().word.toLowerCase() })
+          }
         }
+        setProgressMap(map)
+      } catch (err) {
+        // A read that rejects must still SETTLE: callers gate on `loading`
+        // (the Generate Chat waits for the list before it lets a story start,
+        // FEAT-169), and a flag stuck at `true` would wedge that door offline —
+        // the FEAT-167 lesson. Fail open: no words, nothing claimed, logged.
+        console.warn('Failed to load sight word progress:', err)
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      setProgressMap(map)
-      setLoading(false)
     }
     void load()
     return () => { cancelled = true }

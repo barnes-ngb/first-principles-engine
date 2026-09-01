@@ -88,6 +88,14 @@ export interface UseBookGenerateChat {
    * silent miss is impossible.
    */
   storyWords: string[]
+  /**
+   * True until the child's sight-word list has settled (loaded, or failed and
+   * fell open to `[]`). While true, `canStartStory` is false and
+   * `confirmStartStory` is a no-op, so a fast tap can never send `words: []`
+   * for a child who does have practice words and record that on the draft
+   * (Codex P1 on PR #1724). Never sticks: a rejected read still settles it.
+   */
+  storyWordsLoading: boolean
 
   illustrationProgress: IllustrationProgress
 
@@ -202,7 +210,10 @@ export function useBookGenerateChat(
   const { illustrate } = useBookIllustrator()
   // The child's real list, read-only (FEAT-169). `progressMap` is the hook's
   // stable state — `allProgress` is a fresh array per render.
-  const { progressMap } = useSightWordProgress(familyId, childId)
+  const { progressMap, loading: storyWordsLoading } = useSightWordProgress(
+    familyId,
+    childId,
+  )
   const storyWords = useMemo(
     () => selectStoryPracticeWords(progressMap.values()),
     [progressMap],
@@ -637,6 +648,9 @@ export function useBookGenerateChat(
     if (clarificationPhase !== 'clarifying') return
     if (pendingRefinement !== null) return
     if (!pendingIdea) return
+    // Wait for the list to settle so the call carries the child's real words
+    // (or a settled, honest `[]`) — never a not-yet-loaded one.
+    if (storyWordsLoading) return
 
     setIsLoading(true)
     setError(null)
@@ -708,6 +722,7 @@ export function useBookGenerateChat(
     pendingRefinement,
     persistStory,
     storyWords,
+    storyWordsLoading,
   ])
 
   // ── Confirm add refinement ───────────────────────────────────
@@ -826,7 +841,8 @@ export function useBookGenerateChat(
   const canStartStory =
     clarificationPhase === 'clarifying' &&
     pendingRefinement === null &&
-    pendingIdea.trim().length > 0
+    pendingIdea.trim().length > 0 &&
+    !storyWordsLoading
 
   return {
     chatHistory,
@@ -842,6 +858,7 @@ export function useBookGenerateChat(
     pageCount,
     setPageCount,
     storyWords,
+    storyWordsLoading,
     illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,

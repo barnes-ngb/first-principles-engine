@@ -8,7 +8,7 @@ const { chatMock, generateImageMock, sightWordState } = vi.hoisted(() => ({
   generateImageMock: vi.fn(),
   // The child's sight-word list the hook reads (FEAT-169). Default: nothing to
   // practise, so every pre-existing test runs exactly as before (`words: []`).
-  sightWordState: { progressMap: new Map<string, unknown>() },
+  sightWordState: { progressMap: new Map<string, unknown>(), loading: false },
 }))
 
 vi.mock('../../core/ai/useAI', () => ({
@@ -46,7 +46,7 @@ vi.mock('./useSightWordProgress', () => ({
   useSightWordProgress: () => ({
     progressMap: sightWordState.progressMap,
     allProgress: [...sightWordState.progressMap.values()],
-    loading: false,
+    loading: sightWordState.loading,
     recordInteraction: vi.fn(),
     confirmMastery: vi.fn(),
     getWeakWords: () => [],
@@ -83,6 +83,7 @@ beforeEach(() => {
   chatMock.mockReset()
   generateImageMock.mockReset()
   sightWordState.progressMap = new Map()
+  sightWordState.loading = false
 })
 
 /** A `sightWordProgress` doc for the mocked child list. */
@@ -751,5 +752,52 @@ describe('useBookGenerateChat failure messages (FEAT-169 — a failure that name
       seen.add(result.current.error as string)
     }
     expect(seen.size).toBe(3)
+  })
+})
+
+describe('useBookGenerateChat waits for the sight-word list to settle (FEAT-169, Codex P1 on PR #1724)', () => {
+  const fakeStory = {
+    title: 'Cave Cat',
+    pages: [{ pageNumber: 1, text: 'The cat found water.', sceneDescription: 'a cave' }],
+  }
+
+  it('withholds the start while the list is still loading — a fast tap cannot send words: []', async () => {
+    sightWordState.loading = true
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await act(async () => {
+      await result.current.sendKidMessage('a cat in a cave')
+    })
+    expect(result.current.storyWordsLoading).toBe(true)
+    expect(result.current.canStartStory).toBe(false)
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    expect(chatMock).not.toHaveBeenCalled()
+    expect(result.current.clarificationPhase).toBe('clarifying')
+  })
+
+  it('starts once the list has settled, with the words that arrived', async () => {
+    sightWordState.loading = true
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result, rerender } = renderHook(() => useBookGenerateChat(baseOpts))
+    await act(async () => {
+      await result.current.sendKidMessage('a cat in a cave')
+    })
+    expect(result.current.canStartStory).toBe(false)
+
+    // The read lands.
+    sightWordState.loading = false
+    setChildWords(wordDoc('water', 'practicing'))
+    rerender()
+    await waitFor(() => expect(result.current.canStartStory).toBe(true))
+    expect(result.current.storyWords).toEqual(['water'])
+
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    expect(chatMock).toHaveBeenCalledTimes(1)
+    const payload = JSON.parse(chatMock.mock.calls[0][0].messages[0].content)
+    expect(payload.words).toEqual(['water'])
   })
 })

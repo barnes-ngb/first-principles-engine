@@ -106,6 +106,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     pageCount,
     setPageCount,
     storyWords,
+    storyWordsLoading,
     illustrationProgress,
     sendKidMessage,
     setIllustrationStyle,
@@ -260,6 +261,14 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     canStartStory &&
     lastAiKind === 'echo'
 
+  // The list hasn't settled yet, so the Yes button is withheld (FEAT-169,
+  // Codex P1): say why, instead of an echo turn with nothing under it.
+  const showWordsLoading =
+    clarificationPhase === 'clarifying' &&
+    pendingRefinement === null &&
+    storyWordsLoading &&
+    lastAiKind === 'echo'
+
   const showAddOrChangeButtons =
     clarificationPhase === 'clarifying' &&
     pendingRefinement !== null &&
@@ -304,6 +313,8 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
               turn.role === 'ai' && idx === chatHistory.length - 1
             const showYesHere =
               isLastAi && turn.kind === 'echo' && showYesStartButton
+            const showWordsLoadingHere =
+              isLastAi && turn.kind === 'echo' && showWordsLoading
             const showAddChangeHere =
               isLastAi && turn.kind === 'add-or-change' && showAddOrChangeButtons
             return (
@@ -331,6 +342,17 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
                 {/* Which sight words the story will carry, said before the tap
                     (FEAT-169) — so the parent can see the list is in play, and
                     a child with nothing to practise sees no claim at all. */}
+                {showWordsLoadingHere && (
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    data-testid="story-practice-words-loading"
+                    sx={{ mt: 1, alignSelf: 'stretch' }}
+                  >
+                    One sec — checking which of {childName}&apos;s practice words to
+                    bring along…
+                  </Typography>
+                )}
                 {showYesHere && storyWords.length > 0 && (
                   <Typography
                     variant="body2"
