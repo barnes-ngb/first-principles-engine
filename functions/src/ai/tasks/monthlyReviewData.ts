@@ -7,11 +7,11 @@ import {
 } from "./dadLabReportArtifacts.js";
 import {
   computeMonthHours,
-  deriveChildIdFromDocId,
   type RawDayLog,
   type RawHoursAdjustment,
   type RawHoursEntry,
 } from "./monthlyHours.js";
+import { deriveChildIdFromDocId } from "../../shared/docId.js";
 
 /**
  * Firestore composite indexes required by this module.

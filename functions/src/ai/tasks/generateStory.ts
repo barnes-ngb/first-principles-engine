@@ -138,6 +138,59 @@ export function reconcilePagesFromStory(
 }
 
 /**
+ * Model stop reason that means the output budget ran out before the story did.
+ * `callClaude` reports it as the raw API value.
+ */
+export const MAX_TOKENS_STOP_REASON = "max_tokens";
+
+export interface StoryStopDiagnosis {
+  /** True when the budget ended the reply — the story JSON is almost certainly incomplete. */
+  cutShort: boolean;
+  /** True when the model emitted no visible text at all (the whole budget went to reasoning). */
+  noVisibleText: boolean;
+  /** One-line, log-ready description; empty for a clean `end_turn`. */
+  note: string;
+}
+
+/**
+ * Name the shape of a generateStory reply so the log line — and the client, via
+ * `stopReason` — can say *which* failure happened (FEAT-169). Before this, a
+ * budget-truncated story and an API error reached the client as the same
+ * "I had trouble writing that", and the CF log carried no `stop_reason` at all,
+ * so neither Shelly's screenshot nor the log could say which one it was.
+ *
+ * Pure: no I/O, never throws. `generateStory` runs adaptive thinking at the API
+ * default (HIGH) effort with `max_tokens` = `maxTokensForPageCount(pages)`, and
+ * on the Sonnet-5 generation thinking tokens count against that same budget —
+ * so a `max_tokens` stop with little or no visible text is the FEAT-77/78
+ * signature (reasoning ate the budget), and a `max_tokens` stop with a long
+ * text is a story that ran past its per-page allotment.
+ */
+export function describeStoryStop(
+  stopReason: string | undefined,
+  text: string,
+  outputTokens: number,
+): StoryStopDiagnosis {
+  const cutShort = stopReason === MAX_TOKENS_STOP_REASON;
+  const noVisibleText = text.trim().length === 0;
+  if (!cutShort && !noVisibleText) return { cutShort: false, noVisibleText: false, note: "" };
+  const parts: string[] = [];
+  if (cutShort) {
+    parts.push(
+      `output budget exhausted (stop_reason=${MAX_TOKENS_STOP_REASON}, ${outputTokens} output/thinking tokens, ${text.length} chars of visible text)`,
+    );
+  }
+  if (noVisibleText) {
+    parts.push(
+      cutShort
+        ? "no visible text — reasoning consumed the whole budget (FEAT-77/78 shape)"
+        : `no visible text (stop_reason=${stopReason ?? "unknown"}, ${outputTokens} output tokens)`,
+    );
+  }
+  return { cutShort, noVisibleText, note: parts.join("; ") };
+}
+
+/**
  * Task: generateStory
  * Context: childProfile + sightWords + wordMastery (via buildContextForTask)
  * Model: Sonnet
@@ -248,6 +301,8 @@ export const handleGenerateStory = async (
   const pageMeta = reconcilePagesFromStory(targetPageCount, result.text);
   console.log(
     `[AI] taskType=generateStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}` +
+      ` maxTokens=${maxTokensForPageCount(targetPageCount)} stopReason=${result.stopReason}` +
+      ` words=${storyWords.length}` +
       (pageMeta
         ? ` targetPages=${pageMeta.target} actualPages=${pageMeta.actual} pageDelta=${pageMeta.delta}`
         : ` targetPages=${targetPageCount} actualPages=?`),
@@ -256,6 +311,13 @@ export const handleGenerateStory = async (
     console.warn(
       `[AI] generateStory page count wildly off: target=${pageMeta.target} actual=${pageMeta.actual} (delta=${pageMeta.delta})`,
     );
+  }
+  // Say which failure it was, in the log (FEAT-169): a story the client can't
+  // parse is either cut short by the budget or malformed, and only the server
+  // can see `stop_reason`. The client gets the same signal via `stopReason`.
+  const stop = describeStoryStop(result.stopReason, result.text, result.outputTokens);
+  if (stop.note) {
+    console.warn(`[AI] generateStory reply incomplete: ${stop.note}`);
   }
 
   await logAiUsage(db, familyId, {
@@ -270,5 +332,6 @@ export const handleGenerateStory = async (
     message: result.text,
     model,
     usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+    stopReason: result.stopReason,
   };
 };

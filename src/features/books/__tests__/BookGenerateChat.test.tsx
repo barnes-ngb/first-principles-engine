@@ -32,6 +32,8 @@ interface HookState {
   pendingRefinement: string | null
   canStartStory: boolean
   pageCount: number
+  storyWords: string[]
+  storyWordsLoading: boolean
   illustrationProgress: {
     phase: 'idle' | 'illustrating' | 'done'
     currentPage: number
@@ -53,6 +55,8 @@ let hookState: HookState = {
   pendingRefinement: null,
   canStartStory: false,
   pageCount: 10,
+  storyWords: [],
+  storyWordsLoading: false,
   illustrationProgress: {
     phase: 'idle',
     currentPage: 0,
@@ -159,6 +163,8 @@ beforeEach(() => {
     pendingRefinement: null,
     canStartStory: false,
     pageCount: 10,
+    storyWords: [],
+    storyWordsLoading: false,
     illustrationProgress: {
       phase: 'idle',
       currentPage: 0,
@@ -350,6 +356,73 @@ describe('BookGenerateChat', () => {
     expect(
       screen.getByRole('button', { name: /yes, start my story/i }),
     ).toBeTruthy()
+  })
+
+  it('says which practice words it will weave in, under the echo turn, before the tap (FEAT-169)', () => {
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a cat in a cave', ts: 1 },
+        { role: 'ai', content: 'Here\'s what I heard: "a cat in a cave". Want me to start the story?', ts: 2, kind: 'echo' },
+      ],
+      pendingIdea: 'a cat in a cave',
+      canStartStory: true,
+      storyWords: ['water', 'again', 'people'],
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    const line = screen.getByTestId('story-practice-words')
+    expect(line.textContent).toBe(
+      "I'll try to weave in some of London's practice words: water, again, people.",
+    )
+    expect(screen.getByRole('button', { name: /yes, start my story/i })).toBeTruthy()
+  })
+
+  it('says it is still checking the practice words, and withholds the Yes button, until the list settles (FEAT-169, Codex P1)', () => {
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a cat', ts: 1 },
+        { role: 'ai', content: 'Here\'s what I heard: "a cat". Want me to start the story?', ts: 2, kind: 'echo' },
+      ],
+      pendingIdea: 'a cat',
+      canStartStory: false,
+      storyWords: [],
+      storyWordsLoading: true,
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(screen.getByTestId('story-practice-words-loading').textContent).toMatch(
+      /checking which of London's practice words/i,
+    )
+    expect(screen.queryByRole('button', { name: /yes, start my story/i })).toBeNull()
+    expect(screen.queryByTestId('story-practice-words')).toBeNull()
+  })
+
+  it('makes no practice-word claim when the child has nothing to practise (FEAT-169)', () => {
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a cat', ts: 1 },
+        { role: 'ai', content: 'Here\'s what I heard: "a cat". Want me to start the story?', ts: 2, kind: 'echo' },
+      ],
+      pendingIdea: 'a cat',
+      canStartStory: true,
+      storyWords: [],
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(screen.queryByTestId('story-practice-words')).toBeNull()
+    expect(screen.queryByText(/practice words/i)).toBeNull()
   })
 
   it('calls confirmStartStory when "Yes, start my story!" is tapped', async () => {

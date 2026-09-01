@@ -52,18 +52,31 @@ of not touching the deploy entrypoint.
 
 ## What is here, and what is still duplicated
 
-Migrated (ARCH-47 slice 1):
+Migrated:
 
-- `dadLabReportArtifacts.ts` — `reportArtifactIds`, the "what is on this Dad Lab report"
-  rule (UX-85), previously implemented once in `src/features/dad-lab/reportArtifacts.ts`
-  and again in `functions/src/ai/tasks/dadLabReportArtifacts.ts`.
+- `dadLabReportArtifacts.ts` (slice 1) — `reportArtifactIds`, the "what is on this Dad Lab
+  report" rule (UX-85), previously implemented once in
+  `src/features/dad-lab/reportArtifacts.ts` and again in
+  `functions/src/ai/tasks/dadLabReportArtifacts.ts`.
+- `docId.ts` (slice 2) — `deriveChildIdFromDocId` and `parseDateFromDocId`, plus the
+  `DATE_RE` they share: how a composite `days` doc id splits into a date and a child id,
+  in either order. Previously `src/core/utils/docId.ts` plus a hand-kept inline port in
+  `functions/src/ai/tasks/monthlyHours.ts` with its own copy of the regex. Both readers
+  moved together — they are one rule about one key, and leaving half behind would have
+  split `DATE_RE` across the wall. `src/core/utils/docId.ts` keeps its path and
+  re-exports, so its consumers (and the further re-export in `records.logic.ts`) are
+  untouched; on the functions side `monthlyReviewData.ts` imports it directly.
 
 Still hand-kept copies, in the order they should follow:
 
-1. `deriveChildIdFromDocId` — inline in `functions/src/ai/tasks/monthlyHours.ts`, ported
-   from `src/core/utils/docId.ts`.
-2. `sanitizeJson` — `functions/src/ai/sanitizeJson.ts` vs `src/core/utils/sanitizeJson.ts`
+1. `sanitizeJson` — `functions/src/ai/sanitizeJson.ts` vs `src/core/utils/sanitizeJson.ts`
    (carries its own `// TODO: consolidate`).
-3. `collectHoursContributions` — `functions/src/ai/tasks/monthlyHours.ts` vs
+2. `collectHoursContributions` — `functions/src/ai/tasks/monthlyHours.ts` vs
    `src/features/records/records.logic.ts`. Last, deliberately: it is the largest and it
    is compliance math, which `CLAUDE.md` names propose-and-confirm.
+
+Not a duplicate, despite appearances: `functions/src/records/compliancePack.logic.ts` also
+defines a `DATE_RE` with identical regex text. It is the same *regex*, not the same *rule* —
+it shape-checks a client-supplied `startDate`/`endDate` in `validatePackRequest`, rather
+than parsing a composite key. Merging the two would couple a request validator to a doc-id
+parser for no reason beyond a shared literal. Left where it is.
