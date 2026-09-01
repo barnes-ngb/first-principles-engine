@@ -1,4 +1,5 @@
 import type { ChecklistItem, DayBlock } from '../types'
+import { itemMatchesBlock as sharedItemMatchesBlock } from '../../../functions/src/shared/hoursContributions'
 
 /**
  * Shared correspondence rule between a checklist item and a day block — the
@@ -11,7 +12,18 @@ import type { ChecklistItem, DayBlock } from '../types'
  *  - `records.logic` (`dayLogMinuteContributions`) uses it to dedup completed
  *    checklist items against blocks that already carry `actualMinutes`, so an
  *    unmatched completed item is counted while a matched one is not
- *    double-counted.
+ *    double-counted;
+ *  - `liveDayEdit` and `watchItemCompletion` mirror the same correspondence when
+ *    a live day is edited.
+ *
+ * ARCH-47 slice 4: the rule itself now has exactly ONE definition, in
+ * `functions/src/shared/hoursContributions.ts`, compiled by BOTH the app and the
+ * Cloud Functions — the monthly review book counts the same hours the Records
+ * page does, and a change that breaks either side fails to COMPILE. This file
+ * keeps its path and its TYPED signature so its four consumers are untouched,
+ * and delegates. `ChecklistItem` / `DayBlock` are structurally assignable to the
+ * shared module's `Raw*` shapes, so no cast is needed and no call site was
+ * loosened to `unknown`.
  *
  * Rule (kept byte-identical to the original TodayChecklist auto-set logic):
  *  - label match: the block's own checklist contains an entry whose `label`
@@ -23,12 +35,4 @@ import type { ChecklistItem, DayBlock } from '../types'
 export const itemMatchesBlock = (
   item: ChecklistItem,
   block: DayBlock,
-): boolean => {
-  const matchesLabel = block.checklist?.some((ci) => ci.label === item.label) ?? false
-  const titleClean = item.label.replace(/\s*\(\d+m\)\s*$/, '')
-  const matchesTitle =
-    block.title != null &&
-    (block.title === titleClean ||
-      titleClean.toLowerCase().includes(block.title.toLowerCase()))
-  return matchesLabel || matchesTitle
-}
+): boolean => sharedItemMatchesBlock(item, block)
