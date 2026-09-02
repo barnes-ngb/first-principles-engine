@@ -13,7 +13,12 @@ import {
   classifyStoryGenerationFailure,
   storyGenerationFailureMessage,
 } from './storyGenerationFailure'
-import { selectStoryPracticeWords, storyDraftMessage } from './storyPracticeWords'
+import {
+  StoryWordSource,
+  resolveStoryWords,
+  selectStoryPracticeWords,
+  storyDraftMessage,
+} from './storyPracticeWords'
 import { useBookIllustrator } from './useBookIllustrator'
 import { useSightWordProgress } from './useSightWordProgress'
 import type { IllustrationProgress as IllustratorProgress } from './useBookIllustrator'
@@ -42,6 +47,14 @@ interface ReviseStoryResult {
 
 export interface UseBookGenerateChatOptions {
   familyId: string
+  /**
+   * The active child — the profile the app is on. Every read and write
+   * follows it, as on every other surface (FEAT-173, owner decision
+   * 2026-09-02): the practice words come from this child's
+   * `sightWordProgress`, the server writes for this child's age, interests
+   * and word mastery, and the draft book lands on this child's shelf. There is
+   * no per-story child picker and nothing infers a child from the prose.
+   */
   childId: string
   childName: string
   childAge: number
@@ -81,19 +94,24 @@ export interface UseBookGenerateChat {
 
   /**
    * The sight words this flow will send to `generateStory` as the structured
-   * `words` list (FEAT-169): the child's own practice words (`practicing` /
-   * `new` in `sightWordProgress`), capped. Read-only here — this surface never
-   * writes a sight word. `[]` until the child's list has loaded, and `[]` for a
-   * child with nothing to practise; the UI shows the list before the tap so a
-   * silent miss is impossible.
+   * `words` list. **A list the parent typed into the idea wins** (FEAT-172,
+   * `parseRequestedWords`); otherwise the child's own practice words
+   * (`practicing` / `new` in `sightWordProgress`, capped — FEAT-169); `[]` when
+   * neither exists. Read-only here — this surface never writes a sight word.
+   * The UI shows the list, and which source it is, before the tap so a silent
+   * miss is impossible.
    */
   storyWords: string[]
+  /** Which of the two sources `storyWords` came from (FEAT-172). */
+  storyWordSource: StoryWordSource
   /**
-   * True until the child's sight-word list has settled (loaded, or failed and
-   * fell open to `[]`). While true, `canStartStory` is false and
-   * `confirmStartStory` is a no-op, so a fast tap can never send `words: []`
-   * for a child who does have practice words and record that on the draft
-   * (Codex P1 on PR #1724). Never sticks: a rejected read still settles it.
+   * True while the story still depends on the child's sight-word list and
+   * that list has not settled (loaded, or failed and fell open to `[]`). While
+   * true, `canStartStory` is false and `confirmStartStory` is a no-op, so a
+   * fast tap can never send `words: []` for a child who does have practice
+   * words and record that on the draft (Codex P1 on PR #1724). Never sticks: a
+   * rejected read still settles it. Always false once the parent has typed a
+   * list — that story does not read the practice list at all (FEAT-172).
    */
   storyWordsLoading: boolean
 
@@ -209,12 +227,13 @@ export function useBookGenerateChat(
   const { chat } = useAI()
   const { illustrate } = useBookIllustrator()
   // The child's real list, read-only (FEAT-169). `progressMap` is the hook's
-  // stable state — `allProgress` is a fresh array per render.
-  const { progressMap, loading: storyWordsLoading } = useSightWordProgress(
+  // stable state — `allProgress` is a fresh array per render. Keyed on the
+  // active child, like every other read on this surface.
+  const { progressMap, loading: practiceWordsLoading } = useSightWordProgress(
     familyId,
     childId,
   )
-  const storyWords = useMemo(
+  const practiceWords = useMemo(
     () => selectStoryPracticeWords(progressMap.values()),
     [progressMap],
   )
@@ -233,6 +252,17 @@ export function useBookGenerateChat(
     useState<ClarificationPhase>('clarifying')
   const [pendingIdea, setPendingIdea] = useState<string>('')
   const [pendingRefinement, setPendingRefinement] = useState<string | null>(null)
+
+  // The one decision (FEAT-172): a list typed into the idea wins; the practice
+  // list only when the parent named none. Derived, never stored, so it follows
+  // every edit to the idea (Add / Change) and every child switch.
+  const { source: storyWordSource, words: storyWords } = useMemo(
+    () => resolveStoryWords(pendingIdea, practiceWords),
+    [pendingIdea, practiceWords],
+  )
+  // A typed list does not read the practice list, so it never waits on it.
+  const storyWordsLoading =
+    practiceWordsLoading && storyWordSource !== StoryWordSource.Requested
 
   const [illustrationProgress, setIllustrationProgress] =
     useState<IllustrationProgress>({
@@ -307,6 +337,9 @@ export function useBookGenerateChat(
     ): Promise<string | null> => {
       const now = new Date().toISOString()
       const pages = storyToPages(story)
+      // Recorded from the idea being persisted, not the render's closure —
+      // the first-message write runs before `pendingIdea` has re-rendered.
+      const wordsForIdea = resolveStoryWords(idea, practiceWords).words
 
       if (bookId) {
         const ref = doc(booksCollection(familyId), bookId)
@@ -330,6 +363,13 @@ export function useBookGenerateChat(
               pages: mergedPages,
               coverStyle: style as Book['coverStyle'],
               updatedAt: now,
+              generationConfig: {
+                ...(current.generationConfig ?? {}),
+                storyIdea: idea,
+                words: wordsForIdea,
+                style,
+                pageCount,
+              },
               reviewState: {
                 ...(current.reviewState ?? {}),
                 generateChatState,
@@ -363,11 +403,11 @@ export function useBookGenerateChat(
         createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
           storyIdea: idea,
-          // The words this flow sends to generateStory (FEAT-169) — recorded so
-          // the book says what was asked for. `theme` above stays `[]`-based on
-          // purpose: `inferBookTheme` with words returns `sight_words` and would
-          // drop the picked illustration style's theme.
-          words: storyWords,
+          // The words this flow sends to generateStory (FEAT-169/172) —
+          // recorded so the book says what was asked for. `theme` above stays
+          // `[]`-based on purpose: `inferBookTheme` with words returns
+          // `sight_words` and would drop the picked illustration style's theme.
+          words: wordsForIdea,
           style,
           pageCount,
         },
@@ -389,7 +429,7 @@ export function useBookGenerateChat(
         return null
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, storyWords],
+    [familyId, childId, bookId, attribution, pageCount, practiceWords],
   )
 
   /**
@@ -405,6 +445,9 @@ export function useBookGenerateChat(
       refinement: string | null,
     ): Promise<void> => {
       const now = new Date().toISOString()
+      // See persistStory: the idea's own word list is written on every
+      // persist (FEAT-172), never only on create.
+      const wordsForIdea = resolveStoryWords(idea, practiceWords).words
       if (bookId) {
         const ref = doc(booksCollection(familyId), bookId)
         try {
@@ -414,6 +457,13 @@ export function useBookGenerateChat(
             await setDoc(ref, {
               ...current,
               updatedAt: now,
+              generationConfig: {
+                ...(current.generationConfig ?? {}),
+                storyIdea: idea,
+                words: wordsForIdea,
+                style,
+                pageCount,
+              },
               reviewState: {
                 ...(current.reviewState ?? {}),
                 generateChatState: 'in-progress',
@@ -446,11 +496,11 @@ export function useBookGenerateChat(
         createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
           storyIdea: idea,
-          // The words this flow sends to generateStory (FEAT-169) — recorded so
-          // the book says what was asked for. `theme` above stays `[]`-based on
-          // purpose: `inferBookTheme` with words returns `sight_words` and would
-          // drop the picked illustration style's theme.
-          words: storyWords,
+          // The words this flow sends to generateStory (FEAT-169/172) —
+          // recorded so the book says what was asked for. `theme` above stays
+          // `[]`-based on purpose: `inferBookTheme` with words returns
+          // `sight_words` and would drop the picked illustration style's theme.
+          words: wordsForIdea,
           style,
           pageCount,
         },
@@ -470,7 +520,7 @@ export function useBookGenerateChat(
         console.error('Failed to create draft clarification book:', err)
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, storyWords],
+    [familyId, childId, bookId, attribution, pageCount, practiceWords],
   )
 
   // ── Send a kid message ───────────────────────────────────────
@@ -649,7 +699,8 @@ export function useBookGenerateChat(
     if (pendingRefinement !== null) return
     if (!pendingIdea) return
     // Wait for the list to settle so the call carries the child's real words
-    // (or a settled, honest `[]`) — never a not-yet-loaded one.
+    // (or a settled, honest `[]`) — never a not-yet-loaded one. A typed list
+    // (FEAT-172) never waits: it does not read the practice list.
     if (storyWordsLoading) return
 
     setIsLoading(true)
@@ -666,9 +717,10 @@ export function useBookGenerateChat(
             role: 'user',
             content: JSON.stringify({
               storyIdea: pendingIdea,
-              // The child's practice words, as the structured list the server
-              // threads into the prompt's "weave 3-5 of these in" instruction
-              // (FEAT-169). Prose in the idea was never read as a word list.
+              // The structured list the server threads into the prompt's
+              // "weave 3-5 of these in" instruction (FEAT-169): the words the
+              // parent typed into the idea when there are any (FEAT-172), else
+              // the child's practice words.
               words: storyWords,
               pageCount,
               // Deliberately `[]`: with words, inferBookTheme returns
@@ -689,9 +741,10 @@ export function useBookGenerateChat(
       }
       const aiTurn: ChatTurn = {
         role: 'ai',
-        // Reports which practice words actually landed on a page, checked
-        // against the text — never the model's own claim (FEAT-169).
-        content: storyDraftMessage(story.title, storyWords, story.pages),
+        // Reports which words actually landed on a page, checked against the
+        // text — never the model's own claim (FEAT-169) — and names which
+        // source they were (FEAT-172).
+        content: storyDraftMessage(story.title, storyWords, story.pages, storyWordSource),
         ts: Date.now(),
         kind: 'story-draft',
       }
@@ -722,6 +775,7 @@ export function useBookGenerateChat(
     pendingRefinement,
     persistStory,
     storyWords,
+    storyWordSource,
     storyWordsLoading,
   ])
 
@@ -858,6 +912,7 @@ export function useBookGenerateChat(
     pageCount,
     setPageCount,
     storyWords,
+    storyWordSource,
     storyWordsLoading,
     illustrationProgress,
     sendKidMessage,

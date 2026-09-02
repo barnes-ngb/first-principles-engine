@@ -21,7 +21,7 @@ import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { ChatTurn } from '../../core/types'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
-import { practiceWordsPreviewLine } from './storyPracticeWords'
+import { storyWordsPreviewLine } from './storyPracticeWords'
 import { useBookGenerateChat } from './useBookGenerateChat'
 import StoryLengthSelector from './StoryLengthSelector'
 import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
@@ -69,6 +69,11 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   const { activeChild } = useActiveChild()
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
+  // The active profile IS the context (FEAT-173, owner decision 2026-09-02):
+  // the words read, the child the server writes for and the shelf the draft
+  // lands on all follow the child active in the header, exactly as every
+  // other surface does. No picker here and nothing inferred from the prose —
+  // a story for London is written from London's profile.
   const childName = activeChild?.name ?? 'kid'
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
@@ -106,6 +111,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     pageCount,
     setPageCount,
     storyWords,
+    storyWordSource,
     storyWordsLoading,
     illustrationProgress,
     sendKidMessage,
@@ -341,7 +347,10 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
                 </Box>
                 {/* Which sight words the story will carry, said before the tap
                     (FEAT-169) — so the parent can see the list is in play, and
-                    a child with nothing to practise sees no claim at all. */}
+                    a child with nothing to practise sees no claim at all. The
+                    line names its source (FEAT-172/173): a list the parent
+                    typed into the idea, or the active child's practice words
+                    — never one dressed as the other. */}
                 {showWordsLoadingHere && (
                   <Typography
                     variant="body2"
@@ -360,7 +369,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
                     data-testid="story-practice-words"
                     sx={{ mt: 1, alignSelf: 'stretch' }}
                   >
-                    {practiceWordsPreviewLine(childName, storyWords)}
+                    {storyWordsPreviewLine(storyWordSource, childName, storyWords)}
                   </Typography>
                 )}
                 {showYesHere && (

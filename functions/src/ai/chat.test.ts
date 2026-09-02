@@ -737,6 +737,37 @@ describe("buildStoryPrompt", () => {
     expect(p).not.toContain("CVC");
     expect(p).toContain("real problems, real heroes");
   });
+
+  // ── FEAT-173: the reading level is the child's assessed level, age only as fallback ──
+
+  it("presents an ASSESSED reading level as the level to calibrate decoding to, not a soft hint (FEAT-173)", () => {
+    const p = buildStoryPrompt({
+      ...lincolnInput,
+      readingLevel:
+        "decoding at phonics Level 5 of 8 — CVCe / long vowels (silent-e: make, bike, home, cute) (assessed by quest, Aug 12, 2026)",
+      readingLevelAssessed: true,
+    });
+    expect(p).toContain(
+      "- Reading level (ASSESSED — Lincoln's working level from the Skill Snapshot; keep the decoding demands of the text at or below it, and use WORD MASTERY above for the specific words): decoding at phonics Level 5 of 8",
+    );
+    expect(p).not.toContain("estimated from age");
+    expect(p).not.toContain("1st grade");
+  });
+
+  it("labels the age-derived fallback as a guess when no assessed level was passed (FEAT-173)", () => {
+    const p = buildStoryPrompt(lincolnInput);
+    expect(p).toContain(
+      "- Reading level (no assessed level on file yet — estimated from age; a soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): 1st grade",
+    );
+    expect(p).not.toContain("ASSESSED");
+    expect(buildStoryPrompt(londonInput)).toContain("estimated from age; a soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): pre-K to kindergarten");
+  });
+
+  it("treats a readingLevel string without the assessed flag as the soft hint it always was", () => {
+    const p = buildStoryPrompt({ ...lincolnInput, readingLevel: "2nd grade" });
+    expect(p).toContain("estimated from age; a soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): 2nd grade");
+    expect(p).not.toContain("ASSESSED");
+  });
 });
 
 // ── Story Generation V2 Phase 2 PR-A: buildReviseStoryPrompt ───

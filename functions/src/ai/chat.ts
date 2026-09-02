@@ -1946,6 +1946,12 @@ export interface StoryGenInput {
   childAge?: number;
   childInterests?: string;
   readingLevel?: string;
+  /**
+   * True when `readingLevel` is the child's ASSESSED working level (FEAT-173,
+   * `storyReadingLevel.ts`) rather than the age-derived guess. The prompt then
+   * presents it as the level to calibrate decoding to, not as a soft hint.
+   */
+  readingLevelAssessed?: boolean;
   /** Theme-engine guidance (injected from BookThemeConfig) */
   themeGuidance?: {
     storyTone?: string;
@@ -2064,6 +2070,7 @@ export function buildStoryPrompt(input: StoryGenInput): string {
     childAge,
     childInterests,
     readingLevel,
+    readingLevelAssessed,
     themeGuidance,
   } = input;
   const hasWords = words.length > 0;
@@ -2077,10 +2084,16 @@ export function buildStoryPrompt(input: StoryGenInput): string {
       ? "animals, drawing, fairy tales"
       : "Minecraft, adventures, quests");
 
-  // Reading level fallback. The AI primarily calibrates vocabulary from the
-  // WORD MASTERY + SKILL SNAPSHOT sections of the system prompt (already
-  // attached by buildContextForTask). This string is a soft hint only.
+  // Reading level. When the caller read it off the child's assessed working
+  // levels (FEAT-173), it is the level to calibrate decoding to; otherwise it
+  // is an age-derived guess and only a soft hint — the AI then calibrates
+  // vocabulary from the WORD MASTERY + SKILL SNAPSHOT sections of the system
+  // prompt (already attached by buildContextForTask).
   const level = readingLevel || (age <= 7 ? "pre-K to kindergarten" : "1st grade");
+  const readingLevelRule =
+    readingLevelAssessed && readingLevel
+      ? `- Reading level (ASSESSED — ${childName}'s working level from the Skill Snapshot; keep the decoding demands of the text at or below it, and use WORD MASTERY above for the specific words): ${level}`
+      : `- Reading level (no assessed level on file yet — estimated from age; a soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): ${level}`;
 
   const sentenceTarget = sentenceTargetForAge(age);
   const contentStakes = contentStakesForAge(age);
@@ -2130,7 +2143,7 @@ STORY IDEA: ${storyIdea || fallbackIdea}
 ${sightWordSection}${themeSection}
 RULES:
 - Write exactly ${pageCount} pages — no more, no fewer. Each page has ${sentenceTarget}.
-- Reading level (soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): ${level}
+${readingLevelRule}
 - ${contentStakes}
 - For each page, write a short image description (1-2 sentences) describing what the SCENE looks like. Focus on environment/setting, not characters.
 ${hasWords ? "- On each page, list which provided sight words actually appear on that page.\n" : ""}

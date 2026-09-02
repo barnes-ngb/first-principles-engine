@@ -10,6 +10,7 @@ import {
   maxTokensForPageCount,
   reconcileStoryPageCount,
 } from "../storyPageBudget.js";
+import { resolveStoryReadingLevel } from "../storyReadingLevel.js";
 
 // ── Preset themes (server-side mirror of client PRESET_THEMES) ──
 
@@ -239,7 +240,7 @@ export const handleGenerateStory = async (
 
   // Interests come from the child's profile, never their name (ARCH-15). When
   // no interests are recorded yet, seed a sensible default by age (data may
-  // seed defaults, never gate). Reading level is seeded from age, not name.
+  // seed defaults, never gate).
   const isYoungReader = storyChildAge <= 7;
   const profileInterests =
     childData.interests?.trim() ||
@@ -252,7 +253,14 @@ export const handleGenerateStory = async (
     (isYoungReader
       ? "animals, drawing, fairy tales, colors, nature"
       : "dragons, quests, building, adventures");
-  const readingLevel = isYoungReader ? "pre-K to kindergarten" : "1st grade";
+  // The reading level is READ, not guessed (FEAT-173): the child's assessed
+  // `workingLevels` (phonics = decoding, comprehension) off the skill snapshot
+  // the dispatcher already loaded into `ctx.snapshotData`. The age-derived
+  // string is the fallback only — used when no assessed level exists yet.
+  const readingLevel = resolveStoryReadingLevel(
+    ctx.snapshotData?.workingLevels,
+    storyChildAge,
+  );
 
   // Resolve theme guidance from preset or custom Firestore theme
   const themeGuidance = await resolveThemeGuidance(db, familyId, storyConfig.theme);
@@ -269,7 +277,8 @@ export const handleGenerateStory = async (
     childName: storyChildName,
     childAge: storyChildAge,
     childInterests,
-    readingLevel,
+    readingLevel: readingLevel.text,
+    readingLevelAssessed: readingLevel.source === "assessed",
     themeGuidance,
   });
 
@@ -286,10 +295,16 @@ export const handleGenerateStory = async (
 
   const model = modelForTask("generateStory");
 
+  // The budget scales with the page count AND the word list (FEAT-173): every
+  // word asked for is one more constraint to reason over and one more candidate
+  // for each page's listing, and FEAT-169's diagnostic confirmed a 10-page book
+  // with a list ran out of room at the page-only budget.
+  const maxTokens = maxTokensForPageCount(targetPageCount, storyWords.length);
+
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: maxTokensForPageCount(targetPageCount),
+    maxTokens,
     temperature: 0.7,
     systemPrompt: storySystemPrompt,
     messages: [{ role: "user", content: "Generate the story now." }],
@@ -301,8 +316,8 @@ export const handleGenerateStory = async (
   const pageMeta = reconcilePagesFromStory(targetPageCount, result.text);
   console.log(
     `[AI] taskType=generateStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}` +
-      ` maxTokens=${maxTokensForPageCount(targetPageCount)} stopReason=${result.stopReason}` +
-      ` words=${storyWords.length}` +
+      ` maxTokens=${maxTokens} stopReason=${result.stopReason}` +
+      ` words=${storyWords.length} readingLevel=${readingLevel.source}` +
       (pageMeta
         ? ` targetPages=${pageMeta.target} actualPages=${pageMeta.actual} pageDelta=${pageMeta.delta}`
         : ` targetPages=${targetPageCount} actualPages=?`),

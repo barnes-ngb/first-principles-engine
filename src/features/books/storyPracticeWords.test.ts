@@ -3,10 +3,15 @@ import { describe, expect, it } from 'vitest'
 import type { SightWordProgress } from '../../core/types'
 import {
   MAX_STORY_PRACTICE_WORDS,
+  StoryWordSource,
+  parseRequestedWords,
   practiceWordsPreviewLine,
   practiceWordsUsedIn,
+  requestedWordsPreviewLine,
+  resolveStoryWords,
   selectStoryPracticeWords,
   storyDraftMessage,
+  storyWordsPreviewLine,
 } from './storyPracticeWords'
 
 function progress(
@@ -124,5 +129,183 @@ describe('the two confirmation lines', () => {
     expect(storyDraftMessage('Cave Cat', [], [{ text: 'The cat dug.' }])).toBe(
       'Here\'s your story! "Cave Cat"',
     )
+  })
+})
+
+// ── FEAT-172: the words the parent typed win ─────────────────────
+
+/** Shelly's report, 2026-09-02, verbatim. */
+const SHELLY_IDEA =
+  'Can you include these sight words: our, friend, pretty, eight, could, very, should, would, blue, around, where, know. London becomes Spider-Man'
+
+describe('parseRequestedWords — an explicit list typed into the idea (FEAT-172)', () => {
+  it("reads Shelly's typed list, in order, and stops at the end of the sentence", () => {
+    expect(parseRequestedWords(SHELLY_IDEA)).toEqual([
+      'our',
+      'friend',
+      'pretty',
+      'eight',
+      'could',
+      'very',
+      'should',
+      'would',
+      'blue',
+      'around',
+      'where',
+      'know',
+    ])
+  })
+
+  it('accepts the other ways a parent writes the cue — dash, "like", "are", "practice words", "words to include"', () => {
+    expect(parseRequestedWords('practice words — could, would, should')).toEqual([
+      'could',
+      'would',
+      'should',
+    ])
+    expect(parseRequestedWords('A dragon story with sight words like the, and, said')).toEqual([
+      'the',
+      'and',
+      'said',
+    ])
+    expect(parseRequestedWords('The words are cat, dog and sun. A farm story.')).toEqual([
+      'cat',
+      'dog',
+      'sun',
+    ])
+    expect(parseRequestedWords('Words to include: run, jump')).toEqual(['run', 'jump'])
+    expect(parseRequestedWords('sightwords: my, by')).toEqual(['my', 'by'])
+  })
+
+  it('lower-cases, de-duplicates, strips quotes and trailing punctuation, and keeps hyphens / apostrophes', () => {
+    expect(parseRequestedWords(`Sight words: "Our", our, Don't, ice-cream, FRIEND!`)).toEqual([
+      'our',
+      "don't",
+      'ice-cream',
+      'friend',
+    ])
+  })
+
+  it('is [] — never a guess — for an idea with no cue', () => {
+    expect(parseRequestedWords('a puppy who finds a rainbow')).toEqual([])
+    expect(parseRequestedWords('')).toEqual([])
+    // The word "words" on its own is not a cue.
+    expect(parseRequestedWords('a dragon who loves words and, maybe, songs')).toEqual([])
+    expect(parseRequestedWords('the words of wisdom - a story about a wise owl')).toEqual([])
+  })
+
+  it('keeps "and" / "or" as WORDS when they are list items — both are sight words — and drops them only as joiners', () => {
+    expect(parseRequestedWords('sight words: the, and, said, or')).toEqual(['the', 'and', 'said', 'or'])
+    expect(parseRequestedWords('sight words: the, and said')).toEqual(['the', 'said'])
+    expect(parseRequestedWords('sight words: dog and sun and cat')).toEqual(['dog', 'sun', 'cat'])
+  })
+
+  it('is [] when what follows the cue is prose, not a list — a run of words with no commas or joiners', () => {
+    expect(parseRequestedWords('use these words: whatever fits the story best!')).toEqual([])
+    expect(parseRequestedWords('sight words: our friend pretty')).toEqual([])
+    expect(parseRequestedWords('sight words:')).toEqual([])
+    expect(parseRequestedWords('sight words: 3 hard ones')).toEqual([])
+  })
+
+  it('does not judge vocabulary — any single word a parent lists is sent (what a sight word IS is not decided here)', () => {
+    expect(parseRequestedWords('sight words: none. Just a fun story')).toEqual(['none'])
+  })
+})
+
+describe('resolveStoryWords — typed list wins, practice list is the fallback, else nothing', () => {
+  const practice = ['the', 'a', 'he', 'was']
+
+  it('uses the typed list and ignores the practice list entirely when the parent named words', () => {
+    expect(resolveStoryWords(SHELLY_IDEA, practice)).toEqual({
+      source: StoryWordSource.Requested,
+      words: expect.arrayContaining(['our', 'friend', 'know']),
+    })
+    expect(resolveStoryWords(SHELLY_IDEA, practice).words).not.toContain('the')
+  })
+
+  it('falls back to the practice list only when the parent named none', () => {
+    expect(resolveStoryWords('London becomes a hero', practice)).toEqual({
+      source: StoryWordSource.Practice,
+      words: practice,
+    })
+  })
+
+  it('carries no list, and says so, when neither exists', () => {
+    expect(resolveStoryWords('London becomes a hero', [])).toEqual({
+      source: StoryWordSource.None,
+      words: [],
+    })
+  })
+})
+
+describe('the confirmation lines name their source (FEAT-172)', () => {
+  it('the before-the-tap line says "the words you asked for" for a typed list', () => {
+    expect(requestedWordsPreviewLine(['our', 'friend'])).toBe(
+      "I'll try to work in the words you asked for: our, friend.",
+    )
+    expect(storyWordsPreviewLine(StoryWordSource.Requested, 'Lincoln', ['our', 'friend'])).toBe(
+      "I'll try to work in the words you asked for: our, friend.",
+    )
+  })
+
+  it("the before-the-tap line still names the child's practice words for that source", () => {
+    expect(storyWordsPreviewLine(StoryWordSource.Practice, 'London', ['again'])).toBe(
+      "I'll try to weave in some of London's practice words: again.",
+    )
+  })
+
+  it('renders nothing when there is no list', () => {
+    expect(storyWordsPreviewLine(StoryWordSource.None, 'London', [])).toBe('')
+    expect(storyWordsPreviewLine(StoryWordSource.Practice, 'London', [])).toBe('')
+  })
+
+  it('the draft turn reports a typed list as "the words you asked for", checked against the pages', () => {
+    const pages = [{ text: 'Our friend was very brave.' }]
+    expect(
+      storyDraftMessage('Hero', ['our', 'friend', 'know'], pages, StoryWordSource.Requested),
+    ).toBe('Here\'s your story! "Hero" — it uses the words you asked for: our, friend.')
+    expect(storyDraftMessage('Hero', ['know'], pages, StoryWordSource.Requested)).toBe(
+      'Here\'s your story! "Hero" — I couldn\'t fit the words you asked for in this time.',
+    )
+  })
+
+  it('the draft turn keeps the FEAT-169 practice wording for the practice source', () => {
+    expect(
+      storyDraftMessage('Hero', ['our'], [{ text: 'Our hero.' }], StoryWordSource.Practice),
+    ).toBe('Here\'s your story! "Hero" — it uses your practice words: our.')
+  })
+})
+
+// ── Codex P1 on PR #1731: a refinement joined behind the list must not erase it ──
+
+describe('parseRequestedWords keeps a typed list that "Add it" joined a refinement onto', () => {
+  it("survives joinIdeas' ' and <refinement>' — the exact shape Codex named", () => {
+    // 'include these sight words: our, friend.' + Add 'in space'
+    expect(parseRequestedWords('include these sight words: our, friend and in space')).toEqual([
+      'our',
+      'friend',
+    ])
+  })
+
+  it('treats any chaining word joinIdeas may use as the boundary, not only "and"', () => {
+    expect(parseRequestedWords('sight words: our, friend with a dragon')).toEqual(['our', 'friend'])
+    expect(parseRequestedWords('sight words: our, friend then a spaceship lands')).toEqual([
+      'our',
+      'friend',
+    ])
+    expect(parseRequestedWords('sight words: our, friend but no cats')).toEqual(['our', 'friend'])
+  })
+
+  it('backs off one chain step when the greedy walk crossed into the refinement', () => {
+    // 'sight words: cat and dog' + Add 'the boy went'
+    expect(parseRequestedWords('sight words: cat and dog and the boy went')).toEqual(['cat', 'dog'])
+  })
+
+  it('still reads a plain sentence after the cue as prose, never as a list', () => {
+    expect(parseRequestedWords('sight words: whatever fits the story best')).toEqual([])
+    expect(parseRequestedWords('sight words: our, friend whatever fits')).toEqual([])
+  })
+
+  it('only the LAST item may carry a refinement — a broken chain mid-list is still prose', () => {
+    expect(parseRequestedWords('sight words: our and in space, friend')).toEqual([])
   })
 })
