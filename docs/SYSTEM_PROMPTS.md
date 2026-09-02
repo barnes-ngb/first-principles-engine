@@ -273,7 +273,7 @@ Since FEAT-58 the model strings live in one table — `functions/src/ai/models.t
 
 **Output:** JSON with `title`, `pages[]` (`pageNumber`, `text`, `sceneDescription`, `wordsOnPage`), `allWordsUsed`, `missedWords`, plus new optional `qualityNotes` field (debug-only — logged to aiUsage, not rendered in the book).
 
-**Model:** `claude-sonnet-5` · **maxTokens:** `maxTokensForPageCount(pageCount)` (scales with the target — 10 pages → 7168; the old fixed 6144 truncated longer books, see `storyPageBudget.ts`) · **temperature:** 0.7 (gated — Sonnet 5 rejects the param, so `callClaude` omits it for this model)
+**Model:** `claude-sonnet-5` · **maxTokens:** `maxTokensForPageCount(pageCount, words.length)` (scales with the target AND the word list — FEAT-172: base 8192 + 512/page + 64/word, clamped to [4096, 16384], so 6 / 10 / 14 pages → 11264 / 13312 / 15360 and Shelly's 10 pages + 12 words → 14080; the old fixed 6144 truncated longer books and FEAT-169's diagnostic confirmed FEAT-97's 7168 still cut a 10-page book with a word list short, see `storyPageBudget.ts`) · **temperature:** 0.7 (gated — Sonnet 5 rejects the param, so `callClaude` omits it for this model)
 
 ### `revisePage` (tasks/revisePage.ts)
 
