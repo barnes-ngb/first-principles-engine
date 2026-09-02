@@ -262,10 +262,12 @@ Since FEAT-58 the model strings live in one table — `functions/src/ai/models.t
 1. Context slices for "generateStory": childProfile, sightWords, wordMastery, skillSnapshot
 2. `buildStoryPrompt(input)` — sight word story generator (V2)
 
-**Input:** storyIdea, words[], pageCount, childName, childAge, childInterests, readingLevel
+**Input:** storyIdea, words[], pageCount, childName, childAge, childInterests, readingLevel, readingLevelAssessed
 
 **Key behaviors (V2):**
 - **Per-child calibration:** vocabulary level driven by WORD MASTERY + SKILL SNAPSHOT context slices (loaded per-request), not by a binary age switch. Content stakes (emotional weight, conflict complexity) calibrated separately by `childAge`. No "CVC words" instruction for older children — Lincoln (10) gets age-appropriate prose even when his decoding lags.
+- **The reading level is read, not guessed (FEAT-173):** `readingLevel` comes from `storyReadingLevel.resolveStoryReadingLevel` over the child's assessed `skillSnapshots/{childId}.workingLevels` (`phonics` = decoding, 1–8, with its band; `comprehension`, 1–6, when present), which the `chat` dispatcher already loads into `ctx.snapshotData`. With an assessed level the RULES line reads *"Reading level (ASSESSED — {child}'s working level from the Skill Snapshot; keep the decoding demands of the text at or below it …)"*; the old age-derived string (`≤7` → "pre-K to kindergarten", else "1st grade") is the **fallback only**, and the line then says so (*"no assessed level on file yet — estimated from age; a soft hint"*). The CF log line carries `readingLevel=assessed|age`.
+- **A word list the parent typed wins (FEAT-172/173, client):** the `words[]` this task receives from the Generate Chat is the parent's typed list when the story idea carries one (`storyPracticeWords.parseRequestedWords`), else the active child's practice list, else `[]`. The prompt block is unchanged — it renders whatever list arrives.
 - **Sight-word integration is a soft rule:** "weave 3-5 naturally; leave words out if they don't fit." Not "MUST use every word" — forced injection produced awkward sentences. `missedWords` in the output captures words intentionally skipped.
 - **PAGE BEATS templates:** explicit per-page story arc emitted by exported `buildPageBeats(pageCount)` helper. 6-beat arc for ≤6 pages, 10-beat arc for 7-10 pages, proportional expansion beyond. Gives the model a story-shape scaffold instead of free-form pacing.
 - **WRITING QUALITY guardrails:** read-aloud sanity check (does it sound right spoken?), natural dialogue with contractions, consistent character names across pages, no run-ons / no typos, ending answers the beginning's question.

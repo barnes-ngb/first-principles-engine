@@ -755,7 +755,7 @@ describe('useBookGenerateChat failure messages (FEAT-169 — a failure that name
   })
 })
 
-// ── FEAT-172: the words the parent typed win, and the book binds to its child ──
+// ── FEAT-172: the words the parent typed win ──
 
 describe('useBookGenerateChat — a typed list wins over the practice list (FEAT-172)', () => {
   /** Shelly's report, 2026-09-02. */
@@ -880,40 +880,8 @@ describe('useBookGenerateChat — a typed list wins over the practice list (FEAT
   })
 })
 
-describe('useBookGenerateChat — the book, the words and the call bind to the child it is FOR (FEAT-172)', () => {
-  const fakeStory = {
-    title: 'Web Hero',
-    pages: [{ pageNumber: 1, text: 'A hero.', sceneDescription: 'a city' }],
-  }
-
-  it('sends generateStory for the FOR child and writes the draft on that child, not the header child', async () => {
-    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
-    const { addDoc } = await import('firebase/firestore')
-    const addDocMock = vi.mocked(addDoc)
-    addDocMock.mockClear()
-    // The component resolves `childId` to the picked child; the hook must
-    // carry that one child everywhere.
-    const { result } = renderHook(() =>
-      useBookGenerateChat({
-        ...baseOpts,
-        childId: 'child-london',
-        childName: 'London',
-        attribution: { createdBy: 'parent', createdFor: 'child-london' },
-      }),
-    )
-    await act(async () => {
-      await result.current.sendKidMessage('London becomes a hero')
-    })
-    const clarificationDoc = addDocMock.mock.calls[0]?.[1] as { childId: string; createdFor: string; createdBy: string }
-    expect(clarificationDoc).toMatchObject({ childId: 'child-london', createdFor: 'child-london', createdBy: 'parent' })
-
-    await act(async () => {
-      await result.current.confirmStartStory()
-    })
-    expect(chatMock.mock.calls[0][0].childId).toBe('child-london')
-  })
-
-  it("a parent's switch to the other child before the story exists moves the already-written draft doc with it", async () => {
+describe('useBookGenerateChat — the active profile is the context (FEAT-173, owner decision 2026-09-02)', () => {
+  it('a merge-write never rewrites the draft\'s childId / createdFor — the book stays on the shelf it was created on', async () => {
     const firestore = await import('firebase/firestore')
     const addDoc = vi.mocked(firestore.addDoc)
     const setDoc = vi.mocked(firestore.setDoc)
@@ -928,26 +896,28 @@ describe('useBookGenerateChat — the book, the words and the call bind to the c
     }) as never)
 
     const { result, rerender } = renderHook(
-      ({ forChild }: { forChild: string }) =>
+      ({ active }: { active: string }) =>
         useBookGenerateChat({
           ...baseOpts,
-          childId: forChild,
-          attribution: { createdBy: 'parent', createdFor: forChild },
+          childId: active,
+          attribution: { createdBy: 'parent', createdFor: active },
         }),
-      { initialProps: { forChild: 'child-lincoln' } },
+      { initialProps: { active: 'child-lincoln' } },
     )
     await act(async () => {
       await result.current.sendKidMessage('London becomes a hero')
     })
     expect((addDoc.mock.calls[0]?.[1] as { childId: string }).childId).toBe('child-lincoln')
 
-    // Shelly sees Lincoln's words offered and switches the story to London.
-    rerender({ forChild: 'child-london' })
+    // The header's active child changes under an open draft. FEAT-172 moved
+    // the doc with it; the owner rejected that — the profile is the context,
+    // and a draft is not re-homed by a persist.
+    rerender({ active: 'child-london' })
     await act(async () => {
       await result.current.sendKidMessage('and a spider')
     })
     const merged = setDoc.mock.calls.at(-1)?.[1] as { childId: string; createdFor: string }
-    expect(merged).toMatchObject({ childId: 'child-london', createdFor: 'child-london' })
+    expect(merged).toMatchObject({ childId: 'child-lincoln', createdFor: 'child-lincoln' })
     getDoc.mockReset()
     getDoc.mockResolvedValue({ exists: () => false } as never)
   })
