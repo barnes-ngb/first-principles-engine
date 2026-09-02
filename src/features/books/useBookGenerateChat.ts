@@ -48,12 +48,12 @@ interface ReviseStoryResult {
 export interface UseBookGenerateChatOptions {
   familyId: string
   /**
-   * The child the story is FOR (FEAT-172) — not merely the child active in
-   * the header. Every read and write binds to it: the practice words come from
-   * this child's `sightWordProgress`, the server writes for this child's age,
-   * interests and word mastery, and the draft book lands on this child's
-   * shelf. `BookGenerateChat` lets a parent pick it and hydrates it from the
-   * book when resuming a draft.
+   * The active child — the profile the app is on. Every read and write
+   * follows it, as on every other surface (FEAT-173, owner decision
+   * 2026-09-02): the practice words come from this child's
+   * `sightWordProgress`, the server writes for this child's age, interests
+   * and word mastery, and the draft book lands on this child's shelf. There is
+   * no per-story child picker and nothing infers a child from the prose.
    */
   childId: string
   childName: string
@@ -228,8 +228,7 @@ export function useBookGenerateChat(
   const { illustrate } = useBookIllustrator()
   // The child's real list, read-only (FEAT-169). `progressMap` is the hook's
   // stable state — `allProgress` is a fresh array per render. Keyed on the
-  // child the story is FOR, so a book for London reads London's words even
-  // with Lincoln active in the header (FEAT-172).
+  // active child, like every other read on this surface.
   const { progressMap, loading: practiceWordsLoading } = useSightWordProgress(
     familyId,
     childId,
@@ -338,11 +337,6 @@ export function useBookGenerateChat(
     ): Promise<string | null> => {
       const now = new Date().toISOString()
       const pages = storyToPages(story)
-      // The child this book is FOR (FEAT-172) — written on every persist, not
-      // only on create, so a draft doc opened for one child follows a parent's
-      // switch to the other before the story exists. A resumed draft hydrates
-      // its child from the book, so for it this is the same value again.
-      const forChildId = attribution?.createdFor ?? childId
       // Recorded from the idea being persisted, not the render's closure —
       // the first-message write runs before `pendingIdea` has re-rendered.
       const wordsForIdea = resolveStoryWords(idea, practiceWords).words
@@ -365,8 +359,6 @@ export function useBookGenerateChat(
             })
             await setDoc(ref, {
               ...current,
-              childId: forChildId,
-              createdFor: forChildId,
               title: story.title,
               pages: mergedPages,
               coverStyle: style as Book['coverStyle'],
@@ -396,7 +388,7 @@ export function useBookGenerateChat(
       }
 
       const newBook: Omit<Book, 'id'> = {
-        childId: forChildId,
+        childId: attribution?.createdFor ?? childId,
         title: story.title,
         coverStyle: style as Book['coverStyle'],
         pages,
@@ -408,7 +400,7 @@ export function useBookGenerateChat(
         source: 'ai-generated',
         theme: inferBookTheme('', [], style) as BookTheme,
         createdBy: attribution?.createdBy ?? childId,
-        createdFor: forChildId,
+        createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
           storyIdea: idea,
           // The words this flow sends to generateStory (FEAT-169/172) —
@@ -453,9 +445,8 @@ export function useBookGenerateChat(
       refinement: string | null,
     ): Promise<void> => {
       const now = new Date().toISOString()
-      // See persistStory: the FOR child and the idea's own word list are
-      // written on every persist (FEAT-172), never only on create.
-      const forChildId = attribution?.createdFor ?? childId
+      // See persistStory: the idea's own word list is written on every
+      // persist (FEAT-172), never only on create.
       const wordsForIdea = resolveStoryWords(idea, practiceWords).words
       if (bookId) {
         const ref = doc(booksCollection(familyId), bookId)
@@ -465,8 +456,6 @@ export function useBookGenerateChat(
             const current = snap.data() as Book
             await setDoc(ref, {
               ...current,
-              childId: forChildId,
-              createdFor: forChildId,
               updatedAt: now,
               generationConfig: {
                 ...(current.generationConfig ?? {}),
@@ -493,7 +482,7 @@ export function useBookGenerateChat(
       }
 
       const newBook: Omit<Book, 'id'> = {
-        childId: forChildId,
+        childId: attribution?.createdFor ?? childId,
         title: '',
         pages: [],
         status: 'draft',
@@ -504,7 +493,7 @@ export function useBookGenerateChat(
         source: 'ai-generated',
         theme: inferBookTheme('', [], style) as BookTheme,
         createdBy: attribution?.createdBy ?? childId,
-        createdFor: forChildId,
+        createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
           storyIdea: idea,
           // The words this flow sends to generateStory (FEAT-169/172) —

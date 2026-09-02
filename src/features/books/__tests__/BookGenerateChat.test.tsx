@@ -33,6 +33,7 @@ interface HookState {
   canStartStory: boolean
   pageCount: number
   storyWords: string[]
+  storyWordSource: 'requested' | 'practice' | 'none'
   storyWordsLoading: boolean
   illustrationProgress: {
     phase: 'idle' | 'illustrating' | 'done'
@@ -56,6 +57,7 @@ let hookState: HookState = {
   canStartStory: false,
   pageCount: 10,
   storyWords: [],
+  storyWordSource: 'none',
   storyWordsLoading: false,
   illustrationProgress: {
     phase: 'idle',
@@ -82,10 +84,15 @@ vi.mock('../../../core/auth/useAuth', () => ({
   useFamilyId: () => 'family-1',
 }))
 
+// A two-child family with London active: the header's child is the context
+// for the whole chat (FEAT-173) — there is no per-story child picker.
 vi.mock('../../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
     activeChild: { id: 'child-london', name: 'London', birthdate: '2020-01-01' },
-    children: [],
+    children: [
+      { id: 'child-lincoln', name: 'Lincoln', birthdate: '2016-01-01' },
+      { id: 'child-london', name: 'London', birthdate: '2020-01-01' },
+    ],
   }),
 }))
 
@@ -164,6 +171,7 @@ beforeEach(() => {
     canStartStory: false,
     pageCount: 10,
     storyWords: [],
+    storyWordSource: 'none',
     storyWordsLoading: false,
     illustrationProgress: {
       phase: 'idle',
@@ -368,6 +376,7 @@ describe('BookGenerateChat', () => {
       pendingIdea: 'a cat in a cave',
       canStartStory: true,
       storyWords: ['water', 'again', 'people'],
+      storyWordSource: 'practice',
     }
     render(
       <Wrap>
@@ -379,6 +388,40 @@ describe('BookGenerateChat', () => {
       "I'll try to weave in some of London's practice words: water, again, people.",
     )
     expect(screen.getByRole('button', { name: /yes, start my story/i })).toBeTruthy()
+  })
+
+  it('says it will work in the words the parent asked for — never calling a typed list "practice words" (FEAT-173)', () => {
+    hookState = {
+      ...hookState,
+      chatHistory: [
+        { role: 'kid', content: 'a puppy. include these sight words: our, friend', ts: 1 },
+        { role: 'ai', content: 'Here\'s what I heard: "a puppy. include these sight words: our, friend". Want me to start the story?', ts: 2, kind: 'echo' },
+      ],
+      pendingIdea: 'a puppy. include these sight words: our, friend',
+      canStartStory: true,
+      storyWords: ['our', 'friend'],
+      storyWordSource: 'requested',
+    }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    const line = screen.getByTestId('story-practice-words')
+    expect(line.textContent).toBe("I'll try to work in the words you asked for: our, friend.")
+    expect(line.textContent).not.toMatch(/practice words/i)
+    expect(screen.getByRole('button', { name: /yes, start my story/i })).toBeTruthy()
+  })
+
+  it('offers a parent of two children NO "This story is for" picker — the active profile is the context (FEAT-173)', () => {
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(screen.queryByTestId('story-for-child')).toBeNull()
+    expect(screen.queryByText(/this story is for/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /story for lincoln/i })).toBeNull()
   })
 
   it('says it is still checking the practice words, and withholds the Yes button, until the list settles (FEAT-169, Codex P1)', () => {
