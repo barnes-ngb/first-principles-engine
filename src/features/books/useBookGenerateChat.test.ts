@@ -69,6 +69,7 @@ vi.mock('./useBookArtQuota', () => ({
 // ── Subject under test ──────────────────────────────────────────
 
 import { joinIdeas, useBookGenerateChat } from './useBookGenerateChat'
+import { parseRequestedWords } from './storyPracticeWords'
 
 const baseOpts = {
   familyId: 'family-1',
@@ -130,6 +131,19 @@ describe('joinIdeas', () => {
   it('handles empty parts gracefully', () => {
     expect(joinIdeas('', 'a dragon')).toBe('a dragon')
     expect(joinIdeas('a puppy', '')).toBe('a puppy')
+  })
+
+  it('never loses a typed word list — keeps the sentence boundary when the plain join would (FEAT-172, Codex P1 on PR #1730)', () => {
+    const joined = joinIdeas('Sight words: our, friend.', 'Make it about London')
+    expect(joined).toBe('Sight words: our, friend. Make it about London')
+    expect(parseRequestedWords(joined)).toEqual(['our', 'friend'])
+    // A refinement that chains naturally is just as lossy without the boundary.
+    const chained = joinIdeas('Sight words: our, friend.', 'and a dragon')
+    expect(parseRequestedWords(chained)).toEqual(['our', 'friend'])
+    // With the list safely closed by its own sentence, the plain join stands.
+    expect(joinIdeas('Sight words: our, friend. A hero story.', 'with a dragon')).toBe(
+      'Sight words: our, friend. A hero story with a dragon',
+    )
   })
 })
 
@@ -913,7 +927,7 @@ describe('useBookGenerateChat — the book, the words and the call bind to the c
     expect(chatMock.mock.calls[0][0].childId).toBe('child-london')
   })
 
-  it("a parent's switch to the other child before the story exists moves the already-written draft doc with it", async () => {
+  it("a parent's switch to the other child before the story exists moves the already-written draft doc with it — immediately, not on the next chat action (Codex P2 on PR #1730)", async () => {
     const firestore = await import('firebase/firestore')
     const addDoc = vi.mocked(firestore.addDoc)
     const setDoc = vi.mocked(firestore.setDoc)
@@ -942,14 +956,45 @@ describe('useBookGenerateChat — the book, the words and the call bind to the c
     expect((addDoc.mock.calls[0]?.[1] as { childId: string }).childId).toBe('child-lincoln')
 
     // Shelly sees Lincoln's words offered and switches the story to London.
+    setDoc.mockClear()
     rerender({ forChild: 'child-london' })
-    await act(async () => {
-      await result.current.sendKidMessage('and a spider')
+    // The switch alone persists — a close or reload right now finds the
+    // draft on London. No chat action in between.
+    await waitFor(() => expect(setDoc).toHaveBeenCalled())
+    const merged = setDoc.mock.calls.at(-1)?.[1] as {
+      childId: string
+      createdFor: string
+      reviewState: { pendingIdea: string }
+    }
+    expect(merged).toMatchObject({
+      childId: 'child-london',
+      createdFor: 'child-london',
+      reviewState: { pendingIdea: 'London becomes a hero' },
     })
-    const merged = setDoc.mock.calls.at(-1)?.[1] as { childId: string; createdFor: string }
-    expect(merged).toMatchObject({ childId: 'child-london', createdFor: 'child-london' })
+    // Switching back is one more write, and a re-render with the same child is none.
+    setDoc.mockClear()
+    rerender({ forChild: 'child-london' })
+    expect(setDoc).not.toHaveBeenCalled()
     getDoc.mockReset()
     getDoc.mockResolvedValue({ exists: () => false } as never)
+  })
+
+  it('a child switch before any draft doc exists writes nothing — the create will carry the current child', async () => {
+    const firestore = await import('firebase/firestore')
+    const setDoc = vi.mocked(firestore.setDoc)
+    setDoc.mockClear()
+    const { rerender } = renderHook(
+      ({ forChild }: { forChild: string }) =>
+        useBookGenerateChat({
+          ...baseOpts,
+          childId: forChild,
+          attribution: { createdBy: 'parent', createdFor: forChild },
+        }),
+      { initialProps: { forChild: 'child-lincoln' } },
+    )
+    rerender({ forChild: 'child-london' })
+    await act(async () => {})
+    expect(setDoc).not.toHaveBeenCalled()
   })
 })
 

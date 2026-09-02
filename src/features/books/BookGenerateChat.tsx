@@ -187,12 +187,15 @@ export default function BookGenerateChat({
     [composerDisabled, sendKidMessage],
   )
 
+  // Built entirely from the FOR child (FEAT-172, Codex P2 on PR #1730): the
+  // id the transcription is attributed to and the Whisper / Web-Speech
+  // setting must name the same child.
   const voiceProfile = useMemo(
     () => ({
       id: childId,
-      voiceInputEnhanced: activeChild?.voiceInputEnhanced === true,
+      voiceInputEnhanced: forChild?.voiceInputEnhanced === true,
     }),
-    [childId, activeChild?.voiceInputEnhanced],
+    [childId, forChild?.voiceInputEnhanced],
   )
 
   // ── TTS: auto-play templated turns + first story draft ────────

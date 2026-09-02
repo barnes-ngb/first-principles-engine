@@ -15,6 +15,7 @@ import {
 } from './storyGenerationFailure'
 import {
   StoryWordSource,
+  parseRequestedWords,
   resolveStoryWords,
   selectStoryPracticeWords,
   storyDraftMessage,
@@ -181,6 +182,15 @@ const CHAINING_WORDS = new Set([
  * Dumb heuristic to combine the kid's prior idea with a refinement they
  * tapped "+ Add it" for. Trims trailing punctuation off the first part,
  * inserts "and" unless the refinement already starts with a chaining word.
+ *
+ * One rule on top (FEAT-172, Codex P1 on PR #1730): a join must never lose
+ * a typed word list. *"Sight words: our, friend."* + *"Make it about
+ * London"* joined the plain way reads *"…our, friend and Make it about
+ * London"*, which the parser rightly rejects as prose — and the story would
+ * silently fall back to the practice list, the exact failure FEAT-172 fixes.
+ * When the plain join would drop or change the list the first idea carried,
+ * the sentence boundary is kept instead: *"Sight words: our, friend. Make it
+ * about London"*.
  */
 export function joinIdeas(a: string, b: string): string {
   const left = a.replace(/[.!?,\s]+$/u, '').trim()
@@ -190,8 +200,16 @@ export function joinIdeas(a: string, b: string): string {
   const firstWord = right.split(/\s+/, 1)[0]?.toLowerCase() ?? ''
   const stripped = firstWord.replace(/[^a-z]/gu, '')
   const naturallyChains = CHAINING_WORDS.has(stripped)
-  const joined = naturallyChains ? `${left} ${right}` : `${left} and ${right}`
-  return joined.replace(/\s{2,}/gu, ' ')
+  const joined = (naturallyChains ? `${left} ${right}` : `${left} and ${right}`).replace(
+    /\s{2,}/gu,
+    ' ',
+  )
+  const listBefore = parseRequestedWords(a)
+  if (listBefore.length === 0) return joined
+  const listAfter = parseRequestedWords(joined)
+  const listKept =
+    listAfter.length === listBefore.length && listAfter.every((w, i) => w === listBefore[i])
+  return listKept ? joined : `${left}. ${right}`.replace(/\s{2,}/gu, ' ')
 }
 
 function echoMessage(idea: string): string {
@@ -533,6 +551,40 @@ export function useBookGenerateChat(
     },
     [familyId, childId, bookId, attribution, pageCount, practiceWords],
   )
+
+  // ── The FOR child changed (FEAT-172, Codex P2 on PR #1730) ───
+  //
+  // A parent may switch the child after the first message, when a draft
+  // doc already exists for the first child. The next chat action would
+  // carry the switch (every persist writes `childId` / `createdFor`), but a
+  // close, reload or resume before that action would find the draft still
+  // on the wrong child — and resume with its picker locked there. So the
+  // switch is persisted the moment it happens. Nothing to do before a doc
+  // exists (the create will carry the current child) or once a story exists
+  // (the picker is locked by then).
+  const persistedChildRef = useRef(childId)
+  useEffect(() => {
+    if (persistedChildRef.current === childId) return
+    persistedChildRef.current = childId
+    if (!bookId || currentStory !== null) return
+    void persistClarification(
+      chatHistory,
+      illustrationStyle,
+      clarificationPhase,
+      pendingIdea,
+      pendingRefinement,
+    )
+  }, [
+    childId,
+    bookId,
+    currentStory,
+    chatHistory,
+    illustrationStyle,
+    clarificationPhase,
+    pendingIdea,
+    pendingRefinement,
+    persistClarification,
+  ])
 
   // ── Send a kid message ───────────────────────────────────────
 

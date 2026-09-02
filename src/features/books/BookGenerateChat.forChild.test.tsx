@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ── Hoisted mocks ───────────────────────────────────────────────
 
-const { hookOpts, hookState, activeChildState, profileState } = vi.hoisted(() => ({
+const { hookOpts, voiceProfiles, hookState, activeChildState, profileState } = vi.hoisted(() => ({
   /** Every options object the component handed the hook, in order. */
   hookOpts: [] as Array<Record<string, unknown>>,
+  /** Every `profile` the component handed VoiceInput, in order. */
+  voiceProfiles: [] as Array<{ id: string; voiceInputEnhanced: boolean }>,
   hookState: {
     storyWords: [] as string[],
     storyWordSource: 'none' as 'requested' | 'practice' | 'none',
@@ -16,8 +18,8 @@ const { hookOpts, hookState, activeChildState, profileState } = vi.hoisted(() =>
   activeChildState: {
     activeChildId: 'child-lincoln',
     children: [
-      { id: 'child-lincoln', name: 'Lincoln', birthdate: '2015-09-30' },
-      { id: 'child-london', name: 'London', birthdate: '2020-02-20' },
+      { id: 'child-lincoln', name: 'Lincoln', birthdate: '2015-09-30', voiceInputEnhanced: false },
+      { id: 'child-london', name: 'London', birthdate: '2020-02-20', voiceInputEnhanced: true },
     ],
   },
   profileState: { profile: 'parents' as string },
@@ -54,7 +56,10 @@ vi.mock('../../core/hooks/useTTS', () => ({
 }))
 
 vi.mock('../../components/VoiceInput', () => ({
-  default: () => null,
+  default: ({ profile }: { profile: { id: string; voiceInputEnhanced: boolean } }) => {
+    voiceProfiles.push(profile)
+    return null
+  },
 }))
 
 vi.mock('../business/useArtQuota', () => ({
@@ -119,6 +124,7 @@ function withEchoTurn(idea: string) {
 
 beforeEach(() => {
   hookOpts.length = 0
+  voiceProfiles.length = 0
   hookState.storyWords = []
   hookState.storyWordSource = 'none'
   hookState.storyWordsLoading = false
@@ -152,6 +158,13 @@ describe('BookGenerateChat — who the story is for (FEAT-172)', () => {
     })
     // The header's active child did not move.
     expect(activeChildState.activeChildId).toBe('child-lincoln')
+  })
+
+  it("the voice profile is built entirely from the FOR child — its id and its Whisper setting name the same child (Codex P2 on PR #1730)", () => {
+    render(<BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />)
+    expect(voiceProfiles.at(-1)).toEqual({ id: 'child-lincoln', voiceInputEnhanced: false })
+    fireEvent.click(screen.getByRole('button', { name: 'Story for London' }))
+    expect(voiceProfiles.at(-1)).toEqual({ id: 'child-london', voiceInputEnhanced: true })
   })
 
   it('a resumed draft binds to the child the BOOK is for, not the header child, and the picker is locked', () => {
