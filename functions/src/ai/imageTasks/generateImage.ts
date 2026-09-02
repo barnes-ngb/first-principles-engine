@@ -6,6 +6,7 @@ import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 import type { ImageOptions } from "../aiService.js";
 import { rewriteForCopyright } from "./copyrightUtils.js";
+import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -15,7 +16,11 @@ export interface ImageGenRequest {
   style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-illustration-garden-warfare" | "book-illustration-platformer" | "book-sticker" | "general";
   /** gpt-image-1.5 sizes. Legacy 1024x1792 / 1792x1024 are silently remapped to 1024x1536 / 1536x1024. */
   size?: "1024x1024" | "1024x1536" | "1536x1024" | "1024x1792" | "1792x1024";
-  /** Optional theme ID — if provided, theme's imageStylePrefix overrides the default style prefix. */
+  /**
+   * Optional theme ID. Its `imageStylePrefix` is used only when `style` carries
+   * no look of its own (`general`, or unrecognised) — an explicitly picked
+   * illustration style always wins (FEAT-174).
+   */
   themeId?: string;
 }
 
@@ -40,7 +45,72 @@ export interface ImageGenResponse {
 
 // ── Style-specific prompt prefixes ──────────────────────────────
 
-const STYLE_PREFIXES: Record<string, string> = {
+/**
+ * The three book-illustration looks that named only adjectives (FEAT-174).
+ *
+ * Minecraft, Garden Battle and Platformer World always named concrete visual
+ * nouns — blocks and terrain, sunflowers and pea shooters, brick platforms and
+ * green pipes — so the model had something to separate them by. Comic Book,
+ * Storybook and Realistic named only adjectives ("bold", "dynamic", "soft
+ * colors", "warm lighting"), and adjectives are what every children's book
+ * illustration already is. So all three drifted toward the same generic look and
+ * Comic Book did not read as comic — reported by a parent who picked it and got
+ * back something that "looks the same as storybook".
+ *
+ * These reuse the FEAT-159 recipe wording, which already had to solve exactly
+ * this for the sticker picker. Palette, line work and shading are the three
+ * questions that make a look tell apart at a glance.
+ */
+const BOOK_ILLUSTRATION_RECIPES: Record<string, VisualRecipe> = {
+  "book-illustration-comic": {
+    hint: "in a bold comic book illustration style",
+    summary: "A bold comic book background panel for a children's story.",
+    palette:
+      "high-saturation comic primaries — red, yellow, cyan — in flat fills with no gradients, and strong complementary contrast.",
+    line: "a heavy, confident black ink outline of varying weight, thickest on the silhouettes, with speed lines and impact streaks in the background.",
+    shading:
+      "hard-edged cel shading in two or three steps, with visible halftone dot screens for the midtones, and a dramatic low or high camera angle.",
+  },
+  "book-illustration-storybook": {
+    hint: "in a warm hand-painted watercolor picture book style",
+    summary: "A warm hand-painted watercolor scene for a children's picture book page.",
+    palette:
+      "warm, gently desaturated colors — cream, soft coral, sage — with visible paper white and paper grain showing through.",
+    line: "a soft, slightly uneven ink line of medium weight that sometimes lifts off the edge of a shape.",
+    shading:
+      "translucent watercolor washes with soft blooms where colors meet; no hard black shadows.",
+  },
+  "book-illustration-realistic": {
+    hint: "in a gentle, realistic children's book illustration style",
+    summary: "A gentle realistic background scene for a children's book page.",
+    palette:
+      "naturalistic, muted colors with believable wood, foliage, stone and fabric tones.",
+    line: "almost no visible outline — forms are defined by tone and edge contrast.",
+    shading:
+      "soft directional light with smooth falloff, subtle bounce light, and gentle cast shadows.",
+  },
+};
+
+/** Every book-illustration page prompt ends with this shared framing. */
+const BOOK_PAGE_FRAMING = "Environment and background only, no characters or people. ";
+
+function bookIllustrationPrefix(styleKey: string): string {
+  const recipe = BOOK_ILLUSTRATION_RECIPES[styleKey];
+  if (!recipe) return "";
+  return `${recipe.summary} ${BOOK_PAGE_FRAMING}${recipeDetail(recipe)}`;
+}
+
+/** The six looks a parent can pick in the book generator's style picker. */
+export const BOOK_ILLUSTRATION_STYLE_KEYS = [
+  "book-illustration-minecraft",
+  "book-illustration-storybook",
+  "book-illustration-comic",
+  "book-illustration-realistic",
+  "book-illustration-garden-warfare",
+  "book-illustration-platformer",
+] as const;
+
+export const STYLE_PREFIXES: Record<string, string> = {
   "schedule-card":
     "A friendly, colorful visual schedule card for a child's daily routine. Simple, clear imagery with large icons. ",
   "reward-chart":
@@ -48,13 +118,10 @@ const STYLE_PREFIXES: Record<string, string> = {
   "theme-illustration":
     "A warm, educational illustration for a homeschool family learning theme. Kid-friendly, inviting art style. ",
   "book-illustration-minecraft":
-    "A blocky pixel art voxel world scene for a children's book page. Environment only, no characters or people. Colorful blocks, dramatic terrain, bright sky. ",
-  "book-illustration-storybook":
-    "A warm hand-painted watercolor scene for a children's picture book page. Background environment only, no characters. Soft colors, gentle shapes, inviting landscape. ",
-  "book-illustration-comic":
-    "A bold comic book background panel for a children's story. Dynamic environment, no characters. Bright colors, dramatic perspective, action lines. ",
-  "book-illustration-realistic":
-    "A gentle realistic background scene for a children's book page. Environment only, no people or characters. Warm lighting, friendly atmosphere. ",
+    "A blocky pixel art voxel world scene for a children's book page. Environment only, no characters or people. Cubic blocks with visible pixel steps, dramatic mined terrain, bright sky. Flat per-face shading only — one solid tone per cube face, lighter on top, darker on the sides. No gradients, no outlines. ",
+  "book-illustration-storybook": bookIllustrationPrefix("book-illustration-storybook"),
+  "book-illustration-comic": bookIllustrationPrefix("book-illustration-comic"),
+  "book-illustration-realistic": bookIllustrationPrefix("book-illustration-realistic"),
   "book-illustration-garden-warfare":
     "A fun cartoon garden battle scene for a children's book page. Bright green garden with sunflowers, pea shooters, walnuts as barriers, silly cartoon zombies in the background. Colorful, humorous, family-friendly. Environment only, no specific characters. ",
   "book-illustration-platformer":
@@ -64,18 +131,43 @@ const STYLE_PREFIXES: Record<string, string> = {
   general: "",
 };
 
-/** Build the final image prompt with style context and safety guardrails.
- *  If a themeImagePrefix is provided (from BookThemeConfig), it takes precedence
- *  over the default STYLE_PREFIXES for book illustrations. */
+/**
+ * Build the final image prompt with style context and safety guardrails.
+ *
+ * ── Precedence: the picked style owns the look (FEAT-174) ────────────────────
+ * This used to read the other way round — a `themeImagePrefix` REPLACED the style
+ * prefix for any `book-illustration-*` style. That silently threw away the one
+ * art-style control a parent has. Picking "Comic Book" for a superhero story sent
+ * no comic language at all: `inferBookTheme` matched the idea's word "hero" to the
+ * `adventure` theme, and "A colorful adventure scene for a children's book"
+ * replaced the comic recipe outright. The parent's picker was decorative.
+ *
+ * (The theme most often blamed for this, `sight_words`, could never have caused
+ * it — it is absent from `PRESET_IMAGE_PREFIXES` below, so it resolves to no
+ * prefix. The themes that actually overrode a picked style are the ones that map:
+ * `adventure`, `animals`, `fantasy`, `space`, `ocean` and the rest.)
+ *
+ * Now an explicitly picked style wins outright, and a theme prefix applies only
+ * where the style contributes nothing to the look — i.e. `general`, or an unknown
+ * style — so `themeId` stays meaningful for non-book callers without ever being
+ * able to override a control the parent set. A style prefix and a theme prefix
+ * are both whole-image style sentences; concatenating them would put two
+ * different art directions in one prompt, so exactly one is used.
+ */
 export function buildImagePrompt(
   userPrompt: string,
   style: string | undefined,
   themeImagePrefix?: string,
 ): string {
-  // Theme prefix overrides default style prefix for book illustrations
-  const prefix = themeImagePrefix && style?.startsWith("book-illustration")
-    ? themeImagePrefix + " "
-    : (STYLE_PREFIXES[style ?? "general"] ?? "");
+  const stylePrefix = STYLE_PREFIXES[style ?? "general"] ?? "";
+  // A picked style is the parent's decision and is never overridden. The theme
+  // fills in only when the style has nothing of its own to say.
+  const prefix =
+    stylePrefix !== ""
+      ? stylePrefix
+      : themeImagePrefix
+        ? themeImagePrefix + " "
+        : "";
   const safetyPostfix =
     " Safe for children, family-friendly, no text overlays.";
   return `${prefix}${userPrompt}.${safetyPostfix}`;
@@ -157,6 +249,10 @@ export const generateImage = onCall(
     const safePrompt = await rewriteForCopyright(prompt, rewriteMode, claudeApiKey.value());
 
     // ── Resolve theme image prefix ──────────────────────────────
+    // Only reaches the prompt when the picked style has no look of its own —
+    // see the precedence note on `buildImagePrompt` (FEAT-174). Note this map
+    // has drifted from the client's `PRESET_THEMES`: `sight_words`, `family`,
+    // `science` and `faith` are absent here and so resolve to no prefix at all.
     let themeImagePrefix: string | undefined;
     if (themeId) {
       // Check preset themes first (server-side map)

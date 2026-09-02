@@ -5,6 +5,7 @@ import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 import { rewriteForCopyright } from "./copyrightUtils.js";
+import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -35,35 +36,9 @@ export interface EnhanceSketchResponse {
 
 // ── Enhancement prompt ──────────────────────────────────────────
 
-/**
- * A look, spelled out (FEAT-159).
- *
- * Every option the "Make it fancy" picker offers used to reach this builder with
- * `style` undefined, so eight of the nine surfaced options rendered the *same*
- * dominant sentence ("in a warm hand-painted watercolor…") and differed only by
- * one short theme line inside an otherwise identical prompt. The prompts were
- * never literally identical — the routing was fine — but the model had almost
- * nothing to separate them by, which is why Cartoon, Fantasy and Blocky came
- * back looking alike. Naming **palette, line weight and shading** for each look
- * is what makes them tell apart at a glance.
- */
-interface VisualRecipe {
-  /** Fits the slot "Create a polished children's book illustration ___,". */
-  hint: string;
-  /** One-line identity of the look. */
-  summary: string;
-  palette: string;
-  line: string;
-  shading: string;
-}
-
-function recipeDetail(recipe: VisualRecipe): string {
-  return (
-    `Palette: ${recipe.palette} ` +
-    `Line work: ${recipe.line} ` +
-    `Shading: ${recipe.shading} `
-  );
-}
+// `VisualRecipe` + `recipeDetail` were introduced here by FEAT-159 and moved to
+// `visualRecipe.ts` by FEAT-174, which needed the same shape for the book
+// illustration styles in `generateImage.ts`. One definition, two surfaces.
 
 const STYLE_RECIPES: Record<string, VisualRecipe> = {
   storybook: {
