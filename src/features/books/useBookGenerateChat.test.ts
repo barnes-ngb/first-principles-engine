@@ -755,6 +755,204 @@ describe('useBookGenerateChat failure messages (FEAT-169 — a failure that name
   })
 })
 
+// ── FEAT-172: the words the parent typed win, and the book binds to its child ──
+
+describe('useBookGenerateChat — a typed list wins over the practice list (FEAT-172)', () => {
+  /** Shelly's report, 2026-09-02. */
+  const SHELLY_IDEA =
+    'Can you include these sight words: our, friend, pretty, eight, could, very, should, would, blue, around, where, know. London becomes Spider-Man'
+  const fakeStory = {
+    title: 'Web Hero',
+    pages: [
+      { pageNumber: 1, text: 'Our friend could be very brave.', sceneDescription: 'a city' },
+      { pageNumber: 2, text: 'She knew where to go.', sceneDescription: 'a roof' },
+    ],
+  }
+
+  it("sends the parent's typed words as `words`, not the child's practice list, and says which source it is", async () => {
+    // The child's own list is Lincoln-shaped — the list Shelly was offered.
+    setChildWords(wordDoc('the', 'practicing', 3), wordDoc('hut', 'new'), wordDoc('linky', 'new'))
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+
+    await act(async () => {
+      await result.current.sendKidMessage(SHELLY_IDEA)
+    })
+    expect(result.current.storyWordSource).toBe('requested')
+    expect(result.current.storyWords).toEqual([
+      'our', 'friend', 'pretty', 'eight', 'could', 'very', 'should', 'would', 'blue', 'around', 'where', 'know',
+    ])
+
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    const payload = JSON.parse(chatMock.mock.calls[0][0].messages[0].content)
+    expect(payload.words).toEqual(result.current.storyWords)
+    expect(payload.words).not.toContain('the')
+    expect(payload.words).not.toContain('hut')
+  })
+
+  it('records the typed list on the draft book from the FIRST write — not the practice list the render closure held', async () => {
+    setChildWords(wordDoc('the', 'practicing'))
+    const { addDoc } = await import('firebase/firestore')
+    const addDocMock = vi.mocked(addDoc)
+    addDocMock.mockClear()
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await waitFor(() => expect(result.current.storyWords).toEqual(['the']))
+
+    await act(async () => {
+      await result.current.sendKidMessage('sight words: our, friend. A hero story')
+    })
+    const clarificationDoc = addDocMock.mock.calls[0]?.[1] as { generationConfig?: { words: string[] } }
+    expect(clarificationDoc.generationConfig?.words).toEqual(['our', 'friend'])
+  })
+
+  it('the story-draft turn names the typed words as "the words you asked for", checked against the pages', async () => {
+    setChildWords(wordDoc('the', 'practicing'))
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await act(async () => {
+      await result.current.sendKidMessage(SHELLY_IDEA)
+    })
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    const lastAi = result.current.chatHistory[result.current.chatHistory.length - 1]
+    expect(lastAi).toMatchObject({ role: 'ai', kind: 'story-draft' })
+    // "our", "friend", "could", "very", "where" are on a page; "know" is not ("knew").
+    expect(lastAi.content).toBe(
+      'Here\'s your story! "Web Hero" — it uses the words you asked for: our, friend, could, very, where.',
+    )
+  })
+
+  it('falls back to the practice list — and the FEAT-169 wording — when the idea names no words', async () => {
+    setChildWords(wordDoc('water', 'practicing'))
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await waitFor(() => expect(result.current.storyWords).toEqual(['water']))
+    await act(async () => {
+      await result.current.sendKidMessage('London becomes a hero')
+    })
+    expect(result.current.storyWordSource).toBe('practice')
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    const payload = JSON.parse(chatMock.mock.calls[0][0].messages[0].content)
+    expect(payload.words).toEqual(['water'])
+    const lastAi = result.current.chatHistory[result.current.chatHistory.length - 1]
+    expect(lastAi.content).toBe(
+      'Here\'s your story! "Web Hero" — I couldn\'t fit your practice words in this time.',
+    )
+  })
+
+  it('follows an Add / Change edit of the idea — the list is derived from the idea, never stored', async () => {
+    setChildWords(wordDoc('water', 'practicing'))
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await act(async () => {
+      await result.current.sendKidMessage('London becomes a hero')
+    })
+    expect(result.current.storyWordSource).toBe('practice')
+    await act(async () => {
+      await result.current.sendKidMessage('with the words: our, friend')
+    })
+    await act(async () => {
+      await result.current.confirmAddRefinement()
+    })
+    expect(result.current.storyWordSource).toBe('requested')
+    expect(result.current.storyWords).toEqual(['our', 'friend'])
+  })
+
+  it('a typed list never waits on the practice read — the start is not withheld while that list loads', async () => {
+    sightWordState.loading = true
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await act(async () => {
+      await result.current.sendKidMessage(SHELLY_IDEA)
+    })
+    expect(result.current.storyWordsLoading).toBe(false)
+    expect(result.current.canStartStory).toBe(true)
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    expect(chatMock).toHaveBeenCalledTimes(1)
+    const payload = JSON.parse(chatMock.mock.calls[0][0].messages[0].content)
+    expect(payload.words).toContain('our')
+  })
+})
+
+describe('useBookGenerateChat — the book, the words and the call bind to the child it is FOR (FEAT-172)', () => {
+  const fakeStory = {
+    title: 'Web Hero',
+    pages: [{ pageNumber: 1, text: 'A hero.', sceneDescription: 'a city' }],
+  }
+
+  it('sends generateStory for the FOR child and writes the draft on that child, not the header child', async () => {
+    chatMock.mockResolvedValueOnce({ message: JSON.stringify(fakeStory) })
+    const { addDoc } = await import('firebase/firestore')
+    const addDocMock = vi.mocked(addDoc)
+    addDocMock.mockClear()
+    // The component resolves `childId` to the picked child; the hook must
+    // carry that one child everywhere.
+    const { result } = renderHook(() =>
+      useBookGenerateChat({
+        ...baseOpts,
+        childId: 'child-london',
+        childName: 'London',
+        attribution: { createdBy: 'parent', createdFor: 'child-london' },
+      }),
+    )
+    await act(async () => {
+      await result.current.sendKidMessage('London becomes a hero')
+    })
+    const clarificationDoc = addDocMock.mock.calls[0]?.[1] as { childId: string; createdFor: string; createdBy: string }
+    expect(clarificationDoc).toMatchObject({ childId: 'child-london', createdFor: 'child-london', createdBy: 'parent' })
+
+    await act(async () => {
+      await result.current.confirmStartStory()
+    })
+    expect(chatMock.mock.calls[0][0].childId).toBe('child-london')
+  })
+
+  it("a parent's switch to the other child before the story exists moves the already-written draft doc with it", async () => {
+    const firestore = await import('firebase/firestore')
+    const addDoc = vi.mocked(firestore.addDoc)
+    const setDoc = vi.mocked(firestore.setDoc)
+    const getDoc = vi.mocked(firestore.getDoc)
+    addDoc.mockClear()
+    setDoc.mockClear()
+    addDoc.mockResolvedValue({ id: 'book-new' } as never)
+    // Once the draft doc exists, later persists read-merge-write it.
+    getDoc.mockImplementation(async () => ({
+      exists: () => true,
+      data: () => ({ childId: 'child-lincoln', createdFor: 'child-lincoln', pages: [], reviewState: {} }),
+    }) as never)
+
+    const { result, rerender } = renderHook(
+      ({ forChild }: { forChild: string }) =>
+        useBookGenerateChat({
+          ...baseOpts,
+          childId: forChild,
+          attribution: { createdBy: 'parent', createdFor: forChild },
+        }),
+      { initialProps: { forChild: 'child-lincoln' } },
+    )
+    await act(async () => {
+      await result.current.sendKidMessage('London becomes a hero')
+    })
+    expect((addDoc.mock.calls[0]?.[1] as { childId: string }).childId).toBe('child-lincoln')
+
+    // Shelly sees Lincoln's words offered and switches the story to London.
+    rerender({ forChild: 'child-london' })
+    await act(async () => {
+      await result.current.sendKidMessage('and a spider')
+    })
+    const merged = setDoc.mock.calls.at(-1)?.[1] as { childId: string; createdFor: string }
+    expect(merged).toMatchObject({ childId: 'child-london', createdFor: 'child-london' })
+    getDoc.mockReset()
+    getDoc.mockResolvedValue({ exists: () => false } as never)
+  })
+})
+
 describe('useBookGenerateChat waits for the sight-word list to settle (FEAT-169, Codex P1 on PR #1724)', () => {
   const fakeStory = {
     title: 'Cave Cat',

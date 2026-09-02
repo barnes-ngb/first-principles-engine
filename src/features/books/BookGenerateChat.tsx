@@ -21,7 +21,7 @@ import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { ChatTurn } from '../../core/types'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
-import { practiceWordsPreviewLine } from './storyPracticeWords'
+import { storyWordsPreviewLine } from './storyPracticeWords'
 import { useBookGenerateChat } from './useBookGenerateChat'
 import StoryLengthSelector from './StoryLengthSelector'
 import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
@@ -33,6 +33,14 @@ interface Props {
   onAbandon: () => void
   /** When provided, the chat resumes an in-progress draft. */
   resumeBookId?: string
+  /**
+   * The child the resumed draft is FOR (`book.createdFor ?? book.childId`),
+   * supplied by the shelf (FEAT-172). A parent sees every child's books, so a
+   * resumed draft may belong to the child who is NOT active in the header;
+   * without this the resumed story would read the active child's words and
+   * write for the active child's age. Ignored when not resuming.
+   */
+  resumeForChildId?: string
 }
 
 // ── Illustration style icons (emoji prefix + text; image assets TODO) ─
@@ -64,15 +72,40 @@ function ageFromBirthdate(birthdate: string | undefined, fallback: number): numb
 
 // ── Component ─────────────────────────────────────────────────────
 
-export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: Props) {
+export default function BookGenerateChat({
+  onCommit,
+  onAbandon,
+  resumeBookId,
+  resumeForChildId,
+}: Props) {
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, children } = useActiveChild()
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
-  const childName = activeChild?.name ?? 'kid'
-  const childId = activeChild?.id ?? ''
+
+  // ── Who the story is FOR (FEAT-172) ───────────────────────────
+  //
+  // The book's subject used to live only in the prose ("London becomes a
+  // hero") while every read and write bound to the child active in the
+  // header — so a book for London got Lincoln's practice words, Lincoln's
+  // age and Lincoln's shelf. The binding is now explicit: a parent picks the
+  // child here (defaulting to the active one), a resumed draft hydrates it
+  // from the book, and a kid profile is always itself. Nothing infers a child
+  // from prose.
+  const [pickedChildId, setPickedChildId] = useState<string | null>(null)
+  const forChildId =
+    (isParent ? (resumeBookId ? resumeForChildId : pickedChildId) : undefined) ??
+    activeChild?.id ??
+    ''
+  const forChild = useMemo(
+    () => children.find((c) => c.id === forChildId) ?? activeChild,
+    [children, forChildId, activeChild],
+  )
+
+  const childName = forChild?.name ?? 'kid'
+  const childId = forChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
-  const childAge = ageFromBirthdate(activeChild?.birthdate, isLincoln ? 10 : 6)
+  const childAge = ageFromBirthdate(forChild?.birthdate, isLincoln ? 10 : 6)
   const defaultStyle = isLincoln ? 'minecraft' : 'storybook'
 
   const attribution = isParent && childId
@@ -106,6 +139,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     pageCount,
     setPageCount,
     storyWords,
+    storyWordSource,
     storyWordsLoading,
     illustrationProgress,
     sendKidMessage,
@@ -118,6 +152,14 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   } = chat
 
   const isIllustrating = illustrationProgress.phase === 'illustrating'
+
+  // The picker is a parent's, and only while the child can still change: a
+  // resumed draft already belongs to a child, and once a story exists it was
+  // written for one child's age and words. Hidden entirely for a kid profile
+  // and for a one-child family (nothing to choose).
+  const showForChildPicker = isParent && children.length > 1
+  const forChildPickerLocked =
+    !!resumeBookId || currentStory !== null || isLoading || isIllustrating
 
   // ── Composer state ────────────────────────────────────────────
 
@@ -286,6 +328,37 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
 
   return (
     <Stack spacing={2} sx={{ pt: 1 }}>
+      {/* Who the story is for (FEAT-172) — parent-only, visible before the
+          first message so the words, the age and the shelf all bind to the
+          right child. Reads as a label once locked. */}
+      {showForChildPicker && (
+        <Box data-testid="story-for-child">
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            This story is for
+          </Typography>
+          <ToggleButtonGroup
+            value={forChildId}
+            exclusive
+            size="small"
+            disabled={forChildPickerLocked}
+            onChange={(_, val: string | null) => {
+              if (val) setPickedChildId(val)
+            }}
+          >
+            {children.map((c) => (
+              <ToggleButton
+                key={c.id}
+                value={c.id}
+                aria-label={`Story for ${c.name}`}
+                sx={{ textTransform: 'none', px: 2, minHeight: 44 }}
+              >
+                {c.name}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Box>
+      )}
+
       {/* Chat thread */}
       <Box
         ref={threadRef}
@@ -341,7 +414,10 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
                 </Box>
                 {/* Which sight words the story will carry, said before the tap
                     (FEAT-169) — so the parent can see the list is in play, and
-                    a child with nothing to practise sees no claim at all. */}
+                    a child with nothing to practise sees no claim at all. The
+                    line names its source (FEAT-172): a list the parent typed
+                    into the idea, or the child's practice words — never one
+                    dressed as the other. */}
                 {showWordsLoadingHere && (
                   <Typography
                     variant="body2"
@@ -360,7 +436,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
                     data-testid="story-practice-words"
                     sx={{ mt: 1, alignSelf: 'stretch' }}
                   >
-                    {practiceWordsPreviewLine(childName, storyWords)}
+                    {storyWordsPreviewLine(storyWordSource, childName, storyWords)}
                   </Typography>
                 )}
                 {showYesHere && (

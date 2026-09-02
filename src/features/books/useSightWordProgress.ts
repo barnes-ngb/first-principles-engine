@@ -75,6 +75,14 @@ export function useSightWordProgress(familyId: string, childId: string) {
   useEffect(() => {
     if (!familyId || !childId) return
     let cancelled = false
+    // A NEW child means a new read: flag it and drop the previous child's words
+    // first (FEAT-172). Before this, switching the child the story is for left
+    // `loading` false and the map holding the OLD child's list until the read
+    // landed — so a fast tap could send one child's practice words for the
+    // other's book. A first mount already starts loading with an empty map, so
+    // these are no-ops there.
+    setLoading(true)
+    setProgressMap(new Map())
 
     const load = async () => {
       try {

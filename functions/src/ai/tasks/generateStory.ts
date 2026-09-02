@@ -286,10 +286,16 @@ export const handleGenerateStory = async (
 
   const model = modelForTask("generateStory");
 
+  // The budget scales with the page count AND the word list (FEAT-172): every
+  // word asked for is one more constraint to reason over and one more candidate
+  // for each page's listing, and FEAT-169's diagnostic confirmed a 10-page book
+  // with a list ran out of room at the page-only budget.
+  const maxTokens = maxTokensForPageCount(targetPageCount, storyWords.length);
+
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: maxTokensForPageCount(targetPageCount),
+    maxTokens,
     temperature: 0.7,
     systemPrompt: storySystemPrompt,
     messages: [{ role: "user", content: "Generate the story now." }],
@@ -301,7 +307,7 @@ export const handleGenerateStory = async (
   const pageMeta = reconcilePagesFromStory(targetPageCount, result.text);
   console.log(
     `[AI] taskType=generateStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}` +
-      ` maxTokens=${maxTokensForPageCount(targetPageCount)} stopReason=${result.stopReason}` +
+      ` maxTokens=${maxTokens} stopReason=${result.stopReason}` +
       ` words=${storyWords.length}` +
       (pageMeta
         ? ` targetPages=${pageMeta.target} actualPages=${pageMeta.actual} pageDelta=${pageMeta.delta}`

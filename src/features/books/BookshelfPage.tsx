@@ -172,6 +172,14 @@ export default function BookshelfPage() {
     setShowNewDialog(true)
   }, [])
 
+  // The child a resumed draft is FOR (FEAT-172): `createdFor` where the book
+  // records it, else the shelf it sits on. `undefined` when not resuming.
+  const resumeForChildId = useMemo(() => {
+    if (!resumeBookId) return undefined
+    const book = books.find((b) => b.id === resumeBookId)
+    return book?.createdFor ?? book?.childId
+  }, [books, resumeBookId])
+
   // Parent-only: open the printable grandparent brief (FEAT-95 §4). Pure read → print,
   // same window.open pattern as the catalog sheet / printable kit. Not kid-visible.
   const handleGrandparentGuide = useCallback(() => {
@@ -1050,6 +1058,9 @@ export default function BookshelfPage() {
               </Box>
               <BookGenerateChat
                 resumeBookId={resumeBookId}
+                // A parent's shelf holds every child's books, so a resumed
+                // draft says which child it is for (FEAT-172).
+                resumeForChildId={resumeForChildId}
                 onCommit={(bookId) => {
                   handleCloseNewDialog()
                   // Kid-generated books auto-open the Per-Page Review
