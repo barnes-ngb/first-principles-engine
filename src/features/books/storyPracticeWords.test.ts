@@ -274,3 +274,38 @@ describe('the confirmation lines name their source (FEAT-172)', () => {
     ).toBe('Here\'s your story! "Hero" — it uses your practice words: our.')
   })
 })
+
+// ── Codex P1 on PR #1731: a refinement joined behind the list must not erase it ──
+
+describe('parseRequestedWords keeps a typed list that "Add it" joined a refinement onto', () => {
+  it("survives joinIdeas' ' and <refinement>' — the exact shape Codex named", () => {
+    // 'include these sight words: our, friend.' + Add 'in space'
+    expect(parseRequestedWords('include these sight words: our, friend and in space')).toEqual([
+      'our',
+      'friend',
+    ])
+  })
+
+  it('treats any chaining word joinIdeas may use as the boundary, not only "and"', () => {
+    expect(parseRequestedWords('sight words: our, friend with a dragon')).toEqual(['our', 'friend'])
+    expect(parseRequestedWords('sight words: our, friend then a spaceship lands')).toEqual([
+      'our',
+      'friend',
+    ])
+    expect(parseRequestedWords('sight words: our, friend but no cats')).toEqual(['our', 'friend'])
+  })
+
+  it('backs off one chain step when the greedy walk crossed into the refinement', () => {
+    // 'sight words: cat and dog' + Add 'the boy went'
+    expect(parseRequestedWords('sight words: cat and dog and the boy went')).toEqual(['cat', 'dog'])
+  })
+
+  it('still reads a plain sentence after the cue as prose, never as a list', () => {
+    expect(parseRequestedWords('sight words: whatever fits the story best')).toEqual([])
+    expect(parseRequestedWords('sight words: our, friend whatever fits')).toEqual([])
+  })
+
+  it('only the LAST item may carry a refinement — a broken chain mid-list is still prose', () => {
+    expect(parseRequestedWords('sight words: our and in space, friend')).toEqual([])
+  })
+})

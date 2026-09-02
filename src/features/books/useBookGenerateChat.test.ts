@@ -969,3 +969,27 @@ describe('useBookGenerateChat waits for the sight-word list to settle (FEAT-169,
     expect(payload.words).toEqual(['water'])
   })
 })
+
+describe('useBookGenerateChat — a typed list survives "Add it" (Codex P1 on PR #1731)', () => {
+  it('keeps the words the parent asked for when ordinary story detail is added behind them', async () => {
+    setChildWords(wordDoc('water', 'practicing'))
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    await waitFor(() => expect(result.current.storyWords).toEqual(['water']))
+    await act(async () => {
+      await result.current.sendKidMessage('A puppy story. Include these sight words: our, friend.')
+    })
+    expect(result.current.storyWordSource).toBe('requested')
+    await act(async () => {
+      await result.current.sendKidMessage('in space')
+    })
+    await act(async () => {
+      await result.current.confirmAddRefinement()
+    })
+    expect(result.current.pendingIdea).toBe(
+      'A puppy story. Include these sight words: our, friend and in space',
+    )
+    // The typed list is still the list — the practice list did not take over.
+    expect(result.current.storyWordSource).toBe('requested')
+    expect(result.current.storyWords).toEqual(['our', 'friend'])
+  })
+})
