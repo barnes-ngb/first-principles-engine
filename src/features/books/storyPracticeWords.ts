@@ -107,6 +107,42 @@ const LIST_ITEM = /^[a-z]+(?:['’-][a-z]+)*$/i
 const LIST_JOINER = /^(?:and|or)$/i
 
 /**
+ * The words `joinIdeas` (or a parent) uses to hang a refinement off the end of
+ * an idea — the same set as `useBookGenerateChat`'s `CHAINING_WORDS`. One of
+ * these right after a list item marks where the list ends and the story
+ * detail begins.
+ */
+const REFINEMENT_BOUNDARY = /^(?:and|or|with|plus|also|but|then)$/i
+
+/**
+ * The words at the front of the list's last comma-item when a refinement has
+ * been joined behind it, or `null` when the item is plain prose.
+ *
+ * Walks the longest "word (and|or word)*" chain from the front; the remainder
+ * must open with a boundary word to count as a joined refinement. When the
+ * greedy walk over-consumed one step ("cat and dog and the boy went" → the
+ * remainder "boy went" opens with no boundary), it backs off one word so the
+ * boundary is the joiner it just crossed ("cat, dog" + "and the boy went").
+ * A tail with no boundary at all ("whatever fits the story best") is prose.
+ */
+function splitListTail(tokens: string[]): string[] | null {
+  if (!LIST_ITEM.test(tokens[0])) return null
+  const words = [tokens[0]]
+  let i = 1
+  while (i + 1 < tokens.length && LIST_JOINER.test(tokens[i]) && LIST_ITEM.test(tokens[i + 1])) {
+    words.push(tokens[i + 1])
+    i += 2
+  }
+  if (i >= tokens.length) return words
+  if (REFINEMENT_BOUNDARY.test(tokens[i])) return words
+  if (words.length > 1) {
+    words.pop()
+    return words
+  }
+  return null
+}
+
+/**
  * The explicit word list a parent typed into the story idea, if any.
  *
  * Reads a cue such as *"include these sight words: our, friend, pretty"* or
@@ -133,8 +169,17 @@ export function parseRequestedWords(idea: string): string[] {
   // anything else ("whatever fits the story best") is prose, and the whole
   // idea is then NOT a list. An item that IS the word "and" or "or" is kept,
   // because both are sight words a parent will ask for ("the, and, said").
+  //
+  // The LAST item may carry a refinement behind it (Codex P1 on PR #1731):
+  // "Add it" joins the next message onto the idea with a chaining word after
+  // stripping the sentence's punctuation, so "sight words: our, friend." +
+  // "in space" arrives as "sight words: our, friend and in space". The chain
+  // walk below stops where the chain breaks, and a chaining word at that
+  // boundary means the rest is the refinement, not the list — the typed words
+  // survive the join instead of silently giving way to the practice list.
   let prose = false
-  const rawItems = listText.split(',').flatMap((item) => {
+  const items = listText.split(',')
+  const rawItems = items.flatMap((item, index) => {
     let tokens = item
       .trim()
       .split(/\s+/)
@@ -146,11 +191,13 @@ export function parseRequestedWords(idea: string): string[] {
     const isChain =
       tokens.length % 2 === 1 &&
       tokens.every((t, i) => (i % 2 === 1 ? LIST_JOINER.test(t) : true))
-    if (!isChain) {
-      prose = true
-      return []
+    if (isChain) return tokens.filter((_, i) => i % 2 === 0)
+    if (index === items.length - 1) {
+      const tail = splitListTail(tokens)
+      if (tail) return tail
     }
-    return tokens.filter((_, i) => i % 2 === 0)
+    prose = true
+    return []
   })
   if (prose || rawItems.length === 0) return []
   // A single stray non-word ("a dragon who has these words: none!") makes the
