@@ -173,19 +173,43 @@ describe('generateHint — what this tap makes and spends', () => {
   it('names a live count for the batch doors', () => {
     expect(generateHint('makeVersions', 'kid', 3)).toBe('Makes 3 pictures. Uses 3 art.')
     expect(generateHint('illustrateBook', 'kid', 14)).toBe('Makes 14 pictures. Uses 14 art.')
-    expect(generateHint('makeVersions', 'parent', 3)).toContain('3 of your weekly art budget')
-    expect(generateHint('illustrateBook', 'parent', 14)).toContain('14 of your weekly art budget')
+    expect(generateHint('makeVersions', 'parent', 3)).toContain('3 paid image calls')
+    expect(generateHint('illustrateBook', 'parent', 14)).toContain('14 paid image calls')
   })
 
   it('reads singular for a one-picture door', () => {
     expect(generateHint('makeSticker', 'kid')).toBe('Makes 1 sticker. Uses 1 art.')
     expect(generateHint('bookScene', 'kid')).toBe('Makes 1 picture. Uses 1 art.')
-    expect(generateHint('bookScene', 'parent')).toContain('1 of your weekly art budget')
+    expect(generateHint('bookScene', 'parent')).toContain('1 paid image call')
   })
 
   it('never claims a fraction of a picture', () => {
-    expect(generateHint('makeVersions', 'kid', 0)).toBe('Makes 1 picture. Uses 1 art.')
     expect(generateHint('makeVersions', 'kid', 2.7)).toBe('Makes 2 pictures. Uses 2 art.')
+  })
+
+  it('says zero when zero is the truth (Codex P2, PR #1739)', () => {
+    // A resumed Generate-a-Book draft rebuilt with no image prompts has no
+    // scene-bearing page: the illustrate loop makes nothing and spends nothing.
+    // Clamping to 1 promised a picture and a charge that never happen.
+    expect(generateHint('illustrateBook', 'kid', 0)).toBe('Makes no pictures. Uses no art.')
+    const parent = generateHint('illustrateBook', 'parent', 0)
+    expect(parent).toBe('No pictures to make here · nothing to pay for')
+    expect(parent).not.toMatch(/One picture per page/)
+  })
+
+  it('never tells an uncapped parent a tap spends their budget (Codex P2, PR #1739)', () => {
+    // Every host picks the parent audience from the same capability answer that
+    // decides the cap, and a parent's `recordGeneration` is a no-op — so a
+    // "weekly art budget" clause contradicted the sheet behind the same "?".
+    for (const door of DOORS) {
+      for (const count of [1, 3]) {
+        const hint = generateHint(door, 'parent', count)
+        expect(hint, `${door}/${count}`).not.toMatch(/your weekly art budget/)
+        expect(hint, `${door}/${count}`).toMatch(/paid image calls?/)
+      }
+    }
+    // The kid wording is unchanged: a kid IS capped, so "art" is their counter.
+    expect(generateHint('bookScene', 'kid', 3)).toBe('Makes 3 pictures. Uses 3 art.')
   })
 })
 
@@ -236,8 +260,9 @@ describe('the kid readability bar', () => {
     }
   })
 
-  it('holds for every kid hint, single and batch', () => {
+  it('holds for every kid hint — none, one and many', () => {
     for (const door of DOORS) {
+      expectKidLine(generateHint(door, 'kid', 0), `hint/${door}/none`)
       expectKidLine(generateHint(door, 'kid'), `hint/${door}`)
       expectKidLine(generateHint(door, 'kid', 14), `hint/${door}/batch`)
     }

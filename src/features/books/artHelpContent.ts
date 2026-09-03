@@ -607,16 +607,38 @@ const STICKER_DOORS: ReadonlySet<ArtHelpDoor> = new Set<ArtHelpDoor>([
  * whole-book, "Make stickers for the rest") because those spend N, and a hint
  * that said "1" there would be the exact dishonesty this feature exists to fix.
  *
+ * **Zero is a real answer, not a floor to clamp away** (Codex P2, PR #1739). A
+ * resumed Generate-a-Book draft is rebuilt from persisted pages with
+ * `sceneDescription: p.images?.[0]?.prompt ?? ''` (`useBookGenerateChat.ts`), so
+ * a draft whose pages carry no image prompt has **no** scene-bearing page: the
+ * illustrate loop skips every one and spends nothing. Clamping that to 1 made
+ * the hint promise a picture and a charge that never happen — the same
+ * over-statement the live count exists to prevent — so `count: 0` says so
+ * plainly instead.
+ *
+ * **The parent wording never claims a budget deduction** (Codex P2, PR #1739).
+ * Every host picks the parent audience from the *same* capability answer that
+ * decides the cap (`isChildProfile`, or the Kit Builder's `capped = !canEdit`),
+ * and `useArtQuota` makes a parent's `recordGeneration` a no-op — a parent is
+ * uncapped and never touches the counter. Saying "1 of your weekly art budget"
+ * to them contradicted the very sheet behind the "?", which says they are not
+ * capped. "One paid image call" is true for either state and costs the parent
+ * no less information: it still says this tap spends money.
+ *
  * At the cap the host shows `ART_QUOTA_MESSAGE` **instead of** this — never
  * both.
  */
 export function generateHint(door: ArtHelpDoor, audience: ArtHelpAudience, count = 1): string {
-  const n = Math.max(1, Math.floor(count))
+  const n = Math.max(0, Math.floor(count))
   if (audience === 'kid') {
+    if (n === 0) return 'Makes no pictures. Uses no art.'
     const noun = STICKER_DOORS.has(door) ? 'sticker' : 'picture'
     const made = n === 1 ? `1 ${noun}` : `${n} ${noun}s`
     return `Makes ${made}. Uses ${n} art.`
   }
-  const spend = n === 1 ? '1 of your weekly art budget' : `${n} of your weekly art budget`
+  // The door's subject line describes pictures being made, so it is the wrong
+  // sentence when none are.
+  if (n === 0) return 'No pictures to make here · nothing to pay for'
+  const spend = n === 1 ? '1 paid image call' : `${n} paid image calls`
   return `${DOOR_SUBJECT[door]} · ${spend}`
 }

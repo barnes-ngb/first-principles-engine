@@ -110,7 +110,9 @@ describe('MakeStickerDialog — the hint under "Create!" (FEAT-178)', () => {
 
   it('reads the fuller parent line by default', () => {
     render(<MakeStickerDialog open onClose={() => {}} familyId="f1" />)
-    expect(screen.getByText(/One sticker from your words · 1 of your weekly art budget/)).toBeInTheDocument()
+    // Never "your weekly art budget" — a parent is uncapped and never touches
+    // the counter (Codex P2, PR #1739).
+    expect(screen.getByText('One sticker from your words · 1 paid image call')).toBeInTheDocument()
   })
 
   it('is replaced at the cap, not doubled', () => {

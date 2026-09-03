@@ -1,9 +1,17 @@
+import Dialog from '@mui/material/Dialog'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const { useMediaQueryMock } = vi.hoisted(() => ({ useMediaQueryMock: vi.fn(() => false) }))
+vi.mock('@mui/material/useMediaQuery', () => ({ default: useMediaQueryMock }))
 
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from '../ArtHelpSheet'
 import { artHelp, styleBlurb } from '../artHelpContent'
+
+afterEach(() => {
+  useMediaQueryMock.mockReturnValue(false)
+})
 
 const CAPPED = { limit: 100, remaining: 37, capped: true }
 const UNCAPPED = { limit: 100, remaining: Infinity, capped: false }
@@ -149,6 +157,46 @@ describe('ArtHelpSheet — it closes, and it never generates', () => {
       />,
     )
     expect(screen.queryByText(artHelp('stickers', 'kid').title)).toBeNull()
+  })
+})
+
+describe('ArtHelpSheet — the phone drawer opens ABOVE its host dialog', () => {
+  // Codex P1, PR #1739. Two of the five surfaces open this sheet from inside an
+  // already-open Dialog (SketchScanner, the Book Editor's Make a Scene dialog).
+  // A temporary MUI Drawer sits at `zIndex.drawer` (1200) and a Dialog's modal
+  // at `zIndex.modal` (1300), so on a phone — the primary device for this repo
+  // — the help rendered behind the dialog and its backdrop, unusable.
+  it('renders the drawer above modal level on a phone', () => {
+    useMediaQueryMock.mockReturnValue(true)
+    const { baseElement } = render(
+      <Dialog open onClose={() => {}}>
+        <div>host dialog</div>
+        <ArtHelpSheet
+          surface="sketch"
+          open
+          onClose={() => {}}
+          audience="kid"
+          budget={CAPPED}
+        />
+      </Dialog>,
+    )
+
+    // The help is reachable at all...
+    expect(screen.getByText('Cleaning your drawing is free.')).toBeInTheDocument()
+
+    const drawer = baseElement.querySelector('.MuiDrawer-root')
+    expect(drawer).not.toBeNull()
+    const drawerZ = Number(getComputedStyle(drawer as Element).zIndex)
+    // ...and it sits above MUI's modal level (1300), not the drawer's own 1200.
+    expect(drawerZ).toBeGreaterThan(1300)
+  })
+
+  it('still renders as a dialog on a wide screen', () => {
+    render(
+      <ArtHelpSheet surface="sketch" open onClose={() => {}} audience="kid" budget={CAPPED} />,
+    )
+    expect(document.querySelector('.MuiDrawer-root')).toBeNull()
+    expect(screen.getByText('Cleaning your drawing is free.')).toBeInTheDocument()
   })
 })
 

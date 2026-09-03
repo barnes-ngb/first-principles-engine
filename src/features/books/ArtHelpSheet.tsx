@@ -138,6 +138,16 @@ export default function ArtHelpSheet({
         anchor="bottom"
         open={open}
         onClose={onClose}
+        // **The sheet opens from inside an open Dialog on two of its five
+        // surfaces** — SketchScanner and the Book Editor's Make a Scene dialog
+        // (Codex P1, PR #1739). A temporary Drawer sits at
+        // `theme.zIndex.drawer` (1200) and a Dialog's modal at
+        // `theme.zIndex.modal` (1300), so on a phone — the primary device here
+        // — the help rendered *behind* the dialog and its backdrop and could
+        // not be tapped at all. Lifting the nested drawer above modal level
+        // fixes it without closing the host dialog, which would lose whatever
+        // the parent had typed into the scene box.
+        sx={{ zIndex: (t) => t.zIndex.modal + 1 }}
         slotProps={{
           paper: {
             sx: { borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '85vh' },
@@ -150,7 +160,16 @@ export default function ArtHelpSheet({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth scroll="paper">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      scroll="paper"
+      // Two Dialogs at the same z-index stack by DOM order, which happens to
+      // favour this one today. Stating it removes the reliance on mount order.
+      sx={{ zIndex: (t) => t.zIndex.modal + 1 }}
+    >
       {body}
     </Dialog>
   )
