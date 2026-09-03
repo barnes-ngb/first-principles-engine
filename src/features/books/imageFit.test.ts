@@ -5,11 +5,21 @@ import {
   applyBackgroundFit,
   backgroundFitOf,
   hasFitBackdrop,
+  hasFittableBackground,
   resolveImageFit,
 } from './imageFit'
 
 function image(id: string, over: Partial<PageImage> = {}): PageImage {
   return { id, url: `${id}.png`, type: 'ai-generated', ...over }
+}
+
+/**
+ * A photo dropped over an existing image — FEAT-116 stores it as `type: 'photo'`
+ * with `layerType: 'element'` at a 40x40 overlay position (`useBook.ts`). It is a
+ * composed overlay, NOT a page canvas, and `fit` must never reach it.
+ */
+function placedElement(id: string, over: Partial<PageImage> = {}): PageImage {
+  return image(id, { type: 'photo', layerType: 'element', ...over })
 }
 
 describe('resolveImageFit (FEAT-177)', () => {
@@ -97,5 +107,46 @@ describe('applyBackgroundFit (FEAT-177)', () => {
     const images = [image('a')]
     applyBackgroundFit(images, 'fit')
     expect(images[0].fit).toBeUndefined()
+  })
+})
+
+describe('placed elements are out of scope (FEAT-177 / FEAT-116)', () => {
+  it('keeps a placed element cover-fit even when a stray fit says otherwise', () => {
+    expect(resolveImageFit(placedElement('e', { fit: 'fit' }))).toBe('cover')
+    expect(resolveImageFit(placedElement('e'))).toBe('cover')
+  })
+
+  it('never puts a blurred backdrop behind a placed element', () => {
+    expect(hasFitBackdrop(placedElement('e', { fit: 'fit' }))).toBe(false)
+  })
+
+  it('never stamps fit on a placed element', () => {
+    const images = [image('bg'), placedElement('e'), image('s', { type: 'sticker' })]
+    const next = applyBackgroundFit(images, 'fit')
+    expect(next.map((i) => [i.id, i.fit])).toEqual([
+      ['bg', 'fit'],
+      ['e', undefined],
+      ['s', undefined],
+    ])
+    expect(next[1]).toBe(images[1])
+  })
+
+  it('ignores placed elements when reading the page state', () => {
+    expect(backgroundFitOf([image('bg', { fit: 'fit' }), placedElement('e')])).toBe('fit')
+  })
+
+  it('offers the toggle only when a real background plane image exists', () => {
+    expect(hasFittableBackground([])).toBe(false)
+    expect(hasFittableBackground([image('s', { type: 'sticker' })])).toBe(false)
+    expect(hasFittableBackground([placedElement('e')])).toBe(false)
+    expect(hasFittableBackground([image('bg')])).toBe(true)
+    // Legacy images carry no layerType — the heuristic still calls them backgrounds.
+    expect(hasFittableBackground([image('legacy', { type: 'sketch' })])).toBe(true)
+  })
+
+  it('honours an explicit background layerType on an image typed photo', () => {
+    const bg = image('bg', { type: 'photo', layerType: 'background', fit: 'fit' })
+    expect(resolveImageFit(bg)).toBe('contain')
+    expect(hasFitBackdrop(bg)).toBe(true)
   })
 })

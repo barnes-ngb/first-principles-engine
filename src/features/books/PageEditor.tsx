@@ -37,6 +37,7 @@ import {
   applyBackgroundFit,
   backgroundFitOf,
   hasFitBackdrop,
+  hasFittableBackground,
   resolveImageFit,
 } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
@@ -152,8 +153,10 @@ export default function PageEditor({
   const orderedImages = stackOrder(page.images)
 
   // FEAT-177 — "show the whole picture" vs "fill the page", per background,
-  // through the page's existing update path (no second write lane). Stickers
-  // are never stamped.
+  // through the page's existing update path (no second write lane). Only the
+  // background PLANE is offered or stamped: stickers and FEAT-116 placed
+  // elements are composed overlays and stay exactly as they are.
+  const canToggleFit = hasFittableBackground(page.images)
   const currentBgFit = backgroundFitOf(page.images)
   const toggleBackgroundFit = () => {
     const next = currentBgFit === 'fit' ? 'fill' : 'fit'
@@ -186,6 +189,7 @@ export default function PageEditor({
               </MenuItem>
             )}
             {/* FEAT-177 — the whole picture, or the page filled. */}
+            {canToggleFit && (
             <MenuItem onClick={() => { setBgMenuAnchor(null); toggleBackgroundFit() }}>
               <ListItemIcon>
                 {currentBgFit === 'fit'
@@ -196,6 +200,7 @@ export default function PageEditor({
                 {currentBgFit === 'fit' ? 'Fill the page' : 'Show the whole picture'}
               </ListItemText>
             </MenuItem>
+            )}
             {onRemoveImage && (
               <MenuItem onClick={() => { setBgMenuAnchor(null); setConfirmRemoveBg(true) }}>
                 <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>

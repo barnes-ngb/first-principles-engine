@@ -114,4 +114,27 @@ describe('PageEditor background fit toggle (FEAT-177)', () => {
     expect(getComputedStyle(sharp).objectFit).toBe('cover')
     expect(screen.queryByTestId(FIT_BACKDROP_TESTID)).toBeNull()
   })
+
+  it('offers no fit toggle when the only non-sticker is a FEAT-116 placed element', () => {
+    // A placed element is a composed overlay, not a page canvas — the menu still
+    // opens (Change/Remove background), but the fit row is not offered.
+    renderEditor([image('e', { type: 'photo', layerType: 'element' })])
+    openBackgroundMenu()
+    expect(screen.getByText('Change background')).toBeTruthy()
+    expect(screen.queryByText('Show the whole picture')).toBeNull()
+    expect(screen.queryByText('Fill the page')).toBeNull()
+  })
+
+  it('never stamps fit on a placed element sitting over a background', () => {
+    const { onUpdate } = renderEditor([
+      image('bg'),
+      image('e', { type: 'photo', layerType: 'element' }),
+    ])
+    openBackgroundMenu()
+    fireEvent.click(screen.getByText('Show the whole picture'))
+    expect(updatedImages(onUpdate).map((i) => [i.id, i.fit])).toEqual([
+      ['bg', 'fit'],
+      ['e', undefined],
+    ])
+  })
 })

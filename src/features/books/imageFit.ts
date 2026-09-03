@@ -1,4 +1,5 @@
 import type { PageImage } from '../../core/types'
+import { layerTypeOf } from './draggableImageUtils'
 
 /**
  * FEAT-177 — the ONE definition of "how does an image sit in its box."
@@ -10,13 +11,24 @@ import type { PageImage } from '../../core/types'
  * parent could do about it. Now all four call `resolveImageFit`, so the four
  * surfaces cannot disagree.
  *
- * Scope is deliberately narrow: **backgrounds only**. Stickers keep the
- * contain-fit they have always had and ignore `fit` entirely; placed elements
- * (FEAT-116) are out of scope and the editor never offers them the toggle.
+ * Scope is deliberately narrow: **the background plane only**. Stickers keep the
+ * contain-fit they have always had and ignore `fit` entirely, and so does a
+ * placed *element* — FEAT-116 stores a photo dropped over an existing image as
+ * `type: 'photo'` with `layerType: 'element'` at a 40x40 overlay position
+ * (`useBook.ts`), so a `type !== 'sticker'` test would have swept that overlay
+ * into the toggle and contain-fit it behind a blurred rectangle, silently
+ * recomposing the page. The plane test is therefore `layerTypeOf`, the same one
+ * the stacking order uses, never the raw `type`.
  */
 
 /** The only fields the fit rule reads. */
-export type FittableImage = Pick<PageImage, 'type'> & Partial<Pick<PageImage, 'fit'>>
+export type FittableImage = Pick<PageImage, 'id' | 'type'> &
+  Partial<Pick<PageImage, 'fit' | 'layerType'>>
+
+/** True for the full-page canvas plane — the only images `fit` applies to. */
+function isBackgroundPlane(img: FittableImage): boolean {
+  return layerTypeOf(img) === 'background'
+}
 
 /** CSS blur radius (px) for the backdrop copy behind a fitted image. */
 export const FIT_BACKDROP_BLUR_PX = 16
@@ -35,6 +47,10 @@ export function resolveImageFit(img: FittableImage): 'contain' | 'cover' {
   // Stickers are cut-outs: they have always been shown whole, and `fit` is not
   // theirs to set.
   if (img.type === 'sticker') return 'contain'
+  // A placed element is a composed overlay, not a page canvas. It fills its own
+  // box exactly as before, and a stray `fit` on one is ignored rather than
+  // honoured — so even a value written by an older build cannot move it.
+  if (!isBackgroundPlane(img)) return 'cover'
   return img.fit === 'fit' ? 'contain' : 'cover'
 }
 
@@ -54,18 +70,28 @@ export function hasFitBackdrop(img: FittableImage): boolean {
  * "show the whole picture".
  */
 export function backgroundFitOf(images: readonly PageImage[]): 'fill' | 'fit' {
-  const backgrounds = images.filter((img) => img.type !== 'sticker')
+  const backgrounds = images.filter(isBackgroundPlane)
   if (backgrounds.length === 0) return 'fill'
   return backgrounds.every((img) => img.fit === 'fit') ? 'fit' : 'fill'
 }
 
 /**
- * Stamp `fit` on every background of a page, leaving stickers untouched.
- * Returns a new array; the caller hands it to the page's existing update path.
+ * Does this page have anything the toggle applies to? Gates the menu row, so a
+ * page whose only images are stickers or placed elements is never offered a
+ * control that would do nothing.
+ */
+export function hasFittableBackground(images: readonly PageImage[]): boolean {
+  return images.some(isBackgroundPlane)
+}
+
+/**
+ * Stamp `fit` on every image in the background plane, leaving stickers AND
+ * placed elements untouched. Returns a new array; the caller hands it to the
+ * page's existing update path.
  */
 export function applyBackgroundFit(
   images: readonly PageImage[],
   fit: 'fill' | 'fit',
 ): PageImage[] {
-  return images.map((img) => (img.type === 'sticker' ? img : { ...img, fit }))
+  return images.map((img) => (isBackgroundPlane(img) ? { ...img, fit } : img))
 }
