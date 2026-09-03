@@ -5,6 +5,7 @@ import { artifactsCollection, skillSnapshotsCollection } from '../../core/fireba
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useScan } from '../../core/hooks/useScan'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import type { Artifact, ConceptualBlock, DayLog, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
 import { isWorksheetScan } from '../../core/types/planning'
@@ -105,6 +106,23 @@ export interface UseUnifiedCaptureResult {
  * then to scans collection (curriculum) or artifacts collection (non-curriculum).
  *
  * Used by both parent TodayPage and kid KidTodayView.
+ *
+ * **Two lanes, one gate (FEAT-184 / UX-151).** The actor is read here, off the
+ * profile's capability (`useActiveChild().isChildProfile`) — never a name and
+ * never a caller flag a fourth caller could forget. A parent capture is the
+ * pipeline as it always was. A **kid** capture keeps the scan (one paid call —
+ * owner decision, 2026-09-03: most of what the boys photograph is builds, and
+ * describing them is worth having) and keeps the photo as evidence, and the
+ * description the scan produced rides on the artifact (`contentNote`, the
+ * FEAT-141 field). What it never does from a kid session is act on the
+ * analysis: no `activityConfigs` create/advance, no `skillSnapshots`
+ * working-level derivation or blocker merge, no `learnerModels` /
+ * `childSkillMaps` sync — `skillSnapshots` is a propose-and-confirm invariant,
+ * and a six-year-old's photo of a worksheet proposes nothing. When the page
+ * *was* read as curriculum, the item is stamped `pendingScanId` so parent
+ * Today shows "Review this" on the same expandable analysis chip it already
+ * had. One boolean decides the lane; the five writes sit behind it together
+ * rather than behind five doors (the FEAT-167 lesson).
  */
 export function useUnifiedCapture({
   familyId,
@@ -120,6 +138,11 @@ export function useUnifiedCapture({
   const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan()
   const { syncScanToConfig } = useScanToActivityConfig()
   const [scanItemIndex, setScanItemIndex] = useState<number | null>(null)
+  // The one gate on the lane: capability of the ACTOR, never a name. A kid
+  // profile keeps the scan and the photo; every invariant write below is
+  // parent-only (FEAT-184 / UX-151).
+  const { isChildProfile } = useActiveChild()
+  const invariantWritesAllowed = !isChildProfile
 
   /**
    * FEAT-62: analyze a workbook page against a KNOWN config and advance its
@@ -225,7 +248,13 @@ export function useUnifiedCapture({
       // its config via the same name/subject fuzzy match. When it resolves, we
       // stamp `workbookConfigId` onto the item below so the resolution is
       // permanent — exactly what lock-in would have done.
-      const resolvedConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
+      // A kid never takes the deterministic route: its whole point is advancing
+      // the workbook's position, which is an `activityConfigs` write. His photo
+      // falls through to the classification path, where the same gate keeps it
+      // an artifact (FEAT-184 / UX-151).
+      const resolvedConfigId = invariantWritesAllowed
+        ? (item.workbookConfigId ?? findWorkbookConfigId(item, configs))
+        : undefined
       const stampConfigId = !item.workbookConfigId && resolvedConfigId ? { workbookConfigId: resolvedConfigId } : {}
       // FEAT-141: what the app already knows at capture time, handed to the same
       // analysis call that was going to run anyway (never a second one).
@@ -323,8 +352,8 @@ export function useUnifiedCapture({
           record.results.pageType !== 'certificate' &&
           ['worksheet', 'textbook', 'test'].includes(record.results.pageType)
 
-        if (isCurriculumScan && record?.results && record.id) {
-          // ── SCANS path: curriculum evidence ──
+        if (isCurriculumScan && record?.results && record.id && invariantWritesAllowed) {
+          // ── SCANS path: curriculum evidence (parent actor only) ──
           let configResult: ScanConfigResult = { action: 'none' }
           try {
             configResult = await syncScanToConfig(childId, record.results as WorksheetScanResult)
@@ -412,6 +441,12 @@ export function useUnifiedCapture({
           // (or its results) empty, `contentNote` undefined, and the artifact
           // write below completely unchanged — the capture never depends on it.
           const contentNote = pickArtifactContentNote(record?.results)
+          // FEAT-184 / UX-151: a KID's photo that read as a curriculum page
+          // lands here too — kept as his own artifact, with the description —
+          // and the scan doc it already wrote is left for a parent to look at.
+          // A parent never reaches this line with a curriculum scan.
+          const pendingScanId =
+            !invariantWritesAllowed && isCurriculumScan && record?.id ? record.id : undefined
           const artifact = {
             childId,
             title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${childName}'s work`,
@@ -436,7 +471,12 @@ export function useUnifiedCapture({
           // Link artifact to checklist item
           const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
             i === index
-              ? { ...ci, evidenceArtifactId: docRef.id, evidenceCollection: 'artifacts' as const }
+              ? {
+                  ...ci,
+                  evidenceArtifactId: docRef.id,
+                  evidenceCollection: 'artifacts' as const,
+                  ...(pendingScanId ? { pendingScanId } : {}),
+                }
               : ci,
           )
           persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
@@ -444,6 +484,9 @@ export function useUnifiedCapture({
           onMessage?.({ text: 'Work captured!', severity: 'success' })
           // No scan analysis to show for artifacts — clear the index
           setScanItemIndex(null)
+          // A kid never sees a scan result card he cannot read: the analysis
+          // stays on the scan doc for the parent, not in this hook's state.
+          if (!invariantWritesAllowed) clearScan()
         }
         return true
       } catch (err) {
@@ -458,7 +501,7 @@ export function useUnifiedCapture({
         return false
       }
     },
-    [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage, configs],
+    [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage, configs, invariantWritesAllowed],
   )
 
   /**

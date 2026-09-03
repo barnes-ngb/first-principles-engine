@@ -22,7 +22,11 @@ import AdventureLengthStep from './steps/AdventureLengthStep'
 import CardMechanicStep from './steps/CardMechanicStep'
 import CardDesignStep from './steps/CardDesignStep'
 import CardStyleStep from './steps/CardStyleStep'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import ArtHelpSheet, { ArtHelpButton, GenerateHint } from '../books/ArtHelpSheet'
+import type { ArtBudgetState, ArtHelpAudience } from '../books/artHelpContent'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import { estimateWorkshopArtCalls } from './workshopArt'
 import type { TapToHearRef } from './workshopTypes'
 
 /** Estimate deck size from mechanic and descriptions count */
@@ -80,10 +84,29 @@ interface WorkshopWizardProps {
   onStepSave?: (state: WizardState, step: number) => Promise<string | null>
   /** Initial state for resuming a draft */
   initialState?: Partial<WizardState>
+  /**
+   * FEAT-184: what "Create My Game!" spends, said before the tap. The audience
+   * is the host's `isChildProfile` (capability, never a name); the budget is
+   * the host's live quota numbers; at the cap the hint stands down for
+   * `ART_QUOTA_MESSAGE`. All optional so the wizard renders as before without
+   * them.
+   */
+  artAudience?: ArtHelpAudience
+  artBudget?: ArtBudgetState
+  artCapReached?: boolean
 }
 
-export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initialState }: WorkshopWizardProps) {
+export default function WorkshopWizard({
+  onComplete,
+  onCancel,
+  onStepSave,
+  initialState,
+  artAudience,
+  artBudget,
+  artCapReached = false,
+}: WorkshopWizardProps) {
   const wizard = useWorkshopWizard(initialState)
+  const [showArtHelp, setShowArtHelp] = useState(false)
   const tts = useTTS()
   const lastSpokenStep = useRef(-1)
   const { activeChildId } = useActiveChild()
@@ -259,6 +282,37 @@ export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initi
         )}
       </Box>
 
+      {/* What the final tap makes and spends (FEAT-184). The board count is
+          exact; an adventure's or card game's is a ceiling until the writing
+          step sizes it, and the hint says "up to". At the cap the message
+          replaces the hint — never both — and the game is still made, without
+          pictures. */}
+      {wizard.isFinalStep() && artAudience && (() => {
+        const estimate = estimateWorkshopArtCalls(wizard.state.gameType as GameType, wizard.buildStoryInputs())
+        return (
+          <Box sx={{ mb: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                Game pictures
+              </Typography>
+              <ArtHelpButton onClick={() => setShowArtHelp(true)} />
+            </Box>
+            {artCapReached ? (
+              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                {ART_QUOTA_MESSAGE}
+              </Typography>
+            ) : (
+              <GenerateHint
+                door="workshopGame"
+                audience={artAudience}
+                count={estimate.count}
+                atMost={estimate.atMost}
+              />
+            )}
+          </Box>
+        )
+      })()}
+
       {/* Navigation buttons */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
         <Button variant="text" color="inherit" onClick={handleCancel}>
@@ -287,6 +341,16 @@ export default function WorkshopWizard({ onComplete, onCancel, onStepSave, initi
           </Button>
         </Box>
       </Box>
+
+      {artAudience && (
+        <ArtHelpSheet
+          surface="workshop"
+          open={showArtHelp}
+          onClose={() => setShowArtHelp(false)}
+          audience={artAudience}
+          budget={artBudget ?? { limit: 0, remaining: Infinity, capped: false }}
+        />
+      )}
     </Box>
   )
 }

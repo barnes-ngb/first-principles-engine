@@ -44,6 +44,8 @@ import XpDiamondBar from '../../components/XpDiamondBar'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import { useDraftBook, useCompletedBook } from '../books/useBook'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
+import { canAccessKnowledgeMine } from '../quest/knowledgeMineAccess'
 import { useScrollToHash } from '../../core/hooks/useScrollToHash'
 import ExplorerMap from './ExplorerMap'
 import KidExtraLogger from './KidExtraLogger'
@@ -269,6 +271,13 @@ export default function KidTodayView({
   const [dailyArmorSession, setDailyArmorSession] = useState<DailyArmorSession | null>(null)
 
   const todayMinedMinutes = useTodayMiningMinutes(familyId, child.id, today)
+  // The mining row is gated exactly as the Hero Hub tile (`MyAvatarPage.tsx`
+  // `hideKnowledgeMine`) and the `/quest` route: on the child's calibration
+  // data, never on a name (FEAT-184 / UX-150). Before this, the row rendered
+  // for every kid and the route guard bounced an ungated child straight back
+  // here — a big green button that reloaded the page under him.
+  const { snapshot: mineSnapshot } = useChildSkillSnapshot(familyId, child.id)
+  const showMiningRow = canAccessKnowledgeMine(mineSnapshot)
 
   // Watch Vehicle (FEAT-104): resolve the videos this kid's plan already
   // references + shared completion (credit hours + artifact, no XP/concept).
@@ -794,7 +803,10 @@ export default function KidTodayView({
 
       {/* ── MINING ROW ──
           Always open, no checkbox, and excluded from the finish-line count:
-          mining accrues minutes and has no "done" (owner decision #3). */}
+          mining accrues minutes and has no "done" (owner decision #3).
+          Hidden — not disabled, not explained — for a child the Mine holds,
+          the same shame-free absence the Hero Hub tile uses. */}
+      {showMiningRow && (
       <SectionErrorBoundary section="knowledge-mine">
         <KidRitualRow
           icon="⛏️"
@@ -825,6 +837,7 @@ export default function KidTodayView({
           </Button>
         </KidRitualRow>
       </SectionErrorBoundary>
+      )}
 
       {/* Workshop game cards — gated behind must-do progress */}
       {familyId && allChildren.length > 0 && (
