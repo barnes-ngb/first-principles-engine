@@ -11,6 +11,7 @@ import {
   resolveStoryWords,
   selectStoryPracticeWords,
   storyDraftMessage,
+  storyReadabilityClause,
   storyWordsPreviewLine,
 } from './storyPracticeWords'
 
@@ -307,5 +308,162 @@ describe('parseRequestedWords keeps a typed list that "Add it" joined a refineme
 
   it('only the LAST item may carry a refinement — a broken chain mid-list is still prose', () => {
     expect(parseRequestedWords('sight words: our and in space, friend')).toEqual([])
+  })
+})
+
+// ── FEAT-176: the honest line ────────────────────────────────────
+
+describe('storyReadabilityClause (FEAT-176 — say what is above the level)', () => {
+  const failing = {
+    passed: false,
+    levelSource: 'assessed' as const,
+    hardWords: [
+      { page: 1, word: 'castle' },
+      { page: 2, word: 'ready' },
+    ],
+  }
+
+  it('names the words that may be above the level', () => {
+    expect(storyReadabilityClause('London', failing)).toBe(
+      "2 words may be above London's level: castle, ready.",
+    )
+  })
+
+  it('adds the estimate note — and where to fix it — when the level came from age', () => {
+    const clause = storyReadabilityClause('London', { ...failing, levelSource: 'age' })
+    expect(clause).toContain('(estimated from age')
+    expect(clause).toContain("set London's phonics level under Working Levels on the Skill Snapshot")
+  })
+
+  it('says nothing when the story passed, when nothing was measured, or when no words were named', () => {
+    expect(storyReadabilityClause('London', { ...failing, passed: true })).toBe('')
+    expect(storyReadabilityClause('London', undefined)).toBe('')
+    expect(storyReadabilityClause('London', { ...failing, hardWords: [] })).toBe('')
+  })
+
+  it('de-dupes a word that failed on several pages, and uses the singular', () => {
+    expect(
+      storyReadabilityClause('London', {
+        ...failing,
+        hardWords: [
+          { page: 1, word: 'castle' },
+          { page: 3, word: 'castle' },
+        ],
+      }),
+    ).toBe("1 word may be above London's level: castle.")
+  })
+
+  it('stops listing after six words and counts the rest', () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ page: 1, word: `w${i}` }))
+    const clause = storyReadabilityClause('London', { ...failing, hardWords: many })
+    expect(clause).toContain('9 words may be above')
+    expect(clause).toContain('w0, w1, w2, w3, w4, w5 and 3 more')
+  })
+
+  it('is plain and blameless — it reports on the story, never on the child', () => {
+    const clause = storyReadabilityClause('London', failing)
+    expect(clause.toLowerCase()).not.toMatch(/can't read|cannot read|too hard for|failed|error/)
+    expect(clause).toContain('may be above')
+  })
+})
+
+describe('storyDraftMessage with a readability report (FEAT-176)', () => {
+  const failing = {
+    passed: false,
+    levelSource: 'assessed' as const,
+    hardWords: [{ page: 1, word: 'castle' }],
+  }
+
+  it('appends the honest line as its own sentence after a words line', () => {
+    expect(
+      storyDraftMessage(
+        'Cave Cat',
+        ['again'],
+        [{ text: 'Again the cat dug by the castle.' }],
+        StoryWordSource.Practice,
+        failing,
+        'London',
+      ),
+    ).toBe(
+      'Here\'s your story! "Cave Cat" — it uses your practice words: again.' +
+        " 1 word may be above London's level: castle.",
+    )
+  })
+
+  it('appends it as an em-dash clause when there was no words line', () => {
+    expect(
+      storyDraftMessage(
+        'Cave Cat',
+        [],
+        [{ text: 'The castle.' }],
+        StoryWordSource.None,
+        failing,
+        'London',
+      ),
+    ).toBe('Here\'s your story! "Cave Cat" — 1 word may be above London\'s level: castle.')
+  })
+
+  it('adds nothing when the story passed', () => {
+    expect(
+      storyDraftMessage(
+        'Cave Cat',
+        [],
+        [{ text: 'Sam can hop.' }],
+        StoryWordSource.None,
+        { ...failing, passed: true },
+        'London',
+      ),
+    ).toBe('Here\'s your story! "Cave Cat"')
+  })
+
+  it('leaves every pre-FEAT-176 line byte-identical when nothing was measured', () => {
+    expect(
+      storyDraftMessage('Cave Cat', ['again'], [{ text: 'Again it dug.' }]),
+    ).toBe('Here\'s your story! "Cave Cat" — it uses your practice words: again.')
+    expect(storyDraftMessage('Cave Cat', [], [{ text: 'x' }])).toBe(
+      'Here\'s your story! "Cave Cat"',
+    )
+    expect(storyDraftMessage('Cave Cat', ['people'], [{ text: 'The cat dug.' }])).toBe(
+      'Here\'s your story! "Cave Cat" — I couldn\'t fit your practice words in this time.',
+    )
+  })
+})
+
+describe('storyReadabilityClause reports the TRUE total (FEAT-176 / Codex P2)', () => {
+  it('uses the server count, not the length of the truncated sample', () => {
+    // The server caps `hardWords` at 12; counting it would tell a parent
+    // "12 words" about a story with 30 — the one thing this line must not do.
+    const sample = Array.from({ length: 12 }, (_, i) => ({ page: 1, word: `w${i}` }))
+    const clause = storyReadabilityClause('London', {
+      passed: false,
+      levelSource: 'assessed',
+      hardWords: sample,
+      hardWordCount: 30,
+    })
+    expect(clause).toContain("30 words may be above London's level")
+    expect(clause).toContain('w0, w1, w2, w3, w4, w5 and 24 more')
+  })
+
+  it('falls back to the sample length when an older deploy sends no count', () => {
+    expect(
+      storyReadabilityClause('London', {
+        passed: false,
+        levelSource: 'assessed',
+        hardWords: [{ page: 1, word: 'castle' }],
+      }),
+    ).toBe("1 word may be above London's level: castle.")
+  })
+
+  it('never reports fewer words than it names', () => {
+    const clause = storyReadabilityClause('London', {
+      passed: false,
+      levelSource: 'assessed',
+      hardWords: [
+        { page: 1, word: 'castle' },
+        { page: 2, word: 'temple' },
+      ],
+      hardWordCount: 0,
+    })
+    expect(clause).toContain("2 words may be above London's level: castle, temple.")
   })
 })

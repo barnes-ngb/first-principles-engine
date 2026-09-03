@@ -144,3 +144,18 @@ branch to parity with the already-shipped math branch; a few lines in **one func
    receives). **Not required for London's first eval** — it's already ready; this is marginal gentling.
 </content>
 </invoke>
+
+### FEAT-176 (2026-09-03) — "Generate a Book" is now tuned for a 6-year-old, so it opens for London
+
+Owner report, Nathan 2026-09-03: *"it makes books not readable by London who is 6 … regardless the words
+are too advanced."* This is London-specific work landing because the surface is finally being **tuned**
+for him rather than left age-blind. `generateStory` now carries a concrete READING LEVEL block (allowed
+patterns, an explicit banned list, a SAFE WORDS allowlist, a sentence shape by level) and **measures** the
+drafted story against London's decoding level, fixes it once, and says plainly what is still above it —
+`functions/src/ai/storyDecodability.ts`. **When London has no assessed level the check falls back to
+Level 2** (CVC by word family), the careful floor, and the parent-facing line says it is an estimate and
+points at Working Levels on the Skill Snapshot. Gated on capability, never on his name: the level comes
+from `skillSnapshots.workingLevels.phonics`, and nothing reads `isLincoln` or a child's name.
+**Still open for London on this surface:** he has few sight words on file, so his SAFE WORDS list is
+mostly the shared core — the block is as good as the data behind it, and an assessed phonics level would
+make it markedly better than the age estimate.

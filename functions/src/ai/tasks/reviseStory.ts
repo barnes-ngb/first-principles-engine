@@ -9,6 +9,7 @@ import type {
 } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { maxTokensForPageCount } from "../storyPageBudget.js";
+import { resolveStoryLevelContext } from "../storyLevelContext.js";
 
 /**
  * Task: reviseStory
@@ -86,6 +87,20 @@ export const handleReviseStory = async (
     },
     newFeedback: payload.newFeedback,
   };
+
+  // The READING LEVEL block is SERVER-injected (FEAT-176), after normalization,
+  // from the child's assessed level and their own sight words — never off the
+  // client payload. Without it a revise could walk the story back up above the
+  // level the generation was held to, one "make it more exciting" at a time.
+  const levelContext = await resolveStoryLevelContext({
+    db,
+    familyId,
+    childId,
+    childName: normalizedInput.childCalibration.childName || childData.name || "the reader",
+    age: normalizedInput.childCalibration.childAge,
+    workingLevels: ctx.snapshotData?.workingLevels,
+  });
+  normalizedInput.readingLevelBlock = levelContext.block;
 
   const revisePrompt = buildReviseStoryPrompt(normalizedInput);
 

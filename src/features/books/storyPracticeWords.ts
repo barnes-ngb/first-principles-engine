@@ -283,24 +283,105 @@ export function storyWordsPreviewLine(
 }
 
 /**
+ * What the server measured the finished story at (FEAT-176). Mirrors the
+ * `readability` field `generateStory` returns; `undefined` when the server did
+ * not measure (an older deploy, or a reply that did not parse into pages) —
+ * which means "unknown", never "fine".
+ */
+export interface StoryReadabilityNote {
+  passed: boolean
+  levelSource: 'assessed' | 'age'
+  /** A capped SAMPLE of the words above the level — the words the line NAMES. */
+  hardWords: ReadonlyArray<{ page: number; word: string }>
+  /**
+   * The TRUE distinct count across the story — the number the line REPORTS.
+   * `hardWords` is truncated server-side, so counting it would tell a parent
+   * "12 words" about a story with 30. Optional for an older deploy that does
+   * not send it; the sample length is then the honest best available.
+   */
+  hardWordCount?: number
+}
+
+/** How many hard words the line names before it stops listing and just counts. */
+export const MAX_NAMED_HARD_WORDS = 6
+
+/**
+ * The honest clause (FEAT-176). Empty when the story passed, when nothing was
+ * measured, or when a failure named no words.
+ *
+ * Deliberately plain and blameless: it reports on the STORY, not on the child
+ * ("may be above London's level", never "London can't read"), and it is not an
+ * error — the story is perfectly usable and the parent fixes it in the revise
+ * chat they already have ("swap castle for a simpler word"). When the level was
+ * only estimated it says so and points at where to set the real one, because a
+ * wrong estimate is the most likely reason a good story got flagged.
+ */
+export function storyReadabilityClause(
+  childName: string,
+  readability: StoryReadabilityNote | undefined,
+): string {
+  if (!readability || readability.passed) return ''
+  const words: string[] = []
+  const seen = new Set<string>()
+  for (const { word } of readability.hardWords) {
+    const w = word.trim()
+    if (!w || seen.has(w.toLowerCase())) continue
+    seen.add(w.toLowerCase())
+    words.push(w)
+  }
+  if (words.length === 0) return ''
+  // The COUNT is the server's untruncated distinct total; the NAMES come from
+  // the capped sample. Counting the sample would understate a long list — the
+  // one thing this line exists not to do. Never report fewer than we name.
+  const total = Math.max(readability.hardWordCount ?? words.length, words.length)
+  const named = words.slice(0, MAX_NAMED_HARD_WORDS)
+  const more = total - named.length
+  const list = more > 0 ? `${named.join(', ')} and ${more} more` : named.join(', ')
+  const noun = total === 1 ? 'word' : 'words'
+  const estimate =
+    readability.levelSource === 'age'
+      ? ` (estimated from age — set ${childName}'s phonics level under Working Levels on the Skill Snapshot for a better fit)`
+      : ''
+  return `${total} ${noun} may be above ${childName}'s level: ${list}.${estimate}`
+}
+
+/**
+ * Join the clause onto whatever the draft line already says: a new sentence
+ * when that line already closed one, an em-dash clause when it did not. Keeps
+ * every pre-FEAT-176 line byte-identical, because an absent clause changes
+ * nothing.
+ */
+function appendClause(body: string, clause: string): string {
+  if (!clause) return body
+  return /[.!?]$/.test(body) ? `${body} ${clause}` : `${body} — ${clause}`
+}
+
+/**
  * The story-draft turn. Says which words landed, checked against the pages;
  * says so plainly when none did; says nothing about words when none were
  * asked for (the pre-FEAT-169 line, unchanged). Names the source (FEAT-172):
  * "the words you asked for" for a typed list, "your practice words" otherwise.
+ * And since FEAT-176 it names what the server measured as above the child's
+ * reading level — the story is still shown, it just doesn't pretend.
  */
 export function storyDraftMessage(
   title: string,
   requestedWords: ReadonlyArray<string>,
   pages: ReadonlyArray<{ text: string }>,
   source: StoryWordSource = StoryWordSource.Practice,
+  readability?: StoryReadabilityNote,
+  childName = 'this reader',
 ): string {
   const base = `Here's your story! "${title}"`
-  if (requestedWords.length === 0 || source === StoryWordSource.None) return base
+  const clause = storyReadabilityClause(childName, readability)
+  if (requestedWords.length === 0 || source === StoryWordSource.None) {
+    return appendClause(base, clause)
+  }
   const label =
     source === StoryWordSource.Requested ? 'the words you asked for' : 'your practice words'
   const used = practiceWordsUsedIn(pages, requestedWords)
   if (used.length === 0) {
-    return `${base} — I couldn't fit ${label} in this time.`
+    return appendClause(`${base} — I couldn't fit ${label} in this time.`, clause)
   }
-  return `${base} — it uses ${label}: ${used.join(', ')}.`
+  return appendClause(`${base} — it uses ${label}: ${used.join(', ')}.`, clause)
 }

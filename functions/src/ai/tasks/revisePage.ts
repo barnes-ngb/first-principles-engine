@@ -5,6 +5,7 @@ import { buildRevisePagePrompt, modelForTask } from "../chat.js";
 import type { RevisePageInput, RevisePageOutput } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
+import { resolveStoryLevelContext } from "../storyLevelContext.js";
 
 /**
  * Task: revisePage
@@ -87,6 +88,18 @@ export const handleRevisePage = async (
       vocabularyLevel: String(payload.childCalibration.vocabularyLevel ?? ""),
     },
   };
+
+  // Server-injected READING LEVEL block (FEAT-176) — see reviseStory.ts. A
+  // per-page rewrite is the easiest place for the vocabulary to creep back up.
+  const levelContext = await resolveStoryLevelContext({
+    db,
+    familyId,
+    childId,
+    childName: normalizedInput.childCalibration.childName || childData.name || "the reader",
+    age: normalizedInput.childCalibration.childAge,
+    workingLevels: ctx.snapshotData?.workingLevels,
+  });
+  normalizedInput.readingLevelBlock = levelContext.block;
 
   const revisePrompt = buildRevisePagePrompt(normalizedInput);
 

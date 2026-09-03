@@ -743,8 +743,16 @@ export function useBookGenerateChat(
         role: 'ai',
         // Reports which words actually landed on a page, checked against the
         // text — never the model's own claim (FEAT-169) — and names which
-        // source they were (FEAT-172).
-        content: storyDraftMessage(story.title, storyWords, story.pages, storyWordSource),
+        // source they were (FEAT-172). FEAT-176 adds the honest line: what the
+        // server measured as above this child's reading level, if anything.
+        content: storyDraftMessage(
+          story.title,
+          storyWords,
+          story.pages,
+          storyWordSource,
+          result?.readability,
+          childName,
+        ),
         ts: Date.now(),
         kind: 'story-draft',
       }
@@ -766,6 +774,7 @@ export function useBookGenerateChat(
   }, [
     chat,
     chatHistory,
+    childName,
     clarificationPhase,
     familyId,
     childId,
