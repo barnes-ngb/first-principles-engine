@@ -52,14 +52,14 @@ vi.mock('firebase/firestore', () => ({
   getDocs: (...args: unknown[]) => getDocsMock(...args),
 }))
 
-const CAP_MESSAGE = /that's a lot of art today/i
+const CAP_MESSAGE = /that's a lot of art this week/i
 
 async function openMakeVersions(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: 'Edit Wolf' }))
   await user.click(await screen.findByRole('button', { name: /make more versions/i }))
 }
 
-describe('StickerLibraryTab — daily art cap (FEAT-165 / UX-95)', () => {
+describe('StickerLibraryTab — weekly art cap (FEAT-165 / UX-95)', () => {
   beforeEach(() => {
     enhanceSketchMock.mockReset()
     enhanceSketchMock.mockResolvedValue({ url: 'https://x.test/v.png', storagePath: 'p/v.png' })

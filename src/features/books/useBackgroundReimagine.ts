@@ -33,8 +33,8 @@ interface UseBackgroundReimagineOptions {
   /** Called to add a sticker to the current page */
   onAddSticker: (pageId: string, url: string, storagePath: string, label: string) => void
   /**
-   * The actor has spent today's art budget (FEAT-168). A reimagine is a paid
-   * `enhanceSketch` call, so a kid gets the same light daily cap the Stickers
+   * The actor has spent this week's art budget (FEAT-168). A reimagine is a paid
+   * `enhanceSketch` call, so a kid gets the same light weekly cap the Stickers
    * page and the Kit Builder use. The page refuses ahead of the *sketch upload*
    * that precedes this — the guard here is the backstop, so no future caller can
    * reach the paid call around it. Defaults to uncapped.

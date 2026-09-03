@@ -58,8 +58,8 @@ const { useArtQuotaMock, recordGenerationMock } = vi.hoisted(() => ({
 }))
 vi.mock('./useArtQuota', () => ({
   useArtQuota: useArtQuotaMock,
-  DEFAULT_DAILY_ART_QUOTA: 10,
-  ART_QUOTA_MESSAGE: "That's a lot of art today! Ask a grown-up if you need more. 🎨",
+  DEFAULT_WEEKLY_ART_QUOTA: 100,
+  ART_QUOTA_MESSAGE: "That's a lot of art this week! Ask a grown-up if you need more. 🎨",
 }))
 
 function setQuota({ atLimit = false }: { atLimit?: boolean } = {}) {
@@ -484,7 +484,7 @@ describe('KitBuilderSection', () => {
     expect(screen.getByTestId('form-capReached')).toHaveTextContent('false')
   })
 
-  it('passes capReached to the form when a kid hits the daily cap (FEAT-94)', async () => {
+  it('passes capReached to the form when a kid hits the weekly cap (FEAT-94)', async () => {
     const user = userEvent.setup()
     setQuota({ atLimit: true })
     setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
@@ -493,7 +493,7 @@ describe('KitBuilderSection', () => {
     expect(screen.getByTestId('form-capReached')).toHaveTextContent('true')
   })
 
-  it('records the generation against the daily quota on success (FEAT-94)', async () => {
+  it('records the generation against the weekly quota on success (FEAT-94)', async () => {
     const user = userEvent.setup()
     setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
     render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)

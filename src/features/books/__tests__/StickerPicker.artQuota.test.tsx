@@ -60,7 +60,7 @@ function renderPicker(props: Partial<React.ComponentProps<typeof StickerPicker>>
   )
 }
 
-describe('StickerPicker — daily art budget (FEAT-168)', () => {
+describe('StickerPicker — weekly art budget (FEAT-168)', () => {
   it('at the cap there is no Generate button, and the warm nudge takes its place', async () => {
     renderPicker({ capReached: true, recordGeneration: recordGenerationMock })
 

@@ -377,12 +377,12 @@ describe('KitBuilderForm', () => {
     expect(within(dialog).queryByRole('button', { name: /regenerate/i })).not.toBeInTheDocument()
   })
 
-  // ── Daily art cap (FEAT-94) ───────────────────────────────────
+  // ── Weekly art cap (FEAT-94) ──────────────────────────────────
 
-  it('bounds the batch to the remaining daily allowance, not the character count', async () => {
+  it('bounds the batch to the remaining weekly allowance, not the character count', async () => {
     const user = userEvent.setup({ delay: null })
     const onGenerateArt = vi.fn(async () => artRef('x'))
-    // 4 characters with no art, but only 2 generations left today.
+    // 4 characters with no art, but only 2 generations left this week.
     renderArtForm(savedRoster(), { onGenerateArt, remainingArt: 2 })
 
     // The button + dialog advertise the allowance-bounded count, not 4.
@@ -407,7 +407,7 @@ describe('KitBuilderForm', () => {
     await waitFor(() => expect(onGenerateArt).toHaveBeenCalledTimes(4))
   })
 
-  it('at the daily cap: no generate buttons, a friendly non-shaming nudge instead', () => {
+  it('at the weekly cap: no generate buttons, a friendly non-shaming nudge instead', () => {
     renderArtForm(savedRoster({ defenders: [], invaders: [] }), { capReached: true })
     // The cap swaps the paid buttons for a warm message — never a hard error.
     expect(screen.queryByRole('button', { name: /make sticker$/i })).not.toBeInTheDocument()
@@ -415,11 +415,11 @@ describe('KitBuilderForm', () => {
       screen.queryByRole('button', { name: /make stickers for the rest/i }),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByText(/that's a lot of art today! ask a grown-up if you need more/i),
+      screen.getByText(/that's a lot of art this week! ask a grown-up if you need more/i),
     ).toBeInTheDocument()
   })
 
-  it('at the daily cap: existing art thumbnails still show (viewing is never capped)', () => {
+  it('at the weekly cap: existing art thumbnails still show (viewing is never capped)', () => {
     renderArtForm(
       savedRoster({ defenders: [], invaders: [], art: { hero: artRef('https://img/hero.png') } }),
       { capReached: true },
@@ -435,7 +435,7 @@ describe('KitBuilderForm', () => {
       capReached: true,
     })
     expect(
-      screen.queryByText(/that's a lot of art today/i),
+      screen.queryByText(/that's a lot of art this week/i),
     ).not.toBeInTheDocument()
   })
 

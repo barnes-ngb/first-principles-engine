@@ -29,7 +29,7 @@ vi.mock('./bookTypes', () => ({
   generateImageId: () => 'image-id',
 }))
 
-// The daily art budget (FEAT-168). Mocked so these tests can set a remaining
+// The weekly art budget (FEAT-168). Mocked so these tests can set a remaining
 // balance without a ProfileProvider; `Infinity` is the uncapped (parent) value
 // and the default here, so every pre-existing assertion is unchanged.
 const { budget, recordGenerationMock } = vi.hoisted(() => {
@@ -313,7 +313,7 @@ describe('useBookIllustrator', () => {
   })
 })
 
-// ── The daily art budget (FEAT-168) ─────────────────────────────
+// ── The weekly art budget (FEAT-168) ────────────────────────────
 //
 // A book spends one paid call **per page**, so the batch is the one place in
 // the app where "refuse before spending" is not a single check. These pin the
@@ -362,7 +362,7 @@ describe('canAffordNextPage', () => {
   })
 })
 
-describe('useBookIllustrator — daily art budget (FEAT-168)', () => {
+describe('useBookIllustrator — weekly art budget (FEAT-168)', () => {
   /** A 6-page book where every page carries a scene. */
   const sixScenePages = Array.from({ length: 6 }, (_, i) => ({
     pageNumber: i + 1,

@@ -22,7 +22,7 @@ const { useArtQuotaMock, activeChildHolder } = vi.hoisted(() => ({
 
 vi.mock('../business/useArtQuota', () => ({
   useArtQuota: useArtQuotaMock,
-  DEFAULT_DAILY_ART_QUOTA: 25,
+  DEFAULT_WEEKLY_ART_QUOTA: 100,
 }))
 
 vi.mock('../../core/hooks/useActiveChild', () => ({

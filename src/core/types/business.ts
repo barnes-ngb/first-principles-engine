@@ -423,21 +423,30 @@ export interface CatalogOrder {
 // ── Kid art-generation quota (FEAT-94) ────────────────────────────
 
 /**
- * A per-child, per-day counter for kid-initiated art generation (FEAT-94). Each
- * image generation is a paid call, so a kid profile gets a light, non-shaming
- * daily cap (never a lock) — this doc just counts today's generations. Parent
- * profiles are uncapped and never read/write it.
+ * A per-child, per-**week** counter for kid-initiated art generation (FEAT-94;
+ * the window went daily → weekly in FEAT-175). Each image generation is a paid
+ * call, so a kid profile gets a light, non-shaming cap (never a lock) — this doc
+ * just counts this week's generations. Parent profiles are uncapped and never
+ * read/write it.
  *
- * Doc ID: `{childId}-{YYYY-MM-DD}`. Additive, client-written under the existing
- * owner Firestore rule (kids share the family auth, so the cap is UX, not
- * security). No schema churn — a tiny standalone counter, not a child record.
+ * Doc ID: `{childId}-wk-{weekStart}`, where `weekStart` is the app's own
+ * Sunday-start week key (`weekKeyFromDate` → `getWeekRange`). The `wk-` segment
+ * is deliberate: a plain `{childId}-{weekStart}` for a Sunday would be
+ * indistinguishable from that Sunday's **legacy daily** doc, and a leftover
+ * daily count would silently seed the new week. Legacy daily docs
+ * (`{childId}-{YYYY-MM-DD}`) stay where they are — inert, unread, not migrated.
+ *
+ * Additive, client-written under the existing owner Firestore rule (kids share
+ * the family auth, so the cap is UX, not security — and that rule matches the
+ * whole family subtree, never a doc-id shape, so the new id needs no rules
+ * change). No schema churn — a tiny standalone counter, not a child record.
  */
 export interface ArtQuota {
   /** The operator this counter belongs to. */
   childId: string
-  /** The local day this counter covers (`YYYY-MM-DD`). */
-  date: string
-  /** How many generations have been recorded today. */
+  /** The Sunday that starts the local week this counter covers (`YYYY-MM-DD`). */
+  weekStart: string
+  /** How many generations have been recorded this week. */
   count: number
   /** ISO timestamp of the last increment. */
   updatedAt: string
