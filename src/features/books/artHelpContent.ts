@@ -59,7 +59,7 @@ export interface ArtHelpSection {
    * sheet fills it from {@link artHelpStyles} so a style added to a picker shows
    * up here without a second list to keep in step.
    */
-  id: 'what' | 'styles' | 'fit' | 'ask' | 'budget' | 'never'
+  id: 'what' | 'styles' | 'fit' | 'level' | 'ask' | 'budget' | 'never'
   heading: string
   lines: string[]
 }
@@ -309,7 +309,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           heading: 'What you get',
           lines: [
             '"Make a Sticker" turns a few typed words into one cut-out picture you can drop into a book or print on a sheet.',
-            '"From a Drawing" photographs a real drawing and cuts it out. That cleanup is free — only "Make it fancy" spends a picture.',
+            '"From a drawing" photographs a real drawing and cuts it out. That cleanup is free — only "Make it fancy" spends a picture.',
             '"Make it fancy" redraws the same drawing in a look you pick, keeping its shapes, characters and layout.',
             '"Add version" and "Make more versions" each make one more look of a drawing you already have — one picture per tap, and every earlier look stays.',
           ],
@@ -340,7 +340,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
             'Cleaning your drawing is free.',
             'Make it fancy makes a new picture.',
             'It keeps your shapes the same.',
-            'Redo makes one more picture.',
+            'Make it again makes one more.',
           ],
         },
         stylesSection('kid'),
@@ -362,7 +362,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           lines: [
             'Photographing, cropping and cleaning up a drawing is free, and the cut-out sticker you get from that costs nothing.',
             '"Make it fancy" is the paid step: it redraws the child\'s drawing in the look you pick and keeps the same composition, characters and layout.',
-            '"Redo with this style" is another paid picture, not a free retry — both versions stay saveable.',
+            '"Make it with this style" is another paid picture, not a free retry — both versions stay saveable.',
           ],
         },
         stylesSection('parent'),
@@ -388,7 +388,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           id: 'what',
           heading: 'What you get',
           lines: [
-            'Create makes one page picture.',
+            'Make it makes one page picture.',
             'It uses the words you type.',
             'You can redo a page picture.',
             'Adding your own drawing is free.',
@@ -401,7 +401,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           lines: [
             'Show the whole picture fits it all in.',
             'Fill the page cuts the edges off.',
-            'Both live in the background menu.',
+            'Both live in the picture menu.',
           ],
         },
         {
@@ -420,8 +420,8 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           id: 'what',
           heading: 'What you get',
           lines: [
-            '"Create!" makes one background picture for the page you are on, from the scene words you type.',
-            '"Change background" reopens the picture maker for a page that already has one. The new picture replaces the old one and costs another picture.',
+            '"Make it" makes one full-page picture for the page you are on, from the words you type.',
+            '"Change picture" reopens the picture maker for a page that already has one. The new picture replaces the old one and costs another picture.',
             'When you photograph a drawing, "Reimagine" redraws it as a polished illustration — also a paid picture. Cropping, cleaning and using the drawing as it is are all free.',
             'The sticker picker inside the editor can generate a new sticker too, and that counts the same as any other picture.',
           ],
@@ -433,7 +433,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           lines: [
             '"Show the whole picture" fits the entire image inside the page and fills the leftover space with a blurred, enlarged copy of itself.',
             '"Fill the page" crops the image to the frame. That is the original behaviour and stays the default for every background.',
-            'Both live in the "Change background" menu and affect only the background. Stickers and placed pieces never move, on screen or in the PDF.',
+            'Both live in the wallpaper menu above the page and affect only the full-page picture. Stickers and placed pieces never move, on screen or in the PDF.',
           ],
         },
         {
@@ -442,7 +442,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           lines: [
             'Describe the place and the moment, not the character. Every page prompt asks the picture maker for the environment only, and it deliberately draws no people.',
             'Add your characters afterwards with a drawing or a sticker — that is the flow the editor is built for.',
-            'Say the style once by tapping it. Writing a style into the scene words as well gives the picture maker two art directions.',
+            'Say the style once by tapping it. Writing a style into the words as well gives the picture maker two art directions.',
           ],
         },
         budgetSection('parent'),
@@ -482,12 +482,26 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           id: 'what',
           heading: 'What you get',
           lines: [
-            'Writing and revising the story is free. Tapping "I like the whole story!" saves the book and then illustrates it — one picture per page that carries a scene.',
+            'Writing and revising the story is free. Tapping "Make my book!" saves the book and then makes the pictures — one per page that carries a scene.',
             'A page with no scene is skipped and costs nothing.',
             'If the week\'s budget cannot cover the whole book, nothing is spent at all and the story is still saved. A book that stops half-illustrated is the worse outcome.',
           ],
         },
         stylesSection('parent'),
+        {
+          // UX-111 — this used to be a 20-word parenthetical inside the draft
+          // turn, telling a parent inside a book dialog to walk to a Progress
+          // tab she cannot tap through to. The line now just says the level was
+          // a guess; how to fix the guess belongs here, with every other
+          // explanation FEAT-178 moved behind the "?".
+          id: 'level',
+          heading: 'The reading level',
+          lines: [
+            'The story is written to the child\u2019s assessed reading level, and the draft turn says plainly which words came out above it.',
+            'With no assessed level the story is sized from age instead, and the draft turn says so. An age guess is the most likely reason a good story gets flagged.',
+            'Set a real level under Working Levels on the Skill Snapshot (Progress \u2192 Skill Snapshot) and every story after it is written to that.',
+          ],
+        },
         {
           id: 'ask',
           heading: 'How to ask for a good picture',
@@ -587,7 +601,7 @@ const DOOR_SUBJECT: Record<ArtHelpDoor, string> = {
   makeItFancy: 'One new picture of this drawing',
   addVersion: 'One more look of this drawing',
   makeVersions: 'One more look of this drawing',
-  bookScene: 'One picture from your scene words',
+  bookScene: 'One picture from the words you type',
   illustrateBook: 'One picture per page with a scene',
   kitArt: 'One sticker for this character',
   kitArtBatch: 'One sticker for each character left',

@@ -93,7 +93,7 @@ export default function SightWordDashboard() {
           onClick={() => navigate('/books')}
           sx={{ minHeight: 44 }}
         >
-          Back
+          My Books
         </Button>
         <Typography variant="h5" fontWeight={700} sx={{ flex: 1 }}>
           {childName}&apos;s Sight Words
@@ -155,7 +155,7 @@ export default function SightWordDashboard() {
             onClick={handleGenerateFromWeak}
             sx={{ minHeight: 48, alignSelf: 'flex-start' }}
           >
-            Generate Story from Weak Words
+            Make a story from these words
           </Button>
 
           {/* Word grid */}

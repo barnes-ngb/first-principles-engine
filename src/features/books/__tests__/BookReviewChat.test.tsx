@@ -114,7 +114,7 @@ describe('BookReviewChat', () => {
     render(<BookReviewChat />)
     expect(screen.getByText('Ember could not fly.')).toBeInTheDocument()
     expect(screen.getByText(/Page 1 of 2/)).toBeInTheDocument()
-    expect(screen.getByAltText(/Page 1 illustration/)).toBeInTheDocument()
+    expect(screen.getByAltText(/Page 1 picture/)).toBeInTheDocument()
   })
 
   it('"Sounds good!" calls approveCurrentPage', async () => {
@@ -150,7 +150,7 @@ describe('BookReviewChat', () => {
     reviewState.totalPages = 2
     render(<BookReviewChat />)
     expect(screen.getByText(/All done!/)).toBeInTheDocument()
-    expect(screen.getByText(/You reviewed 2 of 2 pages/)).toBeInTheDocument()
+    expect(screen.getByText(/Read it to me.+you went through 2 of 2 pages/)).toBeInTheDocument()
   })
 
   it('parent profile shows Prev/Next navigation', () => {

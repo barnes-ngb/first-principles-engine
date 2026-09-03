@@ -82,7 +82,7 @@ export default function StickersPage() {
           onClick={() => navigate('/books')}
           sx={{ textTransform: 'none' }}
         >
-          Books
+          My Books
         </Button>
       </Stack>
 
@@ -113,7 +113,7 @@ export default function StickersPage() {
           onClick={() => setShowDrawing(true)}
           sx={{ minHeight: 44, textTransform: 'none' }}
         >
-          From a Drawing
+          From a drawing
         </Button>
         <Button
           variant="contained"

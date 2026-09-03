@@ -104,7 +104,7 @@ describe('StoryGuidePage — ai-shaping step removed (Story Gen V2 §6.3)', () =
 
     // Brief preview screen renders ("Your Story" + Generate button).
     expect(screen.getByText(/your story/i)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /generate my book/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /make my book/i })).toBeTruthy()
 
     // None of the AI-shaping CTAs should render anywhere on the page.
     expect(screen.queryByText(/even more epic/i)).toBeNull()

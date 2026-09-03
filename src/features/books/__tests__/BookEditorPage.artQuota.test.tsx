@@ -160,11 +160,11 @@ beforeEach(() => {
 })
 
 /**
- * Open the "Make a Scene" dialog from the editor toolbar. ("Make a scene" also
+ * Open the "Make a picture" dialog from the editor toolbar. ("Make a picture" also
  * appears inside the background-source picker; both land on the same dialog.)
  */
 async function openSceneDialog(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getAllByText('Make a scene')[0])
+  await user.click(screen.getAllByText('Make a picture')[0])
 }
 
 describe('BookEditorPage — weekly art budget (FEAT-168)', () => {
@@ -187,7 +187,7 @@ describe('BookEditorPage — weekly art budget (FEAT-168)', () => {
     expect(drawingDialogProps.current?.capReached).toBe(false)
   })
 
-  it('at the cap the scene generator has no Create button and shows the warm nudge', async () => {
+  it('at the cap the picture generator has no Make button and shows the warm nudge', async () => {
     const user = userEvent.setup()
     quotaHolder.atLimit = true
     render(<BookEditorPage />)
@@ -195,7 +195,7 @@ describe('BookEditorPage — weekly art budget (FEAT-168)', () => {
     await openSceneDialog(user)
 
     expect(await screen.findByText(ART_QUOTA_MESSAGE)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Create!' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Make it' })).toBeNull()
     expect(generateImageMock).not.toHaveBeenCalled()
   })
 
@@ -205,8 +205,8 @@ describe('BookEditorPage — weekly art budget (FEAT-168)', () => {
     render(<BookEditorPage />)
 
     await openSceneDialog(user)
-    await user.type(screen.getByLabelText(/describe the scene/i), 'a castle')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.type(screen.getByLabelText(/describe the picture/i), 'a castle')
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(generateImageMock).toHaveBeenCalledTimes(1))
     expect(recordGenerationMock).toHaveBeenCalledTimes(1)
@@ -220,10 +220,10 @@ describe('BookEditorPage — weekly art budget (FEAT-168)', () => {
     render(<BookEditorPage />)
 
     await openSceneDialog(user)
-    await user.type(screen.getByLabelText(/describe the scene/i), 'a castle')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.type(screen.getByLabelText(/describe the picture/i), 'a castle')
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
-    await waitFor(() => expect(screen.getByAltText('Generated scene')).toBeTruthy())
-    expect(screen.getByRole('button', { name: 'Use this one' })).toBeTruthy()
+    await waitFor(() => expect(screen.getByAltText('Your new picture')).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Use it' })).toBeTruthy()
   })
 })

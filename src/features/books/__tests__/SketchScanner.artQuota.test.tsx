@@ -55,7 +55,7 @@ async function reachFancyTab(user: ReturnType<typeof userEvent.setup>) {
     'input[type="file"]:not([capture])',
   ) as HTMLInputElement
   await user.upload(input, new File(['drawing'], 'drawing.png', { type: 'image/png' }))
-  await user.click(await screen.findByRole('button', { name: /use whole image/i }))
+  await user.click(await screen.findByRole('button', { name: /use the whole picture/i }))
   await user.click(await screen.findByRole('tab', { name: /fancy/i }))
 }
 
@@ -124,7 +124,7 @@ describe('SketchScanner — weekly art cap on "Make it fancy" (FEAT-166 / UX-95)
     await user.click(await screen.findByRole('button', { name: /make it fancy/i }))
     await waitFor(() => expect(recordGeneration).toHaveBeenCalledTimes(1))
 
-    await user.click(await screen.findByRole('button', { name: /redo with this style/i }))
+    await user.click(await screen.findByRole('button', { name: /make it with this style/i }))
     await waitFor(() => expect(enhanceSketchMock).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(recordGeneration).toHaveBeenCalledTimes(2))
   })
@@ -150,7 +150,7 @@ describe('SketchScanner — weekly art cap on "Make it fancy" (FEAT-166 / UX-95)
     )
 
     expect(await screen.findByText(CAP_MESSAGE)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /redo with this style/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /make it with this style/i })).toBeNull()
     expect(screen.getByAltText('Fancy version')).toBeInTheDocument()
   })
 
@@ -214,7 +214,7 @@ describe('SketchScanner — weekly art cap on "Make it fancy" (FEAT-166 / UX-95)
     // this path does not under-count, it just refuses to wait.
     expect(recordGeneration).toHaveBeenCalledTimes(1)
     // And the paid control is live again, so a redo is not wedged either.
-    expect(await screen.findByRole('button', { name: /redo with this style/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /make it with this style/i })).toBeInTheDocument()
   })
 
   it('leaves the free controls working at the cap — the cleaned sticker still saves', async () => {

@@ -142,7 +142,7 @@ export default function StoryGuidePage() {
               onClick={() => navigate('/books')}
               sx={{ textTransform: 'none', color: 'text.secondary' }}
             >
-              Bookshelf
+              My Books
             </Button>
             <Box sx={{ flex: 1 }} />
             <Typography variant="body2" color="text.secondary">
@@ -286,7 +286,7 @@ export default function StoryGuidePage() {
               '&:hover': { bgcolor: accentHover },
             }}
           >
-            Generate My Book! →
+            Make my book →
           </Button>
 
           <Button

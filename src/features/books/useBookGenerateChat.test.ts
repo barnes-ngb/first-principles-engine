@@ -686,7 +686,7 @@ describe('useBookGenerateChat sight-word channel (FEAT-169)', () => {
     expect(lastAi).toMatchObject({ role: 'ai', kind: 'story-draft' })
     // "yellow" was sent but is on no page — it is not claimed.
     expect(lastAi.content).toBe(
-      'Here\'s your story! "Cave Cat" — it uses your practice words: water, again.',
+      'Here\'s your story! "Cave Cat" — it uses London\'s practice words: water, again.',
     )
   })
 })
@@ -841,7 +841,7 @@ describe('useBookGenerateChat — a typed list wins over the practice list (FEAT
     expect(payload.words).toEqual(['water'])
     const lastAi = result.current.chatHistory[result.current.chatHistory.length - 1]
     expect(lastAi.content).toBe(
-      'Here\'s your story! "Web Hero" — I couldn\'t fit your practice words in this time.',
+      'Here\'s your story! "Web Hero" — I couldn\'t fit London\'s practice words in this time.',
     )
   })
 

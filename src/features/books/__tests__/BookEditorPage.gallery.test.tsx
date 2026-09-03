@@ -117,7 +117,7 @@ vi.mock('../../components/SaveIndicator', () => ({ default: () => null }))
 vi.mock('../PageEditor', () => ({
   default: ({ onChangeBackground }: { onChangeBackground?: () => void }) => (
     <div>
-      <button onClick={onChangeBackground}>Change Background</button>
+      <button onClick={onChangeBackground}>Change picture</button>
     </div>
   ),
 }))
@@ -132,16 +132,16 @@ describe('BookEditorPage gallery background picker', () => {
     removeImageFromPageMock.mockReset()
   })
 
-  it('shows background source picker with three options when Change Background is clicked', async () => {
+  it('shows the picture source picker with three options when Change picture is clicked', async () => {
     const user = userEvent.setup()
     render(<BookEditorPage />)
 
-    await user.click(screen.getByRole('button', { name: 'Change Background' }))
+    await user.click(screen.getByRole('button', { name: 'Change picture' }))
 
     // The dialog title
-    expect(screen.getByText('Change Background', { selector: 'h2' })).toBeInTheDocument()
-    // Three source options (use getAllByText since "Make a scene" may also appear as a toolbar button)
-    expect(screen.getAllByText('Make a scene').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Change picture', { selector: 'h2' })).toBeInTheDocument()
+    // Three source options (use getAllByText since "Make a picture" may also appear as a toolbar button)
+    expect(screen.getAllByText('Make a picture').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Upload photo')).toBeInTheDocument()
     expect(screen.getByText('From gallery')).toBeInTheDocument()
   })
@@ -151,11 +151,11 @@ describe('BookEditorPage gallery background picker', () => {
     render(<BookEditorPage />)
 
     // Open background source picker, then gallery
-    await user.click(screen.getByRole('button', { name: 'Change Background' }))
+    await user.click(screen.getByRole('button', { name: 'Change picture' }))
     await user.click(screen.getByText('From gallery'))
 
     // Wait for gallery dialog and sticker loading
-    expect(await screen.findByText('Pick a background')).toBeInTheDocument()
+    expect(await screen.findByText('Pick a picture')).toBeInTheDocument()
 
     // Both section headings should appear
     expect(screen.getByText('From this book')).toBeInTheDocument()

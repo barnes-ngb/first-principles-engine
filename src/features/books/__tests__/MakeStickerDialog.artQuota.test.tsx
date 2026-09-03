@@ -47,7 +47,7 @@ describe('MakeStickerDialog — weekly art cap (FEAT-165 / UX-95)', () => {
 
     // The paid control is simply not offered, and the copy is a nudge — not an
     // error, not a lock.
-    expect(screen.queryByRole('button', { name: 'Create!' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Make it' })).toBeNull()
     expect(screen.getByText(CAP_MESSAGE)).toBeInTheDocument()
     expect(generateImageMock).not.toHaveBeenCalled()
     expect(recordGeneration).not.toHaveBeenCalled()
@@ -66,7 +66,7 @@ describe('MakeStickerDialog — weekly art cap (FEAT-165 / UX-95)', () => {
     )
 
     await user.type(screen.getByLabelText('Describe your sticker'), 'a dragon')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(generateImageMock).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(recordGeneration).toHaveBeenCalledTimes(1))
@@ -86,7 +86,7 @@ describe('MakeStickerDialog — weekly art cap (FEAT-165 / UX-95)', () => {
     )
 
     await user.type(screen.getByLabelText('Describe your sticker'), 'a dragon')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(generateImageMock).toHaveBeenCalledTimes(1))
     expect(recordGeneration).not.toHaveBeenCalled()
@@ -112,12 +112,12 @@ describe('MakeStickerDialog — weekly art cap (FEAT-165 / UX-95)', () => {
     )
 
     await user.type(screen.getByLabelText('Describe your sticker'), 'a dragon')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(recordGeneration).toHaveBeenCalledTimes(1))
     // The preview and both of its controls are live — the image the kid paid
     // for is reachable and saveable.
-    expect(await screen.findByRole('button', { name: 'Use This' })).toBeEnabled()
+    expect(await screen.findByRole('button', { name: 'Use it' })).toBeEnabled()
     expect(screen.getByRole('button', { name: /try again/i })).toBeEnabled()
   })
 
@@ -127,7 +127,7 @@ describe('MakeStickerDialog — weekly art cap (FEAT-165 / UX-95)', () => {
 
     expect(screen.queryByText(CAP_MESSAGE)).toBeNull()
     await user.type(screen.getByLabelText('Describe your sticker'), 'a dragon')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(generateImageMock).toHaveBeenCalledTimes(1))
   })

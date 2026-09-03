@@ -269,7 +269,7 @@ export function useBookGenerator() {
               phase: 'illustrating',
               currentPage: p.currentPage,
               totalPages,
-              message: `Illustrating page ${p.currentPage} of ${totalPages}...`,
+              message: `Making picture ${p.currentPage} of ${totalPages}…`,
               lastImageUrl,
             })
           } else if (p.phase === 'done') {
@@ -290,7 +290,7 @@ export function useBookGenerator() {
           capReached
             ? `Your story is saved! ${ART_QUOTA_MESSAGE} You can add photos or drawings in the editor.`
             : failedPages.length > 0
-              ? `Book created! ${failedPages.length} page${failedPages.length > 1 ? 's' : ''} need illustrations — you can add photos or drawings in the editor.`
+              ? `Book made! ${failedPages.length} page${failedPages.length > 1 ? 's' : ''} still need a picture — you can add photos or drawings in the editor.`
               : 'Your book is ready!',
         lastImageUrl,
       })

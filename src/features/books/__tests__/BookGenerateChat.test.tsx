@@ -182,15 +182,15 @@ beforeEach(() => {
 })
 
 describe('BookGenerateChat', () => {
-  it('renders the composer and the illustration-style strip on initial mount', () => {
+  it('renders the composer and the picture-style strip on initial mount', () => {
     render(
       <Wrap>
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
     expect(screen.getByLabelText(/type your message/i)).toBeTruthy()
-    expect(screen.getByLabelText(/illustration style: minecraft/i)).toBeTruthy()
-    expect(screen.getByLabelText(/illustration style: storybook/i)).toBeTruthy()
+    expect(screen.getByLabelText(/picture style: minecraft/i)).toBeTruthy()
+    expect(screen.getByLabelText(/picture style: storybook/i)).toBeTruthy()
   })
 
   it('calls sendKidMessage when a message is sent', async () => {
@@ -212,7 +212,7 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    const commitBtn = screen.getByRole('button', { name: /i like the whole story/i })
+    const commitBtn = screen.getByRole('button', { name: /make my book/i })
     expect(commitBtn.hasAttribute('disabled')).toBe(true)
   })
 
@@ -235,7 +235,7 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    const commitBtn = screen.getByRole('button', { name: /i like the whole story/i })
+    const commitBtn = screen.getByRole('button', { name: /make my book/i })
     expect(commitBtn.hasAttribute('disabled')).toBe(false)
   })
 
@@ -246,7 +246,7 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    await user.click(screen.getByLabelText(/illustration style: minecraft/i))
+    await user.click(screen.getByLabelText(/picture style: minecraft/i))
     expect(setIllustrationStyleMock).toHaveBeenCalledWith('minecraft')
   })
 
@@ -580,7 +580,7 @@ describe('BookGenerateChat', () => {
       </Wrap>,
     )
 
-    await user.click(screen.getByRole('button', { name: /i like the whole story/i }))
+    await user.click(screen.getByRole('button', { name: /make my book/i }))
 
     await waitFor(() => expect(onCommit).toHaveBeenCalledWith('book-1'))
   })
@@ -604,7 +604,7 @@ describe('BookGenerateChat', () => {
       </Wrap>,
     )
 
-    await user.click(screen.getByRole('button', { name: /i like the whole story/i }))
+    await user.click(screen.getByRole('button', { name: /make my book/i }))
 
     // The story is saved, the notice is on screen — and navigation waits.
     expect(await screen.findByText(/ask a grown-up if you need more/i)).toBeTruthy()
@@ -615,7 +615,7 @@ describe('BookGenerateChat', () => {
     expect(onCommit).toHaveBeenCalledWith('book-1')
   })
 
-  it('shows an "Illustrating page X of Y…" strip and disables the composer/commit during illustration', () => {
+  it('shows a "Making picture X of Y…" strip and disables the composer/commit during illustration', () => {
     hookState = {
       ...hookState,
       currentStory: {
@@ -641,8 +641,8 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    expect(screen.getByText(/illustrating page 1 of 2/i)).toBeTruthy()
-    const preview = screen.getByAltText(/latest illustration preview/i) as HTMLImageElement
+    expect(screen.getByText(/making picture 1 of 2/i)).toBeTruthy()
+    const preview = screen.getByAltText(/latest picture/i) as HTMLImageElement
     expect(preview.src).toContain('preview.png')
 
     // Composer disabled.
@@ -650,7 +650,7 @@ describe('BookGenerateChat', () => {
     expect(input.disabled).toBe(true)
 
     // Commit button disabled while illustrating.
-    const commitBtn = screen.getByRole('button', { name: /i like the whole story/i })
+    const commitBtn = screen.getByRole('button', { name: /make my book/i })
     expect(commitBtn.hasAttribute('disabled')).toBe(true)
   })
 

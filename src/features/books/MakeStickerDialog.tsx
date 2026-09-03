@@ -246,7 +246,7 @@ export default function MakeStickerDialog({
             onClick={() => { void handleConfirmTagging() }}
             disabled={saving}
           >
-            {saving ? 'Saving...' : 'Save Sticker!'}
+            {saving ? 'Saving\u2026' : 'Use it'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -279,7 +279,7 @@ export default function MakeStickerDialog({
                 onClick={() => { void handleUseGenerated() }}
                 disabled={saving}
               >
-                {saving ? 'Saving...' : 'Use This'}
+                {saving ? 'Saving\u2026' : 'Use it'}
               </Button>
             </Stack>
           </Stack>
@@ -349,7 +349,7 @@ export default function MakeStickerDialog({
                 onClick={() => { void handleGenerate() }}
                 disabled={!prompt.trim() || generating}
               >
-                Create!
+                Make it
               </Button>
             )}
           </>

@@ -313,8 +313,9 @@ export const MAX_NAMED_HARD_WORDS = 6
  * ("may be above London's level", never "London can't read"), and it is not an
  * error — the story is perfectly usable and the parent fixes it in the revise
  * chat they already have ("swap castle for a simpler word"). When the level was
- * only estimated it says so and points at where to set the real one, because a
- * wrong estimate is the most likely reason a good story got flagged.
+ * only estimated it says so, because a wrong estimate is the most likely reason
+ * a good story got flagged; *how* to set a real one lives in the surface's "?"
+ * sheet (UX-111), not in a 20-word parenthetical inside a book dialog.
  */
 export function storyReadabilityClause(
   childName: string,
@@ -340,7 +341,7 @@ export function storyReadabilityClause(
   const noun = total === 1 ? 'word' : 'words'
   const estimate =
     readability.levelSource === 'age'
-      ? ` (estimated from age — set ${childName}'s phonics level under Working Levels on the Skill Snapshot for a better fit)`
+      ? ' (level estimated from age)'
       : ''
   return `${total} ${noun} may be above ${childName}'s level: ${list}.${estimate}`
 }
@@ -378,7 +379,9 @@ export function storyDraftMessage(
     return appendClause(base, clause)
   }
   const label =
-    source === StoryWordSource.Requested ? 'the words you asked for' : 'your practice words'
+    source === StoryWordSource.Requested
+      ? 'the words you asked for'
+      : `${childName}'s practice words`
   const used = practiceWordsUsedIn(pages, requestedWords)
   if (used.length === 0) {
     return appendClause(`${base} — I couldn't fit ${label} in this time.`, clause)

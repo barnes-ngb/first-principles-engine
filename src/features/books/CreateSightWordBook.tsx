@@ -204,7 +204,7 @@ export default function CreateSightWordBook() {
           onClick={() => navigate('/books')}
           sx={{ minHeight: 44 }}
         >
-          Back to My Books
+          My Books
         </Button>
       </Stack>
 
@@ -215,7 +215,8 @@ export default function CreateSightWordBook() {
       {/* Prefill banner from Word Wall */}
       {(location.state as LocationState | null)?.source === 'word-wall' && (
         <Alert severity="info" sx={{ mb: 0 }}>
-          These words come from {activeChild?.name ?? 'your child'}&apos;s quest data. They&apos;re struggling with these patterns.
+          These words come from {activeChild?.name ?? 'your child'}&apos;s quest work \u2014 the patterns
+          {' '}{activeChild?.name ?? 'your child'} is practicing right now.
         </Alert>
       )}
 
@@ -282,7 +283,7 @@ export default function CreateSightWordBook() {
 
       {/* Theme */}
       <TextField
-        label="Theme"
+        label="Story idea"
         placeholder="Minecraft adventure with a cat"
         value={theme}
         onChange={(e) => setTheme(e.target.value)}
@@ -314,7 +315,7 @@ export default function CreateSightWordBook() {
         disabled={wordList.length === 0 || generating}
         sx={{ minHeight: 56 }}
       >
-        {generating ? 'Generating...' : 'Generate Story'}
+        {generating ? 'Making\u2026' : 'Make the story'}
       </Button>
 
       {genError && <ErrorState message={genError.message} />}
@@ -376,7 +377,7 @@ export default function CreateSightWordBook() {
               disabled={publishing}
               sx={{ minHeight: 48 }}
             >
-              {publishing ? 'Publishing...' : 'Publish'}
+              {publishing ? 'Finishing\u2026' : 'Finish book'}
             </Button>
           </Stack>
         </Box>

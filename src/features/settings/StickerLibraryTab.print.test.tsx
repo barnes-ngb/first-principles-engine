@@ -70,10 +70,10 @@ describe('StickerLibraryTab — print to sheet (FEAT-33)', () => {
     render(<StickerLibraryTab />)
     await screen.findByText('2 stickers in your library')
     expect(screen.queryByRole('button', { name: /make a sheet/i })).not.toBeInTheDocument()
-    // Preview has no "Print this" without the prop.
+    // Preview has no "Make a PDF" without the prop.
     await userEvent.click(screen.getByRole('button', { name: 'Preview Wolf' }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).queryByRole('button', { name: /print this/i })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /make a pdf/i })).not.toBeInTheDocument()
   })
 
   it('select-to-print: select stickers → print N → printStickerSheet runs with chosen options', async () => {
@@ -86,13 +86,13 @@ describe('StickerLibraryTab — print to sheet (FEAT-33)', () => {
     await user.click(screen.getByRole('button', { name: 'Select Wolf' }))
     await user.click(screen.getByRole('button', { name: 'Select Creeper' }))
 
-    await user.click(screen.getByRole('button', { name: /print 2 stickers/i }))
+    await user.click(screen.getByRole('button', { name: /make a pdf of 2 stickers/i }))
 
-    const optionsDialog = await screen.findByRole('dialog', { name: /print 2 stickers/i })
+    const optionsDialog = await screen.findByRole('dialog', { name: /make a pdf of 2 stickers/i })
     // Choose A4 + Large, then print.
     await user.click(within(optionsDialog).getByText('A4'))
     await user.click(within(optionsDialog).getByText('Large'))
-    await user.click(within(optionsDialog).getByRole('button', { name: /^print$/i }))
+    await user.click(within(optionsDialog).getByRole('button', { name: /^make a pdf$/i }))
 
     await waitFor(() => expect(printStickerSheetMock).toHaveBeenCalledTimes(1))
     const [sent, opts] = printStickerSheetMock.mock.calls[0] as [Sticker[], Record<string, unknown>]
@@ -100,17 +100,17 @@ describe('StickerLibraryTab — print to sheet (FEAT-33)', () => {
     expect(opts).toMatchObject({ pageSize: 'a4', stickerSize: 'large' })
   })
 
-  it('preview "Print this" prints exactly that one sticker', async () => {
+  it('preview "Make a PDF" makes a PDF of exactly that one sticker', async () => {
     const user = userEvent.setup()
     render(<StickerLibraryTab enableSelectToPrint />)
     await screen.findByText('2 stickers in your library')
 
     await user.click(screen.getByRole('button', { name: 'Preview Wolf' }))
     const preview = await screen.findByRole('dialog')
-    await user.click(within(preview).getByRole('button', { name: /print this/i }))
+    await user.click(within(preview).getByRole('button', { name: /make a pdf/i }))
 
-    const optionsDialog = await screen.findByRole('dialog', { name: /print this sticker/i })
-    await user.click(within(optionsDialog).getByRole('button', { name: /^print$/i }))
+    const optionsDialog = await screen.findByRole('dialog', { name: /make a pdf of this sticker/i })
+    await user.click(within(optionsDialog).getByRole('button', { name: /^make a pdf$/i }))
 
     await waitFor(() => expect(printStickerSheetMock).toHaveBeenCalledTimes(1))
     const [sent] = printStickerSheetMock.mock.calls[0] as [Sticker[]]
