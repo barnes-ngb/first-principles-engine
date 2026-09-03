@@ -63,7 +63,7 @@ London uses it today.
 | **Books About Me (`/books-about-me`)** *(landed after 2026-05-31)* | Ready | — | `src/features/monthly-review/KidBooksAboutMePage.tsx:88-89,105-130`, `KidBookReaderPage.tsx:14-19`, `MonthlyReviewReader.tsx:223,252-259,402-427` | Read-only. Title `Books About London`, empty state `Your first book is coming!` / `Mom is working on it.`, a photo grid that opens the reader locked to kid mode with an `Exit reader` icon button and a large `All done` button back to the shelf. No writes, no paid calls, no name check. The strongest new London surface. |
 | **Book Reader (`/books/:id/read`)** *(reconciled)* | Ready | — | `src/features/books/BookReaderPage.tsx:119,134,233,314,337,360,561,572` | TTS per page (`speechSynthesis`, `:360,572`), tap-a-word sight-word tracking, `✨ Words to Watch For` for the non-Minecraft branch. Writes on completion: `hours` (`:73`), `BOOK_READ` XP (`:314`), `sightWordProgress` (`:233,337`) — none guarded. **One behavioural name-gate:** `const childAge = isLincoln ? 10 : 6` (`:134`) feeds the comprehension-questions AI — B4 in §Audit 2026-09; should be `computeAge(birthdate)`. |
 | **Generate a Book** *(reconciled — FEAT-176)* | Ready | An assessed phonics level on file (else the Level-2 age fallback) | `BookshelfPage.tsx:987,1053-1060`, `BookGenerateChat.tsx:81-83,328`, `functions/src/ai/storyDecodability.ts` | **Confirmed Ready per FEAT-176**: the level is enforced and measured server-side, keyed on `skillSnapshots.workingLevels.phonics` with an age fallback, never on a name. Client side, the style default and the age fallback are still name-derived (`isLincoln ? 'minecraft' : 'storybook'`, `ageFromBirthdate(birthdate, isLincoln ? 10 : 6)`, `:82-83`) — cosmetic default + fallback only (birthdate wins), B16/B17. A kid who generates lands in the review chat (`:1060` → `/books/:id/review`), an LLM chat with typed input — FEAT-179's walk. |
-| **Kid Today — `Show your work!` photo capture** *(reconciled — the AI scan path)* | Ready — **but writes an invariant collection from a kid tap** | Decide whether a kid capture may seed `conceptualBlocks` at all (ARCH-10 input) | `KidChecklist.tsx:280-291` → `KidTodayView.tsx:440-454,1109-1136` → `useUnifiedCapture.ts:120-121,365-376` | The per-item capture runs the same AI scan pipeline as the parent view (`useScan` → one LLM call per photo, uncapped) and, on a detected blocker, **merges `skillSnapshots.conceptualBlocks`** (`:373`) plus a `scans` doc — with no `canEdit` / `isChildProfile` guard. The dialog shows `Saving your work...` for the whole round-trip. **UX-151 (P1)** in §Audit 2026-09. |
+| **Kid Today — `Show your work!` photo capture** *(reconciled — the AI scan path)* | Ready — **but writes an invariant collection from a kid tap** | Decide whether a kid capture may seed `conceptualBlocks` at all (ARCH-10 input) | `KidChecklist.tsx:280-291` → `KidTodayView.tsx:440-454,1109-1136` → `useUnifiedCapture.ts:120-121,365-376` | The per-item capture runs the same AI scan pipeline as the parent view (`useScan` → one LLM call per photo, uncapped) and, when the page is recognised as a worksheet/textbook/test, **creates or advances an `activityConfigs` doc, derives `skillSnapshots.workingLevels`, folds the position into `learnerModels` and updates `childSkillMaps`** (`:326,353` → `useScanToActivityConfig.ts:128,138,193,277`), then on a detected blocker **merges `skillSnapshots.conceptualBlocks`** (`:373`) plus a `scans` doc — all with no `canEdit` / `isChildProfile` guard. The dialog shows `Saving your work...` for the whole round-trip. **UX-151 (P1)** in §Audit 2026-09. |
 | **My Stuff (`/records/portfolio`)** *(kid nav, reconciled)* | Ready (age-blind) — parent-shaped | A kid-shaped gallery, or drop the kid nav item | `src/app/AppShell.tsx:47`, `src/features/records/PortfolioPage.tsx:289-360,617-620` | The kid nav's `My Stuff` opens the parent Portfolio: `Portfolio / Demo Night Highlights`, `Year` / `Month` selects, `Search by title`, `Subject` / `Type` filters and a markdown export button. Read-only and harmless, but nothing on it is for a 6-year-old — P2 copy/shape. (UX-81 already notes the Today card `📸 My Stuff` is a different destination.) |
 | **Barnes Bros (`/business`)** *(kid nav, reconciled)* | Ready (kid-allowed by design) | — | `src/features/business/BusinessPage.tsx:33,72,84,95` | Sales log + goal are kid-writable by design (`businessLog` / `businessGoals`, business data, never a learner-model input); confirm/remove and the catalog are `canEdit`-gated; the Kit Builder is its own row above. Typed sales entries are parent-needed for London. |
 | **Settings (via the profile menu)** *(reconciled)* | Reachable, untuned | The UX-76 fix (gate the menu item on `canEdit`) | `src/components/ProfileMenu.tsx:85-88,174-179`, `src/features/settings/SettingsPage.tsx:87,160-200` | Not in the kid nav (`parentOnly`, `AppShell.tsx:37`) and not route-guarded; the profile pill's `Settings` item is ungated (UX-76). A kid gets the `General` tab: a `Theme` select and the `AI Features` switches (`localStorage`, this device only). P2. |
@@ -75,7 +75,7 @@ London uses it today.
 
 29 surfaces classified (16 on 2026-05-31 + 13 landed or reconciled since, walked by FEAT-180):
 
-- **Ready:** 24 — Kid Today checklist, XP/diamonds bar, extra-activity logger, greeting/celebration tone,
+- **Ready:** 25 — Kid Today checklist, XP/diamonds bar, extra-activity logger, greeting/celebration tone,
   Avatar/Hero Hub, My Books, Story Workshop, Conundrum, Chapter pool, Reading-eval infra, Math-eval infra,
   London learner profile, Functions per-child context, Image-gen theming, **Dad Lab kid view (by accident —
   name-gated)**, Stickers, Kit Builder art, Watch playback, Banner Rally, Books About Me, Book Reader,
@@ -114,14 +114,14 @@ register, it did not change gating).
      `hasReadingCalibration` for the Reading quests, `hasMathCalibration` for the Math Quest. London
      (no calibration anywhere) is still held at entry, unchanged. **Design choice to note:** *if* London
      is later math-evaluated but not reading-tuned, he would enter the Mine and see **only the Math
-     Quest** — never the Reading quests (reading calibration absent).
-     **2026-09-03 (FEAT-180):** the entry gate has a hole the two cases above did not consider — applying the
-     FEAT-34 London *defaults* writes non-math **and** math `prioritySkills`, which both domain gates read as
-     calibration, so the whole Mine opens without any evaluation. Filed as **UX-150**; see the audit section below. That is intentional under
+     Quest** — never the Reading quests (reading calibration absent). That is intentional under
      Lincoln-first / shame-free absence. **Open question for the owner:** if instead you want London held
      from the *entire* Mine until his full experience (incl. math) is tuned for a 6-year-old, that is a
      broader gate (hide the tile whenever `isLincoln` is false / age < N) — flagged here, **not built**,
      pending your call. Build it only on an explicit assignment.
+     **2026-09-03 (FEAT-180):** the entry gate has a hole the two cases above did not consider — applying the
+     FEAT-34 London *defaults* writes non-math **and** math `prioritySkills`, which both domain gates read as
+     calibration, so the whole Mine opens without any evaluation. Filed as **UX-150**; see the audit section below.
 
 2. **Math eval (FEAT-06) — done (infra); no gate, no build needed for Lincoln.** Reconciled 2026-06-01:
    the guided math-eval flow is already live at reading parity (FEAT-06 **RESOLVED**). No harmful surface
@@ -217,9 +217,11 @@ status confirmed.
 
 ### Part 2 — The name-gate census (ARCH-41 / ARCH-42 / ARCH-43 re-verified)
 
-**Totals on `main` today:** `isLincoln` — **1,030 occurrences in 61 non-test files** (the run-prompt's
-956 has grown: FEAT-176/177/178 added prop plumbing and three *comments* that say "nothing here reads
-`isLincoln`" — `artHelpContent.ts:19`, `useStickerArtQuota.ts:22`, `useBookArtQuota.ts:21`); `ageGroup` —
+**Totals on `main` today (one scope: `src/` + `functions/src/`, `*.test.*` excluded):** `isLincoln` — **993
+occurrences on 956 matching lines in 61 files** (the run-prompt's 956 is that line count, unchanged; with test
+files included it is 1,030 occurrences in 69 files). Three of the 61 files only *mention* it in a comment that
+says "nothing here reads `isLincoln`" — `artHelpContent.ts:19`, `useStickerArtQuota.ts:22`,
+`useBookArtQuota.ts:21`. `ageGroup` —
 **26 files**, every use cosmetic or a body-proportion/outfit seed (allowed: it *is* the capability field).
 **Literal name comparisons:** ARCH-43's 20 sites are **all still present** (line numbers drifted, no fix,
 no new Lincoln-keyed site), plus **7 London-/both-keyed siblings** ARCH-43's Lincoln-only grep never
@@ -318,8 +320,10 @@ Hub hides the same tile (`MyAvatarPage.tsx:1696 hideMine`), Today does not. The 
 the full Ephesians 6:11 with one control, `Go Suit Up`. *Unsupervised:* the per-item capture dialog
 (`:1109-1136`) shows `Saving your work...` over a `CircularProgress` for the whole AI-scan round trip and
 cannot be dismissed while loading (`onClose={() => !captureLoading && …}`) — a single tap spends an
-**uncapped LLM scan call** (`useUnifiedCapture.ts:120` `useScan`) and, on a detected blocker, **writes
-`skillSnapshots.conceptualBlocks`** (`:365-376`) — **P1, UX-151** (see write table). *Age-shaped copy:*
+**uncapped LLM scan call** (`useUnifiedCapture.ts:120` `useScan`); a recognised worksheet/textbook/test then
+**creates or advances `activityConfigs`, derives `skillSnapshots.workingLevels`, syncs `learnerModels` and
+`childSkillMaps`** (`:326,353`), and a detected blocker **writes `skillSnapshots.conceptualBlocks`**
+(`:365-376`) — **P1, UX-151** (see write table). *Age-shaped copy:*
 the extra logger is Minecraft for both kids (`⛏️ I Did More Mining!`, `KidExtraLogger.tsx:95`), and its
 presets `📖 Reading Eggs / 🔢 Math App / ✏️ Writing / 🔬 Science` assume a tablet-app routine London does
 not have — P3. *Writes:* see table.
@@ -433,17 +437,21 @@ removed. *Rules untouched by this run.*
 | `hours` | Dad Lab completion | `useDadLabReports.ts:70` | parent `LabReportForm` only; `KidLabView` never completes a lab | Surface-level (not a `canEdit` check; *unverified* that no kid path reaches `saveReport`) |
 | **`xpLedger`** (+ diamonds) | `CHECKLIST_ITEM/PRAYER`, `CHECKLIST_DAY_COMPLETE`, `DAILY_ALL_COMPLETE`, `MANUAL_AWARD` (extra, conundrum, workshop), `BOOK_READ`, `ARMOR_DAILY_COMPLETE`, `DAD_LAB_COMPLETE`, quest awards | `KidChecklist.tsx:136`, `KidTodayView.tsx:347,367`, `KidExtraLogger.tsx:68`, `KidConundrumResponse.tsx:134,178`, `WorkshopPage.tsx:720,784,860`, `BookReaderPage.tsx:314`, `useBook.ts:301`, `MyAvatarPage.tsx:801,987`, `useQuestSession.ts:836,1039,1938`, `KidTeachBack.tsx:103` | Every kid surface | **None** beyond `dedupKey` idempotence (the economy is *designed* to be kid-driven) |
 | **`skillSnapshots`** | `conceptualBlocks` merge from a detected scan blocker (+ a `scans` doc) | `useUnifiedCapture.ts:365-376` via `KidChecklist.tsx:282-290` `Show your work!` | Today, one photo | **None** — **UX-151 (P1)**: a kid tap writes a propose-and-confirm invariant collection |
+| `skillSnapshots` | `workingLevels.{subject}` derived from a curriculum scan's lesson number | `useUnifiedCapture.ts:326` `syncScanToConfig` → `useScanToActivityConfig.ts:130` `updateWorkingLevelFromScan` → `:277` | Today, the same photo (page type `worksheet`/`textbook`/`test`) | **None** — part of UX-151 |
+| **`activityConfigs`** | create a workbook config, or advance `currentPosition` / `defaultMinutes` | `useScanToActivityConfig.ts:128,193` via `useUnifiedCapture.ts:326` | Today, the same photo | **None** — a kid photo can create or advance a curriculum config (part of UX-151) |
+| `learnerModels` | workbook position folded into the model when a bridge matches (advance-only) | `useScanToActivityConfig.ts:138` `syncWorkbookPositionToModel` → `workbookPositionSync.ts:127` | Today, the same photo | **None** — part of UX-151 |
+| `childSkillMaps` | scan `skillsTargeted` → node status `mastered`/`emerging` | `useUnifiedCapture.ts:353` `updateSkillMapFromFindings` → `updateSkillMapFromFindings.ts:94` | Today, the same photo | **None** — part of UX-151 |
 | `skillSnapshots` | quest working-level / priority-skill updates | `useQuestSession.ts:1148,1168` | Mine | `canAccessKnowledgeMine` — defeated by UX-150 |
 | `skillSnapshots` | full-document defaults apply / edits | `SkillSnapshotPage.tsx:96,115`, `WorkingLevelsSection.tsx:140,167` | `/progress` — parent nav only, **not route-guarded**; URL only for a kid | None at the route (`RequireParent` wraps only `/weekly-review` and `/watch`) |
 | **`learnerModels`** | quest model sync | `questModelSync.ts:67` | Mine | `canAccessKnowledgeMine` — defeated by UX-150 |
-| `learnerModels` | stuck re-test queue; workbook position sync; Foundations override | `stuckRetestQueue.ts:132` (parent `TodayChecklist` only — the kid mastery chip writes `days` only), `workbookPositionSync.ts:127`, `writeReviewAction.ts` | parent Today / `/progress` | Surface-level / `canEdit` prop (`FoundationsTab`) — URL-reachable |
+| `learnerModels` | stuck re-test queue; Foundations override | `stuckRetestQueue.ts:132` (parent `TodayChecklist` only — the kid mastery chip writes `days` only), `writeReviewAction.ts` | parent Today / `/progress` | Surface-level / `canEdit` prop (`FoundationsTab`) — URL-reachable |
 | **`sightWordProgress`** | `seen` + tap interactions | `BookReaderPage.tsx:233,337` → `useSightWordProgress.ts:132,165` | Book Reader | **None** |
 | `sightWordProgress` | `confirmMastery`; add/remove (portal) | `SightWordDashboard.tsx:70,76`; `useShellyChatActions` | `/books/sight-words` (`isParent`-gated button, `BookshelfPage.tsx:348-363`; route ungated); `/chat` (URL only) | Surface-level only |
 | **`evaluations` / `evaluationSessions`** | quest session docs | `useQuestSession.ts:987,1913,2137`, `KnowledgeMinePage.tsx:294` | Mine | `canAccessKnowledgeMine` — defeated by UX-150 |
 | `evaluations` | guided eval apply (+ XP `:651`) | `EvaluateChatPage.tsx` | `/evaluate` — no kid link, **not route-guarded** | None at the route |
 | `artifacts` | photos/audio/notes | `KidCaptureForm.tsx:59`, `UnifiedCaptureCard.tsx:283-379`, `KidLabView.tsx:142,187` (**`childId` = name**, B14), `KidChapterPool.tsx:113`, `KidConundrumResponse.tsx:117,160`, `MyAvatarPage.tsx:1265`, `workshopUtils.ts:167,368,517,632`, `useWatchItemCompletion.ts:83` | everywhere | None (by design) |
 | `books`, `stickerLibrary`, `storyGames`, `kitRosters`, `businessLog`/`businessGoals`, `avatarProfiles`, `dailyArmorSessions`, `stonebridgeProgress`, `artQuota`, `chapterResponses`, `bookProgress`, `dadLabReports` (field + artifact refs, `KidLabView.tsx:109,151,196`), `transcriptionEvents`, `errorLog` | the kid's own product / progress / telemetry | see writer list in the run | nav-reachable | None (by design); `books` **delete** (`BookshelfPage.tsx:203`) has one confirm and no gate |
-| `children` (soft fields, identity), `weeks`, `activityConfigs`, `helpCards`, `lessonCards`, `settings/plannerDefaults` | parent-only writers | `useShellyChatActions`, `applyWeekPlan`, planner/Today parent paths | `/chat`, `/planner/chat`, `/settings` — none linked from a kid page; **none route-guarded** | `canEdit` in the writer (`applyWeekPlan`, `SoftProfileSection` is `isParent`-rendered) |
+| `children` (soft fields, identity), `weeks`, `activityConfigs` (the **planner/Settings** editors — the scan path above is kid-reachable), `helpCards`, `lessonCards`, `settings/plannerDefaults` | parent-only writers | `useShellyChatActions`, `applyWeekPlan`, planner/Today parent paths | `/chat`, `/planner/chat`, `/settings` — none linked from a kid page; **none route-guarded** | `canEdit` in the writer (`applyWeekPlan`, `SoftProfileSection` is `isParent`-rendered) |
 
 **Paid calls a single kid tap can spend, and what caps them:** Stickers ×4 and Book Editor ×4 and Kit
 Builder — **capped** (weekly `artQuota`, `isChildProfile`/`!canEdit`); **uncapped:** Workshop image ×5 +
@@ -465,8 +473,11 @@ Shelly image generator (URL-only). The art cap covers three of the ~nine paid do
    into the same field an evaluation writes, or the hold becomes an explicit profile flag.
 2. **P1 · UX-151 — `Show your work!` writes `skillSnapshots.conceptualBlocks` from a kid session and spends
    an uncapped LLM scan per photo.** `useUnifiedCapture.ts:365-376` (guarded only by `try/catch`), reached
-   from `KidChecklist.tsx:282-290`. `skillSnapshots` is a propose-and-confirm invariant; nothing proposed,
-   nothing confirmed, a six-year-old's photo of a worksheet can stamp a `conceptualBlock` on his record.
+   from `KidChecklist.tsx:282-290` — and the same photo, when recognised as a worksheet, also creates or
+   advances an `activityConfigs` doc, derives `skillSnapshots.workingLevels`, syncs `learnerModels` and
+   `childSkillMaps` (`:326,353` → `useScanToActivityConfig.ts:128,138,193,277`). `skillSnapshots` is a
+   propose-and-confirm invariant; nothing proposed, nothing confirmed, a six-year-old's photo of a worksheet
+   can stamp a `conceptualBlock` and a working level on his record and move his curriculum position.
 3. **P1 · UX-152 — four behavioural name-gates on London's own screens** (B2 mastery chips, B3 conundrum
    flow, B4 `childAge`, B5 story-guide questions) plus ARCH-42's B1. The rail this audit re-verifies is
    "capability, never name"; these are the sites where the name decides *what he can do*, not how it looks.
