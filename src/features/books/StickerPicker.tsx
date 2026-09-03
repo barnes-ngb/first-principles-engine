@@ -25,6 +25,8 @@ import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
 import { recordBookArtGeneration } from './useBookArtQuota'
+import { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
+import type { ArtHelpAudience } from './artHelpContent'
 
 interface StickerPickerProps {
   open: boolean
@@ -47,6 +49,13 @@ interface StickerPickerProps {
    * uncapped callers; a no-op for a parent.
    */
   recordGeneration?: () => Promise<void>
+  /**
+   * Which wording the help uses — the host's own capability answer (FEAT-178),
+   * the same one that decides `capReached`, passed in so the two agree.
+   */
+  artAudience?: ArtHelpAudience
+  /** Opens the host's "How this works" sheet for the sticker surface (UX-147). */
+  onOpenArtHelp?: () => void
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -90,6 +99,8 @@ export default function StickerPicker({
   onSelectSticker,
   capReached = false,
   recordGeneration,
+  artAudience = 'parent',
+  onOpenArtHelp,
 }: StickerPickerProps) {
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [loadingStickers, setLoadingStickers] = useState(false)
@@ -499,7 +510,14 @@ export default function StickerPicker({
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Make a Sticker</DialogTitle>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <span>Make a Sticker</span>
+            {/* The "?" this door never had (UX-147) — the page's own Make a
+                Sticker has one; this second, older implementation did not. */}
+            {onOpenArtHelp && <ArtHelpButton onClick={onOpenArtHelp} />}
+          </Stack>
+        </DialogTitle>
         <DialogContent>
           {generationPreview ? (
             <Stack spacing={2} alignItems="center" sx={{ pt: 1 }}>
@@ -558,6 +576,10 @@ export default function StickerPicker({
                 sx={{ mt: 1 }}
                 disabled={generating}
               />
+              {/* What this tap makes and what it spends (UX-147). At the cap
+                  this whole branch is replaced by ART_QUOTA_MESSAGE above, so
+                  the hint and the nudge are never both on screen. */}
+              {!generating && <GenerateHint door="makeSticker" audience={artAudience} />}
               {generating && (
                 <Stack alignItems="center" spacing={1} sx={{ mt: 2 }}>
                   <CircularProgress size={24} />

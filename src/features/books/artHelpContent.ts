@@ -104,6 +104,14 @@ export type ArtHelpDoor =
   | 'workshopRegenerate'
   /** The Hero Hub's "Transform!" — reads one photo into the character's look. */
   | 'avatarPhoto'
+  /**
+   * The review chat's "Change this" (UX-147): a voice note that rewrites one
+   * page and, when the words that describe the scene change with it, redraws
+   * that page's picture. The quietest paid door in the area — the kid says
+   * "make the dragon green" and pays for a picture — and the only CONDITIONAL
+   * one, which is why its hint ignores `count`.
+   */
+  | 'revisePagePicture'
 
 /** What the surface's quota hook currently says. `remaining` may be `Infinity`. */
 export interface ArtBudgetState {
@@ -728,6 +736,7 @@ const DOOR_SUBJECT: Record<ArtHelpDoor, string> = {
   workshopGame: 'The pictures for this game',
   workshopRegenerate: 'The missing pictures for this game',
   avatarPhoto: 'Reads one photo into your hero\'s look',
+  revisePagePicture: "Changes this page's words",
 }
 
 /**
@@ -736,6 +745,21 @@ const DOOR_SUBJECT: Record<ArtHelpDoor, string> = {
  */
 const NON_PICTURE_KID_SUBJECT: Partial<Record<ArtHelpDoor, string>> = {
   avatarPhoto: 'Reads your photo.',
+}
+
+/**
+ * Doors where the picture is a CONSEQUENCE of the tap, not the tap itself, so
+ * no count is knowable in advance and neither audience may be promised one.
+ * Their hint says "if" rather than "N", and ignores `count` entirely.
+ */
+const CONDITIONAL_DOORS: ReadonlySet<ArtHelpDoor> = new Set<ArtHelpDoor>([
+  'revisePagePicture',
+])
+
+/** The conditional wording, one per audience. Held to the same kid bar. */
+const CONDITIONAL_HINTS: Record<ArtHelpAudience, string> = {
+  kid: 'Changes the words. The picture may change too.',
+  parent: "Changes this page's words \u00b7 if the picture is redrawn too, that is 1 paid image call",
 }
 
 const STICKER_DOORS: ReadonlySet<ArtHelpDoor> = new Set<ArtHelpDoor>([
@@ -779,6 +803,10 @@ export function generateHint(
   count = 1,
   opts: { atMost?: boolean } = {},
 ): string {
+  // A door whose picture is conditional cannot honestly print a number, so it
+  // never reaches the counting path below (UX-147) — `count` and `atMost` are
+  // both meaningless there.
+  if (CONDITIONAL_DOORS.has(door)) return CONDITIONAL_HINTS[audience]
   const n = Math.max(0, Math.floor(count))
   // FEAT-184: the Workshop's adventure and card-game batches are sized by
   // what the writing step returns, so before that step the honest number is

@@ -18,7 +18,13 @@ const confirmChangeRefinementMock = vi.fn<() => Promise<void>>()
 type ChatKind = 'echo' | 'add-or-change' | 'story-draft' | 'revision'
 
 interface HookState {
-  chatHistory: Array<{ role: 'kid' | 'ai'; content: string; ts: number; kind?: ChatKind }>
+  chatHistory: Array<{
+    role: 'kid' | 'ai'
+    content: string
+    ts: number
+    kind?: ChatKind
+    spokenContent?: string
+  }>
   currentStory: null | {
     title: string
     pages: Array<{ pageNumber: number; text: string; sceneDescription: string }>
@@ -676,5 +682,90 @@ describe('BookGenerateChat', () => {
     )
     expect(screen.getByLabelText(/read page 1 aloud/i)).toBeTruthy()
     expect(screen.getByLabelText(/read page 2 aloud/i)).toBeTruthy()
+  })
+})
+
+// ── UX-109 — the honest line is never read aloud ─────────────────
+
+describe('UX-109 — the TTS queue on the first story draft', () => {
+  const HONEST_LINE =
+    'Here\u2019s your story! "The Brave Knight" \u2014 it uses London\u2019s practice words: the, and. ' +
+    '3 words may be above London\u2019s level: castle, dragon, kingdom. (level estimated from age)'
+  const SPOKEN_LINE =
+    'Here\u2019s your story! "The Brave Knight" \u2014 it uses London\u2019s practice words: the, and.'
+
+  function draftState() {
+    return {
+      ...hookState,
+      clarificationPhase: 'ready' as const,
+      currentStory: {
+        title: 'The Brave Knight',
+        pages: [
+          { pageNumber: 1, text: 'The knight rode out.', sceneDescription: 'a knight' },
+          { pageNumber: 2, text: 'He found a castle.', sceneDescription: 'a castle' },
+        ],
+      },
+      chatHistory: [
+        { role: 'kid' as const, content: 'a brave knight', ts: 1 },
+        {
+          role: 'ai' as const,
+          content: HONEST_LINE,
+          spokenContent: SPOKEN_LINE,
+          ts: 2,
+          kind: 'story-draft' as const,
+        },
+      ],
+    }
+  }
+
+  it('speaks no word of the readability clause', () => {
+    hookState = draftState()
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(ttsSpeakQueueMock).toHaveBeenCalledTimes(1)
+    const spoken: string[] = ttsSpeakQueueMock.mock.calls[0][0]
+    const everythingSaid = spoken.join(' ').toLowerCase()
+    for (const fragment of ['above', 'level', 'castle,', 'kingdom', 'estimated']) {
+      expect(everythingSaid, `spoke "${fragment}"`).not.toContain(fragment)
+    }
+    expect(spoken[0]).toBe(SPOKEN_LINE)
+  })
+
+  it('still reads the story line and every page', () => {
+    hookState = draftState()
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    const spoken: string[] = ttsSpeakQueueMock.mock.calls[0][0]
+    expect(spoken).toHaveLength(3)
+    expect(spoken[1]).toContain('The knight rode out.')
+    expect(spoken[2]).toContain('He found a castle.')
+  })
+
+  it('still shows the whole honest line on screen', () => {
+    hookState = draftState()
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(screen.getByText(new RegExp('may be above London.s level'))).toBeTruthy()
+  })
+
+  it('falls back to the rendered line for a turn persisted before this split', () => {
+    const state = draftState()
+    state.chatHistory[1] = { ...state.chatHistory[1], spokenContent: undefined }
+    hookState = state
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(ttsSpeakQueueMock.mock.calls[0][0][0]).toBe(HONEST_LINE)
   })
 })

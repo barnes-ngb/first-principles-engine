@@ -25,6 +25,7 @@ const DOORS: ArtHelpDoor[] = [
   'workshopGame',
   'workshopRegenerate',
   'avatarPhoto',
+  'revisePagePicture',
 ]
 
 // ── The readability proxy ───────────────────────────────────────

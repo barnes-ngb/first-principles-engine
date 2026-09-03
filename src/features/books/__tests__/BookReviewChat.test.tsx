@@ -174,3 +174,22 @@ describe('BookReviewChat', () => {
     expect(screen.queryByRole('button', { name: /Sounds good/ })).not.toBeInTheDocument()
   })
 })
+
+// UX-147 — the quietest paid door in the book area: the kid says "make the
+// dragon green", the page's words change, and when the scene changes with them
+// the picture is redrawn — a paid call nothing on screen mentioned.
+
+describe('UX-147 — "Change this" says what it may spend', () => {
+  it('carries a hint beside the button', () => {
+    render(<BookReviewChat />)
+    expect(screen.getByRole('button', { name: /change this/i })).toBeInTheDocument()
+    expect(screen.getByText(/if the picture is redrawn too/i)).toBeInTheDocument()
+  })
+
+  it('promises no picture — the redraw is a consequence, not the tap', () => {
+    render(<BookReviewChat />)
+    const hint = screen.getByText(/if the picture is redrawn too/i).textContent ?? ''
+    expect(hint).toMatch(/\bif\b/i)
+    expect(hint).not.toMatch(/^Makes /)
+  })
+})

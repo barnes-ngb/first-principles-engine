@@ -74,6 +74,12 @@ export default function MakeStickerDialog({
   const [generationPreview, setGenerationPreview] = useState<{ url: string; storagePath: string } | null>(null)
   const [generationError, setGenerationError] = useState(false)
   const [saving, setSaving] = useState(false)
+  /**
+   * What a failed write says (UX-93). Both writes in this flow used to fail
+   * silently — one as an unhandled rejection, one as an empty `catch` followed
+   * by a close — so a kid could watch a sticker "save" and never have it.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Post-generation tagging state
   const [pendingSticker, setPendingSticker] = useState<Sticker | null>(null)
@@ -89,6 +95,7 @@ export default function MakeStickerDialog({
     setPendingSticker(null)
     setPendingTags([])
     setPendingProfile('both')
+    setSaveError(null)
   }, [])
 
   const handleClose = useCallback(() => {
@@ -147,6 +154,7 @@ export default function MakeStickerDialog({
       childProfile: autoProfile,
     }
     setSaving(true)
+    setSaveError(null)
     try {
       const docRef = await addDoc(stickerLibraryCollection(familyId), newSticker as Sticker)
       const saved = { ...newSticker, id: docRef.id } as Sticker
@@ -156,6 +164,14 @@ export default function MakeStickerDialog({
       setPendingTags(suggestedTags)
       setPendingProfile(autoProfile)
       onSaved?.(saved)
+    } catch {
+      // The write that puts the sticker in the library failed (UX-93). This
+      // used to be `try … finally` with no `catch`: an unhandled rejection, a
+      // dialog that said nothing, and a sticker the kid believed was saved.
+      // The preview is still on screen, so "Use it" is still the way forward.
+      setSaveError(
+        "That sticker didn't reach your library \u2014 the save didn't go through. Your picture is still here. Tap \"Use it\" to try again.",
+      )
     } finally {
       setSaving(false)
     }
@@ -168,11 +184,19 @@ export default function MakeStickerDialog({
     }
     const updated: Sticker = { ...pendingSticker, tags: pendingTags, childProfile: pendingProfile }
     setSaving(true)
+    setSaveError(null)
     try {
       await setDoc(doc(stickerLibraryCollection(familyId), pendingSticker.id), updated)
       onSaved?.(updated)
     } catch {
-      // Tag save failed — the sticker is already in the library with suggested tags.
+      // The tag write failed (UX-93). This used to be `catch {}` followed by a
+      // close: the dialog vanished and the tags the kid picked were silently
+      // not there. The sticker itself IS saved — with the suggested tags — so
+      // the honest thing is to say exactly that and stay open for another tap.
+      setSaveError(
+        "Your tags didn't save \u2014 the sticker is in your library with the tags we guessed. Tap \"Done\" to try again, or close this and it stays as it is.",
+      )
+      return
     } finally {
       setSaving(false)
     }
@@ -186,9 +210,14 @@ export default function MakeStickerDialog({
   if (pendingSticker) {
     return (
       <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
-        <DialogTitle>What kind of sticker is this?</DialogTitle>
+        {/* The sticker is ALREADY in the library by the time this screen opens
+            (UX-92) — "Use This" wrote it. This step only adds tags, so it says
+            so and its button is "Done", not a second save the kid might think
+            is the one that counts. */}
+        <DialogTitle>Tag your sticker</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
+            {saveError && <Alert severity="warning">{saveError}</Alert>}
             <Box sx={{ textAlign: 'center' }}>
               <Box
                 component="img"
@@ -246,7 +275,7 @@ export default function MakeStickerDialog({
             onClick={() => { void handleConfirmTagging() }}
             disabled={saving}
           >
-            {saving ? 'Saving\u2026' : 'Use it'}
+            {saving ? 'Saving\u2026' : 'Done'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -270,6 +299,9 @@ export default function MakeStickerDialog({
                 background: CHECKERBOARD_BG,
               }}
             />
+            {/* The library write failed and said so (UX-93) — the picture is
+                still on screen, so "Use it" is still the way forward. */}
+            {saveError && <Alert severity="warning">{saveError}</Alert>}
             <Stack direction="row" spacing={1.5}>
               <Button variant="outlined" onClick={handleTryAgain} disabled={saving}>
                 Try Again

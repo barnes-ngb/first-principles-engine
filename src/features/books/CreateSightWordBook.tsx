@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -16,6 +16,7 @@ import PublishIcon from '@mui/icons-material/Publish'
 
 import Page from '../../components/Page'
 import { ErrorState } from '../../components/states'
+import { practiceWordsUsedIn, storyReadabilityClause } from './storyPracticeWords'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { Book, BookPage } from '../../core/types'
@@ -61,6 +62,8 @@ export default function CreateSightWordBook() {
   // parent target any length in the 5–15 range for this sight-word tool.
   const [pageCount, setPageCount] = useState<number>(DEFAULT_TARGET_PAGE_COUNT)
   const [preview, setPreview] = useState<GeneratedStory | null>(null)
+  /** The named failure from the last generate attempt (UX-117); `null` when none. */
+  const [genFailure, setGenFailure] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
 
   // Pre-fill words from navigation state (e.g., from Word Wall)
@@ -90,15 +93,46 @@ export default function CreateSightWordBook() {
 
   const handleGenerate = useCallback(async () => {
     if (wordList.length === 0) return
-    const result = await generateStory(
-      familyId,
-      childId,
-      wordList,
-      theme || childDefaults.defaultTheme,
-      pageCount,
-    )
-    if (result) setPreview(result)
+    // A failure here used to be an unhandled rejection: the button un-spun and
+    // the screen said nothing (UX-117). The hook now names which of the three
+    // failures happened; this shows that name.
+    setGenFailure(null)
+    try {
+      const result = await generateStory(
+        familyId,
+        childId,
+        wordList,
+        theme || childDefaults.defaultTheme,
+        pageCount,
+      )
+      setPreview(result)
+    } catch (err) {
+      setPreview(null)
+      setGenFailure(err instanceof Error ? err.message : String(err))
+    }
   }, [familyId, childId, wordList, theme, pageCount, generateStory, childDefaults.defaultTheme])
+
+  /**
+   * Which requested words the pages actually hold, and therefore which they do
+   * not (UX-119). `preview.missedWords` is whatever the model said it missed;
+   * FEAT-169 stopped trusting that claim in the chat and computes it from the
+   * text instead. Same task, so: same standard.
+   */
+  const missedWords = useMemo(() => {
+    if (!preview) return []
+    const requested = preview.allSightWordsUsed.length > 0 || wordList.length > 0
+      ? [...new Set([...wordList, ...preview.allSightWordsUsed])]
+      : []
+    const used = new Set(
+      practiceWordsUsedIn(preview.pages, requested).map((w) => w.toLowerCase()),
+    )
+    return requested.filter((w) => !used.has(w.toLowerCase()))
+  }, [preview, wordList])
+
+  const readabilityClause = useMemo(
+    () => storyReadabilityClause(activeChild?.name ?? 'this reader', preview?.readability),
+    [activeChild?.name, preview?.readability],
+  )
 
   const handleUseSample = useCallback(() => {
     setPreview(SAMPLE_STORY)
@@ -318,7 +352,16 @@ export default function CreateSightWordBook() {
         {generating ? 'Making\u2026' : 'Make the story'}
       </Button>
 
-      {genError && <ErrorState message={genError.message} />}
+      {/* The named failure (UX-117) takes precedence: it says which of the
+          three shapes happened and what to tap next. `genError` is `useAI`'s
+          own transport error and still shows when there is nothing better. */}
+      {genFailure ? (
+        <Alert severity="warning" sx={{ mt: 2 }}>
+          {genFailure}
+        </Alert>
+      ) : (
+        genError && <ErrorState message={genError.message} />
+      )}
 
       {/* Preview */}
       {preview && (
@@ -327,9 +370,23 @@ export default function CreateSightWordBook() {
             Preview: {preview.title}
           </Typography>
 
-          {preview.missedWords.length > 0 && (
+          {/* The honest line (UX-117): the server measured this story against
+              the child's level here exactly as it does in the chat, and this
+              screen used to drop the answer on the floor. It reports on the
+              STORY, never on the child, and the story is still perfectly
+              usable — it just doesn't pretend. */}
+          {readabilityClause && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {readabilityClause}
+            </Alert>
+          )}
+
+          {/* Checked against the page text, not the model's own claim (UX-119)
+              — the chat computes it this way for the same reason: the list the
+              model returned was not to be trusted. */}
+          {missedWords.length > 0 && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              Missed words: {preview.missedWords.join(', ')}
+              Missed words: {missedWords.join(', ')}
             </Alert>
           )}
 

@@ -31,6 +31,7 @@ vi.mock('../useBookGenerator', () => ({
     progress: null,
     generating: false,
     resetProgress: vi.fn(),
+    lastError: () => null,
   }),
   inferBookTheme: () => 'storybook',
 }))

@@ -39,7 +39,8 @@ export default function ComprehensionQuestions({
   isLincoln,
 }: Props) {
   const [revealedAnswers, setRevealedAnswers] = useState<Set<number>>(new Set())
-  const [answeredCount, setAnsweredCount] = useState(0)
+  /** How many answers have been REVEALED — never how many were answered (UX-135). */
+  const [revealedCount, setRevealedCount] = useState(0)
 
   const toggleAnswer = (index: number) => {
     setRevealedAnswers((prev) => {
@@ -49,7 +50,7 @@ export default function ComprehensionQuestions({
       } else {
         next.add(index)
         if (!prev.has(index)) {
-          setAnsweredCount((c) => c + 1)
+          setRevealedCount((c) => c + 1)
         }
       }
       return next
@@ -95,7 +96,7 @@ export default function ComprehensionQuestions({
     )
   }
 
-  const allAnswered = answeredCount >= questions.length
+  const allRevealed = revealedCount >= questions.length
 
   return (
     <Stack spacing={2} sx={{ py: 1, width: '100%', maxWidth: 500 }}>
@@ -179,11 +180,16 @@ export default function ComprehensionQuestions({
         </Box>
       ))}
 
-      {allAnswered && (
+      {/* This screen counts REVEALS, not answers (UX-135): `toggleAnswer` is
+          the only thing that moves the counter, so "Great job!" fired for a
+          child who read every answer and said nothing. There is no way from
+          here to know whether he answered — this is a talk-it-over surface,
+          not a quiz — so it says what it actually knows. */}
+      {allRevealed && (
         <Stack direction="row" alignItems="center" spacing={1} justifyContent="center">
           <CheckCircleIcon sx={{ color: 'success.main' }} />
           <Typography variant="body2" color="success.main" fontWeight={600}>
-            {isLincoln ? 'Quest complete!' : 'Great job!'}
+            You looked at all the answers
           </Typography>
         </Stack>
       )}
