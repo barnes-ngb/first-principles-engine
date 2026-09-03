@@ -9,11 +9,12 @@ import type { UseArtQuotaResult } from '../business/useArtQuota'
  * that spends paid image calls: the page-illustration generator, the reimagine
  * flow, the in-editor sticker picker, and the illustrate-the-whole-book loop.
  * It is a thin wrapper over the FEAT-94 `useArtQuota`, deliberately **not** a
- * second allowance — the same per-child, per-day doc
- * (`artQuota/{childId}-{YYYY-MM-DD}`) the Kit Builder and the Stickers page
- * write, so a kid's daily number stays the honest total of what they spent on
- * art that day across every surface (owner decision, 2026-08-29). The cap
- * default stays `DEFAULT_DAILY_ART_QUOTA`.
+ * second allowance — the same per-child, per-week doc
+ * (`artQuota/{childId}-wk-{weekStart}`) the Kit Builder and the Stickers page
+ * write, so a kid's number stays the honest total of what they spent on
+ * art that week across every surface (owner decision, 2026-08-29; the window
+ * went daily → weekly in FEAT-175). The cap default stays
+ * `DEFAULT_WEEKLY_ART_QUOTA`.
  *
  * **Capability, never name.** A capped actor is one acting as a kid profile
  * (`isChildProfile`). A parent is uncapped, never subscribes to the doc, and
@@ -36,7 +37,7 @@ export function useBookArtQuota(): UseArtQuotaResult {
 }
 
 /**
- * Count one paid generation against the day's counter (FEAT-168).
+ * Count one paid generation against the week's counter (FEAT-168).
  *
  * Deliberately **the same function** the four sticker doors call, re-exported
  * here under a surface-neutral name so a reader of the Book Editor isn't told

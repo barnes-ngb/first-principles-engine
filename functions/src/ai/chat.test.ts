@@ -655,9 +655,15 @@ describe("buildStoryPrompt", () => {
     expect(p).toContain("VOCABULARY:");
   });
 
-  it("references WORD MASTERY and SKILL SNAPSHOT sections above", () => {
+  it("no longer points the story writer at WORD MASTERY (FEAT-176 finding 1)", () => {
+    // That slice prints STRUGGLING WORDS + "SUGGESTION: Generate or assign a
+    // sight word story targeting these struggling words" — planner guidance that
+    // reached a story writer as an instruction to use the hardest words. It is
+    // no longer attached to the three story tasks, so the prompt no longer sends
+    // the model to look for it.
     const p = buildStoryPrompt(londonInput);
-    expect(p).toMatch(/WORD MASTERY and \(if present\) SKILL SNAPSHOT sections above/);
+    expect(p).not.toMatch(/WORD MASTERY/);
+    expect(p).toMatch(/SKILL SNAPSHOT section above \(if present\)/);
   });
 
   it("includes a PAGE BEATS block", () => {
@@ -748,7 +754,7 @@ describe("buildStoryPrompt", () => {
       readingLevelAssessed: true,
     });
     expect(p).toContain(
-      "- Reading level (ASSESSED — Lincoln's working level from the Skill Snapshot; keep the decoding demands of the text at or below it, and use WORD MASTERY above for the specific words): decoding at phonics Level 5 of 8",
+      "- Reading level (ASSESSED — Lincoln's working level from the Skill Snapshot; keep the decoding demands of the text at or below it): decoding at phonics Level 5 of 8",
     );
     expect(p).not.toContain("estimated from age");
     expect(p).not.toContain("1st grade");
@@ -757,15 +763,15 @@ describe("buildStoryPrompt", () => {
   it("labels the age-derived fallback as a guess when no assessed level was passed (FEAT-173)", () => {
     const p = buildStoryPrompt(lincolnInput);
     expect(p).toContain(
-      "- Reading level (no assessed level on file yet — estimated from age; a soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): 1st grade",
+      "- Reading level (no assessed level on file yet — estimated from age; a soft hint, defer to SKILL SNAPSHOT): 1st grade",
     );
     expect(p).not.toContain("ASSESSED");
-    expect(buildStoryPrompt(londonInput)).toContain("estimated from age; a soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): pre-K to kindergarten");
+    expect(buildStoryPrompt(londonInput)).toContain("estimated from age; a soft hint, defer to SKILL SNAPSHOT): pre-K to kindergarten");
   });
 
   it("treats a readingLevel string without the assessed flag as the soft hint it always was", () => {
     const p = buildStoryPrompt({ ...lincolnInput, readingLevel: "2nd grade" });
-    expect(p).toContain("estimated from age; a soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): 2nd grade");
+    expect(p).toContain("estimated from age; a soft hint, defer to SKILL SNAPSHOT): 2nd grade");
     expect(p).not.toContain("ASSESSED");
   });
 });

@@ -184,9 +184,9 @@ Since FEAT-58 the model strings live in one table — `functions/src/ai/models.t
 | `generate` | charter, childProfile |
 | `evaluate` | charter, childProfile, sightWords, wordMastery |
 | `quest` | charter, childProfile, sightWords, recentHistoryByDomain, wordMastery, skillSnapshot, workbookPaces, recentScans |
-| `generateStory` | charter, childProfile, sightWords, wordMastery, skillSnapshot |
-| `reviseStory` | charter, childProfile, sightWords, wordMastery, skillSnapshot |
-| `revisePage` | charter, childProfile, sightWords, wordMastery, skillSnapshot |
+| `generateStory` | charter, childProfile, sightWords, skillSnapshot _(FEAT-176: `wordMastery` removed — see below)_ |
+| `reviseStory` | charter, childProfile, sightWords, skillSnapshot _(FEAT-176)_ |
+| `revisePage` | charter, childProfile, sightWords, skillSnapshot _(FEAT-176)_ |
 | `workshop` | charter, childProfile, workshopGames |
 | `analyzeWorkbook` | charter, childProfile |
 | `analyzePatterns` | childProfile |
@@ -259,14 +259,19 @@ Since FEAT-58 the model strings live in one table — `functions/src/ai/models.t
 ### `generateStory` (tasks/generateStory.ts)
 
 **System prompt assembly:**
-1. Context slices for "generateStory": childProfile, sightWords, wordMastery, skillSnapshot
+1. Context slices for "generateStory": childProfile, sightWords, skillSnapshot (**FEAT-176 dropped `wordMastery`** — see the READING LEVEL bullet)
 2. `buildStoryPrompt(input)` — sight word story generator (V2)
 
-**Input:** storyIdea, words[], pageCount, childName, childAge, childInterests, readingLevel, readingLevelAssessed
+**Input:** storyIdea, words[], pageCount, childName, childAge, childInterests, readingLevel, readingLevelAssessed, readingLevelBlock (server-injected, FEAT-176)
 
 **Key behaviors (V2):**
-- **Per-child calibration:** vocabulary level driven by WORD MASTERY + SKILL SNAPSHOT context slices (loaded per-request), not by a binary age switch. Content stakes (emotional weight, conflict complexity) calibrated separately by `childAge`. No "CVC words" instruction for older children — Lincoln (10) gets age-appropriate prose even when his decoding lags.
+- **Per-child calibration:** vocabulary level driven by the READING LEVEL block (FEAT-176; formerly the WORD MASTERY + SKILL SNAPSHOT context slices), not by a binary age switch. Content stakes (emotional weight, conflict complexity) calibrated separately by `childAge`. No "CVC words" instruction for older children — Lincoln (10) gets age-appropriate prose even when his decoding lags.
 - **The reading level is read, not guessed (FEAT-173):** `readingLevel` comes from `storyReadingLevel.resolveStoryReadingLevel` over the child's assessed `skillSnapshots/{childId}.workingLevels` (`phonics` = decoding, 1–8, with its band; `comprehension`, 1–6, when present), which the `chat` dispatcher already loads into `ctx.snapshotData`. With an assessed level the RULES line reads *"Reading level (ASSESSED — {child}'s working level from the Skill Snapshot; keep the decoding demands of the text at or below it …)"*; the old age-derived string (`≤7` → "pre-K to kindergarten", else "1st grade") is the **fallback only**, and the line then says so (*"no assessed level on file yet — estimated from age; a soft hint"*). The CF log line carries `readingLevel=assessed|age`.
+- **The story is CHECKED against that level, fixed once, and reported honestly (FEAT-176).** FEAT-173 made the level real but left it abstract — one RULES line, and nothing measured the result; the owner reported books London (6) still could not read. Three things changed:
+  1. **The prompt got concrete.** `buildReadingLevelBlock` (`chat.ts`) replaces the single RULES line with a block carried by all three story prompts: the **allowed patterns** for the level (cumulative, with example words), an explicit **BANNED** list naming the bands above it (*"No silent-e words (make, bike). No vowel teams (boat, rain). No two-syllable words."* — a negative list is what a model actually obeys), a **SAFE WORDS** allowlist (the Dolch pre-primer + primer core plus the child's own sight words, `storyLevelContext.ts`), a **sentence shape by level** (`sentenceTargetFor` — L1-2 → 1-2 sentences of 3-6 words … L7-8 → 2-4 of 8-14; `sentenceTargetForAge` is now the fallback only), a **character-names** rule (a name is a word: at Level 2, Sam/Max/Pip, not Marco/Ember/Coral), a worked **example page** at the level, and stated **precedence** over THEME GUIDANCE's `VOCABULARY STYLE`, over the sight-word slice's planner framing, and over WRITING QUALITY's "contractions are fine" (no contractions at Level ≤4).
+  2. **`wordMastery` is no longer attached to the three story tasks.** That slice prints `STRUGGLING WORDS: …` plus *"SUGGESTION: Generate or assign a sight word story targeting these struggling words"* — planner guidance that reached a story writer as an instruction to use the child's hardest words, and it was the only concrete word list anywhere in the story prompt. The block's allowlist replaces it.
+  3. **The draft is measured.** `storyDecodability.checkStoryReadability` classifies every token orthographically (`minPhonicsLevelForWord`, cumulative bands matching `PHONICS_LEVEL_BANDS`; digraphs and blends both unlock at 3, which closes FEAT-173's open ladder-order question by construction) against a tolerance that scales with level (L1-4: ≤1 hard word/page and ≤5% of tokens; L5-6: ≤2 / ≤10%; L7-8: ≤3 / ≤15%). A failure buys **exactly one** focused revise call (`buildStoryReadabilityFixPrompt` — the story, the failing words, the same level block, nothing else); whichever version has fewer hard words is returned, and the response carries `readability { phonicsLevel, levelSource, passed, hardWords, revised }` so the client's draft turn can say plainly *"— 2 words may be above London's level: castle, ready."* **Never a loop:** one fix, then honesty. When no level is on file the check falls back to Level 2 (age ≤7) / Level 4, marked `levelSource: "age"`, and the client's line says it is an estimate and where to set the real one.
+  The CF log line carries `readabilityLevel=N readability=pass|fail hard=N revised=yes|no`, and both calls are billed to `aiUsage`.
 - **A word list the parent typed wins (FEAT-172/173, client):** the `words[]` this task receives from the Generate Chat is the parent's typed list when the story idea carries one (`storyPracticeWords.parseRequestedWords`), else the active child's practice list, else `[]`. The prompt block is unchanged — it renders whatever list arrives.
 - **Sight-word integration is a soft rule:** "weave 3-5 naturally; leave words out if they don't fit." Not "MUST use every word" — forced injection produced awkward sentences. `missedWords` in the output captures words intentionally skipped.
 - **PAGE BEATS templates:** explicit per-page story arc emitted by exported `buildPageBeats(pageCount)` helper. 6-beat arc for ≤6 pages, 10-beat arc for 7-10 pages, proportional expansion beyond. Gives the model a story-shape scaffold instead of free-form pacing.

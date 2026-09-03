@@ -30,7 +30,7 @@ vi.mock('../../../core/ai/useAI', () => ({
 
 import DrawingGroupCard from '../DrawingGroupCard'
 
-const CAP_MESSAGE = /that's a lot of art today/i
+const CAP_MESSAGE = /that's a lot of art this week/i
 
 function sticker(over: Partial<Sticker> & { id: string }): Sticker {
   return {
@@ -55,7 +55,7 @@ async function openPicker(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: /add version/i }))
 }
 
-describe('DrawingGroupCard — daily art cap (FEAT-165 / UX-95)', () => {
+describe('DrawingGroupCard — weekly art cap (FEAT-165 / UX-95)', () => {
   beforeEach(() => {
     enhanceSketchMock.mockReset()
     enhanceSketchMock.mockResolvedValue({ url: 'https://x.test/v.png', storagePath: 'p/v.png' })

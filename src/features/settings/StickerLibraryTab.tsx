@@ -26,6 +26,8 @@ import type { Sticker, StickerTag } from '../../core/types'
 import { canPromoteSticker } from '../business/catalogOnramps'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { recordStickerArtGeneration } from '../books/useStickerArtQuota'
+import type { ArtHelpAudience } from '../books/artHelpContent'
+import { GenerateHint } from '../books/ArtHelpSheet'
 import { StickerCatalogButton, StickerCatalogPromoteDialog } from './StickerCatalogPromote'
 import { groupStickers } from '../books/stickerGrouping'
 import DrawingGroupCard from '../books/DrawingGroupCard'
@@ -96,8 +98,8 @@ interface StickerLibraryTabProps {
    */
   canEdit?: boolean
   /**
-   * The actor has spent today's art budget (FEAT-165). "Make more versions" is
-   * a paid `enhanceSketch` call, so a kid gets the Kit Builder's light daily
+   * The actor has spent this week's art budget (FEAT-165). "Make more versions" is
+   * a paid `enhanceSketch` call, so a kid gets the Kit Builder's light weekly
    * cap: the theme picker shows a warm nudge instead of "Make it", here and in
    * every drawing card below. Defaults to uncapped, so the parent-only Settings
    * tab is unchanged — this is a **capability** answer the caller computes
@@ -106,6 +108,13 @@ interface StickerLibraryTabProps {
   capReached?: boolean
   /** Count one paid generation against the day's counter (FEAT-165). */
   recordGeneration?: () => Promise<void>
+  /**
+   * Whose words the one-line hints under the paid version doors are written in
+   * (FEAT-178). Resolved by the host from `useActiveChild().isChildProfile` —
+   * capability, never a name. Defaults to the parent wording, which is what the
+   * uncapped Settings admin render wants.
+   */
+  audience?: ArtHelpAudience
 }
 
 export default function StickerLibraryTab({
@@ -118,6 +127,7 @@ export default function StickerLibraryTab({
   canEdit = false,
   capReached = false,
   recordGeneration,
+  audience = 'parent',
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
   const { enhanceSketch } = useAI()
@@ -317,7 +327,7 @@ export default function StickerLibraryTab({
         enhanceSketch,
       })
       if (!res.ok) {
-        // No usable image came back — nothing to charge the daily budget for.
+        // No usable image came back — nothing to charge the weekly budget for.
         setMakeError(res.error)
         return
       }
@@ -455,6 +465,7 @@ export default function StickerLibraryTab({
               // reads the same answer rather than asking its own.
               capReached={capReached}
               recordGeneration={recordGeneration}
+              audience={audience}
             />
           ))}
         </Stack>
@@ -911,7 +922,7 @@ export default function StickerLibraryTab({
         <DialogContent>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
             {capReached ? (
-              /* Daily cap reached (FEAT-165): the Kit Builder's warm nudge, not
+              /* Weekly cap reached (FEAT-165): the Kit Builder's warm nudge, not
                  an error and not a lock — no style picker, no "Make it". */
               <Typography variant="body2" color="text.secondary">
                 {ART_QUOTA_MESSAGE}
@@ -934,6 +945,10 @@ export default function StickerLibraryTab({
                     />
                   ))}
                 </Box>
+                {/* One tap, one picture (FEAT-178). At the cap this whole branch
+                    is the nudge instead, so the hint and ART_QUOTA_MESSAGE are
+                    never both on screen. */}
+                <GenerateHint door="makeVersions" audience={audience} />
               </>
             )}
             {makeError && (

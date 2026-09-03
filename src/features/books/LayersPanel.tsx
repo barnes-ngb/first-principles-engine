@@ -139,6 +139,8 @@ export default function LayersPanel({
                     component="img"
                     src={img.url}
                     alt={img.label ?? TYPE_LABEL[img.type]}
+                    // A 40px layer chip, not the page: cover-fit always, even
+                    // for a background the parent set to `fit` (FEAT-177).
                     sx={{
                       width: 40,
                       height: 40,

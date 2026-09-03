@@ -10,10 +10,11 @@ import type { UseArtQuotaResult } from '../business/useArtQuota'
  * Drawing flow (FEAT-166) — asks this **once, here**, and the page hands the
  * answer down to the four doors. It is a thin wrapper over the
  * existing FEAT-94 `useArtQuota`, deliberately **not** a second allowance: the
- * counter is the same per-child, per-day doc the Kit Builder writes
- * (`artQuota/{childId}-{YYYY-MM-DD}`), so a kid's daily number is the honest
- * total of what they spent on art that day across both surfaces (owner
- * decision, 2026-08-29). The cap default stays `DEFAULT_DAILY_ART_QUOTA`.
+ * counter is the same per-child, per-week doc the Kit Builder writes
+ * (`artQuota/{childId}-wk-{weekStart}`), so a kid's number is the honest
+ * total of what they spent on art that week across both surfaces (owner
+ * decision, 2026-08-29; the window went daily → weekly in FEAT-175). The cap
+ * default stays `DEFAULT_WEEKLY_ART_QUOTA`.
  *
  * **Capability, never name.** A capped actor is one acting as a kid profile
  * (`isChildProfile`) — the same class of check as Kit Builder's `capped =
@@ -41,7 +42,7 @@ export function useStickerArtQuota(): UseArtQuotaResult {
 }
 
 /**
- * Count one paid generation against the day's counter, without ever letting the
+ * Count one paid generation against the week's counter, without ever letting the
  * counting break the art (FEAT-165).
  *
  * The four sticker doors call this instead of awaiting `recordGeneration`

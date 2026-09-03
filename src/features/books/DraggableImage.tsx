@@ -18,6 +18,8 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import OpenWithIcon from '@mui/icons-material/OpenWith'
 import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import type { PageImage } from '../../core/types'
+import { hasFitBackdrop, resolveImageFit } from './imageFit'
+import ImageFitBackdrop from './ImageFitBackdrop'
 import { clampPosition, scaleAboutCenter, rotationFromDrag, DEFAULT_IMAGE_GEOMETRY } from './draggableImageUtils'
 import type { ImagePosition } from './draggableImageUtils'
 export type { ImagePosition } from './draggableImageUtils'
@@ -380,16 +382,28 @@ export default function DraggableImage({
         ...style,
       }}
     >
+      {/* FEAT-177 — a fitted background leaves space inside the box this
+          component owns; fill it with a blurred, enlarged copy of the same
+          picture. Never a sticker (they are cut-outs meant to float). The
+          wrapper carries the rotation/flip, so the copy inherits them. */}
+      {hasFitBackdrop(image) && (
+        <ImageFitBackdrop
+          url={image.url}
+          sx={{ position: 'absolute', inset: 0, borderRadius: 1, zIndex: 0 }}
+        />
+      )}
       <Box
         component="img"
         src={image.url}
         alt={image.label ?? ''}
         draggable={false}
         sx={{
+          position: 'relative',
           width: '100%',
           height: '100%',
-          objectFit: image.type === 'sticker' ? 'contain' : 'cover',
+          objectFit: resolveImageFit(image),
           pointerEvents: 'none',
+          zIndex: 1,
           ...(image.type === 'sticker' ? { mixBlendMode: 'multiply' } : {}),
         }}
       />

@@ -63,6 +63,7 @@ import type { ImageGenRequest } from '../../core/ai/useAI'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import PageEditor from './PageEditor'
 import { recordBookArtGeneration, useBookArtQuota } from './useBookArtQuota'
+import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
 import StickerPicker from './StickerPicker'
 import DrawingChoiceDialog from './DrawingChoiceDialog'
 import type { DrawingChoice, PostCleanupChoice } from './DrawingChoiceDialog'
@@ -134,7 +135,7 @@ export default function BookEditorPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild, children } = useActiveChild()
+  const { activeChild, children, isChildProfile } = useActiveChild()
   const { profile } = useProfile()
   const isParentProfile = profile === UserProfile.Parents
   const muiTheme = useTheme()
@@ -169,10 +170,23 @@ export default function BookEditorPage() {
   // paid image call asks the budget question exactly once, here, and the answer
   // is handed to the three doors below — the AI scene generator, the reimagine
   // flow, and the sticker picker. Same counter as the Stickers page and the Kit
-  // Builder — one honest daily total per child — and capped by capability (a
+  // Builder — one honest weekly total per child — and capped by capability (a
   // kid profile), never by name. The illustrate-the-whole-book loop asks for
   // itself in `useBookIllustrator`, which this page does not use.
-  const { atLimit: artCapReached, recordGeneration } = useBookArtQuota()
+  const {
+    atLimit: artCapReached,
+    limit: artLimit,
+    remaining: artRemaining,
+    recordGeneration,
+  } = useBookArtQuota()
+
+  // Help copy is audience-gated on capability (FEAT-178): a kid profile reads
+  // the kid wording, everyone else the fuller parent wording. Never a name — the
+  // editor's `isLincoln` below is cosmetic (palette, font, chips) and is not
+  // this answer.
+  const artAudience = isChildProfile ? 'kid' : 'parent'
+  const artBudget = { limit: artLimit, remaining: artRemaining, capped: isChildProfile }
+  const [showArtHelp, setShowArtHelp] = useState(false)
 
   // ── Themed child (drives editor palette / font / world chips) ───
   // Reads from book.createdFor so Shelly can re-theme the editor without
@@ -1383,6 +1397,9 @@ export default function BookEditorPage() {
             }}
           >
             {page.images[0] ? (
+              // A 72px page chip, not the page — always cover-fit, whatever
+              // `PageImage.fit` says (FEAT-177). A contain-fitted chip would be
+              // mostly letterbox at this size.
               <Box
                 component="img"
                 src={page.images[0].url}
@@ -1731,7 +1748,13 @@ export default function BookEditorPage() {
 
       {/* AI Scene generation dialog */}
       <Dialog open={showAiDialog} onClose={() => { setShowAiDialog(false); setReplacingBackgroundIds([]) }} maxWidth="sm" fullWidth>
-        <DialogTitle>Make a Scene</DialogTitle>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box component="span" sx={{ flex: 1 }}>Make a Scene</Box>
+          {/* One "?" for every paid picture in the editor (FEAT-178) — the
+              scene generator, reimagine, the sticker picker and the
+              show-the-whole-picture control all live on the same sheet. */}
+          <ArtHelpButton onClick={() => setShowArtHelp(true)} />
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             {/* World type quick-pick chips */}
@@ -1785,6 +1808,13 @@ export default function BookEditorPage() {
                 ))}
               </Stack>
             </Box>
+
+            {/* What this tap makes and what it spends (FEAT-178). Sits directly
+                above the "Create!" action; at the cap the nudge below replaces
+                it, so the two are never on screen together. */}
+            {!aiLoading && !aiResult && !artCapReached && (
+              <GenerateHint door="bookScene" audience={artAudience} />
+            )}
 
             {aiLoading && (
               <Stack alignItems="center" spacing={1}>
@@ -1862,7 +1892,7 @@ export default function BookEditorPage() {
               </Alert>
             )}
 
-            {/* Daily cap reached (FEAT-168): a warm nudge in place of the Create
+            {/* Weekly cap reached (FEAT-168): a warm nudge in place of the Create
                 button — the same copy and posture as the Stickers page's caps.
                 Everything free in the editor keeps working: writing, editing,
                 page layout, saving, reading and printing. */}
@@ -1919,6 +1949,14 @@ export default function BookEditorPage() {
         </DialogActions>
       </Dialog>
 
+      <ArtHelpSheet
+        surface="bookImages"
+        open={showArtHelp}
+        onClose={() => setShowArtHelp(false)}
+        audience={artAudience}
+        budget={artBudget}
+      />
+
       {/* Sticker picker */}
       <StickerPicker
         open={showStickerPicker}
@@ -1957,6 +1995,7 @@ export default function BookEditorPage() {
                         flexShrink: 0,
                       }}
                     >
+                      {/* Cover-candidate chip — cover-fit regardless of `PageImage.fit` (FEAT-177). */}
                       <Box component="img" src={url} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     </Box>
                   ))}

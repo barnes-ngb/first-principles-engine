@@ -19,6 +19,8 @@ import Typography from '@mui/material/Typography'
 import type { KitArtRef, KitDefender, KitInvader, KitRoster } from '../../core/types/business'
 import { KitRosterStatus } from '../../core/types/business'
 import { ART_QUOTA_MESSAGE } from './useArtQuota'
+import type { ArtBudgetState, ArtHelpAudience } from '../books/artHelpContent'
+import ArtHelpSheet, { ArtHelpButton, GenerateHint } from '../books/ArtHelpSheet'
 import { defenderArtKey, heroDescriptor, HERO_ART_KEY, invaderArtKey } from './kitArt'
 import type { NewKitRoster } from './useKitRosters'
 
@@ -209,25 +211,35 @@ export interface KitBuilderFormProps {
    * tap — never auto-generated. Falsy ⇒ no generate buttons render (a brand-new
    * unsaved roster has no persisted target, so the caller passes false until the
    * first save). Since FEAT-94 this is NOT a parent gate — kids generate too;
-   * kid generation is metered by the caller via a light daily quota.
+   * kid generation is metered by the caller via a light weekly quota.
    */
   canGenerateArt?: boolean
   /** Generate + persist one character's sticker. Required for the art buttons. */
   onGenerateArt?: GenerateKitArt
   /**
-   * The generator has hit today's light daily cap (FEAT-94). When true, the
+   * The generator has hit this week's light weekly cap (FEAT-94). When true, the
    * generate buttons are swapped for a friendly, non-shaming nudge (charter: no
    * error styling, no shame) rather than blocked outright with an error. Only
    * ever true for a capped kid profile; a parent is uncapped.
    */
   capReached?: boolean
   /**
-   * How many paid generations the actor may still make today (FEAT-94). The
+   * How many paid generations the actor may still make this week (FEAT-94). The
    * batch loop is bounded by this so a roster with more ungenerated characters
-   * than remaining quota can't exceed the daily cap in a single tap. `Infinity`
+   * than remaining quota can't exceed the weekly cap in a single tap. `Infinity`
    * for an uncapped parent (the default).
    */
   remainingArt?: number
+  /**
+   * Whose words the art help reads in (FEAT-178). Resolved by the caller from
+   * the same capability answer that decides `capReached` — never a name.
+   */
+  audience?: ArtHelpAudience
+  /**
+   * The caller's live art budget, printed on the help sheet (FEAT-178). This
+   * form reads no counter of its own; `KitBuilderSection` already asks once.
+   */
+  artBudget?: ArtBudgetState
 }
 
 /**
@@ -253,7 +265,10 @@ export default function KitBuilderForm({
   onGenerateArt,
   capReached = false,
   remainingArt = Infinity,
+  audience = 'parent',
+  artBudget = { limit: 0, remaining: Infinity, capped: false },
 }: KitBuilderFormProps) {
+  const [showArtHelp, setShowArtHelp] = useState(false)
   const [draft, setDraft] = useState<RosterDraft>(() => draftFromRoster(roster))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -269,7 +284,7 @@ export default function KitBuilderForm({
   // Generation is a paid, persisted-roster affordance offered to parents AND
   // kids (FEAT-94); thumbnails are shown to everyone with art.
   const canGenerate = canGenerateArt && Boolean(onGenerateArt)
-  // The generate buttons only render when generation is possible AND today's cap
+  // The generate buttons only render when generation is possible AND this week's cap
   // isn't reached; hitting the cap shows a friendly nudge instead (FEAT-94).
   const canGenerateNow = canGenerate && !capReached
   const showControl = (characterKey: string) => canGenerateNow || Boolean(art[characterKey]?.url)
@@ -322,7 +337,7 @@ export default function KitBuilderForm({
 
   /**
    * Sequentially generate every remaining character (confirmed count first),
-   * but never more than the actor's remaining daily allowance (FEAT-94). The
+   * but never more than the actor's remaining weekly allowance (FEAT-94). The
    * quota's snapshot count lags a synchronous loop, so we bound by the allowance
    * captured at batch start rather than re-reading it mid-loop — a big roster
    * with few slots left can't blow past the cap in one tap.
@@ -332,7 +347,7 @@ export default function KitBuilderForm({
     let budget = remainingArt
     for (const c of draftCharacters()) {
       if (art[c.key]?.url) continue
-      if (budget <= 0) break // out of daily allowance — stop before another paid call
+      if (budget <= 0) break // out of weekly allowance — stop before another paid call
       // One paid call at a time — sequential so per-row state stays honest.
       const ok = await generateOne(c.key, { name: c.name, descriptor: c.descriptor })
       if (!ok) break // stop the batch on the first failure; nothing already made is lost
@@ -341,7 +356,7 @@ export default function KitBuilderForm({
   }
 
   const remainingCount = draftCharacters().filter((c) => !art[c.key]?.url).length
-  // What the batch will actually make: never more than the daily allowance
+  // What the batch will actually make: never more than the weekly allowance
   // (equals remainingCount for an uncapped parent) — FEAT-94.
   const batchCount = Math.min(remainingCount, remainingArt)
 
@@ -598,6 +613,18 @@ export default function KitBuilderForm({
         <MenuItem value={KitRosterStatus.Complete}>Ready</MenuItem>
       </TextField>
 
+      {/* One "?" for the form's art (FEAT-178). Outside the batch branch so it
+          is still there at the cap and on a roster with nothing left to make —
+          the cap is exactly when the budget needs explaining. */}
+      {canGenerate && (
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <Typography variant="caption" color="text.secondary">
+            Making stickers
+          </Typography>
+          <ArtHelpButton onClick={() => setShowArtHelp(true)} />
+        </Stack>
+      )}
+
       {canGenerateNow && batchCount > 0 && (
         <Box>
           <Button
@@ -608,13 +635,15 @@ export default function KitBuilderForm({
           >
             Make stickers for the rest ({batchCount})
           </Button>
-          <Typography variant="caption" color="text.secondary" display="block">
-            Each sticker is a real image — we'll ask before making them.
-          </Typography>
+          {/* The count is live: this batch spends one picture per character it
+              makes, and a hint that said "1" would be the dishonesty FEAT-178
+              exists to fix. Replaced by ART_QUOTA_MESSAGE at the cap, since the
+              whole block is gated on `canGenerateNow`. */}
+          <GenerateHint door="kitArtBatch" audience={audience} count={batchCount} />
         </Box>
       )}
 
-      {/* Daily cap reached (FEAT-94): a warm nudge, never an error. Only shows to
+      {/* Weekly cap reached (FEAT-94): a warm nudge, never an error. Only shows to
           someone who could otherwise generate (a capped kid), so a read-only
           viewer sees nothing extra. */}
       {canGenerate && capReached && (
@@ -637,6 +666,14 @@ export default function KitBuilderForm({
           Cancel
         </Button>
       </Stack>
+
+      <ArtHelpSheet
+        surface="kitArt"
+        open={showArtHelp}
+        onClose={() => setShowArtHelp(false)}
+        audience={audience}
+        budget={artBudget}
+      />
 
       {/* Count-confirm before any batch generation — never auto-generate (FEAT-88). */}
       <Dialog open={confirmBatch} onClose={() => setConfirmBatch(false)}>

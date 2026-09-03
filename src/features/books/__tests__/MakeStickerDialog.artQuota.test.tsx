@@ -23,9 +23,9 @@ vi.mock('firebase/firestore', () => ({
 
 import MakeStickerDialog from '../MakeStickerDialog'
 
-const CAP_MESSAGE = /that's a lot of art today/i
+const CAP_MESSAGE = /that's a lot of art this week/i
 
-describe('MakeStickerDialog — daily art cap (FEAT-165 / UX-95)', () => {
+describe('MakeStickerDialog — weekly art cap (FEAT-165 / UX-95)', () => {
   beforeEach(() => {
     generateImageMock.mockReset()
     generateImageMock.mockResolvedValue({ url: 'https://x.test/a.png', storagePath: 'p/a.png' })

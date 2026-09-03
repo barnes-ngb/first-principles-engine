@@ -22,6 +22,8 @@ import { db, stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker } from '../../core/types'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import type { ArtHelpAudience } from './artHelpContent'
+import { GenerateHint } from './ArtHelpSheet'
 import { recordStickerArtGeneration } from './useStickerArtQuota'
 import {
   FANCY_STYLE_OPTIONS,
@@ -59,15 +61,22 @@ interface DrawingGroupCardProps {
    */
   allVersions?: Sticker[]
   /**
-   * The actor has spent today's art budget (FEAT-165). "Add version" is this
+   * The actor has spent this week's art budget (FEAT-165). "Add version" is this
    * card's whole invitation and each tap is a paid `enhanceSketch` call, so a
-   * kid gets the Kit Builder's light daily cap here: the theme picker swaps
+   * kid gets the Kit Builder's light weekly cap here: the theme picker swaps
    * "Make it" for a warm nudge. Defaults to uncapped so the parent-only
    * Settings render is unchanged.
    */
   capReached?: boolean
   /** Count one paid generation against the day's counter (FEAT-165). */
   recordGeneration?: () => Promise<void>
+  /**
+   * Whose words the one-line hint under "Make it" is written in (FEAT-178).
+   * Resolved by the host from `useActiveChild().isChildProfile` — capability,
+   * never a name. Defaults to the parent wording for the uncapped Settings
+   * render.
+   */
+  audience?: ArtHelpAudience
 }
 
 /** Friendly label for a version chip — "Original", or the theme's emoji + name. */
@@ -94,6 +103,7 @@ export default function DrawingGroupCard({
   allVersions,
   capReached = false,
   recordGeneration,
+  audience = 'parent',
 }: DrawingGroupCardProps) {
   const { enhanceSketch } = useAI()
   const [picking, setPicking] = useState(false)
@@ -139,7 +149,7 @@ export default function DrawingGroupCard({
       })
       if (!res.ok) {
         // The model produced nothing usable — no image, so no charge to the
-        // kid's daily budget.
+        // kid's weekly budget.
         setError(res.error)
         return
       }
@@ -429,7 +439,7 @@ export default function DrawingGroupCard({
         <DialogContent>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
             {capReached ? (
-              /* Daily cap reached (FEAT-165): the same warm nudge the Kit
+              /* Weekly cap reached (FEAT-165): the same warm nudge the Kit
                  Builder shows — no style picker, no error styling, no lock. */
               <Typography variant="body2" color="text.secondary">
                 {ART_QUOTA_MESSAGE}
@@ -451,6 +461,9 @@ export default function DrawingGroupCard({
                     />
                   ))}
                 </Box>
+                {/* One tap, one picture (FEAT-178). Replaced by the cap nudge
+                    above, never shown beside it. */}
+                <GenerateHint door="addVersion" audience={audience} />
               </>
             )}
             {error && (

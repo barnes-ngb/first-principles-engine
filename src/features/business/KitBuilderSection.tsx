@@ -44,7 +44,7 @@ interface KitBuilderSectionProps {
    * (mutates a catalog product). Everything the kid does with their OWN kit —
    * build/edit the roster, generate/regenerate character art (the owner's
    * explicit ask), view art full-size, download art, print the kit — is open to
-   * kids regardless of `canEdit`. Kid generation is metered by a light daily
+   * kids regardless of `canEdit`. Kid generation is metered by a light weekly
    * quota (see `useArtQuota`), never blocked outright.
    */
   canEdit: boolean
@@ -64,11 +64,11 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
 
   // Cost guard (FEAT-94): image generation is a paid call, so a KID profile
-  // (`!canEdit`) gets a light, non-shaming daily cap. A parent (`canEdit`) is
+  // (`!canEdit`) gets a light, non-shaming weekly cap. A parent (`canEdit`) is
   // uncapped and never touches the counter. `capped === !canEdit` because the
   // only non-parent profiles are the kids.
   const capped = !canEdit
-  const { atLimit, remaining, recordGeneration } = useArtQuota(activeChildId, { capped })
+  const { atLimit, limit, remaining, recordGeneration } = useArtQuota(activeChildId, { capped })
 
   const nameById = useMemo(() => {
     const m: Record<string, string> = {}
@@ -115,7 +115,7 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
         generatedAt: new Date().toISOString(),
       }
       await setRosterArt(rosterId, characterKey, ref)
-      // Count this paid generation against the kid's daily cap (no-op for a
+      // Count this paid generation against the kid's weekly cap (no-op for a
       // parent). Regenerate counts too — each is a real image call (FEAT-94).
       await recordGeneration()
       return ref
@@ -204,14 +204,18 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
         // Art generation needs a persisted target, so it's offered only on a
         // saved roster in edit mode (FEAT-88). It is NOT parent-gated (FEAT-94):
         // making art on your own kit is kid effort, not money or public
-        // exposure — kids generate/regenerate freely, metered by a light daily
+        // exposure — kids generate/regenerate freely, metered by a light weekly
         // quota rather than blocked.
         canGenerateArt={Boolean(editing)}
         onGenerateArt={editing ? makeGenerateArt(editing.id) : undefined}
-        // The kid hit today's light generation cap — the form swaps the generate
+        // The kid hit this week's light generation cap — the form swaps the generate
         // buttons for a friendly nudge instead of a hard error (FEAT-94).
         capReached={atLimit}
-        // How many paid generations the actor may still make today. The form
+        // Help copy is gated on the SAME capability answer as the cap (FEAT-178)
+        // — `capped === !canEdit`, never a name.
+        audience={capped ? 'kid' : 'parent'}
+        artBudget={{ limit, remaining, capped }}
+        // How many paid generations the actor may still make this week. The form
         // bounds the batch loop by this so a big roster can't blow past the cap
         // in one tap (Infinity for an uncapped parent) — FEAT-94.
         remainingArt={remaining}

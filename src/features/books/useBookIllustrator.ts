@@ -33,7 +33,7 @@ export interface IllustrationProgress {
   /** 1-based page numbers that errored. */
   failedPages: number[]
   /**
-   * The day's art budget refused this book, or ran out part-way through it
+   * The week's art budget refused this book, or ran out part-way through it
    * (FEAT-168). Never an error — the caller shows `ART_QUOTA_MESSAGE`.
    */
   capReached: boolean
@@ -101,7 +101,7 @@ type IllustrationStyleKey =
  * Illustrate a book — one paid image call **per page**, the highest-volume paid
  * path in the app, and the reason FEAT-168 exists.
  *
- * The daily art budget (FEAT-94's `artQuota`) is asked **here**, not by the
+ * The weekly art budget (FEAT-94's `artQuota`) is asked **here**, not by the
  * three callers, on purpose. `illustrate` is not a button: it is reached from
  * `useBookGenerator` (Story Guide / Bookshelf generation), from
  * `useBookGenerateChat.commitAndClose` and from `useBookReview`'s per-page
@@ -138,7 +138,7 @@ export function useBookIllustrator() {
 
       // ── Reserve the whole book before spending any of it (FEAT-168) ──
       //
-      // A batch is not a one-tap door. If the day's budget cannot cover every
+      // A batch is not a one-tap door. If the week's budget cannot cover every
       // page this book will actually illustrate, refuse the *whole* generation
       // now and spend nothing: a book that stops half-illustrated at page 7 of
       // 14 is a worse outcome than one that never started — the kid has paid
