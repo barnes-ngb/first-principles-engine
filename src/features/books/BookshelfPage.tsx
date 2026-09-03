@@ -392,7 +392,7 @@ export default function BookshelfPage() {
             variant={creatorFilter === 'all' ? 'filled' : 'outlined'}
           />
           <Chip
-            label={`Mom's Books (${books.filter((b) => (b.createdBy ?? 'parent') === 'parent').length})`}
+            label={`Parents' books (${books.filter((b) => (b.createdBy ?? 'parent') === 'parent').length})`}
             size="small"
             onClick={() => setCreatorFilter('parent')}
             color={creatorFilter === 'parent' ? 'primary' : 'default'}
@@ -568,8 +568,12 @@ export default function BookshelfPage() {
             const coverUrl =
               book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
             const by = book.createdBy ?? 'parent'
+            // `createdBy: 'parent'` is Mom OR Dad (see `Book.createdBy`), and a
+            // legacy book with no `createdBy` resolves to it too — so the chip
+            // says "a parent", the same phrase the Watch Library settled on
+            // (UX-02), never a name the data model does not hold (UX-103).
             const creatorLabel = by === 'parent'
-              ? 'By Mom'
+              ? 'By a parent'
               : `By ${allChildren.find((c) => c.id === by)?.name ?? 'Kid'}`
             const isInProgressDraft = book.reviewState?.generateChatState === 'in-progress'
             // Per-Page Review started but not finished (or skipped) yet.
