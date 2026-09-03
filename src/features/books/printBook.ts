@@ -637,6 +637,109 @@ async function drawCover(
   }
 }
 
+/* ───────────────────── sight-words page layout (FEAT-185, Codex P2 on PR #1744) ───────────────────── */
+
+/** Chip geometry at one scale step, all in mm except `fontSize` (pt). */
+export interface SightWordChipScale {
+  fontSize: number
+  chipH: number
+  chipPadX: number
+  chipGap: number
+}
+
+/**
+ * The scale steps the sight-words page may take, largest first. The first is
+ * the page's historical size; the page steps down only when the list would
+ * not fit the content height it is given.
+ */
+export const SIGHT_WORD_CHIP_SCALES: readonly SightWordChipScale[] = [
+  { fontSize: 12, chipH: 8, chipPadX: 4, chipGap: 3 },
+  { fontSize: 10, chipH: 7, chipPadX: 3, chipGap: 2.5 },
+  { fontSize: 8, chipH: 6, chipPadX: 2.5, chipGap: 2 },
+]
+
+/** Chips start this far below the top of the content area (the title sits above). */
+const SIGHT_WORDS_CHIPS_TOP_MM = 35
+/** The footer baseline sits this far below the bottom of the last chip row. */
+const SIGHT_WORDS_FOOTER_GAP_MM = 15
+
+export interface SightWordChipLayout extends SightWordChipScale {
+  /** Chip rows in reading order; each entry is `[word, chipWidthMm]`. */
+  rows: Array<Array<[word: string, chipW: number]>>
+  /** Words that did not fit even at the smallest scale — named in the footer. */
+  omitted: string[]
+  /** Y offset (from the top of the content area) of the footer baseline. */
+  footerY: number
+}
+
+/**
+ * Bound the sight-words page to the content area it is drawn into. Before
+ * FEAT-185 `drawSightWordsPage` added 11 mm rows without ever reading
+ * `area.h`, which was survivable on an 8.5 in half and is not on the
+ * trimmed 7 in booklet page — the lower rows and the footer would land below
+ * the cut line and be thrown away. This picks the largest scale at which
+ * every chip row plus the footer fits; if none does, it keeps the rows that
+ * fit at the smallest scale and reports the rest as `omitted` so the footer
+ * can say so instead of silently losing them. Pure: `measure` is the only
+ * thing that knows a font.
+ */
+export function layoutSightWordChips(
+  words: readonly string[],
+  measure: (word: string, fontSize: number) => number,
+  areaW: number,
+  areaH: number,
+): SightWordChipLayout {
+  const wrap = (scale: SightWordChipScale) => {
+    const rows: Array<Array<[string, number]>> = []
+    let row: Array<[string, number]> = []
+    let curX = 0
+    for (const word of words) {
+      const chipW = measure(word, scale.fontSize) + scale.chipPadX * 2
+      if (row.length > 0 && curX + chipW > areaW) {
+        rows.push(row)
+        row = []
+        curX = 0
+      }
+      row.push([word, chipW])
+      curX += chipW + scale.chipGap
+    }
+    if (row.length > 0) rows.push(row)
+    return rows
+  }
+  const footerYFor = (scale: SightWordChipScale, rowCount: number) =>
+    SIGHT_WORDS_CHIPS_TOP_MM +
+    Math.max(0, rowCount - 1) * (scale.chipH + scale.chipGap) +
+    scale.chipH +
+    SIGHT_WORDS_FOOTER_GAP_MM
+
+  for (const scale of SIGHT_WORD_CHIP_SCALES) {
+    const rows = wrap(scale)
+    const footerY = footerYFor(scale, rows.length)
+    if (footerY <= areaH) {
+      return { ...scale, rows, omitted: [], footerY }
+    }
+  }
+
+  // Nothing fits whole: keep the rows that do at the smallest scale.
+  const scale = SIGHT_WORD_CHIP_SCALES[SIGHT_WORD_CHIP_SCALES.length - 1]
+  const rows = wrap(scale)
+  const rowPitch = scale.chipH + scale.chipGap
+  const maxRows = Math.max(
+    1,
+    Math.floor((areaH - SIGHT_WORDS_CHIPS_TOP_MM - scale.chipH - SIGHT_WORDS_FOOTER_GAP_MM) / rowPitch) + 1,
+  )
+  const kept = rows.slice(0, maxRows)
+  const omitted = rows.slice(maxRows).flat().map(([word]) => word)
+  return { ...scale, rows: kept, omitted, footerY: footerYFor(scale, kept.length) }
+}
+
+/** The footer line under the chips — names how many words did not fit, if any. */
+export function sightWordsFooterText(omittedCount: number): string {
+  return omittedCount > 0
+    ? `Look for these words as you read! (and ${omittedCount} more)`
+    : 'Look for these words as you read!'
+}
+
 function drawSightWordsPage(
   pdf: jsPDF,
   sightWords: string[],
@@ -658,39 +761,39 @@ function drawSightWordsPage(
   const title = isLincoln ? 'Words to Mine' : 'Words to Watch For'
   pdf.text(title, centerX, area.y + 20, { align: 'center' })
 
-  // Word chips as rounded rectangles with text
-  const chipH = 8
-  const chipPadX = 4
-  const chipGap = 3
-  const startY = area.y + 35
-  let curX = area.x
-  let curY = startY
-
-  pdf.setFontSize(12)
+  // Word chips as rounded rectangles with text, bounded to the area's height.
   pdf.setFont('times', 'bold')
-
-  for (const word of sightWords) {
-    const textW = pdf.getTextWidth(word)
-    const chipW = textW + chipPadX * 2
-    // Wrap to next line if chip overflows
-    if (curX + chipW > area.x + area.w) {
-      curX = area.x
-      curY += chipH + chipGap
+  const layout = layoutSightWordChips(
+    sightWords,
+    (word, fontSize) => {
+      pdf.setFontSize(fontSize)
+      return pdf.getTextWidth(word)
+    },
+    area.w,
+    area.h,
+  )
+  const { chipH, chipPadX, chipGap } = layout
+  pdf.setFontSize(layout.fontSize)
+  let curY = area.y + SIGHT_WORDS_CHIPS_TOP_MM
+  for (const row of layout.rows) {
+    let curX = area.x
+    for (const [word, chipW] of row) {
+      // Draw chip background
+      pdf.setFillColor(...chipBgColor)
+      pdf.roundedRect(curX, curY, chipW, chipH, 2, 2, 'F')
+      // Draw word text centered in chip
+      pdf.setTextColor(...chipTextColor)
+      pdf.text(word, curX + chipPadX, curY + chipH * 0.7)
+      curX += chipW + chipGap
     }
-    // Draw chip background
-    pdf.setFillColor(...chipBgColor)
-    pdf.roundedRect(curX, curY, chipW, chipH, 2, 2, 'F')
-    // Draw word text centered in chip
-    pdf.setTextColor(...chipTextColor)
-    pdf.text(word, curX + chipPadX, curY + chipH * 0.7)
-    curX += chipW + chipGap
+    curY += chipH + chipGap
   }
 
   // Footer hint
   pdf.setFont('times', 'italic')
   pdf.setFontSize(10)
   pdf.setTextColor(...pageTextColor)
-  pdf.text('Look for these words as you read!', centerX, curY + chipH + 15, { align: 'center' })
+  pdf.text(sightWordsFooterText(layout.omitted.length), centerX, area.y + layout.footerY, { align: 'center' })
 }
 
 async function drawContentPage(
