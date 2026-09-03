@@ -195,6 +195,27 @@ The age-based fallback (when no skill snapshot data exists) stays, but with the 
 
 > **Status (FEAT-173, 2026-09-02).** The "skill snapshot reading level" row above is now wired. `generateStory` had kept a binary age guess as the prompt's reading level (`isYoungReader ? "pre-K to kindergarten" : "1st grade"`) even though the `skillSnapshot` slice already printed the child's working levels — so Lincoln got "1st grade" by luck of the age split, not by anything the app knows about him. `functions/src/ai/storyReadingLevel.ts` (pure) reads `ctx.snapshotData.workingLevels` — `phonics` (decoding, 1–8) with its band and `comprehension` (1–6) when present — into the RULES line, marked **ASSESSED** ("keep the decoding demands of the text at or below it"); the age guess is the fallback only, and the line then says it is estimated from age. No new level vocabulary: "Level N" is the Knowledge Mine / Skill Snapshot wording, and the band descriptors are the meaning the repo's two phonics ladders (`buildQuestPrompt`'s READING SKILL PROGRESSION and `PHONICS_SKILL_LEVEL_MAP`) agree on — they disagree on the order of digraphs/blends (3 vs 4) and on rungs 7–8, which is filed for home-base rather than decided here. Sentence length and content stakes still follow age, as this section intends.
 
+> **Status (FEAT-176, 2026-09-03) — the level is now ENFORCED, and sentence length follows it.** FEAT-173
+> made the level real but left it **abstract**: one RULES line, and nothing measured the result. The owner
+> reported books London (6) still could not read — *"regardless the words are too advanced."* Three
+> findings, all confirmed against `main` before building: (1) the only concrete word list in the story
+> prompt was `wordMastery`'s `STRUGGLING WORDS` **plus** *"SUGGESTION: Generate or assign a sight word
+> story targeting these struggling words"* — planner guidance reaching a story writer as an instruction to
+> use the hardest words; (2) sentence length came from `sentenceTargetForAge`, so Lincoln at 10 was asked
+> for 8-14-word sentences while decoding around Level 2-3; (3) THEME GUIDANCE's `VOCABULARY STYLE`
+> ("medium complexity with descriptive fantasy words") sat in the same prompt as the level line with
+> nothing saying which won, and WRITING QUALITY said contractions were fine. Now: `buildReadingLevelBlock`
+> replaces the RULES line with allowed patterns, an explicit **BANNED** list, a **SAFE WORDS** allowlist,
+> a **character-names** rule, a worked example page and stated precedence (no contractions at Level ≤4);
+> `sentenceTargetFor` takes the **assessed level** and falls back to age only; `wordMastery` is no longer
+> attached to the three story tasks; and the drafted story is **measured** (`storyDecodability.ts`),
+> given **exactly one** focused fix call on a failure, and reported to the client via a `readability`
+> field the draft turn renders as *"— 2 words may be above London's level: castle, ready."* One fix, then
+> honesty. **This section's "sentence length follows age" line is superseded** — content *stakes* still
+> follow age, deliberately, so a 10-year-old decoding low still gets real stakes in words he can read.
+> FEAT-173's open ladder-order question (digraphs vs blends at 3/4) is **closed by construction**: the
+> classifier unlocks both at 3, so no stored level can be misread.
+
 ### 4.2 Sight word integration — drop the "MUST use every word" rule
 
 Today:

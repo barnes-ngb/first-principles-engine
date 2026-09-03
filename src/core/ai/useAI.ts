@@ -59,6 +59,21 @@ export interface ChatResponse {
    * that don't, and from an older deploy; treat it as "unknown", never success.
    */
   stopReason?: string
+  /**
+   * How readable the returned story actually is for this child (FEAT-176) —
+   * `generateStory` only. The server measures the drafted story against the
+   * child's assessed phonics level, makes at most one fix attempt, and reports
+   * what is still above the level so the draft turn can say so plainly.
+   * `undefined` from every other task and from an older deploy; treat it as
+   * "not measured", never as "fine".
+   */
+  readability?: {
+    phonicsLevel: number
+    levelSource: 'assessed' | 'age'
+    passed: boolean
+    hardWords: Array<{ page: number; word: string }>
+    revised: boolean
+  }
 }
 
 // ── Generate types (mirrored from functions/src/ai/generate.ts) ──

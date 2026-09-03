@@ -7,6 +7,7 @@ import { STONEBRIDGE_BIBLE } from "./stonebridgeBible.js";
 import { ensureWorkbookActivityConfigsForChild } from "./workbookActivityConfigBackfill.js";
 import { MATH_CONCEPT_BANDS_TEXT } from "./levelDefinitions.js";
 import { ALLOWED_OVERRIDE_MODELS, resolveModelForTask } from "./models.js";
+import { DECODABILITY_LEVEL_CAP } from "./storyDecodability.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -80,6 +81,17 @@ interface ChatResponse {
   usage: { inputTokens: number; outputTokens: number };
   /** Model stop reason, when the task handler reports it (FEAT-169). */
   stopReason?: string;
+  /**
+   * How readable the returned story is for this child (FEAT-176) —
+   * `generateStory` only. `undefined` means "not measured", never "fine".
+   */
+  readability?: {
+    phonicsLevel: number;
+    levelSource: "assessed" | "age";
+    passed: boolean;
+    hardWords: Array<{ page: number; word: string }>;
+    revised: boolean;
+  };
 }
 
 // ── Model mapping ───────────────────────────────────────────────
@@ -1952,6 +1964,13 @@ export interface StoryGenInput {
    * presents it as the level to calibrate decoding to, not as a soft hint.
    */
   readingLevelAssessed?: boolean;
+  /**
+   * The concrete READING LEVEL block (FEAT-176). **Server-injected only** — the
+   * handler composes it from the child's assessed level and their sight words;
+   * it is never read off a client payload. When absent, the prompt falls back to
+   * FEAT-173's one-line rule, so an older caller is unchanged.
+   */
+  readingLevelBlock?: ReadingLevelBlockInput;
   /** Theme-engine guidance (injected from BookThemeConfig) */
   themeGuidance?: {
     storyTone?: string;
@@ -2024,10 +2043,13 @@ export function buildPageBeats(pageCount: number): string {
 }
 
 /**
- * Sentence target by age — calibrated to read-aloud cadence, not to the
- * child's decoding ceiling (the AI handles that from WORD MASTERY context).
- * Shared between buildStoryPrompt and buildReviseStoryPrompt so both stay in
- * sync.
+ * Sentence target by age — the pre-FEAT-176 rule, kept as the FALLBACK only,
+ * for a child with no assessed decoding level on file. Calibrated to read-aloud
+ * cadence, not to the child's decoding ceiling.
+ *
+ * On its own this was finding (2) of FEAT-176: Lincoln at 10 was asked for
+ * "2-4 sentences (8-14 words each)" while decoding at around Level 2-3, because
+ * the only input was his birthdate.
  */
 export function sentenceTargetForAge(age: number): string {
   return age <= 7
@@ -2036,8 +2058,268 @@ export function sentenceTargetForAge(age: number): string {
 }
 
 /**
+ * Sentence shape by assessed phonics level, age only as the fallback (FEAT-176,
+ * owner decision 2026-09-03). Monotone non-decreasing; the Level 1-2 row is
+ * deliberately shorter than the old age<=7 row, because a reader sounding out
+ * CVC words runs out of working memory before they run out of the sentence.
+ */
+export const SENTENCE_TARGET_BY_LEVEL: ReadonlyArray<{ maxLevel: number; target: string }> = [
+  { maxLevel: 2, target: "1-2 sentences (3-6 words each)" },
+  { maxLevel: 4, target: "2-3 sentences (4-8 words each)" },
+  { maxLevel: 6, target: "2-3 sentences (6-10 words each)" },
+  { maxLevel: 8, target: "2-4 sentences (8-14 words each)" },
+];
+
+/**
+ * The sentence shape for this story. `phonicsLevel` is the child's ASSESSED
+ * decoding level when there is one; pass `null`/`undefined` when there is not
+ * and the age row applies unchanged.
+ */
+export function sentenceTargetFor(input: {
+  phonicsLevel?: number | null;
+  age: number;
+}): string {
+  const { phonicsLevel, age } = input;
+  if (typeof phonicsLevel === "number" && Number.isFinite(phonicsLevel) && phonicsLevel >= 1) {
+    const level = Math.min(DECODABILITY_LEVEL_CAP, Math.max(1, Math.round(phonicsLevel)));
+    const row = SENTENCE_TARGET_BY_LEVEL.find((r) => level <= r.maxLevel);
+    if (row) return row.target;
+  }
+  return sentenceTargetForAge(age);
+}
+
+// ── READING LEVEL block (FEAT-176) ──────────────────────────────
+
+/**
+ * What each rung of the ladder unlocks, with words that show it. Cumulative:
+ * a reader at Level N has every row up to N. Merged at 3/4 and 7/8 exactly as
+ * `storyDecodability.minPhonicsLevelForWord` classifies, so the prompt and the
+ * check can never disagree about what "Level 3" permits (this is also what
+ * closes FEAT-173's open ladder-order question — see that module's header).
+ */
+export const DECODABLE_PATTERN_ROWS: ReadonlyArray<{
+  level: number;
+  label: string;
+  examples: string;
+  /** How the BANNED list names this row when it is ABOVE the story's level. */
+  banned: string;
+}> = [
+  {
+    level: 1,
+    label: "single letter sounds and short vowels",
+    examples: "a, m, s, t, i, p",
+    banned: "",
+  },
+  {
+    level: 2,
+    label: "CVC / VC / CV words with one short vowel",
+    examples: "cat, sun, hop, big, up, go",
+    banned: "No words longer than a single short-vowel syllable.",
+  },
+  {
+    level: 3,
+    label: "consonant digraphs (sh ch th wh ck) and blends (bl st tr nd mp), still one short-vowel syllable",
+    examples: "ship, chin, that, stop, hand, black",
+    banned: "No consonant digraphs (ship, chin, that) and no blends (stop, hand, black).",
+  },
+  {
+    level: 4,
+    label: "the same digraphs and blends, read fluently in longer one-syllable words",
+    examples: "stand, crunch, splash, shrimp",
+    banned: "No longer blend clusters (stand, crunch, splash).",
+  },
+  {
+    level: 5,
+    label: "silent-e / long vowels (a_e i_e o_e u_e)",
+    examples: "make, bike, home, cute, five, rope",
+    banned: "No silent-e words (make, bike, home, cute).",
+  },
+  {
+    level: 6,
+    label: "vowel teams (ea ai oa ee oo ay)",
+    examples: "boat, rain, seed, play, moon, read",
+    banned: "No vowel teams (boat, rain, seed, play, moon).",
+  },
+  {
+    level: 7,
+    label: "r-controlled vowels (ar or er ir ur), diphthongs (oi oy ou ow) and two-syllable words",
+    examples: "farm, corn, coin, cloud, rabbit, basket",
+    banned:
+      "No r-controlled vowels or diphthongs (farm, corn, coin, cloud). No two-syllable words (rabbit, basket) — every word is one syllable.",
+  },
+  {
+    level: 8,
+    label: "prefixes and suffixes, and longer multi-syllable words",
+    examples: "unkind, replay, jumping, helpful, wonderful",
+    banned: "No prefixes or suffixes (unkind, replay, jumping, helpful).",
+  },
+];
+
+/** Names at each level, for the CHARACTER NAMES rule. A name is a word too. */
+const NAME_EXAMPLES: Readonly<Record<number, string>> = {
+  1: "Sam, Pip, Dot",
+  2: "Sam, Max, Pip, Dot, Ben, Tug",
+  3: "Sam, Chip, Josh, Trish, Brad",
+  4: "Chip, Trish, Brad, Scout",
+  5: "Jake, Rose, Pete, Duke",
+  6: "Jean, Joan, Neil, Dean",
+  7: "Marco, Carter, Hazel, Turner",
+  8: "Ember, Coral, Wanderly, Everest",
+};
+
+export interface ReadingLevelBlockInput {
+  childName: string;
+  /** The level the story is written for AND checked against (1-8). */
+  level: number;
+  /** `assessed` when it came from `workingLevels.phonics`; `age` for the estimate. */
+  levelSource: "assessed" | "age";
+  /** FEAT-173's descriptive line, printed verbatim when there is one. */
+  levelText?: string;
+  /** The SAFE WORDS list, already composed and capped by the caller. */
+  safeWords: readonly string[];
+  /** The sentence shape for this level (from `sentenceTargetFor`). */
+  sentenceTarget: string;
+}
+
+/**
+ * The concrete READING LEVEL block (FEAT-176) — the replacement for FEAT-173's
+ * single abstract RULES line ("keep the decoding demands of the text at or
+ * below it"), which nothing measured and the model did not obey.
+ *
+ * Four things make it concrete, in the order that matters to a model:
+ *  1. **A negative list.** The patterns of the bands ABOVE this level, named
+ *     with example words. A model follows "no silent-e words (make, bike)" far
+ *     more reliably than "keep decoding demands at or below Level 2".
+ *  2. **An allowlist.** SAFE WORDS — the child's own sight words plus the
+ *     high-frequency core. Before this, the ONLY concrete word list anywhere in
+ *     the story prompt was WORD MASTERY's `STRUGGLING WORDS`, followed by a
+ *     suggestion to target them: a slice written for the planner that reaches a
+ *     story writer as an instruction to use the hardest words (finding 1).
+ *  3. **Stated precedence.** THEME GUIDANCE's `VOCABULARY STYLE` ("medium
+ *     complexity with descriptive fantasy words") sat in the same prompt with
+ *     nothing saying which won (finding 3), and WRITING QUALITY says
+ *     contractions are fine — *can't* is not decodable at Level 2.
+ *  4. **A worked page** at the level. Register is shown, not described.
+ *
+ * Shared by all three story prompts so generate and revise cannot drift.
+ */
+export function buildReadingLevelBlock(input: ReadingLevelBlockInput): string {
+  const { childName, levelSource, levelText, safeWords, sentenceTarget } = input;
+  const level = Math.min(DECODABILITY_LEVEL_CAP, Math.max(1, Math.round(input.level)));
+
+  const allowed = DECODABLE_PATTERN_ROWS.filter((r) => r.level <= level)
+    .map((r) => `- Level ${r.level}: ${r.label} — ${r.examples}`)
+    .join("\n");
+  const banned = DECODABLE_PATTERN_ROWS.filter((r) => r.level > level && r.banned)
+    .map((r) => `- ${r.banned}`)
+    .join("\n");
+
+  const provenance =
+    levelSource === "assessed"
+      ? `ASSESSED — ${childName}'s working level from the Skill Snapshot`
+      : `ESTIMATED from age — no assessed reading level is on file for ${childName} yet, so this is a deliberately careful floor`;
+  const detail = levelText ? `\n${levelText}` : "";
+
+  const safeWordLine =
+    safeWords.length > 0
+      ? `SAFE WORDS — use these freely; they need NOT follow the patterns above, because ${childName} already knows them by sight:\n${safeWords.join(", ")}`
+      : `SAFE WORDS: none on file for ${childName} yet — stay inside the allowed patterns.`;
+
+  const contractionRule =
+    level <= 4
+      ? `- NO CONTRACTIONS at this level. Write "cannot", not "can't"; "it is", not "it's". This overrides "Contractions are fine" in WRITING QUALITY.`
+      : `- Contractions are allowed at this level.`;
+
+  return `READING LEVEL — ${childName} decodes at phonics Level ${level} of ${DECODABILITY_LEVEL_CAP} (${provenance}).${detail}
+
+THIS BLOCK OUTRANKS EVERY OTHER VOCABULARY INSTRUCTION IN THIS PROMPT. A book ${childName} cannot read is not a book for ${childName}, however good the story is.
+
+ALLOWED WORD PATTERNS (cumulative — everything at or below Level ${level}):
+${allowed}
+
+BANNED at Level ${level} — do not use any of these:
+${banned || "- Nothing above this level; this is the top of the ladder."}
+
+${safeWordLine}
+
+SENTENCE SHAPE: each page is ${sentenceTarget}.
+
+CHARACTER NAMES follow the same patterns — a name is a word the reader has to decode. At Level ${level}, names like ${NAME_EXAMPLES[level] ?? NAME_EXAMPLES[8]} work${level <= 4 ? "; names like Marco, Ember and Coral do not." : "."}
+
+PRECEDENCE — when anything else in this prompt conflicts with this block, this block wins:
+- It outranks THEME GUIDANCE's VOCABULARY STYLE. A fantasy theme does not license "medium complexity with descriptive fantasy words" at Level ${level}; write the fantasy with Level ${level} words.
+- It outranks every other word list in this prompt. SIGHT WORD PROGRESS's "words needing work" is an instruction to the lesson planner, not to you — do NOT reach for the words ${childName} struggles with. A lesson is where a reader is stretched; a story is where a reader succeeds.
+${contractionRule}
+
+ONE PAGE AT THIS LEVEL, as a model of the register (do not copy it into the story):
+"${exampleStoryPageForLevel(level)}"`;
+}
+
+export interface StoryReadabilityFixInput {
+  childName: string;
+  /** The story exactly as the model returned it, re-serialized. */
+  storyJson: string;
+  /** Page number → the hard words found on it, in page order. */
+  hardWordsByPage: ReadonlyArray<{ page: number; words: readonly string[] }>;
+  readingLevelBlock: ReadingLevelBlockInput;
+  /** How many pages the fix must return — the same number it was given. */
+  pageCount: number;
+}
+
+/**
+ * The ONE fix attempt (FEAT-176 Part 3). Deliberately narrow: it is handed the
+ * story it must not rewrite, the exact words that failed, and the same READING
+ * LEVEL block the generation had — and nothing else. No family context, no
+ * theme, no beats: every one of those is a reason to drift, and drift here
+ * costs the parent the story they already have.
+ *
+ * There is exactly one of these per generation. If the fix does not come back
+ * better, the original story is returned and the client says so plainly — one
+ * fix, then honesty, never a loop.
+ */
+export function buildStoryReadabilityFixPrompt(input: StoryReadabilityFixInput): string {
+  const { childName, storyJson, hardWordsByPage, readingLevelBlock, pageCount } = input;
+  const hardList = hardWordsByPage
+    .map((p) => `- Page ${p.page}: ${p.words.join(", ")}`)
+    .join("\n");
+
+  return `You are fixing the vocabulary of a children's story so ${childName} can actually read it. The story itself is good. Only the word choices are too hard.
+
+${buildReadingLevelBlock(readingLevelBlock)}
+
+WORDS THAT ARE TOO HARD, by page:
+${hardList}
+
+THE STORY TO FIX (return this same JSON shape):
+${storyJson}
+
+WHAT TO CHANGE:
+- Replace ONLY the words listed above, and rewrite a sentence only where swapping the word alone would leave it clumsy.
+- Every replacement must follow the ALLOWED WORD PATTERNS, or be one of the SAFE WORDS.
+- If a listed word is a character's name, rename that character EVERYWHERE in the story, consistently.
+
+WHAT MUST NOT CHANGE:
+- The title.
+- The page count — exactly ${pageCount} pages, in the same order, telling the same story.
+- Each page's sceneDescription (unless a renamed character appears in it).
+- The JSON shape, field names, and any wordsOnPage / allWordsUsed / missedWords fields — update their contents to match the new text, but keep the fields.
+
+OUTPUT: Respond ONLY with the complete fixed story as valid JSON, no markdown fences, no preamble.`;
+}
+
+/** A real page at each level — register shown, not described. */
+export function exampleStoryPageForLevel(level: number): string {
+  if (level <= 2) return "Sam has a red hat. The hat is big. Sam can hop.";
+  if (level <= 4) return "Sam ran up the big hill. His dog Chip did not stop. The wind was fast.";
+  if (level <= 6) return "Jake made a boat from an old crate. He set it on the lake at sunrise.";
+  return "Marco raced across the park with his dog, hunting for the carved wooden marker his grandfather had hidden.";
+}
+
+/**
  * Content stakes guidance by age — separate from vocabulary calibration.
- * Vocabulary follows WORD MASTERY / SKILL SNAPSHOT; stakes follow age.
+ * Vocabulary follows the READING LEVEL block (FEAT-176); stakes follow age. The
+ * split is the point: a 10-year-old decoding at Level 2 gets real stakes in
+ * words he can read, not a toddler story.
  */
 export function contentStakesForAge(age: number): string {
   return age <= 7
@@ -2058,7 +2340,7 @@ export const WRITING_QUALITY_BLOCK = `WRITING QUALITY:
 /** Shared COPYRIGHT block — used by both generate and revise prompts. */
 export const COPYRIGHT_BLOCK = `COPYRIGHT — IMPORTANT:
 - Never use copyrighted character names (Mario, Luigi, Peach, Bowser, Link, Zelda, Pikachu, Elsa, Spider-Man, Batman, Sonic, etc.) or franchise/brand names (Nintendo, Disney, Marvel, Minecraft, Pokemon, Fortnite, etc.).
-- If the child's idea references a copyrighted character, create an original character inspired by the same archetype. For example: "Princess Peach" → "Princess Coral" (a kind, brave princess in a pink dress), "Mario" → "Marco" (a fearless explorer in red overalls with a big mustache).
+- If the child's idea references a copyrighted character, create an original character inspired by the same archetype. For example: "Princess Peach" → "Princess Coral" (a kind, brave princess in a pink dress), "Mario" → "Marco" (a fearless explorer in red overalls with a big mustache). Those two example names are for an older reader — if a READING LEVEL block is present, the replacement name must follow ITS patterns (at Level 2, "Princess Peach" → "Pip", not "Coral").
 - The story should capture the spirit of what the child imagined with original characters that belong to THEM.`;
 
 export function buildStoryPrompt(input: StoryGenInput): string {
@@ -2071,6 +2353,7 @@ export function buildStoryPrompt(input: StoryGenInput): string {
     childInterests,
     readingLevel,
     readingLevelAssessed,
+    readingLevelBlock,
     themeGuidance,
   } = input;
   const hasWords = words.length > 0;
@@ -2084,18 +2367,26 @@ export function buildStoryPrompt(input: StoryGenInput): string {
       ? "animals, drawing, fairy tales"
       : "Minecraft, adventures, quests");
 
-  // Reading level. When the caller read it off the child's assessed working
-  // levels (FEAT-173), it is the level to calibrate decoding to; otherwise it
-  // is an age-derived guess and only a soft hint — the AI then calibrates
-  // vocabulary from the WORD MASTERY + SKILL SNAPSHOT sections of the system
-  // prompt (already attached by buildContextForTask).
+  // Reading level. FEAT-176: when the concrete block is present it IS the rule,
+  // and this RULES line is only a pointer back to it — two statements of the
+  // same constraint, one vague and one concrete, is how the vague one wins.
+  // Without a block this is FEAT-173's line, minus its pointer at WORD MASTERY
+  // (that slice is no longer attached to the story tasks; see contextSlices).
   const level = readingLevel || (age <= 7 ? "pre-K to kindergarten" : "1st grade");
-  const readingLevelRule =
-    readingLevelAssessed && readingLevel
-      ? `- Reading level (ASSESSED — ${childName}'s working level from the Skill Snapshot; keep the decoding demands of the text at or below it, and use WORD MASTERY above for the specific words): ${level}`
-      : `- Reading level (no assessed level on file yet — estimated from age; a soft hint, defer to WORD MASTERY / SKILL SNAPSHOT): ${level}`;
+  const readingLevelRule = readingLevelBlock
+    ? "- Vocabulary is governed by the READING LEVEL block above. It is not a suggestion; it is the constraint this book is checked against."
+    : readingLevelAssessed && readingLevel
+      ? `- Reading level (ASSESSED — ${childName}'s working level from the Skill Snapshot; keep the decoding demands of the text at or below it): ${level}`
+      : `- Reading level (no assessed level on file yet — estimated from age; a soft hint, defer to SKILL SNAPSHOT): ${level}`;
 
-  const sentenceTarget = sentenceTargetForAge(age);
+  // Sentence shape follows the ASSESSED level when there is one (FEAT-176);
+  // age is the fallback only.
+  const sentenceTarget =
+    readingLevelBlock?.sentenceTarget ??
+    sentenceTargetFor({
+      phonicsLevel: readingLevelBlock?.levelSource === "assessed" ? readingLevelBlock.level : null,
+      age,
+    });
   const contentStakes = contentStakesForAge(age);
 
   const sightWordSection = hasWords
@@ -2103,11 +2394,11 @@ export function buildStoryPrompt(input: StoryGenInput): string {
 SIGHT WORDS ${childName.toUpperCase()} IS PRACTICING:
 ${words.join(", ")}
 
-These are words ${childName} is still working on. Weave 3-5 of them into the story where they fit naturally — in dialogue, as everyday words a character would say, or in a refrain that repeats. DO NOT force every word in. If a word doesn't fit, leave it out. Natural language matters more than coverage. Calibrate the rest of the vocabulary against the WORD MASTERY and (if present) SKILL SNAPSHOT sections above.
+These are words ${childName} is still working on. Weave 3-5 of them into the story where they fit naturally — in dialogue, as everyday words a character would say, or in a refrain that repeats. DO NOT force every word in. If a word doesn't fit, leave it out. Natural language matters more than coverage. Calibrate the rest of the vocabulary against the ${readingLevelBlock ? "READING LEVEL block above" : "SKILL SNAPSHOT section above (if present)"}.
 `
     : `
 VOCABULARY:
-Calibrate vocabulary against the WORD MASTERY and (if present) SKILL SNAPSHOT sections above. Use words ${childName} can decode comfortably with 1-2 stretch words sprinkled in if they're already in the mastered set.
+Calibrate vocabulary against the ${readingLevelBlock ? "READING LEVEL block above" : "SKILL SNAPSHOT section above (if present)"}. Use words ${childName} can decode comfortably with 1-2 stretch words sprinkled in if they're already in the mastered set.
 `;
 
   const themeSection = themeGuidance
@@ -2128,8 +2419,12 @@ Write the story as if it takes place in this world with this tone. Scene descrip
 
   const pageBeatsBlock = buildPageBeats(pageCount);
 
-  const exampleText =
-    age <= 7
+  // The JSON schema's sample page reads at the READING LEVEL, not at the age
+  // (FEAT-176) — the old one taught "Marco" and a 12-word sentence to a Level-2
+  // story. Falls back to the age split only when no level block was injected.
+  const exampleText = readingLevelBlock
+    ? exampleStoryPageForLevel(readingLevelBlock.level)
+    : age <= 7
       ? "A little cat sat in the sun."
       : "The sun was up. Marco and his cat raced across the park.";
   const exampleScene =
@@ -2137,9 +2432,15 @@ Write the story as if it takes place in this world with this tone. Scene descrip
       ? "A cozy sunny garden with flowers and a fluffy orange cat curled up on a stone path."
       : "A bright sunny park with green grass, a wooden bench, and tall trees.";
 
+  // FEAT-176: the concrete block goes FIRST, before the story idea, the theme
+  // and the sight-word section, so everything after it is read as subordinate.
+  const readingLevelSection = readingLevelBlock
+    ? `${buildReadingLevelBlock(readingLevelBlock)}\n\n`
+    : "";
+
   return `You are a children's story writer creating an illustrated book for ${childName}, a ${age}-year-old who loves ${interests}.
 
-STORY IDEA: ${storyIdea || fallbackIdea}
+${readingLevelSection}STORY IDEA: ${storyIdea || fallbackIdea}
 ${sightWordSection}${themeSection}
 RULES:
 - Write exactly ${pageCount} pages — no more, no fewer. Each page has ${sentenceTarget}.
@@ -2196,6 +2497,12 @@ export interface ReviseStoryInput {
     pageCount: number;
   };
   newFeedback: string;
+  /**
+   * The concrete READING LEVEL block (FEAT-176). **Server-injected only** — the
+   * handler builds it after normalizing the client payload, so a revise can
+   * never talk the story up past the level the generation was held to.
+   */
+  readingLevelBlock?: ReadingLevelBlockInput;
 }
 
 /**
@@ -2205,11 +2512,19 @@ export interface ReviseStoryInput {
  * alone, then return the full updated story so the diff is unambiguous.
  */
 export function buildReviseStoryPrompt(input: ReviseStoryInput): string {
-  const { chatHistory, currentStory, childCalibration, newFeedback } = input;
+  const { chatHistory, currentStory, childCalibration, newFeedback, readingLevelBlock } = input;
   const { childAge, childName, illustrationStyle, pageCount } = childCalibration;
 
-  const sentenceTarget = sentenceTargetForAge(childAge);
+  const sentenceTarget =
+    readingLevelBlock?.sentenceTarget ??
+    sentenceTargetFor({
+      phonicsLevel: readingLevelBlock?.levelSource === "assessed" ? readingLevelBlock.level : null,
+      age: childAge,
+    });
   const contentStakes = contentStakesForAge(childAge);
+  const readingLevelSection = readingLevelBlock
+    ? `${buildReadingLevelBlock(readingLevelBlock)}\n\n`
+    : "";
 
   const chatBlock = chatHistory.length === 0
     ? "(no prior turns)"
@@ -2230,7 +2545,7 @@ export function buildReviseStoryPrompt(input: ReviseStoryInput): string {
 
   return `You are revising a children's story for ${childName} (age ${childAge}) based on a chat conversation.
 
-ILLUSTRATION STYLE: ${illustrationStyle}
+${readingLevelSection}ILLUSTRATION STYLE: ${illustrationStyle}
 PAGE COUNT: ${pageCount} (do not add or remove pages)
 
 CALIBRATION:
@@ -2306,6 +2621,11 @@ export interface RevisePageInput {
     sentenceTarget: string;
     vocabularyLevel: string;
   };
+  /**
+   * The concrete READING LEVEL block (FEAT-176). **Server-injected only** — set
+   * by the handler after normalizing the client payload.
+   */
+  readingLevelBlock?: ReadingLevelBlockInput;
 }
 
 export interface RevisePageOutput {
@@ -2330,12 +2650,21 @@ export function buildRevisePagePrompt(input: RevisePageInput): string {
     feedback,
     fullStoryContext,
     childCalibration,
+    readingLevelBlock,
   } = input;
   const { childAge, childName, sentenceTarget: callerSentenceTarget, vocabularyLevel } =
     childCalibration;
 
-  const sentenceTarget = sentenceTargetForAge(childAge);
+  const sentenceTarget =
+    readingLevelBlock?.sentenceTarget ??
+    sentenceTargetFor({
+      phonicsLevel: readingLevelBlock?.levelSource === "assessed" ? readingLevelBlock.level : null,
+      age: childAge,
+    });
   const contentStakes = contentStakesForAge(childAge);
+  const readingLevelSection = readingLevelBlock
+    ? `${buildReadingLevelBlock(readingLevelBlock)}\n\n`
+    : "";
 
   const allPagesBlock = fullStoryContext.allPages
     .map((p) => {
@@ -2358,7 +2687,7 @@ export function buildRevisePagePrompt(input: RevisePageInput): string {
 
   return `You are revising one page of a children's book based on listener feedback. You are revising for ${childName} (age ${childAge}).
 
-The full story is provided so your revision stays consistent with characters, tone, and pacing on the other pages.
+${readingLevelSection}The full story is provided so your revision stays consistent with characters, tone, and pacing on the other pages.
 
 CALIBRATION:
 - Each page should have ${sentenceTarget}.

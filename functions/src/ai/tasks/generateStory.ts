@@ -2,7 +2,7 @@ import { HttpsError } from "firebase-functions/v2/https";
 import type { Firestore } from "firebase-admin/firestore";
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
-import { buildStoryPrompt, modelForTask } from "../chat.js";
+import { buildStoryPrompt, buildStoryReadabilityFixPrompt, modelForTask } from "../chat.js";
 import type { StoryGenInput } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 import {
@@ -10,7 +10,10 @@ import {
   maxTokensForPageCount,
   reconcileStoryPageCount,
 } from "../storyPageBudget.js";
-import { resolveStoryReadingLevel } from "../storyReadingLevel.js";
+import { checkStoryReadability } from "../storyDecodability.js";
+import type { StoryReadabilityReport } from "../storyDecodability.js";
+import { resolveStoryLevelContext } from "../storyLevelContext.js";
+import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
 
 // ── Preset themes (server-side mirror of client PRESET_THEMES) ──
 
@@ -191,6 +194,96 @@ export function describeStoryStop(
   return { cutShort, noVisibleText, note: parts.join("; ") };
 }
 
+// ── Readability check + the one fix (FEAT-176) ───────────────────
+
+/** The parsed story, only as much of it as the readability pass needs. */
+export interface ParsedStory {
+  title: string;
+  pages: Array<{ pageNumber?: number; text?: string }>;
+}
+
+/**
+ * Parse a story reply into pages, or `null` if it isn't one. Never throws — an
+ * unparseable reply is returned to the client exactly as it is today, with no
+ * readability report attached, so every FEAT-169 failure path is unchanged.
+ */
+export function parseStoryForReadability(rawText: string): ParsedStory | null {
+  try {
+    const parsed = sanitizeAndParseJson<{ title?: unknown; pages?: unknown }>(rawText);
+    if (!Array.isArray(parsed.pages) || parsed.pages.length === 0) return null;
+    return {
+      title: typeof parsed.title === "string" ? parsed.title : "",
+      pages: parsed.pages as ParsedStory["pages"],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The hard words the fix prompt is handed, grouped by page in page order. */
+export function hardWordsByPage(
+  report: StoryReadabilityReport,
+): Array<{ page: number; words: string[] }> {
+  return report.pages
+    .filter((p) => p.hardWords.length > 0)
+    .map((p) => ({ page: p.pageNumber, words: p.hardWords.map((h) => h.word) }));
+}
+
+/**
+ * Is the fixed story the one to keep?
+ *
+ * Three conditions, all of them about not making things worse. It must have
+ * parsed; it must still be the same book (same page count — the fix prompt says
+ * so, and a fix that dropped pages is a different failure wearing this one's
+ * clothes); and it must carry strictly FEWER hard words. A tie keeps the
+ * original, because the original is the story the beats and the theme were
+ * written for and the fix prompt saw neither.
+ *
+ * Pure so the decision is testable without a model.
+ */
+export function shouldKeepFixedStory(
+  original: StoryReadabilityReport,
+  fixed: StoryReadabilityReport | null,
+  originalPageCount: number,
+  fixedPageCount: number,
+): boolean {
+  if (!fixed) return false;
+  if (fixedPageCount !== originalPageCount) return false;
+  return fixed.totalHardWords < original.totalHardWords;
+}
+
+/**
+ * What the client is told about how readable the story actually is (FEAT-176
+ * Part 4). Additive on the response next to `stopReason`; a client that doesn't
+ * read it is unchanged, and `undefined` means "not measured", never "fine".
+ */
+export interface StoryReadabilityInfo {
+  phonicsLevel: number;
+  levelSource: "assessed" | "age";
+  passed: boolean;
+  hardWords: Array<{ page: number; word: string }>;
+  /** True when the one fix attempt ran AND its result was the one returned. */
+  revised: boolean;
+}
+
+/** How many hard words the honest line will name — the rest are counted, not listed. */
+export const MAX_REPORTED_HARD_WORDS = 12;
+
+export function toReadabilityInfo(
+  report: StoryReadabilityReport,
+  revised: boolean,
+): StoryReadabilityInfo {
+  return {
+    phonicsLevel: report.phonicsLevel,
+    levelSource: report.levelSource,
+    passed: report.passed,
+    hardWords: report.hardWords
+      .slice(0, MAX_REPORTED_HARD_WORDS)
+      .map((h) => ({ page: h.page, word: h.word })),
+    revised,
+  };
+}
+
 /**
  * Task: generateStory
  * Context: childProfile + sightWords + wordMastery (via buildContextForTask)
@@ -257,10 +350,19 @@ export const handleGenerateStory = async (
   // `workingLevels` (phonics = decoding, comprehension) off the skill snapshot
   // the dispatcher already loaded into `ctx.snapshotData`. The age-derived
   // string is the fallback only — used when no assessed level exists yet.
-  const readingLevel = resolveStoryReadingLevel(
-    ctx.snapshotData?.workingLevels,
-    storyChildAge,
-  );
+  // FEAT-176 turns that level into a CONCRETE prompt block (allowed patterns,
+  // a banned list, the child's own words as an allowlist, a sentence shape and
+  // a worked page) plus the allowlist the finished story is measured against.
+  const levelContext = await resolveStoryLevelContext({
+    db,
+    familyId,
+    childId,
+    childName: storyChildName,
+    age: storyChildAge,
+    workingLevels: ctx.snapshotData?.workingLevels,
+    requestedWords: storyWords,
+  });
+  const readingLevel = levelContext.readingLevel;
 
   // Resolve theme guidance from preset or custom Firestore theme
   const themeGuidance = await resolveThemeGuidance(db, familyId, storyConfig.theme);
@@ -279,6 +381,7 @@ export const handleGenerateStory = async (
     childInterests,
     readingLevel: readingLevel.text,
     readingLevelAssessed: readingLevel.source === "assessed",
+    readingLevelBlock: levelContext.block,
     themeGuidance,
   });
 
@@ -310,14 +413,86 @@ export const handleGenerateStory = async (
     messages: [{ role: "user", content: "Generate the story now." }],
   });
 
+  // ── Measure, fix once, then be honest (FEAT-176) ──────────────
+  //
+  // FEAT-173 asked the model to stay at the level; nothing checked that it had.
+  // Here the drafted story is measured against the same level the prompt block
+  // named, and a failure buys exactly ONE focused revise call — never a loop —
+  // after which whichever version has fewer hard words is returned and the
+  // client says plainly what is still above the level.
+  let finalText = result.text;
+  let readabilityInfo: StoryReadabilityInfo | undefined;
+  let fixTokens: { inputTokens: number; outputTokens: number } | null = null;
+
+  const drafted = parseStoryForReadability(result.text);
+  if (drafted) {
+    const checkOptions = {
+      phonicsLevel: levelContext.effective.level,
+      levelSource: levelContext.effective.source,
+      allowedWords: levelContext.allowedWords,
+    };
+    const firstReport = checkStoryReadability(drafted.pages, checkOptions);
+    let finalReport = firstReport;
+    let revised = false;
+
+    if (!firstReport.passed) {
+      try {
+        const fix = await callClaude({
+          apiKey,
+          model,
+          // The fix rewrites at most a handful of words across the same pages,
+          // so it needs no more room than the generation did.
+          maxTokens,
+          temperature: 0.7,
+          systemPrompt: buildStoryReadabilityFixPrompt({
+            childName: storyChildName,
+            storyJson: JSON.stringify(drafted),
+            hardWordsByPage: hardWordsByPage(firstReport),
+            readingLevelBlock: levelContext.block,
+            pageCount: drafted.pages.length,
+          }),
+          messages: [{ role: "user", content: "Return the fixed story now." }],
+        });
+        fixTokens = { inputTokens: fix.inputTokens, outputTokens: fix.outputTokens };
+        const fixedStory = parseStoryForReadability(fix.text);
+        const fixedReport = fixedStory
+          ? checkStoryReadability(fixedStory.pages, checkOptions)
+          : null;
+        if (
+          fixedStory &&
+          shouldKeepFixedStory(
+            firstReport,
+            fixedReport,
+            drafted.pages.length,
+            fixedStory.pages.length,
+          )
+        ) {
+          finalText = fix.text;
+          finalReport = fixedReport!;
+          revised = true;
+        }
+      } catch (err) {
+        // A failed fix must never cost the parent the story they already have.
+        console.warn("[AI] generateStory readability fix failed", { childId, error: String(err) });
+      }
+    }
+
+    readabilityInfo = toReadabilityInfo(finalReport, revised);
+  }
+
   // Validate on parse (FEAT-97): the model may return a different count. Accept a
   // good story regardless (the client derives the book from pages.length) — just
   // report the delta as telemetry, and warn only when it's wildly off (>±3).
-  const pageMeta = reconcilePagesFromStory(targetPageCount, result.text);
+  const pageMeta = reconcilePagesFromStory(targetPageCount, finalText);
   console.log(
     `[AI] taskType=generateStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}` +
       ` maxTokens=${maxTokens} stopReason=${result.stopReason}` +
       ` words=${storyWords.length} readingLevel=${readingLevel.source}` +
+      ` readabilityLevel=${levelContext.effective.level}` +
+      (readabilityInfo
+        ? ` readability=${readabilityInfo.passed ? "pass" : "fail"}` +
+          ` hard=${readabilityInfo.hardWords.length} revised=${readabilityInfo.revised ? "yes" : "no"}`
+        : " readability=unmeasured") +
       (pageMeta
         ? ` targetPages=${pageMeta.target} actualPages=${pageMeta.actual} pageDelta=${pageMeta.delta}`
         : ` targetPages=${targetPageCount} actualPages=?`),
@@ -335,6 +510,10 @@ export const handleGenerateStory = async (
     console.warn(`[AI] generateStory reply incomplete: ${stop.note}`);
   }
 
+  // Both calls are billed, so both are logged (FEAT-176). The readability fix is
+  // a second paid call and the usage record must say so.
+  const totalInputTokens = result.inputTokens + (fixTokens?.inputTokens ?? 0);
+  const totalOutputTokens = result.outputTokens + (fixTokens?.outputTokens ?? 0);
   await logAiUsage(db, familyId, {
     childId,
     taskType: "generateStory",
@@ -342,11 +521,24 @@ export const handleGenerateStory = async (
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
   });
+  if (fixTokens) {
+    await logAiUsage(db, familyId, {
+      childId,
+      taskType: "generateStory",
+      model,
+      inputTokens: fixTokens.inputTokens,
+      outputTokens: fixTokens.outputTokens,
+    });
+  }
 
   return {
-    message: result.text,
+    message: finalText,
     model,
-    usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+    usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+    // The GENERATION's stop reason, deliberately — it is what says whether the
+    // story itself came back whole, and the readability fix is only ever adopted
+    // when it parsed into the same number of pages.
     stopReason: result.stopReason,
+    ...(readabilityInfo ? { readability: readabilityInfo } : {}),
   };
 };

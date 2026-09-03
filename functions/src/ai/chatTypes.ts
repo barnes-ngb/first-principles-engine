@@ -76,6 +76,19 @@ export interface ChatTaskResult {
    * must treat `undefined` as "unknown", never as success.
    */
   stopReason?: string;
+  /**
+   * How readable the returned story actually is for this child (FEAT-176).
+   * Set by `generateStory` only, and only when the reply parsed into pages —
+   * `undefined` means "not measured", never "fine". Additive: a client that
+   * doesn't read it is unchanged.
+   */
+  readability?: {
+    phonicsLevel: number;
+    levelSource: "assessed" | "age";
+    passed: boolean;
+    hardWords: Array<{ page: number; word: string }>;
+    revised: boolean;
+  };
 }
 
 /** A function that handles a specific chat task type. */
