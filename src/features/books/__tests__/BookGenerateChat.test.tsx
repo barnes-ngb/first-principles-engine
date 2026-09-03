@@ -759,8 +759,9 @@ describe('UX-109 — the TTS queue on the first story draft', () => {
 
   it('falls back to the rendered line for a turn persisted before this split', () => {
     const state = draftState()
-    state.chatHistory[1] = { ...state.chatHistory[1], spokenContent: undefined }
-    hookState = state
+    const legacyTurn = { ...state.chatHistory[1] }
+    delete legacyTurn.spokenContent
+    hookState = { ...state, chatHistory: [state.chatHistory[0], legacyTurn] }
     render(
       <Wrap>
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
