@@ -20,7 +20,7 @@ function renderDialog(props: Partial<React.ComponentProps<typeof DrawingChoiceDi
   )
 }
 
-describe('DrawingChoiceDialog — daily art budget (FEAT-168)', () => {
+describe('DrawingChoiceDialog — weekly art budget (FEAT-168)', () => {
   it('at the cap the paid Reimagine choice is not offered, and the nudge takes its place', () => {
     renderDialog({ capReached: true })
 

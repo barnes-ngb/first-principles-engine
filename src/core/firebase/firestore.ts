@@ -704,11 +704,15 @@ export const catalogOrdersCollection = (
 // ── Kid art-generation quota (FEAT-94) ──────────────────────────
 
 /**
- * Per-child daily art-generation counter (FEAT-94). A tiny courtesy cap so a
- * kid's image generation (a paid call) has a light, non-shaming daily limit —
- * never a lock. Doc ID: `{childId}-{YYYY-MM-DD}`. Additive; client-writable
- * under the existing owner rule (kids share the family auth, so the cap is UX,
- * not security — `firestore.rules` is untouched). Path:
+ * Per-child **weekly** art-generation counter (FEAT-94; the window went daily →
+ * weekly in FEAT-175). A tiny courtesy cap so a kid's image generation (a paid
+ * call) has a light, non-shaming weekly limit — never a lock. Doc ID:
+ * `{childId}-wk-{weekStart}`, the app's own Sunday-start week key; the `wk-`
+ * segment keeps a Sunday's id from colliding with that day's **legacy daily**
+ * doc (`{childId}-{YYYY-MM-DD}`), which is left inert rather than migrated.
+ * Additive; client-writable under the existing owner rule (kids share the family
+ * auth, so the cap is UX, not security — `firestore.rules` is untouched, and its
+ * family-subtree rule never matched on doc-id shape). Path:
  * families/{familyId}/artQuota/{docId}
  */
 export const artQuotaCollection = (

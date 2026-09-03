@@ -54,7 +54,7 @@ interface SketchScannerProps {
   /** Fired after each sticker (raw cleaned or fancy) is saved to the library. */
   onSaved?: () => void
   /**
-   * The actor has spent today's art budget (FEAT-166). "Make it fancy" is the
+   * The actor has spent this week's art budget (FEAT-166). "Make it fancy" is the
    * fourth paid door on the Stickers page and the most-tapped one — this flow's
    * whole invitation is "try another style", and every tap is a real
    * `enhanceSketch` call. At the cap the style controls swap for the same warm
@@ -548,7 +548,7 @@ export default function SketchScanner({
                   {!enhancing && !fancyUrl && (
                     <Stack alignItems="center" spacing={1.5} sx={{ py: 3, px: 2, width: '100%' }}>
                       {capReached ? (
-                        /* Daily cap reached (FEAT-166): the same warm nudge the
+                        /* Weekly cap reached (FEAT-166): the same warm nudge the
                            other three sticker doors show — no style picker, no
                            button, no error styling, no lock. The cleaned sticker
                            they already made stays saveable. */

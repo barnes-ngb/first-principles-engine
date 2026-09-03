@@ -196,6 +196,8 @@ UX-72 (gate treats skipped as resolved), UX-08 (write `discussed`), ~~UX-33 (pen
 
 ## 12. Stickers (added 2026-08-28 — the sticker pipeline's own walk)
 
+> **Note (FEAT-175, 2026-09-03):** the art cap described as *daily* in the UX-95 / UX-100 / UX-101 rows below (and in their `DEFAULT_DAILY_ART_QUOTA` references) is **weekly** as of FEAT-175 — one per-child, per-week doc `artQuota/{childId}-wk-{weekStart}`, `DEFAULT_WEEKLY_ART_QUOTA = 100`, no per-day sub-cap. The rows are left as written: they are the record of what was found and shipped at the time.
+
 **Why this section exists.** Owner-reported, 2026-08-24, with screenshots: two saved drawings both titled "My drawing" with no way to fix either, and a carpet sliver surviving the FEAT-159 cleanup. The FEAT-160 run that fixed both gave the surface the same five-question walk. Surfaces walked: `StickersPage` (the kid-and-parent entry), `MakeStickerDialog` (describe → generate → tag → save), `SketchScanner` (capture → crop → clean → fancy → save), `DrawingGroupCard` (the labeled drawing card), and `StickerLibraryTab` (edit / select / delete / Make a sheet → `printStickerSheet`). Same severity scale; same one-sanctioned-fix rail.
 
 **The run's own fixes, recorded:** the rename affordance and the bimodal second knockout were this run's assigned job, not walk findings. From the walk itself the run fixed exactly one thing — **UX-91**, which the run prompt named directly and which is the root cause of the owner's reported symptom. It is a behavioural fix (five lines of state seeding), not the "one sanctioned label-text correction" the audit's rail contemplates; that budget was **not** additionally spent. Everything else below is filed.

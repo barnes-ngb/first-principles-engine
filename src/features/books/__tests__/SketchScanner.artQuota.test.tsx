@@ -47,7 +47,7 @@ vi.mock('../SketchCropStage', () => ({ default: () => <div data-testid="crop-sta
 
 import SketchScanner from '../SketchScanner'
 
-const CAP_MESSAGE = /that's a lot of art today/i
+const CAP_MESSAGE = /that's a lot of art this week/i
 
 /** Walk the dialog from capture to the Fancy preview tab. */
 async function reachFancyTab(user: ReturnType<typeof userEvent.setup>) {
@@ -65,7 +65,7 @@ function renderScanner(props: Partial<React.ComponentProps<typeof SketchScanner>
   )
 }
 
-describe('SketchScanner — daily art cap on "Make it fancy" (FEAT-166 / UX-95)', () => {
+describe('SketchScanner — weekly art cap on "Make it fancy" (FEAT-166 / UX-95)', () => {
   beforeEach(() => {
     enhanceSketchMock.mockReset()
     enhanceSketchMock.mockResolvedValue({

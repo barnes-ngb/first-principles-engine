@@ -49,7 +49,7 @@ export default function StickersPage() {
   // Cost guard (FEAT-165 / UX-95): every control on this page that spends a
   // paid image call asks the budget question exactly once, here, and the answer
   // is handed to the three doors below ("Create!", "Add version", "Make more
-  // versions"). Same counter as the Kit Builder — one honest daily total per
+  // versions"). Same counter as the Kit Builder — one honest weekly total per
   // child — and capped by capability (a kid profile), never by name.
   const { atLimit: artCapReached, recordGeneration } = useStickerArtQuota()
 

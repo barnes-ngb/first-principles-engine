@@ -61,7 +61,7 @@ interface DrawingChoiceDialogProps {
   ) => void
   onRetryResult?: () => void
   /**
-   * The actor has spent today's art budget (FEAT-168). Every "Reimagine" choice
+   * The actor has spent this week's art budget (FEAT-168). Every "Reimagine" choice
    * here is a paid `enhanceSketch` call, so at the cap they are simply not
    * offered and a warm nudge takes their place — refusing before the spend, and
    * before the sketch upload the page performs on the way to it. "Make a scene"
