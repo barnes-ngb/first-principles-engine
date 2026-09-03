@@ -3,7 +3,15 @@ import type { Book, BookPage, PageImage } from '../../core/types'
 import { startStep } from '../../core/utils/perf'
 import { fetchAsDataUri } from './imageDataUri'
 import { stackOrder } from './draggableImageUtils'
+import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import type { PrintSettings } from './PrintSettingsDialog'
+
+/**
+ * Blur radius (source pixels) for the FEAT-177 backdrop copy in the PDF. Larger
+ * than the CSS value because it is applied to the full-resolution source image,
+ * not to the ~100mm box it ends up occupying on the page.
+ */
+const PRINT_BACKDROP_BLUR_PX = 40
 
 /* ───────────────────── page size & color constants ───────────────────── */
 
@@ -138,7 +146,12 @@ function getImageDimensions(dataUri: string): Promise<{ width: number; height: n
   })
 }
 
-function fitInBox(
+/**
+ * Contain-fit: the largest size that fits inside the box without cropping.
+ * Exported for tests — it is the geometry behind both a printed sticker and a
+ * FEAT-177 background shown whole.
+ */
+export function fitInBox(
   imgW: number,
   imgH: number,
   boxW: number,
@@ -146,6 +159,20 @@ function fitInBox(
 ): { w: number; h: number } {
   const scale = Math.min(boxW / imgW, boxH / imgH)
   return { w: imgW * scale, h: imgH * scale }
+}
+
+/**
+ * Centre a contain-fitted image inside its box — the PDF equivalent of CSS
+ * `object-fit: contain`. Exported for tests.
+ */
+export function centerInBox(
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  boxH: number,
+  fit: { w: number; h: number },
+): { x: number; y: number } {
+  return { x: boxX + (boxW - fit.w) / 2, y: boxY + (boxH - fit.h) / 2 }
 }
 
 /** Crop an image data URI to a target aspect ratio (cover-fit) via offscreen canvas. */
@@ -177,6 +204,50 @@ function cropToAspect(
       const ctx = canvas.getContext('2d')
       if (!ctx) { resolve(dataUri); return }
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+      resolve(canvas.toDataURL('image/png'))
+    }
+    img.onerror = reject
+    img.src = dataUri
+  })
+}
+
+/**
+ * Blur a data URI via an offscreen canvas — the print-side equivalent of the
+ * screen's `filter: blur()` backdrop (FEAT-177).
+ *
+ * `ctx.filter` is the good path. Where it is unsupported (older canvas
+ * implementations, and jsdom in tests) we downscale hard and draw back up:
+ * bilinear resampling of a tiny image IS a blur, and it costs nothing.
+ * Either way this only ever runs on the copy that sits *behind* the picture, so
+ * a slightly different blur never affects what the reader actually looks at.
+ */
+function blurImageDataUri(dataUri: string, blurPx: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const w = img.naturalWidth
+      const h = img.naturalHeight
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(dataUri); return }
+      // `filter` is always in the DOM lib type but not always in the runtime.
+      const supportsFilter = typeof (ctx as { filter?: unknown }).filter === 'string'
+      if (supportsFilter) {
+        ctx.filter = `blur(${blurPx}px)`
+        ctx.drawImage(img, 0, 0, w, h)
+      } else {
+        // Downscale-then-upscale fallback.
+        const small = document.createElement('canvas')
+        const shrink = Math.max(2, blurPx)
+        small.width = Math.max(1, Math.round(w / shrink))
+        small.height = Math.max(1, Math.round(h / shrink))
+        const smallCtx = small.getContext('2d')
+        if (!smallCtx) { resolve(dataUri); return }
+        smallCtx.drawImage(img, 0, 0, small.width, small.height)
+        ctx.drawImage(small, 0, 0, small.width, small.height, 0, 0, w, h)
+      }
       resolve(canvas.toDataURL('image/png'))
     }
     img.onerror = reject
@@ -635,12 +706,32 @@ async function drawContentPage(
           dataUri = await flipImageDataUri(dataUri, dims.width, dims.height, flipH, flipV)
         }
 
-        // Stickers use contain-fit; scene/photo images use cover-fit (crop to fill box)
-        if (img.type === 'sticker') {
+        // How the image sits in its box — the SAME rule the editor, the reader
+        // and the drag layer read (FEAT-177). Stickers are always contain-fit;
+        // a background is cover-fit unless the parent asked to see it whole.
+        if (resolveImageFit(img) === 'contain') {
+          // A fitted background leaves space — fill it with a blurred copy of
+          // itself first, so the print matches the screen instead of showing
+          // white bars. Stickers never get one.
+          if (hasFitBackdrop(img)) {
+            try {
+              const cropped = await cropToAspect(dataUri, dims.width, dims.height, imgW, imgH)
+              const blurred = await blurImageDataUri(cropped, PRINT_BACKDROP_BLUR_PX)
+              let bgX = imgX
+              let bgY = imgY
+              if (rotation !== 0) {
+                ;[bgX, bgY] = adjustForCenterRotation(bgX, bgY, imgW, imgH, rotation)
+              }
+              pdf.addImage({ imageData: blurred, x: bgX, y: bgY, width: imgW, height: imgH, rotation })
+            } catch {
+              // Backdrop is decoration — never lose the picture over it.
+            }
+          }
           const fit = fitInBox(dims.width, dims.height, imgW, imgH)
           // Center within bounding box to match CSS object-fit: contain
-          let drawX = imgX + (imgW - fit.w) / 2
-          let drawY = imgY + (imgH - fit.h) / 2
+          const centered = centerInBox(imgX, imgY, imgW, imgH, fit)
+          let drawX = centered.x
+          let drawY = centered.y
           if (rotation !== 0) {
             // jsPDF rotates around the bottom-left corner. Adjust coordinates so
             // the rotation pivots around the center, matching CSS transform-origin: center.

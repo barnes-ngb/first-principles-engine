@@ -340,6 +340,17 @@ export interface PageImage {
    * elements), so pre-`layerType` books render identically.
    */
   layerType?: 'background' | 'element'
+  /**
+   * How a **background** image sits in its box (FEAT-177). `'fill'` crops the
+   * overflow so the picture covers the whole area; `'fit'` shows the whole
+   * picture and fills the leftover space with a blurred copy of it. Absent =
+   * `'fill'`, which is exactly what every book did before this field existed,
+   * so nothing already saved renders differently. **Ignored for stickers** —
+   * they have always been contain-fit and stay that way. Set from the Book
+   * Editor's "Change background" menu; read only through
+   * `features/books/imageFit.ts`.
+   */
+  fit?: 'fill' | 'fit'
   /** Image style variant */
   style?: 'sketch' | 'ai-generated' | 'ai-enhanced' | 'photo'
   /** Original hand-drawn sketch URL (always saved when type is 'sketch') */

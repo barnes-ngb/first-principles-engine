@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { addDoc } from 'firebase/firestore'
 import Box from '@mui/material/Box'
@@ -30,6 +30,8 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { useBook } from './useBook'
 import { stackOrder } from './draggableImageUtils'
+import { hasFitBackdrop, resolveImageFit } from './imageFit'
+import ImageFitBackdrop from './ImageFitBackdrop'
 import { printBook } from './printBook'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
@@ -613,24 +615,41 @@ export default function BookReaderPage() {
                     if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
                     if (pos.flipH) transforms.push('scaleX(-1)')
                     if (pos.flipV) transforms.push('scaleY(-1)')
+                    // Two z slots per element — the element and, below it, its
+                    // FEAT-177 blurred backdrop (matches the editor exactly).
+                    const renderZ = (stackIdx + 1) * 2
+                    const geometry = {
+                      position: 'absolute' as const,
+                      left: `${pos.x}%`,
+                      top: `${pos.y}%`,
+                      width: `${pos.width}%`,
+                      height: `${pos.height}%`,
+                      borderRadius: 1,
+                      transformOrigin: 'center center',
+                    }
                     return (
-                      <Box
-                        key={img.id}
-                        component="img"
-                        src={img.url}
-                        sx={{
-                          position: 'absolute',
-                          left: `${pos.x}%`,
-                          top: `${pos.y}%`,
-                          width: `${pos.width}%`,
-                          height: `${pos.height}%`,
-                          objectFit: img.type === 'sticker' ? 'contain' : 'cover',
-                          borderRadius: 1,
-                          zIndex: stackIdx + 1,
-                          transform: transforms.length > 0 ? transforms.join(' ') : undefined,
-                          transformOrigin: 'center center',
-                        }}
-                      />
+                      <Fragment key={img.id}>
+                        {hasFitBackdrop(img) && (
+                          <ImageFitBackdrop
+                            url={img.url}
+                            sx={{
+                              ...geometry,
+                              transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                              zIndex: renderZ - 1,
+                            }}
+                          />
+                        )}
+                        <Box
+                          component="img"
+                          src={img.url}
+                          sx={{
+                            ...geometry,
+                            objectFit: resolveImageFit(img),
+                            zIndex: renderZ,
+                            transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                          }}
+                        />
+                      </Fragment>
                     )
                   })}
                 </Box>

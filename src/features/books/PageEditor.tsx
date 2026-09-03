@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
@@ -14,7 +14,9 @@ import ListItemText from '@mui/material/ListItemText'
 import Tooltip from '@mui/material/Tooltip'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import CropFreeIcon from '@mui/icons-material/CropFree'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import FitScreenIcon from '@mui/icons-material/FitScreen'
 import HistoryIcon from '@mui/icons-material/History'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import WallpaperIcon from '@mui/icons-material/Wallpaper'
@@ -31,6 +33,13 @@ import DraggableImage from './DraggableImage'
 import type { ImagePosition } from './DraggableImage'
 import LayersPanel from './LayersPanel'
 import { stackOrder } from './draggableImageUtils'
+import {
+  applyBackgroundFit,
+  backgroundFitOf,
+  hasFitBackdrop,
+  resolveImageFit,
+} from './imageFit'
+import ImageFitBackdrop from './ImageFitBackdrop'
 
 interface PageEditorProps {
   page: BookPage
@@ -142,6 +151,15 @@ export default function PageEditor({
   const backgroundImages = page.images.filter((img) => img.type !== 'sticker')
   const orderedImages = stackOrder(page.images)
 
+  // FEAT-177 — "show the whole picture" vs "fill the page", per background,
+  // through the page's existing update path (no second write lane). Stickers
+  // are never stamped.
+  const currentBgFit = backgroundFitOf(page.images)
+  const toggleBackgroundFit = () => {
+    const next = currentBgFit === 'fit' ? 'fill' : 'fit'
+    onUpdate({ images: applyBackgroundFit(page.images, next) })
+  }
+
   const imageSection = !isTextOnly && (
     <Box sx={{ width: isImageLeft ? '50%' : '100%' }}>
       {/* Background edit icon — sits above the image container */}
@@ -167,6 +185,17 @@ export default function PageEditor({
                 <ListItemText>Change background</ListItemText>
               </MenuItem>
             )}
+            {/* FEAT-177 — the whole picture, or the page filled. */}
+            <MenuItem onClick={() => { setBgMenuAnchor(null); toggleBackgroundFit() }}>
+              <ListItemIcon>
+                {currentBgFit === 'fit'
+                  ? <CropFreeIcon fontSize="small" />
+                  : <FitScreenIcon fontSize="small" />}
+              </ListItemIcon>
+              <ListItemText>
+                {currentBgFit === 'fit' ? 'Fill the page' : 'Show the whole picture'}
+              </ListItemText>
+            </MenuItem>
             {onRemoveImage && (
               <MenuItem onClick={() => { setBgMenuAnchor(null); setConfirmRemoveBg(true) }}>
                 <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
@@ -207,7 +236,11 @@ export default function PageEditor({
           // zIndex = stack position keeps stacking tie-free.
           <Box sx={{ position: 'absolute', inset: 0 }}>
             {orderedImages.map((img, stackIdx) => {
-              const renderZ = stackIdx + 1
+              // Two z slots per element: the element itself and, one below it,
+              // the FEAT-177 blurred backdrop copy. Doubling keeps every
+              // element strictly ordered (no ties) while giving a fitted
+              // background somewhere to put its backdrop.
+              const renderZ = (stackIdx + 1) * 2
               if (img.type === 'sticker') {
                 return (
                   <DraggableImage
@@ -227,31 +260,49 @@ export default function PageEditor({
               if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
               if (pos.flipH) transforms.push('scaleX(-1)')
               if (pos.flipV) transforms.push('scaleY(-1)')
+              const geometry = {
+                position: 'absolute' as const,
+                left: `${pos.x}%`,
+                top: `${pos.y}%`,
+                width: `${pos.width}%`,
+                height: `${pos.height}%`,
+                transformOrigin: 'center center',
+              }
               return (
-                <Box
-                  key={img.id}
-                  component="img"
-                  src={img.url}
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation()
-                    setSelectedImageId(img.id)
-                  }}
-                  sx={{
-                    position: 'absolute',
-                    left: `${pos.x}%`,
-                    top: `${pos.y}%`,
-                    width: `${pos.width}%`,
-                    height: `${pos.height}%`,
-                    objectFit: 'cover',
-                    zIndex: renderZ,
-                    pointerEvents: 'auto',
-                    transform: transforms.length > 0 ? transforms.join(' ') : undefined,
-                    transformOrigin: 'center center',
-                    border: selectedImageId === img.id ? '2px dashed' : 'none',
-                    borderColor: 'warning.main',
-                    cursor: 'pointer',
-                  }}
-                />
+                <Fragment key={img.id}>
+                  {/* FEAT-177 — a fitted background leaves space; fill it with a
+                      blurred, slightly enlarged copy of the same picture rather
+                      than a flat grey bar. Same transforms as the sharp copy so
+                      the two can never disagree. */}
+                  {hasFitBackdrop(img) && (
+                    <ImageFitBackdrop
+                      url={img.url}
+                      sx={{
+                        ...geometry,
+                        transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                        zIndex: renderZ - 1,
+                      }}
+                    />
+                  )}
+                  <Box
+                    component="img"
+                    src={img.url}
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation()
+                      setSelectedImageId(img.id)
+                    }}
+                    sx={{
+                      ...geometry,
+                      objectFit: resolveImageFit(img),
+                      zIndex: renderZ,
+                      pointerEvents: 'auto',
+                      transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+                      border: selectedImageId === img.id ? '2px dashed' : 'none',
+                      borderColor: 'warning.main',
+                      cursor: 'pointer',
+                    }}
+                  />
+                </Fragment>
               )
             })}
           </Box>
