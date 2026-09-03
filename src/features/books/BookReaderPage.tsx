@@ -30,6 +30,7 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { useBook } from './useBook'
+import { practiceWordsUsedIn } from './storyPracticeWords'
 import { stackOrder } from './draggableImageUtils'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
@@ -176,12 +177,16 @@ export default function BookReaderPage() {
     if (!book) return []
     // 1. Book's explicit sight words
     const bookWords = book.sightWords ?? []
-    // 2. Child's working words that appear in this book's text
-    const allBookText = book.pages.map((p) => p.text ?? '').join(' ').toLowerCase()
-    const workingWords = [...progressMap.values()]
+    // 2. Child's working words that appear in this book's text — as WHOLE
+    //    words (UX-134). A substring match put "a" on the page of every book,
+    //    "in" on any book with "into" and "at" on any book with "cat", so a
+    //    child with a long practice list got a "Words to Watch For" page full
+    //    of words the book does not contain. `practiceWordsUsedIn` is the same
+    //    check FEAT-169 wrote for the chat, for the same reason.
+    const candidates = [...progressMap.values()]
       .filter((w) => w.masteryLevel === 'new' || w.masteryLevel === 'practicing')
-      .filter((w) => allBookText.includes(w.word.toLowerCase()))
       .map((w) => w.word)
+    const workingWords = practiceWordsUsedIn(book.pages, candidates)
     // 3. Combined, deduplicated
     return [...new Set([...bookWords, ...workingWords])]
   }, [book, progressMap])

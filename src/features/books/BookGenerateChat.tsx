@@ -207,8 +207,14 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
         chatHistory.filter((t) => t.role === 'ai' && t.kind === 'story-draft')
           .length === 1
       if (isFirstStoryDraft) {
+        // `spokenContent` is the draft line WITHOUT the FEAT-176 readability
+        // clause (UX-109). The clause tells a parent which words are above the
+        // child's level, by name — read aloud beside the phone it tells the
+        // child that about himself, which the charter does not allow. It stays
+        // on screen and never enters this queue. An older persisted turn has
+        // no `spokenContent`; `content` is then all we have.
         const queue = [
-          lastAi.content,
+          lastAi.spokenContent ?? lastAi.content,
           ...currentStory.pages.map((p) => `Page ${p.pageNumber}: ${p.text}`),
         ]
         tts.speakQueue(queue)

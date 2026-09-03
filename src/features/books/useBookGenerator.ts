@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { addDoc } from 'firebase/firestore'
 
 import { useAI } from '../../core/ai/useAI'
@@ -8,6 +8,11 @@ import type { Book, BookPage, BookTheme } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { generatePageId } from './bookTypes'
+import {
+  classifyStoryGenerationFailure,
+  storyGenerationFailureMessage,
+  STORY_GUIDE_SURFACE,
+} from './storyGenerationFailure'
 import { useBookIllustrator } from './useBookIllustrator'
 
 /**
@@ -129,6 +134,21 @@ export function useBookGenerator() {
   const { illustrate } = useBookIllustrator()
   const [progress, setProgress] = useState<GenerationProgress | null>(null)
   const [generating, setGenerating] = useState(false)
+  /**
+   * The named failure from the run that just finished (UX-112), readable the
+   * instant `generateBook` resolves. A ref rather than state because the caller
+   * needs it in the same tick it sees the `null` return — a state read there is
+   * the previous render's value, and the alternative (an effect watching
+   * `progress`) is a setState-in-effect the lint rules reject.
+   */
+  const lastErrorRef = useRef<string | null>(null)
+
+  /** Record an error progress and remember its message for the caller. */
+  const failWith = useCallback((message: string) => {
+    lastErrorRef.current = message
+    setProgress({ phase: 'error', currentPage: 0, totalPages: 0, message })
+    setGenerating(false)
+  }, [])
 
   const generateBook = useCallback(
     async (
@@ -142,6 +162,9 @@ export function useBookGenerator() {
       attribution?: { createdBy: 'parent' | string; createdFor: string },
     ): Promise<string | null> => {
       setGenerating(true)
+      // A run starts with no failure, so a null return can never be explained
+      // by the previous run's message.
+      lastErrorRef.current = null
 
       // Phase 1: Generate story text
       setProgress({
@@ -163,29 +186,25 @@ export function useBookGenerator() {
         ],
       })
 
-      if (!storyResult?.message) {
-        setProgress({
-          phase: 'error',
-          currentPage: 0,
-          totalPages: 0,
-          message: 'Failed to generate story',
-        })
-        setGenerating(false)
-        return null
+      // The same three failure shapes the Generate chat names, named here too
+      // (UX-112) — "Failed to generate story" / "Failed to parse story" told a
+      // parent neither which failure happened nor what to do about it.
+      let story: StoryResult | null = null
+      if (storyResult?.message) {
+        try {
+          const cleaned = storyResult.message.replace(/```json|```/g, '').trim()
+          story = JSON.parse(cleaned) as StoryResult
+        } catch {
+          story = null
+        }
       }
-
-      let story: StoryResult
-      try {
-        const cleaned = storyResult.message.replace(/```json|```/g, '').trim()
-        story = JSON.parse(cleaned)
-      } catch {
-        setProgress({
-          phase: 'error',
-          currentPage: 0,
-          totalPages: 0,
-          message: 'Failed to parse story — please try again',
-        })
-        setGenerating(false)
+      if (!story) {
+        failWith(
+          storyGenerationFailureMessage(
+            classifyStoryGenerationFailure(storyResult, story) ?? 'unreadable',
+            STORY_GUIDE_SURFACE,
+          ),
+        )
         return null
       }
 
@@ -244,8 +263,12 @@ export function useBookGenerator() {
         bookId = docRef.id
       } catch (err) {
         console.error('Failed to save book text:', err)
-        setProgress({ phase: 'error', currentPage: 0, totalPages: 0, message: 'Failed to save book' })
-        setGenerating(false)
+        // Not a generation failure — the story was written, the shelf write is
+        // what broke — so it gets the house shape rather than the classifier's
+        // words, and it does NOT claim nothing was lost (UX-112).
+        failWith(
+          'The story was written, but saving it failed \u2014 it did not reach your shelf. Nothing else changed. Tap "Make my book \u2192" to try again.',
+        )
         return null
       }
 
@@ -297,12 +320,15 @@ export function useBookGenerator() {
       setGenerating(false)
       return bookId
     },
-    [chat, illustrate],
+    [chat, illustrate, failWith],
   )
 
   const resetProgress = useCallback(() => {
     setProgress(null)
   }, [])
 
-  return { generateBook, progress, generating, resetProgress }
+  /** The named failure from the last run, or `null` if it did not fail. */
+  const lastError = useCallback(() => lastErrorRef.current, [])
+
+  return { generateBook, progress, generating, resetProgress, lastError }
 }

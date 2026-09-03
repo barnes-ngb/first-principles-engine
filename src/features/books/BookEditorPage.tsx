@@ -65,6 +65,8 @@ import PageEditor from './PageEditor'
 import { GENERATION_STYLES } from './bookTypes'
 import { recordBookArtGeneration, useBookArtQuota } from './useBookArtQuota'
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
+import { describePageContents } from './deletePageSummary'
+import type { ArtHelpSurface } from './artHelpContent'
 import StickerPicker from './StickerPicker'
 import DrawingChoiceDialog from './DrawingChoiceDialog'
 import type { DrawingChoice, PostCleanupChoice } from './DrawingChoiceDialog'
@@ -172,6 +174,16 @@ export default function BookEditorPage() {
   const artAudience = isChildProfile ? 'kid' : 'parent'
   const artBudget = { limit: artLimit, remaining: artRemaining, capped: isChildProfile }
   const [showArtHelp, setShowArtHelp] = useState(false)
+  /**
+   * Which sheet the "?" opens (UX-147). The editor hosts doors on two art
+   * surfaces — page pictures and the drawing / sticker flows — and one sheet
+   * cannot honestly answer for both, so the opener names its surface.
+   */
+  const [artHelpSurface, setArtHelpSurface] = useState<ArtHelpSurface>('bookImages')
+  const openArtHelp = useCallback((surface: ArtHelpSurface) => {
+    setArtHelpSurface(surface)
+    setShowArtHelp(true)
+  }, [])
 
   // ── Themed child (drives editor palette / font / world chips) ───
   // Reads from book.createdFor so Shelly can re-theme the editor without
@@ -331,8 +343,19 @@ export default function BookEditorPage() {
     if (book) setActivePageIndex(book.pages.length)
   }, [addPage, book])
 
+  /**
+   * Deleting a page is destructive and NOT undoable (UX-130): the editor's
+   * history is per-page — `trackPageChange` snapshots the active page's own
+   * fields — so a deleted page never enters Undo's stack, and the book
+   * auto-saves. On this same screen, removing one picture asks first. The
+   * house rule the August audit settled (UX-48): destructive and not
+   * undoable → confirm.
+   */
+  const [confirmDeletePage, setConfirmDeletePage] = useState(false)
+
   const handleDeletePage = useCallback(() => {
     if (!activePage || !book || book.pages.length <= 1) return
+    setConfirmDeletePage(false)
     deletePage(activePage.id)
     setActivePageIndex((prev) => Math.max(0, prev - 1))
   }, [activePage, book, deletePage])
@@ -1029,8 +1052,12 @@ export default function BookEditorPage() {
         </Alert>
       )}
 
-      {/* Attribution controls: who this book is FOR (drives theming) and BY (who created it) */}
-      {children.length > 0 && (
+      {/* Attribution controls: whose shelf this book is on (and drives theming)
+          and who made it. A parent's bookkeeping row: it moves a book between
+          children and can stamp a grown-up as the author, so it is gated on
+          capability, never on a name (UX-127). A kid in the editor used to see
+          it and could move his own book off his shelf. */}
+      {isParentProfile && children.length > 0 && (
         <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1, py: 0.5 }}>
           <FormControl size="small" sx={{ minWidth: 120 }}>
             <InputLabel id="book-for-label">For</InputLabel>
@@ -1040,9 +1067,15 @@ export default function BookEditorPage() {
               value={book.createdFor ?? themedChild?.id ?? ''}
               onChange={(e) => {
                 const nextFor = e.target.value as string
-                updateBookMeta({ createdFor: nextFor })
-                // Also keep childId aligned to target child for bookshelf queries
-                // (child sees books where childId === their own id)
+                // "For" moves the book (UX-124, owner decision 2026-09-03).
+                // `childId` is what the kid shelf queries, what the kid Today
+                // cards query, and what the reader logs reading minutes and XP
+                // against — so writing `createdFor` alone re-themed the editor
+                // and left the book on the other child's shelf, which is the
+                // opposite of what the label promises. The two now move
+                // together: the book lands on the chosen child's shelf and its
+                // reading minutes follow it there.
+                updateBookMeta({ createdFor: nextFor, childId: nextFor })
               }}
             >
               {children.map((c) => (
@@ -1342,6 +1375,8 @@ export default function BookEditorPage() {
         onPickPostCleanup={(choice, intensity, transparent) => { void handlePostCleanupChoice(choice, intensity, transparent) }}
         onRetryResult={handleRetryDrawingResult}
         capReached={artCapReached}
+        artAudience={artAudience}
+        onOpenArtHelp={() => openArtHelp('sketch')}
       />
 
       {/* Page strip */}
@@ -1506,13 +1541,13 @@ export default function BookEditorPage() {
           Sticker
         </Button>
 
-        {/* Delete page (only if > 1 page) */}
+        {/* Delete page (only if > 1 page) — asks first (UX-130) */}
         {book.pages.length > 1 && (
           <Button
             variant="text"
             color="error"
             startIcon={<DeleteOutlineIcon />}
-            onClick={handleDeletePage}
+            onClick={() => setConfirmDeletePage(true)}
             sx={{ minHeight: 48, ml: 'auto' }}
           >
             Delete page
@@ -1738,7 +1773,7 @@ export default function BookEditorPage() {
           {/* One "?" for every paid picture in the editor (FEAT-178) — the
               scene generator, reimagine, the sticker picker and the
               show-the-whole-picture control all live on the same sheet. */}
-          <ArtHelpButton onClick={() => setShowArtHelp(true)} />
+          <ArtHelpButton onClick={() => openArtHelp('bookImages')} />
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
@@ -1934,8 +1969,31 @@ export default function BookEditorPage() {
         </DialogActions>
       </Dialog>
 
+      {/* Delete page confirm (UX-130). Names what goes, in the counts a person
+          can check against the page in front of them — the shelf's own delete
+          shape. Page deletion is not in Undo's per-page history and the book
+          auto-saves, so this is the only thing standing between a tap and a
+          lost page of story. */}
+      <Dialog
+        open={confirmDeletePage}
+        onClose={() => setConfirmDeletePage(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete page {activePage?.pageNumber ?? ''}?</DialogTitle>
+        <DialogContent>
+          <Typography>{describePageContents(activePage)} This can&apos;t be undone.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeletePage(false)}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={handleDeletePage}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <ArtHelpSheet
-        surface="bookImages"
+        surface={artHelpSurface}
         open={showArtHelp}
         onClose={() => setShowArtHelp(false)}
         audience={artAudience}
@@ -1952,6 +2010,8 @@ export default function BookEditorPage() {
         onSelectSticker={handleSelectSticker}
         capReached={artCapReached}
         recordGeneration={recordGeneration}
+        artAudience={artAudience}
+        onOpenArtHelp={() => openArtHelp('stickers')}
       />
 
       {/* Finish dialog */}

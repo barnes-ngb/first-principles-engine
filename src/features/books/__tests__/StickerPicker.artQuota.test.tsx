@@ -151,3 +151,33 @@ describe('StickerPicker — weekly art budget (FEAT-168)', () => {
     expect(screen.queryByText(ART_QUOTA_MESSAGE)).toBeNull()
   })
 })
+
+// UX-147 — this picker is a second, older "Make a Sticker" that never got
+// FEAT-178's hint or "?" (the Stickers page's own dialog has both).
+
+describe('UX-147 — the picker\'s Make a Sticker door', () => {
+  it('carries a hint under the prompt and a "?" in the title', async () => {
+    const user = userEvent.setup()
+    renderPicker({ artAudience: 'parent', onOpenArtHelp: vi.fn() })
+
+    await user.click(await screen.findByRole('button', { name: /make a sticker/i }))
+    expect(screen.getByText(/1 paid image call/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /how this works/i })).toBeTruthy()
+  })
+
+  it('gives a kid the kid wording, on capability and never a name', async () => {
+    const user = userEvent.setup()
+    renderPicker({ artAudience: 'kid', onOpenArtHelp: vi.fn() })
+
+    await user.click(await screen.findByRole('button', { name: /make a sticker/i }))
+    expect(screen.getByText('Makes 1 sticker. Uses 1 art.')).toBeTruthy()
+    expect(screen.queryByText(/paid image call/)).toBeNull()
+  })
+
+  it('stands down at the cap — the nudge, never both', async () => {
+    renderPicker({ capReached: true, artAudience: 'kid', onOpenArtHelp: vi.fn() })
+
+    await waitFor(() => expect(screen.getByText(ART_QUOTA_MESSAGE)).toBeTruthy())
+    expect(screen.queryByText(/Uses 1 art\./)).toBeNull()
+  })
+})

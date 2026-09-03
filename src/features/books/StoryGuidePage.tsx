@@ -13,6 +13,8 @@ import Page from '../../components/Page'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useBookGenerator, inferBookTheme } from './useBookGenerator'
+import { useBookArtQuota } from './useBookArtQuota'
+import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
 import { useSightWordProgress } from './useSightWordProgress'
 import StoryGuideQuestion from './StoryGuideQuestion'
 import GenerationProgress from './GenerationProgress'
@@ -38,10 +40,18 @@ function ageFromBirthdate(birthdate: string | undefined, fallback: number): numb
 
 type WizardStep = 'questions' | 'questions-done' | 'brief-preview' | 'generating'
 
+/**
+ * Shown only if `generateBook` returns null without having named a failure —
+ * every real path sets one. In the house shape: what failed, what is still
+ * safe, what to tap.
+ */
+const FALLBACK_GENERATION_ERROR =
+  'The story didn\u2019t come back. Nothing was lost: your answers are still here. Tap "Make my book \u2192" to try again.'
+
 export default function StoryGuidePage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, isChildProfile } = useActiveChild()
   const childId = activeChild?.id ?? ''
   const childName = activeChild?.name ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
@@ -52,8 +62,17 @@ export default function StoryGuidePage() {
   const [pageCount, setPageCount] = useState<number>(DEFAULT_TARGET_PAGE_COUNT)
   const genStyle = isLincoln ? 'minecraft' : 'storybook'
 
-  const { generateBook, progress, generating, resetProgress } = useBookGenerator()
+  const { generateBook, progress, generating, resetProgress, lastError } = useBookGenerator()
   const { getWeakWords, loading: sightWordsLoading } = useSightWordProgress(familyId, childId)
+
+  // Help copy is audience-gated on capability (FEAT-178), never on a name —
+  // the cosmetic `isLincoln` below (palette) is not this answer. The budget
+  // figures come from the same weekly counter every other art surface reads,
+  // so this sheet can never print a stale cap.
+  const artAudience = isChildProfile ? 'kid' : 'parent'
+  const { limit: artLimit, remaining: artRemaining } = useBookArtQuota()
+  const artBudget = { limit: artLimit, remaining: artRemaining, capped: isChildProfile }
+  const [showArtHelp, setShowArtHelp] = useState(false)
 
   // FEAT-183 / UX-152 (B5): the guided-story question set is chosen by age
   // group, not by name. Unchanged for both boys — Lincoln resolves 'older',
@@ -95,7 +114,11 @@ export default function StoryGuidePage() {
         navigate(`/books/${bookId}`)
       }, 1500)
     } else {
-      setGenerationError('Failed to generate the book. Please try again.')
+      // The generator named WHICH failure happened (UX-112) — no reply, a reply
+      // cut short by the output budget, an unreadable one, or a save that
+      // failed after the story was written. That is the message worth showing,
+      // so it is read back rather than replaced with a flat "Please try again".
+      setGenerationError(lastError() ?? FALLBACK_GENERATION_ERROR)
       setWizardStep('brief-preview')
     }
   }, [
@@ -109,6 +132,7 @@ export default function StoryGuidePage() {
     generateBook,
     resetProgress,
     navigate,
+    lastError,
   ])
 
   // ── Render: generation in progress ───────────────────────────
@@ -264,7 +288,12 @@ export default function StoryGuidePage() {
           "{storyPromptPreview.length > 120 ? storyPromptPreview.slice(0, 120) + '...' : storyPromptPreview}"
         </Typography>
 
-        <StoryLengthSelector value={pageCount} onChange={setPageCount} disabled={generating} />
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <StoryLengthSelector value={pageCount} onChange={setPageCount} disabled={generating} />
+          {/* One "?" for the surface (FEAT-178 / UX-147): what the pictures
+              look like, what making the book spends, what it never touches. */}
+          <ArtHelpButton onClick={() => setShowArtHelp(true)} />
+        </Stack>
 
         {generationError && (
           <Alert severity="error" onClose={() => setGenerationError(null)}>
@@ -292,6 +321,11 @@ export default function StoryGuidePage() {
           >
             Make my book →
           </Button>
+          {/* What this tap makes and what it spends (UX-147). It is the loudest
+              paid door in the area — one tap, one picture per page, up to 14 —
+              and it arrived with nothing said about the cost. The count is the
+              live page count, never a hard-coded 1. */}
+          <GenerateHint door="illustrateBook" audience={artAudience} count={pageCount} />
 
           <Button
             variant="text"
@@ -304,6 +338,14 @@ export default function StoryGuidePage() {
           </Button>
         </Stack>
       </Stack>
+
+      <ArtHelpSheet
+        surface="generateBook"
+        open={showArtHelp}
+        onClose={() => setShowArtHelp(false)}
+        audience={artAudience}
+        budget={artBudget}
+      />
     </Page>
   )
 }

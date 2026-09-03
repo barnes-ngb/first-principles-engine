@@ -12,12 +12,14 @@ import { clampTargetPageCount } from './storyPageTargets'
 import {
   classifyStoryGenerationFailure,
   storyGenerationFailureMessage,
+  STORY_REVISE_SURFACE,
 } from './storyGenerationFailure'
 import {
   StoryWordSource,
   resolveStoryWords,
   selectStoryPracticeWords,
   storyDraftMessage,
+  storyDraftSpokenMessage,
 } from './storyPracticeWords'
 import { useBookIllustrator } from './useBookIllustrator'
 import { useSightWordProgress } from './useSightWordProgress'
@@ -182,6 +184,44 @@ const CHAINING_WORDS = new Set([
  * tapped "+ Add it" for. Trims trailing punctuation off the first part,
  * inserts "and" unless the refinement already starts with a chaining word.
  */
+/**
+ * A bare answer to the yes/no question the chat just asked (UX-110).
+ *
+ * "Want me to start the story?" is a question, the composer is live under it,
+ * and a kid who types "yes" got *"Should I ADD that to your story, or CHANGE
+ * the idea to that?"* — and "+ Add it" then produced the idea "a dragon who
+ * finds a cave and yes". Answering the question was treated as a new idea.
+ *
+ * Deliberately narrow: only a bare affirmative or negative, punctuation and
+ * case aside. "yes, and a dragon" is a real refinement and must stay one, so
+ * anything with more than the word itself falls through untouched.
+ */
+export const AFFIRMATIVE_REPLIES: ReadonlySet<string> = new Set([
+  'y', 'ya', 'yah', 'yeah', 'yep', 'yes', 'yup',
+  'ok', 'okay', 'sure', 'go', 'start', 'please',
+])
+
+export const NEGATIVE_REPLIES: ReadonlySet<string> = new Set([
+  'n', 'no', 'nope', 'nah', 'not yet', 'wait',
+])
+
+export type ClarificationReply = 'affirmative' | 'negative' | 'idea'
+
+export function classifyClarificationReply(text: string): ClarificationReply {
+  const bare = text
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?,\s]+$/u, '')
+    .replace(/\s{2,}/gu, ' ')
+  if (AFFIRMATIVE_REPLIES.has(bare)) return 'affirmative'
+  if (NEGATIVE_REPLIES.has(bare)) return 'negative'
+  return 'idea'
+}
+
+/** What the chat says when the answer was "no" — no idea change, one nudge. */
+export const DECLINED_START_NUDGE =
+  "Okay \u2014 we won't start yet. Tell me what to change about the idea, or tap \"\u2713 Yes, start my story!\" when you're ready."
+
 export function joinIdeas(a: string, b: string): string {
   const left = a.replace(/[.!?,\s]+$/u, '').trim()
   const right = b.replace(/^\s+/u, '')
@@ -239,6 +279,12 @@ export function useBookGenerateChat(
   )
 
   const [chatHistory, setChatHistory] = useState<ChatTurn[]>([])
+  /**
+   * `confirmStartStory` is defined below `sendKidMessage` and depends on state
+   * that message handler also touches, so a bare "yes" reaches it through a ref
+   * rather than by reordering two large callbacks around each other (UX-110).
+   */
+  const confirmStartStoryRef = useRef<(() => Promise<void>) | null>(null)
   const [currentStory, setCurrentStory] = useState<GeneratedStory | null>(null)
   const [illustrationStyle, setIllustrationStyle] = useState<string>(
     defaultIllustrationStyle,
@@ -568,13 +614,18 @@ export function useBookGenerateChat(
               },
             ],
           })
-          if (!result?.message) {
-            setError('I had trouble with that. Try again?')
-            return
-          }
-          const parsed = parseReviseResult(result.message)
+          // The same three failure shapes the first draft has, named the same
+          // way (UX-112) — the revise loop kept the pre-FEAT-169 "I had trouble
+          // with that" for both, which told a parent nothing about which of the
+          // two happened or what to do next.
+          const parsed = result?.message ? parseReviseResult(result.message) : null
           if (!parsed) {
-            setError('I had trouble with that. Try again?')
+            setError(
+              storyGenerationFailureMessage(
+                classifyStoryGenerationFailure(result, parsed) ?? 'unreadable',
+                STORY_REVISE_SURFACE,
+              ),
+            )
             return
           }
           const aiTurn: ChatTurn = {
@@ -635,6 +686,33 @@ export function useBookGenerateChat(
       }
 
       if (pendingRefinement === null) {
+        // The Yes button is on screen and the chat just asked a yes/no
+        // question, so a bare answer to it is an ANSWER, not a new idea
+        // (UX-110). "yes" used to become part of the story idea.
+        const reply = classifyClarificationReply(trimmed)
+        if (reply === 'affirmative' && pendingIdea) {
+          await confirmStartStoryRef.current?.()
+          return
+        }
+        if (reply === 'negative' && pendingIdea) {
+          const nudgeTurn: ChatTurn = {
+            role: 'ai',
+            content: DECLINED_START_NUDGE,
+            ts: Date.now(),
+            kind: 'echo',
+          }
+          const nudged: ChatTurn[] = [...chatHistory, kidTurn, nudgeTurn]
+          setChatHistory(nudged)
+          await persistClarification(
+            nudged,
+            illustrationStyle,
+            'clarifying',
+            pendingIdea,
+            null,
+          )
+          return
+        }
+
         // Kid sent a follow-up during clarification → Add/Change prompt.
         const aiTurn: ChatTurn = {
           role: 'ai',
@@ -753,6 +831,17 @@ export function useBookGenerateChat(
           result?.readability,
           childName,
         ),
+        // The same line minus the honest clause — what the chat's TTS is
+        // allowed to say (UX-109). The clause names words above the child's
+        // level and is for the parent's eyes only, so it has one delivery:
+        // the screen.
+        spokenContent: storyDraftSpokenMessage(
+          story.title,
+          storyWords,
+          story.pages,
+          storyWordSource,
+          childName,
+        ),
         ts: Date.now(),
         kind: 'story-draft',
       }
@@ -787,6 +876,10 @@ export function useBookGenerateChat(
     storyWordSource,
     storyWordsLoading,
   ])
+
+  // The bare-"yes" branch in `sendKidMessage` above reaches the tap through
+  // this ref, so both stay one implementation (UX-110).
+  confirmStartStoryRef.current = confirmStartStory
 
   // ── Confirm add refinement ───────────────────────────────────
 

@@ -58,11 +58,15 @@ export default function SightWordDashboard() {
 
   const handleGenerateFromWeak = useCallback(() => {
     const weakWords = getWeakWords()
-    const params = new URLSearchParams()
-    if (weakWords.length > 0) {
-      params.set('words', weakWords.join(','))
-    }
-    navigate(`/books/create-story?${params.toString()}`)
+    // Navigation state, not a query string (UX-142). Create a Sight Word Story
+    // reads `location.state.prefillWords` and only that — as the evaluation
+    // banner, the Word Wall and the quest summary already pass it — so
+    // `?words=` put the words in the URL and nowhere on the page: a button
+    // promising a story from THESE words landed on a blank words box. One
+    // contract, and this is it.
+    navigate('/books/create-story', {
+      state: { prefillWords: weakWords, source: 'dashboard' },
+    })
   }, [getWeakWords, navigate])
 
   const handleConfirmMastered = useCallback(async () => {

@@ -105,12 +105,17 @@ export default function GenerationProgress({ progress, isLincoln }: Props) {
         />
       )}
 
-      {/* Done state */}
+      {/* Done state — the generator's own `message` is the truth about what
+          landed (UX-115). It reads "Your book is ready!" only when every page
+          got its picture; at the art cap it is the FEAT-168 refusal copy, and
+          after a partial failure it says how many pages still need one. This
+          used to print a hard-coded success over both, so the honest copy
+          written for exactly this moment never reached a screen. */}
       {phase === 'done' && (
         <Stack alignItems="center" spacing={1}>
           <CheckCircleIcon sx={{ fontSize: 48, color: 'success.main' }} />
           <Typography variant="h6" color="success.main">
-            Your book is ready!
+            {message}
           </Typography>
         </Stack>
       )}

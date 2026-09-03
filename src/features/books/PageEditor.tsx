@@ -91,7 +91,6 @@ export default function PageEditor({
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
   const [layersOpen, setLayersOpen] = useState(false)
-  const [confirmRemoveBg, setConfirmRemoveBg] = useState(false)
   const [bgMenuAnchor, setBgMenuAnchor] = useState<HTMLElement | null>(null)
   const [versionHistoryImageId, setVersionHistoryImageId] = useState<string | null>(null)
   const imageContainerRef = useRef<HTMLDivElement>(null)
@@ -171,6 +170,27 @@ export default function PageEditor({
   // elements are composed overlays and stay exactly as they are.
   const canToggleFit = hasFittableBackground(page.images)
   const currentBgFit = backgroundFitOf(page.images)
+
+  /**
+   * One "Remove picture" behaviour on this screen (UX-129).
+   *
+   * This menu item used to confirm and then remove EVERY background on the
+   * page, while the action-bar chip with the same words removed the selected
+   * one without asking. Two behaviours behind one label, and the confirmed
+   * plural was the surprising one. Both are undoable — `onRemoveImage` is the
+   * editor's tracked remover — and the house rule is: undoable → don't ask.
+   * So this now does what the chip does: remove one, the selected background
+   * when there is one, otherwise the page's only/top background.
+   */
+  const removeOneBackground = () => {
+    if (!onRemoveImage) return
+    const target =
+      backgroundImages.find((img) => img.id === selectedImageId) ??
+      backgroundImages[backgroundImages.length - 1]
+    if (!target) return
+    onRemoveImage(target.id)
+    setSelectedImageId(null)
+  }
   const toggleBackgroundFit = () => {
     const next = currentBgFit === 'fit' ? 'fill' : 'fit'
     onUpdate({ images: applyBackgroundFit(page.images, next) })
@@ -215,7 +235,7 @@ export default function PageEditor({
             </MenuItem>
             )}
             {onRemoveImage && (
-              <MenuItem onClick={() => { setBgMenuAnchor(null); setConfirmRemoveBg(true) }}>
+              <MenuItem onClick={() => { setBgMenuAnchor(null); removeOneBackground() }}>
                 <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
                 <ListItemText>Remove picture</ListItemText>
               </MenuItem>
@@ -494,27 +514,6 @@ export default function PageEditor({
           ))}
         </ToggleButtonGroup>
       </Box>
-
-      {/* Remove background confirmation dialog */}
-      <Dialog open={confirmRemoveBg} onClose={() => setConfirmRemoveBg(false)}>
-        <DialogTitle>Remove the picture?</DialogTitle>
-        <DialogActions>
-          <Button onClick={() => setConfirmRemoveBg(false)}>Cancel</Button>
-          <Button
-            color="error"
-            variant="contained"
-            onClick={() => {
-              if (onRemoveImage) {
-                backgroundImages.forEach((img) => onRemoveImage(img.id))
-              }
-              setSelectedImageId(null)
-              setConfirmRemoveBg(false)
-            }}
-          >
-            Remove
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* Previous versions dialog */}
       <Dialog
