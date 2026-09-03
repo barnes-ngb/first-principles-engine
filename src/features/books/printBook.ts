@@ -1,10 +1,13 @@
 import { jsPDF } from 'jspdf'
-import type { Book, BookPage, PageImage } from '../../core/types'
+import type { Book, BookPage } from '../../core/types'
 import { startStep } from '../../core/utils/perf'
 import { fetchAsDataUri } from './imageDataUri'
 import { stackOrder } from './draggableImageUtils'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
+import { duplexSides, imposeBooklet, type LogicalPage } from './bookletImposition'
 import type { PrintSettings } from './PrintSettingsDialog'
+
+export type { LogicalPage } from './bookletImposition'
 
 /**
  * Blur radius (source pixels) for the FEAT-177 backdrop copy in the PDF. Larger
@@ -37,6 +40,29 @@ type Colors = (typeof BG_COLORS)[keyof typeof BG_COLORS]
 const TRIM_MARK_LENGTH_MM = 3
 const BLEED_MM = 6
 
+/**
+ * The booklet's finished page (FEAT-185): each half of the landscape letter
+ * sheet is laid out as a 5.5 × 7 in page — the `mini-5x7` size, so one shape
+ * is shared — and a dashed trim line across the sheet at this height says
+ * where to cut. The strip below it (1.5 in) is waste; nothing of the book is
+ * drawn there.
+ */
+const BOOKLET_TRIM_HEIGHT_MM = PAGE_CONFIGS['mini-5x7'].heightMM
+
+/**
+ * How much of a content page's height the picture box may take. The box is
+ * also capped by its 3:2 width-derived height (`drawContentPage`), which is
+ * the binding limit on every current format — the fraction is the ceiling for
+ * a page whose content area is narrower than it is tall. The trimmed booklet
+ * page is short, so it is allowed a larger share (FEAT-185).
+ */
+const IMAGE_BOX_HEIGHT_FRACTION = 0.55
+const BOOKLET_IMAGE_BOX_HEIGHT_FRACTION = 0.6
+
+export function imageBoxHeightFraction(pageSize: PrintSettings['pageSize']): number {
+  return pageSize === 'booklet' ? BOOKLET_IMAGE_BOX_HEIGHT_FRACTION : IMAGE_BOX_HEIGHT_FRACTION
+}
+
 const DEFAULT_SETTINGS: PrintSettings = {
   pageSize: 'half-letter',
   background: 'white',
@@ -55,49 +81,87 @@ export interface PrintBookOptions {
   settings?: PrintSettings
 }
 
-/* ───────────────────── cover URL + dedupe (FEAT-99 / FEAT-91) ───────────────────── */
+/* ───────────────────── cover URL (FEAT-99 / FEAT-91) ───────────────────── */
 
 /**
  * The cover image URL: the explicit `coverImageUrl`, else the first page image
  * as a fallback. Single source of truth used by both the prefetch pass and
  * `drawCover` so they never disagree.
+ *
+ * A cover that reuses the first illustration is a picture-book convention. It
+ * is NOT deduplicated off page 1 any more: FEAT-99's `contentImagesToDraw`
+ * stripped the cover's fallback image from story page 1 so the cover would not
+ * "read as two pages", and the owner's printed book (2026-09-03) showed the
+ * cost — page 1 was a grey box with its stickers floating on nothing. Retired
+ * by owner decision in FEAT-185; page 1 keeps its picture in every format.
  */
 export function resolveCoverImageUrl(book: Book): string | undefined {
   return book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
 }
 
-/**
- * Images to draw on a content page, dropping any that duplicate the cover image
- * (FEAT-99). When a book has no explicit cover the cover falls back to page 1's
- * image (see {@link resolveCoverImageUrl}); without this filter that art would
- * render again on story page 1, so the cover reads as "two pages." Deduping by
- * URL mirrors the FEAT-91 fix in `catalogPreview.buildBookPreview`. `dedupeUrl`
- * is `undefined` when there is no cover page (nothing to duplicate).
- */
-export function contentImagesToDraw(
-  images: PageImage[],
-  dedupeUrl: string | undefined,
-): PageImage[] {
-  if (!dedupeUrl) return images
-  return images.filter((img) => img.url !== dedupeUrl)
-}
-
-/* ───────────────────── page-number placement (FEAT-99) ───────────────────── */
+/* ───────────────────── page-number placement (FEAT-99 / FEAT-185) ───────────────────── */
 
 /**
- * Full-document formats that keep printed page numbers. The picture-book
- * formats (half-letter, booklet, mini-5x7, square-6) are small folded/stapled
- * storybooks: a bottom-center number sits in the fold/trim zone and reads as
- * clutter on a kids' picture book, so it's suppressed there regardless of the
- * `includePageNumbers` toggle. letter/a4 read as documents and keep numbers.
+ * Formats that keep printed page numbers. letter/a4 read as documents. The
+ * booklet joined them in FEAT-185: its halves are now laid out as trimmed
+ * 5.5 × 7 pages with the number bottom-centre INSIDE the trimmed page, above
+ * the trim line — the reason it was suppressed (a number sitting in the
+ * fold/trim zone) no longer holds. The single-page picture-book formats
+ * (half-letter, mini-5x7, square-6) stay suppressed regardless of the
+ * `includePageNumbers` toggle: a bottom-centre number on a small folded
+ * storybook reads as clutter, and those pages have no trim line to sit above.
  */
-const PAGE_NUMBER_FORMATS: ReadonlySet<PrintSettings['pageSize']> = new Set(['letter', 'a4'])
+const PAGE_NUMBER_FORMATS: ReadonlySet<PrintSettings['pageSize']> = new Set([
+  'letter',
+  'a4',
+  'booklet',
+])
 
 export function shouldRenderPageNumbers(
   pageSize: PrintSettings['pageSize'],
   includePageNumbers: boolean,
 ): boolean {
   return includePageNumbers && PAGE_NUMBER_FORMATS.has(pageSize)
+}
+
+/**
+ * The number printed on a logical page, or `null` for pages that carry none.
+ * Only story pages are numbered, and the number is the story page number
+ * (`index + 1`) — never the imposed sheet position. Cover, sight-words page,
+ * back cover and imposition blanks are unnumbered (FEAT-185).
+ */
+export function pageNumberLabel(logicalPage: LogicalPage): string | null {
+  return logicalPage.type === 'content' ? String(logicalPage.index + 1) : null
+}
+
+/* ───────────────────── text sizing ───────────────────── */
+
+/**
+ * Font size + line height for a content page's story text, by text length and
+ * the height left under the picture. Narrower page formats (half-letter,
+ * mini-5x7, booklet halves) take smaller base sizes so lines don't clip on the
+ * right edge. Exported so the booklet's trimmed page (FEAT-185) can be checked
+ * against the untrimmed one: with the shorter page the London six-page example
+ * must land on the same size, not a smaller one.
+ */
+export function textSizeFor(
+  textLen: number,
+  availableTextH: number,
+  isNarrowPage: boolean,
+): { fontSize: number; lineHeight: number } {
+  if (textLen > 400 || availableTextH < 40) {
+    return { fontSize: isNarrowPage ? 9 : 10, lineHeight: 1.35 }
+  }
+  if (textLen > 300 || availableTextH < 50) {
+    return { fontSize: isNarrowPage ? 10 : 11, lineHeight: 1.4 }
+  }
+  if (textLen > 200) {
+    return { fontSize: isNarrowPage ? 11 : 12, lineHeight: 1.45 }
+  }
+  if (textLen > 120) {
+    return { fontSize: isNarrowPage ? 12 : 14, lineHeight: 1.5 }
+  }
+  return { fontSize: isNarrowPage ? 14 : 16, lineHeight: 1.6 }
 }
 
 /* ───────────────────── image pre-fetch (Firebase SDK) ───────────────────── */
@@ -638,14 +702,13 @@ async function drawContentPage(
   sightWordSet: Set<string>,
   resolveUrl: (url: string) => string,
   area: ContentArea,
-  dedupeUrl: string | undefined,
 ): Promise<void> {
   const textColor = hexToRgb(colors.text)
   let curY = area.y
 
-  // Drop any image that duplicates the cover art (FEAT-99) so it never repeats
-  // as story page 1.
-  const pageImages = contentImagesToDraw(page.images, dedupeUrl)
+  // Every image the page holds — including one the cover reuses (FEAT-185
+  // retired FEAT-99's dedupe; see `resolveCoverImageUrl`).
+  const pageImages = page.images
 
   // Render page images
   if (pageImages.length > 0) {
@@ -653,7 +716,10 @@ async function drawContentPage(
     // Derive height from available width so the container always fits.
     const IMAGE_ASPECT_RATIO = 3 / 2
     const imgAreaW = area.w
-    const imgAreaH = Math.min(area.w / IMAGE_ASPECT_RATIO, area.h * 0.55)
+    const imgAreaH = Math.min(
+      area.w / IMAGE_ASPECT_RATIO,
+      area.h * imageBoxHeightFraction(settings.pageSize),
+    )
     const imgAreaX = area.x
 
     // Draw bottom → top in the same unified stacking order as the editor and
@@ -769,22 +835,8 @@ async function drawContentPage(
     const availableTextH = maxTextY - curY
 
     // Scale font size and line height based on text length and available space.
-    // Narrower page formats (half-letter, mini-5x7, booklet halves) need smaller
-    // base sizes to avoid text clipping on the right edge.
     const isNarrowPage = area.w < 120 // mm — letter content is ~190mm, half-letter ~114mm
-    let fontSize: number
-    let lineHeight: number
-    if (textLen > 400 || availableTextH < 40) {
-      fontSize = isNarrowPage ? 9 : 10; lineHeight = 1.35
-    } else if (textLen > 300 || availableTextH < 50) {
-      fontSize = isNarrowPage ? 10 : 11; lineHeight = 1.4
-    } else if (textLen > 200) {
-      fontSize = isNarrowPage ? 11 : 12; lineHeight = 1.45
-    } else if (textLen > 120) {
-      fontSize = isNarrowPage ? 12 : 14; lineHeight = 1.5
-    } else {
-      fontSize = isNarrowPage ? 14 : 16; lineHeight = 1.6
-    }
+    const { fontSize, lineHeight } = textSizeFor(textLen, availableTextH, isNarrowPage)
 
     curY = renderText(
       pdf,
@@ -802,12 +854,14 @@ async function drawContentPage(
     )
   }
 
-  // Page number at bottom center — document formats only (FEAT-99)
-  if (shouldRenderPageNumbers(settings.pageSize, settings.includePageNumbers)) {
+  // Page number at bottom center — document formats + the trimmed booklet
+  // page (FEAT-99 / FEAT-185). Always the story page number.
+  const numberLabel = pageNumberLabel({ type: 'content', page, index: pageIndex })
+  if (numberLabel && shouldRenderPageNumbers(settings.pageSize, settings.includePageNumbers)) {
     pdf.setFont('times', 'normal')
     pdf.setFontSize(12)
     pdf.setTextColor(...textColor)
-    pdf.text(String(pageIndex + 1), area.x + area.w / 2, area.y + area.h + 2, { align: 'center' })
+    pdf.text(numberLabel, area.x + area.w / 2, area.y + area.h + 2, { align: 'center' })
   }
 }
 
@@ -845,17 +899,12 @@ function drawBackCover(
 
 /* ───────────────────── booklet rendering ───────────────────── */
 
-export type LogicalPage =
-  | { type: 'cover' }
-  | { type: 'sight-words' }
-  | { type: 'content'; page: BookPage; index: number }
-  | { type: 'back' }
-
 /**
  * Build the ordered logical-page sequence for a book: cover (once) → sight-words
  * (if any) → each content page → back cover. Pure and read-only — the single
  * source of truth shared by the flat and booklet render paths, so the cover is
- * emitted exactly once regardless of format.
+ * emitted exactly once regardless of format. The booklet path imposes THIS
+ * sequence (`bookletImposition.ts`); the imposition never builds its own.
  */
 export function buildLogicalPages(
   book: Book,
@@ -882,7 +931,6 @@ async function drawLogicalPage(
   resolveUrl: (url: string) => string,
   area: ContentArea,
   isLincoln: boolean,
-  dedupeUrl: string | undefined,
 ): Promise<void> {
   switch (logicalPage.type) {
     case 'cover':
@@ -892,14 +940,43 @@ async function drawLogicalPage(
       drawSightWordsPage(pdf, [...sightWordSet], colors, isLincoln, area)
       break
     case 'content':
-      await drawContentPage(pdf, logicalPage.page, logicalPage.index, colors, settings, sightWordSet, resolveUrl, area, dedupeUrl)
+      await drawContentPage(pdf, logicalPage.page, logicalPage.index, colors, settings, sightWordSet, resolveUrl, area)
       break
     case 'back':
       drawBackCover(pdf, book, childName, colors, area)
       break
+    case 'blank':
+      // Imposition padding: the sheet background is already drawn.
+      break
   }
 }
 
+/** Draw a dashed line between two points, 2 mm dash / 2 mm gap. */
+function drawDashedLine(pdf: jsPDF, x1: number, y1: number, x2: number, y2: number): void {
+  const dashLen = 2
+  const gapLen = 2
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const length = Math.hypot(dx, dy)
+  if (length === 0) return
+  const ux = dx / length
+  const uy = dy / length
+  let pos = 0
+  while (pos < length) {
+    const end = Math.min(pos + dashLen, length)
+    pdf.line(x1 + ux * pos, y1 + uy * pos, x1 + ux * end, y1 + uy * end)
+    pos = end + gapLen
+  }
+}
+
+/**
+ * The booklet (FEAT-185): a saddle-stitched, fold-in-half book. Each landscape
+ * letter sheet carries two logical pages per face, placed by
+ * `imposeBooklet` so the stack folds into reading order; each half is laid out
+ * as a trimmed 5.5 × 7 in page; a dashed trim line across the sheet says where
+ * to cut and nothing of the book is drawn below it; the fold line runs down
+ * the centre and stops at the trim line.
+ */
 async function renderBooklet(
   pdf: jsPDF,
   book: Book,
@@ -913,58 +990,54 @@ async function renderBooklet(
 ): Promise<void> {
   const config = PAGE_CONFIGS.booklet
   const halfW = config.widthMM / 2
+  const trimY = BOOKLET_TRIM_HEIGHT_MM + bleedOffset
 
-  // Build logical page sequence (cover emitted exactly once)
+  // Build logical page sequence (cover emitted exactly once), then impose it.
   const logicalPages = buildLogicalPages(
     book,
     settings.includeCover,
     sightWordSet.size > 0,
     settings.includeBackCover,
   )
-  // Cover art to suppress on content pages (only when a cover page exists).
-  const dedupeUrl = settings.includeCover ? resolveCoverImageUrl(book) : undefined
+  const sides = duplexSides(imposeBooklet(logicalPages))
 
-  for (let i = 0; i < logicalPages.length; i += 2) {
+  // Each half is a trimmed page: content sits inside the 5.5 × 7 in page's
+  // margins, never inside the sheet's full height.
+  const halfArea = (left: boolean): ContentArea => ({
+    x: (left ? 0 : halfW) + MARGIN_MM + bleedOffset,
+    y: MARGIN_MM + bleedOffset,
+    w: halfW - MARGIN_MM * 2,
+    h: BOOKLET_TRIM_HEIGHT_MM - MARGIN_MM * 2,
+  })
+
+  for (let i = 0; i < sides.length; i++) {
     if (i > 0) pdf.addPage()
+    const side = sides[i]
 
-    // Draw full sheet background
+    // Draw full sheet background (the waste strip below the trim line too —
+    // it is cut away, and a page-coloured strip is what a trimmed edge wants).
     drawBackground(pdf, colors.bg, config.widthMM, config.heightMM, bleedOffset, bleedOffset)
 
-    // Left half
-    const leftArea: ContentArea = {
-      x: MARGIN_MM + bleedOffset,
-      y: MARGIN_MM + bleedOffset,
-      w: halfW - MARGIN_MM * 2,
-      h: config.heightMM - MARGIN_MM * 2,
-    }
-    await drawLogicalPage(pdf, logicalPages[i], book, childName, colors, settings, sightWordSet, resolveUrl, leftArea, isLincoln, dedupeUrl)
+    await drawLogicalPage(pdf, side.left, book, childName, colors, settings, sightWordSet, resolveUrl, halfArea(true), isLincoln)
+    await drawLogicalPage(pdf, side.right, book, childName, colors, settings, sightWordSet, resolveUrl, halfArea(false), isLincoln)
 
-    // Right half
-    if (i + 1 < logicalPages.length) {
-      const rightArea: ContentArea = {
-        x: halfW + MARGIN_MM + bleedOffset,
-        y: MARGIN_MM + bleedOffset,
-        w: halfW - MARGIN_MM * 2,
-        h: config.heightMM - MARGIN_MM * 2,
-      }
-      await drawLogicalPage(pdf, logicalPages[i + 1], book, childName, colors, settings, sightWordSet, resolveUrl, rightArea, isLincoln, dedupeUrl)
-    }
-
-    // Fold line (dashed)
-    const foldX = halfW + bleedOffset
     pdf.setDrawColor(200, 200, 200)
     pdf.setLineWidth(0.15)
-    // Draw dashed line manually (small segments)
-    const dashLen = 2
-    const gapLen = 2
-    const lineTop = bleedOffset
-    const lineBottom = config.heightMM + bleedOffset
-    let dashY = lineTop
-    while (dashY < lineBottom) {
-      const endY = Math.min(dashY + dashLen, lineBottom)
-      pdf.line(foldX, dashY, foldX, endY)
-      dashY = endY + gapLen
-    }
+
+    // Fold line (dashed), down the centre, stopping at the trim line.
+    const foldX = halfW + bleedOffset
+    drawDashedLine(pdf, foldX, bleedOffset, foldX, trimY)
+
+    // Trim line (dashed, same colour) across the full sheet width at the
+    // trimmed page height, with a small "cut" label at each edge. The labels
+    // sit in the waste strip, just under the line, so they leave with it.
+    drawDashedLine(pdf, bleedOffset, trimY, config.widthMM + bleedOffset, trimY)
+    pdf.setFont('times', 'italic')
+    pdf.setFontSize(7)
+    pdf.setTextColor(160, 160, 160)
+    const cutLabelY = trimY + 3
+    pdf.text('cut', bleedOffset + 2, cutLabelY)
+    pdf.text('cut', config.widthMM + bleedOffset - 2, cutLabelY, { align: 'right' })
 
     // Trim marks for booklet
     if (settings.trimMarks) {
@@ -991,9 +1064,6 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<Pri
   const config = PAGE_CONFIGS[settings.pageSize]
   const sightWordSet = new Set((opts.sightWords ?? []).map((w) => w.toLowerCase()))
   const isBooklet = settings.pageSize === 'booklet'
-  // Cover art to suppress on content pages (only when a cover page exists) so it
-  // never repeats as story page 1 (FEAT-99).
-  const dedupeUrl = settings.includeCover ? resolveCoverImageUrl(book) : undefined
 
   // Pre-fetch all images as base64 to avoid CORS issues
   const endPrefetch = startStep('printBook.prefetchImages')
@@ -1051,7 +1121,7 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<Pri
     for (let i = 0; i < book.pages.length; i++) {
       if (pageAdded) pdf.addPage()
       drawBackground(pdf, colors.bg, config.widthMM, config.heightMM, bleedOffset, bleedOffset)
-      await drawContentPage(pdf, book.pages[i], i, colors, settings, sightWordSet, resolveUrl, contentArea, dedupeUrl)
+      await drawContentPage(pdf, book.pages[i], i, colors, settings, sightWordSet, resolveUrl, contentArea)
       if (settings.trimMarks) drawTrimMarks(pdf, pdfW, pdfH)
       pageAdded = true
     }

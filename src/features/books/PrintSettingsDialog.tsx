@@ -101,8 +101,9 @@ export default function PrintSettingsDialog({
             )}
             {settings.pageSize === 'booklet' && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                Prints 2 pages per sheet. Fold each sheet in half, stack, and staple the edge to
-                make a mini book!
+                Prints a real fold-in-half book, trimmed to 5.5 x 7 in. Print double-sided (flip
+                on the short edge), fold the whole stack in half, staple at the fold, then cut
+                along the dashed line.
               </Typography>
             )}
           </div>
