@@ -17,6 +17,7 @@ import { useSightWordProgress } from './useSightWordProgress'
 import StoryGuideQuestion from './StoryGuideQuestion'
 import GenerationProgress from './GenerationProgress'
 import StoryLengthSelector from './StoryLengthSelector'
+import { resolveChildAgeGroup } from '../../core/profile/childIdentity'
 import { useStoryGuide, assembleStoryPrompt } from './useStoryGuide'
 import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
 
@@ -54,7 +55,10 @@ export default function StoryGuidePage() {
   const { generateBook, progress, generating, resetProgress } = useBookGenerator()
   const { getWeakWords, loading: sightWordsLoading } = useSightWordProgress(familyId, childId)
 
-  const guide = useStoryGuide(isLincoln)
+  // FEAT-183 / UX-152 (B5): the guided-story question set is chosen by age
+  // group, not by name. Unchanged for both boys — Lincoln resolves 'older',
+  // London 'younger', with or without a stored birthdate.
+  const guide = useStoryGuide(resolveChildAgeGroup(activeChild))
   const [wizardStep, setWizardStep] = useState<WizardStep>('questions')
   const [generationError, setGenerationError] = useState<string | null>(null)
 

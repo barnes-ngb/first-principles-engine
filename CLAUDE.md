@@ -54,7 +54,14 @@ reviewing / merging a PR.
 **capability, never on his name** (`isLincoln`/`ageGroup` are cosmetic/personality, not access). London's
 account/profile stays live but his experience is intentionally minimal — a surface opens for him only
 when it's tuned for a 6-year-old. Log London-specific work in `docs/LONDON_BACKLOG.md`; don't build it
-speculatively. Parity is **not** the goal.
+speculatively. Parity is **not** the goal. **The behavioural name-gates are closed (FEAT-183):** no
+branch, capture flow, feature or AI input is selected by a literal `child.name` any more — the seven
+sites the 2026-09 audit classified as behavioural (B1–B5, B13, B14) key on `resolveChildAgeGroup` /
+`isChildProfile` / `findYoungerSibling` / `computeAge`, and kid Dad-Lab artifacts are written with
+`child.id`. What remains is name-keyed **data shapes and choice sets** (the sticker `childProfile`
+field, the parent lab form's field lists, day templates, chat context, the brothers scene — B6–B12),
+each its own small design, plus the cosmetic `isLincoln` flag, which stays: it is personality, not
+access.
 
 ### Ledger integrity & base discipline
 

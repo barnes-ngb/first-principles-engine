@@ -19,6 +19,7 @@ import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
 import { DadLabStatus, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { DadLabType } from '../../core/types/enums'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
+import { resolveChildAgeGroup } from '../../core/profile/childIdentity'
 import { normalizeChildRoles, resolveChildReport } from './childRoles'
 
 const LAB_TYPE_ICONS: Record<DadLabType, string> = {
@@ -51,9 +52,17 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
   const [activeStep, setActiveStep] = useState(0)
 
   const childName = child.name
-  const isLincoln = childName === 'Lincoln'
-  // Kid writes still key childReports/artifacts by lowercase name (unchanged
-  // storage shape); reads go through resolveChildReport so any keying resolves.
+  // FEAT-183 / ARCH-42 (B1): which capture flow this lab shows is a capability
+  // question, not a name one. The framework flow (Scientific Method steps,
+  // typed fields) is for an older child; the voice-first + drawing flow below
+  // is the right surface for a younger one. Keying on the name meant a third
+  // child landed in the younger flow because he isn't called "Lincoln".
+  // No behaviour change for either boy today — Lincoln resolves 'older',
+  // London 'younger', with or without a stored birthdate.
+  const isOlder = resolveChildAgeGroup(child) === 'older'
+  // Kid writes still key childReports by lowercase name (unchanged storage
+  // shape); reads go through resolveChildReport so any keying resolves.
+  // Artifacts are NOT keyed this way — see the childId note on the captures.
   const childKey = childName.toLowerCase()
   // Ensure the current child is always available for legacy role mapping,
   // even before the family children list finishes loading.
@@ -128,7 +137,14 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
       try {
         const ext = file.name.split('.').pop() ?? 'jpg'
         const artifact = {
-          childId: childKey,
+          // FEAT-183 (B14): the child's DOC ID, not the lowercase name. Every
+          // artifact reader queries `where('childId','==', child.id)` (Kid
+          // Today's My Stuff, the portfolio, the compliance pack), so a
+          // name-keyed id made these captures invisible everywhere but this
+          // page. Existing docs are counted, never rewritten — the Dev tab's
+          // "Artifact childId audit" reports them; a backfill is a separate,
+          // confirmed decision.
+          childId: child.id,
           title: `Dad Lab photo - ${activeLab.title}`,
           type: EvidenceType.Photo,
           createdAt: new Date().toISOString(),
@@ -173,7 +189,9 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
       setUploading(true)
       try {
         const artifact = {
-          childId: childKey,
+          // FEAT-183 (B14): the child's DOC ID, not the lowercase name — see
+          // the note on the photo capture above.
+          childId: child.id,
           title: `Dad Lab recording - ${activeLab.title}`,
           type: EvidenceType.Audio,
           createdAt: new Date().toISOString(),
@@ -275,9 +293,9 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
           )}
 
           <SectionCard title={`${childName}'s Job`}>
-            {isLincoln ? (
+            {isOlder ? (
               activeLab.labType === 'science' ? (
-                /* Scientific Method Steps for Lincoln */
+                /* Scientific-method steps — the older-child framework flow */
                 <Stack spacing={2}>
                   {myRole && (
                     <Box>

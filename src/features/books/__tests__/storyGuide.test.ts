@@ -2,8 +2,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import {
   assembleStoryPrompt,
-  LINCOLN_QUESTIONS,
-  LONDON_QUESTIONS,
+  OLDER_QUESTIONS,
+  YOUNGER_QUESTIONS,
   useStoryGuide,
   VoiceState,
 } from '../useStoryGuide'
@@ -105,13 +105,13 @@ describe('assembleBrief (via useStoryGuide)', () => {
   })
 
   /** Helper: set typed value then advance (separate act() calls for batching) */
-  function typeAndAdvance(result: ReturnType<typeof renderHook<ReturnType<typeof useStoryGuide>, boolean>>['result'], value: string) {
+  function typeAndAdvance(result: ReturnType<typeof renderHook<ReturnType<typeof useStoryGuide>, 'older' | 'younger'>>['result'], value: string) {
     act(() => { result.current.setTypedValue(value) })
     act(() => { result.current.advanceWithTyped() })
   }
 
-  it('assembles a brief from all five answers (Lincoln)', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+  it('assembles a brief from all five answers (older)', () => {
+    const { result } = renderHook(() => useStoryGuide('older'))
 
     typeAndAdvance(result, 'Steve')
     typeAndAdvance(result, 'The Nether')
@@ -131,7 +131,7 @@ describe('assembleBrief (via useStoryGuide)', () => {
   })
 
   it('produces undefined fields (not null) for skipped questions', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
 
     for (let i = 0; i < 5; i++) {
       act(() => { result.current.skip() })
@@ -148,20 +148,20 @@ describe('assembleBrief (via useStoryGuide)', () => {
   })
 
   it('injects sight words up to maximum 10', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
     const manyWords = ['a', 'an', 'the', 'is', 'was', 'are', 'he', 'she', 'it', 'we', 'they']
     const brief = result.current.assembleBrief('child-1', 10, manyWords)
     expect(brief.sightWords).toHaveLength(10)
   })
 
   it('omits sightWords field when no sight words provided', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
     const brief = result.current.assembleBrief('child-1', 10, [])
     expect(brief.sightWords).toBeUndefined()
   })
 
-  it('uses storybook theme for London', () => {
-    const { result } = renderHook(() => useStoryGuide(false))
+  it('uses storybook theme for a younger child', () => {
+    const { result } = renderHook(() => useStoryGuide('younger'))
     const brief = result.current.assembleBrief('child-2', 6, [])
     expect(brief.theme).toBe('storybook')
   })
@@ -170,16 +170,16 @@ describe('assembleBrief (via useStoryGuide)', () => {
 // ── Question sets ─────────────────────────────────────────────────
 
 describe('question sets', () => {
-  it('Lincoln has exactly 5 questions', () => {
-    expect(LINCOLN_QUESTIONS).toHaveLength(5)
+  it('the older set has exactly 5 questions', () => {
+    expect(OLDER_QUESTIONS).toHaveLength(5)
   })
 
-  it('London has exactly 5 questions', () => {
-    expect(LONDON_QUESTIONS).toHaveLength(5)
+  it('the younger set has exactly 5 questions', () => {
+    expect(YOUNGER_QUESTIONS).toHaveLength(5)
   })
 
-  it('all Lincoln questions have non-empty text', () => {
-    for (const q of LINCOLN_QUESTIONS) {
+  it('all older-set questions have non-empty text', () => {
+    for (const q of OLDER_QUESTIONS) {
       expect(q.text.length).toBeGreaterThan(0)
     }
   })
@@ -204,12 +204,12 @@ describe('TTS read-back', () => {
   })
 
   it('calls speechSynthesis.speak on mount (question 0)', () => {
-    renderHook(() => useStoryGuide(true))
+    renderHook(() => useStoryGuide('older'))
     expect(speakMock).toHaveBeenCalled()
   })
 
   it('calls speechSynthesis.speak again after advancing to next question', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
     const callsBefore = speakMock.mock.calls.length
 
     act(() => { result.current.setTypedValue('Steve') })
@@ -232,12 +232,12 @@ describe('voice transcription confirmation', () => {
   })
 
   it('starts in idle state', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
     expect(result.current.voiceState).toBe(VoiceState.Idle)
   })
 
   it('retryRecording resets transcription and voiceState to idle', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
 
     act(() => {
       result.current.retryRecording()
@@ -248,7 +248,7 @@ describe('voice transcription confirmation', () => {
   })
 
   it('advanceWithTyped saves answer and advances to next question', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
     expect(result.current.currentIndex).toBe(0)
 
     act(() => { result.current.setTypedValue('test answer') })
@@ -272,7 +272,7 @@ describe('navigation', () => {
   })
 
   it('goBack decrements the question index', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
 
     act(() => { result.current.setTypedValue('hero') })
     act(() => { result.current.advanceWithTyped() })
@@ -283,7 +283,7 @@ describe('navigation', () => {
   })
 
   it('skip produces an undefined answer and advances', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
 
     act(() => { result.current.skip() })
 
@@ -292,7 +292,7 @@ describe('navigation', () => {
   })
 
   it('isDone is true after all 5 questions are answered', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
 
     for (let i = 0; i < 5; i++) {
       act(() => { result.current.setTypedValue(`answer ${i}`) })
@@ -303,7 +303,7 @@ describe('navigation', () => {
   })
 
   it('isDone is true after all 5 questions are skipped', () => {
-    const { result } = renderHook(() => useStoryGuide(true))
+    const { result } = renderHook(() => useStoryGuide('older'))
 
     for (let i = 0; i < 5; i++) {
       act(() => { result.current.skip() })

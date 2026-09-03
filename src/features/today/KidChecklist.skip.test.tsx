@@ -20,6 +20,7 @@ function renderKidChecklist(mustDo: ChecklistItem[]) {
         checklist={mustDo}
         maxChoices={2}
         isLincoln
+        isChildProfile
         isMvd={false}
         gateUnlocked={false}
         gateThreshold={3}

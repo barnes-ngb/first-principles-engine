@@ -10,13 +10,17 @@ export const CHILD_BIRTHDATES: Record<string, string> = {
   London: '2019-05-01',
 }
 
-/** Compute integer age in years from a birthdate string (YYYY-MM-DD). */
-export function deriveChildAge(child: Child): number | null {
+/**
+ * Compute integer age in years from a birthdate string (YYYY-MM-DD).
+ *
+ * `now` is injectable so callers (and their tests) can pin the clock; it
+ * defaults to the current time, so every existing call site is unchanged.
+ */
+export function deriveChildAge(child: Child, now: Date = new Date()): number | null {
   const birthdate = child.birthdate ?? CHILD_BIRTHDATES[child.name]
   if (!birthdate) return null
   const birth = new Date(birthdate)
   if (Number.isNaN(birth.getTime())) return null
-  const now = new Date()
   let age = now.getFullYear() - birth.getFullYear()
   const m = now.getMonth() - birth.getMonth()
   if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) {

@@ -22,6 +22,7 @@ import Page from '../../components/Page'
 import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { computeAge } from '../../core/profile/childIdentity'
 import { artifactsCollection, hoursCollection } from '../../core/firebase/firestore'
 import type { Book, BookPage } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
@@ -131,7 +132,14 @@ export default function BookReaderPage() {
     childId,
   )
 
-  const childAge = isLincoln ? 10 : 6
+  // FEAT-183 / UX-152 (B4): the comprehension-questions AI gets the child's
+  // REAL age, read off the identity profile the app already stores, not an
+  // age inferred from his name. The name-keyed pair survives only as the
+  // fallback for a doc with no birthdate — the same shape the three sibling
+  // Books surfaces already use (`StoryGuidePage`, `BookGenerateChat`,
+  // `BookReviewChat` each keep a local `ageFromBirthdate`; collapsing the
+  // four copies into one helper is filed, not done here).
+  const childAge = computeAge(activeChild?.birthdate) ?? (isLincoln ? 10 : 6)
   const {
     questions: comprehensionQuestions,
     loading: comprehensionLoading,
