@@ -2,8 +2,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 
 // The Stickers surface must ask the EXISTING Kit Builder counter (FEAT-165 owner
-// decision: one per-child daily budget across both surfaces, not a second
-// allowance). These spies record exactly what `useStickerArtQuota` asks it.
+// decision: one per-child budget across both surfaces, not a second allowance;
+// the window went daily → weekly in FEAT-175). These spies record exactly what
+// `useStickerArtQuota` asks it.
 const { useArtQuotaMock, useActiveChildMock } = vi.hoisted(() => ({
   useArtQuotaMock: vi.fn(),
   useActiveChildMock: vi.fn(),
@@ -11,8 +12,8 @@ const { useArtQuotaMock, useActiveChildMock } = vi.hoisted(() => ({
 
 vi.mock('../business/useArtQuota', () => ({
   useArtQuota: useArtQuotaMock,
-  DEFAULT_DAILY_ART_QUOTA: 10,
-  ART_QUOTA_MESSAGE: "That's a lot of art today! Ask a grown-up if you need more. 🎨",
+  DEFAULT_WEEKLY_ART_QUOTA: 100,
+  ART_QUOTA_MESSAGE: "That's a lot of art this week! Ask a grown-up if you need more. 🎨",
 }))
 
 vi.mock('../../core/hooks/useActiveChild', () => ({

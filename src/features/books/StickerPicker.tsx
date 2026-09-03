@@ -34,8 +34,8 @@ interface StickerPickerProps {
   childProfile?: 'lincoln' | 'london'
   onSelectSticker: (sticker: Sticker) => void
   /**
-   * The actor has spent today's art budget (FEAT-168). "Generate" is a paid
-   * call, so a kid gets the same light daily cap the Stickers page uses — a warm
+   * The actor has spent this week's art budget (FEAT-168). "Generate" is a paid
+   * call, so a kid gets the same light weekly cap the Stickers page uses — a warm
    * nudge in place of the button, never an error and never a lock. Everything
    * free here stays free at the cap: browsing, filtering, picking an existing
    * sticker, and **Upload**. Defaults to uncapped so any other mount is
@@ -161,7 +161,7 @@ export default function StickerPicker({
       size: '1024x1024',
     })
     if (!result) {
-      // Nothing came back — don't charge the kid's daily budget for it.
+      // Nothing came back — don't charge the kid's weekly budget for it.
       setGenerationError(true)
       return
     }

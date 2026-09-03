@@ -32,8 +32,8 @@ interface MakeStickerDialogProps {
   /** Fired after a sticker is generated/saved to the library. */
   onSaved?: (sticker: Sticker) => void
   /**
-   * The actor has spent today's art budget (FEAT-165). Generating is a paid
-   * call, so a kid gets the same light daily cap the Kit Builder uses — a warm
+   * The actor has spent this week's art budget (FEAT-165). Generating is a paid
+   * call, so a kid gets the same light weekly cap the Kit Builder uses — a warm
    * nudge in place of the Create button, never an error and never a lock. The
    * default keeps uncapped callers (the parent-only Settings render) unchanged.
    */
@@ -99,7 +99,7 @@ export default function MakeStickerDialog({
       size: '1024x1024',
     })
     if (!result) {
-      // Nothing came back — don't charge the kid's daily budget for it.
+      // Nothing came back — don't charge the kid's weekly budget for it.
       setGenerationError(true)
       return
     }
@@ -283,7 +283,7 @@ export default function MakeStickerDialog({
             </Button>
           </Stack>
         ) : capReached ? (
-          /* Daily cap reached (FEAT-165): a warm nudge, never an error styling
+          /* Weekly cap reached (FEAT-165): a warm nudge, never an error styling
              — the same copy and posture as the Kit Builder's cap. The prompt
              field and Create button are simply not offered. */
           <Typography variant="body2" color="text.secondary" sx={{ pt: 1 }}>

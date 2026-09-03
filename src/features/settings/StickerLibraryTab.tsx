@@ -96,8 +96,8 @@ interface StickerLibraryTabProps {
    */
   canEdit?: boolean
   /**
-   * The actor has spent today's art budget (FEAT-165). "Make more versions" is
-   * a paid `enhanceSketch` call, so a kid gets the Kit Builder's light daily
+   * The actor has spent this week's art budget (FEAT-165). "Make more versions" is
+   * a paid `enhanceSketch` call, so a kid gets the Kit Builder's light weekly
    * cap: the theme picker shows a warm nudge instead of "Make it", here and in
    * every drawing card below. Defaults to uncapped, so the parent-only Settings
    * tab is unchanged — this is a **capability** answer the caller computes
@@ -317,7 +317,7 @@ export default function StickerLibraryTab({
         enhanceSketch,
       })
       if (!res.ok) {
-        // No usable image came back — nothing to charge the daily budget for.
+        // No usable image came back — nothing to charge the weekly budget for.
         setMakeError(res.error)
         return
       }
@@ -911,7 +911,7 @@ export default function StickerLibraryTab({
         <DialogContent>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
             {capReached ? (
-              /* Daily cap reached (FEAT-165): the Kit Builder's warm nudge, not
+              /* Weekly cap reached (FEAT-165): the Kit Builder's warm nudge, not
                  an error and not a lock — no style picker, no "Make it". */
               <Typography variant="body2" color="text.secondary">
                 {ART_QUOTA_MESSAGE}

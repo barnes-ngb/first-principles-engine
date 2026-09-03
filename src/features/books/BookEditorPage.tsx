@@ -169,7 +169,7 @@ export default function BookEditorPage() {
   // paid image call asks the budget question exactly once, here, and the answer
   // is handed to the three doors below — the AI scene generator, the reimagine
   // flow, and the sticker picker. Same counter as the Stickers page and the Kit
-  // Builder — one honest daily total per child — and capped by capability (a
+  // Builder — one honest weekly total per child — and capped by capability (a
   // kid profile), never by name. The illustrate-the-whole-book loop asks for
   // itself in `useBookIllustrator`, which this page does not use.
   const { atLimit: artCapReached, recordGeneration } = useBookArtQuota()
@@ -1862,7 +1862,7 @@ export default function BookEditorPage() {
               </Alert>
             )}
 
-            {/* Daily cap reached (FEAT-168): a warm nudge in place of the Create
+            {/* Weekly cap reached (FEAT-168): a warm nudge in place of the Create
                 button — the same copy and posture as the Stickers page's caps.
                 Everything free in the editor keeps working: writing, editing,
                 page layout, saving, reading and printing. */}

@@ -167,7 +167,7 @@ async function openSceneDialog(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getAllByText('Make a scene')[0])
 }
 
-describe('BookEditorPage — daily art budget (FEAT-168)', () => {
+describe('BookEditorPage — weekly art budget (FEAT-168)', () => {
   it('asks the budget question once and hands the answer to both child doors', async () => {
     quotaHolder.atLimit = true
     render(<BookEditorPage />)

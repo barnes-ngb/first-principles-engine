@@ -59,9 +59,9 @@ interface DrawingGroupCardProps {
    */
   allVersions?: Sticker[]
   /**
-   * The actor has spent today's art budget (FEAT-165). "Add version" is this
+   * The actor has spent this week's art budget (FEAT-165). "Add version" is this
    * card's whole invitation and each tap is a paid `enhanceSketch` call, so a
-   * kid gets the Kit Builder's light daily cap here: the theme picker swaps
+   * kid gets the Kit Builder's light weekly cap here: the theme picker swaps
    * "Make it" for a warm nudge. Defaults to uncapped so the parent-only
    * Settings render is unchanged.
    */
@@ -139,7 +139,7 @@ export default function DrawingGroupCard({
       })
       if (!res.ok) {
         // The model produced nothing usable — no image, so no charge to the
-        // kid's daily budget.
+        // kid's weekly budget.
         setError(res.error)
         return
       }
@@ -429,7 +429,7 @@ export default function DrawingGroupCard({
         <DialogContent>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
             {capReached ? (
-              /* Daily cap reached (FEAT-165): the same warm nudge the Kit
+              /* Weekly cap reached (FEAT-165): the same warm nudge the Kit
                  Builder shows — no style picker, no error styling, no lock. */
               <Typography variant="body2" color="text.secondary">
                 {ART_QUOTA_MESSAGE}

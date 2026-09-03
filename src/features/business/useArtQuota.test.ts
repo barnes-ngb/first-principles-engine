@@ -25,15 +25,21 @@ vi.mock('../../core/auth/useAuth', () => ({
   useFamilyId: () => 'family-1',
 }))
 
-// Pin the day so the doc id is deterministic — mutable so the rollover test can
-// advance it across local midnight.
-const dayHolder = vi.hoisted(() => ({ value: '2026-07-18' }))
-vi.mock('../../core/utils/dateKey', () => ({
-  todayKey: () => dayHolder.value,
-}))
-
+// `dateKey` is deliberately NOT mocked (FEAT-175). The window is now the app's
+// own Sunday-start week, and the whole point of the change is that the boundary
+// falls on Saturday night and NOT on an ordinary midnight — a mocked week key
+// would assert that by construction instead of proving it. The real
+// `weekKeyFromDate` (→ `getWeekRange`) runs here, and the rollover tests pin the
+// system clock instead so it sees a known Saturday / Tuesday.
+import { weekKeyFromDate } from '../../core/utils/dateKey'
 import { MAX_TARGET_PAGE_COUNT } from '../books/storyPageTargets'
-import { ART_QUOTA_MESSAGE, DEFAULT_DAILY_ART_QUOTA, useArtQuota } from './useArtQuota'
+import { ART_QUOTA_MESSAGE, DEFAULT_WEEKLY_ART_QUOTA, useArtQuota } from './useArtQuota'
+
+/** The doc id the hook should be using right now, for the current real week. */
+const currentWeekDocId = (childId: string) => `${childId}-wk-${weekKeyFromDate(new Date())}`
+
+/** A legacy FEAT-94/168 daily id: `{childId}-{YYYY-MM-DD}` and nothing else. */
+const LEGACY_DAILY_ID = /^[^-]+-\d{4}-\d{2}-\d{2}$/
 
 /** Drive the stored onSnapshot success callback with a given count. */
 function emitCount(count: number | undefined) {
@@ -47,18 +53,23 @@ beforeEach(() => {
   onSnapshotMock.mockReturnValue(() => undefined)
   incrementMock.mockClear()
   docMock.mockClear()
-  dayHolder.value = '2026-07-18'
 })
 
 describe('useArtQuota', () => {
-  it('the default cap is 25 and the message is warm + non-shaming', () => {
-    // Raised 10 → 25 by FEAT-168: a book spends one paid call per illustrated
-    // page and a "Long" book is 14, so 10 could not fit one book.
-    expect(DEFAULT_DAILY_ART_QUOTA).toBe(25)
-    // Still a real ceiling, and still enough for the longest book plus a
-    // normal day's stickers.
-    expect(DEFAULT_DAILY_ART_QUOTA).toBeGreaterThanOrEqual(MAX_TARGET_PAGE_COUNT)
-    expect(DEFAULT_DAILY_ART_QUOTA).toBeLessThan(100)
+  it('the default cap is a weekly 100 and the message says "this week"', () => {
+    // 10 (FEAT-94) → 25 (FEAT-168) → weekly 100 (FEAT-175). A book spends one
+    // paid call per illustrated page and a "Long" book is 14, so 100 is roughly
+    // seven Long books a week — the owner's ask ("some days it's a few books and
+    // some more. Maybe a weekly max"), and still a real ceiling.
+    expect(DEFAULT_WEEKLY_ART_QUOTA).toBe(100)
+    // Enough for several of the longest book, not just one.
+    expect(DEFAULT_WEEKLY_ART_QUOTA).toBeGreaterThanOrEqual(MAX_TARGET_PAGE_COUNT * 4)
+    // Still a ceiling, not an open tap.
+    expect(DEFAULT_WEEKLY_ART_QUOTA).toBeLessThanOrEqual(200)
+    // The copy has to name the window it actually enforces, or the nudge lies
+    // about when the budget comes back.
+    expect(ART_QUOTA_MESSAGE).toMatch(/this week/i)
+    expect(ART_QUOTA_MESSAGE).not.toMatch(/today/i)
     expect(ART_QUOTA_MESSAGE).toMatch(/ask a grown-up/i)
     expect(ART_QUOTA_MESSAGE).not.toMatch(/error|fail|denied|not allowed/i)
   })
@@ -74,45 +85,61 @@ describe('useArtQuota', () => {
     expect(setDocMock).not.toHaveBeenCalled()
   })
 
-  it('a capped kid subscribes to the per-day doc {childId}-{date} and tracks the count', async () => {
+  it('a capped kid subscribes to the per-week doc {childId}-wk-{weekStart} and tracks the count', async () => {
     const { result } = renderHook(() => useArtQuota('lincoln', { capped: true }))
 
-    expect(docMock).toHaveBeenCalledWith(expect.anything(), 'lincoln-2026-07-18')
+    expect(docMock).toHaveBeenCalledWith(expect.anything(), currentWeekDocId('lincoln'))
 
     emitCount(3)
     await waitFor(() => expect(result.current.count).toBe(3))
-    // Derived from the constant, not a literal — the cap moved once (FEAT-168)
-    // and these assertions are about the arithmetic, not the number.
-    expect(result.current.remaining).toBe(DEFAULT_DAILY_ART_QUOTA - 3)
+    // Derived from the constant, not a literal — the cap has moved twice
+    // (FEAT-168, FEAT-175) and these assertions are about the arithmetic.
+    expect(result.current.remaining).toBe(DEFAULT_WEEKLY_ART_QUOTA - 3)
     expect(result.current.atLimit).toBe(false)
+  })
+
+  it('the week doc id can never collide with a legacy daily id (the `wk-` segment)', () => {
+    // A plain `{childId}-{weekStart}` for a Sunday IS that Sunday's legacy daily
+    // id, so a leftover daily count would silently seed the new week. The `wk-`
+    // segment is what keeps the two namespaces apart, and legacy daily docs are
+    // left inert rather than migrated — so this is the guard that matters.
+    renderHook(() => useArtQuota('lincoln', { capped: true }))
+
+    const id = docMock.mock.calls[0][1]
+    expect(id).toContain('-wk-')
+    expect(id).not.toMatch(LEGACY_DAILY_ID)
+    expect(id).toBe(`lincoln-wk-${weekKeyFromDate(new Date())}`)
   })
 
   it('atLimit flips true once the count reaches the cap', async () => {
     const { result } = renderHook(() => useArtQuota('lincoln', { capped: true }))
-    emitCount(DEFAULT_DAILY_ART_QUOTA)
+    emitCount(DEFAULT_WEEKLY_ART_QUOTA)
     await waitFor(() => expect(result.current.atLimit).toBe(true))
     expect(result.current.remaining).toBe(0)
   })
 
-  it('a missing counter doc reads as zero (fresh day)', async () => {
+  it('a missing counter doc reads as zero (fresh week)', async () => {
     const { result } = renderHook(() => useArtQuota('lincoln', { capped: true }))
     emitCount(undefined)
     await waitFor(() => expect(result.current.count).toBe(0))
-    expect(result.current.remaining).toBe(DEFAULT_DAILY_ART_QUOTA)
+    expect(result.current.remaining).toBe(DEFAULT_WEEKLY_ART_QUOTA)
   })
 
-  it('recordGeneration writes an atomic increment merge to the per-day doc', async () => {
+  it('recordGeneration writes an atomic increment merge stamped with the weekStart', async () => {
     const { result } = renderHook(() => useArtQuota('lincoln', { capped: true }))
     await result.current.recordGeneration()
 
     expect(setDocMock).toHaveBeenCalledTimes(1)
-    const [, payload, options] = setDocMock.mock.calls[0] as [
-      unknown,
-      { childId: string; date: string; count: unknown },
+    const [ref, payload, options] = setDocMock.mock.calls[0] as [
+      { __doc: string },
+      { childId: string; weekStart: string; count: unknown; date?: unknown },
       { merge: boolean },
     ]
+    expect(ref.__doc).toBe(currentWeekDocId('lincoln'))
     expect(payload.childId).toBe('lincoln')
-    expect(payload.date).toBe('2026-07-18')
+    // The doc records the week it covers, not a day (FEAT-175). `date` is gone.
+    expect(payload.weekStart).toBe(weekKeyFromDate(new Date()))
+    expect(payload.date).toBeUndefined()
     expect(payload.count).toEqual({ __increment: 1 })
     expect(options).toEqual({ merge: true })
   })
@@ -124,22 +151,46 @@ describe('useArtQuota', () => {
     await waitFor(() => expect(result.current.atLimit).toBe(true))
   })
 
-  it('rolls the subscription over to the new day at local midnight while mounted', () => {
+  it('rolls the subscription over at the week boundary — Saturday night into Sunday', () => {
     vi.useFakeTimers()
     try {
-      // Just before local midnight on 2026-07-18.
+      // Just before local midnight on Saturday 2026-07-18. That week started on
+      // Sunday 2026-07-12; the next one starts on Sunday 2026-07-19.
       vi.setSystemTime(new Date(2026, 6, 18, 23, 59, 0))
       renderHook(() => useArtQuota('lincoln', { capped: true }))
-      expect(docMock).toHaveBeenLastCalledWith(expect.anything(), 'lincoln-2026-07-18')
+      expect(docMock).toHaveBeenLastCalledWith(expect.anything(), 'lincoln-wk-2026-07-12')
 
-      // Cross midnight: the calendar day advances and the timer fires.
-      dayHolder.value = '2026-07-19'
+      // Cross into Sunday: the week advances and the timer fires.
       act(() => {
         vi.advanceTimersByTime(2 * 60 * 1000) // 2 min → past the +1s cushion
       })
 
-      // The subscription re-targets the new day's counter doc, no refresh needed.
-      expect(docMock).toHaveBeenLastCalledWith(expect.anything(), 'lincoln-2026-07-19')
+      // The subscription re-targets the new week's counter doc, no refresh needed.
+      expect(docMock).toHaveBeenLastCalledWith(expect.anything(), 'lincoln-wk-2026-07-19')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does NOT roll over at an ordinary midnight — Tuesday night into Wednesday', () => {
+    vi.useFakeTimers()
+    try {
+      // Just before local midnight on Tuesday 2026-07-21, inside the week that
+      // started Sunday 2026-07-19. Wednesday is the same week's budget.
+      vi.setSystemTime(new Date(2026, 6, 21, 23, 59, 0))
+      const { rerender } = renderHook(() => useArtQuota('lincoln', { capped: true }))
+      expect(docMock).toHaveBeenLastCalledWith(expect.anything(), 'lincoln-wk-2026-07-19')
+
+      act(() => {
+        vi.advanceTimersByTime(2 * 60 * 1000) // now Wednesday 2026-07-22
+      })
+      // Re-render explicitly, so this proves the recomputed key is unchanged and
+      // not merely that no timer happened to fire.
+      rerender()
+
+      expect(docMock).toHaveBeenLastCalledWith(expect.anything(), 'lincoln-wk-2026-07-19')
+      // The old daily behaviour would have moved to a 2026-07-22 doc here.
+      expect(docMock.mock.calls.map((c) => c[1])).not.toContain('lincoln-wk-2026-07-22')
     } finally {
       vi.useRealTimers()
     }
