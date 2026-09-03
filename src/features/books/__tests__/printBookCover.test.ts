@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Book, BookPage, PageImage } from '../../../core/types'
-import {
-  buildLogicalPages,
-  contentImagesToDraw,
-  resolveCoverImageUrl,
-} from '../printBook'
+import * as printBookModule from '../printBook'
+import { buildLogicalPages, resolveCoverImageUrl } from '../printBook'
+import { stackOrder } from '../draggableImageUtils'
 
 /* Minimal fixtures — only the fields the pure builders read. */
 
@@ -75,29 +73,33 @@ describe('buildLogicalPages emits exactly one cover (FEAT-99)', () => {
   })
 })
 
-describe('contentImagesToDraw dedupes the cover image (FEAT-99 / FEAT-91)', () => {
-  it('drops the page-1 image when it duplicates the fallback cover URL', () => {
-    // No explicit cover → cover falls back to page 1 image 'scene-1.png'.
-    const b = book()
-    const dedupeUrl = resolveCoverImageUrl(b)
-    const drawn = contentImagesToDraw(b.pages[0].images, dedupeUrl)
-    expect(drawn).toHaveLength(0)
+describe('page 1 keeps its picture (FEAT-185 retires the FEAT-99 dedupe)', () => {
+  /*
+   * FEAT-99 stripped the cover's fallback image from story page 1 so the cover
+   * would not "read as two pages". The owner's printed book (2026-09-03)
+   * showed the cost: page 1 was a grey box with three stickers floating on it
+   * and no forest. A cover reusing the first illustration is a picture-book
+   * convention; a page stripped of its scene under its stickers is a defect.
+   * Retired by owner decision — in every format.
+   */
+  it('the dedupe seam is gone: printBook no longer exports contentImagesToDraw', () => {
+    expect('contentImagesToDraw' in printBookModule).toBe(false)
   })
 
-  it('keeps non-duplicate images (stickers) on the deduped page', () => {
+  it('the cover still falls back to page 1 image — and page 1 still carries that image', () => {
+    const b = book()
+    const coverUrl = resolveCoverImageUrl(b)
+    expect(coverUrl).toBe('scene-1.png')
+    const seq = buildLogicalPages(b, true, false, false)
+    const first = seq.find((p) => p.type === 'content')
+    expect(first?.type).toBe('content')
+    if (first?.type !== 'content') return
+    expect(first.page.images.map((i) => i.url)).toContain(coverUrl)
+  })
+
+  it('the only transform left before drawing (stack order) keeps the scene under its stickers', () => {
     const images = [image('scene-1.png'), image('sticker.png', { type: 'sticker' })]
-    const drawn = contentImagesToDraw(images, 'scene-1.png')
-    expect(drawn.map((i) => i.url)).toEqual(['sticker.png'])
-  })
-
-  it('keeps all images on later pages that do not match the cover', () => {
-    const b = book()
-    const drawn = contentImagesToDraw(b.pages[1].images, resolveCoverImageUrl(b))
-    expect(drawn.map((i) => i.url)).toEqual(['scene-2.png'])
-  })
-
-  it('is a no-op when there is no cover to dedupe against', () => {
-    const images = [image('scene-1.png')]
-    expect(contentImagesToDraw(images, undefined)).toBe(images)
+    const drawn = stackOrder(images)
+    expect(drawn.map((i) => i.url).sort()).toEqual(['scene-1.png', 'sticker.png'])
   })
 })
