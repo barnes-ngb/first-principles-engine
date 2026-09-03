@@ -324,6 +324,16 @@ export interface ChecklistItem {
   evidenceArtifactId?: string
   /** Which Firestore collection the evidence doc lives in. Absent on legacy items means 'artifacts'. */
   evidenceCollection?: 'scans' | 'artifacts'
+  /**
+   * FEAT-184 / UX-151: a KID's `Show your work!` photo was read as a curriculum
+   * page (worksheet / textbook / test). The scan doc's analysis is kept, but
+   * from a kid session nothing acts on it — the workbook advance, working-level
+   * derivation, blocker merge and model syncs run only for a parent actor — so
+   * this holds the `scans` doc id as a "review this" marker for parent Today.
+   * The item's evidence stays the kid's own artifact (`evidenceCollection:
+   * 'artifacts'`). Additive; never set on a parent capture.
+   */
+  pendingScanId?: string
   /** Manual or AI-generated review result for the captured work. */
   gradeResult?: string
   /** FEAT-70: the parent flagged something tricky when reviewing captured work.

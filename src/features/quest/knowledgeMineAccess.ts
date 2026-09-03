@@ -1,4 +1,6 @@
-import type { SkillSnapshot } from '../../core/types'
+import type { PrioritySkill, SkillSnapshot } from '../../core/types'
+import { MasteryGate, SkillLevel } from '../../core/types/enums'
+import { STARTER_PRIORITY_SKILLS } from '../evaluation/childDefaults'
 
 /**
  * Capability gates for the Knowledge Mine — a MULTI-DOMAIN hub.
@@ -42,7 +44,39 @@ import type { SkillSnapshot } from '../../core/types'
  *     any priority skill that is NOT a math skill. Math-prefixed skills are
  *     the one thing excluded from reading — which is exactly what closes the
  *     math-only → reading leak.
+ *
+ * A STARTER SKILL IS NOT CALIBRATION (FEAT-184 / UX-150). "Load Starter
+ * Defaults" writes a template's `prioritySkills` into the same field an
+ * evaluation writes, and London's K frame carries both a reading and a
+ * `math.` row — so one parent tap used to satisfy BOTH gates and open the
+ * whole Mine for a child nothing had been tuned for. Both gates now ignore any
+ * priority skill that still has the exact starter shape (`isStarterSkill`:
+ * same tag as a template row, `Emerging`, `NotYet`). Only the shape is
+ * matched, never the tag alone: a quest, eval or scan that moves one of those
+ * rows to `Developing`, or clears its gate, makes it real evidence again.
+ * `PrioritySkill` has no `source` field, so matching the shape is what also
+ * covers a snapshot the defaults were applied to before this rule existed.
  */
+
+/**
+ * True when a priority skill is still a template row, untouched: the same tag
+ * as one of the starter defaults (any template), at `Emerging` with the
+ * `NotYet` mastery gate. Pure; exported for the tests and for any surface that
+ * needs to tell a starting frame from evidence.
+ */
+export function isStarterSkill(
+  skill: Pick<PrioritySkill, 'tag' | 'level' | 'masteryGate'>,
+  starters: readonly PrioritySkill[] = STARTER_PRIORITY_SKILLS,
+): boolean {
+  if (skill.level !== SkillLevel.Emerging) return false
+  if (skill.masteryGate !== MasteryGate.NotYet) return false
+  return starters.some((s) => s.tag === skill.tag)
+}
+
+/** The snapshot's priority skills that count as evidence — starter rows removed. */
+function calibratedSkills(snapshot: SkillSnapshot): PrioritySkill[] {
+  return (snapshot.prioritySkills ?? []).filter((s) => !isStarterSkill(s))
+}
 
 /** A priority-skill tag belongs to math iff it carries the `math.` prefix the math eval emits. */
 function isMathSkillTag(tag: string): boolean {
@@ -52,8 +86,9 @@ function isMathSkillTag(tag: string): boolean {
 /**
  * True once the child has reading calibration the Reading quests can use:
  * a phonics/comprehension working level, a completed (reading) program, or any
- * non-math priority skill. Reading is the default domain — only math-prefixed
- * skills are excluded, so a math-only child does NOT pass this gate.
+ * non-math priority skill that is not an untouched starter row. Reading is the
+ * default domain — only math-prefixed skills are excluded, so a math-only
+ * child does NOT pass this gate.
  */
 export function hasReadingCalibration(
   snapshot: SkillSnapshot | null | undefined,
@@ -62,20 +97,21 @@ export function hasReadingCalibration(
   if (snapshot.workingLevels?.phonics) return true
   if (snapshot.workingLevels?.comprehension) return true
   if (snapshot.completedPrograms?.length) return true
-  if (snapshot.prioritySkills?.some((s) => !isMathSkillTag(s.tag))) return true
+  if (calibratedSkills(snapshot).some((s) => !isMathSkillTag(s.tag))) return true
   return false
 }
 
 /**
  * True once the child has math calibration the Math quest can use:
- * a `workingLevels.math` entry or any `math.`-prefixed priority skill.
+ * a `workingLevels.math` entry or any `math.`-prefixed priority skill that is
+ * not an untouched starter row.
  */
 export function hasMathCalibration(
   snapshot: SkillSnapshot | null | undefined,
 ): boolean {
   if (!snapshot) return false
   if (snapshot.workingLevels?.math) return true
-  if (snapshot.prioritySkills?.some((s) => isMathSkillTag(s.tag))) return true
+  if (calibratedSkills(snapshot).some((s) => isMathSkillTag(s.tag))) return true
   return false
 }
 

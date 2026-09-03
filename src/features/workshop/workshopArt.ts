@@ -1,5 +1,6 @@
 import type { ImageGenRequest, ImageGenResponse } from '../../core/ai/useAI'
 import type { AdventureTree, CardGameData, GeneratedArt, StoryInputs } from '../../core/types'
+import type { GameType } from '../../core/types/workshop'
 
 // ── DALL-E Prompt Builders ───────────────────────────────────────
 
@@ -213,9 +214,65 @@ export async function generateAdventureArt(
   inputs: StoryInputs,
   adventure: AdventureTree,
 ): Promise<AdventureArtResult> {
-  const theme = inputs.theme
   const art: GeneratedArt = {}
   const failures: string[] = []
+  const requests = buildAdventureArtRequests(inputs, adventure)
+
+  const results = await Promise.allSettled(
+    requests.map(async (req) => {
+      const response = await generateImage({
+        familyId,
+        prompt: req.prompt,
+        style: 'general',
+        size: '1024x1024',
+      })
+      return { key: req.key, response }
+    }),
+  )
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      failures.push('unknown')
+      continue
+    }
+    const { key, response } = result.value
+    if (!response?.url) {
+      failures.push(key)
+      continue
+    }
+
+    if (key === 'title') {
+      art.titleScreen = response.url
+    } else if (key.startsWith('scene-')) {
+      const nodeId = key.replace('scene-', '')
+      art.sceneArt = { ...art.sceneArt, [nodeId]: response.url }
+    } else if (key.startsWith('card-')) {
+      const cType = key.replace('card-', '') as 'reading' | 'math' | 'story' | 'action'
+      art.cardArt = { ...art.cardArt, [cType]: response.url }
+    }
+  }
+
+  return { art, failures }
+}
+
+/** One keyed picture request — the key says where the URL lands on `GeneratedArt`. */
+export interface KeyedArtRequest {
+  key: string
+  prompt: string
+}
+
+/**
+ * Every picture an adventure will make, in order: title, key scenes, one card
+ * per challenge type. Pure and exported (FEAT-184) so the page can size the
+ * batch — and reserve it whole against the weekly art budget — before a single
+ * call is spent. `generateAdventureArt` consumes exactly this list; there is no
+ * second definition of what an adventure draws.
+ */
+export function buildAdventureArtRequests(
+  inputs: StoryInputs,
+  adventure: AdventureTree,
+): KeyedArtRequest[] {
+  const theme = inputs.theme
 
   // Collect key nodes: root, nodes with illustration fields, and endings (max 5)
   const keyNodeIds: string[] = [adventure.rootNodeId]
@@ -258,41 +315,7 @@ export async function generateAdventureArt(
     })
   }
 
-  const results = await Promise.allSettled(
-    requests.map(async (req) => {
-      const response = await generateImage({
-        familyId,
-        prompt: req.prompt,
-        style: 'general',
-        size: '1024x1024',
-      })
-      return { key: req.key, response }
-    }),
-  )
-
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      failures.push('unknown')
-      continue
-    }
-    const { key, response } = result.value
-    if (!response?.url) {
-      failures.push(key)
-      continue
-    }
-
-    if (key === 'title') {
-      art.titleScreen = response.url
-    } else if (key.startsWith('scene-')) {
-      const nodeId = key.replace('scene-', '')
-      art.sceneArt = { ...art.sceneArt, [nodeId]: response.url }
-    } else if (key.startsWith('card-')) {
-      const cType = key.replace('card-', '') as 'reading' | 'math' | 'story' | 'action'
-      art.cardArt = { ...art.cardArt, [cType]: response.url }
-    }
-  }
-
-  return { art, failures }
+  return requests
 }
 
 // ── Card Game Art Generation ─────────────────────────────────────
@@ -316,11 +339,59 @@ export async function generateCardGameArt(
   inputs: StoryInputs,
   cardGame: CardGameData,
 ): Promise<CardGameArtResult> {
-  const theme = inputs.theme
   const art: GeneratedArt = {}
   const failures: string[] = []
+  const capped = buildCardGameArtRequests(inputs, cardGame)
 
-  const requests: Array<{ key: string; prompt: string }>  = []
+  const results = await Promise.allSettled(
+    capped.map(async (req) => {
+      const response = await generateImage({
+        familyId,
+        prompt: req.prompt,
+        style: 'general',
+        size: '1024x1024',
+      })
+      return { key: req.key, response }
+    }),
+  )
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      failures.push('unknown')
+      continue
+    }
+    const { key, response } = result.value
+    if (!response?.url) {
+      failures.push(key)
+      continue
+    }
+
+    if (key === 'title') {
+      art.titleScreen = response.url
+    } else if (key === 'cardBack') {
+      art.cardBack = response.url
+    } else if (key.startsWith('face-')) {
+      const faceKey = key.replace('face-', '')
+      art.cardFaces = { ...art.cardFaces, [faceKey]: response.url }
+    }
+  }
+
+  return { art, failures }
+}
+
+/**
+ * Every picture a card game will make, already capped at 15: title, card back,
+ * then the faces the mechanic needs. Pure and exported (FEAT-184) so the page
+ * can reserve the batch whole before spending it. `generateCardGameArt`
+ * consumes exactly this list.
+ */
+export function buildCardGameArtRequests(
+  inputs: StoryInputs,
+  cardGame: CardGameData,
+): KeyedArtRequest[] {
+  const theme = inputs.theme
+
+  const requests: KeyedArtRequest[] = []
 
   // Title screen
   requests.push({
@@ -384,42 +455,53 @@ export async function generateCardGameArt(
   }
 
   // Cap total at 15
-  const capped = requests.slice(0, 15)
+  return requests.slice(0, WORKSHOP_ART_MAX_CALLS.cards)
+}
 
-  const results = await Promise.allSettled(
-    capped.map(async (req) => {
-      const response = await generateImage({
-        familyId,
-        prompt: req.prompt,
-        style: 'general',
-        size: '1024x1024',
-      })
-      return { key: req.key, response }
-    }),
-  )
+// ── Sizing a game's art before it is made (FEAT-184) ────────────────────────
 
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      failures.push('unknown')
-      continue
-    }
-    const { key, response } = result.value
-    if (!response?.url) {
-      failures.push(key)
-      continue
-    }
+/**
+ * The most pictures each game type can make in one "Create My Game!". The
+ * board count is exact once the inputs are known (see
+ * `estimateWorkshopArtCalls`); these two are ceilings, because an adventure's
+ * scenes and a card game's faces are sized by the writing step that has not
+ * run yet when the child is looking at the button.
+ *
+ *  - adventure: title (1) + key scenes (root + up to 5 = 6) + one card per
+ *    challenge type (up to 4) = 11
+ *  - cards: title + card back + up to 13 faces, hard-capped in
+ *    `buildCardGameArtRequests` = 15
+ */
+export const WORKSHOP_ART_MAX_CALLS = {
+  adventure: 11,
+  cards: 15,
+} as const
 
-    if (key === 'title') {
-      art.titleScreen = response.url
-    } else if (key === 'cardBack') {
-      art.cardBack = response.url
-    } else if (key.startsWith('face-')) {
-      const faceKey = key.replace('face-', '')
-      art.cardFaces = { ...art.cardFaces, [faceKey]: response.url }
-    }
+/**
+ * The board flow makes one more picture than `buildArtRequests` lists: the
+ * page draws a second title card *after* the writing step, with the game's
+ * real title (`WorkshopPage` board branch). It is a paid call like the rest.
+ */
+export const BOARD_TITLE_AFTER_WORDS = 1
+
+/**
+ * How many pictures "Create My Game!" will spend for these inputs — the number
+ * the hint prints and the number the page reserves. `atMost` says the figure
+ * is a ceiling (adventure, cards) rather than the exact batch (board).
+ */
+export function estimateWorkshopArtCalls(
+  gameType: GameType,
+  inputs: StoryInputs,
+  gameTitle?: string,
+): { count: number; atMost: boolean } {
+  switch (gameType) {
+    case 'adventure':
+      return { count: WORKSHOP_ART_MAX_CALLS.adventure, atMost: true }
+    case 'cards':
+      return { count: WORKSHOP_ART_MAX_CALLS.cards, atMost: true }
+    default:
+      return { count: buildArtRequests(inputs, gameTitle).length + BOARD_TITLE_AFTER_WORDS, atMost: false }
   }
-
-  return { art, failures }
 }
 
 /**

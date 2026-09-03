@@ -1220,17 +1220,25 @@ export default function TodayChecklist({
                   </Box>
                 )}
                 {item.completed && item.evidenceArtifactId && (() => {
+                  // FEAT-184 / UX-151: a kid's photo that read as a curriculum
+                  // page keeps its analysis on the scan doc but acts on nothing;
+                  // `pendingScanId` surfaces it here as "Review this" on the
+                  // same expandable chip a parent's own scan already gets.
                   const scanDoc = item.evidenceCollection === 'scans'
                     ? recentScans.find((s) => s.id === item.evidenceArtifactId)
-                    : undefined
+                    : item.pendingScanId
+                      ? recentScans.find((s) => s.id === item.pendingScanId)
+                      : undefined
                   const isExpandable = !!scanDoc?.results
+                  const needsReview = !!item.pendingScanId && isExpandable
+                  const chipWord = needsReview ? 'Review this' : 'Captured ✓'
                   return (
                     <>
                       <Chip
                         size="small"
-                        label={isExpandable ? (expandedCaptureIndex === index ? 'Captured ✓ ▴' : 'Captured ✓ ▾') : 'Captured ✓'}
+                        label={isExpandable ? (expandedCaptureIndex === index ? `${chipWord} ▴` : `${chipWord} ▾`) : 'Captured ✓'}
                         variant="outlined"
-                        color="success"
+                        color={needsReview ? 'warning' : 'success'}
                         onClick={isExpandable ? () => setExpandedCaptureIndex(expandedCaptureIndex === index ? null : index) : undefined}
                         sx={{ ml: 5, mt: 0.5, height: 22, cursor: isExpandable ? 'pointer' : 'default' }}
                       />

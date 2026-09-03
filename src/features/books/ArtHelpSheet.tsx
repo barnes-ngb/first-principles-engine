@@ -212,14 +212,17 @@ export function GenerateHint({
   door,
   audience,
   count = 1,
+  atMost = false,
 }: {
   door: ArtHelpDoor
   audience: ArtHelpAudience
   count?: number
+  /** FEAT-184: `count` is a ceiling sized by a step that has not run yet. */
+  atMost?: boolean
 }) {
   return (
     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-      {generateHint(door, audience, count)}
+      {generateHint(door, audience, count, { atMost })}
     </Typography>
   )
 }

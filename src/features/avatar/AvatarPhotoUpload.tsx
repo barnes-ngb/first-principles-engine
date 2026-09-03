@@ -10,8 +10,12 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt'
 
 import { app } from '../../core/firebase/firebase'
 import { avatarProfilesCollection } from '../../core/firebase/firestore'
+import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { safeSetProfile } from './safeProfileWrite'
 import type { AvatarProfile, CharacterFeatures } from '../../core/types'
+import ArtHelpSheet, { ArtHelpButton, GenerateHint } from '../books/ArtHelpSheet'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import { recordAvatarArtGeneration, useAvatarArtQuota } from './useAvatarArtQuota'
 
 interface AvatarPhotoUploadProps {
   profile: AvatarProfile
@@ -32,7 +36,17 @@ export default function AvatarPhotoUpload({
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
   const [photoExtracting, setPhotoExtracting] = useState(false)
   const [photoError, setPhotoError] = useState<string | null>(null)
+  const [showArtHelp, setShowArtHelp] = useState(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
+
+  // ── The weekly art budget (FEAT-184 — audit #7) ──
+  // `extractFeatures` is a paid image call: one read counts one against the
+  // same per-child, per-week counter every art surface shares. Capability,
+  // never name — a kid profile is capped, a parent is not. At the cap the
+  // button stands down for the warm message; there is no confirm dialog.
+  const { isChildProfile } = useActiveChild()
+  const { atLimit, limit, remaining, recordGeneration } = useAvatarArtQuota()
+  const artAudience = isChildProfile ? 'kid' : 'parent'
 
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
@@ -64,6 +78,8 @@ export default function AvatarPhotoUpload({
 
   const handlePhotoTransform = useCallback(async () => {
     if (!familyId || !childId || !photoPreviewUrl || !profile) return
+    // Refused whole at the cap, before the call (FEAT-184).
+    if (atLimit) return
     setPhotoExtracting(true)
     setPhotoError(null)
 
@@ -83,6 +99,9 @@ export default function AvatarPhotoUpload({
         photoBase64: base64,
         photoMimeType: mimeType,
       })
+      // A real read came back, so a real call was made: count it. Fire-and-
+      // forget by construction (FEAT-167) — never awaited.
+      recordAvatarArtGeneration(recordGeneration)
 
       // Save features to profile
       const profileRef = doc(avatarProfilesCollection(familyId), childId)
@@ -102,7 +121,7 @@ export default function AvatarPhotoUpload({
     } finally {
       setPhotoExtracting(false)
     }
-  }, [familyId, childId, photoPreviewUrl, profile])
+  }, [familyId, childId, photoPreviewUrl, profile, atLimit, recordGeneration])
 
   return (
     <Box
@@ -140,6 +159,9 @@ export default function AvatarPhotoUpload({
         >
           Transform YOUR Photo
         </Typography>
+        {/* One "?" for the panel (FEAT-178 shape): what the read does, what it
+            spends, and what it never touches. */}
+        <ArtHelpButton onClick={() => setShowArtHelp(true)} />
       </Box>
 
       {!photoPreviewUrl ? (
@@ -194,7 +216,7 @@ export default function AvatarPhotoUpload({
               variant="contained"
               size="small"
               onClick={() => void handlePhotoTransform()}
-              disabled={photoExtracting}
+              disabled={photoExtracting || atLimit}
               sx={{
                 bgcolor: accentColor,
                 color: isLincoln ? '#000' : '#fff',
@@ -209,6 +231,15 @@ export default function AvatarPhotoUpload({
             >
               {photoExtracting ? 'Extracting...' : 'Transform!'}
             </Button>
+            {/* What the tap spends (FEAT-184). At the cap the message replaces
+                the hint — never both. */}
+            {atLimit ? (
+              <Typography sx={{ fontSize: '13px', color: isLincoln ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)' }}>
+                {ART_QUOTA_MESSAGE}
+              </Typography>
+            ) : (
+              <GenerateHint door="avatarPhoto" audience={artAudience} />
+            )}
             <Button
               variant="text"
               size="small"
@@ -245,6 +276,14 @@ export default function AvatarPhotoUpload({
           3D character reflects your look
         </Typography>
       )}
+
+      <ArtHelpSheet
+        surface="avatarPhoto"
+        open={showArtHelp}
+        onClose={() => setShowArtHelp(false)}
+        audience={artAudience}
+        budget={{ limit, remaining, capped: isChildProfile }}
+      />
     </Box>
   )
 }
