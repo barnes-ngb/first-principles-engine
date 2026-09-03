@@ -386,7 +386,7 @@ export default function BookReaderPage() {
       })
       if (skippedImageCount > 0) {
         setPrintSkipNotice(
-          `${skippedImageCount} image${skippedImageCount === 1 ? '' : 's'} couldn't be embedded and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
+          `${skippedImageCount} picture${skippedImageCount === 1 ? '' : 's'} couldn't be printed and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
         )
       }
     } finally {
@@ -409,7 +409,7 @@ export default function BookReaderPage() {
           title="Book not found."
           action={
             <Button onClick={() => navigate('/books')} startIcon={<ArrowBackIcon />}>
-              Back to My Books
+              My Books
             </Button>
           }
         />
@@ -868,7 +868,7 @@ export default function BookReaderPage() {
               disabled={printing}
               sx={{ minHeight: 36, color: textColor, borderColor: textColor }}
             >
-              {printing ? 'Creating PDF...' : 'Download PDF'}
+              {printing ? 'Making PDF\u2026' : 'Make a PDF'}
             </Button>
           </>
         )}

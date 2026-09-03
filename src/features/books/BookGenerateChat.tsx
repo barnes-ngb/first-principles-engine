@@ -531,7 +531,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           <CircularProgress size={20} />
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              Illustrating page {illustrationProgress.currentPage} of{' '}
+              Making picture {illustrationProgress.currentPage} of{' '}
               {illustrationProgress.totalPages}…
             </Typography>
             <Typography variant="caption" color="text.secondary">
@@ -542,7 +542,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
             <Box
               component="img"
               src={illustrationProgress.lastImageUrl}
-              alt="Latest illustration preview"
+              alt="Latest picture"
               sx={{ width: 48, height: 48, borderRadius: 1, boxShadow: 1 }}
             />
           )}
@@ -610,7 +610,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
       <Box>
         <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
           <Typography variant="caption" color="text.secondary">
-            Illustration style
+            Picture style
           </Typography>
           {/* One "?" for the whole surface (FEAT-178) — what each style looks
               like, what committing spends, and what it never touches. */}
@@ -629,7 +629,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
             <ToggleButton
               key={opt.value}
               value={opt.value}
-              aria-label={`Illustration style: ${opt.label}`}
+              aria-label={`Picture style: ${opt.label}`}
               sx={{ textTransform: 'none', px: 1.5 }}
             >
               <span aria-hidden style={{ marginRight: 6 }}>{opt.emoji}</span>
@@ -648,7 +648,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           onClick={() => void handleCommit()}
           sx={{ minHeight: 56, textTransform: 'none', fontWeight: 700 }}
         >
-          ✓ I like the whole story!
+          ✓ Make my book!
         </Button>
         {/* What committing makes and what it spends (FEAT-178). At the cap the
             surface already shows ART_QUOTA_MESSAGE above, so the hint stands

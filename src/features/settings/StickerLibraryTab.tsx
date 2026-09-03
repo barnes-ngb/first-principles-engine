@@ -84,7 +84,7 @@ interface StickerLibraryTabProps {
    */
   groupByDrawing?: boolean
   /**
-   * When true, enables sticker-sheet printing (FEAT-33): a "Print this" action
+   * When true, enables sticker-sheet printing (FEAT-33): a "Make a PDF" action
    * in the big preview, plus a "Make a sheet" select-to-print mode (tap to
    * select → sticky "Print N stickers" → grid PDF). Off by default so the
    * Settings admin tab is unaffected.
@@ -615,7 +615,7 @@ export default function StickerLibraryTab({
             >
               {selected.length === 0
                 ? 'Tap stickers to add them'
-                : `Print ${selected.length} sticker${selected.length !== 1 ? 's' : ''}`}
+                : `Make a PDF of ${selected.length} sticker${selected.length !== 1 ? 's' : ''}`}
             </Button>
           </Box>
         )
@@ -630,8 +630,8 @@ export default function StickerLibraryTab({
       >
         <DialogTitle>
           {printTargets && printTargets.length === 1
-            ? 'Print this sticker'
-            : `Print ${printTargets?.length ?? 0} stickers`}
+            ? 'Make a PDF of this sticker'
+            : `Make a PDF of ${printTargets?.length ?? 0} stickers`}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 0.5 }}>
@@ -690,7 +690,7 @@ export default function StickerLibraryTab({
             disabled={printing}
             sx={{ minHeight: 44 }}
           >
-            {printing ? 'Making PDF...' : 'Print'}
+            {printing ? 'Making PDF\u2026' : 'Make a PDF'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -775,7 +775,7 @@ export default function StickerLibraryTab({
                     setPrintTargets([target])
                   }}
                 >
-                  Print this
+                  Make a PDF
                 </Button>
               )}
               {/* Add to catalog (FEAT-82) — parent-only (§6). Read-only of the

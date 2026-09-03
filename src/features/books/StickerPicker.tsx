@@ -346,7 +346,7 @@ export default function StickerPicker({
             variant="contained"
             onClick={() => { void handleConfirmTagging() }}
           >
-            Use Sticker!
+            Use it
           </Button>
         </DialogActions>
       </Dialog>
@@ -476,7 +476,7 @@ export default function StickerPicker({
                 onClick={() => setShowCreateDialog(true)}
                 sx={{ minHeight: 48, flex: 1 }}
               >
-                Generate
+                Make a sticker
               </Button>
             )}
           </Stack>
@@ -524,7 +524,7 @@ export default function StickerPicker({
                   variant="contained"
                   onClick={() => { void handleUseGeneratedSticker() }}
                 >
-                  Use This
+                  Use it
                 </Button>
               </Stack>
             </Stack>
@@ -590,7 +590,7 @@ export default function StickerPicker({
                   onClick={() => { void handleCreateSticker() }}
                   disabled={!createPrompt.trim() || generating}
                 >
-                  Create!
+                  Make it
                 </Button>
               )}
             </>

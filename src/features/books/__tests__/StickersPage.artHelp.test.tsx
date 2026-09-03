@@ -101,10 +101,10 @@ describe('StickersPage — the "?" (FEAT-178)', () => {
   })
 })
 
-describe('MakeStickerDialog — the hint under "Create!" (FEAT-178)', () => {
+describe('MakeStickerDialog — the hint under "Make it" (FEAT-178)', () => {
   it('reads the kid line for a kid profile', () => {
     render(<MakeStickerDialog open onClose={() => {}} familyId="f1" audience="kid" />)
-    expect(screen.getByRole('button', { name: 'Create!' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Make it' })).toBeInTheDocument()
     expect(screen.getByText('Makes 1 sticker. Uses 1 art.')).toBeInTheDocument()
   })
 
@@ -120,6 +120,6 @@ describe('MakeStickerDialog — the hint under "Create!" (FEAT-178)', () => {
     expect(screen.getByText(CAP_MESSAGE)).toBeInTheDocument()
     // The price of a tap the kid cannot make is not information they need.
     expect(screen.queryByText('Makes 1 sticker. Uses 1 art.')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Create!' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Make it' })).toBeNull()
   })
 })

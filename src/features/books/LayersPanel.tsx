@@ -24,7 +24,7 @@ interface LayersPanelProps {
 }
 
 const TYPE_LABEL: Record<PageImage['type'], string> = {
-  'ai-generated': 'Scene',
+  'ai-generated': 'Picture',
   photo: 'Photo',
   sticker: 'Sticker',
   sketch: 'Drawing',

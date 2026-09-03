@@ -6,7 +6,7 @@ import { FIT_BACKDROP_TESTID } from '../imageFit'
 import type { BookPage, PageImage } from '../../../core/types'
 
 /**
- * FEAT-177 — the Book Editor's "Change background" menu can show a background
+ * FEAT-177 — the Book Editor's "Change picture" menu can show a background
  * whole instead of cropping it to fill the page.
  */
 
@@ -42,7 +42,7 @@ function renderEditor(images: PageImage[]) {
 }
 
 function openBackgroundMenu() {
-  fireEvent.click(screen.getByRole('button', { name: /change background/i }))
+  fireEvent.click(screen.getByRole('button', { name: /change picture/i }))
 }
 
 /** The images handed to the page's update path by the most recent call. */
@@ -54,7 +54,7 @@ function updatedImages(onUpdate: ReturnType<typeof vi.fn>): PageImage[] {
 describe('PageEditor background fit toggle (FEAT-177)', () => {
   it('offers no background menu at all when the page has no background', () => {
     renderEditor([{ ...image('s'), type: 'sticker' }])
-    expect(screen.queryByRole('button', { name: /change background/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /change picture/i })).toBeNull()
   })
 
   it('offers "Show the whole picture" when a background is filling the page', () => {
@@ -117,10 +117,10 @@ describe('PageEditor background fit toggle (FEAT-177)', () => {
 
   it('offers no fit toggle when the only non-sticker is a FEAT-116 placed element', () => {
     // A placed element is a composed overlay, not a page canvas — the menu still
-    // opens (Change/Remove background), but the fit row is not offered.
+    // opens (Change/Remove picture), but the fit row is not offered.
     renderEditor([image('e', { type: 'photo', layerType: 'element' })])
     openBackgroundMenu()
-    expect(screen.getByText('Change background')).toBeTruthy()
+    expect(screen.getByText('Change picture')).toBeTruthy()
     expect(screen.queryByText('Show the whole picture')).toBeNull()
     expect(screen.queryByText('Fill the page')).toBeNull()
   })

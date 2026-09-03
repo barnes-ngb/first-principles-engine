@@ -36,10 +36,10 @@ describe('DrawingChoiceDialog — weekly art budget (FEAT-168)', () => {
     expect(screen.getByText('Make a sticker')).toBeTruthy()
   })
 
-  it('"Make a scene" stays offered — it routes to the page’s AI dialog, which carries the same cap', () => {
+  it('"Make a picture" stays offered — it routes to the page’s AI dialog, which carries the same cap', () => {
     renderDialog({ capReached: true })
 
-    expect(screen.getByText('Make a scene')).toBeTruthy()
+    expect(screen.getByText('Make a picture')).toBeTruthy()
   })
 
   it('a capped tap cannot reach the paid choice even if something routes to it', async () => {
@@ -73,7 +73,7 @@ describe('DrawingChoiceDialog — weekly art budget (FEAT-168)', () => {
     })
 
     expect(screen.queryByText('Reimagine as sticker')).toBeNull()
-    expect(screen.queryByText('Reimagine as scene')).toBeNull()
+    expect(screen.queryByText('Reimagine as a picture')).toBeNull()
     expect(screen.getByText('Add as sticker')).toBeTruthy()
     expect(screen.getByText('Save to gallery')).toBeTruthy()
     expect(screen.getByText(ART_QUOTA_MESSAGE)).toBeTruthy()

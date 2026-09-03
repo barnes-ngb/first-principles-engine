@@ -175,7 +175,7 @@ describe('BookshelfPage — Story Gen V2 PR-A wiring', () => {
 // ── Story Gen V2 PR-B: Per-Page Review wiring ─────────────────────
 
 describe('BookshelfPage — Per-Page Review wiring (PR-B)', () => {
-  it('shows a "Continue reading →" badge for a book with an in-progress review', () => {
+  it('names the review surface on the in-progress badge — "Read it to me" (UX-106)', () => {
     booksFixture = [
       makeBook({
         id: 'b-review',
@@ -184,7 +184,10 @@ describe('BookshelfPage — Per-Page Review wiring (PR-B)', () => {
       }),
     ]
     render(<BookshelfPage />)
-    expect(screen.getByText(/continue reading/i)).toBeTruthy()
+    // "Continue reading →" named the wrong act: the tap opens the approve /
+    // change surface the editor's own chip calls "Read it to me 🎧".
+    expect(screen.getByText(/Finish "Read it to me"/)).toBeTruthy()
+    expect(screen.queryByText(/continue reading/i)).toBeNull()
   })
 
   it('clicking an in-progress-review book navigates to the review surface', async () => {
