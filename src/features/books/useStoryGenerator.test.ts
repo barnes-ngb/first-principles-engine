@@ -118,3 +118,59 @@ describe('UX-117 — the honest line reaches this surface too', () => {
     expect((await generateStory('f1', 'c1', ['the'], 'cats', 6)).title).toBe('The Cat')
   })
 })
+
+// Codex P1 (PR #1748) — the tests above mock the CLIENT field name. The server
+// prompt (`functions/src/ai/chat.ts`) asks for `allWordsUsed`, and the parse was
+// a bare cast, so on a real reply `allSightWordsUsed` was simply absent and any
+// `.length` read on it threw before the preview could render.
+
+const SERVER_SHAPED_REPLY = {
+  title: 'The Cat',
+  pages: [
+    { pageNumber: 1, text: 'The cat sat.', sightWordsOnPage: ['the'] },
+    { pageNumber: 2, text: 'The cat ran to the castle.', sightWordsOnPage: ['the', 'to'] },
+  ],
+  // The server's key — note NO `allSightWordsUsed`.
+  allWordsUsed: ['the', 'to'],
+  missedWords: [],
+}
+
+describe('the story that actually comes back off the wire', () => {
+  it('fills allSightWordsUsed from the server\'s allWordsUsed', async () => {
+    chatMock.mockResolvedValue({ message: JSON.stringify(SERVER_SHAPED_REPLY) })
+    const { generateStory } = hook()
+    const story = await generateStory('f1', 'c1', ['the'], 'cats', 6)
+    expect(story.allSightWordsUsed).toEqual(['the', 'to'])
+  })
+
+  it('never hands back an absent list — a .length read cannot throw', async () => {
+    // A reply carrying neither key: the shape a terse model actually returns.
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({ title: 'Bare', pages: [{ pageNumber: 1, text: 'A cat.' }] }),
+    })
+    const { generateStory } = hook()
+    const story = await generateStory('f1', 'c1', ['the'], 'cats', 6)
+    expect(story.allSightWordsUsed).toEqual([])
+    expect(story.missedWords).toEqual([])
+    expect(story.pages[0].sightWordsOnPage).toEqual([])
+    expect(() => story.allSightWordsUsed.length).not.toThrow()
+  })
+
+  it('still reads the client-shaped fixture (sampleStory) unchanged', async () => {
+    chatMock.mockResolvedValue({ message: JSON.stringify(STORY) })
+    const { generateStory } = hook()
+    expect((await generateStory('f1', 'c1', ['the'], 'cats', 6)).allSightWordsUsed).toEqual([
+      'the',
+      'to',
+    ])
+  })
+
+  it('numbers pages when the model omits pageNumber', async () => {
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({ title: 'X', pages: [{ text: 'One.' }, { text: 'Two.' }] }),
+    })
+    const { generateStory } = hook()
+    const story = await generateStory('f1', 'c1', ['the'], 'cats', 6)
+    expect(story.pages.map((p) => p.pageNumber)).toEqual([1, 2])
+  })
+})

@@ -120,9 +120,13 @@ export default function CreateSightWordBook() {
    */
   const missedWords = useMemo(() => {
     if (!preview) return []
-    const requested = preview.allSightWordsUsed.length > 0 || wordList.length > 0
-      ? [...new Set([...wordList, ...preview.allSightWordsUsed])]
-      : []
+    // The requested list is the parent's typed/picked words and ONLY those —
+    // the same `wordList` the publish path writes as `book.sightWords`. It
+    // deliberately does not union in `preview.allSightWordsUsed`: that is the
+    // model's own claim about what it used, which is exactly the number
+    // UX-119 exists to stop repeating, and it is absent on a real reply
+    // anyway (the server emits `allWordsUsed` — Codex P1, PR #1748).
+    const requested = [...new Set(wordList)]
     const used = new Set(
       practiceWordsUsedIn(preview.pages, requested).map((w) => w.toLowerCase()),
     )

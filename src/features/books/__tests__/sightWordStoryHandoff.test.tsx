@@ -5,6 +5,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 import SightWordDashboard from '../SightWordDashboard'
 import CreateSightWordBook from '../CreateSightWordBook'
+import type { GeneratedStory } from '../useStoryGenerator'
 
 // UX-142 — "Generate Story from Weak Words" built `?words=a,b,c` while the
 // receiving screen reads only `location.state.prefillWords`. The words went
@@ -169,6 +170,49 @@ describe('UX-119 — missed words are checked against the pages', () => {
       // The model claims a clean run; "said" is nowhere on the page.
       missedWords: [],
       readability: undefined,
+    })
+    locationState = { prefillWords: ['the', 'said'] }
+    render(<CreateSightWordBook />)
+
+    await user.click(screen.getByRole('button', { name: /make the story/i }))
+    await waitFor(() => expect(screen.getByText(/Missed words: said/)).toBeTruthy())
+  })
+})
+
+// Codex P1 (PR #1748) — with a REAL generated response the preview crashed
+// before it could render: the server emits `allWordsUsed`, the client type
+// declared `allSightWordsUsed`, and the UX-119 computation read `.length` on
+// the absent field. The mocks above hid it by using the client-only name.
+
+describe('UX-119 — the preview renders on a real server-shaped reply', () => {
+  it('does not crash when the reply carries allWordsUsed and no allSightWordsUsed', async () => {
+    const user = userEvent.setup()
+    generateStoryMock.mockResolvedValue({
+      title: 'The Cat',
+      pages: [{ pageNumber: 1, text: 'The cat and the dog ran.', sightWordsOnPage: [] }],
+      // Deliberately WITHOUT `allSightWordsUsed` — the shape the hook handed
+      // back before it normalized, and the exact value that crashed the
+      // preview. The screen must not read that field at all.
+      missedWords: [],
+    } as unknown as GeneratedStory)
+    locationState = { prefillWords: ['the', 'and'] }
+    render(<CreateSightWordBook />)
+
+    await user.click(screen.getByRole('button', { name: /make the story/i }))
+    await waitFor(() => expect(screen.getByText(/Preview: The Cat/)).toBeTruthy())
+    // Both requested words are on the page, so nothing is reported missed.
+    expect(screen.queryByText(/Missed words/)).toBeNull()
+  })
+
+  it('reports missed words from the parent\'s list alone, never the model\'s claim', async () => {
+    const user = userEvent.setup()
+    generateStoryMock.mockResolvedValue({
+      title: 'The Cat',
+      pages: [{ pageNumber: 1, text: 'The cat ran.', sightWordsOnPage: [] }],
+      // The model claims it used "said" — the page does not contain it. The
+      // claim must not widen or narrow what is reported.
+      allSightWordsUsed: ['the', 'said'],
+      missedWords: [],
     })
     locationState = { prefillWords: ['the', 'said'] }
     render(<CreateSightWordBook />)
