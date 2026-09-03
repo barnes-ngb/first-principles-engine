@@ -46,6 +46,7 @@ function renderKid(checklist: ChecklistItem[], opts: { isMvd?: boolean } = {}) {
         checklist={checklist}
         maxChoices={2}
         isLincoln
+        isChildProfile
         isMvd={opts.isMvd ?? false}
         gateUnlocked={p.gateUnlocked}
         gateThreshold={p.gateThreshold}

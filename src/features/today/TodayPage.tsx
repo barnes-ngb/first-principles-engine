@@ -1236,12 +1236,13 @@ export default function TodayPage() {
         </SectionErrorBoundary>
       )}
 
-      {/* --- Teach-Back (Lincoln only, after 50%+ must-do completion) --- */}
+      {/* --- Teach-Back (a child with a younger sibling, after 50%+ must-do) --- */}
       {selectedChild && (
         <SectionErrorBoundary section="teach-back">
           <TeachBackSection
             dayLog={dayLog}
             selectedChild={selectedChild}
+            children={children}
             familyId={familyId}
             selectedChildId={selectedChildId}
             today={today}

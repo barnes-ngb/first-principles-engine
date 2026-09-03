@@ -31,6 +31,8 @@ import type { BackfillResult } from './backfillWorkingLevels'
 import { backfillWorkingLevels } from './backfillWorkingLevels'
 import type { BackfillBlockIdsResult } from './backfillBlockIds'
 import { backfillBlockIds } from './backfillBlockIds'
+import type { ArtifactChildIdAudit } from './auditArtifactChildIds'
+import { fetchArtifactChildIdAudit } from './auditArtifactChildIds'
 import type { DuplicateGroup, MergeOutcome } from './mergeDuplicateConfigs'
 import { applyMerge, fetchDuplicateGroups } from './mergeDuplicateConfigs'
 import { useAI, TaskType } from '../../core/ai/useAI'
@@ -69,7 +71,7 @@ type SundayDoc = {
 }
 
 type StatusMsg = {
-  severity: 'success' | 'error' | 'info'
+  severity: 'success' | 'error' | 'info' | 'warning'
   text: string
 }
 
@@ -519,6 +521,38 @@ export default function DevAdminTab() {
       setBlockIdsStatus({ severity: 'error', text: `Backfill failed: ${err}` })
     } finally {
       setBlockIdsRunning(false)
+    }
+  }
+
+  // ── Section H: Artifact childId Audit (FEAT-183 / B14) ───────
+  // READ-ONLY. Counts artifacts whose `childId` is not a child doc id — the
+  // residue of the kid Dad-Lab captures that wrote the lowercase NAME as the
+  // id. Nothing here writes; a backfill is a separate confirmed decision.
+  const [childIdAuditRunning, setChildIdAuditRunning] = useState(false)
+  const [childIdAudit, setChildIdAudit] = useState<ArtifactChildIdAudit | null>(null)
+  const [childIdAuditStatus, setChildIdAuditStatus] = useState<StatusMsg | null>(null)
+
+  const handleAuditArtifactChildIds = async () => {
+    if (!familyId) return
+    setChildIdAuditRunning(true)
+    setChildIdAuditStatus(null)
+    setChildIdAudit(null)
+    try {
+      const result = await fetchArtifactChildIdAudit(familyId, children)
+      setChildIdAudit(result)
+      const strayTotal = result.stray.reduce((sum, g) => sum + g.count, 0)
+      setChildIdAuditStatus({
+        severity: strayTotal > 0 ? 'warning' : 'success',
+        text:
+          strayTotal > 0
+            ? `${strayTotal} of ${result.total} artifact(s) carry a childId that is not a child doc id.`
+            : `All ${result.matched} of ${result.total} artifact(s) with a childId use a real child doc id.`,
+      })
+    } catch (err) {
+      console.error('Artifact childId audit failed', err)
+      setChildIdAuditStatus({ severity: 'error', text: `Audit failed: ${err}` })
+    } finally {
+      setChildIdAuditRunning(false)
     }
   }
 
@@ -1037,6 +1071,65 @@ export default function DevAdminTab() {
                   : ''}
                 )
               </Typography>
+            ))}
+          </Stack>
+        )}
+      </Box>
+
+      <Divider />
+
+      {/* ── Section H: Artifact childId Audit (FEAT-183 / B14) ── */}
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Artifact childId Audit
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          Read-only. Kid Dad-Lab captures used to write the lowercase child
+          <em> name</em> as an artifact&apos;s <code>childId</code> instead of the
+          child doc id, so those artifacts are invisible to every reader that
+          queries <code>childId == child.id</code>. The write is fixed going
+          forward; this counts what is left behind. <strong>It changes
+          nothing</strong> — a backfill is a separate, confirmed decision.
+        </Typography>
+        <Button
+          variant="outlined"
+          onClick={() => void handleAuditArtifactChildIds()}
+          disabled={childIdAuditRunning}
+          sx={{ mt: 1, minHeight: 48 }}
+        >
+          {childIdAuditRunning ? <CircularProgress size={20} /> : 'Run Audit'}
+        </Button>
+
+        {childIdAuditStatus && (
+          <Alert severity={childIdAuditStatus.severity} sx={{ mt: 1 }}>
+            {childIdAuditStatus.text}
+          </Alert>
+        )}
+
+        {childIdAudit && (
+          <Stack spacing={1} sx={{ mt: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              {childIdAudit.total} artifact(s) read · {childIdAudit.matched} keyed
+              by doc id · {childIdAudit.missing} with no <code>childId</code>.
+            </Typography>
+            {childIdAudit.stray.map((g) => (
+              <Box
+                key={g.childId}
+                sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
+              >
+                <Typography variant="subtitle2">
+                  <code>{g.childId}</code> — {g.count} artifact(s)
+                  {g.likelyChild
+                    ? ` · likely ${g.likelyChild.name} (${g.likelyChild.id})`
+                    : ' · no matching child — needs a human decision'}
+                </Typography>
+                {g.samples.map((sample) => (
+                  <Typography key={sample.id} variant="body2" color="text.secondary">
+                    {sample.title}
+                    {sample.createdAt ? ` · ${sample.createdAt.slice(0, 10)}` : ''}
+                  </Typography>
+                ))}
+              </Box>
             ))}
           </Stack>
         )}

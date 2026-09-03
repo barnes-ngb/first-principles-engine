@@ -189,7 +189,7 @@ export default function KidTodayView({
   // Draft book for "Continue your book" card + completed book for "Read your books" card
   const { draftBook } = useDraftBook(familyId, child.id)
   const { completedBook } = useCompletedBook(familyId, child.id)
-  const { children: allChildren } = useActiveChild()
+  const { children: allChildren, isChildProfile } = useActiveChild()
 
   // --- Chapter book progress for KidChapterPool ---
   const [selectedBook, setSelectedBook] = useState<ChapterBook | null>(null)
@@ -727,6 +727,7 @@ export default function KidTodayView({
           checklist={checklist}
           maxChoices={maxChoices}
           isLincoln={isLincoln}
+          isChildProfile={isChildProfile}
           isMvd={!!isMvd}
           gateUnlocked={gateUnlocked}
           gateThreshold={gateThreshold}
@@ -762,7 +763,6 @@ export default function KidTodayView({
           >
             <KidConundrumResponse
               conundrum={weekFocus.conundrum}
-              isLincoln={isLincoln}
               child={child}
               familyId={familyId}
             />

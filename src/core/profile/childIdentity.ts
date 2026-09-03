@@ -11,6 +11,7 @@
 // "demographics may seed sensible defaults" allowance in CLAUDE.md.
 
 import type { Child } from '../types'
+import { deriveChildAge } from './childAge'
 
 /**
  * Whole-year age from a `YYYY-MM-DD` (or any Date-parseable) birthdate.
@@ -55,5 +56,31 @@ export function getChildAgeGroup(
 ): AgeGroup {
   const age = computeAge(child?.birthdate, now)
   if (age === undefined) return 'younger'
+  return age >= OLDER_AGE_GROUP_THRESHOLD ? 'older' : 'younger'
+}
+
+/**
+ * Age group resolved from a child's identity data, falling back to the
+ * canonical birthdate seed in `childAge.ts` when the Firestore doc has no
+ * `birthdate` of its own.
+ *
+ * Same threshold and same `'younger'` default as {@link getChildAgeGroup} —
+ * this only widens where the age may come from. Use it when the age group
+ * *selects a branch* (FEAT-183): `getChildAgeGroup` is birthdate-only and
+ * silently reads `'younger'` for a child doc that predates the ARCH-15
+ * identity backfill, which would flip an older child into the younger
+ * child's flow. Seeding defaults (avatar proportions, worksheet fonts) can
+ * keep using the narrower helper — a cosmetic default that lands on
+ * `'younger'` is harmless.
+ *
+ * Still DATA, never a gate: it derives an age, it does not grant access.
+ */
+export function resolveChildAgeGroup(
+  child: Child | null | undefined,
+  now: Date = new Date(),
+): AgeGroup {
+  if (!child) return 'younger'
+  const age = computeAge(child.birthdate, now) ?? deriveChildAge(child, now)
+  if (age === null || age === undefined) return 'younger'
   return age >= OLDER_AGE_GROUP_THRESHOLD ? 'older' : 'younger'
 }

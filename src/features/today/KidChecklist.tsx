@@ -45,6 +45,13 @@ interface KidChecklistProps {
   checklist: ChecklistItem[]
   maxChoices: number
   isLincoln: boolean
+  /**
+   * True when a child profile is driving this view (FEAT-183 / UX-152, B2).
+   * Gates the self-report mastery chips, which used to render `&& isLincoln`
+   * — a name deciding whether a kid could tell the app something was hard.
+   * The chips are three taps, not a reading task, so any kid gets them.
+   */
+  isChildProfile: boolean
   isMvd: boolean
   gateUnlocked: boolean
   gateThreshold: number
@@ -82,6 +89,7 @@ export default function KidChecklist({
   checklist,
   maxChoices,
   isLincoln,
+  isChildProfile,
   isMvd,
   gateUnlocked,
   gateThreshold,
@@ -295,8 +303,8 @@ export default function KidChecklist({
                     Work captured!
                   </Typography>
                 )}
-                {/* Lincoln self-report mastery */}
-                {item.completed && !item.mastery && isLincoln && (
+                {/* Self-report mastery — any kid (FEAT-183, B2) */}
+                {item.completed && !item.mastery && isChildProfile && (
                   <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 0.5 }}>
                     <Chip label="⛏️ Easy!" size="small" color="success" variant="outlined"
                       onClick={() => handleSetMastery(absIndex, 'got-it')} />
@@ -620,8 +628,8 @@ export default function KidChecklist({
                         Work captured!
                       </Typography>
                     )}
-                    {/* Lincoln self-report mastery */}
-                    {item.completed && !item.mastery && isLincoln && (
+                    {/* Self-report mastery — any kid (FEAT-183, B2) */}
+                    {item.completed && !item.mastery && isChildProfile && (
                       <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 0.5 }}>
                         <Chip label="⛏️ Easy!" size="small" color="success" variant="outlined"
                           onClick={() => handleSetMastery(absIndex, 'got-it')} />
