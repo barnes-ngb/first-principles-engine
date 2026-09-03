@@ -21,6 +21,8 @@ import { useProfile } from '../../core/profile/useProfile'
 import { UserProfile } from '../../core/types/enums'
 import type { ChatTurn } from '../../core/types'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
+import { useBookArtQuota } from './useBookArtQuota'
 import { storyWordsPreviewLine } from './storyPracticeWords'
 import { useBookGenerateChat } from './useBookGenerateChat'
 import StoryLengthSelector from './StoryLengthSelector'
@@ -66,7 +68,7 @@ function ageFromBirthdate(birthdate: string | undefined, fallback: number): numb
 
 export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: Props) {
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, isChildProfile } = useActiveChild()
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
   // The active profile IS the context (FEAT-173, owner decision 2026-09-02):
@@ -124,6 +126,21 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   } = chat
 
   const isIllustrating = illustrationProgress.phase === 'illustrating'
+
+  // Help (FEAT-178). The counter is read for display only — the illustrate loop
+  // asks for itself inside `useBookIllustrator`, and nothing here spends,
+  // records or gates. Audience is capability, never a name.
+  const { limit: artLimit, remaining: artRemaining } = useBookArtQuota()
+  const artAudience = isChildProfile ? 'kid' : 'parent'
+  const artBudget = { limit: artLimit, remaining: artRemaining, capped: isChildProfile }
+  const [showArtHelp, setShowArtHelp] = useState(false)
+  // What committing will actually spend: one picture per page that carries a
+  // scene. A page without one is skipped and costs nothing, so counting the
+  // whole story would overstate the price. Before a draft exists the chosen
+  // length is the honest upper bound.
+  const scenePageCount = currentStory
+    ? currentStory.pages.filter((p) => (p.sceneDescription ?? '').trim() !== '').length
+    : pageCount
 
   // ── Composer state ────────────────────────────────────────────
 
@@ -591,9 +608,14 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
 
       {/* Illustration style strip */}
       <Box>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-          Illustration style
-        </Typography>
+        <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">
+            Illustration style
+          </Typography>
+          {/* One "?" for the whole surface (FEAT-178) — what each style looks
+              like, what committing spends, and what it never touches. */}
+          <ArtHelpButton onClick={() => setShowArtHelp(true)} />
+        </Stack>
         <ToggleButtonGroup
           value={illustrationStyle}
           exclusive
@@ -628,6 +650,16 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
         >
           ✓ I like the whole story!
         </Button>
+        {/* What committing makes and what it spends (FEAT-178). At the cap the
+            surface already shows ART_QUOTA_MESSAGE above, so the hint stands
+            down rather than doubling it. */}
+        {!illustrationProgress.capReached && (
+          <GenerateHint
+            door="illustrateBook"
+            audience={artAudience}
+            count={scenePageCount}
+          />
+        )}
         {canAbandon && (
           <Button
             variant="text"
@@ -639,6 +671,14 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           </Button>
         )}
       </Stack>
+
+      <ArtHelpSheet
+        surface="generateBook"
+        open={showArtHelp}
+        onClose={() => setShowArtHelp(false)}
+        audience={artAudience}
+        budget={artBudget}
+      />
     </Stack>
   )
 }

@@ -22,6 +22,8 @@ import { db, stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useAI } from '../../core/ai/useAI'
 import type { Sticker } from '../../core/types'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import type { ArtHelpAudience } from './artHelpContent'
+import { GenerateHint } from './ArtHelpSheet'
 import { recordStickerArtGeneration } from './useStickerArtQuota'
 import {
   FANCY_STYLE_OPTIONS,
@@ -68,6 +70,13 @@ interface DrawingGroupCardProps {
   capReached?: boolean
   /** Count one paid generation against the day's counter (FEAT-165). */
   recordGeneration?: () => Promise<void>
+  /**
+   * Whose words the one-line hint under "Make it" is written in (FEAT-178).
+   * Resolved by the host from `useActiveChild().isChildProfile` — capability,
+   * never a name. Defaults to the parent wording for the uncapped Settings
+   * render.
+   */
+  audience?: ArtHelpAudience
 }
 
 /** Friendly label for a version chip — "Original", or the theme's emoji + name. */
@@ -94,6 +103,7 @@ export default function DrawingGroupCard({
   allVersions,
   capReached = false,
   recordGeneration,
+  audience = 'parent',
 }: DrawingGroupCardProps) {
   const { enhanceSketch } = useAI()
   const [picking, setPicking] = useState(false)
@@ -451,6 +461,9 @@ export default function DrawingGroupCard({
                     />
                   ))}
                 </Box>
+                {/* One tap, one picture (FEAT-178). Replaced by the cap nudge
+                    above, never shown beside it. */}
+                <GenerateHint door="addVersion" audience={audience} />
               </>
             )}
             {error && (

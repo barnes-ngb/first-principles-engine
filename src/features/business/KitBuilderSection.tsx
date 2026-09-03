@@ -68,7 +68,7 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
   // uncapped and never touches the counter. `capped === !canEdit` because the
   // only non-parent profiles are the kids.
   const capped = !canEdit
-  const { atLimit, remaining, recordGeneration } = useArtQuota(activeChildId, { capped })
+  const { atLimit, limit, remaining, recordGeneration } = useArtQuota(activeChildId, { capped })
 
   const nameById = useMemo(() => {
     const m: Record<string, string> = {}
@@ -211,6 +211,10 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
         // The kid hit this week's light generation cap — the form swaps the generate
         // buttons for a friendly nudge instead of a hard error (FEAT-94).
         capReached={atLimit}
+        // Help copy is gated on the SAME capability answer as the cap (FEAT-178)
+        // — `capped === !canEdit`, never a name.
+        audience={capped ? 'kid' : 'parent'}
+        artBudget={{ limit, remaining, capped }}
         // How many paid generations the actor may still make this week. The form
         // bounds the batch loop by this so a big roster can't blow past the cap
         // in one tap (Infinity for an uncapped parent) — FEAT-94.

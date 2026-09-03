@@ -39,6 +39,8 @@ import {
 } from './drawingStickerStyles'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { recordStickerArtGeneration } from './useStickerArtQuota'
+import type { ArtBudgetState, ArtHelpAudience } from './artHelpContent'
+import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
 import { StickerCategory } from '../../core/types/enums'
 import type { Sticker, StickerTag } from '../../core/types'
 import { STICKER_TAG_LABELS } from '../../core/types'
@@ -64,6 +66,17 @@ interface SketchScannerProps {
   capReached?: boolean
   /** Count one paid transform against the day's counter (FEAT-166). */
   recordGeneration?: () => Promise<void>
+  /**
+   * Whose words the help reads in (FEAT-178) — resolved by the host from
+   * `useActiveChild().isChildProfile`. Capability, never a name.
+   */
+  audience?: ArtHelpAudience
+  /**
+   * The host's live art budget, printed on the help sheet (FEAT-178). Passed in
+   * rather than read here: this dialog reads no counter of its own, and the page
+   * above it already asks the budget question exactly once.
+   */
+  artBudget?: ArtBudgetState
 }
 
 type Stage = 'capture' | 'crop' | 'cleaning' | 'preview'
@@ -101,7 +114,10 @@ export default function SketchScanner({
   onSaved,
   capReached = false,
   recordGeneration,
+  audience = 'parent',
+  artBudget = { limit: 0, remaining: Infinity, capped: false },
 }: SketchScannerProps) {
+  const [showHelp, setShowHelp] = useState(false)
   // The active child can resolve *after* this dialog mounts with its page, so
   // the default label follows `childName` until the kid types their own — a
   // plain useState initializer froze it at "My drawing" (FEAT-160).
@@ -547,6 +563,16 @@ export default function SketchScanner({
                   )}
                   {!enhancing && !fancyUrl && (
                     <Stack alignItems="center" spacing={1.5} sx={{ py: 3, px: 2, width: '100%' }}>
+                      {/* The "?" sits OUTSIDE the cap branch on purpose
+                          (FEAT-178): at the cap the picker and the button are
+                          replaced by the nudge, which is exactly the moment a
+                          kid most needs to be told what the budget is. */}
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <Typography variant="caption" color="text.secondary">
+                          Making it fancy
+                        </Typography>
+                        <ArtHelpButton onClick={() => setShowHelp(true)} />
+                      </Stack>
                       {capReached ? (
                         /* Weekly cap reached (FEAT-166): the same warm nudge the
                            other three sticker doors show — no style picker, no
@@ -572,14 +598,19 @@ export default function SketchScanner({
                               />
                             ))}
                           </Box>
-                          <Button
-                            variant="contained"
-                            startIcon={<AutoAwesomeIcon />}
-                            onClick={() => void handleMakeFancy()}
-                            sx={{ minHeight: 44, textTransform: 'none' }}
-                          >
-                            Make it fancy
-                          </Button>
+                          <Box>
+                            <Button
+                              variant="contained"
+                              startIcon={<AutoAwesomeIcon />}
+                              onClick={() => void handleMakeFancy()}
+                              sx={{ minHeight: 44, textTransform: 'none' }}
+                            >
+                              Make it fancy
+                            </Button>
+                            {/* Replaced by ART_QUOTA_MESSAGE at the cap — never
+                                shown alongside it (FEAT-178). */}
+                            <GenerateHint door="makeItFancy" audience={audience} />
+                          </Box>
                         </>
                       )}
                       {enhanceError && (
@@ -617,14 +648,19 @@ export default function SketchScanner({
                         />
                       ))}
                     </Box>
-                    <Button
-                      size="small"
-                      startIcon={<AutoAwesomeIcon />}
-                      onClick={() => void handleMakeFancy()}
-                      sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
-                    >
-                      Redo with this style
-                    </Button>
+                    <Box>
+                      <Button
+                        size="small"
+                        startIcon={<AutoAwesomeIcon />}
+                        onClick={() => void handleMakeFancy()}
+                        sx={{ textTransform: 'none' }}
+                      >
+                        Redo with this style
+                      </Button>
+                      {/* A redo is another paid picture, not a free retry
+                          (FEAT-178). */}
+                      <GenerateHint door="makeItFancy" audience={audience} />
+                    </Box>
                   </>
                 )}
                 {enhanceError && (
@@ -754,6 +790,14 @@ export default function SketchScanner({
           </>
         )}
       </DialogActions>
+
+      <ArtHelpSheet
+        surface="sketch"
+        open={showHelp}
+        onClose={() => setShowHelp(false)}
+        audience={audience}
+        budget={artBudget}
+      />
     </Dialog>
   )
 }

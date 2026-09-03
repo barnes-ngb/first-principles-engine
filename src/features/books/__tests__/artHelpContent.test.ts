@@ -1,0 +1,301 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  artBudgetLines,
+  artHelp,
+  artHelpStyles,
+  generateHint,
+  styleBlurb,
+} from '../artHelpContent'
+import type { ArtHelpAudience, ArtHelpDoor, ArtHelpSurface } from '../artHelpContent'
+import { GENERATION_STYLES } from '../bookTypes'
+import { FANCY_STYLE_OPTIONS } from '../drawingStickerStyles'
+
+const SURFACES: ArtHelpSurface[] = ['stickers', 'sketch', 'bookImages', 'generateBook', 'kitArt']
+const AUDIENCES: ArtHelpAudience[] = ['kid', 'parent']
+const DOORS: ArtHelpDoor[] = [
+  'makeSticker',
+  'makeItFancy',
+  'addVersion',
+  'makeVersions',
+  'bookScene',
+  'illustrateBook',
+  'kitArt',
+  'kitArtBatch',
+]
+
+// ── The readability proxy ───────────────────────────────────────
+//
+// A cheap stand-in, and deliberately labelled as one. The repo's real
+// orthographic classifier is `functions/src/ai/storyDecodability.ts`, which the
+// app cannot import — it is server-only by design and not in
+// `functions/src/shared/`, the one directory both projects compile. So the bar
+// this suite enforces on kid copy counts maximal vowel runs after stripping a
+// trailing silent `e` / `es`. It over-counts some words ("science") and
+// under-counts others ("fire"); it is a floor on carelessness, not a reading
+// measurement. Its job is to make "polished", "reimagine" and "characters"
+// fail loudly in a file written for a six-year-old.
+
+function syllableProxy(word: string): number {
+  const letters = word.toLowerCase().replace(/[^a-z]/g, '')
+  if (letters === '') return 0 // a numeral or bare punctuation — nothing to say
+  // Silent trailing e / es, when something vowel-bearing survives it.
+  const trimmed = letters.replace(/(?:es|e)$/, '')
+  const base = /[aeiouy]/.test(trimmed) ? trimmed : letters
+  return Math.max(1, base.match(/[aeiouy]+/g)?.length ?? 1)
+}
+
+function words(line: string): string[] {
+  return line.split(/\s+/).filter((w) => w.trim() !== '')
+}
+
+function sentenceCount(line: string): number {
+  return (line.match(/[.!?]/g) ?? []).length
+}
+
+/** Word count + syllable bar. Applied to every kid string. */
+function expectKidWording(text: string, where: string) {
+  expect(words(text).length, `${where}: over eight words — "${text}"`).toBeLessThanOrEqual(8)
+  for (const w of words(text)) {
+    expect(syllableProxy(w), `${where}: "${w}" is over two syllables — "${text}"`).toBeLessThanOrEqual(2)
+  }
+}
+
+/** The full bar, for kid *lines* (titles and headings do not end in a period). */
+function expectKidLine(line: string, where: string) {
+  expectKidWording(line, where)
+  expect(line.trim().endsWith('.'), `${where}: does not end with a period — "${line}"`).toBe(true)
+}
+
+describe('artHelpContent — the proxy itself', () => {
+  it('counts the way the bar claims to', () => {
+    expect(syllableProxy('picture')).toBe(2)
+    expect(syllableProxy('pictures')).toBe(2)
+    expect(syllableProxy('sticker')).toBe(2)
+    expect(syllableProxy('grown')).toBe(1)
+    expect(syllableProxy('3')).toBe(0)
+    // The words this bar exists to catch.
+    expect(syllableProxy('polished')).toBeGreaterThan(2)
+    expect(syllableProxy('reimagine')).toBeGreaterThan(2)
+    expect(syllableProxy('characters')).toBeGreaterThan(2)
+  })
+})
+
+describe('artHelp — every surface, every audience', () => {
+  it('returns a titled sheet with real sections', () => {
+    for (const surface of SURFACES) {
+      for (const audience of AUDIENCES) {
+        const content = artHelp(surface, audience)
+        expect(content.title.trim(), `${surface}/${audience}`).not.toBe('')
+        expect(content.sections.length, `${surface}/${audience}`).toBeGreaterThan(0)
+        for (const section of content.sections) {
+          expect(section.heading.trim(), `${surface}/${audience}/${section.id}`).not.toBe('')
+          if (section.id === 'styles') {
+            // The one section the sheet fills from the picker lists.
+            expect(artHelpStyles(surface).length, `${surface} styles`).toBeGreaterThan(0)
+          } else {
+            expect(section.lines.length, `${surface}/${audience}/${section.id}`).toBeGreaterThan(0)
+          }
+        }
+      }
+    }
+  })
+
+  it('says what the surface never touches, on every sheet', () => {
+    for (const surface of SURFACES) {
+      for (const audience of AUDIENCES) {
+        const ids = artHelp(surface, audience).sections.map((s) => s.id)
+        expect(ids, `${surface}/${audience}`).toContain('never')
+        expect(ids, `${surface}/${audience}`).toContain('budget')
+      }
+    }
+  })
+
+  it('only the book-images sheet explains show-the-whole-picture (FEAT-177)', () => {
+    for (const surface of SURFACES) {
+      for (const audience of AUDIENCES) {
+        const ids = artHelp(surface, audience).sections.map((s) => s.id)
+        expect(ids.includes('fit'), `${surface}/${audience}`).toBe(surface === 'bookImages')
+      }
+    }
+  })
+
+  it('never prints a budget number in the static copy', () => {
+    // The live figures come from `artBudgetLines`, so a change to
+    // `DEFAULT_WEEKLY_ART_QUOTA` can never leave a stale number in the help.
+    for (const surface of SURFACES) {
+      for (const audience of AUDIENCES) {
+        const budget = artHelp(surface, audience).sections.find((s) => s.id === 'budget')
+        for (const line of budget?.lines ?? []) {
+          expect(line, `${surface}/${audience}`).not.toMatch(/\d/)
+        }
+      }
+    }
+  })
+})
+
+describe('styleBlurb — every look a picker offers', () => {
+  it('covers every book illustration style', () => {
+    for (const style of GENERATION_STYLES) {
+      for (const audience of AUDIENCES) {
+        const blurb = styleBlurb(style.value, audience)
+        expect(blurb.trim(), `${style.value}/${audience}`).not.toBe('')
+        expect(blurb, `${style.value}/${audience}`).not.toBe('A look for your picture.')
+      }
+    }
+  })
+
+  it('covers every sticker look', () => {
+    for (const option of FANCY_STYLE_OPTIONS) {
+      for (const audience of AUDIENCES) {
+        const blurb = styleBlurb(option.id, audience)
+        expect(blurb.trim(), `${option.id}/${audience}`).not.toBe('')
+        expect(blurb, `${option.id}/${audience}`).not.toBe('A look for your picture.')
+      }
+    }
+  })
+
+  it('lists the right looks per surface, with the picker’s own labels', () => {
+    expect(artHelpStyles('bookImages').map((s) => s.id)).toEqual(
+      GENERATION_STYLES.map((s) => s.value),
+    )
+    expect(artHelpStyles('generateBook').map((s) => s.id)).toEqual(
+      GENERATION_STYLES.map((s) => s.value),
+    )
+    expect(artHelpStyles('sketch').map((s) => s.id)).toEqual(FANCY_STYLE_OPTIONS.map((o) => o.id))
+    expect(artHelpStyles('stickers').map((s) => s.id)).toEqual(FANCY_STYLE_OPTIONS.map((o) => o.id))
+    // The Kit Builder has no style picker — its stickers are one fixed look.
+    expect(artHelpStyles('kitArt')).toEqual([])
+  })
+})
+
+describe('generateHint — what this tap makes and spends', () => {
+  it('names a live count for the batch doors', () => {
+    expect(generateHint('makeVersions', 'kid', 3)).toBe('Makes 3 pictures. Uses 3 art.')
+    expect(generateHint('illustrateBook', 'kid', 14)).toBe('Makes 14 pictures. Uses 14 art.')
+    expect(generateHint('makeVersions', 'parent', 3)).toContain('3 paid image calls')
+    expect(generateHint('illustrateBook', 'parent', 14)).toContain('14 paid image calls')
+  })
+
+  it('reads singular for a one-picture door', () => {
+    expect(generateHint('makeSticker', 'kid')).toBe('Makes 1 sticker. Uses 1 art.')
+    expect(generateHint('bookScene', 'kid')).toBe('Makes 1 picture. Uses 1 art.')
+    expect(generateHint('bookScene', 'parent')).toContain('1 paid image call')
+  })
+
+  it('never claims a fraction of a picture', () => {
+    expect(generateHint('makeVersions', 'kid', 2.7)).toBe('Makes 2 pictures. Uses 2 art.')
+  })
+
+  it('says zero when zero is the truth (Codex P2, PR #1739)', () => {
+    // A resumed Generate-a-Book draft rebuilt with no image prompts has no
+    // scene-bearing page: the illustrate loop makes nothing and spends nothing.
+    // Clamping to 1 promised a picture and a charge that never happen.
+    expect(generateHint('illustrateBook', 'kid', 0)).toBe('Makes no pictures. Uses no art.')
+    const parent = generateHint('illustrateBook', 'parent', 0)
+    expect(parent).toBe('No pictures to make here · nothing to pay for')
+    expect(parent).not.toMatch(/One picture per page/)
+  })
+
+  it('never tells an uncapped parent a tap spends their budget (Codex P2, PR #1739)', () => {
+    // Every host picks the parent audience from the same capability answer that
+    // decides the cap, and a parent's `recordGeneration` is a no-op — so a
+    // "weekly art budget" clause contradicted the sheet behind the same "?".
+    for (const door of DOORS) {
+      for (const count of [1, 3]) {
+        const hint = generateHint(door, 'parent', count)
+        expect(hint, `${door}/${count}`).not.toMatch(/your weekly art budget/)
+        expect(hint, `${door}/${count}`).toMatch(/paid image calls?/)
+      }
+    }
+    // The kid wording is unchanged: a kid IS capped, so "art" is their counter.
+    expect(generateHint('bookScene', 'kid', 3)).toBe('Makes 3 pictures. Uses 3 art.')
+  })
+})
+
+describe('artBudgetLines — the only place a real number is printed', () => {
+  it('prints what is actually left, not a baked-in cap', () => {
+    expect(artBudgetLines('kid', { limit: 100, remaining: 37, capped: true })).toEqual([
+      'You have 37 left this week.',
+    ])
+    expect(artBudgetLines('parent', { limit: 100, remaining: 37, capped: true })[0]).toContain(
+      'out of 100',
+    )
+  })
+
+  it('is honest and unshaming at nothing left', () => {
+    const kid = artBudgetLines('kid', { limit: 100, remaining: 0, capped: true })[0]
+    expect(kid).toContain('this week')
+    expect(kid).not.toMatch(/fail|error|sorry|too much/i)
+  })
+
+  it('says a parent is not capped', () => {
+    expect(artBudgetLines('parent', { limit: 100, remaining: Infinity, capped: false })[0]).toContain(
+      'not capped',
+    )
+  })
+})
+
+describe('the kid readability bar', () => {
+  it('holds for every kid line on every sheet', () => {
+    for (const surface of SURFACES) {
+      const content = artHelp(surface, 'kid')
+      expectKidWording(content.title, `${surface} title`)
+      for (const section of content.sections) {
+        expectKidWording(section.heading, `${surface}/${section.id} heading`)
+        for (const line of section.lines) {
+          expectKidLine(line, `${surface}/${section.id}`)
+        }
+      }
+    }
+  })
+
+  it('holds for every kid style blurb', () => {
+    const ids = new Set([
+      ...GENERATION_STYLES.map((s) => s.value as string),
+      ...FANCY_STYLE_OPTIONS.map((o) => o.id),
+    ])
+    for (const id of ids) {
+      expectKidLine(styleBlurb(id, 'kid'), `styleBlurb/${id}`)
+    }
+  })
+
+  it('holds for every kid hint — none, one and many', () => {
+    for (const door of DOORS) {
+      expectKidLine(generateHint(door, 'kid', 0), `hint/${door}/none`)
+      expectKidLine(generateHint(door, 'kid'), `hint/${door}`)
+      expectKidLine(generateHint(door, 'kid', 14), `hint/${door}/batch`)
+    }
+  })
+
+  it('holds for the live kid budget lines', () => {
+    for (const budget of [
+      { limit: 100, remaining: 37, capped: true },
+      { limit: 100, remaining: 0, capped: true },
+      { limit: 100, remaining: Infinity, capped: false },
+    ]) {
+      for (const line of artBudgetLines('kid', budget)) {
+        expectKidLine(line, `budget/${budget.remaining}`)
+      }
+    }
+  })
+})
+
+describe('the parent copy bar', () => {
+  it('keeps every parent line to three sentences or fewer', () => {
+    for (const surface of SURFACES) {
+      const content = artHelp(surface, 'parent')
+      for (const section of content.sections) {
+        for (const line of section.lines) {
+          expect(sentenceCount(line), `${surface}/${section.id}: "${line}"`).toBeLessThanOrEqual(3)
+        }
+      }
+    }
+    for (const id of [
+      ...GENERATION_STYLES.map((s) => s.value as string),
+      ...FANCY_STYLE_OPTIONS.map((o) => o.id),
+    ]) {
+      expect(sentenceCount(styleBlurb(id, 'parent')), `styleBlurb/${id}`).toBeLessThanOrEqual(3)
+    }
+  })
+})

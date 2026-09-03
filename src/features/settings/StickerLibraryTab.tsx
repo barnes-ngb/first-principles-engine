@@ -26,6 +26,8 @@ import type { Sticker, StickerTag } from '../../core/types'
 import { canPromoteSticker } from '../business/catalogOnramps'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { recordStickerArtGeneration } from '../books/useStickerArtQuota'
+import type { ArtHelpAudience } from '../books/artHelpContent'
+import { GenerateHint } from '../books/ArtHelpSheet'
 import { StickerCatalogButton, StickerCatalogPromoteDialog } from './StickerCatalogPromote'
 import { groupStickers } from '../books/stickerGrouping'
 import DrawingGroupCard from '../books/DrawingGroupCard'
@@ -106,6 +108,13 @@ interface StickerLibraryTabProps {
   capReached?: boolean
   /** Count one paid generation against the day's counter (FEAT-165). */
   recordGeneration?: () => Promise<void>
+  /**
+   * Whose words the one-line hints under the paid version doors are written in
+   * (FEAT-178). Resolved by the host from `useActiveChild().isChildProfile` —
+   * capability, never a name. Defaults to the parent wording, which is what the
+   * uncapped Settings admin render wants.
+   */
+  audience?: ArtHelpAudience
 }
 
 export default function StickerLibraryTab({
@@ -118,6 +127,7 @@ export default function StickerLibraryTab({
   canEdit = false,
   capReached = false,
   recordGeneration,
+  audience = 'parent',
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
   const { enhanceSketch } = useAI()
@@ -455,6 +465,7 @@ export default function StickerLibraryTab({
               // reads the same answer rather than asking its own.
               capReached={capReached}
               recordGeneration={recordGeneration}
+              audience={audience}
             />
           ))}
         </Stack>
@@ -934,6 +945,10 @@ export default function StickerLibraryTab({
                     />
                   ))}
                 </Box>
+                {/* One tap, one picture (FEAT-178). At the cap this whole branch
+                    is the nudge instead, so the hint and ART_QUOTA_MESSAGE are
+                    never both on screen. */}
+                <GenerateHint door="makeVersions" audience={audience} />
               </>
             )}
             {makeError && (

@@ -159,3 +159,15 @@ from `skillSnapshots.workingLevels.phonics`, and nothing reads `isLincoln` or a 
 **Still open for London on this surface:** he has few sight words on file, so his SAFE WORDS list is
 mostly the shared core — the block is as good as the data behind it, and an assessed phonics level would
 make it markedly better than the age estimate.
+
+### FEAT-178 (2026-09-03) — the art help's kid wording is written to a 6-year-old, and tested for it
+
+The "How this works" sheets and the one-line hints under every paid generate button (Stickers, From a
+Drawing, the Book Editor, Generate-a-Book, the Kit Builder) carry two voices, and the kid voice is written
+to London's reading, not to a generic "simple" register: `artHelpContent.test.ts` fails the build if any
+kid line runs over eight words, skips its full stop, or uses a word over two syllables by a vowel-group
+proxy. The proxy is deliberately cheap — the repo's real orthographic classifier
+(`functions/src/ai/storyDecodability.ts`) is server-only and the app cannot import it — so it is a floor on
+carelessness, not a reading measurement; its job is to make "polished", "reimagine" and "characters" fail
+loudly in a file a six-year-old has to read alone. Gated on capability (`isChildProfile`), never on his
+name, and the kid text says "you" — it never names a child.
