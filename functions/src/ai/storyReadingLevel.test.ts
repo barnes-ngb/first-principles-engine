@@ -27,12 +27,12 @@ describe("resolveStoryReadingLevel (FEAT-173 — read the child's real level, gu
   });
 
   it("is the age-derived string — the pre-FEAT-173 guess — ONLY when no assessed level exists", () => {
-    expect(resolveStoryReadingLevel(undefined, 10)).toEqual({ text: "1st grade", source: "age" });
-    expect(resolveStoryReadingLevel({}, 6)).toEqual({ text: "pre-K to kindergarten", source: "age" });
+    expect(resolveStoryReadingLevel(undefined, 10)).toEqual({ text: "1st grade", source: "age", phonics: null });
+    expect(resolveStoryReadingLevel({}, 6)).toEqual({ text: "pre-K to kindergarten", source: "age", phonics: null });
     // Other modes (math, writing, sentence) are not reading levels.
     expect(
       resolveStoryReadingLevel({ math: { level: 4, source: "quest", updatedAt: "2026-08-01" } }, 10),
-    ).toEqual({ text: "1st grade", source: "age" });
+    ).toEqual({ text: "1st grade", source: "age", phonics: null });
     expect(readingLevelFromAge(7)).toBe("pre-K to kindergarten");
     expect(readingLevelFromAge(8)).toBe("1st grade");
   });

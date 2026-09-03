@@ -59,6 +59,15 @@ export interface StoryReadingLevel {
   text: string;
   /** `assessed` when it came from `workingLevels`; `age` for the fallback guess. */
   source: "assessed" | "age";
+  /**
+   * The assessed DECODING level as a number (1-8), or `null` when
+   * `workingLevels.phonics` carries none — additive (FEAT-176) so the
+   * decodability check and the READING LEVEL prompt block can read the number
+   * instead of re-parsing `text`. Note this is `null` even when `source` is
+   * `"assessed"`, in the case where only `comprehension` was on file: a
+   * comprehension level says nothing about which patterns the child can decode.
+   */
+  phonics: number | null;
 }
 
 /** The pre-FEAT-173 guess, kept as the fallback only. */
@@ -106,7 +115,7 @@ export function resolveStoryReadingLevel(
   const comprehension = validLevel(comprehensionEntry, COMPREHENSION_LEVEL_CAP);
 
   if (phonics === null && comprehension === null) {
-    return { text: readingLevelFromAge(age), source: "age" };
+    return { text: readingLevelFromAge(age), source: "age", phonics: null };
   }
 
   const parts: string[] = [];
@@ -122,5 +131,5 @@ export function resolveStoryReadingLevel(
       `comprehension Level ${comprehension} of ${COMPREHENSION_LEVEL_CAP}${whenAndHow(comprehensionEntry)}`,
     );
   }
-  return { text: parts.join("; "), source: "assessed" };
+  return { text: parts.join("; "), source: "assessed", phonics };
 }

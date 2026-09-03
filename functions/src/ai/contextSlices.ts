@@ -79,9 +79,19 @@ export const TASK_CONTEXT: Record<string, ContextSlice[]> = {
   generate: ["charter", "childProfile"],
   evaluate: ["charter", "childProfile", "sightWords", "wordMastery"],
   quest: ["charter", "childProfile", "sightWords", "recentHistoryByDomain", "wordMastery", "skillSnapshot", "workbookPaces", "recentScans"],
-  generateStory: ["charter", "childProfile", "sightWords", "wordMastery", "skillSnapshot"],
-  reviseStory: ["charter", "childProfile", "sightWords", "wordMastery", "skillSnapshot"],
-  revisePage: ["charter", "childProfile", "sightWords", "wordMastery", "skillSnapshot"],
+  // FEAT-176 — the three story tasks no longer take `wordMastery`. That slice
+  // prints `STRUGGLING WORDS: …` followed by *"SUGGESTION: Generate or assign a
+  // sight word story targeting these struggling words."* It was written for the
+  // lesson planner, and it was the ONLY concrete word list anywhere in the story
+  // prompt: a story writer read it as an instruction to put the child's hardest
+  // words in. A precedence line asking the model to disregard a directive that
+  // explicit is a contradiction we can simply not create — and nothing is lost,
+  // because the READING LEVEL block now prints the allowlist the story actually
+  // needs (`storyLevelContext.ts`). `sightWords` stays: it is descriptive, and
+  // the block states precedence over its planner-facing framing.
+  generateStory: ["charter", "childProfile", "sightWords", "skillSnapshot"],
+  reviseStory: ["charter", "childProfile", "sightWords", "skillSnapshot"],
+  revisePage: ["charter", "childProfile", "sightWords", "skillSnapshot"],
   analyzePatterns: ["childProfile"],
   workshop: ["charter", "childProfile", "workshopGames"],
   analyzeWorkbook: ["charter", "childProfile"],

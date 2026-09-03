@@ -137,14 +137,19 @@ describe("TASK_CONTEXT", () => {
 
   // ── Story Generation V2 Phase 1: generateStory slice list ──
 
-  it("generateStory wires childProfile, sightWords, wordMastery, and skillSnapshot", () => {
+  it("generateStory wires childProfile, sightWords and skillSnapshot — and NOT wordMastery (FEAT-176)", () => {
     expect(TASK_CONTEXT.generateStory).toContain("charter");
     expect(TASK_CONTEXT.generateStory).toContain("childProfile");
     expect(TASK_CONTEXT.generateStory).toContain("sightWords");
-    expect(TASK_CONTEXT.generateStory).toContain("wordMastery");
     // Phase 1 adds skillSnapshot so the AI can calibrate vocabulary from
     // the child's actual reading level rather than the old binary isYounger.
     expect(TASK_CONTEXT.generateStory).toContain("skillSnapshot");
+    // FEAT-176: `wordMastery` prints STRUGGLING WORDS + "SUGGESTION: Generate or
+    // assign a sight word story targeting these struggling words" — planner
+    // guidance that reached the story writer as an instruction to use the
+    // child's hardest words, and was the only concrete word list in the prompt.
+    // The READING LEVEL block prints the allowlist instead.
+    expect(TASK_CONTEXT.generateStory).not.toContain("wordMastery");
   });
 
   it("generateStory cross-task isolation guard: does not pull planner-scoped slices", () => {
@@ -160,13 +165,13 @@ describe("TASK_CONTEXT", () => {
 
   // ── Story Generation V2 Phase 2 PR-A: reviseStory slice list ──
 
-  it("reviseStory wires childProfile, sightWords, wordMastery, and skillSnapshot", () => {
+  it("reviseStory wires childProfile, sightWords and skillSnapshot — and NOT wordMastery (FEAT-176)", () => {
     // Matches generateStory — same per-child calibration needs.
     expect(TASK_CONTEXT.reviseStory).toContain("charter");
     expect(TASK_CONTEXT.reviseStory).toContain("childProfile");
     expect(TASK_CONTEXT.reviseStory).toContain("sightWords");
-    expect(TASK_CONTEXT.reviseStory).toContain("wordMastery");
     expect(TASK_CONTEXT.reviseStory).toContain("skillSnapshot");
+    expect(TASK_CONTEXT.reviseStory).not.toContain("wordMastery");
   });
 
   it("reviseStory cross-task isolation guard: does not pull planner-scoped slices", () => {
@@ -180,13 +185,13 @@ describe("TASK_CONTEXT", () => {
 
   // ── Story Generation V2 Phase 2 PR-B: revisePage slice list ──
 
-  it("revisePage wires childProfile, sightWords, wordMastery, and skillSnapshot", () => {
+  it("revisePage wires childProfile, sightWords and skillSnapshot — and NOT wordMastery (FEAT-176)", () => {
     // Matches generateStory + reviseStory — same per-child calibration needs.
     expect(TASK_CONTEXT.revisePage).toContain("charter");
     expect(TASK_CONTEXT.revisePage).toContain("childProfile");
     expect(TASK_CONTEXT.revisePage).toContain("sightWords");
-    expect(TASK_CONTEXT.revisePage).toContain("wordMastery");
     expect(TASK_CONTEXT.revisePage).toContain("skillSnapshot");
+    expect(TASK_CONTEXT.revisePage).not.toContain("wordMastery");
   });
 
   it("revisePage cross-task isolation guard: does not pull planner-scoped slices", () => {
