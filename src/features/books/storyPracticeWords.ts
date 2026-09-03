@@ -291,7 +291,15 @@ export function storyWordsPreviewLine(
 export interface StoryReadabilityNote {
   passed: boolean
   levelSource: 'assessed' | 'age'
+  /** A capped SAMPLE of the words above the level — the words the line NAMES. */
   hardWords: ReadonlyArray<{ page: number; word: string }>
+  /**
+   * The TRUE distinct count across the story — the number the line REPORTS.
+   * `hardWords` is truncated server-side, so counting it would tell a parent
+   * "12 words" about a story with 30. Optional for an older deploy that does
+   * not send it; the sample length is then the honest best available.
+   */
+  hardWordCount?: number
 }
 
 /** How many hard words the line names before it stops listing and just counts. */
@@ -322,15 +330,19 @@ export function storyReadabilityClause(
     words.push(w)
   }
   if (words.length === 0) return ''
+  // The COUNT is the server's untruncated distinct total; the NAMES come from
+  // the capped sample. Counting the sample would understate a long list — the
+  // one thing this line exists not to do. Never report fewer than we name.
+  const total = Math.max(readability.hardWordCount ?? words.length, words.length)
   const named = words.slice(0, MAX_NAMED_HARD_WORDS)
-  const more = words.length - named.length
+  const more = total - named.length
   const list = more > 0 ? `${named.join(', ')} and ${more} more` : named.join(', ')
-  const noun = words.length === 1 ? 'word' : 'words'
+  const noun = total === 1 ? 'word' : 'words'
   const estimate =
     readability.levelSource === 'age'
       ? ` (estimated from age — set ${childName}'s phonics level under Working Levels on the Skill Snapshot for a better fit)`
       : ''
-  return `${words.length} ${noun} may be above ${childName}'s level: ${list}.${estimate}`
+  return `${total} ${noun} may be above ${childName}'s level: ${list}.${estimate}`
 }
 
 /**

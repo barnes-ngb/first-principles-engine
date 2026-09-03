@@ -196,10 +196,21 @@ export function describeStoryStop(
 
 // ── Readability check + the one fix (FEAT-176) ───────────────────
 
-/** The parsed story, only as much of it as the readability pass needs. */
+/**
+ * The parsed story. `pages` is the typed view the readability pass measures;
+ * `raw` is the **whole** parsed object, kept because the story JSON carries
+ * top-level fields this module has no business knowing about — `allWordsUsed`
+ * and `missedWords` among them — and the readability pass must not be the
+ * reason one goes missing (Codex P1 on PR #1737). `CreateSightWordBook` reads
+ * `preview.missedWords.length` unguarded off a raw `JSON.parse`
+ * (`useStoryGenerator`), so dropping the field is a client-side TypeError, not
+ * a cosmetic loss.
+ */
 export interface ParsedStory {
   title: string;
   pages: Array<{ pageNumber?: number; text?: string }>;
+  /** The complete parsed object, exactly as the model returned it. */
+  raw: Record<string, unknown>;
 }
 
 /**
@@ -210,14 +221,38 @@ export interface ParsedStory {
 export function parseStoryForReadability(rawText: string): ParsedStory | null {
   try {
     const parsed = sanitizeAndParseJson<{ title?: unknown; pages?: unknown }>(rawText);
+    if (!parsed || typeof parsed !== "object") return null;
     if (!Array.isArray(parsed.pages) || parsed.pages.length === 0) return null;
     return {
       title: typeof parsed.title === "string" ? parsed.title : "",
       pages: parsed.pages as ParsedStory["pages"],
+      raw: parsed as unknown as Record<string, unknown>,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * The story to return after an accepted fix: the fixed story, with any
+ * top-level field the ORIGINAL carried and the fix dropped filled back in.
+ *
+ * The fix prompt asks for the same JSON shape and is now handed the complete
+ * original, but a model that quietly omits `missedWords` must not be able to
+ * crash the sight-word-book preview — so this is the belt to that braces.
+ * Fixed fields always win; only genuinely absent keys are restored, and
+ * `pages` is never taken from the original.
+ */
+export function mergeFixedStory(
+  original: Record<string, unknown>,
+  fixed: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...fixed };
+  for (const [key, value] of Object.entries(original)) {
+    if (key === "pages") continue;
+    if (!(key in merged) || merged[key] === undefined) merged[key] = value;
+  }
+  return merged;
 }
 
 /** The hard words the fix prompt is handed, grouped by page in page order. */
@@ -233,11 +268,20 @@ export function hardWordsByPage(
  * Is the fixed story the one to keep?
  *
  * Three conditions, all of them about not making things worse. It must have
- * parsed; it must still be the same book (same page count — the fix prompt says
- * so, and a fix that dropped pages is a different failure wearing this one's
- * clothes); and it must carry strictly FEWER hard words. A tie keeps the
- * original, because the original is the story the beats and the theme were
- * written for and the fix prompt saw neither.
+ * parsed, and it must still be the same book (same page count — the fix prompt
+ * says so, and a fix that dropped pages is a different failure wearing this
+ * one's clothes).
+ *
+ * Then the readability outcome is compared **whole** (Codex P2 on PR #1737).
+ * Counting only distinct hard words was gameable in the wrong direction: a fix
+ * that replaces three distinct above-level words with ONE above-level word
+ * repeated a dozen times lowers `totalHardWords` while making the page denser
+ * and the story harder to read. So a fix that does not itself pass must improve
+ * the distinct count **and** worsen neither the hard-word density nor the worst
+ * page. A fix that passes the tolerance is kept outright — passing is the goal.
+ *
+ * A tie keeps the original, because the original is the story the beats and the
+ * theme were written for and the fix prompt saw neither.
  *
  * Pure so the decision is testable without a model.
  */
@@ -249,7 +293,21 @@ export function shouldKeepFixedStory(
 ): boolean {
   if (!fixed) return false;
   if (fixedPageCount !== originalPageCount) return false;
-  return fixed.totalHardWords < original.totalHardWords;
+  // Passing the tolerance is the whole point of the fix.
+  if (fixed.passed) return true;
+  if (fixed.totalHardWords >= original.totalHardWords) return false;
+  if (hardWordRatio(fixed) > hardWordRatio(original)) return false;
+  return worstPageHardWords(fixed) <= worstPageHardWords(original);
+}
+
+/** Hard-word occurrences as a share of all tokens; 0 for an empty story. */
+function hardWordRatio(report: StoryReadabilityReport): number {
+  return report.totalTokens === 0 ? 0 : report.totalHardOccurrences / report.totalTokens;
+}
+
+/** The most distinct hard words on any one page — the per-page rule's high-water mark. */
+function worstPageHardWords(report: StoryReadabilityReport): number {
+  return report.pages.reduce((max, p) => Math.max(max, p.hardWords.length), 0);
 }
 
 /**
@@ -261,7 +319,19 @@ export interface StoryReadabilityInfo {
   phonicsLevel: number;
   levelSource: "assessed" | "age";
   passed: boolean;
+  /**
+   * A capped SAMPLE of the words above the level, page-tagged — examples for
+   * the parent-facing line, not the tally.
+   */
   hardWords: Array<{ page: number; word: string }>;
+  /**
+   * The TRUE number of distinct words above the level across the whole story,
+   * never truncated (Codex P2 on PR #1737). `hardWords` is capped at
+   * `MAX_REPORTED_HARD_WORDS`, so a client that counted that array would tell a
+   * parent "12 words" about a story with 30 — the one thing this feature exists
+   * not to do.
+   */
+  hardWordCount: number;
   /** True when the one fix attempt ran AND its result was the one returned. */
   revised: boolean;
 }
@@ -280,6 +350,7 @@ export function toReadabilityInfo(
     hardWords: report.hardWords
       .slice(0, MAX_REPORTED_HARD_WORDS)
       .map((h) => ({ page: h.page, word: h.word })),
+    hardWordCount: report.distinctHardWords.length,
     revised,
   };
 }
@@ -446,7 +517,9 @@ export const handleGenerateStory = async (
           temperature: 0.7,
           systemPrompt: buildStoryReadabilityFixPrompt({
             childName: storyChildName,
-            storyJson: JSON.stringify(drafted),
+            // The COMPLETE story, not the reduced view: the model has to see
+            // `allWordsUsed` / `missedWords` to return them (Codex P1).
+            storyJson: JSON.stringify(drafted.raw),
             hardWordsByPage: hardWordsByPage(firstReport),
             readingLevelBlock: levelContext.block,
             pageCount: drafted.pages.length,
@@ -467,7 +540,11 @@ export const handleGenerateStory = async (
             fixedStory.pages.length,
           )
         ) {
-          finalText = fix.text;
+          // Re-serialize from the MERGE, not from `fix.text`: a fix that
+          // silently dropped a top-level field would otherwise reach the client
+          // without it, and `CreateSightWordBook` dereferences `missedWords`
+          // unguarded (Codex P1).
+          finalText = JSON.stringify(mergeFixedStory(drafted.raw, fixedStory.raw));
           finalReport = fixedReport!;
           revised = true;
         }

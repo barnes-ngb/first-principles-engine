@@ -428,3 +428,42 @@ describe('storyDraftMessage with a readability report (FEAT-176)', () => {
     )
   })
 })
+
+describe('storyReadabilityClause reports the TRUE total (FEAT-176 / Codex P2)', () => {
+  it('uses the server count, not the length of the truncated sample', () => {
+    // The server caps `hardWords` at 12; counting it would tell a parent
+    // "12 words" about a story with 30 — the one thing this line must not do.
+    const sample = Array.from({ length: 12 }, (_, i) => ({ page: 1, word: `w${i}` }))
+    const clause = storyReadabilityClause('London', {
+      passed: false,
+      levelSource: 'assessed',
+      hardWords: sample,
+      hardWordCount: 30,
+    })
+    expect(clause).toContain("30 words may be above London's level")
+    expect(clause).toContain('w0, w1, w2, w3, w4, w5 and 24 more')
+  })
+
+  it('falls back to the sample length when an older deploy sends no count', () => {
+    expect(
+      storyReadabilityClause('London', {
+        passed: false,
+        levelSource: 'assessed',
+        hardWords: [{ page: 1, word: 'castle' }],
+      }),
+    ).toBe("1 word may be above London's level: castle.")
+  })
+
+  it('never reports fewer words than it names', () => {
+    const clause = storyReadabilityClause('London', {
+      passed: false,
+      levelSource: 'assessed',
+      hardWords: [
+        { page: 1, word: 'castle' },
+        { page: 2, word: 'temple' },
+      ],
+      hardWordCount: 0,
+    })
+    expect(clause).toContain("2 words may be above London's level: castle, temple.")
+  })
+})

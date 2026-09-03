@@ -86,7 +86,10 @@ export interface ChatTaskResult {
     phonicsLevel: number;
     levelSource: "assessed" | "age";
     passed: boolean;
+    /** A capped SAMPLE of the words above the level — examples, not the tally. */
     hardWords: Array<{ page: number; word: string }>;
+    /** The TRUE distinct count across the story, never truncated (FEAT-176 / Codex P2). */
+    hardWordCount: number;
     revised: boolean;
   };
 }

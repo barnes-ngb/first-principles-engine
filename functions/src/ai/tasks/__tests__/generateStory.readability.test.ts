@@ -32,8 +32,10 @@ vi.mock("firebase-functions/v2/https", () => ({
 
 // Import AFTER mocks are set up.
 import {
+  MAX_REPORTED_HARD_WORDS,
   handleGenerateStory,
   hardWordsByPage,
+  mergeFixedStory,
   parseStoryForReadability,
   shouldKeepFixedStory,
   toReadabilityInfo,
@@ -366,5 +368,154 @@ describe("hardWordsByPage / toReadabilityInfo", () => {
       allowedWords: CORE_SIGHT_WORDS,
     });
     expect(toReadabilityInfo(report, false).hardWords.length).toBeLessThanOrEqual(12);
+  });
+});
+
+// ── Codex review round (PR #1737) ─────────────────────────────────
+
+describe("the readability pass preserves the whole story shape (Codex P1)", () => {
+  const withTopLevelFields = (pages: string[]) =>
+    JSON.stringify({
+      title: "Sam and the Hat",
+      pages: pages.map((text, i) => ({
+        pageNumber: i + 1,
+        text,
+        sceneDescription: "a sunny spot",
+        wordsOnPage: ["the"],
+      })),
+      allWordsUsed: ["the", "and"],
+      missedWords: ["pretty"],
+      qualityNotes: "n/a",
+    });
+
+  it("keeps allWordsUsed / missedWords when a fix is accepted", async () => {
+    // CreateSightWordBook reads `preview.missedWords.length` unguarded off a raw
+    // JSON.parse (useStoryGenerator) — dropping the field is a TypeError there,
+    // and that flow calls this same task.
+    callClaudeMock
+      .mockResolvedValueOnce(reply(withTopLevelFields(HARD)))
+      // The fixed story omits the top-level fields, as a model well might.
+      .mockResolvedValueOnce(reply(story(EASY)));
+
+    const result = await handleGenerateStory(makeCtx(CONFIG));
+
+    expect(result.readability?.revised).toBe(true);
+    const returned = JSON.parse(result.message) as Record<string, unknown>;
+    expect(returned.missedWords).toEqual(["pretty"]);
+    expect(returned.allWordsUsed).toEqual(["the", "and"]);
+    // The FIXED pages are the ones returned — the merge never restores pages.
+    expect((returned.pages as Array<{ text: string }>)[0].text).toBe(EASY[0]);
+  });
+
+  it("hands the fix call the complete story, not a reduced view", async () => {
+    callClaudeMock
+      .mockResolvedValueOnce(reply(withTopLevelFields(HARD)))
+      .mockResolvedValueOnce(reply(story(EASY)));
+
+    await handleGenerateStory(makeCtx(CONFIG));
+
+    // Assert on the STORY JSON in the prompt, not on the instruction text —
+    // the "what must not change" list names these fields too, so a bare
+    // `toContain` would pass even with a reduced story.
+    const fixPrompt = callClaudeMock.mock.calls[1][0].systemPrompt as string;
+    const storyJson = fixPrompt.slice(fixPrompt.indexOf('{"title"'));
+    expect(storyJson).toContain('"missedWords":["pretty"]');
+    expect(storyJson).toContain('"allWordsUsed":["the","and"]');
+    expect(storyJson).toContain('"sceneDescription"');
+  });
+});
+
+describe("mergeFixedStory", () => {
+  it("lets fixed fields win and restores only what the fix dropped", () => {
+    expect(
+      mergeFixedStory(
+        { title: "Old", missedWords: ["pretty"], pages: ["old"], extra: 1 },
+        { title: "New", pages: ["new"] },
+      ),
+    ).toEqual({ title: "New", pages: ["new"], missedWords: ["pretty"], extra: 1 });
+  });
+
+  it("never restores the original pages", () => {
+    const merged = mergeFixedStory({ pages: ["old"] }, { pages: ["new"] });
+    expect(merged.pages).toEqual(["new"]);
+    expect(mergeFixedStory({ pages: ["old"] }, {}).pages).toBeUndefined();
+  });
+});
+
+describe("shouldKeepFixedStory compares the whole outcome (Codex P2)", () => {
+  const opts = { phonicsLevel: 2, allowedWords: CORE_SIGHT_WORDS };
+  const check = (pages: string[]) =>
+    checkStoryReadability(
+      pages.map((text, i) => ({ pageNumber: i + 1, text })),
+      opts,
+    );
+
+  it("rejects a fix that trades several distinct hard words for one repeated many times", () => {
+    // Two hard words, spread thin — one on each of two pages.
+    const original = check([
+      "Sam can hop by the castle.",
+      "Sam can nap by the temple.",
+      "Sam can sit on the mat.",
+    ]);
+    // ONE distinct hard word, so the old distinct-count rule would accept it —
+    // but it is now eight occurrences packed onto a single page.
+    const denser = check([
+      "Castle castle castle castle castle castle castle castle.",
+      "Sam can nap on the mat.",
+      "Sam can sit on the mat.",
+    ]);
+    expect(denser.totalHardWords).toBeLessThan(original.totalHardWords);
+    expect(denser.totalHardOccurrences).toBeGreaterThan(original.totalHardOccurrences);
+    expect(shouldKeepFixedStory(original, denser, 3, 3)).toBe(false);
+  });
+
+  it("keeps a fix that actually passes the tolerance", () => {
+    const original = check(HARD);
+    const passing = check(EASY);
+    expect(passing.passed).toBe(true);
+    expect(shouldKeepFixedStory(original, passing, 3, 3)).toBe(true);
+  });
+
+  it("keeps a genuine improvement that is still short of passing", () => {
+    const original = check([
+      "The castle temple fountain.",
+      "The castle temple fountain.",
+      "The castle temple fountain.",
+    ]);
+    const better = check([
+      "Sam can hop by the castle.",
+      "Sam can nap by the pot.",
+      "Sam can sit by the mat.",
+    ]);
+    expect(better.passed).toBe(false);
+    expect(shouldKeepFixedStory(original, better, 3, 3)).toBe(true);
+  });
+});
+
+describe("the hard-word total the client is given is not truncated (Codex P2)", () => {
+  it("reports the true distinct count alongside the capped sample", () => {
+    const many = [
+      "castle temple fountain marketplace",
+      "harbour cathedral monument boulevard",
+      "carnival festival tournament",
+      "adventure treasure mountain",
+      "journey mystery",
+    ];
+    const report = checkStoryReadability(
+      many.map((text, i) => ({ pageNumber: i + 1, text })),
+      { phonicsLevel: 2, allowedWords: CORE_SIGHT_WORDS },
+    );
+    const info = toReadabilityInfo(report, false);
+    expect(report.distinctHardWords.length).toBeGreaterThan(MAX_REPORTED_HARD_WORDS);
+    expect(info.hardWords).toHaveLength(MAX_REPORTED_HARD_WORDS);
+    expect(info.hardWordCount).toBe(report.distinctHardWords.length);
+  });
+
+  it("carries the count through the handler response", async () => {
+    callClaudeMock.mockResolvedValue(reply(story(HARD)));
+    const result = await handleGenerateStory(makeCtx(CONFIG));
+    expect(result.readability?.hardWordCount).toBeGreaterThanOrEqual(
+      result.readability?.hardWords.length ?? 0,
+    );
   });
 });
