@@ -645,6 +645,8 @@ export default function BookshelfPage() {
                   <Box
                     component="img"
                     src={coverUrl}
+                    // Shelf cover thumbnail — a chip, not the page. Cover-fit
+                    // always; `PageImage.fit` is a page rule (FEAT-177).
                     sx={{
                       width: '100%',
                       aspectRatio: '2/3',

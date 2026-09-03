@@ -1383,6 +1383,9 @@ export default function BookEditorPage() {
             }}
           >
             {page.images[0] ? (
+              // A 72px page chip, not the page — always cover-fit, whatever
+              // `PageImage.fit` says (FEAT-177). A contain-fitted chip would be
+              // mostly letterbox at this size.
               <Box
                 component="img"
                 src={page.images[0].url}
@@ -1957,6 +1960,7 @@ export default function BookEditorPage() {
                         flexShrink: 0,
                       }}
                     >
+                      {/* Cover-candidate chip — cover-fit regardless of `PageImage.fit` (FEAT-177). */}
                       <Box component="img" src={url} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     </Box>
                   ))}
