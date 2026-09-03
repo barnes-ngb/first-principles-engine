@@ -2,6 +2,8 @@
 
 **Run date:** 2026-08-17 · **Baseline:** `origin/main` @ `212a928` · **Branch:** `claude/ux-audit-2026-08-4ieerz`
 
+> **See also (2026-09-03):** the book area — shelf, Generate a Book, Create Sight Word Book, Book Editor, Reader, Review chat, Sight Words dashboard, Print — has its own walk in [`UX_AUDIT_BOOKS_2026-09.md`](./UX_AUDIT_BOOKS_2026-09.md) (FEAT-179, UX-102 → UX-147). §12 below (Stickers) was the only part of Books this document covered; its open P1s UX-92 / UX-93 are re-verified and re-ranked there.
+
 **Why this audit exists.** Owner direction (Nathan, 2026-08-17): *"this boilerplate that just has a deluge of videos seemed like a poor starting setup… it's UI things like this that make me wish you did a better job."* The cause is structural: ~50 runs of defect fixes and feature slices, every review aimed at data safety and honesty, and no run has ever owned UI coherence as its job. This run creates that discipline, modeled on the monthly architecture audit: **walk, file, rank — fix nothing**, with one narrow exception (pure label-text corrections where the current word is dishonest about the data model; each applied fix is listed in §0 and the PR body).
 
 **Method.** The app cannot be run from this environment; the audit walks what the code says the screen shows — the parent-facing JSX, surface by surface: copy, labels, chips, empty states, section order, card hierarchy, dead ends. Kid-mode surfaces got a read-only pass (flag, never touch). Every surface was asked five questions, in order:
