@@ -19,6 +19,7 @@ import { STICKER_TAG_LABELS } from '../../core/types'
 import type { StickerTag } from '../../core/types'
 import StickerLibraryTab from '../settings/StickerLibraryTab'
 import { STICKER_TAGS_ORDERED } from './stickerTagging'
+import ArtHelpSheet, { ArtHelpButton } from './ArtHelpSheet'
 import MakeStickerDialog from './MakeStickerDialog'
 import SketchScanner from './SketchScanner'
 import { useStickerArtQuota } from './useStickerArtQuota'
@@ -32,7 +33,7 @@ import { useStickerArtQuota } from './useStickerArtQuota'
 export default function StickersPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, isChildProfile } = useActiveChild()
   const { profile } = useProfile()
   // Pricing/publishing is parent-only (catalog design §6) — gates the FEAT-82
   // "Add to catalog" affordance on stickers.
@@ -51,10 +52,21 @@ export default function StickersPage() {
   // is handed to the three doors below ("Create!", "Add version", "Make more
   // versions"). Same counter as the Kit Builder — one honest weekly total per
   // child — and capped by capability (a kid profile), never by name.
-  const { atLimit: artCapReached, recordGeneration } = useStickerArtQuota()
+  const {
+    atLimit: artCapReached,
+    limit: artLimit,
+    remaining: artRemaining,
+    recordGeneration,
+  } = useStickerArtQuota()
+
+  // Help copy is audience-gated on capability (FEAT-178) — a kid profile reads
+  // the kid wording, everyone else the fuller parent wording. Never a name.
+  const audience = isChildProfile ? 'kid' : 'parent'
+  const artBudget = { limit: artLimit, remaining: artRemaining, capped: isChildProfile }
 
   const [showMake, setShowMake] = useState(false)
   const [showDrawing, setShowDrawing] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const [childFilter, setChildFilter] = useState(false)
   // undefined = "All"; otherwise narrow the library to one tag.
   const [tagFilter, setTagFilter] = useState<StickerTag | undefined>(undefined)
@@ -111,6 +123,10 @@ export default function StickersPage() {
         >
           Make a Sticker
         </Button>
+        {/* One "?" for the whole surface (FEAT-178). Deliberately not one per
+            door: "Make a Sticker" itself renders twice on this page (UX-98),
+            and four paid controls with four help buttons would be noise. */}
+        <ArtHelpButton onClick={() => setShowHelp(true)} />
       </Stack>
 
       {/* Optional "for the current child" filter */}
@@ -171,6 +187,7 @@ export default function StickersPage() {
         canEdit={isParent}
         capReached={artCapReached}
         recordGeneration={recordGeneration}
+        audience={audience}
       />
 
       {familyId && (
@@ -194,6 +211,7 @@ export default function StickersPage() {
         onSaved={() => setRefreshSignal((n) => n + 1)}
         capReached={artCapReached}
         recordGeneration={recordGeneration}
+        audience={audience}
       />
 
       <SketchScanner
@@ -205,6 +223,16 @@ export default function StickersPage() {
         onSaved={() => setRefreshSignal((n) => n + 1)}
         capReached={artCapReached}
         recordGeneration={recordGeneration}
+        audience={audience}
+        artBudget={artBudget}
+      />
+
+      <ArtHelpSheet
+        surface="stickers"
+        open={showHelp}
+        onClose={() => setShowHelp(false)}
+        audience={audience}
+        budget={artBudget}
       />
     </Page>
   )

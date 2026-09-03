@@ -19,6 +19,8 @@ import type { Sticker, StickerTag } from '../../core/types'
 import { STICKER_TAG_LABELS } from '../../core/types'
 import { StickerCategory } from '../../core/types/enums'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import type { ArtHelpAudience } from './artHelpContent'
+import { GenerateHint } from './ArtHelpSheet'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
 import { recordStickerArtGeneration } from './useStickerArtQuota'
@@ -43,6 +45,13 @@ interface MakeStickerDialogProps {
    * uncapped callers; a no-op for a parent.
    */
   recordGeneration?: () => Promise<void>
+  /**
+   * Whose words the one-line hint under "Create!" is written in (FEAT-178).
+   * Resolved by the host from `useActiveChild().isChildProfile` — capability,
+   * never a name. Defaults to the fuller parent wording, which is what the
+   * uncapped parent-only callers want.
+   */
+  audience?: ArtHelpAudience
 }
 
 /**
@@ -59,6 +68,7 @@ export default function MakeStickerDialog({
   onSaved,
   capReached = false,
   recordGeneration,
+  audience = 'parent',
 }: MakeStickerDialogProps) {
   const [prompt, setPrompt] = useState('')
   const [generationPreview, setGenerationPreview] = useState<{ url: string; storagePath: string } | null>(null)
@@ -302,6 +312,11 @@ export default function MakeStickerDialog({
               sx={{ mt: 1 }}
               disabled={generating}
             />
+            {/* What this tap makes and what it spends (FEAT-178). Sits directly
+                above the "Create!" button in the actions row. At the cap this
+                whole branch is replaced by ART_QUOTA_MESSAGE, so the hint and
+                the nudge are never both on screen. */}
+            {!generating && <GenerateHint door="makeSticker" audience={audience} />}
             {generating && (
               <Stack alignItems="center" spacing={1} sx={{ mt: 2 }}>
                 <CircularProgress size={24} />

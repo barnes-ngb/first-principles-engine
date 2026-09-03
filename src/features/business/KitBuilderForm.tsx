@@ -19,6 +19,8 @@ import Typography from '@mui/material/Typography'
 import type { KitArtRef, KitDefender, KitInvader, KitRoster } from '../../core/types/business'
 import { KitRosterStatus } from '../../core/types/business'
 import { ART_QUOTA_MESSAGE } from './useArtQuota'
+import type { ArtBudgetState, ArtHelpAudience } from '../books/artHelpContent'
+import ArtHelpSheet, { ArtHelpButton, GenerateHint } from '../books/ArtHelpSheet'
 import { defenderArtKey, heroDescriptor, HERO_ART_KEY, invaderArtKey } from './kitArt'
 import type { NewKitRoster } from './useKitRosters'
 
@@ -228,6 +230,16 @@ export interface KitBuilderFormProps {
    * for an uncapped parent (the default).
    */
   remainingArt?: number
+  /**
+   * Whose words the art help reads in (FEAT-178). Resolved by the caller from
+   * the same capability answer that decides `capReached` — never a name.
+   */
+  audience?: ArtHelpAudience
+  /**
+   * The caller's live art budget, printed on the help sheet (FEAT-178). This
+   * form reads no counter of its own; `KitBuilderSection` already asks once.
+   */
+  artBudget?: ArtBudgetState
 }
 
 /**
@@ -253,7 +265,10 @@ export default function KitBuilderForm({
   onGenerateArt,
   capReached = false,
   remainingArt = Infinity,
+  audience = 'parent',
+  artBudget = { limit: 0, remaining: Infinity, capped: false },
 }: KitBuilderFormProps) {
+  const [showArtHelp, setShowArtHelp] = useState(false)
   const [draft, setDraft] = useState<RosterDraft>(() => draftFromRoster(roster))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -598,6 +613,18 @@ export default function KitBuilderForm({
         <MenuItem value={KitRosterStatus.Complete}>Ready</MenuItem>
       </TextField>
 
+      {/* One "?" for the form's art (FEAT-178). Outside the batch branch so it
+          is still there at the cap and on a roster with nothing left to make —
+          the cap is exactly when the budget needs explaining. */}
+      {canGenerate && (
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <Typography variant="caption" color="text.secondary">
+            Making stickers
+          </Typography>
+          <ArtHelpButton onClick={() => setShowArtHelp(true)} />
+        </Stack>
+      )}
+
       {canGenerateNow && batchCount > 0 && (
         <Box>
           <Button
@@ -608,9 +635,11 @@ export default function KitBuilderForm({
           >
             Make stickers for the rest ({batchCount})
           </Button>
-          <Typography variant="caption" color="text.secondary" display="block">
-            Each sticker is a real image — we'll ask before making them.
-          </Typography>
+          {/* The count is live: this batch spends one picture per character it
+              makes, and a hint that said "1" would be the dishonesty FEAT-178
+              exists to fix. Replaced by ART_QUOTA_MESSAGE at the cap, since the
+              whole block is gated on `canGenerateNow`. */}
+          <GenerateHint door="kitArtBatch" audience={audience} count={batchCount} />
         </Box>
       )}
 
@@ -637,6 +666,14 @@ export default function KitBuilderForm({
           Cancel
         </Button>
       </Stack>
+
+      <ArtHelpSheet
+        surface="kitArt"
+        open={showArtHelp}
+        onClose={() => setShowArtHelp(false)}
+        audience={audience}
+        budget={artBudget}
+      />
 
       {/* Count-confirm before any batch generation — never auto-generate (FEAT-88). */}
       <Dialog open={confirmBatch} onClose={() => setConfirmBatch(false)}>
