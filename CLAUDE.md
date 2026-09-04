@@ -57,11 +57,13 @@ that PR is answered. After opening the PR, poll for up to 10 minutes, reading th
 `/pulls/{n}/comments`, or the GraphQL `reviewThreads`) — Codex anchors its findings to lines, and
 `gh pr view <n> --comments` fetches top-level comments and review bodies but **no** review threads, so it
 shows a review that looks empty while every finding sits unread — **and the reactions** on the PR and on the
-comment that asked, because Codex signals *reviewed, nothing to say* with a 👍 rather than a review, and no
-review endpoint returns that. It closes the round clean **only when the reaction is the Codex reviewer's own**
-(`chatgpt-codex-connector[bot]`) and, on the PR itself, was added **within this round's window** — a 👍 from a
-human or another bot is not a review result, and an older one is not this round's. A qualifying 👍 closes the
-round immediately; don't burn the rest of the window on it. **If the round raised nothing, go straight to the summary** — never re-ask for a review of an unchanged
+comment that asked — because a clean round does **not** come back as a review. It arrives as a plain
+**top-level PR comment** from the reviewer ("Codex Review: Didn't find any major issues", naming the reviewed
+commit) or as a **👍 reaction**, and the review endpoints return neither. So read the PR's top-level comments
+as well. Either signal counts **only when it is the Codex reviewer's own** (`chatgpt-codex-connector[bot]`),
+names or post-dates the head you asked about, and — for a reaction on the PR itself — was added **within this
+round's window**: a 👍 from a human or another bot is not a review result, and an older one is not this
+round's. A qualifying clean signal closes the round immediately; don't burn the rest of the window on it. **If the round raised nothing, go straight to the summary** — never re-ask for a review of an unchanged
 head. If it raised findings: address every one **in the same PR**, push, then **ask** for the next round with
 an `@codex review` comment (Codex reviews on PR open, on a draft going ready, and on that comment — **not**
 on every push, so without the ask the next window times out silently), and poll the same 10-minute window,
