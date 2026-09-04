@@ -36,7 +36,7 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 vi.mock('../../core/firebase/storage', () => ({ storage: {} }))
 vi.mock('../../core/ai/useAI', () => ({
-  useAI: () => ({ chat: vi.fn(), generateImage: vi.fn(), lastErrorRef: { current: null } }),
+  useAI: () => ({ imageFailureRef: { current: null }, chat: vi.fn(), generateImage: vi.fn(), lastErrorRef: { current: null } }),
   TaskType: { ShellyChat: 'shellyChat', Chat: 'chat' },
 }))
 

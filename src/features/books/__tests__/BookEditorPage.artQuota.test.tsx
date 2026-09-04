@@ -5,14 +5,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ── Hoisted mocks ───────────────────────────────────────────────
 
-const { generateImageMock, recordGenerationMock, quotaHolder, pickerProps, drawingDialogProps } =
-  vi.hoisted(() => ({
-    generateImageMock: vi.fn(),
-    recordGenerationMock: vi.fn(async () => undefined),
-    quotaHolder: { atLimit: false },
-    pickerProps: { current: null as Record<string, unknown> | null },
-    drawingDialogProps: { current: null as Record<string, unknown> | null },
-  }))
+const {
+  generateImageMock,
+  recordGenerationMock,
+  quotaHolder,
+  pickerProps,
+  drawingDialogProps,
+  imageFailureRef,
+} = vi.hoisted(() => ({
+  generateImageMock: vi.fn(),
+  recordGenerationMock: vi.fn(async () => undefined),
+  quotaHolder: { atLimit: false },
+  pickerProps: { current: null as Record<string, unknown> | null },
+  drawingDialogProps: { current: null as Record<string, unknown> | null },
+  imageFailureRef: { current: null as unknown },
+}))
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
@@ -35,6 +42,7 @@ vi.mock('/src/core/profile/useProfile', () => ({
 
 vi.mock('/src/core/ai/useAI', () => ({
   useAI: () => ({
+    imageFailureRef,
     generateImage: generateImageMock,
     enhanceSketch: vi.fn(),
     loading: false,
@@ -151,6 +159,7 @@ import BookEditorPage from '../BookEditorPage'
 
 beforeEach(() => {
   generateImageMock.mockReset()
+  imageFailureRef.current = null
   generateImageMock.mockResolvedValue({ url: 'https://img/scene.png', storagePath: 's/scene.png' })
   recordGenerationMock.mockReset()
   recordGenerationMock.mockResolvedValue(undefined)
@@ -225,5 +234,46 @@ describe('BookEditorPage — weekly art budget (FEAT-168)', () => {
 
     await waitFor(() => expect(screen.getByAltText('Your new picture')).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Use it' })).toBeTruthy()
+  })
+
+  it('a refused picture offers the server’s rewordings as taps, and spends nothing (FEAT-195)', async () => {
+    // This dialog is where the good copy lived — two written suggestions plus
+    // two free exits — but as prose the parent had to retype, and nowhere else.
+    // Now the suggestions come from the server and tapping one IS the retry.
+    const user = userEvent.setup()
+    quotaHolder.atLimit = false
+    generateImageMock.mockImplementationOnce(async () => {
+      imageFailureRef.current = {
+        code: 'functions/invalid-argument',
+        message: "That prompt was blocked by the image generator's safety filter.",
+        details: {
+          failure: 'blocked',
+          alternatives: ['a blocky pixel world', 'a green cave of cubes', 'a castle of bricks'],
+        },
+      }
+      return null
+    })
+    render(<BookEditorPage />)
+
+    await openSceneDialog(user)
+    await user.type(screen.getByLabelText(/describe the picture/i), 'Minecraft Steve')
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
+
+    // Kid audience on this mount (`isChildProfile: true`) — capability, never a name.
+    expect(await screen.findByText('The picture maker said no to that.')).toBeInTheDocument()
+    // A refusal made no picture, so nothing is charged to the week.
+    expect(recordGenerationMock).not.toHaveBeenCalled()
+    // The free exits the Book Editor already had are still offered, beside the
+    // paid retry.
+    expect(screen.getByRole('button', { name: /add a drawing/i })).toBeInTheDocument()
+
+    // Tapping a rewording re-runs the generation with those words, verbatim.
+    await user.click(screen.getByRole('button', { name: 'a green cave of cubes' }))
+    await waitFor(() => expect(generateImageMock).toHaveBeenCalledTimes(2))
+    expect(generateImageMock.mock.calls[1][0]).toMatchObject({
+      prompt: 'a green cave of cubes',
+    })
+    // And it counts as one, like any other picture.
+    await waitFor(() => expect(recordGenerationMock).toHaveBeenCalledTimes(1))
   })
 })

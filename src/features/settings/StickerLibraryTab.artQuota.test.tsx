@@ -17,8 +17,9 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 const enhanceSketchMock = vi.fn()
+const imageFailureRef: { current: unknown } = { current: null }
 vi.mock('../../core/ai/useAI', () => ({
-  useAI: () => ({ enhanceSketch: enhanceSketchMock }),
+  useAI: () => ({ imageFailureRef, enhanceSketch: enhanceSketchMock }),
 }))
 
 const updateDocMock = vi.fn()
@@ -62,6 +63,7 @@ async function openMakeVersions(user: ReturnType<typeof userEvent.setup>) {
 describe('StickerLibraryTab — weekly art cap (FEAT-165 / UX-95)', () => {
   beforeEach(() => {
     enhanceSketchMock.mockReset()
+    imageFailureRef.current = null
     enhanceSketchMock.mockResolvedValue({ url: 'https://x.test/v.png', storagePath: 'p/v.png' })
     updateDocMock.mockReset()
     updateDocMock.mockResolvedValue(undefined)
@@ -110,6 +112,24 @@ describe('StickerLibraryTab — weekly art cap (FEAT-165 / UX-95)', () => {
     await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(enhanceSketchMock).toHaveBeenCalledTimes(1))
+    expect(recordGeneration).not.toHaveBeenCalled()
+  })
+
+  it('names WHICH failure it was, and a refusal still spends nothing (FEAT-195)', async () => {
+    const user = userEvent.setup()
+    const recordGeneration = vi.fn().mockResolvedValue(undefined)
+    imageFailureRef.current = {
+      code: 'functions/invalid-argument',
+      message: 'The sketch enhancement was blocked by the safety filter.',
+      details: { failure: 'blocked' },
+    }
+    enhanceSketchMock.mockResolvedValue({ url: '', storagePath: '' })
+    render(<StickerLibraryTab recordGeneration={recordGeneration} />)
+
+    await openMakeVersions(user)
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
+
+    expect(await screen.findByText(/wouldn't draw that one/i)).toBeInTheDocument()
     expect(recordGeneration).not.toHaveBeenCalled()
   })
 

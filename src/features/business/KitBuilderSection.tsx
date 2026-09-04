@@ -13,8 +13,12 @@ import type { CatalogProduct, KitArtRef, KitRoster } from '../../core/types/busi
 import { BusinessItemType, KitRosterStatus } from '../../core/types/business'
 import CatalogProductForm from './CatalogProductForm'
 import { artToProductImages, buildKitCharacterPrompt, hasAnyArt } from './kitArt'
-import type { KitArtCharacter } from './KitBuilderForm'
+import type { KitArtCharacter, KitArtOutcome } from './KitBuilderForm'
 import KitBuilderForm from './KitBuilderForm'
+import {
+  classifyImageGenerationFailure,
+  ImageGenerationFailure,
+} from '../books/imageGenerationFailure'
 import { buildPrintableKitHtml } from './printableKit'
 import { buildKitArtDownloads, downloadArtFiles, kitArtZipName } from './stickerArtExport'
 import { useArtQuota } from './useArtQuota'
@@ -59,7 +63,7 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
   const { rosters, loading, createRoster, updateRoster, setRosterArt } = useKitRosters(activeChildId)
   const { products, createProduct, updateProduct } = useCatalogProducts()
   const { children } = useChildren()
-  const { generateImage } = useAI()
+  const { generateImage, imageFailureRef } = useAI()
   const familyId = useFamilyId()
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
 
@@ -99,8 +103,11 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
    */
   const makeGenerateArt =
     (rosterId: string) =>
-    async (characterKey: string, character: KitArtCharacter): Promise<KitArtRef | null> => {
-      if (!familyId) return null
+    async (characterKey: string, character: KitArtCharacter): Promise<KitArtOutcome> => {
+      // No family is not an image failure — but the form has to render
+      // *something*, and "no picture came back" is the honest reading of a call
+      // that never went out (FEAT-195).
+      if (!familyId) return { ok: false, failure: ImageGenerationFailure.NoImage }
       const prompt = buildKitCharacterPrompt(character)
       const result = await generateImage({
         familyId,
@@ -108,7 +115,14 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
         style: 'book-sticker',
         size: '1024x1024',
       })
-      if (!result) return null
+      if (!result) {
+        // Which failure it was, off the raw rejection rather than a `null` that
+        // says only "no" (FEAT-195). Nothing counted — no image was made.
+        return {
+          ok: false,
+          failure: classifyImageGenerationFailure(imageFailureRef.current),
+        }
+      }
       const ref: KitArtRef = {
         url: result.url,
         storagePath: result.storagePath,
@@ -118,7 +132,7 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
       // Count this paid generation against the kid's weekly cap (no-op for a
       // parent). Regenerate counts too — each is a real image call (FEAT-94).
       await recordGeneration()
-      return ref
+      return { ok: true, ref }
     }
 
   /**

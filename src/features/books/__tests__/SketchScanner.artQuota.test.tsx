@@ -8,12 +8,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // why FEAT-165 capped three and left this one open. These probes hold the same
 // four rules the other doors keep: refuse before the spend, count only a real
 // image, fail open on the counter, and leave every free control working.
-const { enhanceSketchMock, uploadBytesMock, addDocMock, cleanSketchMock } = vi.hoisted(() => ({
-  enhanceSketchMock: vi.fn(),
-  uploadBytesMock: vi.fn(),
-  addDocMock: vi.fn(),
-  cleanSketchMock: vi.fn(),
-}))
+const { enhanceSketchMock, uploadBytesMock, addDocMock, cleanSketchMock, imageFailureRef } =
+  vi.hoisted(() => ({
+    enhanceSketchMock: vi.fn(),
+    uploadBytesMock: vi.fn(),
+    addDocMock: vi.fn(),
+    cleanSketchMock: vi.fn(),
+    imageFailureRef: { current: null as unknown },
+  }))
 
 vi.mock('firebase/firestore', () => ({
   addDoc: (...args: unknown[]) => addDocMock(...args),
@@ -33,7 +35,7 @@ vi.mock('../../../core/firebase/firestore', () => ({
 vi.mock('../../../core/firebase/storage', () => ({ storage: {} }))
 
 vi.mock('../../../core/ai/useAI', () => ({
-  useAI: () => ({ enhanceSketch: enhanceSketchMock }),
+  useAI: () => ({ imageFailureRef, enhanceSketch: enhanceSketchMock }),
 }))
 
 // The real cleaner is canvas work; the flow under test starts after it.
@@ -68,6 +70,7 @@ function renderScanner(props: Partial<React.ComponentProps<typeof SketchScanner>
 describe('SketchScanner — weekly art cap on "Make it fancy" (FEAT-166 / UX-95)', () => {
   beforeEach(() => {
     enhanceSketchMock.mockReset()
+    imageFailureRef.current = null
     enhanceSketchMock.mockResolvedValue({
       url: 'https://example.test/fancy.png',
       storagePath: 'families/f1/fancy.png',
@@ -165,6 +168,49 @@ describe('SketchScanner — weekly art cap on "Make it fancy" (FEAT-166 / UX-95)
 
     await waitFor(() => expect(enhanceSketchMock).toHaveBeenCalledTimes(1))
     expect(recordGeneration).not.toHaveBeenCalled()
+  })
+
+  it('names WHICH failure it was, and a refusal still spends nothing (FEAT-195)', async () => {
+    // This door said "Couldn't use that picture. Please try again." for a
+    // refused prompt, a rate limit, a missing API key and a dropped connection
+    // alike. `useAI.enhanceSketch` swallows the rejection and returns null, so
+    // the classified failure comes off the ref rather than a message string.
+    const user = userEvent.setup()
+    const recordGeneration = vi.fn().mockResolvedValue(undefined)
+    imageFailureRef.current = {
+      code: 'functions/invalid-argument',
+      message: 'The sketch enhancement was blocked by the safety filter.',
+      details: { failure: 'blocked' },
+    }
+    enhanceSketchMock.mockResolvedValue(null)
+    renderScanner({ recordGeneration })
+
+    await reachFancyTab(user)
+    await user.click(await screen.findByRole('button', { name: /make it fancy/i }))
+
+    expect(await screen.findByText(/wouldn't draw that one/i)).toBeInTheDocument()
+    // No picture was made, so nothing is charged to the week.
+    expect(recordGeneration).not.toHaveBeenCalled()
+    // The written tips stand in: this door sends no caption, so the server has
+    // no words of the kid's to reword.
+    expect(screen.getByText(/describe the world instead of characters/i)).toBeInTheDocument()
+  })
+
+  it('tells a rate limit apart from a refusal — different failure, different words', async () => {
+    const user = userEvent.setup()
+    imageFailureRef.current = {
+      code: 'functions/resource-exhausted',
+      message: 'Image enhancement is busy right now.',
+      details: { failure: 'busy' },
+    }
+    enhanceSketchMock.mockResolvedValue(null)
+    renderScanner({})
+
+    await reachFancyTab(user)
+    await user.click(await screen.findByRole('button', { name: /make it fancy/i }))
+
+    expect(await screen.findByText(/busy right now/i)).toBeInTheDocument()
+    expect(screen.queryByText(/try one of these/i)).toBeNull()
   })
 
   it('does not count a transform that threw', async () => {

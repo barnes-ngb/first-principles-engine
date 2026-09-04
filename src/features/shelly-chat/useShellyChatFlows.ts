@@ -34,6 +34,11 @@ import { computeReflectionSuggestions } from './reflectionSuggestions'
 import type { ReflectionDay } from './reflectionSuggestions'
 import type { ChatAttachment, RefinementQuestion, ShellyChatState } from './useShellyChatState'
 import { buildImageMessageContent, MAX_UPLOAD_FILES } from './imageMarkers'
+import {
+  classifyImageGenerationFailure,
+  imageFailureAlternatives,
+  imageFailureMessage,
+} from '../books/imageGenerationFailure'
 
 type AI = ReturnType<typeof useAI>
 
@@ -50,6 +55,8 @@ export interface ShellyChatFlowsDeps {
   chat: AI['chat']
   generateImage: AI['generateImage']
   lastErrorRef: AI['lastErrorRef']
+  /** The structured rejection of the last image call (FEAT-195). */
+  imageFailureRef: AI['imageFailureRef']
   setSearchParams: SetURLSearchParams
   /**
    * Stage `<action>` proposals parsed from an assistant message for
@@ -87,7 +94,7 @@ export interface ShellyChatFlowsDeps {
  * keeping its external prop/route contract identical.
  */
 export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlowsDeps) {
-  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope } = deps
+  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, imageFailureRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope } = deps
 
   const {
     chatContext, setChatContext,
@@ -588,11 +595,20 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         // Surface the actual error from the AI hook ref (synchronously available, unlike state)
         const errorDetail = lastErrorRef.current || 'unknown error'
         console.error('[Chat] Image generation failed:', errorDetail, '| prompt:', prompt.slice(0, 80))
-        const userMessage = errorDetail.includes('safety') || errorDetail.includes('content_policy')
-          ? `That prompt was blocked by the image safety filter — try describing the scene differently.`
-          : errorDetail.includes('rate') || errorDetail.includes('busy')
-            ? `Image generation is busy right now. Wait a moment and try again.`
-            : `Sorry, I wasn't able to generate that image. ${errorDetail.includes('deadline') || errorDetail.includes('timeout') ? 'The request timed out — try again.' : 'Try rephrasing or try again in a moment.'}`
+        // The one classifier and the one set of words, instead of this door's
+        // own three-way message sniff (FEAT-195). A chat reply cannot hold the
+        // shared card — it is persisted text, not a component — so the
+        // alternatives are listed for the parent to ask for by name, which is
+        // this surface's own affordance. Parent voice, matching the register
+        // every other reply in this thread is written in.
+        const failure = classifyImageGenerationFailure(imageFailureRef.current)
+        const alternatives = imageFailureAlternatives(imageFailureRef.current)
+        const userMessage = [
+          imageFailureMessage(failure, 'parent'),
+          ...(alternatives.length > 0
+            ? ['', 'Try one of these — just ask me for it:', ...alternatives.map((a) => `• ${a}`)]
+            : []),
+        ].join('\n')
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
           content: userMessage,
@@ -612,7 +628,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     } finally {
       setGeneratingImage(false)
     }
-  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef, setActiveThreadId, setGeneratingImage])
+  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef, imageFailureRef, setActiveThreadId, setGeneratingImage])
 
   // ── Image refinement flow (Prompt 9) ───────────────────────────
 

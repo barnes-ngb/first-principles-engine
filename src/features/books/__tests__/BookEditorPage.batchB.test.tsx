@@ -35,7 +35,7 @@ vi.mock('/src/core/profile/useProfile', () => ({
 }))
 
 vi.mock('/src/core/ai/useAI', () => ({
-  useAI: () => ({ generateImage: vi.fn(), enhanceSketch: vi.fn(), loading: false, error: null }),
+  useAI: () => ({ imageFailureRef: { current: null }, generateImage: vi.fn(), enhanceSketch: vi.fn(), loading: false, error: null }),
 }))
 
 vi.mock('../useBackgroundReimagine', () => ({ useBackgroundReimagine: () => ({ job: null }) }))

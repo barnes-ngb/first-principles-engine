@@ -4,7 +4,14 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireApprovedUser } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
-import { rewriteForCopyright } from "./copyrightUtils.js";
+import {
+  rewriteForCopyright,
+  suggestPromptAlternatives,
+} from "./copyrightUtils.js";
+import {
+  ImageFailureKind,
+  imageFailureDetailsFor,
+} from "./imageFailure.js";
 import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
 
 // ── Request / Response types ────────────────────────────────────
@@ -421,6 +428,16 @@ export const enhanceSketch = onCall(
         error: errMsg,
       });
 
+      // Refusal only (FEAT-195) — the shared rail spends the suggester on a
+      // blocked prompt and nothing else. An UNCAPTIONED sketch has no words to
+      // reword either, and `suggestPromptAlternatives` skips the call entirely
+      // for empty text, so that case costs nothing and the client shows its
+      // static tips.
+      const detailsFor = (failure: ImageFailureKind) =>
+        imageFailureDetailsFor(failure, () =>
+          suggestPromptAlternatives(caption ?? "", "sketch", claudeApiKey.value()),
+        );
+
       if (
         errMsg.includes("content_policy") ||
         errMsg.includes("safety") ||
@@ -429,17 +446,20 @@ export const enhanceSketch = onCall(
         throw new HttpsError(
           "invalid-argument",
           "The sketch enhancement was blocked by the safety filter. Try describing what the character looks like instead of using their name!",
+          await detailsFor(ImageFailureKind.Blocked),
         );
       }
       if (errMsg.includes("rate_limit") || errMsg.includes("429")) {
         throw new HttpsError(
           "resource-exhausted",
           "Image enhancement is busy right now. Wait a moment and try again.",
+          await detailsFor(ImageFailureKind.Busy),
         );
       }
       throw new HttpsError(
         "internal",
         `Sketch enhancement failed: ${errMsg.slice(0, 200)}`,
+        await detailsFor(ImageFailureKind.NoImage),
       );
     }
 
@@ -454,6 +474,7 @@ export const enhanceSketch = onCall(
       throw new HttpsError(
         "internal",
         "Sketch enhancement returned no image data.",
+        { failure: ImageFailureKind.NoImage },
       );
     }
 

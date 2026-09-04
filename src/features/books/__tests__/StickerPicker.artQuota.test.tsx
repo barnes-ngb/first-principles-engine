@@ -11,6 +11,7 @@ const { generateImageMock, recordGenerationMock } = vi.hoisted(() => ({
 
 vi.mock('../../../core/ai/useAI', () => ({
   useAI: () => ({
+    imageFailureRef: { current: null },
     generateImage: generateImageMock,
     loading: false,
     error: null,

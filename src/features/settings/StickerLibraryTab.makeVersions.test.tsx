@@ -18,7 +18,7 @@ vi.mock('../../core/firebase/firestore', () => ({
 
 const enhanceSketchMock = vi.fn()
 vi.mock('../../core/ai/useAI', () => ({
-  useAI: () => ({ enhanceSketch: enhanceSketchMock }),
+  useAI: () => ({ imageFailureRef: { current: null }, enhanceSketch: enhanceSketchMock }),
 }))
 
 const updateDocMock = vi.fn()

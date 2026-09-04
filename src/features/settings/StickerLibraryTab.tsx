@@ -32,6 +32,12 @@ import { StickerCatalogButton, StickerCatalogPromoteDialog } from './StickerCata
 import { groupStickers } from '../books/stickerGrouping'
 import DrawingGroupCard from '../books/DrawingGroupCard'
 import { generateStickerVersion } from '../books/generateStickerVersion'
+import ImageRetryCard from '../books/ImageRetryCard'
+import {
+  classifyImageGenerationFailure,
+  imageFailureAlternatives,
+  type ImageGenerationFailure,
+} from '../books/imageGenerationFailure'
 import { planStickerEdit } from '../books/stickerLabelEdit'
 import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from '../books/drawingStickerStyles'
 import { CHECKERBOARD_BG } from '../books/DrawingChoiceDialog'
@@ -130,7 +136,7 @@ export default function StickerLibraryTab({
   audience = 'parent',
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
-  const { enhanceSketch } = useAI()
+  const { enhanceSketch, imageFailureRef } = useAI()
   // Catalog on-ramp (FEAT-82): promote a sticker into a CatalogProduct. The
   // catalog hooks (useChildren/useCatalogProducts) live in the `canEdit`-gated
   // child components below, never at this level — so the kid-facing / Settings
@@ -165,6 +171,13 @@ export default function StickerLibraryTab({
   const [makeStyleId, setMakeStyleId] = useState(DEFAULT_FANCY_STYLE_ID)
   const [makingVersion, setMakingVersion] = useState(false)
   const [makeError, setMakeError] = useState<string | null>(null)
+  /**
+   * Why the last version didn't come back (FEAT-195) — the shared card, same as
+   * the drawing card's "Add version". `makeError` survives for the failures that
+   * are NOT image calls: the adoption write and the rename commit above it.
+   */
+  const [makeFailure, setMakeFailure] = useState<ImageGenerationFailure | null>(null)
+  const [makeAlternatives, setMakeAlternatives] = useState<string[]>([])
 
   const load = useCallback(async () => {
     if (!familyId) return
@@ -299,6 +312,8 @@ export default function StickerLibraryTab({
     if (capReached) return
     setMakingVersion(true)
     setMakeError(null)
+    setMakeFailure(null)
+    setMakeAlternatives([])
     try {
       // Commit anything typed in the edit dialog first, so a rename entered here
       // is not discarded by generating, and the new version carries the name the
@@ -328,7 +343,9 @@ export default function StickerLibraryTab({
       })
       if (!res.ok) {
         // No usable image came back — nothing to charge the weekly budget for.
-        setMakeError(res.error)
+        // Which failure it was comes off the raw rejection (FEAT-195).
+        setMakeFailure(classifyImageGenerationFailure(imageFailureRef.current))
+        setMakeAlternatives(imageFailureAlternatives(imageFailureRef.current))
         return
       }
       // A real version came back: count the paid call (FEAT-165). Never
@@ -355,6 +372,7 @@ export default function StickerLibraryTab({
     load,
     persistPendingEdit,
     recordGeneration,
+    imageFailureRef,
   ])
 
   const handleDelete = useCallback(async () => {
@@ -955,6 +973,18 @@ export default function StickerLibraryTab({
               <Typography variant="body2" color="error">
                 {makeError}
               </Typography>
+            )}
+            {/* One card for every way a picture can fail to arrive (FEAT-195).
+                No tappable alternatives — a version re-draws a saved drawing and
+                sends no words to reword. */}
+            {makeFailure && (
+              <ImageRetryCard
+                failure={makeFailure}
+                audience={audience}
+                alternatives={makeAlternatives}
+                onRetry={() => { void handleMakeVersion() }}
+                retryLabel="Make more versions"
+              />
             )}
           </Stack>
         </DialogContent>

@@ -41,6 +41,12 @@ import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { recordStickerArtGeneration } from './useStickerArtQuota'
 import type { ArtBudgetState, ArtHelpAudience } from './artHelpContent'
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
+import ImageRetryCard from './ImageRetryCard'
+import {
+  classifyImageGenerationFailure,
+  imageFailureAlternatives,
+  type ImageGenerationFailure,
+} from './imageGenerationFailure'
 import { StickerCategory } from '../../core/types/enums'
 import type { Sticker, StickerTag } from '../../core/types'
 import { STICKER_TAG_LABELS } from '../../core/types'
@@ -142,6 +148,15 @@ export default function SketchScanner({
   const [fancyStoragePath, setFancyStoragePath] = useState<string | null>(null)
   const [enhancing, setEnhancing] = useState(false)
   const [enhanceError, setEnhanceError] = useState<string | null>(null)
+  /**
+   * Why the last "Make it fancy" didn't come back (FEAT-195). This door said
+   * "Couldn't use that picture. Please try again." for a refused prompt, a rate
+   * limit, a missing API key and a dropped connection alike — four different
+   * problems, one useless sentence, nothing to tap. `enhanceError` survives for
+   * the one failure that is NOT an image call: the Storage upload underneath it.
+   */
+  const [fancyFailure, setFancyFailure] = useState<ImageGenerationFailure | null>(null)
+  const [fancyAlternatives, setFancyAlternatives] = useState<string[]>([])
 
   // Shared tagging (applies to whichever version is saved)
   const [tags, setTags] = useState<StickerTag[]>([])
@@ -157,7 +172,7 @@ export default function SketchScanner({
   // Group key shared by every version saved from one drawing (the cleaned
   // original + any fancy versions). Minted when a new drawing is captured.
   const sourceDrawingIdRef = useRef<string | null>(null)
-  const { enhanceSketch } = useAI()
+  const { enhanceSketch, imageFailureRef } = useAI()
 
   const reset = useCallback(() => {
     setStage('capture')
@@ -173,6 +188,8 @@ export default function SketchScanner({
     setFancyStoragePath(null)
     setEnhancing(false)
     setEnhanceError(null)
+    setFancyFailure(null)
+    setFancyAlternatives([])
     resetLabel()
     setTags([])
     setProfile(childProfile ?? 'both')
@@ -279,6 +296,8 @@ export default function SketchScanner({
     if (enhancing || capReached) return
     setEnhancing(true)
     setEnhanceError(null)
+    setFancyFailure(null)
+    setFancyAlternatives([])
     setPreviewTab('fancy')
 
     try {
@@ -320,7 +339,12 @@ export default function SketchScanner({
           return next
         })
       } else {
-        setEnhanceError('No picture came back. Please try again.')
+        // `useAI.enhanceSketch` swallows the rejection and returns null, so this
+        // — not the catch below — is the branch a refused or rate-limited call
+        // actually lands in. The classifier reads the raw rejection off the ref
+        // (FEAT-195); nothing is counted, because no picture was made.
+        setFancyFailure(classifyImageGenerationFailure(imageFailureRef.current))
+        setFancyAlternatives(imageFailureAlternatives(imageFailureRef.current))
       }
     } catch (err) {
       setEnhanceError(err instanceof Error ? err.message : 'Transform failed')
@@ -335,6 +359,7 @@ export default function SketchScanner({
     familyId,
     styleId,
     recordGeneration,
+    imageFailureRef,
   ])
 
   const saveSticker = useCallback(
@@ -618,6 +643,19 @@ export default function SketchScanner({
                           {enhanceError}
                         </Typography>
                       )}
+                      {/* One card for every way a picture can fail to arrive
+                          (FEAT-195). No tappable alternatives here: this door
+                          sends no caption, so there are no words of the kid's to
+                          reword — the card shows the written tips instead. */}
+                      {fancyFailure && (
+                        <ImageRetryCard
+                          failure={fancyFailure}
+                          audience={audience}
+                          alternatives={fancyAlternatives}
+                          onRetry={() => { void handleMakeFancy() }}
+                          retryLabel="Make it fancy"
+                        />
+                      )}
                     </Stack>
                   )}
                 </>
@@ -667,6 +705,16 @@ export default function SketchScanner({
                   <Typography variant="body2" color="error">
                     {enhanceError}
                   </Typography>
+                )}
+                {/* The redo fails the same way the first try does (FEAT-195). */}
+                {fancyFailure && (
+                  <ImageRetryCard
+                    failure={fancyFailure}
+                    audience={audience}
+                    alternatives={fancyAlternatives}
+                    onRetry={() => { void handleMakeFancy() }}
+                    retryLabel="Make it with this style"
+                  />
                 )}
               </Stack>
             )}

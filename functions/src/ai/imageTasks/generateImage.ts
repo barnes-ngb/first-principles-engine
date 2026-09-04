@@ -5,7 +5,14 @@ import { requireApprovedUser, checkRateLimit } from "../authGuard.js";
 import { claudeApiKey, openaiApiKey } from "../aiConfig.js";
 import { createOpenAiProvider } from "../providers/openai.js";
 import type { ImageOptions } from "../aiService.js";
-import { rewriteForCopyright } from "./copyrightUtils.js";
+import {
+  rewriteForCopyright,
+  suggestPromptAlternatives,
+} from "./copyrightUtils.js";
+import {
+  ImageFailureKind,
+  imageFailureDetailsFor,
+} from "./imageFailure.js";
 import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
 
 // ── Request / Response types ────────────────────────────────────
@@ -34,12 +41,43 @@ function remapLegacySize(s: string): string {
   return LEGACY_SIZE_REMAP[s] ?? s;
 }
 
+/**
+ * What to report as "what the picture maker was actually asked to draw", or
+ * `undefined` when there is nothing worth saying (FEAT-195).
+ *
+ * Pure. The provider's own revision wins where it reports one; otherwise the
+ * copyright rewrite counts as a revision **only when it changed the ask** — a
+ * prompt with no character names comes back from `rewriteForCopyright`
+ * unchanged, and telling someone their picture was "drawn as" the exact words
+ * they typed is noise, not honesty. Compared on trimmed, case-folded,
+ * whitespace-collapsed text so a reformat is not reported as a rewrite.
+ */
+export function resolveRevisedPrompt(
+  original: string,
+  safePrompt: string,
+  providerRevised?: string,
+): string | undefined {
+  if (providerRevised && providerRevised.trim()) return providerRevised.trim();
+  const normalize = (t: string) => t.trim().replace(/\s+/g, " ").toLowerCase();
+  const rewritten = safePrompt.trim();
+  if (!rewritten) return undefined;
+  return normalize(rewritten) === normalize(original) ? undefined : rewritten;
+}
+
 export interface ImageGenResponse {
   /** Public download URL from Firebase Storage. */
   url: string;
   /** Storage path (e.g. families/{id}/generated-images/{file}). */
   storagePath: string;
-  /** The prompt the image model actually used (may be revised for safety). */
+  /**
+   * What the picture maker was actually asked to draw, when that is not what
+   * the person typed (FEAT-195). `rewriteForCopyright` runs before every image
+   * call and silently replaces named characters with descriptions of how they
+   * look, so a child who asks for Mario gets a picture of someone else and no
+   * word about why. Present only when the ask CHANGED — the provider's own
+   * revision where it reports one, otherwise the rewritten subject — so a
+   * caller can say "Drawn as: …" and stay quiet when there is nothing to say.
+   */
   revisedPrompt?: string;
 }
 
@@ -608,6 +646,15 @@ export const generateImage = onCall(
         error: errMsg,
       });
 
+      // Every branch goes through `imageFailureDetailsFor`, which spends the
+      // suggester ONLY on a refusal (FEAT-195) — so the happy path pays nothing,
+      // a rate limit pays nothing, and a new branch added below cannot quietly
+      // start buying rewordings no one would use.
+      const detailsFor = (failure: ImageFailureKind) =>
+        imageFailureDetailsFor(failure, () =>
+          suggestPromptAlternatives(prompt, rewriteMode, claudeApiKey.value()),
+        );
+
       if (
         errMsg.includes("content_policy") ||
         errMsg.includes("safety") ||
@@ -616,18 +663,21 @@ export const generateImage = onCall(
         throw new HttpsError(
           "invalid-argument",
           "That prompt was blocked by the image generator's safety filter. Try describing the scene differently — avoid character names like Mario, Elsa, etc.",
+          await detailsFor(ImageFailureKind.Blocked),
         );
       }
       if (errMsg.includes("rate_limit") || errMsg.includes("429")) {
         throw new HttpsError(
           "resource-exhausted",
           "Image generation is busy right now. Wait a moment and try again.",
+          await detailsFor(ImageFailureKind.Busy),
         );
       }
       if (errMsg.includes("invalid_api_key") || errMsg.includes("401")) {
         throw new HttpsError(
           "failed-precondition",
           "Image generation is not configured correctly. Ask Dad to check the API key.",
+          await detailsFor(ImageFailureKind.NotConfigured),
         );
       }
       if (
@@ -638,11 +688,13 @@ export const generateImage = onCall(
         throw new HttpsError(
           "failed-precondition",
           "OpenAI org verification incomplete — ask Dad to complete API Organization Verification in the OpenAI dashboard.",
+          await detailsFor(ImageFailureKind.NotConfigured),
         );
       }
       throw new HttpsError(
         "internal",
         `Image generation failed: ${errMsg.slice(0, 200)}`,
+        await detailsFor(ImageFailureKind.NoImage),
       );
     }
 
@@ -666,10 +718,13 @@ export const generateImage = onCall(
         throw new HttpsError(
           "internal",
           `Failed to download generated image: ${errMsg}`,
+          { failure: ImageFailureKind.NoImage },
         );
       }
     } else {
-      throw new HttpsError("internal", "Image generation returned no data.");
+      throw new HttpsError("internal", "Image generation returned no data.", {
+        failure: ImageFailureKind.NoImage,
+      });
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -713,7 +768,11 @@ export const generateImage = onCall(
     return {
       url: downloadUrl,
       storagePath,
-      revisedPrompt: imageResponse.revisedPrompt,
+      revisedPrompt: resolveRevisedPrompt(
+        prompt,
+        safePrompt,
+        imageResponse.revisedPrompt,
+      ),
     };
   },
 );
