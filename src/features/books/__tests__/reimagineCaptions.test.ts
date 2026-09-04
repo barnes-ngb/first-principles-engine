@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -89,5 +92,34 @@ describe('the bands are the thresholds the hook labels a job with', () => {
     [100, 'full'],
   ] as const)('intensity %i is %s', (intensity, band) => {
     expect(reimagineBand(intensity)).toBe(band)
+  })
+})
+
+describe('both reimagine routes use the one definition', () => {
+  // Codex P1 on PR #1766, and it was right: the slider has TWO callers — the
+  // raw-photo branch and the post-cleanup branch — each with its own copy of the
+  // same three literals. Fixing one left a paid path still asking for "a
+  // polished cartoon style" while sending the comic recipe. Both now call
+  // `reimagineCaption`, and this is the assertion that would have caught it.
+  const page = readFileSync(
+    join(__dirname, '..', 'BookEditorPage.tsx'),
+    'utf8',
+  )
+
+  it('leaves no caption literal behind in the editor page', () => {
+    for (const stale of [
+      'Lightly clean up this child',
+      'polished cartoon style',
+      'Enhance this child',
+    ]) {
+      expect(page, `"${stale}" is still inline`).not.toContain(stale)
+    }
+  })
+
+  it('calls the shared caption for every route the slider drives', () => {
+    const calls = page.match(/reimagineCaption\(/g) ?? []
+    const starts = page.match(/bgReimagine\.startReimagine\(/g) ?? []
+    expect(starts.length).toBeGreaterThan(1)
+    expect(calls).toHaveLength(starts.length)
   })
 })

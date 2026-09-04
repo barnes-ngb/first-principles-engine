@@ -527,12 +527,9 @@ export default function BookEditorPage() {
         const { imageId, storagePath } = sketchResult
         const imageUrl = URL.createObjectURL(drawingFile)
 
-        // Build caption from intensity
-        const caption = (reimagineIntensity ?? 50) <= 25
-          ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
-          : (reimagineIntensity ?? 50) >= 75
-            ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
-            : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
+        // The same captions as the post-cleanup route below — one definition,
+        // because both routes are the same slider and both spend a paid call.
+        const caption = reimagineCaption(reimagineIntensity ?? 50)
 
         // Close the dialog — kid goes back to editing
         resetDrawingFlow()
