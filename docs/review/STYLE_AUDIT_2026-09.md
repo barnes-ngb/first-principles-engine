@@ -3,8 +3,9 @@
 **Ledger row:** `FEAT-190`. **Findings:** `UX-160` → `UX-179`.
 **Scope:** every pickable "style", "theme" and "look" in the app, laid next to the text it actually
 sends to a model. Read-only — **one** sanctioned fix applied (§11).
-**Base:** `origin/main` @ `8c5062a1` (FEAT-189 / PR #1758 merged; this audit reads the post-189 state
-and does not re-file what 189 fixed).
+**Base:** `origin/main` @ `4423fd36` — FEAT-189 and **both** its Codex follow-ups (PR #1758, PR #1759)
+merged. This audit reads the post-189 state and does not re-file what 189 fixed; every rendered prompt
+below was re-rendered against `4423fd36` after #1759 landed mid-run.
 **Owner direction** (Nathan, 2026-09-04): *"I'm not sure the themes vary the sketch a lot — cartoon
 vs fantasy was small. Themes and how they work are worth an examination at some point."*
 
@@ -45,15 +46,28 @@ Every prefix = `summary` + `BOOK_PAGE_FRAMING` (`:159-161`) + `recipeDetail` + o
 | Option id · label | What the user is told (`artHelpContent.ts` parent blurb) | What is actually sent | Look or subject? | Separates from nearest sibling? |
 |---|---|---|---|---|
 | `minecraft` · **Minecraft** | "Blocky voxel worlds built from cubes with visible pixel steps. One flat tone per cube face… Where a page allows it the scene dresses in blocks and stepped terrain; indoors it keeps the look and drops the props." (`:154`) | 791 chars. Summary *"A children's book page drawn in the look of a blocky voxel pixel-art world."* · Palette *"a limited palette of flat, saturated colors — grass green, dirt brown, stone grey — laid down unblended, never mixed."* · Line *"no outlines at all; every form is built from hard-edged cubes with visible pixel steps."* · Shading *"flat per-face shading only — one solid tone per cube face, lighter on top, darker on the sides. No gradients, no soft light."* · Props *"cubic blocks, stepped terrain, torches, ore seams"* (`generateImage.ts:115-125`) | **Look** (props correctly demoted, FEAT-189) | Yes. Nearest is `platformer` (mean .144); differs on all three axes — cubes vs chunky rounded shapes, per-face vs two-step cel |
-| `garden-warfare` · **Garden Battle** | "Leaf green and warm yellow in flat cheerful fills, bold rounded outlines with nothing sharp… in the spirit of Plants vs. Zombies." (`:159`) | 817 chars. Palette *"high-saturation leaf green and warm yellow against soft earth brown, in flat cheerful fills."* · Line *"a bold, rounded outline of even weight on every shape — nothing sharp, nothing spiky, nothing frightening."* · Shading *"simple two-tone cartoon shading with one soft drop shadow under each shape, lit by broad flat daylight."* · Props *"sunflowers, pea shooters, walnut barriers, garden pots, silly cartoon zombies in the background"* (`:126-136`) | **Look** | Nearest is `platformer` (mean **.204**, the closest pair in this picker). Both are "flat saturated fills + thick even outlines + two-step cel". Separated in practice only by palette (green/yellow vs blue/red/gold) and by `platformer`'s *"drawn side-on in 2D"* |
+| `garden-warfare` · **Garden Battle** | "Leaf green and warm yellow in flat cheerful fills, bold rounded outlines with nothing sharp… in the spirit of Plants vs. Zombies." (`:159`) | 1034 chars (**the longest**, since PR #1759). Palette *"high-saturation leaf green and warm yellow against soft earth brown, in flat cheerful fills."* · Line *"a bold, rounded outline of even weight on every shape — nothing sharp, nothing spiky, nothing frightening."* · Shading *"simple two-tone cartoon shading with one soft drop shadow under each shape, lit by broad flat daylight."* · Props *"sunflowers, pea shooters, walnut barriers, garden pots, silly cartoon zombies in the background"* (`:126-136`) | **Look** | Nearest is `platformer` (mean **.204**, the closest pair in this picker). Both are "flat saturated fills + thick even outlines + two-step cel". Separated in practice only by palette (green/yellow vs blue/red/gold) and by `platformer`'s *"drawn side-on in 2D"* |
 | `storybook` · **Storybook** | "Warm hand-painted watercolor: cream, soft coral and sage, with paper grain showing through." (`:164`) | 572 chars (the shortest). Palette *"warm, gently desaturated colors — cream, soft coral, sage — with visible paper white and paper grain showing through."* · Line *"a soft, slightly uneven ink line of medium weight that sometimes lifts off the edge of a shape."* · Shading *"translucent watercolor washes with soft blooms where colors meet; no hard black shadows."* (`:97-105`) | **Look** | Yes — the only watercolor in this picker. Furthest from `platformer` (mean .043) |
-| `platformer` · **Platformer World** | "Saturated primaries in flat fills, thick clean outlines around chunky shapes… the classic Mario-style game look." (`:169`) | 820 chars (the longest). Palette *"saturated primaries — bright blue, warm red, gold and green — in flat unblended fills with no gradients."* · Line *"thick, clean outlines of even weight around chunky rounded shapes; nothing wispy or sketchy."* · Shading *"flat cel shading in two steps per shape, drawn side-on in 2D with no perspective depth and no soft light."* · Props *"brick platforms, green pipes, gold coins, question blocks, fluffy clouds, mushroom shapes"* (`:137-147`) | **Look** | See `garden-warfare` |
+| `platformer` · **Platformer World** | "Saturated primaries in flat fills, thick clean outlines around chunky shapes… the classic Mario-style game look." (`:169`) | 820 chars. Palette *"saturated primaries — bright blue, warm red, gold and green — in flat unblended fills with no gradients."* · Line *"thick, clean outlines of even weight around chunky rounded shapes; nothing wispy or sketchy."* · Shading *"flat cel shading in two steps per shape, drawn side-on in 2D with no perspective depth and no soft light."* · Props *"brick platforms, green pipes, gold coins, question blocks, fluffy clouds, mushroom shapes"* (`:137-147`) | **Look** | See `garden-warfare` |
 | `comic` · **Comic Book** | "High-saturation comic primaries in flat fills, a heavy black ink outline thickest on the silhouettes, hard cel shading and halftone dots. The most graphic of the looks." (`:174`) | 656 chars. Palette *"high-saturation comic primaries — red, yellow, cyan — in flat fills with no gradients, and strong complementary contrast."* · Line *"a heavy, confident black ink outline of varying weight, thickest on the silhouettes, with speed lines and impact streaks in the background."* · Shading *"hard-edged cel shading in two or three steps, with visible halftone dot screens for the midtones, and a dramatic low or high camera angle."* (`:88-96`) | **Look** | Yes — halftone + camera angle are unique in this picker |
 | `realistic` · **Realistic** | "Naturalistic muted colors with believable wood, stone and fabric. Almost no outline…" (`:179`) | 505 chars. Palette *"naturalistic, muted colors with believable wood, foliage, stone and fabric tones."* · Line *"almost no visible outline — forms are defined by tone and edge contrast."* · Shading *"soft directional light with smooth falloff, subtle bounce light, and gentle cast shadows."* (`:106-114`) | **Look** | Yes — the only one with no outline at all |
 
-**Every one of the six also carries** `BOOK_PAGE_FRAMING`: *"One single, unified scene filling the
-whole image — never split panels, halves, strips, collages or borders. Environment and background
-only, no characters or people."*
+**Five of the six also carry** `BOOK_PAGE_FRAMING`: *"One single, unified scene filling the whole
+image — never split panels, halves, strips, collages or borders. Environment and background only, no
+characters or people."*
+
+**Garden Battle is the exception, as of PR #1759** (a FEAT-189 Codex follow-up that landed while this
+audit was being written). Its props include living things, so `propsIncludeCreatures: true` routes it
+through `BOOK_PAGE_FRAMING_WITH_PROP_CREATURES` instead: the same unified-scene rule, then *"Environment
+and background only: no people, and none of the story's characters. The one exception is the world's own
+prop creatures listed below — those ARE allowed and expected: draw them as scenery, small and incidental
+in the background, never the subject of the picture."* The reasoning generalises and is worth recording:
+an earlier attempt appended a later sentence saying the zombies were *not* the story's characters, and
+Codex correctly rejected it — describing what something is not never grants an exemption from a ban
+already stated categorically, and a model holding a prohibition plus a later exception tends to keep the
+prohibition. The contradiction is now **never emitted** rather than patched. That is the right shape,
+and it is the one place in the repo where a look and a subject constraint were reconciled properly —
+see §9, and contrast **UX-162**, which is the same class of defect on the sticker surface.
 
 ### 1b. Book theme presets — `PRESET_THEMES` × two server copies
 
@@ -448,6 +462,13 @@ path, six theme recipes are unreachable, and the custom-theme feature cannot rea
 - **FEAT-189's `worldPropsClause` + `BOOK_PAGE_FRAMING` split is exactly right.** Each recipe supplies
   only the noun list; the *rule* about those nouns is stated once, so three styles cannot phrase it
   three ways, and the unified-scene guardrail sits where the next style inherits it.
+- **PR #1759's `propsIncludeCreatures` opt-in is the best single piece of prompt reasoning in the
+  area** (§1a). Faced with a look that needs zombies and a framing that bans characters, it does not
+  append an exception — it **selects a different framing so the contradiction is never emitted**, and
+  it makes the flag opt-in rather than automatic on every world style, so Minecraft and Platformer
+  World (whose props are blocks and pipes) cannot inherit a creature allowance they should not have.
+  Every other prompt conflict in this audit — UX-161's "Keep my style", UX-162's cutout shadows — is
+  the same class of problem and none of them is handled this well.
 - **`buildEnhancePrompt`'s "exactly one full recipe, ever"** (`enhanceSketch.ts:238-260`) is the single
   best-reasoned piece of prompt plumbing in the area, and its comment names the concrete case it
   prevents (a minecraft-themed book at storybook intensity asking for watercolor washes and per-face
