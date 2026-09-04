@@ -53,6 +53,13 @@ import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
+import CustomStoryThemeCard from './CustomStoryThemeCard'
+import {
+  CUSTOM_STORY_THEME_EXCLUSIVE_HINT,
+  chooseStoryTheme,
+  hasCustomStoryTheme,
+  normalizeCustomStoryTheme,
+} from './customStoryTheme'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import { SubjectBucket, UserProfile } from '../../core/types/enums'
@@ -319,6 +326,12 @@ export default function BookEditorPage() {
   const [showFinishDialog, setShowFinishDialog] = useState(false)
   const [selectedCoverUrl, setSelectedCoverUrl] = useState<string | null>(null)
   const [selectedTheme, setSelectedTheme] = useState<BookTheme | undefined>(undefined)
+  /**
+   * The one-off note for this book (FEAT-194). `''` = none. Exclusive with
+   * `selectedTheme` — every change to either goes through `chooseStoryTheme`,
+   * so the two can never both be set.
+   */
+  const [selectedCustomTheme, setSelectedCustomTheme] = useState('')
   const [showCelebration, setShowCelebration] = useState(false)
 
   // Print state
@@ -875,8 +888,11 @@ export default function BookEditorPage() {
     (sticker: Sticker) => {
       if (!activePage) return
       addStickerToPage(activePage.id, sticker.url, sticker.storagePath, sticker.label, sticker.tags)
-      // Auto-suggest theme if book has none
-      if (book && !book.theme) {
+      // Auto-suggest theme if book has none. A book carrying a one-off note has
+      // a theme — the parent's own words (FEAT-194) — so a sticker's tag must
+      // not quietly hand it a preset id and leave both stored. The suggester
+      // itself is untouched; this is its gate.
+      if (book && !book.theme && !hasCustomStoryTheme(book.generationConfig?.customTheme)) {
         // Build what the book will look like after sticker is added
         const updatedPages = book.pages.map((p) =>
           p.id === activePage.id
@@ -934,24 +950,79 @@ export default function BookEditorPage() {
   const handleOpenFinishDialog = useCallback(() => {
     setSelectedCoverUrl(book?.coverImageUrl ?? coverCandidates[0] ?? null)
     setSelectedTheme(book?.theme)
+    // The note the book carries, restored the same way the theme is: reopening
+    // shows what is stored, never a stale draft.
+    setSelectedCustomTheme(normalizeCustomStoryTheme(book?.generationConfig?.customTheme))
     setShowFinishDialog(true)
-  }, [coverCandidates, book?.coverImageUrl, book?.theme])
+  }, [
+    coverCandidates,
+    book?.coverImageUrl,
+    book?.theme,
+    book?.generationConfig?.customTheme,
+  ])
+
+  /**
+   * The `generationConfig` patch the finish handlers write, or `{}` when there
+   * is nothing to record (FEAT-194).
+   *
+   * Nothing to record means: this book has no `generationConfig` AND the parent
+   * typed no note. A hand-written book finished with the preset chips must not
+   * gain a fabricated one — `words: []` and a page count it never generated
+   * against would be a write this dialog has no business making.
+   *
+   * When there IS something to record and the book has no config yet, the two
+   * required fields are seeded honestly rather than invented: no word list was
+   * in play (`[]`, exactly what it means everywhere else) and the page count is
+   * the pages the book actually has.
+   *
+   * `''` rather than `undefined` for a cleared note: the app runs Firestore with
+   * `ignoreUndefinedProperties`, so `undefined` would leave a stored note in
+   * place on any merge write.
+   */
+  const themeGenerationConfig = useCallback(
+    (note: string): Pick<Book, 'generationConfig'> | Record<string, never> => {
+      const value = normalizeCustomStoryTheme(note)
+      const existing = book?.generationConfig
+      if (!existing && !value) return {}
+      return {
+        generationConfig: {
+          words: [],
+          pageCount: book?.pages.length ?? 0,
+          ...(existing ?? {}),
+          customTheme: value,
+        },
+      }
+    },
+    [book?.generationConfig, book?.pages.length],
+  )
 
   const handleSaveCover = useCallback(() => {
     if (!book) return
     updateBookMeta({
       ...(selectedCoverUrl ? { coverImageUrl: selectedCoverUrl } : { coverImageUrl: undefined }),
       ...(selectedTheme ? { theme: selectedTheme } : { theme: undefined }),
+      ...themeGenerationConfig(selectedCustomTheme),
     })
     setShowFinishDialog(false)
-  }, [book, selectedCoverUrl, selectedTheme, updateBookMeta])
+  }, [
+    book,
+    selectedCoverUrl,
+    selectedTheme,
+    selectedCustomTheme,
+    themeGenerationConfig,
+    updateBookMeta,
+  ])
 
   const handleFinishBook = useCallback(() => {
     if (!book) return
     updateBookMeta({
       status: 'complete',
       ...(selectedCoverUrl ? { coverImageUrl: selectedCoverUrl } : {}),
-      ...(selectedTheme ? { theme: selectedTheme } : {}),
+      // Not a conditional spread like the cover: a book whose theme was replaced
+      // by a note must have its preset id CLEARED, or both would be stored and
+      // the one-source rule would hold only in the dialog's own state.
+      theme: selectedTheme,
+      ...themeGenerationConfig(selectedCustomTheme),
     })
     setShowFinishDialog(false)
     setShowCelebration(true)
@@ -959,7 +1030,16 @@ export default function BookEditorPage() {
       setShowCelebration(false)
       navigate(`/books/${bookId}/read`)
     }, 2000)
-  }, [book, selectedCoverUrl, selectedTheme, updateBookMeta, navigate, bookId])
+  }, [
+    book,
+    selectedCoverUrl,
+    selectedTheme,
+    selectedCustomTheme,
+    themeGenerationConfig,
+    updateBookMeta,
+    navigate,
+    bookId,
+  ])
 
   if (loading) {
     return (
@@ -2071,10 +2151,42 @@ export default function BookEditorPage() {
                     label={`${t.emoji} ${t.label}`}
                     size="small"
                     variant={selectedTheme === t.id ? 'filled' : 'outlined'}
-                    onClick={() => setSelectedTheme(selectedTheme === t.id ? undefined : t.id)}
+                    onClick={() => {
+                      // One or the other (FEAT-194): picking a preset drops any
+                      // note, and the same chip again clears the preset.
+                      const next = chooseStoryTheme(
+                        { theme: selectedTheme, customTheme: selectedCustomTheme },
+                        { kind: 'preset', id: t.id },
+                      )
+                      setSelectedTheme(next.theme as BookTheme | undefined)
+                      setSelectedCustomTheme(next.customTheme)
+                    }}
                   />
                 ))}
+                {/* One-off custom feel (FEAT-194) — a PARENT control, gated on
+                    capability and never on a name. A kid never sees it: the
+                    presets are the kid-legible choices, and a free-text field
+                    has no readability bar to hold it to. Sits at the end of the
+                    row because it is the same choice, in the parent's words. */}
+                {isParentProfile && (
+                  <CustomStoryThemeCard
+                    value={selectedCustomTheme}
+                    onChange={(note) => {
+                      const next = chooseStoryTheme(
+                        { theme: selectedTheme, customTheme: selectedCustomTheme },
+                        { kind: 'custom', note },
+                      )
+                      setSelectedTheme(next.theme as BookTheme | undefined)
+                      setSelectedCustomTheme(next.customTheme)
+                    }}
+                  />
+                )}
               </Box>
+              {isParentProfile && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  {selectedCustomTheme || CUSTOM_STORY_THEME_EXCLUSIVE_HINT}
+                </Typography>
+              )}
             </Box>
             <Typography variant="body2" color="text.secondary">
               You can always come back and edit!

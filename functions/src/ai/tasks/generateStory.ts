@@ -1,5 +1,4 @@
 import { HttpsError } from "firebase-functions/v2/https";
-import type { Firestore } from "firebase-admin/firestore";
 import type { ChatTaskContext, ChatTaskResult } from "../chatTypes.js";
 import { callClaude, logAiUsage } from "../chatTypes.js";
 import { buildStoryPrompt, buildStoryReadabilityFixPrompt, modelForTask } from "../chat.js";
@@ -91,34 +90,61 @@ const PRESET_THEME_MAP: Record<string, {
   },
 };
 
-async function resolveThemeGuidance(
-  db: Firestore,
-  familyId: string,
+/**
+ * The cap on a parent's one-off note (FEAT-194). Mirrors the client's
+ * `CUSTOM_STORY_THEME_MAX_LENGTH` (`src/features/books/customStoryTheme.ts`) —
+ * the client caps the field so a parent sees the limit, and this caps again
+ * because a length that only the client enforces is not a limit.
+ */
+export const CUSTOM_STORY_THEME_MAX_LENGTH = 200;
+
+/**
+ * Coerce whatever arrived on the payload into a usable note: a string, its
+ * whitespace collapsed, trimmed, capped. Anything else is `""` — absent, a
+ * number, an object — because a note is only ever words a parent typed.
+ */
+export function normalizeCustomStoryTheme(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, CUSTOM_STORY_THEME_MAX_LENGTH)
+    .trim();
+}
+
+/**
+ * The one source of theme guidance for a story (FEAT-194).
+ *
+ * Pure since this run: the saved-theme library (`families/{id}/bookThemes`) is
+ * retired, so there is nothing to read. It was unreachable anyway — no code path
+ * could write a custom id onto `book.theme`, so this function's custom branch
+ * never fired in practice.
+ *
+ * ## Precedence, and why there is only one line out
+ *
+ * A parent's one-off note is their explicit words for THIS book; a preset id
+ * reaching this task is most often *inferred* from the story idea
+ * (`inferBookTheme`), not picked. So a note wins outright and the preset is
+ * dropped — two world/tone descriptions in one prompt are two stories.
+ *
+ * ## What a note may never become
+ *
+ * `imageStylePrefix`. The returned guidance carries a `customNote` and nothing
+ * else, so a note cannot reach `buildImagePrompt` even by accident. Free text
+ * from a parent is the most likely thing in this app to name subject matter
+ * ("a spooky forest with a kind witch"), and `buildImagePrompt` appends the
+ * page's own scene after its prefix — two scenes, and the model splits the
+ * canvas. That is FEAT-189's measured failure; this keeps it one table away.
+ * Describing a LOOK in free text is a separate design (UX-177).
+ */
+export function resolveThemeGuidance(
   themeId: string | undefined,
-): Promise<StoryGenInput["themeGuidance"]> {
+  customTheme?: unknown,
+): StoryGenInput["themeGuidance"] {
+  const note = normalizeCustomStoryTheme(customTheme);
+  if (note) return { customNote: note };
   if (!themeId) return undefined;
-
-  // Check presets first
-  const preset = PRESET_THEME_MAP[themeId];
-  if (preset) return preset;
-
-  // Check custom themes in Firestore
-  try {
-    const customDoc = await db.doc(`families/${familyId}/bookThemes/${themeId}`).get();
-    if (customDoc.exists) {
-      const data = customDoc.data() as Record<string, unknown>;
-      return {
-        storyTone: data.storyTone as string | undefined,
-        storyWorldDescription: data.storyWorldDescription as string | undefined,
-        storyVocabularyLevel: data.storyVocabularyLevel as string | undefined,
-        imageStylePrefix: data.imageStylePrefix as string | undefined,
-      };
-    }
-  } catch {
-    // Ignore — fall through to no guidance
-  }
-
-  return undefined;
+  return PRESET_THEME_MAP[themeId];
 }
 
 /**
@@ -388,6 +414,13 @@ export const handleGenerateStory = async (
      * child's own level, which is what every story before this run was.
      */
     levelStretch?: number;
+    /**
+     * The parent's one-off "what should this story feel like?" note for THIS
+     * book (FEAT-194), recorded on the book as `generationConfig.customTheme`.
+     * Story-side only — see `resolveThemeGuidance`. Normalized and capped here;
+     * the client's cap is a courtesy, this one is the rule.
+     */
+    customTheme?: string;
   };
   try {
     storyConfig = JSON.parse(messages[0].content);
@@ -455,8 +488,9 @@ export const handleGenerateStory = async (
   });
   const readingLevel = levelContext.readingLevel;
 
-  // Resolve theme guidance from preset or custom Firestore theme
-  const themeGuidance = await resolveThemeGuidance(db, familyId, storyConfig.theme);
+  // Theme guidance: the parent's one-off note for this book if there is one,
+  // else the preset the idea resolved to (FEAT-194). Never both.
+  const themeGuidance = resolveThemeGuidance(storyConfig.theme, storyConfig.customTheme);
 
   // Target page count is a product decision (FEAT-97). Default to the priced
   // product size when the client sends no target, and scale the output budget

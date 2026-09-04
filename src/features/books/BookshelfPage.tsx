@@ -54,7 +54,6 @@ import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
 import EvaluationBookBanner from './EvaluationBookBanner'
 import { useEvaluationBookSuggestions } from './useEvaluationBookSuggestions'
-import CreateThemeDialog from './CreateThemeDialog'
 import {
   MAKE_BOOK_DOOR_LABEL,
   MAKE_BOOK_DOOR_TITLE,
@@ -114,7 +113,6 @@ export default function BookshelfPage() {
   const [deleteTarget, setDeleteTarget] = useState<Book | null>(null)
 
   // Custom theme dialog
-  const [showCreateTheme, setShowCreateTheme] = useState(false)
 
   // Print state
   const [showPrintSettings, setShowPrintSettings] = useState(false)
@@ -508,15 +506,6 @@ export default function BookshelfPage() {
               />
             )
           })}
-          {isParent && (
-            <Chip
-              label="+ New Theme"
-              size="small"
-              variant="outlined"
-              color="primary"
-              onClick={() => setShowCreateTheme(true)}
-            />
-          )}
         </Box>
       )}
 
@@ -1186,18 +1175,6 @@ export default function BookshelfPage() {
           ) : null}
         </DialogActions>
       </Dialog>
-
-      {/* Create custom theme dialog */}
-      <CreateThemeDialog
-        open={showCreateTheme}
-        onClose={() => setShowCreateTheme(false)}
-        familyId={familyId}
-        childId={childId}
-        onCreated={(themeId) => {
-          // Select the new custom theme as the filter
-          setThemeFilter(themeId)
-        }}
-      />
     </Page>
   )
 }
