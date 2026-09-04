@@ -104,7 +104,12 @@ Each preset also carries a story-side triple, which is the half that works well:
 `storyTone` / `storyWorldDescription` / `storyVocabularyLevel` → `THEME GUIDANCE` in the story prompt
 (`chat.ts:2407-2416`) — for the 11 ids `PRESET_THEME_MAP` covers.
 
-### 1c. Custom themes — `bookThemes` (`CreateThemeDialog.tsx`)
+### 1c. Custom themes — `bookThemes` (`CreateThemeDialog.tsx`) — ✅ **RETIRED (FEAT-194)**
+
+> The table below is the state this audit found. It no longer exists: `CreateThemeDialog`, the shelf's
+> *+ New Theme* chip, `bookThemesCollection` and both server lookups are deleted, and the existing
+> documents are left in place unread. What replaced it is a one-off note on the book itself
+> (`generationConfig.customTheme`), story-side only. See **UX-160**.
 
 | Field the parent fills in | Where it is stored | Where it reaches a model |
 |---|---|---|
@@ -325,7 +330,7 @@ FEAT-159 designed.
   routing gap is **UX-165**.
 - `family` / `science` / `sight_words` / `faith` on the **story** path — still nothing. **UX-172.**
 - `other` (`BOOK_THEMES`) — matches no map anywhere.
-- Every field of a custom theme. **UX-160.**
+- Every field of a custom theme. **UX-160** — ✅ retired in FEAT-194; the control is gone rather than fixed.
 - **Photo Album** (`COVER_STYLES`) on the regen path. **UX-165.**
 
 **Reaches by two paths:**
@@ -385,10 +390,9 @@ drawn; **theme** = the book's world tag), *theme* currently means **five** thing
 3. `ImageGenRequest.themeId` → keep the wire name (it selects a *book theme* record) but rename the
    field it reads from `imageStylePrefix` → `pictureHint`, so nothing calls it a style.
 4. Workshop `inputs.theme` → `inputs.subject`.
-5. User-facing: `CreateThemeDialog`'s *"What style should pictures be?"* is the only place a person is
-   asked for a style inside a theme; if UX-160 is fixed by removing custom themes, the question goes
-   with it. If it is fixed by wiring them up, the field is genuinely a style and the dialog should say
-   so.
+5. User-facing: `CreateThemeDialog`'s *"What style should pictures be?"* was the only place a person was
+   asked for a style inside a theme. UX-160 was fixed by **removing** custom themes, so the question
+   went with it (FEAT-194) — and describing a look in free text is now wholly **UX-177**, unbuilt.
 
 **UX-176.**
 
@@ -400,7 +404,9 @@ drawn; **theme** = the book's world tag), *theme* currently means **five** thing
 
 - The Workshop's **Custom card back** (`CardStyleStep.tsx:26-28`, `workshopArt.ts:403-407`) — typed
   text reaches the prompt verbatim. It works.
-- `CreateThemeDialog`'s **"What style should pictures be?"** — typed text reaches nothing (§1c).
+- `CreateThemeDialog`'s **"What style should pictures be?"** — typed text reached nothing (§1c), and
+  the field is **deleted** as of FEAT-194. So this design has no half-built precedent to inherit: it
+  starts from the chip described below.
 
 **Where it would plug in.** `buildImagePrompt` already takes a third argument for exactly this shape
 (`generateImage.ts:242-246`), and the callable already resolves a custom string out of Firestore
@@ -489,7 +495,7 @@ path, six theme recipes are unreachable, and the custom-theme feature cannot rea
 
 | # | ID | P | One line | Batch |
 |---|---|---|---|---|
-| 1 | **UX-160** | P1 | Custom book themes are a write-only dead end: a parent fills in four fields, no book can ever carry the id, the client never reads the collection, and creating one silently blanks the shelf | B |
+| 1 | **UX-160** | P1 | ✅ **FIXED — FEAT-194.** Custom book themes were a write-only dead end: a parent filled in four fields, no book could ever carry the id, the client never read the collection, and creating one silently blanked the shelf. **Retired** (the recommended half of Batch B item 8): `CreateThemeDialog`, the shelf's *+ New Theme* chip, `bookThemesCollection` and **both** server custom-theme lookups are deleted; existing `bookThemes` documents are left in place, unread. The want behind it is per-book, not reusable, so it returns as the one-off `generationConfig.customTheme` — a parent-only *Custom…* card on the two theme surfaces, threaded into the STORY prompt only and never into an image prompt (FEAT-189's lesson, one table over). The dropped *"What style should pictures be?"* field has no replacement by design — that is **UX-177** | B |
 | 2 | **UX-179** | P1 | Cartoon and Fantasy are the only two of nine sticker looks naming the **same medium** (watercolor washes + a soft ink line), and the one axis that fully separates them — palette — is the axis a re-draw of the child's own drawing most constrains. **The measured cause of the owner's report** | A ✅ |
 | 3 | **UX-161** | P1 | "Keep my style" sends the full watercolor recipe under *"follow it exactly"*; three labelled intensity bands resolve to two styles, two of which are identical; "Full reimagine" says cartoon and sends comic halftones | A ✅ + B |
 | 4 | **UX-172** | P1 | Four theme ids still reach the **story** writer as nothing — including `sight_words`, which `inferBookTheme` returns for *every* book made from a word list | B |
@@ -629,11 +635,15 @@ a **story-prompt** change, outside the sanctioned exception. Filed as **UX-172**
 
 ### Batch B — plumbing (one source of truth; some of it propose-and-confirm)
 
-8. **UX-160** — decide custom themes: **wire them up** (a "Theme" chip row that includes custom themes
-   in the Finish dialog, and read `bookThemes` on the client) or **retire them** (delete
-   `CreateThemeDialog`, the "+ New Theme" chip, and the two server custom-theme lookups — the ARCH-07
-   precedent). *Recommend retire:* the story-side triple is the half that works, and it already ships
-   fifteen presets.
+8. **UX-160** — ✅ **DONE (FEAT-194).** Decided: **retired**, as recommended. `CreateThemeDialog`, the
+   "+ New Theme" chip, `bookThemesCollection` and both server custom-theme lookups are deleted; the
+   orphan `bookThemes` documents are left in place, unread (a parent's typed words — a data delete is
+   propose-and-confirm and no run has that go-ahead). The story-side half that works came back as a
+   **one-off note on the book** rather than a reusable record (owner, 2026-09-04): *"I don't think it
+   makes sense to support a different theme, but maybe a slight augmentation… a card at the bottom
+   could say custom and support only one-off."* It reaches `buildStoryPrompt`'s THEME GUIDANCE and
+   **never** `buildImagePrompt` — free text is the most likely thing in the app to name a subject, and
+   a subject arriving beside the page's own scene is the split canvas FEAT-189 measured.
 9. **UX-172 + UX-167 + UX-174** — one server theme module; the four shared looks into `visualRecipe.ts`;
    `BookGenerateChat` imports `GENERATION_STYLES`.
 10. **UX-161b** — three intensity bands → three distinct styles, or two labelled bands.

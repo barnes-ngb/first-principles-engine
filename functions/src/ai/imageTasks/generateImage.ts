@@ -572,24 +572,16 @@ export const generateImage = onCall(
     // Only reaches the prompt when the picked style has no look of its own —
     // see the precedence note on `buildImagePrompt` (FEAT-174) and the coverage
     // note on `PRESET_IMAGE_PREFIXES` above.
-    let themeImagePrefix: string | undefined;
-    if (themeId) {
-      // Check preset themes first (server-side map)
-      themeImagePrefix = PRESET_IMAGE_PREFIXES[themeId];
-
-      // Check custom theme in Firestore if not a preset
-      if (!themeImagePrefix) {
-        try {
-          const db = getFirestore();
-          const themeDoc = await db.doc(`families/${familyId}/bookThemes/${themeId}`).get();
-          if (themeDoc.exists) {
-            themeImagePrefix = (themeDoc.data() as Record<string, unknown>).imageStylePrefix as string | undefined;
-          }
-        } catch {
-          // Ignore — use default style prefix
-        }
-      }
-    }
+    // FEAT-194: presets only. The saved-theme library this used to fall back to
+    // (`families/{id}/bookThemes`) is retired — nothing could ever write a
+    // custom id onto a book, so this branch never fired, and the one-off note
+    // that replaced it is STORY-side by construction: a parent's free text
+    // names subject matter ("a spooky forest with a kind witch"), and the page's
+    // own scene is appended after this prefix, so a note here would hand the
+    // model two scenes and split the canvas — FEAT-189's failure, one table over.
+    const themeImagePrefix: string | undefined = themeId
+      ? PRESET_IMAGE_PREFIXES[themeId]
+      : undefined;
 
     // ── Generate image ──────────────────────────────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());

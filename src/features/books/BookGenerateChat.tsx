@@ -27,6 +27,8 @@ import { storyWordsPreviewLine } from './storyPracticeWords'
 import { useBookGenerateChat } from './useBookGenerateChat'
 import StoryLengthSelector from './StoryLengthSelector'
 import StoryLevelStretchSelector from './StoryLevelStretchSelector'
+import CustomStoryThemeCard from './CustomStoryThemeCard'
+import { CUSTOM_STORY_THEME_HINT } from './customStoryTheme'
 import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
 
 interface Props {
@@ -115,6 +117,8 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     setPageCount,
     levelStretch,
     setLevelStretch,
+    customTheme,
+    setCustomTheme,
     storyWords,
     storyWordSource,
     storyWordsLoading,
@@ -627,6 +631,32 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           childName={childName}
           disabled={isLoading || isIllustrating}
         />
+      )}
+
+      {/* How should this book FEEL (FEAT-194) — a PARENT control, gated on
+          capability and never on a name, for the same reason as the level strip
+          above: a free-text field has no readability bar, and the fifteen
+          preset themes are the kid-legible choices. Locked once a draft exists,
+          like the length and the level: the book is written.
+
+          It reaches the STORY only. The picture's look stays owned by the style
+          strip below — free text names subject matter, and a subject reaching
+          the image model alongside the page's own scene is what split the
+          canvas in FEAT-189. */}
+      {isParent && !currentStory && (
+        <Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            How should this book feel?
+          </Typography>
+          <CustomStoryThemeCard
+            value={customTheme}
+            onChange={setCustomTheme}
+            disabled={isLoading || isIllustrating}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            {customTheme || CUSTOM_STORY_THEME_HINT}
+          </Typography>
+        </Box>
       )}
 
       {/* Illustration style strip */}

@@ -112,7 +112,7 @@ apart** — all three run under the same family UID (see §4.0).
 | `plannerConversations` | `planner-chat/PlannerChatPage.tsx` | set | parent |
 | `scans` | `components/ScanAnalysisPanel.tsx`, `today/TodayPage.tsx`, `core/hooks/useScan.ts` | add, update | parent, **kid**, shared |
 | `books` | `books/useBook.ts`, `books/useBookGenerator.ts`, `books/CreateSightWordBook.tsx` | add, set | **kid** |
-| `bookThemes` | `books/CreateThemeDialog.tsx` | add | **kid** |
+| ~~`bookThemes`~~ | *(no writer — **retired**, FEAT-194: `CreateThemeDialog` is deleted and the existing documents are left unread)* | — | — |
 | `bookProgress` | `today/useBookProgress.ts`, `today/TodayPage.tsx` | set, update | **kid**, shared |
 | `stickerLibrary` | `books/BookEditorPage.tsx`, `books/useBackgroundReimagine.ts`, `books/SketchScanner.tsx`, `settings/StickerLibraryTab.tsx` | add, set, delete | **kid**, shared |
 | `storyGames` | `workshop/WorkshopPage.tsx`, `workshop/workshopUtils.ts`, `workshop/VoiceRecordingStep.tsx` | add, update | **kid** |
@@ -167,7 +167,7 @@ progression/economy ledger.
 ### 3.2 Descriptive / low-stakes — family-scoped, light or no shape validation
 
 `children` (soft fields), `artifacts`, `days`, `dailyPlans`, `weeks`, `weeklyReviews`, `lessonCards`,
-`plannerConversations`, `scans`, `books`, `bookThemes`, `bookProgress`, `stickerLibrary`,
+`plannerConversations`, `scans`, `books`, `bookProgress`, `stickerLibrary`,
 `storyGames`, `chapterResponses`, `dadLabReports`, `activityConfigs`, `workbookConfigs`,
 `sightWordProgress`, `avatarProfiles`, `dailyArmorSessions`, `shellyChatThreads/*`,
 `settings/*`, `wordProgress`. These keep the existing family-scoped grant; corruption here is

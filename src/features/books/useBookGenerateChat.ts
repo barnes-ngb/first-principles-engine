@@ -8,6 +8,7 @@ import type { Book, BookPage, BookTheme, ChatTurn } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
 import { generatePageId } from './bookTypes'
 import { inferBookTheme } from './bookThemeInference'
+import { normalizeCustomStoryTheme } from './customStoryTheme'
 import { clampTargetPageCount } from './storyPageTargets'
 import {
   DEFAULT_LEVEL_STRETCH,
@@ -108,6 +109,15 @@ export interface UseBookGenerateChat {
    */
   levelStretch: LevelStretch
   setLevelStretch: (stretch: LevelStretch) => void
+
+  /**
+   * The parent's one-off "what should this story feel like?" note for this book
+   * (FEAT-194). `''` = none. Sent to `generateStory` as `customTheme` and
+   * recorded on the draft's own `generationConfig`, so a resumed draft restores
+   * it. Story-side only — it never reaches an image prompt.
+   */
+  customTheme: string
+  setCustomTheme: (note: string) => void
 
   /**
    * The sight words this flow will send to `generateStory` as the structured
@@ -312,6 +322,16 @@ export function useBookGenerateChat(
   // only ever an explicit parent tap, and a resumed draft restores the one it
   // was generated with (below).
   const [levelStretch, setLevelStretchState] = useState<LevelStretch>(DEFAULT_LEVEL_STRETCH)
+  /**
+   * The parent's one-off "what should this story feel like?" note for this
+   * book (FEAT-194). `''` = none, which is every draft before it existed.
+   *
+   * It lives here rather than only in the Book Editor's Finish dialog because
+   * this is the surface that WRITES a story: a note set after the story exists
+   * can shape nothing, and the whole point of retiring the saved-theme library
+   * was that a parent's typed words reached no model.
+   */
+  const [customTheme, setCustomThemeState] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -349,6 +369,9 @@ export function useBookGenerateChat(
    * Kept in step by `setLevelStretch` and by the resume hydration.
    */
   const levelStretchRef = useRef<LevelStretch>(DEFAULT_LEVEL_STRETCH)
+
+  /** The same ref treatment, for the same two reasons (FEAT-194). */
+  const customThemeRef = useRef<string>('')
 
   /** One narrow `merge` write of the field, never anything else on the book. */
   const writeLevelStretch = useCallback(
@@ -416,6 +439,50 @@ export function useBookGenerateChat(
     [bookId, writeLevelStretch],
   )
 
+  /**
+   * One narrow `merge` write of the note, never anything else on the book
+   * (FEAT-194) — the twin of `writeLevelStretch`, for the same reason: a control
+   * a parent taps has to persist on its own, not only as a side effect of the
+   * next message.
+   *
+   * `''` rather than a removal for "no note": the app runs Firestore with
+   * `ignoreUndefinedProperties`, so `undefined` on a merge write would leave a
+   * cleared note stored.
+   */
+  const writeCustomTheme = useCallback(
+    async (id: string, value: string): Promise<void> => {
+      try {
+        await setDoc(
+          doc(booksCollection(familyId), id),
+          { generationConfig: { customTheme: normalizeCustomStoryTheme(value) } },
+          { merge: true },
+        )
+      } catch (err) {
+        console.warn('Failed to persist the story feel note:', err)
+      }
+    },
+    [familyId],
+  )
+
+  /** The create-in-flight window, exactly as `flushLevelStretch` covers it. */
+  const flushCustomTheme = useCallback(
+    (id: string, written: string): void => {
+      if (customThemeRef.current === written) return
+      void writeCustomTheme(id, customThemeRef.current)
+    },
+    [writeCustomTheme],
+  )
+
+  const setCustomTheme = useCallback(
+    (next: string) => {
+      const value = normalizeCustomStoryTheme(next)
+      customThemeRef.current = value
+      setCustomThemeState(value)
+      if (bookId) void writeCustomTheme(bookId, value)
+    },
+    [bookId, writeCustomTheme],
+  )
+
   const [resumedStoryWords, setResumedStoryWords] = useState<string[] | null>(null)
   const fallbackWords = resumedStoryWords ?? practiceWords
 
@@ -480,6 +547,13 @@ export function useBookGenerateChat(
           const hydrated = normalizeLevelStretch(data.generationConfig.levelStretch)
           levelStretchRef.current = hydrated
           setLevelStretchState(hydrated)
+        }
+        // The note this draft was started with (FEAT-194). Same reasoning, and
+        // the raw setter for the same reason: hydrating is reading.
+        if (data.generationConfig?.customTheme !== undefined) {
+          const note = normalizeCustomStoryTheme(data.generationConfig.customTheme)
+          customThemeRef.current = note
+          setCustomThemeState(note)
         }
         if (state?.chatHistory) setChatHistory(state.chatHistory)
         if (state?.illustrationStyle) setIllustrationStyle(state.illustrationStyle)
@@ -614,6 +688,9 @@ export function useBookGenerateChat(
                 // The ref, not the closure: a tap during this in-flight write
                 // must not be overwritten by the value it started with.
                 levelStretch: levelStretchRef.current,
+                // The one-off note this book is written with (FEAT-194), off the
+                // ref for the same reason.
+                customTheme: customThemeRef.current,
               },
               reviewState: {
                 ...(current.reviewState ?? {}),
@@ -661,6 +738,9 @@ export function useBookGenerateChat(
           // levelled against the book, not against today's default. Read off
           // the ref so it is the parent's latest pick, not the render's.
           levelStretch: levelStretchRef.current,
+          // The one-off note this book is written with (FEAT-194) — recorded on
+          // the book for the same reasons, and read off its own ref.
+          customTheme: customThemeRef.current,
         },
         reviewState: {
           generateChatState,
@@ -672,19 +752,21 @@ export function useBookGenerateChat(
         },
       }
       const writtenStretch = levelStretchRef.current
+      const writtenNote = customThemeRef.current
       try {
         const ref = await addDoc(booksCollection(familyId), newBook as Book)
         setBookId(ref.id)
         // The picker stayed live for this whole round-trip — settle any tap
         // that landed during it (Codex P2, round 2).
         flushLevelStretch(ref.id, writtenStretch)
+        flushCustomTheme(ref.id, writtenNote)
         return ref.id
       } catch (err) {
         console.error('Failed to create draft book:', err)
         return null
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, flushLevelStretch, fallbackWords],
+    [familyId, childId, bookId, attribution, pageCount, flushLevelStretch, flushCustomTheme, fallbackWords],
   )
 
   /**
@@ -721,6 +803,9 @@ export function useBookGenerateChat(
                 // The ref, not the closure: a tap during this in-flight write
                 // must not be overwritten by the value it started with.
                 levelStretch: levelStretchRef.current,
+                // The one-off note this book is written with (FEAT-194), off the
+                // ref for the same reason.
+                customTheme: customThemeRef.current,
               },
               reviewState: {
                 ...(current.reviewState ?? {}),
@@ -766,6 +851,9 @@ export function useBookGenerateChat(
           // levelled against the book, not against today's default. Read off
           // the ref so it is the parent's latest pick, not the render's.
           levelStretch: levelStretchRef.current,
+          // The one-off note this book is written with (FEAT-194) — recorded on
+          // the book for the same reasons, and read off its own ref.
+          customTheme: customThemeRef.current,
         },
         reviewState: {
           generateChatState: 'in-progress',
@@ -777,17 +865,19 @@ export function useBookGenerateChat(
         },
       }
       const writtenStretch = levelStretchRef.current
+      const writtenNote = customThemeRef.current
       try {
         const ref = await addDoc(booksCollection(familyId), newBook as Book)
         setBookId(ref.id)
         // See `flushLevelStretch` — this is the create the round-2 finding is
         // actually about: the clarification branch never sets `isLoading`.
         flushLevelStretch(ref.id, writtenStretch)
+        flushCustomTheme(ref.id, writtenNote)
       } catch (err) {
         console.error('Failed to create draft clarification book:', err)
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, flushLevelStretch, fallbackWords],
+    [familyId, childId, bookId, attribution, pageCount, flushLevelStretch, flushCustomTheme, fallbackWords],
   )
 
   // ── Send a kid message ───────────────────────────────────────
@@ -1038,6 +1128,13 @@ export function useBookGenerateChat(
               // Deliberately `[]`: with words, inferBookTheme returns
               // `sight_words` and the picked style's theme guidance is lost.
               theme: inferBookTheme(pendingIdea, [], illustrationStyle),
+              // The parent's one-off note (FEAT-194). Spread conditionally so a
+              // book without one sends a payload byte-identical to before this
+              // run. The server prefers it over `theme` above — that id is
+              // INFERRED from the idea, and a note is what a parent actually
+              // said — and threads it into the STORY prompt only; it can never
+              // reach an image prompt (see `customStoryTheme.ts`).
+              ...(customThemeRef.current ? { customTheme: customThemeRef.current } : {}),
             }),
           },
         ],
@@ -1249,6 +1346,8 @@ export function useBookGenerateChat(
     setPageCount,
     levelStretch,
     setLevelStretch,
+    customTheme,
+    setCustomTheme,
     storyWords,
     storyWordSource,
     storyWordsLoading,

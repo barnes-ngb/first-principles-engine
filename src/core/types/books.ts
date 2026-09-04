@@ -326,6 +326,27 @@ export interface Book {
      * level it was written at (the server reads it off this record).
      */
     levelStretch?: 0 | 1 | 2
+    /**
+     * The parent's one-off "what should this story feel like?" note for THIS
+     * book (FEAT-194). Additive — absent on every book made before it existed,
+     * and absent is the whole prior behaviour. A cleared note is stored as `''`
+     * rather than removed: the app runs Firestore with
+     * `ignoreUndefinedProperties`, so `undefined` on a `merge` write leaves the
+     * old value in place. `''` and absent mean the same thing everywhere
+     * (`hasCustomStoryTheme`).
+     *
+     * It replaced the saved-theme library (`families/{id}/bookThemes`), which no
+     * book could ever carry: it lives here because the want is per-book, not
+     * reusable. A book has a preset `theme` OR this, never both — the rule is
+     * the pure `books/customStoryTheme.ts`.
+     *
+     * **Story-side only.** It reaches `buildStoryPrompt`'s THEME GUIDANCE and is
+     * never used as an image prefix: free text names subject matter, and
+     * `buildImagePrompt` appends the page's own scene after its prefix, so a
+     * note there would hand the model two scenes (FEAT-189's failure). Asking a
+     * parent to describe a LOOK is a separate design, UX-177.
+     */
+    customTheme?: string
   }
   /** Review state (Generate Chat + Per-Page Review). Phase 2 V2. */
   reviewState?: ReviewState

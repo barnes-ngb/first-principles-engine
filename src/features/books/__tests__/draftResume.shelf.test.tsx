@@ -76,7 +76,6 @@ vi.mock('../BookGenerateChat', () => ({
   },
 }))
 vi.mock('../EvaluationBookBanner', () => ({ default: () => null }))
-vi.mock('../CreateThemeDialog', () => ({ default: () => null }))
 vi.mock('../PrintSettingsDialog', () => ({ default: () => null }))
 vi.mock('../../../components/CreativeTimer', () => ({ default: () => null }))
 vi.mock('../../../components/Page', () => ({
