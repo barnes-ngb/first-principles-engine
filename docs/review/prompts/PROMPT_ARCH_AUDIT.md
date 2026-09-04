@@ -95,3 +95,22 @@ Trace the core loop end to end and look for breaks, not just code smells:
    the ledger update, and any mechanical doc fixes. **Do not merge** — leave for review.
 5. End with a 5-line summary: baseline status, top 3 findings by leverage, and which issue IDs you
    recommend running `PROMPT_FIX.md` against next.
+
+## End of run
+
+A run is not finished when the PR opens; it is finished when the **automated review round on that PR is
+answered**. After opening the PR: wait for the Codex review (poll the PR's reviews/comments every 60 s,
+up to 10 minutes — `gh pr view <n> --comments`, or the PR API), address every finding it raises **in the
+same PR**, push, and poll once more for a follow-up round. Then post the run summary with, as its first
+line, one of:
+
+- `CODEX ROUND: done — safe to merge`
+- `CODEX ROUND: none arrived in 10 min — safe to merge`
+- `CODEX ROUND: open — do not merge yet`
+
+Then **stop**. Do not subscribe to the PR, do not schedule a check-in, reminder, wake-up or scheduled
+task of any kind, and do not stay resident to "watch CI" — CI's result is on the PR page. If CI fails
+after you stop, the human pastes the log into a new run. **A merged PR is never touched again by the run
+that opened it**; a fix that is still needed goes on a new branch and PR.
+
+The human merges only a PR whose summary's first line says `safe to merge`.

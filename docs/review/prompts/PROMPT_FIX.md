@@ -69,6 +69,25 @@ the issue measured (line counts, bundle size, test count, etc.).
 2. Update the ledger row in `docs/review/REVIEW_HOME_BASE.md` → status `IN PROGRESS` (PR open, awaiting review) with the PR link.
 3. End with a 4-line summary: what changed, what's verified, any follow-on issues discovered (add them to the ledger with new IDs), and whether anything still needs a human decision.
 
+## End of run
+
+A run is not finished when the PR opens; it is finished when the **automated review round on that PR is
+answered**. After opening the PR: wait for the Codex review (poll the PR's reviews/comments every 60 s,
+up to 10 minutes — `gh pr view <n> --comments`, or the PR API), address every finding it raises **in the
+same PR**, push, and poll once more for a follow-up round. Then post the run summary with, as its first
+line, one of:
+
+- `CODEX ROUND: done — safe to merge`
+- `CODEX ROUND: none arrived in 10 min — safe to merge`
+- `CODEX ROUND: open — do not merge yet`
+
+Then **stop**. Do not subscribe to the PR, do not schedule a check-in, reminder, wake-up or scheduled
+task of any kind, and do not stay resident to "watch CI" — CI's result is on the PR page. If CI fails
+after you stop, the human pastes the log into a new run. **A merged PR is never touched again by the run
+that opened it**; a fix that is still needed goes on a new branch and PR.
+
+The human merges only a PR whose summary's first line says `safe to merge`.
+
 ---
 
 ISSUE_ID:

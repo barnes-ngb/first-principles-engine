@@ -19,7 +19,8 @@ makes the change, updates the review ledger, and opens a PR. Sessions don't free
 the run they were given.
 
 **Branch + PR, never merge.** Every change lands on a branch with a PR. **Do not merge** — the human
-reviews and merges (usually from a phone). Never push directly to `main` or `deploy`.
+reviews and merges (usually from a phone). Never push directly to `main` or `deploy`, and never re-arm
+after the PR is open — see **End of run**.
 
 **Invariants are propose-and-confirm.** Never silently change: compliance / `hours` math, the
 `xpLedger`, `skillSnapshots` (write only via the central `skillSnapshotWrites.ts`), the charter
@@ -49,6 +50,17 @@ If a fix-making routine exists, it is scoped to one ledger issue at a time behin
 **Phone-first.** A run does all build / lint / test / git in its own environment. Never instruct the
 human to run a local command — their actions are limited to: pasting a run, uploading a file, and
 reviewing / merging a PR.
+
+**End of run.** A run is not finished when the PR opens; it is finished when the automated review round
+on that PR is answered. After opening the PR: wait for the Codex review (poll the PR's reviews/comments
+every 60 s, up to 10 minutes — `gh pr view <n> --comments`, or the PR API), address every finding it
+raises **in the same PR**, push, and poll once more for a follow-up round. Then post the run summary
+with, as its first line, one of: `CODEX ROUND: done — safe to merge` · `CODEX ROUND: none arrived in
+10 min — safe to merge` · `CODEX ROUND: open — do not merge yet`. Then **stop**. Do not subscribe to the
+PR, do not schedule a check-in, reminder, wake-up or scheduled task of any kind, and do not stay resident
+to "watch CI" — CI's result is on the PR page. If CI fails after you stop, the human pastes the log into a
+new run. **A merged PR is never touched again by the run that opened it**; a fix that is still needed goes
+on a new branch and PR. The human merges only a PR whose summary's first line says `safe to merge`.
 
 **Lincoln-first / London minimal.** Wire new work for Lincoln; gate London out of untuned surfaces on
 **capability, never on his name** (`isLincoln`/`ageGroup` are cosmetic/personality, not access). London's
