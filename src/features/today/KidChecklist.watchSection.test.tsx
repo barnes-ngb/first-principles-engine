@@ -82,16 +82,16 @@ describe('KidChecklist — a planned video is visible and playable (FEAT-134)', 
   it('shows the video with a ▶ Watch button when almost no quests are done', () => {
     // The reported bug: at 1 of 11 quests done the row was locked inside "Craft 2".
     renderKid(lincolnsDay())
-    expect(screen.getByText('10 quests to go!')).toBeTruthy()
+    expect(screen.getByText('10 jobs to go!')).toBeTruthy()
     expect(screen.getByText(/Watch: Revolution war/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /watch/i })).toBeTruthy()
     // …and no lock copy anywhere near it.
-    expect(screen.queryByText(/unlock crafting/i)).toBeNull()
+    expect(screen.queryByText(/must-do jobs first/i)).toBeNull()
   })
 
   it('shows the video with zero quests done', () => {
     renderKid([quest({ label: 'Prayer' }), quest({ label: 'Math' }), watchRow()])
-    expect(screen.getByText('2 quests to go!')).toBeTruthy()
+    expect(screen.getByText('2 jobs to go!')).toBeTruthy()
     expect(screen.getByRole('button', { name: /watch/i })).toBeTruthy()
   })
 
@@ -141,7 +141,7 @@ describe('KidChecklist — a planned video is visible and playable (FEAT-134)', 
       watchRow({ category: 'must-do', mvdEssential: true }),
     ])
     // The count stays 2 — the video is not a quest.
-    expect(screen.getByText('2 quests to go!')).toBeTruthy()
+    expect(screen.getByText('2 jobs to go!')).toBeTruthy()
     expect(screen.getByRole('button', { name: /watch/i })).toBeTruthy()
   })
 

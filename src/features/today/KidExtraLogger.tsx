@@ -86,16 +86,23 @@ export default function KidExtraLogger({
       setExtraMinutes(null)
     } catch (err) {
       console.error('Extra activity save failed:', err)
-      setSaveError("Hmm, that didn't save. Check your connection and try again.")
+      setSaveError('Hmm, that did not save. Try again.')
     }
     setSavingExtra(false)
   }, [extraActivity, extraMinutes, dayLog, persistDayLogImmediate, familyId, childId, today])
 
+  // FEAT-186: the logger renders for BOTH kids unconditionally, so its
+  // Minecraft framing ("I Did More Mining!") was Lincoln's personality showing
+  // up on a six-year-old's screen with no way to opt out — and the old body
+  // line named three tablet apps London does not use, in fourteen words.
+  // Neutral, short, true. The preset chips are deliberately left alone: their
+  // labels are written into `days.checklist[].label`, so they are a stored
+  // data shape, not copy (filed, FEAT-186).
   return (
-    <SectionCard title="⛏️ I Did More Mining!">
+    <SectionCard title="⭐ I Did More!">
       <Stack spacing={2} sx={{ py: 1 }}>
         <Typography variant="body2" sx={{ textAlign: 'center' }}>
-          Did extra work on your tablet? (Reading Eggs, Math App, Typing) Log it here!
+          Did more work today? Add it here.
         </Typography>
         {saveError && (
           <Alert
@@ -115,7 +122,7 @@ export default function KidExtraLogger({
             onClick={() => { setShowExtraLog(true); setSaveError(null) }}
             sx={{ alignSelf: 'center' }}
           >
-            ⛏️ I Did More!
+            ⭐ Add More Work
           </Button>
         ) : (
           <Stack spacing={2}>
@@ -169,7 +176,7 @@ export default function KidExtraLogger({
               onClick={handleSaveExtra}
               size="large"
             >
-              {savingExtra ? 'Saving...' : '💎 Log It!'}
+              {savingExtra ? 'Saving...' : '💎 Save It!'}
             </Button>
 
             <Button

@@ -68,6 +68,11 @@ export default function ProfileMenu() {
   if (!profile) return null
 
   const current = profileMeta[profile]
+  // FEAT-186 / UX-76. `/settings` is `parentOnly` in the nav and has no route
+  // guard, so the profile pill's Settings item was the one tap that put the AI
+  // Features switches and the Theme select in front of a kid. Capability, never
+  // a name — the same answer `AppShell` uses to pick the kid nav.
+  const isParentProfile = profile === UserProfile.Parents
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget)
@@ -170,13 +175,15 @@ export default function ProfileMenu() {
             </MenuItem>
           )
         })}
-        <Divider />
-        <MenuItem onClick={handleSettings}>
-          <ListItemIcon>
-            <SettingsIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Settings</ListItemText>
-        </MenuItem>
+        {isParentProfile && <Divider />}
+        {isParentProfile && (
+          <MenuItem onClick={handleSettings}>
+            <ListItemIcon>
+              <SettingsIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Settings</ListItemText>
+          </MenuItem>
+        )}
       </Menu>
     </>
   )

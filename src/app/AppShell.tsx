@@ -44,7 +44,15 @@ const kidNavItems = [
   { label: 'My Books', to: '/books' },
   { label: 'Books About Me', to: '/books-about-me' },
   { label: 'My Hero', to: '/avatar' },
-  { label: 'My Stuff', to: '/records/portfolio' },
+  // FEAT-186 (London audit #9, owner decision): no `My Stuff` entry for a kid.
+  // It opened `/records/portfolio` — the PARENT Portfolio: "Demo Night
+  // Highlights", Year/Month selects, a title search, Subject/Type filters and a
+  // markdown export. Read-only and harmless, but nothing on it is for a
+  // six-year-old, and a nav item that lands nowhere he can use is worse than no
+  // item. The ROUTE is untouched (a parent still reaches it from Records, and a
+  // typed URL still works) — only the kid nav entry is gone. A kid-shaped
+  // gallery is the real answer and is filed as a candidate, not built here.
+  // Kid Today's own "📸 My Stuff" card is a different destination and stays.
   { label: 'Barnes Bros', to: '/business' },
   { label: 'Game Workshop', to: '/workshop' },
   { label: 'Dad Lab', to: '/dad-lab' },
