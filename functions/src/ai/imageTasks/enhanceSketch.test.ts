@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildEnhancePrompt } from "./enhanceSketch.js";
+import {
+  buildEnhancePrompt,
+  styleRecipe,
+  themeRecipe,
+} from "./enhanceSketch.js";
+import { recipeMediums, type VisualRecipe } from "./visualRecipe.js";
 
 describe("buildEnhancePrompt", () => {
   it("builds prompt without caption", () => {
@@ -143,6 +148,25 @@ const FANCY_PAYLOADS: Array<{
   { id: "minecraft", style: "minecraft", theme: "minecraft" },
 ];
 
+/** Every id `THEME_IMAGE_STYLES` covers — the nine a picker reaches, plus six it does not. */
+const THEME_KEYS = [
+  "minecraft",
+  "fantasy",
+  "adventure",
+  "animals",
+  "science",
+  "space",
+  "faith",
+  "dinosaurs",
+  "ocean",
+  "superheroes",
+  "holidays",
+  "cooking",
+  "sports",
+  "family",
+  "sight_words",
+];
+
 describe("buildEnhancePrompt — style distinctness (FEAT-159)", () => {
   const render = (p: (typeof FANCY_PAYLOADS)[number]) =>
     buildEnhancePrompt(p.style, undefined, p.theme, true);
@@ -210,6 +234,126 @@ describe("buildEnhancePrompt — style distinctness (FEAT-159)", () => {
     expect(buildEnhancePrompt("storybook")).toContain(
       "do not drift toward a generic soft cartoon look",
     );
+  });
+});
+
+
+// ── FEAT-193: the medium rule, and the cutout rule ─────────────────
+
+/**
+ * The recipe that *owns the look* for each picker option — an explicitly named
+ * style when there is one, otherwise the theme. This is the same choice
+ * `buildEnhancePrompt` makes, so the tests below read exactly what the model is
+ * told (`getThemeRecipe` / `baseRecipe` there).
+ */
+function owningRecipe(payload: (typeof FANCY_PAYLOADS)[number]): VisualRecipe {
+  const recipe = payload.style
+    ? styleRecipe(payload.style)
+    : themeRecipe(payload.theme as string);
+  if (!recipe) throw new Error(`no recipe owns "${payload.id}"`);
+  return recipe;
+}
+
+describe("the medium rule — no two options in a picker share one (FEAT-193 / UX-179)", () => {
+  // The owner reported Cartoon and Fantasy coming back looking alike. Measured,
+  // the two shared no palette word at all — what they shared was the medium
+  // (watercolor washes under a soft ink line), and they were the only two of the
+  // nine options that did. Medium is what the eye reads first, and on this
+  // surface it is the axis that survives: the picture is a re-draw of the
+  // child's own drawing, so its palette is largely the drawing's. This is the
+  // assertion that would have caught that pair.
+
+  it("names a medium for every option", () => {
+    for (const payload of FANCY_PAYLOADS) {
+      expect(
+        recipeMediums(owningRecipe(payload)),
+        `"${payload.id}" names no medium — it can only separate on palette, which a re-draw constrains`,
+      ).not.toHaveLength(0);
+    }
+  });
+
+  it("gives every option a medium no sibling uses", () => {
+    const byMedium = new Map<string, string[]>();
+    for (const payload of FANCY_PAYLOADS) {
+      for (const medium of recipeMediums(owningRecipe(payload))) {
+        byMedium.set(medium, [...(byMedium.get(medium) ?? []), payload.id]);
+      }
+    }
+    for (const [medium, ids] of byMedium) {
+      expect(ids, `"${medium}" is named by ${ids.join(" and ")}`).toHaveLength(1);
+    }
+  });
+
+  it("names a medium in every recipe in both tables, reachable or not", () => {
+    // The six theme recipes no picker reaches today are still one wiring change
+    // from being pickable, so the rule holds for them too — a look added to
+    // either table has to answer the medium question like the rest.
+    for (const key of THEME_KEYS) {
+      const recipe = themeRecipe(key);
+      expect(recipe, key).toBeDefined();
+      expect(recipeMediums(recipe as VisualRecipe), key).not.toHaveLength(0);
+    }
+    for (const key of ["storybook", "comic", "realistic", "minecraft"]) {
+      const recipe = styleRecipe(key);
+      expect(recipe, key).toBeDefined();
+      expect(recipeMediums(recipe as VisualRecipe), key).not.toHaveLength(0);
+    }
+  });
+});
+
+describe("the cutout rule — no shadow the transparent clause removes (FEAT-193 / UX-162)", () => {
+  // Every "Make it fancy" call sets `transparent: true`, and the prompt then
+  // says "no ground, no shadows on the ground". A recipe whose shading asks for
+  // a cast, drop or long shadow is asking for the one thing the same prompt
+  // removes. Three did: `adventure`, `faith` and `science`.
+  //
+  // `family` ("a visible paper grain over everything") and `space` ("fine star
+  // speckles") are NOT asserted against here and were deliberately left alone:
+  // the clause forbids background, ground and shadows on the ground, not texture
+  // on the subject, so neither is demonstrable from the text. They need a real
+  // generated sticker to judge, which is an owner call.
+  const FORBIDDEN = /cast shadows?|drop shadows?|shadows? on the ground/i;
+
+  /**
+   * Just the shading clause of the recipe that owns the look, with every
+   * *negated* shadow phrase removed first — a recipe saying "no cast shadow" is
+   * obeying the rule, not breaking it, and the rule is about what a prompt asks
+   * FOR.
+   */
+  const shadingAsk = (prompt: string) => {
+    const start = prompt.lastIndexOf("Shading:");
+    return prompt
+      .slice(start, prompt.indexOf("IMPORTANT:", start))
+      .replace(/\bno\s+(?:hard\s+|harsh\s+|soft\s+|black\s+)*(?:cast|drop|long)?\s*shadows?\b/gi, " ");
+  };
+
+  it("asks for no ground shadow on any fancy option", () => {
+    for (const payload of FANCY_PAYLOADS) {
+      expect(
+        shadingAsk(
+          buildEnhancePrompt(payload.style, undefined, payload.theme, true),
+        ),
+        payload.id,
+      ).not.toMatch(FORBIDDEN);
+    }
+  });
+
+  it("keeps the full-scene shading on the non-transparent path", () => {
+    // The book reimagine can ask for a whole illustrated scene, where a cast
+    // shadow is exactly right. `shadingCutout` swaps in only for the cutout.
+    const scene = buildEnhancePrompt(undefined, undefined, "adventure", false);
+    expect(scene).toContain("strong cast shadows");
+    const cutout = buildEnhancePrompt(undefined, undefined, "adventure", true);
+    expect(cutout).not.toContain("strong cast shadows");
+    expect(cutout).toContain("raking hard across the form itself");
+  });
+
+  it("leaves a recipe with no cutout variant alone on both paths", () => {
+    for (const transparent of [true, false]) {
+      expect(
+        buildEnhancePrompt(undefined, undefined, "animals", transparent),
+      ).toContain("visible fur or feather texture");
+    }
   });
 });
 

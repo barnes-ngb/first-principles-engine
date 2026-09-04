@@ -4,6 +4,28 @@ import type { GameType } from '../../core/types/workshop'
 
 // ── DALL-E Prompt Builders ───────────────────────────────────────
 
+/**
+ * The look every Game Workshop picture is drawn in (FEAT-193 / UX-163).
+ *
+ * Every call site here used to send `style: 'general'` — which resolves to the
+ * empty prefix — while `artHelpContent.ts` told the parent "every picture is
+ * made in one children's-game look; there is no style picker here". No look
+ * table reached the Workshop at all. Its only art direction was three inline
+ * adjective phrases ("children's board game art style, vibrant, fun";
+ * "storybook illustration style"; "children's game card art style, simple,
+ * colorful") interpolated into the prompts below — the exact adjective-only
+ * strings FEAT-159 and FEAT-174 diagnosed as collapsing toward one generic
+ * children's-illustration look.
+ *
+ * Those phrases are gone from the prompts and this style carries the look
+ * instead: one `VisualRecipe` (`GAME_ART_RECIPE` in
+ * `functions/src/ai/imageTasks/generateImage.ts`) naming palette, line and
+ * shading, applied identically to boards, title cards, challenge cards and
+ * tokens. The prompts below now carry only subject and format — what is in the
+ * picture and what shape it has to be — which is the split FEAT-189 established.
+ */
+export const WORKSHOP_ART_STYLE = 'game-art' as const
+
 export type ArtImageType =
   | 'board'
   | 'title'
@@ -22,12 +44,12 @@ interface ArtRequest {
 }
 
 function buildBoardPrompt(theme: string, boardStyle: string): string {
-  return `A colorful illustrated ${theme} themed game board background, top-down bird's eye view, ${boardStyle} layout visible, children's board game art style, vibrant, fun, no text`
+  return `A ${theme} themed game board background, top-down bird's eye view, ${boardStyle} layout visible, no text`
 }
 
 function buildTitlePrompt(theme: string, title?: string): string {
   const titlePart = title ? `called '${title}', ` : ''
-  return `A title card illustration for a children's board game ${titlePart}${theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`
+  return `A title card illustration for a children's board game ${titlePart}${theme} themed, centered composition, no text`
 }
 
 function buildCardPrompt(theme: string, cardType: string): string {
@@ -41,11 +63,11 @@ function buildCardPrompt(theme: string, cardType: string): string {
       'an action challenge card illustration, a character jumping or moving',
   }
   const desc = descriptions[cardType] ?? 'a challenge card illustration'
-  return `A ${theme} themed ${desc}, children's game card art style, simple, colorful, no text`
+  return `A ${theme} themed ${desc}, centered on the card, no text`
 }
 
 function buildParentTokenPrompt(theme: string, parentName: string): string {
-  return `A friendly cute ${theme}-themed game piece token for ${parentName}, pixel art style, circular icon, simple, colorful, on transparent background, no text`
+  return `A friendly cute ${theme}-themed game piece token for ${parentName}, circular icon, on transparent background, no text`
 }
 
 const BOARD_STYLE_LABELS: Record<string, string> = {
@@ -141,7 +163,7 @@ export async function generateAllArt(
       const response = await generateImage({
         familyId,
         prompt: req.prompt,
-        style: 'general',
+        style: WORKSHOP_ART_STYLE,
         size: '1024x1024',
       })
       return { ...req, response }
@@ -223,7 +245,7 @@ export async function generateAdventureArt(
       const response = await generateImage({
         familyId,
         prompt: req.prompt,
-        style: 'general',
+        style: WORKSHOP_ART_STYLE,
         size: '1024x1024',
       })
       return { key: req.key, response }
@@ -289,7 +311,7 @@ export function buildAdventureArtRequests(
   const requests: Array<{ key: string; prompt: string }> = [
     {
       key: 'title',
-      prompt: `A title card illustration for a children's choose-your-adventure story, ${theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
+      prompt: `A title card illustration for a children's choose-your-adventure story, ${theme} themed, centered composition, no text`,
     },
   ]
 
@@ -299,7 +321,7 @@ export function buildAdventureArtRequests(
     const desc = node.illustration ?? node.text.slice(0, 100)
     requests.push({
       key: `scene-${nodeId}`,
-      prompt: `A storybook illustration scene: ${desc}, ${theme} themed, colorful, children's book art style, no text`,
+      prompt: `An illustrated scene: ${desc}, ${theme} themed, no text`,
     })
   }
 
@@ -348,7 +370,7 @@ export async function generateCardGameArt(
       const response = await generateImage({
         familyId,
         prompt: req.prompt,
-        style: 'general',
+        style: WORKSHOP_ART_STYLE,
         size: '1024x1024',
       })
       return { key: req.key, response }
@@ -396,7 +418,7 @@ export function buildCardGameArtRequests(
   // Title screen
   requests.push({
     key: 'title',
-    prompt: `A title card illustration for a children's card game, ${theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
+    prompt: `A title card illustration for a children's card game, ${theme} themed, centered composition, no text`,
   })
 
   // Card back design
@@ -407,7 +429,7 @@ export function buildCardGameArtRequests(
       : `simple elegant pattern`
   requests.push({
     key: 'cardBack',
-    prompt: `A card back design for a children's card game, ${theme} themed, ${cardBackDesc}, repeating pattern, symmetrical, colorful, no text`,
+    prompt: `A card back design for a children's card game, ${theme} themed, ${cardBackDesc}, repeating pattern, symmetrical, no text`,
   })
 
   // Card face art — varies by mechanic
@@ -420,7 +442,7 @@ export function buildCardGameArtRequests(
       const card = cardGame.cards.find((c) => c.category === category)
       requests.push({
         key: `face-${category}`,
-        prompt: `A children's card game illustration of ${card?.artPrompt ?? category}, ${theme} themed, colorful, simple, card art style, no text`,
+        prompt: `A children's card game illustration of ${card?.artPrompt ?? category}, ${theme} themed, centered on the card, no text`,
       })
       count++
     }
@@ -433,7 +455,7 @@ export function buildCardGameArtRequests(
       const card = cardGame.cards.find((c) => c.category === category)
       requests.push({
         key: `face-${category}`,
-        prompt: `A children's card game illustration of ${card?.artPrompt ?? category}, ${theme} themed, colorful, simple, card art style, no text`,
+        prompt: `A children's card game illustration of ${card?.artPrompt ?? category}, ${theme} themed, centered on the card, no text`,
       })
       count++
     }
@@ -444,13 +466,13 @@ export function buildCardGameArtRequests(
     for (const card of topCards) {
       requests.push({
         key: `face-${card.id}`,
-        prompt: `A children's card game battle card illustration of ${card.artPrompt}, ${theme} themed, dynamic, powerful, colorful, no text`,
+        prompt: `A children's card game battle card illustration of ${card.artPrompt}, ${theme} themed, dynamic, centered on the card, no text`,
       })
     }
     // Generic card for remaining
     requests.push({
       key: 'face-generic',
-      prompt: `A generic children's card game battle card illustration, ${theme} themed, simple warrior/creature, colorful, no text`,
+      prompt: `A generic children's card game battle card illustration, ${theme} themed, a simple warrior or creature, centered on the card, no text`,
     })
   }
 
@@ -549,7 +571,7 @@ export async function regenerateFailedArt(
       const response = await generateImage({
         familyId,
         prompt: req.prompt,
-        style: 'general',
+        style: WORKSHOP_ART_STYLE,
         size: '1024x1024',
       })
       return { ...req, response }

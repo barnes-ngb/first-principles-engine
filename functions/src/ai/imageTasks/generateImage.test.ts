@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   BOOK_ILLUSTRATION_STYLE_KEYS,
+  PRESET_IMAGE_PREFIXES,
   STYLE_PREFIXES,
   bookIllustrationRecipe,
   buildImagePrompt,
+  gameArtRecipe,
+  stickerRecipe,
 } from "./generateImage.js";
+import { recipeMediums } from "./visualRecipe.js";
 
 /**
  * The theme prefix a superhero story idea actually produced before FEAT-174:
@@ -128,6 +132,202 @@ describe("book illustration style prefixes are distinguishable", () => {
     }
   });
 });
+
+// ── FEAT-193 ───────────────────────────────────────────────────────
+
+describe("the medium rule — no two book styles share one (FEAT-193 / UX-179)", () => {
+  // The sticker picker's Cartoon/Fantasy collapse was a shared *medium*, not
+  // shared words. The same rule holds here, and it is what separates the closest
+  // measured pair in this picker (Garden Battle ↔ Platformer World, .204): both
+  // were "flat saturated fills + thick even outlines + two-step cel", so once
+  // FEAT-189 made their props conditional they rested on palette alone.
+  const recipes = BOOK_ILLUSTRATION_STYLE_KEYS.map((key) => ({
+    key,
+    recipe: bookIllustrationRecipe(key)!,
+  }));
+
+  it("names a medium for every style", () => {
+    for (const { key, recipe } of recipes) {
+      expect(recipeMediums(recipe), `${key} names no medium`).not.toHaveLength(0);
+    }
+  });
+
+  it("gives every style a medium no sibling uses", () => {
+    const byMedium = new Map<string, string[]>();
+    for (const { key, recipe } of recipes) {
+      for (const medium of recipeMediums(recipe)) {
+        byMedium.set(medium, [...(byMedium.get(medium) ?? []), key]);
+      }
+    }
+    for (const [medium, keys] of byMedium) {
+      expect(keys, `"${medium}" is named by ${keys.join(" and ")}`).toHaveLength(1);
+    }
+  });
+
+  it("separates Garden Battle from Platformer World structurally, not just on palette (UX-171)", () => {
+    // Platformer World always had one: "drawn side-on in 2D with no perspective
+    // depth". Garden Battle had none until FEAT-193.
+    const garden = bookIllustrationRecipe("book-illustration-garden-warfare")!;
+    const platformer = bookIllustrationRecipe("book-illustration-platformer")!;
+    expect(platformer.shading).toContain("side-on in 2D");
+    expect(garden.shading).toMatch(/three-quarter view/);
+    expect(garden.shading).not.toContain("side-on");
+  });
+});
+
+describe("the two fixed looks are real recipes (FEAT-193 / UX-163, UX-164)", () => {
+  // `book-sticker` sits behind three paid doors with no style picker, and was
+  // the one look never given the VisualRecipe treatment: "A single cute cartoon
+  // character or object, sticker style. Bold clean outline, colorful flat fill,
+  // simple shapes, fun and expressive." — adjectives plus a subject constraint.
+  // `game-art` did not exist: every Workshop picture was sent as `general`, the
+  // empty prefix, while the help sheet claimed one fixed children's-game look.
+  for (const [key, name] of [
+    ["book-sticker", "sticker"],
+    ["game-art", "game art"],
+  ] as const) {
+    it(`answers palette, line work and shading for ${name}`, () => {
+      const prefix = STYLE_PREFIXES[key] ?? "";
+      expect(prefix, key).not.toBe("");
+      expect(prefix, key).toContain("Palette:");
+      expect(prefix, key).toContain("Line work:");
+      expect(prefix, key).toContain("Shading:");
+    });
+
+  }
+
+  it("carries the never-split guardrail on the sticker (FEAT-189)", () => {
+    expect(STYLE_PREFIXES["book-sticker"]).toContain(
+      "never split panels, halves, strips, collages or borders",
+    );
+  });
+
+  it("keeps game art look-only — it states no framing at all", () => {
+    // Codex P1, round 2 on PR #1766. This one prefix is prepended to every
+    // Workshop prompt including the parent token ("a circular icon, on
+    // transparent background"), which runs on `background: "auto"` because the
+    // callable forces transparency only for `book-sticker`. A framing sentence
+    // demanding a scene that fills the whole image fights the token's own
+    // request, and a paid token could come back opaque and full-scene. So the
+    // recipe says how to draw and each prompt keeps saying what shape it is —
+    // the FEAT-189 split.
+    const prefix = STYLE_PREFIXES["game-art"] ?? "";
+    for (const framing of [
+      "unified scene",
+      "filling the whole image",
+      "never split panels",
+      "Environment and background only",
+      "centered",
+      "transparent",
+    ]) {
+      expect(prefix, `game art states framing: "${framing}"`).not.toContain(
+        framing,
+      );
+    }
+    // Still a complete look.
+    expect(prefix).toContain("Palette:");
+    expect(prefix).toContain("Line work:");
+    expect(prefix).toContain("Shading:");
+  });
+
+  it("states the sticker's rule without taking it back", () => {
+    // A sticker is not a scene, so the page styles' "one single, unified SCENE
+    // filling the whole image" followed by "no background elements, no SCENE"
+    // would be a rule and its own contradiction — the shape PR #1759 established
+    // must never be emitted rather than patched. The rule itself still has one
+    // definition; only the subject sentence in front of it differs.
+    const prefix = STYLE_PREFIXES["book-sticker"] ?? "";
+    expect(prefix).toContain("One single subject, centered and complete");
+    expect(prefix).toContain("never a sheet or grid of several stickers");
+    expect(prefix).not.toContain("unified scene");
+  });
+
+  it("keeps the six page styles' framing byte-identical (FEAT-189)", () => {
+    for (const key of BOOK_ILLUSTRATION_STYLE_KEYS) {
+      expect(STYLE_PREFIXES[key], key).toContain(
+        "One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. ",
+      );
+    }
+  });
+
+  it("asks for no shadow a cutout would remove (UX-162)", () => {
+    // Both are rendered on transparent backgrounds — the sticker style always
+    // (`isSticker` in the callable), and the Workshop's parent tokens by their
+    // own prompt — so their shading is written cutout-safe outright.
+    for (const recipe of [stickerRecipe(), gameArtRecipe()]) {
+      const ask = recipe.shading.replace(
+        /\bno\s+(?:hard\s+|harsh\s+|soft\s+|black\s+)*(?:cast|drop|long)?\s*shadows?\b/gi,
+        " ",
+      );
+      expect(ask).not.toMatch(/cast shadows?|drop shadows?|shadows? on the ground/i);
+    }
+  });
+
+  it("keeps the sticker's single-subject constraint out of the look itself", () => {
+    // The subject rule is framing, not a look — the recipe answers only the
+    // three look questions, the way the six page styles do.
+    const recipe = stickerRecipe();
+    expect(`${recipe.palette} ${recipe.line} ${recipe.shading}`).not.toMatch(
+      /single|one character/i,
+    );
+    expect(STYLE_PREFIXES["book-sticker"]).toContain(
+      "Exactly one character or object",
+    );
+  });
+});
+
+describe("theme picture prefixes are hints, not scenes (FEAT-193 / UX-166)", () => {
+  // The same failure FEAT-189 removed from three illustration styles, still live
+  // one table over: `buildImagePrompt` appends the page's own scene AFTER the
+  // prefix, so a subject list here is a second, competing scene. It was harmless
+  // only because FEAT-174 made a picked style win — a property of another table,
+  // not of this one.
+  const SCENE_NOUNS = [
+    "treasure map",
+    "hidden path",
+    "landscapes",
+    "lab equipment",
+    "experiments",
+    "coral reef",
+    "sea creatures",
+    "city skyline",
+    "rockets",
+    "astronauts",
+    "planets",
+    "enchanted forest",
+    "mythical creature",
+    "volcanic landscape",
+    "decorations",
+    "chefs",
+    "ingredients",
+    "dishes",
+    "costumes",
+    "vegetation",
+    "dinosaurs",
+    "celebrations",
+  ];
+
+  it("covers all fifteen ids a parent can pick", () => {
+    expect(Object.keys(PRESET_IMAGE_PREFIXES)).toHaveLength(15);
+  });
+
+  it("names no scene furniture in any of them", () => {
+    for (const [id, prefix] of Object.entries(PRESET_IMAGE_PREFIXES)) {
+      const named = SCENE_NOUNS.filter((noun) =>
+        prefix.toLowerCase().includes(noun),
+      );
+      expect(
+        named,
+        `theme "${id}" names ${named.join(", ")} — that is a scene, and the page's own scene is appended after it`,
+      ).toHaveLength(0);
+    }
+  });
+
+  it("keeps the copyright clause the client carries on minecraft", () => {
+    expect(PRESET_IMAGE_PREFIXES.minecraft).toContain("No character names.");
+  });
+});
+
 
 /**
  * FEAT-189 — the world styles split the canvas.
@@ -276,6 +476,6 @@ describe("world styles are looks, not scene lists (FEAT-189)", () => {
         "inside a wooden hut, a lantern, a rolled map on the table",
         "book-illustration-platformer",
       ),
-    ).toMatchInlineSnapshot(`"A children's book page drawn in the look of a classic side-scrolling platformer video game. One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. Environment and background only, no characters or people. Palette: saturated primaries — bright blue, warm red, gold and green — in flat unblended fills with no gradients. Line work: thick, clean outlines of even weight around chunky rounded shapes; nothing wispy or sketchy. Shading: flat cel shading in two steps per shape, drawn side-on in 2D with no perspective depth and no soft light. Where the scene allows, dress it with the world's props (brick platforms, green pipes, gold coins, question blocks, fluffy clouds, mushroom shapes); when the scene is indoors or somewhere else, keep the LOOK and drop the props. inside a wooden hut, a lantern, a rolled map on the table. Safe for children, family-friendly, no text overlays."`);
+    ).toMatchInlineSnapshot(`"A children's book page drawn in the look of a classic side-scrolling platformer video game. One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. Environment and background only, no characters or people. Palette: saturated primaries — bright blue, warm red, gold and green — in flat unblended vector fills with no gradients. Line work: thick, clean outlines of even weight around chunky rounded shapes; nothing wispy or sketchy. Shading: flat cel shading in two steps per shape, drawn side-on in 2D with no perspective depth and no soft light. Where the scene allows, dress it with the world's props (brick platforms, green pipes, gold coins, question blocks, fluffy clouds, mushroom shapes); when the scene is indoors or somewhere else, keep the LOOK and drop the props. inside a wooden hut, a lantern, a rolled map on the table. Safe for children, family-friendly, no text overlays."`);
   });
 });

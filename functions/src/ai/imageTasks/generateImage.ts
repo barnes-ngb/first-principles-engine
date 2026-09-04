@@ -13,7 +13,7 @@ import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
 export interface ImageGenRequest {
   familyId: string;
   prompt: string;
-  style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-illustration-garden-warfare" | "book-illustration-platformer" | "book-sticker" | "general";
+  style?: "schedule-card" | "reward-chart" | "theme-illustration" | "book-illustration-minecraft" | "book-illustration-storybook" | "book-illustration-comic" | "book-illustration-realistic" | "book-illustration-garden-warfare" | "book-illustration-platformer" | "book-sticker" | "game-art" | "general";
   /** gpt-image-1.5 sizes. Legacy 1024x1792 / 1792x1024 are silently remapped to 1024x1536 / 1536x1024. */
   size?: "1024x1024" | "1024x1536" | "1536x1024" | "1024x1792" | "1792x1024";
   /**
@@ -119,7 +119,7 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
     hint: "in a gentle, realistic children's book illustration style",
     summary: "A gentle realistic background scene for a children's book page.",
     palette:
-      "naturalistic, muted colors with believable wood, foliage, stone and fabric tones.",
+      "naturalistic, muted colors in soft oil paint with believable wood, foliage, stone and fabric tones.",
     line: "almost no visible outline — forms are defined by tone and edge contrast.",
     shading:
       "soft directional light with smooth falloff, subtle bounce light, and gentle cast shadows.",
@@ -140,10 +140,17 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
     summary:
       "A children's book page drawn in the look of a bright, silly cartoon garden battle.",
     palette:
-      "high-saturation leaf green and warm yellow against soft earth brown, in flat cheerful fills.",
+      "high-saturation leaf green and warm yellow against soft earth brown, in flat cheerful gouache fills.",
     line: "a bold, rounded outline of even weight on every shape — nothing sharp, nothing spiky, nothing frightening.",
+    // FEAT-193 / UX-171 — the closest measured pair in this picker was Garden
+    // Battle ↔ Platformer World (.204): both flat saturated fills, thick even
+    // outlines and two-step cel shading. Platformer World carried one structural
+    // clause of its own ("drawn side-on in 2D with no perspective depth"); Garden
+    // Battle carried none, so once FEAT-189 made the props conditional the two
+    // rested on palette alone for any page whose scene drops them. This is its
+    // structural clause, and it is deliberately the opposite of side-on flat 2D.
     shading:
-      "simple two-tone cartoon shading with one soft drop shadow under each shape, lit by broad flat daylight.",
+      "simple two-tone cartoon shading with one soft drop shadow under each shape, lit by broad flat daylight, seen from a low three-quarter view looking slightly down across the ground with everything standing upright in real depth.",
     props: "sunflowers, pea shooters, walnut barriers, garden pots, silly cartoon zombies in the background",
     propsIncludeCreatures: true,
   },
@@ -152,7 +159,7 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
     summary:
       "A children's book page drawn in the look of a classic side-scrolling platformer video game.",
     palette:
-      "saturated primaries — bright blue, warm red, gold and green — in flat unblended fills with no gradients.",
+      "saturated primaries — bright blue, warm red, gold and green — in flat unblended vector fills with no gradients.",
     line: "thick, clean outlines of even weight around chunky rounded shapes; nothing wispy or sketchy.",
     shading:
       "flat cel shading in two steps per shape, drawn side-on in 2D with no perspective depth and no soft light.",
@@ -167,8 +174,29 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
  * indoors, and this tells it that whatever it decides, the answer is one
  * picture (FEAT-189).
  */
+const NEVER_SPLIT_CLAUSE =
+  "never split panels, halves, strips, collages or borders. ";
+
 const UNIFIED_SCENE_RULE =
-  "One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. ";
+  "One single, unified scene filling the whole image — " + NEVER_SPLIT_CLAUSE;
+
+/**
+ * The same rule for a cut-out sticker, which is not a scene (FEAT-193).
+ *
+ * A sticker prefix that said "one single, unified **scene** filling the whole
+ * image" and then "no background elements, no **scene**" would state a rule and
+ * take it back in the next breath — the defect PR #1759 established should never
+ * be emitted rather than patched. The *rule* still has one definition
+ * ({@link NEVER_SPLIT_CLAUSE}); only the subject sentence in front of it differs
+ * by context, which is the same split {@link worldPropsClause} uses.
+ *
+ * It also names the failure a sticker actually has: asked for "a sticker", a
+ * model will happily return a printed *sheet* of them.
+ */
+const UNIFIED_STICKER_RULE =
+  "One single subject, centered and complete, on an empty background — " +
+  "never a sheet or grid of several stickers, " +
+  NEVER_SPLIT_CLAUSE;
 
 /**
  * Every book-illustration page prompt opens with this framing: a page picture is
@@ -222,6 +250,90 @@ function worldPropsClause(recipe: BookIllustrationRecipe): string {
   );
 }
 
+/**
+ * The fixed look behind three paid doors — the Kit Builder's character art, the
+ * editor's sticker picker and Make-a-sticker (FEAT-193 / UX-164).
+ *
+ * It was the one look in the repo never given the {@link VisualRecipe}
+ * treatment: "A single cute cartoon character or object, sticker style. Bold
+ * clean outline, colorful flat fill, simple shapes, fun and expressive." That is
+ * adjectives plus a subject constraint doing duty as a look — exactly the shape
+ * FEAT-159 and FEAT-174 diagnosed as collapsing toward one generic children's
+ * illustration, and the three doors that share it have no style picker to
+ * compensate.
+ *
+ * Its shading is written cutout-safe outright rather than through
+ * {@link VisualRecipe.shadingCutout}: this style is *always* rendered
+ * transparent (`isSticker` in the callable below), so there is no second path
+ * for a shadow-on-the-ground variant to serve.
+ */
+const STICKER_RECIPE: VisualRecipe = {
+  hint: "as a single cut-out sticker",
+  summary: "A single cute cartoon character or object, drawn as one sticker.",
+  palette:
+    "bright, cheerful saturated colors in flat unblended vector fills — nothing muddy, nothing washed out.",
+  line: "a bold, clean outline of even weight running all the way around the subject, closed everywhere so the shape reads as one cut-out piece.",
+  shading:
+    "flat fills with one darker tone on each side that turns away and one soft highlight where the light lands; no gradients, no cast shadow, no drop shadow.",
+};
+
+/**
+ * The subject constraint that makes a sticker a sticker, stated separately from
+ * the look so the recipe above answers only the three look questions.
+ */
+const STICKER_FRAMING =
+  UNIFIED_STICKER_RULE +
+  "Exactly one character or object. No background elements, no ground, no text. ";
+
+function stickerPrefix(): string {
+  return `${STICKER_RECIPE.summary} ${STICKER_FRAMING}${recipeDetail(STICKER_RECIPE)}`;
+}
+
+/**
+ * The one look every Game Workshop picture is drawn in (FEAT-193 / UX-163).
+ *
+ * The Workshop sent `style: "general"` — the empty prefix — for every board,
+ * title card, challenge card and token, while `artHelpContent.ts` told the
+ * parent "every picture is made in one children's-game look". The only art
+ * direction it had was three inline adjective phrases interpolated into the
+ * prompts ("children's board game art style, vibrant, fun"), which are the exact
+ * adjective-only strings FEAT-159 and FEAT-174 found collapsing. Those phrases
+ * are gone from `workshopArt.ts`, and this is the look they are replaced by, so
+ * the help copy is now true.
+ *
+ * **It is look-only — it states no framing at all** (Codex P1, round 2 on
+ * PR #1766, and it was right). The first version carried
+ * {@link UNIFIED_SCENE_RULE}, which reads "One single, unified scene filling the
+ * whole image". This one prefix is prepended to every Workshop prompt, and one
+ * of them is the parent token — *"a circular icon, on transparent background"*.
+ * The callable forces `background: "transparent"` only for `book-sticker`, so a
+ * `game-art` token runs on `auto` and had nothing but its own prompt asking for
+ * a cutout; a framing sentence demanding a scene that fills the image fights it,
+ * and a paid token could come back as an opaque full-scene picture instead of a
+ * player's avatar.
+ *
+ * Selecting cutout framing plus a transparent image option per request is the
+ * other way out, but that is routing, not a recipe. The right answer for a look
+ * table shared by boards, title cards, challenge cards and tokens is the FEAT-189
+ * split itself: the recipe says **how to draw**, and each prompt keeps saying
+ * **what shape it has to be** — "top-down bird's eye view", "centered
+ * composition", "repeating pattern, symmetrical", "circular icon, on transparent
+ * background". Its shading is cutout-safe for the same reason.
+ */
+const GAME_ART_RECIPE: VisualRecipe = {
+  hint: "in a bright children's game-art style",
+  summary: "A bright, friendly children's game illustration.",
+  palette:
+    "bold poster colors in flat opaque gouache fills — primary red, blue and yellow with one warm accent — high contrast and nothing muddy.",
+  line: "a clean, even-weight dark outline around every shape, a little chunky; nothing wispy, nothing sketchy.",
+  shading:
+    "simple two-step cel shading — one lit tone and one shadow tone per shape — under broad even light; no gradients and no cast shadow.",
+};
+
+function gameArtPrefix(): string {
+  return `${GAME_ART_RECIPE.summary} ${recipeDetail(GAME_ART_RECIPE)}`;
+}
+
 function bookIllustrationPrefix(styleKey: string): string {
   const recipe = BOOK_ILLUSTRATION_RECIPES[styleKey];
   if (!recipe) return "";
@@ -264,9 +376,78 @@ export const STYLE_PREFIXES: Record<string, string> = {
   "book-illustration-realistic": bookIllustrationPrefix("book-illustration-realistic"),
   "book-illustration-garden-warfare": bookIllustrationPrefix("book-illustration-garden-warfare"),
   "book-illustration-platformer": bookIllustrationPrefix("book-illustration-platformer"),
-  "book-sticker":
-    "A single cute cartoon character or object, sticker style. Bold clean outline, colorful flat fill, simple shapes, fun and expressive. Child-friendly, no text, no background elements. ",
+  "book-sticker": stickerPrefix(),
+  "game-art": gameArtPrefix(),
   general: "",
+};
+
+/**
+ * Read-only views of the two fixed looks, for tests and for anything that needs
+ * to check what they actually say. The prompts themselves come from
+ * {@link STYLE_PREFIXES}.
+ */
+export function stickerRecipe(): VisualRecipe {
+  return STICKER_RECIPE;
+}
+
+export function gameArtRecipe(): VisualRecipe {
+  return GAME_ART_RECIPE;
+}
+
+/**
+ * A book theme's picture **hint** — how a picture for this theme should look,
+ * never what should be in it (FEAT-193 / UX-166).
+ *
+ * These used to be scene lists: "Exciting landscapes, treasure maps, hidden
+ * paths"; "Lab equipment, nature exploration, experiments"; "coral reefs,
+ * friendly sea creatures, sparkling water". That is the exact shape FEAT-189
+ * removed from three illustration styles, for the exact reason it matters here:
+ * {@link buildImagePrompt} appends the page's own scene *after* the prefix, so a
+ * subject list in the prefix is a second, competing scene and a model handed two
+ * scenes splits the canvas.
+ *
+ * It was harmless only because FEAT-174 made a picked style win outright, and no
+ * caller in the repo reaches this map today (UX-165). Both of those are
+ * properties of code one table over, not of this table, so the strings are now
+ * hints and the hazard is gone at the source.
+ *
+ * Still a hand-kept duplicate of the client's `PRESET_THEMES[*].imageStylePrefix`
+ * (`src/core/types/books.ts`), which carries the identical fifteen strings, and
+ * `functions/src/ai/tasks/generateStory.ts` holds a third, abridged copy that
+ * feeds the *story* writer rather than a picture. Consolidating the three is
+ * UX-167 / UX-172, filed not done — see `docs/review/STYLE_AUDIT_2026-09.md` §5.
+ */
+export const PRESET_IMAGE_PREFIXES: Record<string, string> = {
+  adventure:
+    "A bold, sunlit children's picture-book look — warm and full of open space.",
+  animals:
+    "A warm, gentle children's picture-book look — soft edges and friendly shapes.",
+  family:
+    "A warm domestic picture-book look — soft light and homey, lived-in color.",
+  fantasy:
+    "A magical children's picture-book look — luminous color and a soft glow.",
+  minecraft:
+    "A blocky pixel-art look — hard-edged cubes and flat, bright color. No character names.",
+  science:
+    "A clean, bright children's picture-book look — crisp lines and generous white space.",
+  sight_words:
+    "A simple, clean children's picture-book look — bold flat color and very little detail.",
+  faith:
+    "A warm, reverent children's picture-book look — gentle golden light at low saturation.",
+  space:
+    "A cosmic children's picture-book look — deep darks with bright glowing accents.",
+  dinosaurs:
+    "A playful prehistoric picture-book look — deep greens and warm volcanic earth tones.",
+  ocean:
+    "An underwater children's picture-book look — cool blues with soft light falling from above.",
+  superheroes:
+    "A bold, graphic superhero look — saturated primaries and strong contrast.",
+  cooking:
+    "A warm kitchen picture-book look — buttery, appetizing color and soft daylight.",
+  sports:
+    "A bright, energetic children's picture-book look — vivid color and a sense of motion.",
+  holidays:
+    "A festive, cozy children's picture-book look — warm glow and rich seasonal color.",
 };
 
 /**
@@ -362,6 +543,7 @@ export const generateImage = onCall(
       "book-illustration-garden-warfare",
       "book-illustration-platformer",
       "book-sticker",
+      "game-art",
       "general",
     ]);
     if (style && !validStyles.has(style)) {
@@ -388,53 +570,11 @@ export const generateImage = onCall(
 
     // ── Resolve theme image prefix ──────────────────────────────
     // Only reaches the prompt when the picked style has no look of its own —
-    // see the precedence note on `buildImagePrompt` (FEAT-174).
-    //
-    // FEAT-190 completed this map: `sight_words`, `family`, `science` and
-    // `faith` were absent, so four of the fifteen ids a parent can pick in the
-    // Book Editor's Finish dialog had no entry at all. Their four strings are
-    // copied verbatim from the client's `PRESET_THEMES[*].imageStylePrefix`
-    // (`src/core/types/books.ts`), which is the text a person can actually read;
-    // the eleven older entries are hand-abridged copies of the same field, and
-    // abridging the new four would only add a fifth variant of one string.
-    //
-    // **No caller in the repo can reach any entry in this map today**, and that
-    // is a separate gap from the missing four. `useBookIllustrator` is the only
-    // caller that sends `themeId`, and it always sends a
-    // `book-illustration-${style}` alongside it, which wins outright (FEAT-174).
-    // The one style that resolves to no prefix — `book-illustration-photo`, from
-    // the `photo` cover style in `useBookReview`'s fallback chain — is not in
-    // `validStyles` above, so that request is rejected at the argument gate
-    // before it ever gets here (caught per page by the illustrator, which marks
-    // the page failed). Completing the map is therefore correct data, not a
-    // behaviour change: routing a caller to it is filed as UX-165/UX-172, not
-    // done here.
-    //
-    // This is still a hand-kept duplicate of the client table, and a third copy
-    // lives in `functions/src/ai/tasks/generateStory.ts` (`PRESET_THEME_MAP`,
-    // where the same four ids are still missing). Consolidating the three is
-    // filed, not done here — see `docs/review/STYLE_AUDIT_2026-09.md` §5.
+    // see the precedence note on `buildImagePrompt` (FEAT-174) and the coverage
+    // note on `PRESET_IMAGE_PREFIXES` above.
     let themeImagePrefix: string | undefined;
     if (themeId) {
       // Check preset themes first (server-side map)
-      const PRESET_IMAGE_PREFIXES: Record<string, string> = {
-        adventure: "A colorful adventure scene for a children's book.",
-        animals: "A warm, friendly children's book illustration of animals in nature.",
-        fantasy: "A magical fantasy scene for a children's book.",
-        minecraft: "A blocky pixel-art Minecraft-style scene. Cubic blocks, pixelated textures, bright colors.",
-        space: "A vivid space scene for a children's book. Colorful planets, stars, rockets.",
-        dinosaurs: "A prehistoric children's book illustration. Friendly dinosaurs, lush vegetation.",
-        ocean: "An underwater children's book illustration. Colorful coral reefs, friendly sea creatures.",
-        superheroes: "A bold, colorful superhero scene for a children's book.",
-        cooking: "A warm, cheerful kitchen scene for a children's book.",
-        sports: "A bright, energetic children's book illustration of kids playing sports.",
-        holidays: "A festive, joyful children's book illustration. Holiday decorations, seasonal scenes, warm family celebrations.",
-        // Added by FEAT-190 — verbatim from the client's `PRESET_THEMES`.
-        family: "A warm, cozy children's book illustration of a family together. Soft lighting, happy expressions.",
-        science: "A bright, educational children's book illustration about science. Lab equipment, nature exploration, experiments.",
-        sight_words: "A simple, clean children's book illustration. Clear scenes, minimal detail, bold colors.",
-        faith: "A warm, reverent children's book illustration. Gentle light, nature scenes, peaceful atmosphere.",
-      };
       themeImagePrefix = PRESET_IMAGE_PREFIXES[themeId];
 
       // Check custom theme in Firestore if not a preset

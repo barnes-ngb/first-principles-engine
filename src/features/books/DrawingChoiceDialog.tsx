@@ -20,6 +20,7 @@ import WallpaperIcon from '@mui/icons-material/Wallpaper'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
 import type { ArtHelpAudience } from './artHelpContent'
+import { REIMAGINE_LEFT_LABEL, REIMAGINE_RIGHT_LABEL } from './reimagineCaptions'
 
 /** Checkerboard background to make transparent regions visible in previews. */
 export const CHECKERBOARD_BG =
@@ -109,11 +110,24 @@ const PAID_POST_CLEANUP_CHOICES: readonly PostCleanupChoice[] = [
   'reimagine-scene',
 ]
 
+/**
+ * The reimagine slider's bands (FEAT-193 / UX-161a).
+ *
+ * The band labels describe how closely the prompt asks the redraw to follow the
+ * original — a real difference in what is sent. The two END labels used to read
+ * "Keep my style" ↔ "Full reimagine"; neither was true, so they now name the two
+ * looks the slider actually reaches and live in `reimagineCaptions.ts` beside
+ * the captions they have to agree with.
+ *
+ * That the first two bands resolve to the same style is a routing defect
+ * (UX-161b, batch B), deliberately not papered over here.
+ */
 const REIMAGINE_MARKS = [
   { value: 0, label: 'Light' },
   { value: 50, label: 'Medium' },
   { value: 100, label: 'Full' },
 ]
+
 
 export default function DrawingChoiceDialog({
   open,
@@ -239,7 +253,7 @@ export default function DrawingChoiceDialog({
             />
             <Stack direction="row" alignItems="center" spacing={2} sx={{ px: 1 }}>
               <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                Keep my style
+                {REIMAGINE_LEFT_LABEL}
               </Typography>
               <Slider
                 value={reimagineIntensity}
@@ -251,7 +265,7 @@ export default function DrawingChoiceDialog({
                 sx={{ flex: 1 }}
               />
               <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                Full reimagine
+                {REIMAGINE_RIGHT_LABEL}
               </Typography>
             </Stack>
             <FormControlLabel
@@ -433,7 +447,7 @@ export default function DrawingChoiceDialog({
             />
             <Stack direction="row" alignItems="center" spacing={2} sx={{ px: 1 }}>
               <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                Keep my style
+                {REIMAGINE_LEFT_LABEL}
               </Typography>
               <Slider
                 value={reimagineIntensity}
@@ -445,7 +459,7 @@ export default function DrawingChoiceDialog({
                 sx={{ flex: 1 }}
               />
               <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                Full reimagine
+                {REIMAGINE_RIGHT_LABEL}
               </Typography>
             </Stack>
             <FormControlLabel

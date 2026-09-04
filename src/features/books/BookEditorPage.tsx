@@ -81,6 +81,7 @@ import ReimagineResultDialog from './ReimagineResultDialog'
 import { useEditorHistory, useUndoRedoKeys } from './useEditorHistory'
 import UndoIcon from '@mui/icons-material/Undo'
 import RedoIcon from '@mui/icons-material/Redo'
+import { reimagineCaption } from './reimagineCaptions'
 
 type VoiceMode = 'record' | 'dictate'
 
@@ -526,12 +527,9 @@ export default function BookEditorPage() {
         const { imageId, storagePath } = sketchResult
         const imageUrl = URL.createObjectURL(drawingFile)
 
-        // Build caption from intensity
-        const caption = (reimagineIntensity ?? 50) <= 25
-          ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
-          : (reimagineIntensity ?? 50) >= 75
-            ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
-            : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
+        // The same captions as the post-cleanup route below — one definition,
+        // because both routes are the same slider and both spend a paid call.
+        const caption = reimagineCaption(reimagineIntensity ?? 50)
 
         // Close the dialog — kid goes back to editing
         resetDrawingFlow()
@@ -677,11 +675,7 @@ export default function BookEditorPage() {
         const { imageId, storagePath } = sketchResult
         const cleanedUrl = drawingResultUrl ?? URL.createObjectURL(drawingResultFile)
         const intensity = reimagineIntensity ?? 50
-        const caption = intensity <= 25
-          ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
-          : intensity >= 75
-            ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
-            : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
+        const caption = reimagineCaption(intensity)
         resetDrawingFlow()
         void bgReimagine.startReimagine(
           imageId,

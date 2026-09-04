@@ -31,7 +31,21 @@ export interface BookThemeConfig {
   name: string
   isPreset: boolean
   childId?: string
-  /** Injected into DALL-E image generation prompt */
+  /**
+   * How a picture for this theme should **look** — never what should be in it
+   * (FEAT-193 / UX-166).
+   *
+   * These were scene lists ("Exciting landscapes, treasure maps, hidden paths").
+   * The server appends the page's own scene after this prefix, so a subject list
+   * here is a second, competing scene and a model handed two scenes splits the
+   * canvas — the failure FEAT-189 removed from three illustration styles. A
+   * theme names a world for the *story*; the look of a picture is what
+   * `GENERATION_STYLES` picks.
+   *
+   * The fifteen preset strings are byte-identical to the server's
+   * `PRESET_IMAGE_PREFIXES` (`functions/src/ai/imageTasks/generateImage.ts`).
+   * They are still two hand-kept tables (UX-167), not one module.
+   */
   imageStylePrefix: string
   /** Maps to existing coverStyle for visual theming */
   coverStyle: string
@@ -50,7 +64,7 @@ export interface BookThemeConfig {
 export const PRESET_THEMES: BookThemeConfig[] = [
   {
     id: 'adventure', name: 'Adventure', emoji: '🗺️', isPreset: true,
-    imageStylePrefix: 'A colorful adventure scene for a children\'s book. Exciting landscapes, treasure maps, hidden paths.',
+    imageStylePrefix: 'A bold, sunlit children\'s picture-book look — warm and full of open space.',
     coverStyle: 'realistic',
     storyTone: 'adventurous and exciting with brave heroes',
     storyWorldDescription: 'a world full of hidden treasures, ancient maps, and daring quests',
@@ -58,7 +72,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'animals', name: 'Animals', emoji: '🐾', isPreset: true,
-    imageStylePrefix: 'A warm, friendly children\'s book illustration of animals in nature. Soft colors, gentle expressions.',
+    imageStylePrefix: 'A warm, gentle children\'s picture-book look — soft edges and friendly shapes.',
     coverStyle: 'storybook',
     storyTone: 'gentle and heartwarming with animal friendships',
     storyWorldDescription: 'a forest, farm, or jungle where animals talk and help each other',
@@ -66,7 +80,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'family', name: 'Family', emoji: '👨‍👩‍👦', isPreset: true,
-    imageStylePrefix: 'A warm, cozy children\'s book illustration of a family together. Soft lighting, happy expressions.',
+    imageStylePrefix: 'A warm domestic picture-book look — soft light and homey, lived-in color.',
     coverStyle: 'storybook',
     storyTone: 'warm, loving, and relatable with family moments',
     storyWorldDescription: 'a loving home where a family shares everyday adventures together',
@@ -74,7 +88,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'fantasy', name: 'Fantasy', emoji: '✨', isPreset: true,
-    imageStylePrefix: 'A magical fantasy scene for a children\'s book. Sparkling effects, enchanted forests, mythical creatures.',
+    imageStylePrefix: 'A magical children\'s picture-book look — luminous color and a soft glow.',
     coverStyle: 'storybook',
     storyTone: 'whimsical and magical with wonder and discovery',
     storyWorldDescription: 'an enchanted realm with dragons, fairies, magic spells, and glowing forests',
@@ -82,7 +96,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'minecraft', name: 'Minecraft', emoji: '⛏️', isPreset: true,
-    imageStylePrefix: 'A blocky pixel-art Minecraft-style scene. Cubic blocks, pixelated textures, bright colors. No character names.',
+    imageStylePrefix: 'A blocky pixel-art look — hard-edged cubes and flat, bright color. No character names.',
     coverStyle: 'minecraft',
     storyTone: 'adventurous with crafting and mining language',
     storyWorldDescription: 'a blocky world made of cubes where heroes mine resources, craft tools, and explore caves',
@@ -90,7 +104,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'science', name: 'Science', emoji: '🔬', isPreset: true,
-    imageStylePrefix: 'A bright, educational children\'s book illustration about science. Lab equipment, nature exploration, experiments.',
+    imageStylePrefix: 'A clean, bright children\'s picture-book look — crisp lines and generous white space.',
     coverStyle: 'realistic',
     storyTone: 'curious and educational with discovery and experimentation',
     storyWorldDescription: 'a world where young scientists explore nature, conduct experiments, and make discoveries',
@@ -98,7 +112,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'sight_words', name: 'Sight Words', emoji: '📖', isPreset: true,
-    imageStylePrefix: 'A simple, clean children\'s book illustration. Clear scenes, minimal detail, bold colors.',
+    imageStylePrefix: 'A simple, clean children\'s picture-book look — bold flat color and very little detail.',
     coverStyle: 'storybook',
     storyTone: 'simple and repetitive for reading practice',
     storyWorldDescription: 'everyday scenes that naturally use common sight words in context',
@@ -106,7 +120,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'faith', name: 'Faith', emoji: '✝️', isPreset: true,
-    imageStylePrefix: 'A warm, reverent children\'s book illustration. Gentle light, nature scenes, peaceful atmosphere.',
+    imageStylePrefix: 'A warm, reverent children\'s picture-book look — gentle golden light at low saturation.',
     coverStyle: 'storybook',
     storyTone: 'gentle, reverent, and encouraging with faith themes',
     storyWorldDescription: 'a world that reflects God\'s creation, kindness, and the beauty of faith',
@@ -114,7 +128,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'space', name: 'Space Explorer', emoji: '🚀', isPreset: true,
-    imageStylePrefix: 'A vivid space scene for a children\'s book. Colorful planets, stars, rockets, and astronauts.',
+    imageStylePrefix: 'A cosmic children\'s picture-book look — deep darks with bright glowing accents.',
     coverStyle: 'realistic',
     storyTone: 'exciting and wonder-filled with space exploration',
     storyWorldDescription: 'outer space where astronauts visit planets, discover aliens, and float among the stars',
@@ -122,7 +136,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'dinosaurs', name: 'Dinosaur World', emoji: '🦕', isPreset: true,
-    imageStylePrefix: 'A prehistoric children\'s book illustration. Friendly dinosaurs, lush vegetation, volcanic landscapes.',
+    imageStylePrefix: 'A playful prehistoric picture-book look — deep greens and warm volcanic earth tones.',
     coverStyle: 'realistic',
     storyTone: 'exciting and educational with dinosaur facts woven in',
     storyWorldDescription: 'a prehistoric world where friendly dinosaurs roam jungles, volcanoes, and swamps',
@@ -130,7 +144,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'ocean', name: 'Ocean Adventure', emoji: '🌊', isPreset: true,
-    imageStylePrefix: 'An underwater children\'s book illustration. Colorful coral reefs, friendly sea creatures, sparkling water.',
+    imageStylePrefix: 'An underwater children\'s picture-book look — cool blues with soft light falling from above.',
     coverStyle: 'storybook',
     storyTone: 'adventurous and curious with ocean exploration',
     storyWorldDescription: 'a colorful underwater world with coral reefs, dolphins, whales, and sunken ships',
@@ -138,7 +152,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'superheroes', name: 'Superheroes', emoji: '🦸', isPreset: true,
-    imageStylePrefix: 'A bold, colorful superhero scene for a children\'s book. Dynamic poses, bright costumes, city skyline.',
+    imageStylePrefix: 'A bold, graphic superhero look — saturated primaries and strong contrast.',
     coverStyle: 'comic',
     storyTone: 'action-packed and inspiring with heroes saving the day',
     storyWorldDescription: 'a city where kid superheroes use their powers to help people and stop villains',
@@ -146,7 +160,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'cooking', name: 'Kitchen Adventures', emoji: '👨‍🍳', isPreset: true,
-    imageStylePrefix: 'A warm, cheerful kitchen scene for a children\'s book. Colorful ingredients, friendly chefs, tasty dishes.',
+    imageStylePrefix: 'A warm kitchen picture-book look — buttery, appetizing color and soft daylight.',
     coverStyle: 'storybook',
     storyTone: 'fun and sensory-rich with cooking and tasting',
     storyWorldDescription: 'a magical kitchen where ingredients come alive and cooking is an adventure',
@@ -154,7 +168,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'sports', name: 'Sports & Games', emoji: '⚽', isPreset: true,
-    imageStylePrefix: 'A bright, energetic children\'s book illustration of kids playing sports. Action poses, outdoor settings.',
+    imageStylePrefix: 'A bright, energetic children\'s picture-book look — vivid color and a sense of motion.',
     coverStyle: 'realistic',
     storyTone: 'energetic and encouraging with teamwork themes',
     storyWorldDescription: 'playgrounds, fields, and courts where kids play sports and learn teamwork',
@@ -162,7 +176,7 @@ export const PRESET_THEMES: BookThemeConfig[] = [
   },
   {
     id: 'holidays', name: 'Holiday Stories', emoji: '🎄', isPreset: true,
-    imageStylePrefix: 'A festive, joyful children\'s book illustration. Holiday decorations, seasonal scenes, warm family celebrations.',
+    imageStylePrefix: 'A festive, cozy children\'s picture-book look — warm glow and rich seasonal color.',
     coverStyle: 'storybook',
     storyTone: 'warm, festive, and joyful with celebration themes',
     storyWorldDescription: 'a world of holiday celebrations — Christmas, Easter, Thanksgiving, birthdays, and seasonal traditions',
