@@ -54,3 +54,47 @@ describe('Workshop art — capped and counted (FEAT-184)', () => {
     expect(code).not.toMatch(/isLincoln/)
   })
 })
+
+/**
+ * FEAT-195: a picture that didn't come back is said out loud. Before this the
+ * Workshop's four image doors reported a failure as a `console.warn` and
+ * nothing on screen — the game was made without the picture and nobody was
+ * told. Pinned at the source for the same reason the cap wiring above is: the
+ * page is a 1,600-line shell over a dozen live hooks.
+ */
+describe('Workshop — a missing picture is reported (FEAT-195)', () => {
+  const code = pageSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
+  it('the counting wrapper remembers WHY a picture failed', () => {
+    expect(code).toMatch(/lastArtFailureRef\.current = classifyImageGenerationFailure\(/)
+  })
+
+  it('every batch surfaces its failures — board, adventure, cards, regenerate', () => {
+    // Four batches, each reporting when it came back short.
+    const surfaced = code.match(/setArtFailure\(lastArtFailureRef\.current \?\? 'no-image'\)/g) ?? []
+    expect(surfaced.length).toBeGreaterThanOrEqual(4)
+    expect(code).toMatch(/if \(artResult\.failures\.length > 0\)/)
+    expect(code).toMatch(/if \(result\.failures\.length > 0\)/)
+  })
+
+  it('the title card — drawn AFTER the words, past the batch check — reports too', () => {
+    // Codex P2 (PR #1768): this request lands after the batch's own failure
+    // check, so without its own `else` the game silently lost its title art and
+    // the retry card never opened.
+    const titleAt = code.indexOf('A title card illustration')
+    expect(titleAt).toBeGreaterThan(-1)
+    const titleBlock = code.slice(titleAt, titleAt + 700)
+    expect(titleBlock).toMatch(/\} else \{\s*setArtFailure\(/)
+  })
+
+  it('a new run clears the last failure, so a stale card never greets the next game', () => {
+    expect(code).toMatch(/setArtFailure\(null\)/)
+    expect(code).toMatch(/lastArtFailureRef\.current = null/)
+  })
+
+  it('offers no rewordings — a batch has no single prompt to reword', () => {
+    // The card is given `onRetry` (Regenerate Art) but never `onUseAlternative`.
+    expect(code).not.toMatch(/onUseAlternative/)
+    expect(code).toMatch(/retryLabel: 'Regenerate Art'/)
+  })
+})

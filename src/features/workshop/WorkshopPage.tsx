@@ -628,9 +628,16 @@ export default function WorkshopPage() {
             })
             if (titleResult?.url) {
               generatedArt = { ...generatedArt, titleScreen: titleResult.url }
+            } else {
+              // The title card is drawn AFTER the words, so it lands past the
+              // batch's own failure check above (Codex P2, PR #1768). Without
+              // this the game quietly lost its title art and the card never
+              // opened — the exact silence FEAT-195 exists to end.
+              setArtFailure(lastArtFailureRef.current ?? 'no-image')
             }
           } catch (err) {
             console.warn('Title screen generation failed:', err)
+            setArtFailure(lastArtFailureRef.current ?? 'no-image')
           }
         }
 

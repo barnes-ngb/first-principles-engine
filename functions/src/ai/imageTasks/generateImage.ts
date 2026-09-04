@@ -11,7 +11,10 @@ import {
 } from "./copyrightUtils.js";
 import {
   ImageFailureKind,
+  PROVIDER_ERROR_KIND,
+  ProviderErrorReason,
   imageFailureDetailsFor,
+  readProviderError,
 } from "./imageFailure.js";
 import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
 
@@ -646,56 +649,51 @@ export const generateImage = onCall(
         error: errMsg,
       });
 
-      // Every branch goes through `imageFailureDetailsFor`, which spends the
-      // suggester ONLY on a refusal (FEAT-195) — so the happy path pays nothing,
-      // a rate limit pays nothing, and a new branch added below cannot quietly
-      // start buying rewordings no one would use.
-      const detailsFor = (failure: ImageFailureKind) =>
-        imageFailureDetailsFor(failure, () =>
-          suggestPromptAlternatives(prompt, rewriteMode, claudeApiKey.value()),
-        );
-
-      if (
-        errMsg.includes("content_policy") ||
-        errMsg.includes("safety") ||
-        errMsg.includes("blocked")
-      ) {
-        throw new HttpsError(
-          "invalid-argument",
-          "That prompt was blocked by the image generator's safety filter. Try describing the scene differently — avoid character names like Mario, Elsa, etc.",
-          await detailsFor(ImageFailureKind.Blocked),
-        );
-      }
-      if (errMsg.includes("rate_limit") || errMsg.includes("429")) {
-        throw new HttpsError(
-          "resource-exhausted",
-          "Image generation is busy right now. Wait a moment and try again.",
-          await detailsFor(ImageFailureKind.Busy),
-        );
-      }
-      if (errMsg.includes("invalid_api_key") || errMsg.includes("401")) {
-        throw new HttpsError(
-          "failed-precondition",
-          "Image generation is not configured correctly. Ask Dad to check the API key.",
-          await detailsFor(ImageFailureKind.NotConfigured),
-        );
-      }
-      if (
-        errMsg.includes("403") ||
-        errMsg.includes("organization") ||
-        errMsg.includes("verification")
-      ) {
-        throw new HttpsError(
-          "failed-precondition",
-          "OpenAI org verification incomplete — ask Dad to complete API Organization Verification in the OpenAI dashboard.",
-          await detailsFor(ImageFailureKind.NotConfigured),
-        );
-      }
-      throw new HttpsError(
-        "internal",
-        `Image generation failed: ${errMsg.slice(0, 200)}`,
-        await detailsFor(ImageFailureKind.NoImage),
+      // One shared reader decides what the provider's message means
+      // (`readProviderError`), and every branch goes through
+      // `imageFailureDetailsFor`, which spends the suggester ONLY on a refusal
+      // (FEAT-195) — so the happy path pays nothing, a rate limit pays nothing,
+      // and a branch added later cannot quietly start buying rewordings no one
+      // would use. The reader is shared with `enhanceSketch` because two copies
+      // of this ladder is exactly how they drifted apart (Codex P2, PR #1768).
+      const reason = readProviderError(errMsg);
+      const details = await imageFailureDetailsFor(
+        PROVIDER_ERROR_KIND[reason],
+        () => suggestPromptAlternatives(prompt, rewriteMode, claudeApiKey.value()),
       );
+
+      switch (reason) {
+        case ProviderErrorReason.Blocked:
+          throw new HttpsError(
+            "invalid-argument",
+            "That prompt was blocked by the image generator's safety filter. Try describing the scene differently — avoid character names like Mario, Elsa, etc.",
+            details,
+          );
+        case ProviderErrorReason.RateLimited:
+          throw new HttpsError(
+            "resource-exhausted",
+            "Image generation is busy right now. Wait a moment and try again.",
+            details,
+          );
+        case ProviderErrorReason.MissingKey:
+          throw new HttpsError(
+            "failed-precondition",
+            "Image generation is not configured correctly. Ask Dad to check the API key.",
+            details,
+          );
+        case ProviderErrorReason.OrgUnverified:
+          throw new HttpsError(
+            "failed-precondition",
+            "OpenAI org verification incomplete — ask Dad to complete API Organization Verification in the OpenAI dashboard.",
+            details,
+          );
+        default:
+          throw new HttpsError(
+            "internal",
+            `Image generation failed: ${errMsg.slice(0, 200)}`,
+            details,
+          );
+      }
     }
 
     // ── Get image buffer ──────────────────────────────────────

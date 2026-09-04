@@ -10,7 +10,10 @@ import {
 } from "./copyrightUtils.js";
 import {
   ImageFailureKind,
+  PROVIDER_ERROR_KIND,
+  ProviderErrorReason,
   imageFailureDetailsFor,
+  readProviderError,
 } from "./imageFailure.js";
 import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
 
@@ -428,39 +431,53 @@ export const enhanceSketch = onCall(
         error: errMsg,
       });
 
-      // Refusal only (FEAT-195) — the shared rail spends the suggester on a
-      // blocked prompt and nothing else. An UNCAPTIONED sketch has no words to
-      // reword either, and `suggestPromptAlternatives` skips the call entirely
-      // for empty text, so that case costs nothing and the client shows its
-      // static tips.
-      const detailsFor = (failure: ImageFailureKind) =>
-        imageFailureDetailsFor(failure, () =>
-          suggestPromptAlternatives(caption ?? "", "sketch", claudeApiKey.value()),
-        );
-
-      if (
-        errMsg.includes("content_policy") ||
-        errMsg.includes("safety") ||
-        errMsg.includes("blocked")
-      ) {
-        throw new HttpsError(
-          "invalid-argument",
-          "The sketch enhancement was blocked by the safety filter. Try describing what the character looks like instead of using their name!",
-          await detailsFor(ImageFailureKind.Blocked),
-        );
-      }
-      if (errMsg.includes("rate_limit") || errMsg.includes("429")) {
-        throw new HttpsError(
-          "resource-exhausted",
-          "Image enhancement is busy right now. Wait a moment and try again.",
-          await detailsFor(ImageFailureKind.Busy),
-        );
-      }
-      throw new HttpsError(
-        "internal",
-        `Sketch enhancement failed: ${errMsg.slice(0, 200)}`,
-        await detailsFor(ImageFailureKind.NoImage),
+      // The SAME ladder `generateImage` reads (Codex P2, PR #1768) — this
+      // handler used to carry its own copy with no configuration branches at
+      // all, so an unset API key was declared `no-image` and, because the client
+      // trusts the declared kind ahead of the message text, every sketch door
+      // told a child to try again forever for something only a grown-up could
+      // fix. The rail below still spends the suggester on a refusal and nothing
+      // else; an UNCAPTIONED sketch has no words to reword either, and
+      // `suggestPromptAlternatives` skips the call entirely for empty text, so
+      // that case costs nothing and the client shows its written tips.
+      const reason = readProviderError(errMsg);
+      const details = await imageFailureDetailsFor(
+        PROVIDER_ERROR_KIND[reason],
+        () => suggestPromptAlternatives(caption ?? "", "sketch", claudeApiKey.value()),
       );
+
+      switch (reason) {
+        case ProviderErrorReason.Blocked:
+          throw new HttpsError(
+            "invalid-argument",
+            "The sketch enhancement was blocked by the safety filter. Try describing what the character looks like instead of using their name!",
+            details,
+          );
+        case ProviderErrorReason.RateLimited:
+          throw new HttpsError(
+            "resource-exhausted",
+            "Image enhancement is busy right now. Wait a moment and try again.",
+            details,
+          );
+        case ProviderErrorReason.MissingKey:
+          throw new HttpsError(
+            "failed-precondition",
+            "Image enhancement is not configured correctly. Ask Dad to check the API key.",
+            details,
+          );
+        case ProviderErrorReason.OrgUnverified:
+          throw new HttpsError(
+            "failed-precondition",
+            "OpenAI org verification incomplete — ask Dad to complete API Organization Verification in the OpenAI dashboard.",
+            details,
+          );
+        default:
+          throw new HttpsError(
+            "internal",
+            `Sketch enhancement failed: ${errMsg.slice(0, 200)}`,
+            details,
+          );
+      }
     }
 
     // ── Save enhanced image to Storage ─────────────────────────

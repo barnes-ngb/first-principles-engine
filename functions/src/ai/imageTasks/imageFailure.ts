@@ -88,3 +88,70 @@ export async function imageFailureDetailsFor(
     return { failure };
   }
 }
+
+// ── Reading the provider's error ───────────────────────────────────
+
+/**
+ * Why the image provider rejected, at the granularity the HANDLERS need — one
+ * step finer than {@link ImageFailureKind}, because a missing key and an
+ * unverified org are the same *kind* to a reader but want different words.
+ */
+export const ProviderErrorReason = {
+  Blocked: "blocked",
+  RateLimited: "rate-limited",
+  MissingKey: "missing-key",
+  OrgUnverified: "org-unverified",
+  Unknown: "unknown",
+} as const;
+export type ProviderErrorReason =
+  (typeof ProviderErrorReason)[keyof typeof ProviderErrorReason];
+
+/** Which failure kind each reason is reported as. */
+export const PROVIDER_ERROR_KIND: Record<ProviderErrorReason, ImageFailureKind> =
+  {
+    [ProviderErrorReason.Blocked]: ImageFailureKind.Blocked,
+    [ProviderErrorReason.RateLimited]: ImageFailureKind.Busy,
+    [ProviderErrorReason.MissingKey]: ImageFailureKind.NotConfigured,
+    [ProviderErrorReason.OrgUnverified]: ImageFailureKind.NotConfigured,
+    [ProviderErrorReason.Unknown]: ImageFailureKind.NoImage,
+  };
+
+/**
+ * Read an image provider's error message into one reason. Pure.
+ *
+ * **Why this is shared** (Codex P2, PR #1768): `generateImage` and
+ * `enhanceSketch` each carried their own copy of this ladder, and the copies
+ * had drifted — `enhanceSketch` had no configuration branches at all, so an
+ * unset API key fell through to `no-image`. That was survivable while the
+ * client sniffed the message text, but FEAT-195 made it trust the kind the
+ * handler DECLARES, which meant every sketch door told a child to try again,
+ * forever, for something only a grown-up could fix. Two ladders where one
+ * decision lives is how that happens; this is the one ladder.
+ *
+ * The order matters and matches the original: a refusal wins over everything,
+ * then a rate limit, then the two configuration cases. Unknown is the honest
+ * default — it offers a plain retry and claims nothing.
+ */
+export function readProviderError(errMsg: string): ProviderErrorReason {
+  if (
+    errMsg.includes("content_policy") ||
+    errMsg.includes("safety") ||
+    errMsg.includes("blocked")
+  ) {
+    return ProviderErrorReason.Blocked;
+  }
+  if (errMsg.includes("rate_limit") || errMsg.includes("429")) {
+    return ProviderErrorReason.RateLimited;
+  }
+  if (errMsg.includes("invalid_api_key") || errMsg.includes("401")) {
+    return ProviderErrorReason.MissingKey;
+  }
+  if (
+    errMsg.includes("403") ||
+    errMsg.includes("organization") ||
+    errMsg.includes("verification")
+  ) {
+    return ProviderErrorReason.OrgUnverified;
+  }
+  return ProviderErrorReason.Unknown;
+}
