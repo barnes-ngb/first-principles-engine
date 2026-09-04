@@ -70,19 +70,21 @@ A run is not finished when the PR opens; it is finished when the **automated rev
 answered**. This is the run's last step, and the summary below is the run's **one** summary — do not post a
 finish-looking summary before it.
 
-1. **Poll for the Codex review** every 60 s for up to 10 minutes — **and poll the inline review threads, not
-   just the PR's comments**. Codex files its findings as review comments anchored to lines, so read the PR's
-   **reviews** *and* its **review comments** (`/repos/{owner}/{repo}/pulls/{n}/reviews` plus
-   `/pulls/{n}/comments`, or the GraphQL `reviewThreads`). `gh pr view <n> --comments` fetches top-level
-   comments and review bodies but **no** review threads, so it will show a review that looks empty while
-   every finding sits unread. (Codex reacts 👍 instead of reviewing when it has no suggestions.)
-2. **Address every finding in the same PR**, and push.
-3. **Ask for the follow-up round.** Codex reviews on PR open, on a draft going ready, and on an
-   `@codex review` comment — **not** on every push, so without the ask the next window times out silently.
-4. **Poll another full 10-minute window against the new head commit.** A follow-up review is as
-   asynchronous as the first, so one immediate read does not close the round. **If that round raises a
-   finding, go back to step 2 and repeat 2–4** — as many times as it takes. The round is done only when a
-   whole window passes with **no** new finding; never stop on an unanswered one.
+1. **Poll for the Codex round**, up to 10 minutes, reading three things:
+   - the PR's **reviews** (`/repos/{owner}/{repo}/pulls/{n}/reviews`);
+   - its **inline review threads** (`/pulls/{n}/comments`, or the GraphQL `reviewThreads`) — Codex anchors
+     its findings to lines, and `gh pr view <n> --comments` fetches top-level comments and review bodies but
+     **no** review threads, so it shows a review that looks empty while every finding sits unread;
+   - the **reactions** on the PR and on the comment that asked for the round — Codex signals *reviewed,
+     nothing to say* with a 👍 rather than a review, and no review endpoint returns that. A 👍 closes the
+     round clean immediately; don't burn the rest of the window on it.
+2. **If the round raised no findings, go straight to step 5.** Never re-ask for a review of an unchanged head.
+3. **Address every finding in the same PR**, and push.
+4. **Ask for the next round** with an `@codex review` comment — Codex reviews on PR open, on a draft going
+   ready, and on that comment, **not** on every push, so without the ask the next window times out silently
+   — then poll another full 10-minute window, reactions included, against the new head commit. **If that
+   round raises a finding, go back to step 3 and repeat 3–4** — as many times as it takes. The round is done
+   when one comes back clean or a whole window passes with nothing; never stop on an unanswered one.
 5. **Post the summary**, with as its first line one of:
    - `CODEX ROUND: done — safe to merge`
    - `CODEX ROUND: none arrived in 10 min — safe to merge`
