@@ -301,10 +301,24 @@ function stickerPrefix(): string {
  * are gone from `workshopArt.ts`, and this is the look they are replaced by, so
  * the help copy is now true.
  *
- * It carries {@link UNIFIED_SCENE_RULE} but not {@link BOOK_PAGE_FRAMING}: a
- * challenge card is *supposed* to show a character jumping, and a token is
- * supposed to be one creature. Its shading is cutout-safe, because the parent
- * token asks for a transparent background.
+ * **It is look-only — it states no framing at all** (Codex P1, round 2 on
+ * PR #1766, and it was right). The first version carried
+ * {@link UNIFIED_SCENE_RULE}, which reads "One single, unified scene filling the
+ * whole image". This one prefix is prepended to every Workshop prompt, and one
+ * of them is the parent token — *"a circular icon, on transparent background"*.
+ * The callable forces `background: "transparent"` only for `book-sticker`, so a
+ * `game-art` token runs on `auto` and had nothing but its own prompt asking for
+ * a cutout; a framing sentence demanding a scene that fills the image fights it,
+ * and a paid token could come back as an opaque full-scene picture instead of a
+ * player's avatar.
+ *
+ * Selecting cutout framing plus a transparent image option per request is the
+ * other way out, but that is routing, not a recipe. The right answer for a look
+ * table shared by boards, title cards, challenge cards and tokens is the FEAT-189
+ * split itself: the recipe says **how to draw**, and each prompt keeps saying
+ * **what shape it has to be** — "top-down bird's eye view", "centered
+ * composition", "repeating pattern, symmetrical", "circular icon, on transparent
+ * background". Its shading is cutout-safe for the same reason.
  */
 const GAME_ART_RECIPE: VisualRecipe = {
   hint: "in a bright children's game-art style",
@@ -317,7 +331,7 @@ const GAME_ART_RECIPE: VisualRecipe = {
 };
 
 function gameArtPrefix(): string {
-  return `${GAME_ART_RECIPE.summary} ${UNIFIED_SCENE_RULE}${recipeDetail(GAME_ART_RECIPE)}`;
+  return `${GAME_ART_RECIPE.summary} ${recipeDetail(GAME_ART_RECIPE)}`;
 }
 
 function bookIllustrationPrefix(styleKey: string): string {

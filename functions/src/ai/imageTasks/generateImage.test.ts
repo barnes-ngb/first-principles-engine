@@ -194,12 +194,41 @@ describe("the two fixed looks are real recipes (FEAT-193 / UX-163, UX-164)", () 
       expect(prefix, key).toContain("Shading:");
     });
 
-    it(`carries the never-split guardrail for ${name} (FEAT-189)`, () => {
-      expect(STYLE_PREFIXES[key]).toContain(
-        "never split panels, halves, strips, collages or borders",
-      );
-    });
   }
+
+  it("carries the never-split guardrail on the sticker (FEAT-189)", () => {
+    expect(STYLE_PREFIXES["book-sticker"]).toContain(
+      "never split panels, halves, strips, collages or borders",
+    );
+  });
+
+  it("keeps game art look-only — it states no framing at all", () => {
+    // Codex P1, round 2 on PR #1766. This one prefix is prepended to every
+    // Workshop prompt including the parent token ("a circular icon, on
+    // transparent background"), which runs on `background: "auto"` because the
+    // callable forces transparency only for `book-sticker`. A framing sentence
+    // demanding a scene that fills the whole image fights the token's own
+    // request, and a paid token could come back opaque and full-scene. So the
+    // recipe says how to draw and each prompt keeps saying what shape it is —
+    // the FEAT-189 split.
+    const prefix = STYLE_PREFIXES["game-art"] ?? "";
+    for (const framing of [
+      "unified scene",
+      "filling the whole image",
+      "never split panels",
+      "Environment and background only",
+      "centered",
+      "transparent",
+    ]) {
+      expect(prefix, `game art states framing: "${framing}"`).not.toContain(
+        framing,
+      );
+    }
+    // Still a complete look.
+    expect(prefix).toContain("Palette:");
+    expect(prefix).toContain("Line work:");
+    expect(prefix).toContain("Shading:");
+  });
 
   it("states the sticker's rule without taking it back", () => {
     // A sticker is not a scene, so the page styles' "one single, unified SCENE
