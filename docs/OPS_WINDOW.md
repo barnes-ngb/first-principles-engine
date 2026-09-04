@@ -102,9 +102,14 @@ against a **live Firestore export** (repo-only work can't resolve them):
 - [ ] **Model / pricing check** — **Sonnet 5 intro pricing ends Aug 31.**
   Decide keep/adjust before then; verify the `models.ts` table against the
   current Anthropic catalog.
-- _Retired 2026-09-04:_ **ARCH-17 Node runtime countdown** — functions run on
-  Node 22 (PR #1751); `firebase-functions` 6.6.0 needed no bump. Nothing left to
-  track here until Node 22's own deprecation (2027-04-30).
+- [ ] **ARCH-17 Node 22 deploy confirmation** — **hard stop Oct 30** (Node 20
+  functions stop deploying). The code side landed on `main` 2026-09-04 (PR
+  #1751: `functions/package.json` engines `22`; `firebase-functions` 6.6.0 needed
+  no bump), but a merge to `main` deploys nothing — the live functions stay on
+  Node 20 until the next `deploy`-branch push or a manual run of `deploy.yml`.
+  Confirm that deploy has happened (deploy log shows `nodejs22`; `healthCheck`
+  answers), then retire this item. Until then production is still on the
+  runtime approaching decommission.
 
 ---
 
