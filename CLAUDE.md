@@ -108,6 +108,7 @@ import type { SomeType } from './types'
 ### CI/CD (preferred method)
 - **Push to `main`**: CI runs tests. If `firestore.indexes.json` changed, indexes auto-deploy.
 - **Push to `deploy` branch**: Full deploy — hosting, functions (if changed), Firestore rules + indexes, Storage rules + CORS.
+- **Functions run on Node 22** (ARCH-17). The runtime comes from `functions/package.json` `engines.node` — firebase-tools builds the `nodejs22` runtime string from it, and `firebase.json` deliberately has no `runtime` key. CI and local match via `.nvmrc` / root `engines`.
 
 ### How indexes deploy
 Firestore indexes deploy automatically in three ways:
