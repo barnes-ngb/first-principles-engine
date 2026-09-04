@@ -61,6 +61,7 @@ import {
   MakeBookChoice,
   makeBookChoices,
 } from './makeBookDoor'
+import { draftOwnerLabel, planDraftResume, resolveDraftOwnership } from './draftOwnership'
 
 type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
 type CreatorFilter = 'all' | 'parent' | 'kids'
@@ -68,7 +69,8 @@ type CreatorFilter = 'all' | 'parent' | 'kids'
 export default function BookshelfPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild, children: allChildren } = useActiveChild()
+  const { activeChild, children: allChildren, setActiveChildId, isChildProfile } =
+    useActiveChild()
   const childName = activeChild?.name ?? ''
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
@@ -185,12 +187,33 @@ export default function BookshelfPage() {
   /**
    * Resuming a half-made draft skips the door: the question "which way do you
    * want to make this?" was already answered when the draft was started.
+   *
+   * A draft belongs to the child it was started for, and a parent shelf lists
+   * every child's (UX-108). So before the chat mounts — and it reads the
+   * active child on mount — the header is switched to the draft's own child
+   * when it is someone else's. `planDraftResume` owns that decision, including
+   * the two cases with no honest switch; the card does not offer the tap at
+   * all in those, and this guard makes the write impossible rather than
+   * merely unreached.
    */
-  const handleResumeDraft = useCallback((bookId: string) => {
-    setResumeBookId(bookId)
-    setDialogChoice(MakeBookChoice.WithShelly)
-    setShowNewDialog(true)
-  }, [])
+  const handleResumeDraft = useCallback(
+    (book: Book) => {
+      if (!book.id) return
+      const plan = planDraftResume(
+        resolveDraftOwnership(book, childId, allChildren),
+        { isChildProfile },
+      )
+      if (!plan.canResume) return
+      // Order matters: `setActiveChildIdShared` writes the shared store
+      // synchronously, so the switch is in effect for the render that mounts
+      // the chat — never a frame of the chat reading the previous child.
+      if (plan.switchToChildId) setActiveChildId(plan.switchToChildId)
+      setResumeBookId(book.id)
+      setDialogChoice(MakeBookChoice.WithShelly)
+      setShowNewDialog(true)
+    },
+    [childId, allChildren, isChildProfile, setActiveChildId],
+  )
 
   // Parent-only: open the printable grandparent brief (FEAT-95 §4). Pure read → print,
   // same window.open pattern as the catalog sheet / printable kit. Not kid-visible.
@@ -595,6 +618,12 @@ export default function BookshelfPage() {
               ? 'By a parent'
               : `By ${allChildren.find((c) => c.id === by)?.name ?? 'Kid'}`
             const isInProgressDraft = book.reviewState?.generateChatState === 'in-progress'
+            // Whose draft this is, and what a tap does about it (UX-108).
+            // Resolved through `children`, never a name literal.
+            const draftOwnership = resolveDraftOwnership(book, childId, allChildren)
+            const draftPlan = planDraftResume(draftOwnership, { isChildProfile })
+            const ownerLabel = isInProgressDraft ? draftOwnerLabel(draftOwnership) : null
+            const draftBlockedLine = isInProgressDraft ? draftPlan.blockedLine : null
             // Per-Page Review started but not finished (or skipped) yet.
             const isReviewInProgress =
               !isInProgressDraft &&
@@ -606,8 +635,10 @@ export default function BookshelfPage() {
               <Box
                 key={book.id}
                 onClick={() => {
-                  if (isInProgressDraft && book.id) {
-                    handleResumeDraft(book.id)
+                  if (isInProgressDraft) {
+                    // A draft with no honest resume opens nothing — the card
+                    // carries the line saying why.
+                    if (draftPlan.canResume) handleResumeDraft(book)
                     return
                   }
                   if (isReviewInProgress && book.id) {
@@ -629,13 +660,16 @@ export default function BookshelfPage() {
                       : 'divider',
                   bgcolor: isLincoln ? 'grey.900' : '#fff8f0',
                   color: isLincoln ? 'grey.100' : '#3d3d3d',
-                  cursor: 'pointer',
+                  // A blocked draft is not a door — it should not invite the tap.
+                  cursor: draftBlockedLine ? 'default' : 'pointer',
                   transition: 'transform 0.15s, box-shadow 0.15s',
                   position: 'relative',
-                  '&:hover': {
-                    transform: 'translateY(-2px)',
-                    boxShadow: 3,
-                  },
+                  '&:hover': draftBlockedLine
+                    ? undefined
+                    : {
+                        transform: 'translateY(-2px)',
+                        boxShadow: 3,
+                      },
                   display: 'flex',
                   flexDirection: 'column',
                   minHeight: 140,
@@ -757,6 +791,23 @@ export default function BookshelfPage() {
                       fontWeight: 600,
                     }}
                   />
+                  {/* Whose draft this is (UX-108). "By a parent" says who typed
+                      it; this says who it is FOR — the child the chat will
+                      read, size and write for when it reopens. */}
+                  {ownerLabel && (
+                    <Chip
+                      data-testid={`draft-owner-${book.id}`}
+                      label={ownerLabel}
+                      size="small"
+                      sx={{
+                        height: 20,
+                        fontSize: '0.65rem',
+                        bgcolor: 'info.100',
+                        color: 'info.800',
+                        fontWeight: 600,
+                      }}
+                    />
+                  )}
                   {(book.sightWords?.length ?? 0) > 0 && (
                     <Chip
                       label={`${book.sightWords!.length} words`}
@@ -796,6 +847,18 @@ export default function BookshelfPage() {
                         fontWeight: 600,
                       }}
                     />
+                  ) : isInProgressDraft && draftBlockedLine ? (
+                    // No honest resume for this draft (UX-108): say why, once,
+                    // instead of offering a tap that would write for the wrong
+                    // child.
+                    <Typography
+                      data-testid={`draft-blocked-${book.id}`}
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ ml: 'auto', textAlign: 'right' }}
+                    >
+                      {draftBlockedLine}
+                    </Typography>
                   ) : isInProgressDraft ? (
                     <Chip
                       label="Continue making this story →"
