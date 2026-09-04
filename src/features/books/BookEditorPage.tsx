@@ -962,24 +962,37 @@ export default function BookEditorPage() {
   ])
 
   /**
-   * The `generationConfig` patch the finish handlers write (FEAT-194).
+   * The `generationConfig` patch the finish handlers write, or `{}` when there
+   * is nothing to record (FEAT-194).
    *
-   * A hand-written book has no `generationConfig` at all, and the shape's
-   * `words` / `pageCount` are required — so seed them honestly rather than
-   * invent them: no word list was in play (`[]`, exactly what it means
-   * elsewhere) and the page count is the pages the book actually has.
+   * Nothing to record means: this book has no `generationConfig` AND the parent
+   * typed no note. A hand-written book finished with the preset chips must not
+   * gain a fabricated one — `words: []` and a page count it never generated
+   * against would be a write this dialog has no business making.
+   *
+   * When there IS something to record and the book has no config yet, the two
+   * required fields are seeded honestly rather than invented: no word list was
+   * in play (`[]`, exactly what it means everywhere else) and the page count is
+   * the pages the book actually has.
    *
    * `''` rather than `undefined` for a cleared note: the app runs Firestore with
    * `ignoreUndefinedProperties`, so `undefined` would leave a stored note in
    * place on any merge write.
    */
   const themeGenerationConfig = useCallback(
-    (note: string): Book['generationConfig'] => ({
-      words: [],
-      pageCount: book?.pages.length ?? 0,
-      ...(book?.generationConfig ?? {}),
-      customTheme: normalizeCustomStoryTheme(note),
-    }),
+    (note: string): Pick<Book, 'generationConfig'> | Record<string, never> => {
+      const value = normalizeCustomStoryTheme(note)
+      const existing = book?.generationConfig
+      if (!existing && !value) return {}
+      return {
+        generationConfig: {
+          words: [],
+          pageCount: book?.pages.length ?? 0,
+          ...(existing ?? {}),
+          customTheme: value,
+        },
+      }
+    },
     [book?.generationConfig, book?.pages.length],
   )
 
@@ -988,7 +1001,7 @@ export default function BookEditorPage() {
     updateBookMeta({
       ...(selectedCoverUrl ? { coverImageUrl: selectedCoverUrl } : { coverImageUrl: undefined }),
       ...(selectedTheme ? { theme: selectedTheme } : { theme: undefined }),
-      generationConfig: themeGenerationConfig(selectedCustomTheme),
+      ...themeGenerationConfig(selectedCustomTheme),
     })
     setShowFinishDialog(false)
   }, [
@@ -1009,7 +1022,7 @@ export default function BookEditorPage() {
       // by a note must have its preset id CLEARED, or both would be stored and
       // the one-source rule would hold only in the dialog's own state.
       theme: selectedTheme,
-      generationConfig: themeGenerationConfig(selectedCustomTheme),
+      ...themeGenerationConfig(selectedCustomTheme),
     })
     setShowFinishDialog(false)
     setShowCelebration(true)
