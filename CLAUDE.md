@@ -73,10 +73,11 @@ reactions included, against the new head commit. **Repeat for as long as a round
 The round is done when one comes back clean or a whole window passes with nothing — never stop on an
 unanswered one. Then post the run's summary — **its one summary, not a second one after an earlier "done"
 post** — with, as its first line, one of: `CODEX ROUND: done — safe to merge` · `CODEX ROUND: none arrived in
-10 min — safe to merge` · `CODEX ROUND: open — do not merge yet`. Then **stop**. Do not subscribe to the PR —
-and where the harness subscribes for you when the PR is created, **unsubscribe before you stop**, or the run
-stays armed exactly as this protocol exists to prevent. Do not schedule a check-in, reminder, wake-up or
-scheduled task of any kind, and do not stay resident to "watch CI" — CI's result is on the PR page. If CI fails after you stop, the human pastes the log into a new
+10 min — safe to merge` · `CODEX ROUND: open — do not merge yet`. Never subscribe to the PR, never schedule a
+check-in, reminder, wake-up or scheduled task of any kind, and never stay resident to "watch CI" — CI's
+result is on the PR page. Then, as the **last action of the run**: where the harness subscribed the session
+for you when the PR was created, **unsubscribe** — otherwise the run stays armed exactly as this protocol
+exists to prevent — and only **then stop**. If CI fails after you stop, the human pastes the log into a new
 run. **A merged PR is never touched again by the run that opened it**; a fix that is still needed goes on a
 new branch and PR. The human merges only a PR whose summary's first line says `safe to merge`.
 
