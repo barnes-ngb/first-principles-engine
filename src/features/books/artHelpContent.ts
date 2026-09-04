@@ -156,7 +156,7 @@ const STYLE_BLURBS: Record<string, Record<ArtHelpAudience, string>> = {
   },
   'garden-warfare': {
     parent:
-      'Leaf green and warm yellow in flat cheerful fills, bold rounded outlines with nothing sharp, and simple two-tone shading in broad daylight — in the spirit of Plants vs. Zombies. Where a page allows it the scene dresses in sunflowers, pea shooters and silly cartoon zombies; indoors it keeps the look and drops the props.',
+      'Leaf green and warm yellow in flat cheerful gouache, bold rounded outlines with nothing sharp, and two-tone shading seen from a low three-quarter view looking down across the ground — in the spirit of Plants vs. Zombies. Where a page allows it the scene dresses in sunflowers, pea shooters and silly cartoon zombies; indoors it keeps the look and drops the props.',
     kid: 'A silly garden battle. Bright and green.',
   },
   storybook: {
@@ -166,7 +166,7 @@ const STYLE_BLURBS: Record<string, Record<ArtHelpAudience, string>> = {
   },
   platformer: {
     parent:
-      'Saturated primaries in flat fills, thick clean outlines around chunky shapes, and flat cel shading drawn side-on in 2D — the classic Mario-style game look. Where a page allows it the scene dresses in brick platforms, green pipes and gold coins; indoors it keeps the look and drops the props.',
+      'Saturated primaries in flat vector fills, thick clean outlines around chunky shapes, and flat cel shading drawn side-on in 2D with no depth — the classic Mario-style game look. Where a page allows it the scene dresses in brick platforms, green pipes and gold coins; indoors it keeps the look and drops the props.',
     kid: 'A game world. Bricks, pipes and gold coins.',
   },
   comic: {
@@ -176,7 +176,7 @@ const STYLE_BLURBS: Record<string, Record<ArtHelpAudience, string>> = {
   },
   realistic: {
     parent:
-      'Naturalistic muted colors with believable wood, stone and fabric. Almost no outline — form comes from soft directional light and gentle cast shadows.',
+      'Naturalistic muted colors in soft oil paint, with believable wood, stone and fabric. Almost no outline — form comes from soft directional light and gentle cast shadows.',
     kid: 'Looks real. Soft light and shadows.',
   },
 
@@ -188,17 +188,17 @@ const STYLE_BLURBS: Record<string, Record<ArtHelpAudience, string>> = {
   },
   fantasy: {
     parent:
-      'Dusty lilac, moss green and candlelight gold with a faint glow around anything magical. A fine tapering ink line and soft washes that bleed past it.',
+      'Dusty lilac, moss green and candlelight gold in opaque matte gouache, with a faint glow around anything magical. A fine tapering ink line and flat velvety layers with highlights scumbled on top — the one look here that is not a wash.',
     kid: 'Soft magic colors. A gentle glow.',
   },
   animals: {
     parent:
-      'Warm creams, ginger and soft brown with pink cheek accents. A thick rounded outline with no sharp corners, and simple two-tone shading with visible fur.',
+      'Warm creams, ginger and soft brown in flat felt-tip marker fills, with pink cheek accents. A thick rounded outline with no sharp corners, and two-tone shading with fur drawn in short strokes over the fill.',
     kid: 'Warm colors. Thick round lines. Soft fur.',
   },
   adventure: {
     parent:
-      'Sun-bleached ochre against deep teal shadow with one hot highlight color. A confident varied-weight brush line and strong cast shadows with a bright rim light.',
+      'Sun-bleached ochre against deep teal shadow in thick opaque acrylic, with one hot highlight color. A confident varied-weight brush line, hard light raking across the shape itself and a bright rim light on the silhouette.',
     kid: 'Bright sun and deep shadows. Bold lines.',
   },
   space: {
@@ -208,12 +208,12 @@ const STYLE_BLURBS: Record<string, Record<ArtHelpAudience, string>> = {
   },
   science: {
     parent:
-      'Clean primary red, blue and yellow on generous white space. A crisp uniform line like a well-drawn diagram, flat fills and a single soft grey drop shadow.',
+      'Clean primary red, blue and yellow on generous white space. A crisp uniform technical pen line like a well-drawn diagram, flat fills and one narrow grey band along each edge that turns away.',
     kid: 'Clean flat colors. Neat even lines.',
   },
   faith: {
     parent:
-      'Warm amber, ivory and soft olive at low saturation. A soft line drawn in warm brown rather than black, with gentle golden light from one side.',
+      'Warm amber, ivory and soft olive in soft chalk pastel with a gentle grain, at low saturation. A soft line drawn in warm brown rather than black, with warm light falling across the shape from one side.',
     kid: 'Warm gold light. Soft brown lines.',
   },
   family: {
@@ -256,8 +256,11 @@ export function artHelpStyles(surface: ArtHelpSurface): ArtHelpStyleEntry[] {
     case 'kitArt':
     case 'workshop':
     case 'avatarPhoto':
-      // No style picker on these surfaces: the Workshop's art is one fixed
-      // children's-game look and the photo read makes no picture at all.
+      // No style picker on these surfaces: the Kit Builder's stickers are the
+      // fixed `book-sticker` look, the Workshop's art is the fixed `game-art`
+      // look (both real recipes since FEAT-193 — the Workshop used to send the
+      // empty `general` prefix while this sheet claimed a fixed look), and the
+      // photo read makes no picture at all.
       return []
   }
 }
@@ -604,7 +607,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           heading: 'How to ask for a good picture',
           lines: [
             'The words typed about a character are what the picture maker sees: "a purple robot with one big eye" gives it far more than a name does.',
-            'These are always cut-out stickers on a clear background — there is no style picker here.',
+            'These are always cut-out stickers on a clear background, in one fixed look — bright flat colors, a bold even outline all the way round and no shadow — and there is no style picker here.',
           ],
         },
         budgetSection('parent'),
@@ -654,7 +657,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           heading: 'How to ask for a good picture',
           lines: [
             'The theme is the one word every picture prompt carries, so a concrete one ("underwater", "dinosaur jungle") draws better than a mood ("fun").',
-            'Every picture is made in one children\'s-game look; there is no style picker here.',
+            'Every picture is made in one children\'s-game look — bold poster colors in flat fills, a clean chunky outline and simple two-step shading — and there is no style picker here.',
           ],
         },
         budgetSection('parent'),

@@ -52,6 +52,22 @@ const AUTO_DISMISS_MS = 5 * 60 * 1000
 /** Client-side timeout: mark as failed after 3 minutes with no result. */
 const CLIENT_TIMEOUT_MS = 3 * 60 * 1000
 
+/**
+ * The base style each slider band sends (FEAT-193 / UX-161a).
+ *
+ * Extracted verbatim from the hook so the captions in `reimagineCaptions.ts` can
+ * be held to it by a test — a caption that names a look the band does not send
+ * is the defect UX-161a was. The mapping itself is untouched: `light` and
+ * `medium` both resolve to `storybook`, which is UX-161b's routing defect and is
+ * deliberately left as it is.
+ */
+export function reimagineStyleFor(
+  intensity: number,
+): NonNullable<EnhanceSketchRequest['style']> {
+  if (intensity >= 75) return 'comic'
+  return 'storybook'
+}
+
 export function useBackgroundReimagine({
   familyId,
   childId,
@@ -149,8 +165,7 @@ export function useBackgroundReimagine({
       })
 
       try {
-        const style: EnhanceSketchRequest['style'] =
-          intensity <= 25 ? 'storybook' : intensity >= 75 ? 'comic' : 'storybook'
+        const style = reimagineStyleFor(intensity)
 
         const result = await enhanceSketch({
           familyId,

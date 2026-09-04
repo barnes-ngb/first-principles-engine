@@ -115,7 +115,7 @@ export interface GenerateResponse {
 export interface ImageGenRequest {
   familyId: string
   prompt: string
-  style?: 'schedule-card' | 'reward-chart' | 'theme-illustration' | 'book-illustration-minecraft' | 'book-illustration-storybook' | 'book-illustration-comic' | 'book-illustration-realistic' | 'book-illustration-garden-warfare' | 'book-illustration-platformer' | 'book-sticker' | 'general'
+  style?: 'schedule-card' | 'reward-chart' | 'theme-illustration' | 'book-illustration-minecraft' | 'book-illustration-storybook' | 'book-illustration-comic' | 'book-illustration-realistic' | 'book-illustration-garden-warfare' | 'book-illustration-platformer' | 'book-sticker' | 'game-art' | 'general'
   size?: '1024x1024' | '1024x1792' | '1792x1024'
   /** Optional theme ID — used only when `style` carries no look of its own; a picked illustration style always wins (FEAT-174). */
   themeId?: string

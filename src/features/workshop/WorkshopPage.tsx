@@ -76,6 +76,7 @@ import {
   generateAllArt,
   generateAdventureArt,
   generateCardGameArt,
+  WORKSHOP_ART_STYLE,
 } from './workshopArt'
 import type { GenerateImageFn } from './workshopArt'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
@@ -581,8 +582,8 @@ export default function WorkshopPage() {
           try {
             const titleResult = await countedGenerateImage({
               familyId,
-              prompt: `A title card illustration for a children's board game called '${generatedGame.title}', ${inputs.theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
-              style: 'general',
+              prompt: `A title card illustration for a children's board game called '${generatedGame.title}', ${inputs.theme} themed, centered composition, no text`,
+              style: WORKSHOP_ART_STYLE,
               size: '1024x1024',
             })
             if (titleResult?.url) {
