@@ -174,8 +174,29 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
  * indoors, and this tells it that whatever it decides, the answer is one
  * picture (FEAT-189).
  */
+const NEVER_SPLIT_CLAUSE =
+  "never split panels, halves, strips, collages or borders. ";
+
 const UNIFIED_SCENE_RULE =
-  "One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. ";
+  "One single, unified scene filling the whole image — " + NEVER_SPLIT_CLAUSE;
+
+/**
+ * The same rule for a cut-out sticker, which is not a scene (FEAT-193).
+ *
+ * A sticker prefix that said "one single, unified **scene** filling the whole
+ * image" and then "no background elements, no **scene**" would state a rule and
+ * take it back in the next breath — the defect PR #1759 established should never
+ * be emitted rather than patched. The *rule* still has one definition
+ * ({@link NEVER_SPLIT_CLAUSE}); only the subject sentence in front of it differs
+ * by context, which is the same split {@link worldPropsClause} uses.
+ *
+ * It also names the failure a sticker actually has: asked for "a sticker", a
+ * model will happily return a printed *sheet* of them.
+ */
+const UNIFIED_STICKER_RULE =
+  "One single subject, centered and complete, on an empty background — " +
+  "never a sheet or grid of several stickers, " +
+  NEVER_SPLIT_CLAUSE;
 
 /**
  * Every book-illustration page prompt opens with this framing: a page picture is
@@ -258,14 +279,11 @@ const STICKER_RECIPE: VisualRecipe = {
 
 /**
  * The subject constraint that makes a sticker a sticker, stated separately from
- * the look so the recipe above answers only the three look questions. Carries
- * {@link UNIFIED_SCENE_RULE} for the same reason the six page styles do: asked
- * for "a sticker", a model will happily return a *sheet* of them.
+ * the look so the recipe above answers only the three look questions.
  */
 const STICKER_FRAMING =
-  UNIFIED_SCENE_RULE +
-  "Exactly one character or object, centered and complete. " +
-  "No background elements, no scene, no ground, no text. ";
+  UNIFIED_STICKER_RULE +
+  "Exactly one character or object. No background elements, no ground, no text. ";
 
 function stickerPrefix(): string {
   return `${STICKER_RECIPE.summary} ${STICKER_FRAMING}${recipeDetail(STICKER_RECIPE)}`;

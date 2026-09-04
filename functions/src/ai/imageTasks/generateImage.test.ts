@@ -194,12 +194,32 @@ describe("the two fixed looks are real recipes (FEAT-193 / UX-163, UX-164)", () 
       expect(prefix, key).toContain("Shading:");
     });
 
-    it(`carries the unified-scene guardrail for ${name} (FEAT-189)`, () => {
+    it(`carries the never-split guardrail for ${name} (FEAT-189)`, () => {
       expect(STYLE_PREFIXES[key]).toContain(
-        "One single, unified scene filling the whole image",
+        "never split panels, halves, strips, collages or borders",
       );
     });
   }
+
+  it("states the sticker's rule without taking it back", () => {
+    // A sticker is not a scene, so the page styles' "one single, unified SCENE
+    // filling the whole image" followed by "no background elements, no SCENE"
+    // would be a rule and its own contradiction — the shape PR #1759 established
+    // must never be emitted rather than patched. The rule itself still has one
+    // definition; only the subject sentence in front of it differs.
+    const prefix = STYLE_PREFIXES["book-sticker"] ?? "";
+    expect(prefix).toContain("One single subject, centered and complete");
+    expect(prefix).toContain("never a sheet or grid of several stickers");
+    expect(prefix).not.toContain("unified scene");
+  });
+
+  it("keeps the six page styles' framing byte-identical (FEAT-189)", () => {
+    for (const key of BOOK_ILLUSTRATION_STYLE_KEYS) {
+      expect(STYLE_PREFIXES[key], key).toContain(
+        "One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. ",
+      );
+    }
+  });
 
   it("asks for no shadow a cutout would remove (UX-162)", () => {
     // Both are rendered on transparent backgrounds — the sticker style always
