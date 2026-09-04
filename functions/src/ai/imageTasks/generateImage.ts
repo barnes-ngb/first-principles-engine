@@ -335,9 +335,21 @@ export const generateImage = onCall(
 
     // ── Resolve theme image prefix ──────────────────────────────
     // Only reaches the prompt when the picked style has no look of its own —
-    // see the precedence note on `buildImagePrompt` (FEAT-174). Note this map
-    // has drifted from the client's `PRESET_THEMES`: `sight_words`, `family`,
-    // `science` and `faith` are absent here and so resolve to no prefix at all.
+    // see the precedence note on `buildImagePrompt` (FEAT-174).
+    //
+    // FEAT-190 closed the gap this map had: `sight_words`, `family`, `science`
+    // and `faith` were absent, so four of the fifteen ids a parent can pick in
+    // the Book Editor's Finish dialog resolved to no prefix at all — a control
+    // that reaches the model as nothing. Their four strings are copied verbatim
+    // from the client's `PRESET_THEMES[*].imageStylePrefix`
+    // (`src/core/types/books.ts`), which is the text a person can actually read;
+    // the eleven older entries are hand-abridged copies of the same field, and
+    // abridging the new four would only add a fifth variant of one string.
+    //
+    // This is still a hand-kept duplicate of the client table, and a third copy
+    // lives in `functions/src/ai/tasks/generateStory.ts` (`PRESET_THEME_MAP`,
+    // where the same four ids are still missing). Consolidating the three is
+    // filed, not done here — see `docs/review/STYLE_AUDIT_2026-09.md` §5.
     let themeImagePrefix: string | undefined;
     if (themeId) {
       // Check preset themes first (server-side map)
@@ -353,6 +365,11 @@ export const generateImage = onCall(
         cooking: "A warm, cheerful kitchen scene for a children's book.",
         sports: "A bright, energetic children's book illustration of kids playing sports.",
         holidays: "A festive, joyful children's book illustration. Holiday decorations, seasonal scenes, warm family celebrations.",
+        // Added by FEAT-190 — verbatim from the client's `PRESET_THEMES`.
+        family: "A warm, cozy children's book illustration of a family together. Soft lighting, happy expressions.",
+        science: "A bright, educational children's book illustration about science. Lab equipment, nature exploration, experiments.",
+        sight_words: "A simple, clean children's book illustration. Clear scenes, minimal detail, bold colors.",
+        faith: "A warm, reverent children's book illustration. Gentle light, nature scenes, peaceful atmosphere.",
       };
       themeImagePrefix = PRESET_IMAGE_PREFIXES[themeId];
 
