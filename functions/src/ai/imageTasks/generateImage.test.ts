@@ -228,29 +228,43 @@ describe("world styles are looks, not scene lists (FEAT-189)", () => {
     }
   });
 
-  it("does not both demand and forbid Garden Battle's zombies", () => {
-    // Codex P2 on PR #1758, and a real regression: before FEAT-189, Garden
-    // Battle was the ONLY style saying "no specific characters" instead of "no
-    // characters or people", because its look asks for silly cartoon zombies.
-    // Routing it through the shared framing took the allowance away and kept the
-    // prop, leaving the model to reconcile a prompt that both demands and
-    // forbids them.
+  it("never states a ban Garden Battle's own props would break", () => {
+    // Codex P2, twice. Before FEAT-189, Garden Battle was the ONLY style saying
+    // "no specific characters" instead of "no characters or people", because its
+    // look asks for silly cartoon zombies; routing it through the shared framing
+    // took the allowance away and kept the prop. The first fix appended a later
+    // sentence calling the zombies "not the story's characters" — which describes
+    // what they are not and never exempts them, so the model could still satisfy
+    // "no characters" by dropping them. The contradiction must not be emitted at
+    // all, not stated and then walked back.
     const garden = STYLE_PREFIXES["book-illustration-garden-warfare"] ?? "";
     expect(garden).toContain("silly cartoon zombies");
-    expect(garden).toContain("Any creatures among those props are decorative background set dressing");
+    expect(garden).not.toContain("no characters or people");
+    expect(garden).toContain("no people, and none of the story's characters");
+    expect(garden).toContain("those ARE allowed and expected");
   });
 
-  it("keeps the strict no-characters rule on every style that has no creatures", () => {
-    // The carve-out is scoped to the one style that needs it — an unconditional
-    // aside would invite creatures into a Minecraft or Platformer page whose
-    // props are blocks, pipes and coins.
+  it("keeps the categorical ban on every style whose props are objects", () => {
+    // The exception is scoped to the style that opts in — a blanket one would
+    // invite creatures into a Minecraft or Platformer page whose props are
+    // blocks, terrain, pipes and coins.
     for (const key of BOOK_ILLUSTRATION_STYLE_KEYS) {
       const prefix = STYLE_PREFIXES[key] ?? "";
-      // The shared framing is untouched for all six.
+      if (key === "book-illustration-garden-warfare") continue;
       expect(prefix, key).toContain("Environment and background only, no characters or people.");
-      if (key !== "book-illustration-garden-warfare") {
-        expect(prefix, key).not.toContain("Any creatures among those props");
-      }
+      expect(prefix, key).not.toContain("ARE allowed and expected");
+    }
+  });
+
+  it("forbids people and story characters on all six either way", () => {
+    // Both framings ban the same two things; only the prop-creature exception
+    // differs, so no style can quietly stop excluding the story's cast.
+    for (const key of BOOK_ILLUSTRATION_STYLE_KEYS) {
+      const prefix = STYLE_PREFIXES[key] ?? "";
+      expect(prefix, key).toContain("Environment and background only");
+      expect(prefix, key).toMatch(
+        /no characters or people|no people, and none of the story's characters/,
+      );
     }
   });
 
