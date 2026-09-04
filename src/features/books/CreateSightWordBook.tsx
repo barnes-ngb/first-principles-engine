@@ -23,7 +23,7 @@ import type { Book, BookPage } from '../../core/types'
 import { booksCollection } from '../../core/firebase/firestore'
 import { addDoc } from 'firebase/firestore'
 import { generatePageId } from './bookTypes'
-import { inferBookTheme } from './useBookGenerator'
+import { inferBookTheme } from './bookThemeInference'
 import { useStoryGenerator } from './useStoryGenerator'
 import type { GeneratedStory } from './useStoryGenerator'
 import { useSightWordProgress } from './useSightWordProgress'
@@ -247,7 +247,7 @@ export default function CreateSightWordBook() {
       </Stack>
 
       <Typography variant="h5" fontWeight={700}>
-        Create a Sight Word Story
+        Make a sight word book
       </Typography>
 
       {/* Prefill banner from Word Wall */}

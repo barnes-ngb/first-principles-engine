@@ -32,7 +32,7 @@ vi.mock('firebase/firestore', () => ({
   setDoc: vi.fn(async () => undefined),
 }))
 
-vi.mock('./useBookGenerator', () => ({
+vi.mock('./bookThemeInference', () => ({
   inferBookTheme: () => 'fantasy',
 }))
 

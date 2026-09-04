@@ -20,7 +20,6 @@ import BookReaderPage from '../features/books/BookReaderPage'
 import BookReviewChat from '../features/books/BookReviewChat'
 import CreateSightWordBook from '../features/books/CreateSightWordBook'
 import SightWordDashboard from '../features/books/SightWordDashboard'
-import StoryGuidePage from '../features/books/StoryGuidePage'
 import StickersPage from '../features/books/StickersPage'
 import MyAvatarPage from '../features/avatar/MyAvatarPage'
 import WorkshopPage from '../features/workshop/WorkshopPage'
@@ -72,7 +71,12 @@ export const routes = [
       { path: '/planner/legacy', element: <Navigate to="/planner/chat" replace /> },
       { path: '/evaluate', element: <EvaluateChatPage /> },
       { path: '/books', element: <BookshelfPage /> },
-      { path: '/books/story-guide', element: <StoryGuidePage /> },
+      // The Story Guide wizard retired with FEAT-187 — one "Make a book" door
+      // on the shelf, two choices, and the Generate chat is the AI one. The
+      // route is kept as a redirect (the ARCH-07 ladders precedent: route
+      // kept, page removed) so a bookmark or an old link still lands
+      // somewhere real — the shelf, where the door is.
+      { path: '/books/story-guide', element: <Navigate to="/books" replace /> },
       { path: '/books/create-story', element: <CreateSightWordBook /> },
       { path: '/books/sight-words', element: <SightWordDashboard /> },
       { path: '/stickers', element: <StickersPage /> },

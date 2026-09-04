@@ -9,7 +9,6 @@ import {
 import {
   PAGE_REVISE_SURFACE,
   STORY_CHAT_SURFACE,
-  STORY_GUIDE_SURFACE,
   STORY_REVISE_SURFACE,
   StoryGenerationFailure,
   storyGenerationFailureMessage,
@@ -120,12 +119,8 @@ describe('UX-112 — every generateStory sibling names its failure', () => {
     expect(revise).toContain('your story is unchanged')
     expect(revise).toContain('"Send"')
 
-    const guide = storyGenerationFailureMessage(
-      StoryGenerationFailure.CutShort,
-      STORY_GUIDE_SURFACE,
-    )
-    expect(guide).toContain('your answers are still here')
-    expect(guide).toContain('Make my book →')
+    // The Story Guide's surface was the fourth here until FEAT-187 retired the
+    // wizard; it went with its only caller.
 
     const page = storyGenerationFailureMessage(
       StoryGenerationFailure.NoReply,
@@ -140,7 +135,6 @@ describe('UX-112 — every generateStory sibling names its failure', () => {
     for (const surface of [
       STORY_CHAT_SURFACE,
       STORY_REVISE_SURFACE,
-      STORY_GUIDE_SURFACE,
       PAGE_REVISE_SURFACE,
     ]) {
       for (const kind of Object.values(StoryGenerationFailure)) {
