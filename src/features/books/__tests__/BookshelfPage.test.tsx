@@ -115,23 +115,27 @@ describe('BookshelfPage — Story Gen V2 PR-A wiring', () => {
     }
   })
 
-  it('opens the New Book dialog to the "Generate a Book" tab by default', async () => {
+  it('opens the "Make a book" door on the choice, not straight into a generator (FEAT-187)', async () => {
     const user = userEvent.setup()
     booksFixture = [makeBook({ id: 'b1', title: 'Existing' })]
     render(<BookshelfPage />)
     await user.click(screen.getByTestId('new-book-tile'))
-    // The Generate Chat surface (mocked) should be visible, not the Blank Book form.
-    expect(screen.getByTestId('book-generate-chat')).toBeTruthy()
+    // Before FEAT-187 the dialog defaulted to the AI tab, so the chat was on
+    // screen the instant it opened. Now the door asks first.
+    expect(screen.queryByTestId('book-generate-chat')).toBeNull()
+    expect(screen.getByTestId('make-book-choice-myself')).toBeTruthy()
+    expect(screen.getByTestId('make-book-choice-with-shelly')).toBeTruthy()
   })
 
-  it('"Use Story Guide" button is present in the Generate tab and navigates to /books/story-guide', async () => {
+  it('no longer offers the Story Guide anywhere in the door', async () => {
     const user = userEvent.setup()
     booksFixture = [makeBook({ id: 'b1', title: 'Existing' })]
     render(<BookshelfPage />)
     await user.click(screen.getByTestId('new-book-tile'))
-    const storyGuideBtn = screen.getByRole('button', { name: /use story guide/i })
-    await user.click(storyGuideBtn)
-    expect(navigateMock).toHaveBeenCalledWith('/books/story-guide')
+    expect(screen.queryByText(/story guide/i)).toBeNull()
+    await user.click(screen.getByTestId('make-book-choice-with-shelly'))
+    expect(screen.queryByText(/story guide/i)).toBeNull()
+    expect(navigateMock).not.toHaveBeenCalledWith('/books/story-guide')
   })
 
   it('renders books with reviewState.generateChatState === "in-progress" with a Continue badge', () => {
@@ -224,6 +228,7 @@ describe('BookshelfPage — Per-Page Review wiring (PR-B)', () => {
     booksFixture = [makeBook({ id: 'b1', title: 'Existing' })]
     render(<BookshelfPage />)
     await user.click(screen.getByTestId('new-book-tile'))
+    await user.click(screen.getByTestId('make-book-choice-with-shelly'))
     await user.click(screen.getByRole('button', { name: /commit-trigger/i }))
     expect(navigateMock).toHaveBeenCalledWith('/books/committed-book/review')
   })
@@ -234,6 +239,7 @@ describe('BookshelfPage — Per-Page Review wiring (PR-B)', () => {
     booksFixture = [makeBook({ id: 'b1', title: 'Existing' })]
     render(<BookshelfPage />)
     await user.click(screen.getByTestId('new-book-tile'))
+    await user.click(screen.getByTestId('make-book-choice-with-shelly'))
     await user.click(screen.getByRole('button', { name: /commit-trigger/i }))
     expect(navigateMock).toHaveBeenCalledWith('/books/committed-book')
   })

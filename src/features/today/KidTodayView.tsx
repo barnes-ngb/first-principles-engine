@@ -721,8 +721,12 @@ export default function KidTodayView({
       {isMvd && (
         <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
           {/* A noun on every count, and a singular that reads (UX-81) —
-              "Just these 1!" was the light-day message on the lightest day. */}
-          Light day today. Just {mustDo.length} quest
+              "Just these 1!" was the light-day message on the lightest day.
+              FEAT-186 keeps the noun and swaps the word: "quest" is Lincoln's
+              Minecraft framing (his card is titled "⛏️ Daily Quests"), and it
+              had leaked into the copy BOTH kids read. "job" is the app's own
+              kid noun (Dad Lab's "Your Job") and decodes at London's level. */}
+          Light day today. Just {mustDo.length} job
           {mustDo.length === 1 ? '' : 's'}!
         </Typography>
       )}
@@ -847,7 +851,7 @@ export default function KidTodayView({
           <SectionCard title="🔒 Game Workshop">
             <Stack spacing={1} alignItems="center" sx={{ py: 2 }}>
               <Typography variant="body2" color="text.secondary" textAlign="center">
-                Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''} to unlock!
+                Do {gateThreshold - mustDoCompleted} more job{gateThreshold - mustDoCompleted !== 1 ? 's' : ''} to open this.
               </Typography>
               <Stack direction="row" spacing={0.5}>
                 {Array.from({ length: gateThreshold }).map((_, i) => (
@@ -947,7 +951,7 @@ export default function KidTodayView({
             </Stack>
           </Box>
         ) : (
-          <Chip label="🔒 Finish quests first" variant="outlined" />
+          <Chip label="🔒 Do your jobs first" variant="outlined" />
         )
       )}
 
@@ -1006,7 +1010,7 @@ export default function KidTodayView({
             </Stack>
           </Box>
         ) : (
-          <Chip label="🔒 Finish quests first" variant="outlined" />
+          <Chip label="🔒 Do your jobs first" variant="outlined" />
         )
       )}
 

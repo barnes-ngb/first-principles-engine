@@ -102,12 +102,12 @@ type IllustrationStyleKey =
  * path in the app, and the reason FEAT-168 exists.
  *
  * The weekly art budget (FEAT-94's `artQuota`) is asked **here**, not by the
- * three callers, on purpose. `illustrate` is not a button: it is reached from
- * `useBookGenerator` (Story Guide / Bookshelf generation), from
+ * callers, on purpose. `illustrate` is not a button: it is reached from
  * `useBookGenerateChat.commitAndClose` and from `useBookReview`'s per-page
- * regeneration — so a guard threaded through callers is a guard a fourth caller
- * can forget. Gating the loop itself means every route to a paid image call is
- * capped by construction. (The Book Editor's own three doors *do* take the
+ * regeneration — and, until FEAT-187 retired that wizard, from the Story
+ * Guide's own generate hook — so a guard threaded through callers is a guard
+ * the next caller can forget. Gating the loop itself means every route to a
+ * paid image call is capped by construction. (The Book Editor's own three doors *do* take the
  * answer as props from the page, the way `StickersPage` feeds its four; nothing
  * asks the counter twice in one component.)
  */

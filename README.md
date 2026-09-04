@@ -6,7 +6,7 @@ Built around Ad Astra / Astra Nova pedagogy: disposition over content mastery, t
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+ (`.nvmrc` pins 22; the Functions runtime is `nodejs22`)
 - Firebase CLI: `npm install -g firebase-tools`
 - Firebase project authenticated: `firebase login && firebase use <project-id>`
 

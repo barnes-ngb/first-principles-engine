@@ -141,6 +141,27 @@ export function labBeatsHaveContent(beats: LabBeats | undefined): boolean {
   )
 }
 
+/**
+ * The one human label per lab type (FEAT-186 / UX-90).
+ *
+ * The kid Dad Lab header rendered `activeLab.labType` raw, so a six-year-old
+ * read the enum value — `science`, `engineering`, `adventure`, `heart`. These
+ * are the words a person sees instead, and they are held to the FEAT-178 kid
+ * bar (at most eight words, nothing over two syllables by the vowel-group
+ * proxy) because the kid view is the surface that shows them: "Engineering"
+ * and "Adventure" both fail that bar, which is why neither word is here.
+ *
+ * `LAB_FRAMEWORKS[type].label` is a *different* thing and stays as it is — it
+ * names the method a lab follows ("Scientific Method"), not the lab's kind,
+ * and it heads the parent-shaped step chips.
+ */
+export const DAD_LAB_TYPE_LABELS: Record<DadLabType, string> = {
+  science: 'Science',
+  engineering: 'Building',
+  adventure: 'Go and See',
+  heart: 'Heart',
+}
+
 /** Framework steps for each lab type */
 export const LAB_FRAMEWORKS: Record<string, { label: string; steps: string[] }> = {
   science: {

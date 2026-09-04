@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       # Same auth path as deploy.yml — google-github-actions/auth@v2 writes the
       # service-account key to disk and exports GOOGLE_APPLICATION_CREDENTIALS,
