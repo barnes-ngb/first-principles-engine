@@ -132,17 +132,31 @@ export interface ArtBudgetState {
  * and `generateImage.ts` `BOOK_ILLUSTRATION_RECIPES["book-illustration-storybook"]`
  * are the same palette, line and shading — so they read alike on purpose.
  * `minecraft` is one key serving both pickers for the same reason.
+ *
+ * **Why three parent blurbs name an outside game (FEAT-189).** A parent picking
+ * "Platformer World" or "Garden Battle" from a bare label has no way to know
+ * which look that is; the owner asked for the reference by name. This is
+ * descriptive help copy inside the family's own app — it names a reference so a
+ * parent can choose between six looks. It never reaches a prompt and never draws
+ * the thing: `copyrightUtils.rewriteForCopyright` and the `COPYRIGHT_BLOCK` in
+ * `chat.ts` govern generated content and are untouched by this file, which is
+ * strings only. The kid blurbs do not carry the reference — they are held to the
+ * readability bar and a six-year-old is picking by what the picture looks like.
+ *
+ * The three world blurbs also state the FEAT-189 set-dressing rule, because that
+ * is now what those looks actually do: the props appear where the page's scene
+ * allows them and are dropped indoors, keeping the look.
  */
 const STYLE_BLURBS: Record<string, Record<ArtHelpAudience, string>> = {
   // ── Book illustration looks (GENERATION_STYLES) ──────────────
   minecraft: {
     parent:
-      'Blocky voxel worlds built from cubes with visible pixel steps. One flat tone per cube face — lighter on top, darker on the sides — with no gradients and no outlines.',
+      'Blocky voxel worlds built from cubes with visible pixel steps. One flat tone per cube face — lighter on top, darker on the sides — with no gradients and no outlines. Where a page allows it the scene dresses in blocks and stepped terrain; indoors it keeps the look and drops the props.',
     kid: 'Blocky cubes. Flat colors. No outlines.',
   },
   'garden-warfare': {
     parent:
-      'A bright green garden with sunflowers, pea shooters, walnut barriers and silly cartoon zombies in the background. Humorous and colorful rather than scary.',
+      'Leaf green and warm yellow in flat cheerful fills, bold rounded outlines with nothing sharp, and simple two-tone shading in broad daylight — in the spirit of Plants vs. Zombies. Where a page allows it the scene dresses in sunflowers, pea shooters and silly cartoon zombies; indoors it keeps the look and drops the props.',
     kid: 'A silly garden battle. Bright and green.',
   },
   storybook: {
@@ -152,7 +166,7 @@ const STYLE_BLURBS: Record<string, Record<ArtHelpAudience, string>> = {
   },
   platformer: {
     parent:
-      'A side-scrolling video game world — blue sky, floating brick platforms, green pipes, gold coins, clouds with eyes. Cheerful and inviting.',
+      'Saturated primaries in flat fills, thick clean outlines around chunky shapes, and flat cel shading drawn side-on in 2D — the classic Mario-style game look. Where a page allows it the scene dresses in brick platforms, green pipes and gold coins; indoors it keeps the look and drops the props.',
     kid: 'A game world. Bricks, pipes and gold coins.',
   },
   comic: {
