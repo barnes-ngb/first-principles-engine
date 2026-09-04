@@ -80,8 +80,9 @@ finish-looking summary before it.
 3. **Ask for the follow-up round.** Codex reviews on PR open, on a draft going ready, and on an
    `@codex review` comment — **not** on every push, so without the ask the next window times out silently.
 4. **Poll another full 10-minute window against the new head commit.** A follow-up review is as
-   asynchronous as the first, so one immediate read does not close the round. The round is done when a
-   whole window passes with no new finding.
+   asynchronous as the first, so one immediate read does not close the round. **If that round raises a
+   finding, go back to step 2 and repeat 2–4** — as many times as it takes. The round is done only when a
+   whole window passes with **no** new finding; never stop on an unanswered one.
 5. **Post the summary**, with as its first line one of:
    - `CODEX ROUND: done — safe to merge`
    - `CODEX ROUND: none arrived in 10 min — safe to merge`

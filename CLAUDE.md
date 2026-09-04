@@ -59,10 +59,11 @@ plus `/pulls/{n}/comments`, or the GraphQL `reviewThreads`). `gh pr view <n> --c
 comments and review bodies but **no** review threads, so it will show a review that appears empty while
 every finding sits unread. (Codex reacts 👍 instead of reviewing when it has no suggestions.) Address every
 finding **in the same PR**, push, then **ask for the follow-up round** — Codex reviews on PR open, on a
-draft going ready, and on an `@codex review` comment, **not** on every push, so without the ask the second
+draft going ready, and on an `@codex review` comment, **not** on every push, so without the ask the next
 window times out silently — and poll **another full 10-minute window against the new head commit**. A
-follow-up review is as asynchronous as the first, so a single immediate read does not close the round. The
-round is done when a whole window passes with no new finding. Then post the run's summary — **its one
+follow-up review is as asynchronous as the first, so a single immediate read does not close the round.
+**Repeat that fix → ask → poll cycle for as long as a round keeps raising findings**; the round is done only
+when a whole window passes with no new finding — never stop on an unanswered one. Then post the run's summary — **its one
 summary, not a second one after an earlier "done" post** — with, as its first line, one of: `CODEX ROUND:
 done — safe to merge` · `CODEX ROUND: none arrived in 10 min — safe to merge` · `CODEX ROUND: open — do not
 merge yet`. Then **stop**. Do not subscribe to the PR, do not schedule a check-in, reminder, wake-up or
