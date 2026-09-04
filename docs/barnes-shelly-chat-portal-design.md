@@ -22,8 +22,8 @@
 >
 > **Hand-off to home base (infra, not portal scope — surfaced during portal work; the home base owns
 > these `ARCH-*` rows, do not create them here):**
-> - Functions runtime **Node 20 is deprecated; decommission 2026-10-30** — needs a runtime bump before then.
-> - `firebase-functions` is **one version behind** (deploy-log warning) — worth upgrading alongside the runtime bump.
+> - Functions runtime **Node 20 is deprecated; decommission 2026-10-30** — needs a runtime bump before then. _Code landed: ARCH-17, PR #1751 (2026-09-04) — `engines.node` is 22 on `main`; the live functions move to `nodejs22` on the next `deploy` push (tracked in `docs/OPS_WINDOW.md`)._
+> - `firebase-functions` is **one version behind** (deploy-log warning) — worth upgrading alongside the runtime bump. _Checked in ARCH-17: the installed 6.6.0 already supports `nodejs22`; no bump needed._
 >
 > ---
 >
