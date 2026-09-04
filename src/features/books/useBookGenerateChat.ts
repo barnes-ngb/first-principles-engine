@@ -16,6 +16,7 @@ import {
 } from './storyGenerationFailure'
 import {
   StoryWordSource,
+  practiceWordsUsedIn,
   resolveStoryWords,
   selectStoryPracticeWords,
   storyDraftMessage,
@@ -99,9 +100,11 @@ export interface UseBookGenerateChat {
    * `words` list. **A list the parent typed into the idea wins** (FEAT-172,
    * `parseRequestedWords`); otherwise the child's own practice words
    * (`practicing` / `new` in `sightWordProgress`, capped — FEAT-169); `[]` when
-   * neither exists. Read-only here — this surface never writes a sight word.
-   * The UI shows the list, and which source it is, before the tap so a silent
-   * miss is impossible.
+   * neither exists. `sightWordProgress` stays read-only here — this surface
+   * never writes a child's word record; since FEAT-188 it does record the
+   * words that landed on the pages as `book.sightWords`, which is a property
+   * of the book, not of the child. The UI shows the list, and which source it
+   * is, before the tap so a silent miss is impossible.
    */
   storyWords: string[]
   /** Which of the two sources `storyWords` came from (FEAT-172). */
@@ -387,6 +390,35 @@ export function useBookGenerateChat(
       // the first-message write runs before `pendingIdea` has re-rendered.
       const wordsForIdea = resolveStoryWords(idea, practiceWords).words
 
+      // UX-123, the standing decision, settled by the owner 2026-09-04
+      // (FEAT-188): **a chat book is a practice book when a list was in play.**
+      // `book.sightWords` is what flips the reader into sight-word mode — the
+      // "Words to Watch For" page, the tappable chips, the per-word
+      // `sightWordProgress` writes, the print dialog's highlighting section.
+      // FEAT-169 left it unset on chat books pending this decision, so a
+      // parent who asked for Lincoln's words got a plain reader while the same
+      // ask through "Make a sight word book" got the practice one.
+      //
+      // Two rails on the set:
+      //   - Only at **publish** ("I like the whole story!"). A half-made draft
+      //     is not a practice book yet, and this is the same write the book
+      //     already makes — never a second one.
+      //   - Only the words that **actually landed on the pages**
+      //     (`practiceWordsUsedIn`, the same check the draft turn reports
+      //     from), never the requested list and never the model's own claim.
+      //     A story that missed every word is not a practice book for words it
+      //     does not contain, so an empty result leaves the field unset and
+      //     the book reads plain — exactly as it did before this run.
+      // No list in play (`StoryWordSource.None` → `wordsForIdea` empty) is
+      // unchanged: unset.
+      const landedWords =
+        generateChatState === 'completed' && wordsForIdea.length > 0
+          ? [...new Set(practiceWordsUsedIn(pages, wordsForIdea))]
+          : []
+      // Spread, not a key set to `undefined`: Firestore rejects that, and an
+      // absent field is what "not a practice book" means on every other book.
+      const sightWordField = landedWords.length > 0 ? { sightWords: landedWords } : {}
+
       if (bookId) {
         const ref = doc(booksCollection(familyId), bookId)
         try {
@@ -409,6 +441,7 @@ export function useBookGenerateChat(
               pages: mergedPages,
               coverStyle: style as Book['coverStyle'],
               updatedAt: now,
+              ...sightWordField,
               generationConfig: {
                 ...(current.generationConfig ?? {}),
                 storyIdea: idea,
@@ -438,6 +471,7 @@ export function useBookGenerateChat(
         title: story.title,
         coverStyle: style as Book['coverStyle'],
         pages,
+        ...sightWordField,
         status: 'draft',
         createdAt: now,
         updatedAt: now,
