@@ -43,21 +43,32 @@ Add/keep tests proving it. No new heavy dependencies (bundle is tracked debt).
 
 ## Step 6 — Verify & PR
 Green before and after. Branch `auto/arch-<id>-<slug>`. PR `fix(<area>): <id> — <desc> (auto)`.
-**Do not merge.** Update the ledger row to `IN PROGRESS` with the PR link. End with a 4-line summary:
-the item, what changed, before/after evidence, and confirmation no invariant was touched. A green run
+**Do not merge.** Update the ledger row to `IN PROGRESS` with the PR link. Then run **End of run** below,
+and post the 4-line summary there — the item, what changed, before/after evidence, and confirmation no
+invariant was touched — under the `CODEX ROUND:` first line. Do not post a summary before the Codex round
+is answered. A green run
 status means it executed, not that it's correct — the human reviews the PR.
 
 ## End of run
 
 A run is not finished when the PR opens; it is finished when the **automated review round on that PR is
-answered**. After opening the PR: wait for the Codex review (poll the PR's reviews/comments every 60 s,
-up to 10 minutes — `gh pr view <n> --comments`, or the PR API), address every finding it raises **in the
-same PR**, push, and poll once more for a follow-up round. Then post the run summary with, as its first
-line, one of:
+answered**. This is the run's last step, and the summary below is the run's **one** summary — do not post a
+finish-looking summary before it.
 
-- `CODEX ROUND: done — safe to merge`
-- `CODEX ROUND: none arrived in 10 min — safe to merge`
-- `CODEX ROUND: open — do not merge yet`
+1. **Poll for the Codex review** every 60 s for up to 10 minutes — **and poll the inline review threads, not
+   just the PR's comments**. Codex files its findings as review comments anchored to lines, so read the PR's
+   **reviews** *and* its **review comments** (`/repos/{owner}/{repo}/pulls/{n}/reviews` plus
+   `/pulls/{n}/comments`, or the GraphQL `reviewThreads`). `gh pr view <n> --comments` fetches top-level
+   comments and review bodies but **no** review threads, so it will show a review that looks empty while
+   every finding sits unread. (Codex reacts 👍 instead of reviewing when it has no suggestions.)
+2. **Address every finding in the same PR**, and push.
+3. **Poll another full 10-minute window against the new head commit.** A follow-up review is as
+   asynchronous as the first, so one immediate read does not close the round. The round is done when a
+   whole window passes with no new finding.
+4. **Post the summary**, with as its first line one of:
+   - `CODEX ROUND: done — safe to merge`
+   - `CODEX ROUND: none arrived in 10 min — safe to merge`
+   - `CODEX ROUND: open — do not merge yet`
 
 Then **stop**. Do not subscribe to the PR, do not schedule a check-in, reminder, wake-up or scheduled
 task of any kind, and do not stay resident to "watch CI" — CI's result is on the PR page. If CI fails

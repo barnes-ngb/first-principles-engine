@@ -57,8 +57,9 @@ state a printable copy"; backup = "survive a data disaster."
    - If none exists → keep `OPEN`, append the recommended option and the console-confirmation note.
 2. If you wrote a code proposal (option 2), put it in a `docs:` PR titled
    `docs: backup proposal (DATA-03)` — proposal only, no deployed code. **Do not merge.**
-3. End with a 4-line answer to the original question: can they recover today (yes/no/unknown-pending-
-   console-check), what you recommend, and the single next action for the human.
+3. If you opened a PR, run **End of run** below and post the 4-line answer there, under the `CODEX ROUND:`
+   first line (an investigation that opened no PR just answers). Either way the answer is: can they recover
+   today (yes/no/unknown-pending-console-check), what you recommend, and the single next action for the human.
 
 Remember: do **not** deploy backup infrastructure or change data in this run. Investigate, confirm,
 propose. The human decides.
@@ -66,14 +67,23 @@ propose. The human decides.
 ## End of run
 
 A run is not finished when the PR opens; it is finished when the **automated review round on that PR is
-answered**. After opening the PR: wait for the Codex review (poll the PR's reviews/comments every 60 s,
-up to 10 minutes — `gh pr view <n> --comments`, or the PR API), address every finding it raises **in the
-same PR**, push, and poll once more for a follow-up round. Then post the run summary with, as its first
-line, one of:
+answered**. This is the run's last step, and the summary below is the run's **one** summary — do not post a
+finish-looking summary before it.
 
-- `CODEX ROUND: done — safe to merge`
-- `CODEX ROUND: none arrived in 10 min — safe to merge`
-- `CODEX ROUND: open — do not merge yet`
+1. **Poll for the Codex review** every 60 s for up to 10 minutes — **and poll the inline review threads, not
+   just the PR's comments**. Codex files its findings as review comments anchored to lines, so read the PR's
+   **reviews** *and* its **review comments** (`/repos/{owner}/{repo}/pulls/{n}/reviews` plus
+   `/pulls/{n}/comments`, or the GraphQL `reviewThreads`). `gh pr view <n> --comments` fetches top-level
+   comments and review bodies but **no** review threads, so it will show a review that looks empty while
+   every finding sits unread. (Codex reacts 👍 instead of reviewing when it has no suggestions.)
+2. **Address every finding in the same PR**, and push.
+3. **Poll another full 10-minute window against the new head commit.** A follow-up review is as
+   asynchronous as the first, so one immediate read does not close the round. The round is done when a
+   whole window passes with no new finding.
+4. **Post the summary**, with as its first line one of:
+   - `CODEX ROUND: done — safe to merge`
+   - `CODEX ROUND: none arrived in 10 min — safe to merge`
+   - `CODEX ROUND: open — do not merge yet`
 
 Then **stop**. Do not subscribe to the PR, do not schedule a check-in, reminder, wake-up or scheduled
 task of any kind, and do not stay resident to "watch CI" — CI's result is on the PR page. If CI fails

@@ -52,15 +52,22 @@ human to run a local command — their actions are limited to: pasting a run, up
 reviewing / merging a PR.
 
 **End of run.** A run is not finished when the PR opens; it is finished when the automated review round
-on that PR is answered. After opening the PR: wait for the Codex review (poll the PR's reviews/comments
-every 60 s, up to 10 minutes — `gh pr view <n> --comments`, or the PR API), address every finding it
-raises **in the same PR**, push, and poll once more for a follow-up round. Then post the run summary
-with, as its first line, one of: `CODEX ROUND: done — safe to merge` · `CODEX ROUND: none arrived in
-10 min — safe to merge` · `CODEX ROUND: open — do not merge yet`. Then **stop**. Do not subscribe to the
-PR, do not schedule a check-in, reminder, wake-up or scheduled task of any kind, and do not stay resident
-to "watch CI" — CI's result is on the PR page. If CI fails after you stop, the human pastes the log into a
-new run. **A merged PR is never touched again by the run that opened it**; a fix that is still needed goes
-on a new branch and PR. The human merges only a PR whose summary's first line says `safe to merge`.
+on that PR is answered. After opening the PR, poll every 60 s for up to 10 minutes — **and poll the inline
+review threads, not just the PR's comments**: Codex files its findings as review comments anchored to
+lines, so read the PR's **reviews** *and* its **review comments** (`/repos/{owner}/{repo}/pulls/{n}/reviews`
+plus `/pulls/{n}/comments`, or the GraphQL `reviewThreads`). `gh pr view <n> --comments` fetches top-level
+comments and review bodies but **no** review threads, so it will show a review that appears empty while
+every finding sits unread. (Codex reacts 👍 instead of reviewing when it has no suggestions.) Address every
+finding **in the same PR**, push, then poll **another full 10-minute window against the new head commit** —
+a follow-up review is as asynchronous as the first, so a single immediate read does not close the round.
+The round is done when a whole window passes with no new finding. Then post the run's summary — **its one
+summary, not a second one after an earlier "done" post** — with, as its first line, one of: `CODEX ROUND:
+done — safe to merge` · `CODEX ROUND: none arrived in 10 min — safe to merge` · `CODEX ROUND: open — do not
+merge yet`. Then **stop**. Do not subscribe to the PR, do not schedule a check-in, reminder, wake-up or
+scheduled task of any kind, and do not stay resident to "watch CI" — CI's result is on the PR page. If CI
+fails after you stop, the human pastes the log into a new run. **A merged PR is never touched again by the
+run that opened it**; a fix that is still needed goes on a new branch and PR. The human merges only a PR
+whose summary's first line says `safe to merge`.
 
 **Lincoln-first / London minimal.** Wire new work for Lincoln; gate London out of untuned surfaces on
 **capability, never on his name** (`isLincoln`/`ageGroup` are cosmetic/personality, not access). London's
