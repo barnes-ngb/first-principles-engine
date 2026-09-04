@@ -61,8 +61,11 @@ finish-looking summary before it.
      its findings to lines, and `gh pr view <n> --comments` fetches top-level comments and review bodies but
      **no** review threads, so it shows a review that looks empty while every finding sits unread;
    - the **reactions** on the PR and on the comment that asked for the round — Codex signals *reviewed,
-     nothing to say* with a 👍 rather than a review, and no review endpoint returns that. A 👍 closes the
-     round clean immediately; don't burn the rest of the window on it.
+     nothing to say* with a 👍 rather than a review, and no review endpoint returns that. It counts **only
+     when the reaction is the Codex reviewer's own** (`chatgpt-codex-connector[bot]`) and, on the PR itself,
+     was added **within this round's window**: a 👍 from a human or another bot is not a review result, and
+     an older one is not this round's. A qualifying 👍 closes the round clean immediately; don't burn the
+     rest of the window on it.
 2. **If the round raised no findings, go straight to step 5.** Never re-ask for a review of an unchanged head.
 3. **Address every finding in the same PR**, and push.
 4. **Ask for the next round** with an `@codex review` comment — Codex reviews on PR open, on a draft going
