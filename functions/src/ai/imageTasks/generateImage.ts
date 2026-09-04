@@ -82,6 +82,18 @@ type BookIllustrationRecipe = VisualRecipe & {
    * three world styles cannot state the rule three slightly different ways.
    */
   props?: string;
+  /**
+   * Set when this world's props include living things, so the page opens with
+   * {@link BOOK_PAGE_FRAMING_WITH_PROP_CREATURES} instead of {@link
+   * BOOK_PAGE_FRAMING} — forbidding the same things while naming those props as
+   * the one allowed exception, rather than banning them and then taking it back.
+   *
+   * Only Garden Battle needs it, and it is opt-in rather than automatic on every
+   * world style: a blanket exception would invite Minecraft and Platformer World
+   * — whose props are blocks, terrain, pipes and coins — to put creatures in a
+   * picture that should have none.
+   */
+  propsIncludeCreatures?: true;
 };
 
 const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
@@ -133,6 +145,7 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
     shading:
       "simple two-tone cartoon shading with one soft drop shadow under each shape, lit by broad flat daylight.",
     props: "sunflowers, pea shooters, walnut barriers, garden pots, silly cartoon zombies in the background",
+    propsIncludeCreatures: true,
   },
   "book-illustration-platformer": {
     hint: "in the look of a classic side-scrolling platformer video game",
@@ -148,26 +161,63 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
 };
 
 /**
- * Every book-illustration page prompt ends with this shared framing.
- *
- * The unified-scene guardrail sits here rather than on each style so the next
- * style added inherits it. It is the belt to {@link worldPropsClause}'s braces:
- * the props clause tells the model what to do with a world's props when the
- * scene is indoors, and this tells it that whatever it decides, the answer is
- * one picture (FEAT-189).
+ * The unified-scene guardrail, shared by all six styles so the next style added
+ * inherits it. It is the belt to {@link worldPropsClause}'s braces: the props
+ * clause tells the model what to do with a world's props when the scene is
+ * indoors, and this tells it that whatever it decides, the answer is one
+ * picture (FEAT-189).
+ */
+const UNIFIED_SCENE_RULE =
+  "One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. ";
+
+/**
+ * Every book-illustration page prompt opens with this framing: a page picture is
+ * the background a story sits on, and the story's people belong to the words.
  */
 const BOOK_PAGE_FRAMING =
-  "One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. " +
-  "Environment and background only, no characters or people. ";
+  UNIFIED_SCENE_RULE + "Environment and background only, no characters or people. ";
+
+/**
+ * The same framing for a world whose own props are alive (Codex P2 on PR #1758,
+ * then again on PR #1759).
+ *
+ * Before FEAT-189, Garden Battle was the **only** style whose prefix said "no
+ * specific characters" rather than "no characters or people" — deliberately
+ * looser, because a garden battle without its silly cartoon zombies is just a
+ * garden. Routing it through the shared framing swapped that for the strict
+ * wording while still asking for the zombies, so the prompt both demanded and
+ * forbade them.
+ *
+ * The first attempt at a fix appended a later sentence saying those creatures
+ * were "not the story's characters". That was not enough, and Codex was right to
+ * say so: describing what they are not never grants an exemption from a ban
+ * already stated categorically, so the model could still satisfy "no characters"
+ * by dropping them — the very regression the fix was for. An image model asked
+ * to hold a prohibition and a later exception together tends to keep the
+ * prohibition.
+ *
+ * So the contradiction is not patched, it is never emitted: a style whose props
+ * include creatures gets a framing that forbids exactly what the other five
+ * forbid — people, and the story's characters — while naming its own prop
+ * creatures as the one allowed exception, up front and in the same breath.
+ * Scoped to the style that opts in, so the other five keep {@link
+ * BOOK_PAGE_FRAMING} verbatim. It names no prop of its own, so a world's nouns
+ * still appear only inside the props clause.
+ */
+const BOOK_PAGE_FRAMING_WITH_PROP_CREATURES =
+  UNIFIED_SCENE_RULE +
+  "Environment and background only: no people, and none of the story's characters. " +
+  "The one exception is the world's own prop creatures listed below — those ARE allowed and expected: " +
+  "draw them as scenery, small and incidental in the background, never the subject of the picture. ";
 
 /**
  * The one statement of how a world's props relate to the page's own scene
  * (FEAT-189). Each world recipe supplies only the noun list; this supplies the
  * rule, so the three cannot drift apart.
  */
-function worldPropsClause(props: string): string {
+function worldPropsClause(recipe: BookIllustrationRecipe): string {
   return (
-    `Where the scene allows, dress it with the world's props (${props}); ` +
+    `Where the scene allows, dress it with the world's props (${recipe.props}); ` +
     "when the scene is indoors or somewhere else, keep the LOOK and drop the props. "
   );
 }
@@ -175,8 +225,11 @@ function worldPropsClause(props: string): string {
 function bookIllustrationPrefix(styleKey: string): string {
   const recipe = BOOK_ILLUSTRATION_RECIPES[styleKey];
   if (!recipe) return "";
-  const props = recipe.props ? worldPropsClause(recipe.props) : "";
-  return `${recipe.summary} ${BOOK_PAGE_FRAMING}${recipeDetail(recipe)}${props}`;
+  const framing = recipe.propsIncludeCreatures
+    ? BOOK_PAGE_FRAMING_WITH_PROP_CREATURES
+    : BOOK_PAGE_FRAMING;
+  const props = recipe.props ? worldPropsClause(recipe) : "";
+  return `${recipe.summary} ${framing}${recipeDetail(recipe)}${props}`;
 }
 
 /** The six looks a parent can pick in the book generator's style picker. */
