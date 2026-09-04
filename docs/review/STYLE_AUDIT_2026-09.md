@@ -599,17 +599,22 @@ a **story-prompt** change, outside the sanctioned exception. Filed as **UX-172**
    `style: 'book-illustration-storybook'` (or a new `game-art` recipe) instead of `'general'`, and make
    `artHelpContent`'s claim true.
    *Landed:* a new **`game-art`** recipe rather than `book-illustration-storybook` — that style's
-   framing bans characters and people, which would break every challenge card and token. It
-   carries `UNIFIED_SCENE_RULE` but not `BOOK_PAGE_FRAMING`, and its shading is cutout-safe for
-   the transparent parent token. All **five** call sites send it (the fifth is `WorkshopPage`'s
+   framing bans characters and people, which would break every challenge card and token. It is
+   **look-only** — it states no framing at all, and its shading is cutout-safe — because that one
+   prefix also reaches the parent token ("a circular icon, on transparent background"), which runs
+   on `background: 'auto'`; each Workshop prompt keeps saying what shape it has to be, which is
+   the FEAT-189 split. All **five** call sites send it (the fifth is `WorkshopPage`'s
    after-the-words title card), and the inline adjective phrases came out of the prompts in the
    same change — leaving them would put two art directions in one prompt.
 5. **UX-164** — ✅ **FIXED (FEAT-193).** Promote `book-sticker` to a `VisualRecipe`.
    *Landed:* flat vector fills, a bold even outline closed all the way round, one turned-away
    tone and one highlight, and no shadow of any kind (it is always transparent). Its
-   single-subject rule moved into a separate `STICKER_FRAMING` carrying `UNIFIED_SCENE_RULE`, so
-   the recipe answers only the three look questions and "a sticker" cannot come back as a
-   *sheet* of them.
+   single-subject rule moved into a separate `STICKER_FRAMING`, so the recipe answers only the
+   three look questions and "a sticker" cannot come back as a *sheet* of them. A sticker is not a
+   scene, so it gets its own subject sentence rather than the page styles' — "one single, unified
+   **scene** filling the whole image" followed by "no background elements, no **scene**" would
+   state a rule and take it back. The rule keeps one definition (`NEVER_SPLIT_CLAUSE`, composed by
+   both framings), so the six page styles' framing is byte-identical.
 6. **UX-161a** — ✅ **FIXED (FEAT-193).** Fix the three reimagine captions so they describe what the style actually does.
    *Landed:* the three captions and both slider end labels ("Keep my style" → *Watercolor look*,
    "Full reimagine" → *Comic-book look*) moved into a pure `reimagineCaptions.ts`;
