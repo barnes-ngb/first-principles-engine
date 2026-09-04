@@ -110,10 +110,12 @@ finish-looking summary before it.
    comments and review bodies but **no** review threads, so it will show a review that looks empty while
    every finding sits unread. (Codex reacts 👍 instead of reviewing when it has no suggestions.)
 2. **Address every finding in the same PR**, and push.
-3. **Poll another full 10-minute window against the new head commit.** A follow-up review is as
+3. **Ask for the follow-up round.** Codex reviews on PR open, on a draft going ready, and on an
+   `@codex review` comment — **not** on every push, so without the ask the next window times out silently.
+4. **Poll another full 10-minute window against the new head commit.** A follow-up review is as
    asynchronous as the first, so one immediate read does not close the round. The round is done when a
    whole window passes with no new finding.
-4. **Post the summary**, with as its first line one of:
+5. **Post the summary**, with as its first line one of:
    - `CODEX ROUND: done — safe to merge`
    - `CODEX ROUND: none arrived in 10 min — safe to merge`
    - `CODEX ROUND: open — do not merge yet`
