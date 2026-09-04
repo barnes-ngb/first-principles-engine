@@ -337,14 +337,25 @@ export const generateImage = onCall(
     // Only reaches the prompt when the picked style has no look of its own —
     // see the precedence note on `buildImagePrompt` (FEAT-174).
     //
-    // FEAT-190 closed the gap this map had: `sight_words`, `family`, `science`
-    // and `faith` were absent, so four of the fifteen ids a parent can pick in
-    // the Book Editor's Finish dialog resolved to no prefix at all — a control
-    // that reaches the model as nothing. Their four strings are copied verbatim
-    // from the client's `PRESET_THEMES[*].imageStylePrefix`
+    // FEAT-190 completed this map: `sight_words`, `family`, `science` and
+    // `faith` were absent, so four of the fifteen ids a parent can pick in the
+    // Book Editor's Finish dialog had no entry at all. Their four strings are
+    // copied verbatim from the client's `PRESET_THEMES[*].imageStylePrefix`
     // (`src/core/types/books.ts`), which is the text a person can actually read;
     // the eleven older entries are hand-abridged copies of the same field, and
     // abridging the new four would only add a fifth variant of one string.
+    //
+    // **No caller in the repo can reach any entry in this map today**, and that
+    // is a separate gap from the missing four. `useBookIllustrator` is the only
+    // caller that sends `themeId`, and it always sends a
+    // `book-illustration-${style}` alongside it, which wins outright (FEAT-174).
+    // The one style that resolves to no prefix — `book-illustration-photo`, from
+    // the `photo` cover style in `useBookReview`'s fallback chain — is not in
+    // `validStyles` above, so that request is rejected at the argument gate
+    // before it ever gets here (caught per page by the illustrator, which marks
+    // the page failed). Completing the map is therefore correct data, not a
+    // behaviour change: routing a caller to it is filed as UX-165/UX-172, not
+    // done here.
     //
     // This is still a hand-kept duplicate of the client table, and a third copy
     // lives in `functions/src/ai/tasks/generateStory.ts` (`PRESET_THEME_MAP`,

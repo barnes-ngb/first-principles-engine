@@ -1,6 +1,6 @@
 # STYLE & THEME AUDIT — 2026-09-04
 
-**Ledger row:** `FEAT-190`. **Findings:** `UX-160` → `UX-178`.
+**Ledger row:** `FEAT-190`. **Findings:** `UX-160` → `UX-179`.
 **Scope:** every pickable "style", "theme" and "look" in the app, laid next to the text it actually
 sends to a model. Read-only — **one** sanctioned fix applied (§11).
 **Base:** `origin/main` @ `8c5062a1` (FEAT-189 / PR #1758 merged; this audit reads the post-189 state
@@ -118,11 +118,11 @@ with no `style`, the theme owns the look (`:238-260`).
 | `cartoon` · 🎨 **Cartoon** (default) | "The house default: warm hand-painted watercolor… The same recipe the Storybook book look uses." `:186` | `STYLE_RECIPES.storybook` `enhanceSketch.ts:44-52`. Palette *"…cream, soft coral, sage — with visible paper white showing through."* Line *"a soft, slightly uneven ink line of medium weight that sometimes lifts off the edge."* Shading *"translucent watercolor washes with soft blooms where colors meet; no hard black shadows."* | **Look** | **See §3** — shares its medium (watercolor + ink) with `fantasy`, the only such pair in the picker. Also **not** byte-identical to the Storybook book recipe the help says it equals (§5) |
 | `fantasy` · ✨ **Fantasy** | "Dusty lilac, moss green and candlelight gold with a faint glow… A fine tapering ink line and soft washes that bleed past it." `:191` | `THEME_IMAGE_STYLES.fantasy` `:97-106`. Palette *"dusty lilac, moss green and candlelight gold, with a faint glow around anything magical."* Line *"a fine, tapering ink line — noticeably thinner than the house cartoon style — that breaks away in places."* Shading *"soft watercolor washes that bleed past the line, with luminous highlights and no hard shadow."* | **Look** | **The owner's pair — §3** |
 | `animals` · 🐾 **Animals** | "Warm creams, ginger and soft brown with pink cheek accents…" `:196` | `THEME_IMAGE_STYLES.animals` `:117-124`. Shading *"simple two-tone shading with visible fur or feather texture; no hard shadows."* | **Look** | Yes — the only one naming fur |
-| `adventure` · 🗺️ **Adventure** | "Sun-bleached ochre against deep teal shadow… strong cast shadows with a bright rim light." `:201` | `THEME_IMAGE_STYLES.adventure` `:107-116`. Shading *"high-contrast directional light with strong cast shadows and a bright rim light on the silhouette."* | **Look**, but names **no medium** | Palette-only separation — and its shading contradicts the transparent clause (**UX-162**) |
-| `space` · 🚀 **Space Explorer** | "Deep indigo and violet darks with electric cyan and magenta nebula accents…" `:206` | `THEME_IMAGE_STYLES.space` `:134-143`. Shading *"airbrushed gradients with bloom around bright areas and fine star speckles."* | **Look** with a subject tail (*star speckles*) | Yes on medium (airbrush) — but "star speckles" is environment on a cutout (**UX-162**) |
-| `science` · 🔬 **Science** | "Clean primary red, blue and yellow on generous white space. A crisp uniform line like a well-drawn diagram…" `:211` | `THEME_IMAGE_STYLES.science` `:125-133`. Shading *"flat fills with a single soft light-grey drop shadow. No gradients, no texture."* | **Look** | Yes (technical line is unique) — drop shadow contradicts the cutout (**UX-162**) |
-| `faith` · ✝️ **Faith** | "Warm amber, ivory and soft olive at low saturation. A soft line drawn in warm brown rather than black…" `:216` | `THEME_IMAGE_STYLES.faith` `:144-151`. Shading *"gentle golden light from one side with long soft shadows and no harsh contrast."* | **Look**, names **no medium** | Palette + line-colour only — "long soft shadows" contradicts the cutout (**UX-162**) |
-| `family` · 👨‍👩‍👦 **Family** | "Muted terracotta, wheat and sage — homey and deliberately desaturated. A soft pencil-textured line…" `:221` | `THEME_IMAGE_STYLES.family` `:202-209`. Shading *"soft diffuse indoor light with a visible paper grain over everything."* | **Look** | Yes on medium (pencil) — "paper grain over everything" is a background on a cutout (**UX-162**) |
+| `adventure` · 🗺️ **Adventure** | "Sun-bleached ochre against deep teal shadow… strong cast shadows with a bright rim light." `:201` | `THEME_IMAGE_STYLES.adventure` `:107-116`. Shading *"high-contrast directional light with strong cast shadows and a bright rim light on the silhouette."* | **Look**, but names **no medium** | Palette-only separation — and *"strong cast shadows"* needs a surface the cutout clause removes (**UX-162**) |
+| `space` · 🚀 **Space Explorer** | "Deep indigo and violet darks with electric cyan and magenta nebula accents…" `:206` | `THEME_IMAGE_STYLES.space` `:134-143`. Shading *"airbrushed gradients with bloom around bright areas and fine star speckles."* | **Look** with a subject tail (*star speckles*) | Yes on medium (airbrush). "Star speckles" reads as environment on a cutout, but could be speckles *on* the subject — **ambiguous, not demonstrable** (**UX-162**) |
+| `science` · 🔬 **Science** | "Clean primary red, blue and yellow on generous white space. A crisp uniform line like a well-drawn diagram…" `:211` | `THEME_IMAGE_STYLES.science` `:125-133`. Shading *"flat fills with a single soft light-grey drop shadow. No gradients, no texture."* | **Look** | Yes (technical line is unique) — a drop shadow falls behind the subject, which the cutout removes (**UX-162**) |
+| `faith` · ✝️ **Faith** | "Warm amber, ivory and soft olive at low saturation. A soft line drawn in warm brown rather than black…" `:216` | `THEME_IMAGE_STYLES.faith` `:144-151`. Shading *"gentle golden light from one side with long soft shadows and no harsh contrast."* | **Look**, names **no medium** | Palette + line-colour only — *"long soft shadows"* needs a surface the cutout removes (**UX-162**) |
+| `family` · 👨‍👩‍👦 **Family** | "Muted terracotta, wheat and sage — homey and deliberately desaturated. A soft pencil-textured line…" `:221` | `THEME_IMAGE_STYLES.family` `:202-209`. Shading *"soft diffuse indoor light with a visible paper grain over everything."* | **Look** | Yes on medium (pencil). "Paper grain over everything" may mean over the *subject* — **ambiguous, not demonstrable** (**UX-162**) |
 | `minecraft` · ⛏️ **Blocky** | (shares the `minecraft` blurb, `:154`) | The **only** option sending both: `STYLE_RECIPES.minecraft` owns the look *and* `THEME_IMAGE_STYLES.minecraft`'s summary rides along as *"Visual theme: Blocky pixel-art Minecraft style with cubic shapes and bright colors."* (rendered prompt, 1149 chars — the longest) | **Look** | Yes, comfortably — but see **UX-167** (a third minecraft recipe exists) |
 
 `THEME_IMAGE_STYLES` covers **all fifteen** presets — it is the only complete server copy. Six of them
@@ -174,7 +174,7 @@ adjective-only strings FEAT-159 and FEAT-174 diagnosed as collapsing. **UX-163.*
 
 | Picker | Options | What it does |
 |---|---|---|
-| **Cover style** — *Write it myself* sheet (`BookshelfPage.tsx:1121-1142`, `COVER_STYLES` `bookTypes.ts:3-11`) | Storybook · Minecraft · Comic Book · **Photo Album** · Realistic · Garden Battle · Platformer World | Writes `book.coverStyle`. Nothing renders a cover from it. Its **only** functional read is a third-level fallback for the review chat's picture regen (`useBookReview.ts:383-387`) — where **Photo Album** becomes `book-illustration-photo`, which is in no table, so it resolves to no look at all. **UX-165** |
+| **Cover style** — *Write it myself* sheet (`BookshelfPage.tsx:1121-1142`, `COVER_STYLES` `bookTypes.ts:3-11`) | Storybook · Minecraft · Comic Book · **Photo Album** · Realistic · Garden Battle · Platformer World | Writes `book.coverStyle`. Nothing renders a cover from it. Its **only** functional read is a third-level fallback for the review chat's picture regen (`useBookReview.ts:383-387`) — where **Photo Album** becomes `book-illustration-photo`, which is not in the callable's `validStyles` (`generateImage.ts:301-319`), so the request is **rejected at the argument gate**; `useBookIllustrator` catches it per page (`:252-255`) and marks the page failed. Not a look-less picture — **no picture**. **UX-165** |
 | **App theme** — `ThemeMode` `family` \| `lincoln` \| `london` (`enums.ts:96-101`, `ProfileProvider.tsx:7`) | — | MUI colour scheme in `localStorage`. A fifth meaning of "theme" (§6) |
 | **Seasonal theme** (`avatar/voxel/seasonalTheme.ts:60`) | spring/summer/autumn/winter | Three.js particle colours. A sixth, internal only |
 
@@ -242,20 +242,41 @@ space      airbrush, gradient
 ```
 
 Medium is the axis a viewer reads first. Two watercolor options differing by palette and line weight
-will look like variations of one thing — which is exactly the report. **Two things make it worse on
-this surface specifically:**
+will look like variations of one thing — which is exactly the report. And **the one axis that does
+fully separate them is the one the surface constrains**: the prompt says *"Keep the same composition,
+characters, and scene layout from the original drawing"*, so the palette of a re-drawn child's drawing
+is largely the drawing's. That is **UX-179**, and it is the mechanism behind the owner's report — it
+rests on a measurement (the medium scan above), not on inference.
 
-- **The picture is a cutout of the child's own drawing.** The prompt says *"Keep the same composition,
-  characters, and scene layout from the original drawing"* — so the palette, the one axis that fully
-  separates these two, is the axis the source drawing most constrains.
-- **Five of the nine options describe light and shadow, and the same prompt forbids them.** Because
-  `resolveFancyEnhanceParams` always sets `transparent: true`, every fancy prompt ends with *"No
-  background scene, no ground, **no shadows on the ground**, no environment, no border."* — while
-  `adventure` asks for *"strong cast shadows"*, `faith` for *"long soft shadows"*, `science` for *"a
-  single soft light-grey drop shadow"*, `family` for *"a visible paper grain over everything"* and
-  `space` for *"fine star speckles"*. Those five options are each asking for a thing the next sentence
-  bans, so their most distinctive axis is the one thrown away. **UX-162 — the P1 of this audit's
-  sticker half, and the mechanism behind the owner's report.**
+> **Correction, 2026-09-04 — this section originally over-claimed, and a Codex review on PR #1760
+> caught it.** The first draft folded a second finding into this one and called the pair "the P1 of
+> this audit's sticker half, and the mechanism behind the owner's report". That was wrong on both
+> counts, and the split below is the corrected reading. The shadow conflict is real but **narrower**
+> than stated, and — decisively — **neither Cartoon nor Fantasy is in the conflicting set**: both say
+> *"no hard shadow(s)"*, which the cutout clause is perfectly happy with. So the shadow conflict cannot
+> be the mechanism behind the owner's specific report. The two are now filed separately: **UX-179**
+> (the measured medium collapse, the owner's pair) and **UX-162** (the shadow conflict, narrowed and
+> demoted to P2).
+
+**The separate, narrower finding — UX-162.** Because `resolveFancyEnhanceParams` always sets
+`transparent: true`, every fancy prompt ends *"No background scene, no ground, **no shadows on the
+ground**, no environment, no border."* Three of the nine options ask for something that clause
+**demonstrably** removes, because each needs a surface the cutout does not have:
+
+| option | shading clause | why it conflicts |
+|---|---|---|
+| `adventure` | *"strong cast shadows and a bright rim light on the silhouette"* | a cast shadow is cast **onto** something; the rim light is fine and survives |
+| `faith` | *"gentle golden light from one side with long soft shadows"* | a long shadow lies on a ground plane that is removed |
+| `science` | *"flat fills with a single soft light-grey drop shadow"* | a drop shadow falls behind the subject, onto the background |
+
+Two more were originally listed here and are **not** demonstrable from the prompt text alone, because
+the clause forbids background, ground and shadows *on the ground* — not shading, texture or detail on
+the subject itself: `family`'s *"a visible paper grain over everything"* (which may mean over the
+subject) and `space`'s *"fine star speckles"* (which may be speckles on the subject). Both are recorded
+as **ambiguous — needs looking at real output**, not as conflicts.
+
+So: **3 of 9 demonstrable, 2 of 9 ambiguous, and the owner's own pair in neither group.** UX-162 is a
+P2.
 
 **Second-closest, worth naming:** `garden-warfare` ↔ `platformer` (.204). Both are *"flat saturated
 fills + thick even outlines + two-step cel shading"*. `platformer` adds *"drawn side-on in 2D with no
@@ -275,7 +296,7 @@ FEAT-159 designed.
 |---|---|---|
 | `GENERATION_STYLES` → `STYLE_PREFIXES` | every book picture, always wins (FEAT-174) | — |
 | `PRESET_THEMES.imageStylePrefix` (client) | **nothing.** It is the display copy; both server maps carry their own abridged text | any model |
-| `PRESET_IMAGE_PREFIXES` | a book picture **only** when the style resolves to no prefix — i.e. the `photo` cover-style fallback (§1h). Never on the normal path | the Generate chat, the editor's Make-a-Scene, the whole-book loop |
+| `PRESET_IMAGE_PREFIXES` | **nothing, from any caller in the repo.** The only caller that sends `themeId` (`useBookIllustrator.ts:200`) always sends a `book-illustration-*` style, which wins outright (FEAT-174); the one style that would fall through — `book-illustration-photo` — is rejected at the callable's `validStyles` gate first (§1h). Completing the map (§11) is correct data, not a live change | every book picture path |
 | `PRESET_THEME_MAP` (story) | the story prompt's `THEME GUIDANCE`, for 11 ids | the four ids in §1b, and every book whose theme is `sight_words` or `other` |
 | custom `bookThemes` | **nothing** — no book can carry the id (§1c) | everything |
 | `THEME_IMAGE_STYLES` | the sticker reimagine, 9 of 15 ids | 6 ids reachable from no picker |
@@ -285,7 +306,9 @@ FEAT-159 designed.
 
 **Pickable, resolves to nothing (dishonest controls):**
 
-- ~~`family` / `science` / `sight_words` / `faith` on the picture path~~ — **fixed in §11**.
+- `family` / `science` / `sight_words` / `faith` had **no entry** in `PRESET_IMAGE_PREFIXES` — the map
+  is completed in §11, but the map itself is unreachable, so the picker is still not honest. The
+  routing gap is **UX-165**.
 - `family` / `science` / `sight_words` / `faith` on the **story** path — still nothing. **UX-172.**
 - `other` (`BOOK_THEMES`) — matches no map anywhere.
 - Every field of a custom theme. **UX-160.**
@@ -400,8 +423,11 @@ existing `themeImagePrefix` argument carries it with no signature change.
 (palette overlap is literally zero), but Cartoon and Fantasy are the only two of nine options that name
 the **same medium** — watercolor washes with a soft ink line — and medium is what the eye reads first.
 Compounding it on this specific surface: the picture is a re-draw of the child's own drawing, so the
-palette (the axis that does separate them) is the axis the source most constrains; and five of the nine
-options ask for shadows, light and grain that the same prompt's transparent-cutout clause then forbids.
+palette (the axis that does separate them) is the axis the source most constrains. That is **UX-179**.
+
+A separate defect — three options asking for shadows the transparent-cutout clause removes (**UX-162**)
+— was **wrongly folded into this answer in the first draft** and is not the cause here: neither Cartoon
+nor Fantasy is among them. See the correction note in §3.
 
 > *"Themes and how they work are worth an examination at some point."*
 
@@ -443,17 +469,18 @@ path, six theme recipes are unreachable, and the custom-theme feature cannot rea
 | # | ID | P | One line | Batch |
 |---|---|---|---|---|
 | 1 | **UX-160** | P1 | Custom book themes are a write-only dead end: a parent fills in four fields, no book can ever carry the id, the client never reads the collection, and creating one silently blanks the shelf | B |
-| 2 | **UX-162** | P1 | Every "Make it fancy" prompt is a transparent cutout, and five of the nine options ask for cast shadows, drop shadows, indoor light, paper grain or star speckles that the same prompt then forbids | A |
+| 2 | **UX-179** | P1 | Cartoon and Fantasy are the only two of nine sticker looks naming the **same medium** (watercolor washes + a soft ink line), and the one axis that fully separates them — palette — is the axis a re-draw of the child's own drawing most constrains. **The measured cause of the owner's report** | A |
 | 3 | **UX-161** | P1 | "Keep my style" sends the full watercolor recipe under *"follow it exactly"*; three labelled intensity bands resolve to two styles, two of which are identical; "Full reimagine" says cartoon and sends comic halftones | A + B |
 | 4 | **UX-172** | P1 | Four theme ids still reach the **story** writer as nothing — including `sight_words`, which `inferBookTheme` returns for *every* book made from a word list | B |
 | 5 | **UX-166** | P2 | All fifteen theme picture-prefixes are subject lists — the exact shape FEAT-189 removed from three styles, still live one table over, held harmless only by FEAT-174's precedence rule | A |
 | 6 | **UX-167** | P2 | Four look recipes exist twice inside `functions/`, and 8 of their 12 axes have drifted; the help copy asserts two of them are identical | B |
 | 7 | **UX-163** | P2 | The Game Workshop sends `style: 'general'` — an empty prefix — for every picture, and the help sheet tells the parent it is "one fixed children's-game look" | A |
 | 8 | **UX-164** | P2 | `book-sticker`, the fixed look behind three paid doors, is adjective-only — the one look never given the `VisualRecipe` treatment | A |
-| 9 | **UX-165** | P2 | "Cover style" renders no cover; its only effect is a hidden regen fallback, where "Photo Album" resolves to no look at all | B |
-| 10 | **UX-176** | P2 | "Theme" means five things; five mechanical renames settle it | C |
+| 9 | **UX-165** | P2 | "Cover style" renders no cover; its only effect is a hidden regen fallback, where **"Photo Album" is rejected at the callable's argument gate** and the page just fails. Also the reason `PRESET_IMAGE_PREFIXES` is unreachable from every path | B |
+| 10 | **UX-162** | P2 | Three of the nine fancy looks ask for cast/long/drop shadows that the transparent-cutout clause removes; two more (`family`, `space`) are ambiguous and need real output to judge | A |
 
-**The rest:** UX-168 (Blocky sends two paths) · UX-169 (`STYLE_RECIPES.realistic` unreachable) ·
+**The rest:** UX-176 ("theme" means five things; five mechanical renames settle it) ·
+UX-168 (Blocky sends two paths) · UX-169 (`STYLE_RECIPES.realistic` unreachable) ·
 UX-170 (six theme recipes unreachable) · UX-171 (`garden-warfare` ↔ `platformer`, the closest measured
 pair) · UX-173 (`IMAGE STYLE:` reaches the story writer while a different table draws the picture) ·
 UX-174 (a fourth copy of `GENERATION_STYLES`) · UX-175 (`autoSuggestTheme`, a fifth classifier, maps to
@@ -480,9 +507,22 @@ Copied **verbatim** from `src/core/types/books.ts`, not abridged to match the el
 client string is the one a person can read, and abridging would add a fifth variant of one string. The
 duplication itself is **not** solved here — it is filed as UX-167 / §5 (batch B).
 
-**Blast radius.** These entries only reach a prompt when the picked style contributes no look
-(`buildImagePrompt`, FEAT-174) — on the book path, that is the `photo` cover-style fallback alone
-(§1h). No normal generation changes. `functions` build + 50/1219 tests green.
+**Blast radius: none — and that is itself a finding.**
+
+> **Correction, 2026-09-04 — the first draft of this section claimed these entries would fire on the
+> `photo` cover-style fallback. They cannot, and a Codex review on PR #1760 caught it.** These entries
+> only reach a prompt when the picked style contributes no look (`buildImagePrompt`, FEAT-174), and
+> **no caller in the repo produces that state**: `useBookIllustrator` is the only sender of `themeId`
+> and always sends a `book-illustration-*` style alongside. The one style that *would* fall through —
+> `book-illustration-photo` — is not in the callable's `validStyles`, so that request is rejected at
+> the argument gate (`generateImage.ts:301-319`) **before** reaching this map; `useBookIllustrator`
+> catches the error per page and marks the page failed (`:252-255`).
+
+So completing the map is **correct data, not a live change**: the fifteen ids a parent can pick now all
+have an entry, and the map no longer lies about its own coverage. Making one of them actually reach a
+prompt is a **routing** change — send `general` on the photo path, or add `book-illustration-photo` to
+`validStyles` and the recipe table — which is a behaviour change well outside a four-line data copy.
+Filed as **UX-165**. `functions` build + 50/1219 tests green.
 
 **Deliberately not fixed here:** the same four ids are still missing from `generateStory.ts`'s
 `PRESET_THEME_MAP`, so a `sight_words`- or `faith`-themed book still gets no `THEME GUIDANCE`. That is
@@ -494,14 +534,17 @@ a **story-prompt** change, outside the sanctioned exception. Filed as **UX-172**
 
 ### Batch A — recipe and copy rewrites (server strings, cheap, no plumbing)
 
-1. **UX-162** — make the fancy recipes cutout-aware. Either give `VisualRecipe` an optional
-   `shadingCutout` used when `transparent`, or rewrite the five conflicting shading lines to describe
-   shading *on the subject* (`faith`: "warm light falling across the form from one side, no cast
-   shadow"). Highest-leverage single change in this audit — it is the mechanism behind the owner's
-   report.
-2. **UX-162b / the owner's pair** — give `fantasy` a medium of its own, or give `cartoon` one. They are
-   the only two watercolors in a nine-option picker. Cheapest: move `fantasy` to *"coloured pencil and
-   ink with a soft glow"* and leave `cartoon` as the house watercolor.
+1. **UX-179 — the owner's pair, and the highest-leverage single change here.** Give `fantasy` a medium
+   of its own, or give `cartoon` one; they are the only two watercolors in a nine-option picker.
+   Cheapest: move `fantasy` to *"coloured pencil and ink with a soft glow"* and leave `cartoon` as the
+   house watercolor. While there, check the three options that name **no** medium at all (`adventure`,
+   `faith`, `holidays`/`cooking`/`sports` in the wider table) — a look with no medium separates on
+   palette alone, and palette is the axis this surface constrains.
+2. **UX-162** — make the three demonstrably-conflicting recipes cutout-aware: give `VisualRecipe` an
+   optional `shadingCutout` used when `transparent`, or rewrite those shading lines to describe shading
+   *on the subject* (`faith`: "warm light falling across the form from one side, no cast shadow").
+   Before touching `family` and `space`, generate one sticker in each and look — the audit could not
+   settle those two from the text.
 3. **UX-166** — rewrite the fifteen `imageStylePrefix` strings as *hints*, not scenes ("a warm domestic
    picture-book look" rather than "Soft lighting, happy expressions"), so the theme can never be a
    second scene if precedence ever changes.
@@ -538,3 +581,9 @@ a **story-prompt** change, outside the sanctioned exception. Filed as **UX-172**
 
 *Filed by the FEAT-190 run, 2026-09-04. Read-only except §11. Nothing near quota, hours, XP,
 compliance or `firestore.rules`.*
+
+*Revised 2026-09-04 after a Codex review on PR #1760 raised two P2s, both of which were verified and
+both of which were right: the §11 blast-radius claim was wrong (the `photo` path is rejected at the
+argument gate, so the completed map is unreachable — now UX-165), and UX-162 over-claimed (three of
+five shadow conflicts are demonstrable, two are ambiguous, and neither of the owner's two options is
+among them — the owner's mechanism is split out as UX-179 and UX-162 is demoted to P2).*
