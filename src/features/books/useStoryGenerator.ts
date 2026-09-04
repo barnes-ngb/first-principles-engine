@@ -62,12 +62,38 @@ export const SIGHT_WORD_STORY_SURFACE: StoryFailureSurface = {
  */
 interface RawGeneratedStory {
   title?: string
-  pages?: Array<{ pageNumber?: number; text?: string; sightWordsOnPage?: string[] }>
+  pages?: Array<{
+    pageNumber?: number
+    text?: string
+    /** The server's name for the per-page list (`chat.ts` asks for this key). */
+    wordsOnPage?: string[]
+    /** The name this client's own type uses. Accepted so a fixture still reads. */
+    sightWordsOnPage?: string[]
+  }>
   /** The server's name for it. */
   allWordsUsed?: string[]
   /** The name this client has always used. Accepted so a fixture still reads. */
   allSightWordsUsed?: string[]
   missedWords?: string[]
+}
+
+/**
+ * Is this parsed value actually a story? (Codex P1, PR #1749.)
+ *
+ * Valid JSON that is not a story — `{}`, or `{"error": "..."}` — is truthy, so
+ * a truthiness check let it through; normalizing it then produced a preview
+ * with an empty title and no pages, and the screen's "Finish book" would
+ * happily persist that as a `status: 'complete'` book. A reply we cannot read
+ * as a story belongs on the Unreadable failure path, which already says so
+ * honestly and keeps the parent's words.
+ *
+ * The bar is deliberately the minimum that makes a book: at least one page
+ * carrying text. A missing title is survivable — it defaults, and the editor
+ * can rename — but a book with no words in it is not a book.
+ */
+function isUsableStory(raw: RawGeneratedStory | null): raw is RawGeneratedStory {
+  if (!raw || !Array.isArray(raw.pages) || raw.pages.length === 0) return false
+  return raw.pages.some((p) => (p?.text ?? '').trim() !== '')
 }
 
 /** Fill in what the wire may omit, so the exported type is true of the result. */
@@ -77,7 +103,13 @@ function normalizeStory(raw: RawGeneratedStory): GeneratedStory {
     pages: (raw.pages ?? []).map((p, i) => ({
       pageNumber: p.pageNumber ?? i + 1,
       text: p.text ?? '',
-      sightWordsOnPage: p.sightWordsOnPage ?? [],
+      // The server emits `wordsOnPage`; this client's type calls it
+      // `sightWordsOnPage`. Reading only the client name silently replaced a
+      // populated list with `[]` — and this value is persisted and then used by
+      // the reader to record each word's `seen` interaction, so a book made
+      // here would have logged zero sight-word encounters (Codex P1, PR #1749).
+      // `useBookGenerator` and `useBookGenerateChat` already map it this way.
+      sightWordsOnPage: p.wordsOnPage ?? p.sightWordsOnPage ?? [],
     })),
     allSightWordsUsed: raw.allWordsUsed ?? raw.allSightWordsUsed ?? [],
     missedWords: raw.missedWords ?? [],
@@ -131,10 +163,14 @@ export function useStoryGenerator() {
         story = null
       }
     }
-    if (!story) {
+    if (!isUsableStory(story)) {
+      // `null`, not `story`: the classifier treats any truthy parsed value as a
+      // success and returns `null`, so handing it a `{}` that we have just
+      // rejected would throw away the reply's own `stopReason` and call a
+      // cut-short reply unreadable.
       throw new Error(
         storyGenerationFailureMessage(
-          classifyStoryGenerationFailure(result, story) ?? StoryGenerationFailure.Unreadable,
+          classifyStoryGenerationFailure(result, null) ?? StoryGenerationFailure.Unreadable,
           SIGHT_WORD_STORY_SURFACE,
         ),
       )

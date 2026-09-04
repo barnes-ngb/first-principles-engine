@@ -174,3 +174,105 @@ describe('the story that actually comes back off the wire', () => {
     expect(story.pages.map((p) => p.pageNumber)).toEqual([1, 2])
   })
 })
+
+// Codex P1 ×2 (PR #1749) — two more places the client type did not match the
+// wire, both introduced or exposed by the normalization above.
+
+describe('the per-page sight-word list the server actually sends', () => {
+  it("keeps the server's wordsOnPage instead of blanking it", async () => {
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({
+        title: 'The Cat',
+        pages: [
+          { pageNumber: 1, text: 'The cat sat.', wordsOnPage: ['the', 'cat'] },
+          { pageNumber: 2, text: 'The cat ran.', wordsOnPage: ['the', 'ran'] },
+        ],
+        allWordsUsed: ['the'],
+      }),
+    })
+    const { generateStory } = hook()
+    const story = await generateStory('f1', 'c1', ['the'], 'cats', 6)
+    // Persisted, and then read by the reader to record each word's `seen`
+    // interaction — an emptied list means a book that logs zero encounters.
+    expect(story.pages.map((p) => p.sightWordsOnPage)).toEqual([
+      ['the', 'cat'],
+      ['the', 'ran'],
+    ])
+  })
+
+  it('maps it the same way the other two generators do', async () => {
+    // `useBookGenerator` and `useBookGenerateChat` both read `p.wordsOnPage ?? []`.
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({ title: 'X', pages: [{ text: 'A cat.', wordsOnPage: ['a'] }] }),
+    })
+    const { generateStory } = hook()
+    expect((await generateStory('f1', 'c1', ['a'], 'cats', 6)).pages[0].sightWordsOnPage).toEqual([
+      'a',
+    ])
+  })
+
+  it('still reads the client-shaped key, and defaults when neither is present', async () => {
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({
+        title: 'X',
+        pages: [{ text: 'A cat.', sightWordsOnPage: ['a'] }, { text: 'It ran.' }],
+      }),
+    })
+    const { generateStory } = hook()
+    const story = await generateStory('f1', 'c1', ['a'], 'cats', 6)
+    expect(story.pages[0].sightWordsOnPage).toEqual(['a'])
+    expect(story.pages[1].sightWordsOnPage).toEqual([])
+  })
+})
+
+describe('a reply that is valid JSON but is not a story', () => {
+  it('refuses an empty object rather than previewing an empty book', async () => {
+    chatMock.mockResolvedValue({ message: '{}' })
+    const { generateStory } = hook()
+    await expect(generateStory('f1', 'c1', ['the'], 'cats', 6)).rejects.toThrow(
+      /shape I couldn't read/i,
+    )
+  })
+
+  it('refuses an error object', async () => {
+    chatMock.mockResolvedValue({ message: '{"error":"content_policy"}' })
+    const { generateStory } = hook()
+    await expect(generateStory('f1', 'c1', ['the'], 'cats', 6)).rejects.toThrow(
+      /Nothing was lost: your words are still here/,
+    )
+  })
+
+  it('refuses a story whose pages are all empty text', async () => {
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({ title: 'Blank', pages: [{ text: '' }, { text: '   ' }] }),
+    })
+    const { generateStory } = hook()
+    await expect(generateStory('f1', 'c1', ['the'], 'cats', 6)).rejects.toThrow(
+      /shape I couldn't read/i,
+    )
+  })
+
+  it('refuses an empty pages array', async () => {
+    chatMock.mockResolvedValue({ message: JSON.stringify({ title: 'Blank', pages: [] }) })
+    const { generateStory } = hook()
+    await expect(generateStory('f1', 'c1', ['the'], 'cats', 6)).rejects.toThrow(/couldn't read/i)
+  })
+
+  it('still names a CUT-SHORT reply as cut short, not unreadable', async () => {
+    // The rejected value must not be handed to the classifier: it treats any
+    // truthy parsed value as a success and would lose `stopReason`.
+    chatMock.mockResolvedValue({ message: '{}', stopReason: 'max_tokens' })
+    const { generateStory } = hook()
+    await expect(generateStory('f1', 'c1', ['the'], 'cats', 6)).rejects.toThrow(
+      /ran out of room/i,
+    )
+  })
+
+  it('accepts a story with one real page', async () => {
+    chatMock.mockResolvedValue({
+      message: JSON.stringify({ title: 'One', pages: [{ text: 'A cat sat.' }] }),
+    })
+    const { generateStory } = hook()
+    expect((await generateStory('f1', 'c1', ['a'], 'cats', 6)).pages).toHaveLength(1)
+  })
+})
