@@ -339,42 +339,81 @@ export function useBookGenerateChat(
    * over both and follows every later edit (FEAT-172).
    */
   /**
-   * Picking a stretch WRITES it when a draft already exists (Codex P2 on PR
-   * #1763).
+   * The stretch the parent has picked RIGHT NOW (FEAT-191).
+   *
+   * A ref beside the state because two different writers need the live value at
+   * a moment React state cannot give it to them:
+   *   - every persist below builds its `generationConfig` from the ref, so an
+   *     in-flight write can never carry a value the parent has already changed;
+   *   - the post-create flush (`flushLevelStretch`) compares against it.
+   * Kept in step by `setLevelStretch` and by the resume hydration.
+   */
+  const levelStretchRef = useRef<LevelStretch>(DEFAULT_LEVEL_STRETCH)
+
+  /** One narrow `merge` write of the field, never anything else on the book. */
+  const writeLevelStretch = useCallback(
+    async (id: string, value: LevelStretch): Promise<void> => {
+      try {
+        await setDoc(
+          doc(booksCollection(familyId), id),
+          { generationConfig: { levelStretch: value } },
+          { merge: true },
+        )
+      } catch (err) {
+        console.warn('Failed to persist the story reading level:', err)
+      }
+    },
+    [familyId],
+  )
+
+  /**
+   * Close the gap between what a just-created draft WROTE and what the parent
+   * has picked since (Codex P2, round 2 on PR #1763).
+   *
+   * The clarification branch of `sendKidMessage` renders the echo turn and then
+   * awaits `addDoc` **without** setting `isLoading`, so the picker stays live
+   * for the whole round-trip while `bookId` is still `null`. A tap in that
+   * window used to hit the `!bookId` early return and be dropped, while the
+   * create — whose document object was built before the tap — wrote the older
+   * value and only then installed the id.
+   *
+   * So every create calls this the moment it has an id, with the value it
+   * actually wrote. A tap during the window moved the ref, the two differ, and
+   * one small write settles it. Nothing moved → no write.
+   */
+  const flushLevelStretch = useCallback(
+    (id: string, written: LevelStretch): void => {
+      if (levelStretchRef.current === written) return
+      void writeLevelStretch(id, levelStretchRef.current)
+    },
+    [writeLevelStretch],
+  )
+
+  /**
+   * Picking a stretch WRITES it when a draft already exists (Codex P2, round 1
+   * on PR #1763).
    *
    * Every other write of this field is a side effect of a message or a
-   * confirmation — `persistClarification` / `persistStory` read it out of the
-   * closure. A tap on the control is neither. So a parent who sends the first
-   * message (creating the draft at the child's own level), THEN picks "One step
-   * up", and then dismisses the enclosing dialog by its backdrop or the Escape
-   * key — neither of which runs any handler here — leaves the choice in React
-   * state only. Resuming that draft hydrates the stored 0 and the book is
-   * silently generated at the wrong level: the one failure this whole feature
-   * exists to prevent, arrived at from the other direction.
+   * confirmation. A tap on the control is neither. So a parent who sends the
+   * first message (creating the draft at the child's own level), THEN picks
+   * "One step up", and then dismisses the enclosing dialog by its backdrop or
+   * the Escape key — neither of which runs any handler here — used to leave the
+   * choice in React state only. Resuming that draft hydrated the stored 0 and
+   * the book was silently generated at the wrong level: the one failure this
+   * whole feature exists to prevent, arrived at from the other direction.
    *
-   * A narrow `merge` write, so it touches `generationConfig.levelStretch` and
-   * nothing else (Firestore deep-merges nested maps, so `words`, `pageCount`
-   * and `storyIdea` are untouched). Before a draft exists there is nothing to
-   * write to, and the first persist carries the current value anyway.
+   * Before a draft exists there is nothing to write to; the ref above is what
+   * carries the value into the create, and `flushLevelStretch` covers the
+   * window where the create is already in flight.
    */
   const setLevelStretch = useCallback(
     (next: LevelStretch) => {
       const value = normalizeLevelStretch(next)
+      levelStretchRef.current = value
       setLevelStretchState(value)
-      if (!bookId) return
-      void (async () => {
-        try {
-          await setDoc(
-            doc(booksCollection(familyId), bookId),
-            { generationConfig: { levelStretch: value } },
-            { merge: true },
-          )
-        } catch (err) {
-          console.warn('Failed to persist the story reading level:', err)
-        }
-      })()
+      if (bookId) void writeLevelStretch(bookId, value)
     },
-    [bookId, familyId],
+    [bookId, writeLevelStretch],
   )
 
   const [resumedStoryWords, setResumedStoryWords] = useState<string[] | null>(null)
@@ -438,7 +477,9 @@ export function useBookGenerateChat(
           // The raw setter, deliberately: hydrating is reading, and the
           // persisting `setLevelStretch` below would echo the value straight
           // back to the document it just came from.
-          setLevelStretchState(normalizeLevelStretch(data.generationConfig.levelStretch))
+          const hydrated = normalizeLevelStretch(data.generationConfig.levelStretch)
+          levelStretchRef.current = hydrated
+          setLevelStretchState(hydrated)
         }
         if (state?.chatHistory) setChatHistory(state.chatHistory)
         if (state?.illustrationStyle) setIllustrationStyle(state.illustrationStyle)
@@ -570,7 +611,9 @@ export function useBookGenerateChat(
                 words: wordsForIdea,
                 style,
                 pageCount,
-                levelStretch,
+                // The ref, not the closure: a tap during this in-flight write
+                // must not be overwritten by the value it started with.
+                levelStretch: levelStretchRef.current,
               },
               reviewState: {
                 ...(current.reviewState ?? {}),
@@ -615,8 +658,9 @@ export function useBookGenerateChat(
           pageCount,
           // The level this book was written at (FEAT-191) — recorded on the
           // book so a resumed draft restores it and every later revise is
-          // levelled against the book, not against today's default.
-          levelStretch,
+          // levelled against the book, not against today's default. Read off
+          // the ref so it is the parent's latest pick, not the render's.
+          levelStretch: levelStretchRef.current,
         },
         reviewState: {
           generateChatState,
@@ -627,16 +671,20 @@ export function useBookGenerateChat(
           pendingRefinement: refinement,
         },
       }
+      const writtenStretch = levelStretchRef.current
       try {
         const ref = await addDoc(booksCollection(familyId), newBook as Book)
         setBookId(ref.id)
+        // The picker stayed live for this whole round-trip — settle any tap
+        // that landed during it (Codex P2, round 2).
+        flushLevelStretch(ref.id, writtenStretch)
         return ref.id
       } catch (err) {
         console.error('Failed to create draft book:', err)
         return null
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, levelStretch, fallbackWords],
+    [familyId, childId, bookId, attribution, pageCount, flushLevelStretch, fallbackWords],
   )
 
   /**
@@ -670,7 +718,9 @@ export function useBookGenerateChat(
                 words: wordsForIdea,
                 style,
                 pageCount,
-                levelStretch,
+                // The ref, not the closure: a tap during this in-flight write
+                // must not be overwritten by the value it started with.
+                levelStretch: levelStretchRef.current,
               },
               reviewState: {
                 ...(current.reviewState ?? {}),
@@ -713,8 +763,9 @@ export function useBookGenerateChat(
           pageCount,
           // The level this book was written at (FEAT-191) — recorded on the
           // book so a resumed draft restores it and every later revise is
-          // levelled against the book, not against today's default.
-          levelStretch,
+          // levelled against the book, not against today's default. Read off
+          // the ref so it is the parent's latest pick, not the render's.
+          levelStretch: levelStretchRef.current,
         },
         reviewState: {
           generateChatState: 'in-progress',
@@ -725,14 +776,18 @@ export function useBookGenerateChat(
           pendingRefinement: refinement,
         },
       }
+      const writtenStretch = levelStretchRef.current
       try {
         const ref = await addDoc(booksCollection(familyId), newBook as Book)
         setBookId(ref.id)
+        // See `flushLevelStretch` — this is the create the round-2 finding is
+        // actually about: the clarification branch never sets `isLoading`.
+        flushLevelStretch(ref.id, writtenStretch)
       } catch (err) {
         console.error('Failed to create draft clarification book:', err)
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, levelStretch, fallbackWords],
+    [familyId, childId, bookId, attribution, pageCount, flushLevelStretch, fallbackWords],
   )
 
   // ── Send a kid message ───────────────────────────────────────
@@ -977,8 +1032,9 @@ export function useBookGenerateChat(
               // raises the level the story is WRITTEN at and the level it is
               // CHECKED at together, so a book asked for one rung higher is not
               // then flagged word by word for being exactly that. 0 (the
-              // default) is byte-for-byte the pre-FEAT-191 request.
-              levelStretch,
+              // default) is byte-for-byte the pre-FEAT-191 request. Off the
+              // ref, so a tap in the same tick as the confirm still counts.
+              levelStretch: levelStretchRef.current,
               // Deliberately `[]`: with words, inferBookTheme returns
               // `sight_words` and the picked style's theme guidance is lost.
               theme: inferBookTheme(pendingIdea, [], illustrationStyle),
@@ -1046,7 +1102,6 @@ export function useBookGenerateChat(
     familyId,
     childId,
     illustrationStyle,
-    levelStretch,
     pageCount,
     pendingIdea,
     pendingRefinement,

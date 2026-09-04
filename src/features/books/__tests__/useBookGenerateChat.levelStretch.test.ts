@@ -82,7 +82,8 @@ const STORY = {
 beforeEach(() => {
   chatMock.mockReset()
   generateImageMock.mockReset()
-  addDocMock.mockReset().mockResolvedValue({ id: 'book-new' })
+  addDocMock.mockReset()
+  addDocMock.mockResolvedValue({ id: 'book-new' })
   getDocMock.mockReset().mockResolvedValue({ exists: () => false } as unknown)
   setDocMock.mockReset().mockResolvedValue(undefined)
 })
@@ -175,6 +176,52 @@ describe('useBookGenerateChat — the per-story stretch (FEAT-191)', () => {
     expect(options?.merge).toBe(true)
     expect(Object.keys(payload)).toEqual(['generationConfig'])
     expect(Object.keys(payload.generationConfig ?? {})).toEqual(['levelStretch'])
+  })
+
+  it('keeps a tap made WHILE the draft is being created (Codex P2, round 2)', async () => {
+    // The clarification branch renders the echo turn and then awaits `addDoc`
+    // WITHOUT setting `isLoading`, so the picker stays live for the whole
+    // round-trip while `bookId` is still null. A tap in that window used to hit
+    // the `!bookId` early return and vanish, while the create — its document
+    // built before the tap — wrote the older value and only then installed the
+    // id. Reopening the draft then restored the old choice.
+    let releaseCreate: (v: { id: string }) => void = () => {}
+    addDocMock.mockImplementation(
+      () => new Promise<{ id: string }>((resolve) => (releaseCreate = resolve)),
+    )
+
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+
+    // Start the create and leave it in flight.
+    let sent: Promise<void> = Promise.resolve()
+    await act(async () => {
+      sent = result.current.sendKidMessage('a ship')
+      await Promise.resolve()
+    })
+
+    // The parent taps while `bookId` is still null.
+    act(() => {
+      result.current.setLevelStretch(2)
+    })
+    expect(setDocMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      releaseCreate({ id: 'book-new' })
+      await sent
+    })
+
+    // The create's document was built before the tap, so it necessarily carries
+    // the old value — that is the window. What matters is the LAST thing
+    // written to the field: the flush settles it at the parent's pick.
+    const writes = [
+      ...addDocMock.mock.calls.map(([, d]) => d),
+      ...setDocMock.mock.calls.map(([, d]) => d),
+    ] as Array<{ generationConfig?: { levelStretch?: number } }>
+    const levels = writes
+      .map((d) => d?.generationConfig?.levelStretch)
+      .filter((v): v is number => typeof v === 'number')
+    expect(levels.at(-1)).toBe(2)
+    expect(result.current.levelStretch).toBe(2)
   })
 
   it('writes nothing before a draft exists — the first persist carries it', async () => {
