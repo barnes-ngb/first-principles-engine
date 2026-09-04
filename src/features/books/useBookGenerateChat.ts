@@ -302,16 +302,40 @@ export function useBookGenerateChat(
   const [pendingIdea, setPendingIdea] = useState<string>('')
   const [pendingRefinement, setPendingRefinement] = useState<string | null>(null)
 
+  /**
+   * The word list a RESUMED draft was generated against, read back from its
+   * own `generationConfig.words` (Codex P2 on PR #1755).
+   *
+   * The practice fallback is a live read of `sightWordProgress`, and it moves:
+   * the map starts empty while it loads, and a word mastered since the draft
+   * was started drops out of `practicing`/`new` altogether. `commitAndClose`
+   * does not wait on that read the way `confirmStartStory` does, so deriving
+   * the published list from the *current* practice words could omit the very
+   * words the story was written around — or fold in words that were never
+   * sent — and overwrite the recorded `generationConfig.words` with them.
+   *
+   * So a resumed draft's fallback is the list it recorded, not today's. A
+   * stored `[]` is honoured as "no list was in play for this draft", which is
+   * exactly what it means. A list the parent TYPED is unaffected either way:
+   * `resolveStoryWords` reads it straight out of the idea text, so it wins
+   * over both and follows every later edit (FEAT-172).
+   */
+  const [resumedStoryWords, setResumedStoryWords] = useState<string[] | null>(null)
+  const fallbackWords = resumedStoryWords ?? practiceWords
+
   // The one decision (FEAT-172): a list typed into the idea wins; the practice
   // list only when the parent named none. Derived, never stored, so it follows
   // every edit to the idea (Add / Change) and every child switch.
   const { source: storyWordSource, words: storyWords } = useMemo(
-    () => resolveStoryWords(pendingIdea, practiceWords),
-    [pendingIdea, practiceWords],
+    () => resolveStoryWords(pendingIdea, fallbackWords),
+    [pendingIdea, fallbackWords],
   )
-  // A typed list does not read the practice list, so it never waits on it.
+  // A typed list does not read the practice list, so it never waits on it —
+  // and neither does a resumed draft that carries its own recorded list.
   const storyWordsLoading =
-    practiceWordsLoading && storyWordSource !== StoryWordSource.Requested
+    practiceWordsLoading &&
+    storyWordSource !== StoryWordSource.Requested &&
+    resumedStoryWords === null
 
   const [illustrationProgress, setIllustrationProgress] =
     useState<IllustrationProgress>({
@@ -341,6 +365,13 @@ export function useBookGenerateChat(
         // length the user picked, not the reset default (FEAT-97).
         if (typeof data.generationConfig?.pageCount === 'number') {
           setPageCount(clampTargetPageCount(data.generationConfig.pageCount))
+        }
+        // The list this draft was actually generated against — see
+        // `resumedStoryWords`. Set in the same pass that reconstructs
+        // `currentStory` below, and `commitAndClose` needs a story, so a
+        // publish can never outrun it.
+        if (Array.isArray(data.generationConfig?.words)) {
+          setResumedStoryWords(data.generationConfig.words.map(String))
         }
         if (state?.chatHistory) setChatHistory(state.chatHistory)
         if (state?.illustrationStyle) setIllustrationStyle(state.illustrationStyle)
@@ -388,7 +419,7 @@ export function useBookGenerateChat(
       const pages = storyToPages(story)
       // Recorded from the idea being persisted, not the render's closure —
       // the first-message write runs before `pendingIdea` has re-rendered.
-      const wordsForIdea = resolveStoryWords(idea, practiceWords).words
+      const wordsForIdea = resolveStoryWords(idea, fallbackWords).words
 
       // UX-123, the standing decision, settled by the owner 2026-09-04
       // (FEAT-188): **a chat book is a practice book when a list was in play.**
@@ -417,7 +448,31 @@ export function useBookGenerateChat(
           : []
       // Spread, not a key set to `undefined`: Firestore rejects that, and an
       // absent field is what "not a practice book" means on every other book.
-      const sightWordField = landedWords.length > 0 ? { sightWords: landedWords } : {}
+      const isPracticeBook = landedWords.length > 0
+      const sightWordField = isPracticeBook ? { sightWords: landedWords } : {}
+
+      // Codex P1 on PR #1755 — real, and the reason the honesty rail has to
+      // reach the PAGES too. `storyToPages` copies the model's own
+      // `wordsOnPage` claim into `page.sightWordsOnPage` verbatim, and setting
+      // `sightWords` above is exactly what turns on `BookReaderPage`'s effect
+      // that calls `recordInteraction(word, 'seen')` for every entry in it. So
+      // flipping practice mode on a page carrying an invented word would
+      // create a `sightWordProgress` record for a word that is not in the book
+      // — a write into the child's own record, from a claim nothing checked.
+      //
+      // So the moment the book becomes a practice book, every page's word list
+      // is recomputed the same way its `sightWords` was: the landed words that
+      // this page's text actually holds. Chips, the per-page count and the
+      // reader's writes then all key off one verified set. A book that is not
+      // a practice book keeps its pages byte-for-byte — the field is inert
+      // there (`isSightWordBook` gates every reader of it), and rewriting it
+      // would be widening the change past the defect.
+      const persistedPages = isPracticeBook
+        ? pages.map((p) => ({
+            ...p,
+            sightWordsOnPage: practiceWordsUsedIn([p], landedWords),
+          }))
+        : pages
 
       if (bookId) {
         const ref = doc(booksCollection(familyId), bookId)
@@ -425,7 +480,7 @@ export function useBookGenerateChat(
           const snap = await getDoc(ref)
           if (snap.exists()) {
             const current = snap.data() as Book
-            const mergedPages: BookPage[] = pages.map((p, i) => {
+            const mergedPages: BookPage[] = persistedPages.map((p, i) => {
               const prior = current.pages?.[i]
               if (!prior) return p
               return {
@@ -470,7 +525,7 @@ export function useBookGenerateChat(
         childId: attribution?.createdFor ?? childId,
         title: story.title,
         coverStyle: style as Book['coverStyle'],
-        pages,
+        pages: persistedPages,
         ...sightWordField,
         status: 'draft',
         createdAt: now,
@@ -509,7 +564,7 @@ export function useBookGenerateChat(
         return null
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, practiceWords],
+    [familyId, childId, bookId, attribution, pageCount, fallbackWords],
   )
 
   /**
@@ -527,7 +582,7 @@ export function useBookGenerateChat(
       const now = new Date().toISOString()
       // See persistStory: the idea's own word list is written on every
       // persist (FEAT-172), never only on create.
-      const wordsForIdea = resolveStoryWords(idea, practiceWords).words
+      const wordsForIdea = resolveStoryWords(idea, fallbackWords).words
       if (bookId) {
         const ref = doc(booksCollection(familyId), bookId)
         try {
@@ -600,7 +655,7 @@ export function useBookGenerateChat(
         console.error('Failed to create draft clarification book:', err)
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, practiceWords],
+    [familyId, childId, bookId, attribution, pageCount, fallbackWords],
   )
 
   // ── Send a kid message ───────────────────────────────────────

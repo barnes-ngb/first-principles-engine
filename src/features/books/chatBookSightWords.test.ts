@@ -1,4 +1,4 @@
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 // FEAT-188 / UX-123 — a chat book is a practice book when a list was in play.
@@ -219,6 +219,96 @@ describe('only at publish', () => {
     for (const write of draftWrites) {
       expect('sightWords' in write).toBe(false)
     }
+  })
+})
+
+// Codex P1 on PR #1755. `storyToPages` copies the model's own `wordsOnPage`
+// claim into `page.sightWordsOnPage` verbatim, and `book.sightWords` is exactly
+// what turns on `BookReaderPage`'s effect that calls
+// `recordInteraction(word, 'seen')` for every entry in it. So enabling practice
+// mode over an unchecked page list would write `sightWordProgress` records for
+// words the model invented — a write into the child's own record from a claim
+// nothing verified.
+describe('turning practice mode on verifies the PAGES too', () => {
+  it('rewrites each page to the landed words that page actually holds', async () => {
+    const { published } = await publish(
+      'a story with these sight words: our, friend, pretty',
+      ['Our dog is here.', 'He is a friend.'],
+    )
+
+    const pages = published?.pages as Array<{ sightWordsOnPage?: string[] }>
+    expect(pages.map((p) => p.sightWordsOnPage)).toEqual([['our'], ['friend']])
+    // The model's invented claims reach no page, so the reader records none.
+    for (const page of pages) {
+      expect(page.sightWordsOnPage).not.toContain('xylophone')
+      expect(page.sightWordsOnPage).not.toContain('aardvark')
+    }
+  })
+
+  it('leaves the pages alone when the book is NOT a practice book', async () => {
+    // The field is inert without `sightWords` (`isSightWordBook` gates every
+    // reader of it), so rewriting it would widen the change past the defect.
+    const { published } = await publish('a puppy who finds a rainbow', [
+      'Our dog is here.',
+    ])
+
+    expect('sightWords' in (published ?? {})).toBe(false)
+    const pages = published?.pages as Array<{ sightWordsOnPage?: string[] }>
+    expect(pages[0].sightWordsOnPage).toEqual(['xylophone', 'aardvark'])
+  })
+})
+
+// Codex P2 on PR #1755. The practice fallback is a live `sightWordProgress`
+// read: it starts empty while it loads, and a word mastered since the draft was
+// started drops out of `practicing`/`new` altogether. `commitAndClose` does not
+// wait on that read the way `confirmStartStory` does — so a resumed draft must
+// publish against the list it recorded, not against today's.
+describe('a resumed draft publishes against the list it was generated with', () => {
+  it('uses the saved generationConfig.words, not the live practice map', async () => {
+    const firestore = await import('firebase/firestore')
+    const setDoc = firestore.setDoc as ReturnType<typeof vi.fn>
+    const getDoc = firestore.getDoc as ReturnType<typeof vi.fn>
+
+    // The live map has moved on since the draft was started: "said" and "come"
+    // are mastered and gone, and an unrelated word is now practising.
+    sightWordState.progressMap = new Map([[ 'zebra', wordDoc('zebra') ]])
+
+    const storedPages = [
+      { text: 'She said hello.', images: [], layout: 'text-only', sightWordsOnPage: [] },
+      { text: 'Come and see.', images: [], layout: 'text-only', sightWordsOnPage: [] },
+    ]
+    getDoc.mockImplementation(async () => ({
+      exists: () => true,
+      data: () => ({
+        title: 'The Story',
+        pages: storedPages,
+        generationConfig: { words: ['said', 'come', 'there'], pageCount: 6 },
+        reviewState: {
+          generateChatState: 'in-progress',
+          clarificationPhase: 'ready',
+          pendingIdea: 'a puppy who finds a rainbow',
+          chatHistory: [],
+        },
+      }),
+    }))
+
+    const { result } = renderHook(() =>
+      useBookGenerateChat({ ...baseOpts, resumeBookId: 'book-1' }),
+    )
+    await waitFor(() => expect(result.current.currentStory).not.toBeNull())
+
+    setDoc.mockClear()
+    await act(async () => {
+      await result.current.commitAndClose()
+    })
+
+    const published = setDoc.mock.calls[0]?.[1] as Record<string, unknown>
+    // The words the story was actually written around, filtered to the two the
+    // pages hold — not `[]` (the live map has neither) and not "zebra".
+    expect(published?.sightWords).toEqual(['said', 'come'])
+    expect(published?.generationConfig).toMatchObject({
+      words: ['said', 'come', 'there'],
+    })
   })
 })
 
