@@ -9,6 +9,7 @@ import {
   customStoryThemeChipLabel,
   hasCustomStoryTheme,
   normalizeCustomStoryTheme,
+  themeIdForNote,
 } from '../customStoryTheme'
 
 /**
@@ -123,5 +124,41 @@ describe('the hint', () => {
   it('says the note shapes the story and not the pictures', () => {
     expect(CUSTOM_STORY_THEME_HINT.toLowerCase()).toContain('not the pictures')
     expect(CUSTOM_STORY_THEME_HINT.toLowerCase()).toContain('story')
+  })
+})
+
+describe('themeIdForNote — the rule where a theme is INFERRED, not picked', () => {
+  /**
+   * Codex P1 on PR #1767. The Generate chat has no theme chips: it assigns an
+   * `inferBookTheme` id on every create. Without this, a noted book stored both
+   * and the invariant held only inside the Finish dialog's own state — reopening
+   * Finish showed a preset chip AND Custom selected, and the shelf's preset
+   * filter listed a custom-noted book.
+   */
+  it('drops the inferred id when a note is in play', () => {
+    expect(themeIdForNote('fantasy', 'spooky but kind')).toBe('')
+  })
+
+  it('keeps the inferred id when there is no note', () => {
+    expect(themeIdForNote('fantasy', '')).toBe('fantasy')
+    expect(themeIdForNote('fantasy', undefined)).toBe('fantasy')
+    expect(themeIdForNote('fantasy', '   ')).toBe('fantasy')
+  })
+
+  it("returns `''`, not `undefined` — `undefined` survives a merge write", () => {
+    // The app runs Firestore with `ignoreUndefinedProperties`.
+    expect(themeIdForNote('fantasy', 'spooky')).not.toBeUndefined()
+  })
+
+  it("`''` is falsy everywhere the id is read", () => {
+    const cleared = themeIdForNote('fantasy', 'spooky')
+    // The shelf's `filter(Boolean)`, the Finish dialog's `selectedTheme === t.id`,
+    // and `useBookIllustrator`'s `bookTheme ? { themeId } : {}` all read it.
+    expect(Boolean(cleared)).toBe(false)
+  })
+
+  it('leaves an already-absent id absent', () => {
+    expect(themeIdForNote(undefined, 'spooky')).toBe('')
+    expect(themeIdForNote(undefined, '')).toBeUndefined()
   })
 })

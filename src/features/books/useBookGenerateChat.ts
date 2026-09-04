@@ -8,7 +8,7 @@ import type { Book, BookPage, BookTheme, ChatTurn } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
 import { generatePageId } from './bookTypes'
 import { inferBookTheme } from './bookThemeInference'
-import { normalizeCustomStoryTheme } from './customStoryTheme'
+import { normalizeCustomStoryTheme, themeIdForNote } from './customStoryTheme'
 import { clampTargetPageCount } from './storyPageTargets'
 import {
   DEFAULT_LEVEL_STRETCH,
@@ -451,10 +451,20 @@ export function useBookGenerateChat(
    */
   const writeCustomTheme = useCallback(
     async (id: string, value: string): Promise<void> => {
+      const note = normalizeCustomStoryTheme(value)
       try {
         await setDoc(
           doc(booksCollection(familyId), id),
-          { generationConfig: { customTheme: normalizeCustomStoryTheme(value) } },
+          {
+            // Saving a note CLEARS the inferred preset in the same write (Codex
+            // P1 on PR #1767) — a book carries one or the other, and this chat
+            // assigns an inferred `theme` on every create, so without this the
+            // invariant would hold only inside the Finish dialog's own state.
+            // Clearing a note leaves the id alone: `''` stays `''`, and a
+            // preset is one tap away in the Finish dialog.
+            ...(note ? { theme: '' } : {}),
+            generationConfig: { customTheme: note },
+          },
           { merge: true },
         )
       } catch (err) {
@@ -674,6 +684,9 @@ export function useBookGenerateChat(
             })
             await setDoc(ref, {
               ...current,
+              // The invariant restated at every write, not only at the create
+              // (Codex P1 on PR #1767).
+              theme: themeIdForNote(current.theme, customThemeRef.current),
               title: story.title,
               pages: mergedPages,
               coverStyle: style as Book['coverStyle'],
@@ -721,7 +734,9 @@ export function useBookGenerateChat(
         subjectBuckets: ['LanguageArts' as SubjectBucket],
         bookType: 'generated',
         source: 'ai-generated',
-        theme: inferBookTheme('', [], style) as BookTheme,
+        // A note wins over the inferred id (Codex P1 on PR #1767): one or the
+        // other, never both.
+        theme: themeIdForNote(inferBookTheme('', [], style), customThemeRef.current) as BookTheme,
         createdBy: attribution?.createdBy ?? childId,
         createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
@@ -793,6 +808,9 @@ export function useBookGenerateChat(
             const current = snap.data() as Book
             await setDoc(ref, {
               ...current,
+              // The invariant restated at every write, not only at the create
+              // (Codex P1 on PR #1767).
+              theme: themeIdForNote(current.theme, customThemeRef.current),
               updatedAt: now,
               generationConfig: {
                 ...(current.generationConfig ?? {}),
@@ -834,7 +852,9 @@ export function useBookGenerateChat(
         subjectBuckets: ['LanguageArts' as SubjectBucket],
         bookType: 'generated',
         source: 'ai-generated',
-        theme: inferBookTheme('', [], style) as BookTheme,
+        // A note wins over the inferred id (Codex P1 on PR #1767): one or the
+        // other, never both.
+        theme: themeIdForNote(inferBookTheme('', [], style), customThemeRef.current) as BookTheme,
         createdBy: attribution?.createdBy ?? childId,
         createdFor: attribution?.createdFor ?? childId,
         generationConfig: {
@@ -1287,7 +1307,13 @@ export function useBookGenerateChat(
     const resolvedId = finalId ?? bookId
     if (!resolvedId) return null
 
-    const themeId = inferBookTheme(pendingIdea, [], illustrationStyle)
+    // A noted book has no preset id, so its pictures get no theme prefix — the
+    // picked illustration style owns the look outright (FEAT-174), which is
+    // what a note asked for anyway.
+    const themeId = themeIdForNote(
+      inferBookTheme(pendingIdea, [], illustrationStyle),
+      customThemeRef.current,
+    )
 
     await illustrate({
       bookId: resolvedId,

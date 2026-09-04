@@ -171,8 +171,74 @@ describe('useBookGenerateChat — the one-off feel note (FEAT-194)', () => {
     ]
     expect(payload.generationConfig?.customTheme).toBe('spooky but kind')
     expect(options?.merge).toBe(true)
-    expect(Object.keys(payload)).toEqual(['generationConfig'])
+    // Narrow: the note, and the one field it is exclusive with (Codex P1 on
+    // PR #1767). Nothing else on the book.
+    expect(Object.keys(payload).sort()).toEqual(['generationConfig', 'theme'])
     expect(Object.keys(payload.generationConfig ?? {})).toEqual(['customTheme'])
+  })
+
+  it('CLEARS the inferred preset in the same write (Codex P1, PR #1767)', async () => {
+    // This chat has no theme chips — it assigns an `inferBookTheme` id on every
+    // create — so without this a noted book stored both, reopening Finish
+    // selected a preset chip AND Custom, and the shelf's preset filter listed a
+    // custom-noted book.
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+
+    await act(async () => {
+      await result.current.sendKidMessage('a ship')
+    })
+    setDocMock.mockClear()
+    act(() => {
+      result.current.setCustomTheme('spooky but kind')
+    })
+
+    await waitFor(() => expect(setDocMock).toHaveBeenCalled())
+    const [, payload] = setDocMock.mock.calls[0] as [unknown, { theme?: string }]
+    expect(payload.theme).toBe('')
+  })
+
+  it('leaves the inferred preset alone when a note is CLEARED', async () => {
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+
+    await act(async () => {
+      await result.current.sendKidMessage('a ship')
+    })
+    act(() => {
+      result.current.setCustomTheme('spooky')
+    })
+    setDocMock.mockClear()
+    act(() => {
+      result.current.setCustomTheme('')
+    })
+
+    await waitFor(() => expect(setDocMock).toHaveBeenCalled())
+    const [, payload] = setDocMock.mock.calls[0] as [unknown, { theme?: string }]
+    expect(payload).not.toHaveProperty('theme')
+  })
+
+  it('omits the inferred preset from a draft CREATED with a note', async () => {
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+
+    act(() => {
+      result.current.setCustomTheme('spooky but kind')
+    })
+    await act(async () => {
+      await result.current.sendKidMessage('a ship')
+    })
+
+    const created = addDocMock.mock.calls[0][1] as { theme?: string }
+    expect(created.theme).toBe('')
+  })
+
+  it('still records the inferred preset on a draft created WITHOUT one', async () => {
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+
+    await act(async () => {
+      await result.current.sendKidMessage('a ship')
+    })
+
+    const created = addDocMock.mock.calls[0][1] as { theme?: string }
+    expect(created.theme).toBe('fantasy')
   })
 
   it("clears a note as `''` — `undefined` would survive a merge write", async () => {

@@ -100,6 +100,34 @@ export function chooseStoryTheme(
   return { theme: undefined, customTheme: note }
 }
 
+/**
+ * The theme id a write should carry, given the note that write also carries
+ * (Codex P1 on PR #1767).
+ *
+ * `chooseStoryTheme` holds the rule where a person PICKS — the Finish dialog's
+ * chip row. The Generate chat has no theme chips: it assigns an **inferred** id
+ * (`inferBookTheme`) on every create, so a noted book would quietly store both,
+ * and the invariant would hold only inside the dialog's own state. Reopening
+ * Finish would show a preset chip *and* Custom selected, and the shelf's preset
+ * filter would list a custom-noted book.
+ *
+ * So every write that assigns a theme passes it through here first. A note wins:
+ * it is what a parent said, and the id is what a regex guessed from the idea.
+ *
+ * `''` rather than `undefined` for the cleared case, for the reason the whole
+ * module uses `''`: the app runs Firestore with `ignoreUndefinedProperties`, so
+ * `undefined` on a merge write leaves the old id in place. `''` is falsy
+ * everywhere the id is read — the shelf's `filter(Boolean)`, the Finish
+ * dialog's `selectedTheme === t.id`, and `useBookIllustrator`'s
+ * `bookTheme ? { themeId } : {}` — so it reads as "no theme", which is true.
+ */
+export function themeIdForNote<T extends string | undefined>(
+  inferred: T,
+  note: unknown,
+): T | '' {
+  return hasCustomStoryTheme(note) ? '' : inferred
+}
+
 // ── Copy ────────────────────────────────────────────────────────────
 // One place, so the chip, the card and the hint cannot drift. Parent-facing
 // only: this control is gated on capability and a kid never sees it, so it is
