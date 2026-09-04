@@ -224,3 +224,99 @@ describe('per-domain helpers — capability, not identity', () => {
     expect(code).not.toMatch(/\.name\b/)
   })
 })
+
+// ── FEAT-184 / UX-150: a starting frame is not calibration ──────────────────
+//
+// "Load Starter Defaults" writes a template's `prioritySkills` into the same
+// field an evaluation writes. London's K frame carries a reading row AND a
+// `math.` row, so before this rule one parent tap satisfied both gates and the
+// whole Mine opened for a child nothing had been tuned for.
+
+import { isStarterSkill } from './knowledgeMineAccess'
+import { getDefaultsForChild, STARTER_PRIORITY_SKILLS } from '../evaluation/childDefaults'
+import { defaultPrioritySkills as londonPrioritySkills } from '../evaluation/londonDefaults'
+import { defaultPrioritySkills as lincolnPrioritySkills } from '../evaluation/lincolnDefaults'
+import { MasteryGate } from '../../core/types/enums'
+
+describe('starter defaults do not open the Mine (FEAT-184 / UX-150)', () => {
+  /** What `SkillSnapshotPage`'s "Load Starter Defaults" writes for a kindergarten-band child. */
+  const londonAfterDefaults = () =>
+    baseSnapshot({
+      childId: 'child-k',
+      prioritySkills: [...getDefaultsForChild({ grade: 'Kindergarten' }).prioritySkills],
+    })
+
+  it('the K template is the one the defaults selector hands a kindergarten-band child', () => {
+    expect(getDefaultsForChild({ grade: 'Kindergarten' }).prioritySkills).toBe(londonPrioritySkills)
+  })
+
+  it('London with defaults applied and nothing else → both gates false, entry held', () => {
+    const snapshot = londonAfterDefaults()
+    expect(hasReadingCalibration(snapshot)).toBe(false)
+    expect(hasMathCalibration(snapshot)).toBe(false)
+    expect(canAccessKnowledgeMine(snapshot)).toBe(false)
+  })
+
+  it('every template row is recognised as a starter — the union covers both frames', () => {
+    for (const skill of [...londonPrioritySkills, ...lincolnPrioritySkills]) {
+      if (skill.level === SkillLevel.Emerging && skill.masteryGate === MasteryGate.NotYet) {
+        expect(isStarterSkill(skill), skill.tag).toBe(true)
+        expect(STARTER_PRIORITY_SKILLS).toContain(skill)
+      }
+    }
+  })
+
+  it('the same tags at Developing are real evidence — a quest that upgraded a starter opens the Mine', () => {
+    const upgraded = londonAfterDefaults()
+    upgraded.prioritySkills = upgraded.prioritySkills.map((s) =>
+      s.tag === 'reading.letterSound' ? { ...s, level: SkillLevel.Developing } : s,
+    )
+    expect(isStarterSkill(upgraded.prioritySkills.find((s) => s.tag === 'reading.letterSound')!)).toBe(false)
+    expect(hasReadingCalibration(upgraded)).toBe(true)
+    // The math row is still untouched, so the Math quest stays absent.
+    expect(hasMathCalibration(upgraded)).toBe(false)
+    expect(canAccessKnowledgeMine(upgraded)).toBe(true)
+  })
+
+  it('a starter tag whose mastery gate moved is real evidence too — only the exact shape is a starter', () => {
+    const gated = londonAfterDefaults()
+    gated.prioritySkills = gated.prioritySkills.map((s) =>
+      s.tag === 'math.placeValue' ? { ...s, masteryGate: MasteryGate.WithHelp } : s,
+    )
+    expect(hasMathCalibration(gated)).toBe(true)
+  })
+
+  it('the same tag written by an evaluation (no mastery gate) is not a starter', () => {
+    // Evaluations write `{tag, label, level}`; the template always stamps `NotYet`.
+    const evaluated = baseSnapshot({
+      prioritySkills: [{ tag: 'reading.letterSound', label: 'Letter sounds', level: SkillLevel.Emerging }],
+    })
+    expect(isStarterSkill(evaluated.prioritySkills[0])).toBe(false)
+    expect(hasReadingCalibration(evaluated)).toBe(true)
+  })
+
+  it('a non-template tag at the starter shape is still evidence — the tag has to be a template row', () => {
+    const snapshot = baseSnapshot({
+      prioritySkills: [
+        { tag: 'reading.cvcSegment', label: 'CVC segmenting', level: SkillLevel.Emerging, masteryGate: MasteryGate.NotYet },
+      ],
+    })
+    expect(hasReadingCalibration(snapshot)).toBe(true)
+  })
+
+  it('Lincoln is unchanged — his working levels open the gate whatever his priority rows hold', () => {
+    const lincoln = baseSnapshot({
+      childId: 'child-older',
+      prioritySkills: [...getDefaultsForChild({ grade: '4th grade' }).prioritySkills],
+      workingLevels: { phonics: { level: 3, updatedAt: '2026-01-01', source: 'quest' } },
+    })
+    expect(hasReadingCalibration(lincoln)).toBe(true)
+    expect(canAccessKnowledgeMine(lincoln)).toBe(true)
+  })
+
+  it('identical starter snapshots gate identically regardless of childId (still capability, never name)', () => {
+    const a = londonAfterDefaults()
+    const b = { ...londonAfterDefaults(), childId: 'anyone-else' }
+    expect(canAccessKnowledgeMine(a)).toBe(canAccessKnowledgeMine(b))
+  })
+})

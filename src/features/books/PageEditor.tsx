@@ -42,6 +42,19 @@ import {
 } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
 
+/**
+ * Human wording for `ImageVersion.replacedBy` (UX-132c). The stored value is a
+ * raw enum — `reimagine` / `upload` / `gallery` / `generate` — and it was
+ * printed verbatim as the caption under each earlier picture. These say what
+ * actually happened, in the same words the doors that did it now use.
+ */
+const REPLACED_BY_LABEL: Record<string, string> = {
+  reimagine: 'Replaced by a reimagined drawing',
+  upload: 'Replaced by a photo you added',
+  gallery: 'Replaced from the gallery',
+  generate: 'Replaced by a made picture',
+}
+
 interface PageEditorProps {
   page: BookPage
   onUpdate: (changes: Partial<BookPage>) => void
@@ -78,7 +91,6 @@ export default function PageEditor({
   const isLincoln = childName.toLowerCase() === 'lincoln'
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
   const [layersOpen, setLayersOpen] = useState(false)
-  const [confirmRemoveBg, setConfirmRemoveBg] = useState(false)
   const [bgMenuAnchor, setBgMenuAnchor] = useState<HTMLElement | null>(null)
   const [versionHistoryImageId, setVersionHistoryImageId] = useState<string | null>(null)
   const imageContainerRef = useRef<HTMLDivElement>(null)
@@ -158,6 +170,27 @@ export default function PageEditor({
   // elements are composed overlays and stay exactly as they are.
   const canToggleFit = hasFittableBackground(page.images)
   const currentBgFit = backgroundFitOf(page.images)
+
+  /**
+   * One "Remove picture" behaviour on this screen (UX-129).
+   *
+   * This menu item used to confirm and then remove EVERY background on the
+   * page, while the action-bar chip with the same words removed the selected
+   * one without asking. Two behaviours behind one label, and the confirmed
+   * plural was the surprising one. Both are undoable — `onRemoveImage` is the
+   * editor's tracked remover — and the house rule is: undoable → don't ask.
+   * So this now does what the chip does: remove one, the selected background
+   * when there is one, otherwise the page's only/top background.
+   */
+  const removeOneBackground = () => {
+    if (!onRemoveImage) return
+    const target =
+      backgroundImages.find((img) => img.id === selectedImageId) ??
+      backgroundImages[backgroundImages.length - 1]
+    if (!target) return
+    onRemoveImage(target.id)
+    setSelectedImageId(null)
+  }
   const toggleBackgroundFit = () => {
     const next = currentBgFit === 'fit' ? 'fill' : 'fit'
     onUpdate({ images: applyBackgroundFit(page.images, next) })
@@ -168,7 +201,7 @@ export default function PageEditor({
       {/* Background edit icon — sits above the image container */}
       {backgroundImages.length > 0 && (onChangeBackground || onRemoveImage) && (
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5, px: 1 }}>
-          <Tooltip title="Change background">
+          <Tooltip title="Change picture">
             <IconButton
               size="small"
               onClick={(e) => setBgMenuAnchor(e.currentTarget)}
@@ -185,7 +218,7 @@ export default function PageEditor({
             {onChangeBackground && (
               <MenuItem onClick={() => { setBgMenuAnchor(null); onChangeBackground() }}>
                 <ListItemIcon><AutoFixHighIcon fontSize="small" /></ListItemIcon>
-                <ListItemText>Change background</ListItemText>
+                <ListItemText>Change picture</ListItemText>
               </MenuItem>
             )}
             {/* FEAT-177 — the whole picture, or the page filled. */}
@@ -202,9 +235,9 @@ export default function PageEditor({
             </MenuItem>
             )}
             {onRemoveImage && (
-              <MenuItem onClick={() => { setBgMenuAnchor(null); setConfirmRemoveBg(true) }}>
+              <MenuItem onClick={() => { setBgMenuAnchor(null); removeOneBackground() }}>
                 <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
-                <ListItemText>Remove background</ListItemText>
+                <ListItemText>Remove picture</ListItemText>
               </MenuItem>
             )}
             {onRestoreVersion && backgroundImages.some((img) => (img.previousVersions?.length ?? 0) > 0) && (
@@ -214,7 +247,7 @@ export default function PageEditor({
                 if (imgWithVersions) setVersionHistoryImageId(imgWithVersions.id)
               }}>
                 <ListItemIcon><HistoryIcon fontSize="small" /></ListItemIcon>
-                <ListItemText>Previous versions</ListItemText>
+                <ListItemText>Earlier pictures</ListItemText>
               </MenuItem>
             )}
           </Menu>
@@ -482,27 +515,6 @@ export default function PageEditor({
         </ToggleButtonGroup>
       </Box>
 
-      {/* Remove background confirmation dialog */}
-      <Dialog open={confirmRemoveBg} onClose={() => setConfirmRemoveBg(false)}>
-        <DialogTitle>Remove the background?</DialogTitle>
-        <DialogActions>
-          <Button onClick={() => setConfirmRemoveBg(false)}>Cancel</Button>
-          <Button
-            color="error"
-            variant="contained"
-            onClick={() => {
-              if (onRemoveImage) {
-                backgroundImages.forEach((img) => onRemoveImage(img.id))
-              }
-              setSelectedImageId(null)
-              setConfirmRemoveBg(false)
-            }}
-          >
-            Remove
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       {/* Previous versions dialog */}
       <Dialog
         open={!!versionHistoryImageId}
@@ -510,14 +522,14 @@ export default function PageEditor({
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Previous versions</DialogTitle>
+        <DialogTitle>Earlier pictures</DialogTitle>
         <DialogContent>
           {(() => {
             const img = page.images.find((i) => i.id === versionHistoryImageId)
             if (!img?.previousVersions?.length) {
               return (
                 <Typography variant="body2" color="text.secondary">
-                  No previous versions available.
+                  No earlier pictures yet.
                 </Typography>
               )
             }
@@ -545,18 +557,18 @@ export default function PageEditor({
                     >
                       <img
                         src={v.url}
-                        alt={`Version from ${new Date(v.replacedAt).toLocaleDateString()}`}
+                        alt={`Earlier picture from ${new Date(v.replacedAt).toLocaleDateString()}`}
                         loading="lazy"
                         style={{ borderRadius: 8, objectFit: 'cover', height: 80, width: '100%' }}
                       />
                       <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
-                        {v.replacedBy}
+                        {REPLACED_BY_LABEL[v.replacedBy] ?? v.replacedBy}
                       </Typography>
                     </ImageListItem>
                   ))}
                 </ImageList>
                 <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
-                  Tap any version to restore it
+                  Tap an earlier picture to bring it back
                 </Typography>
               </Stack>
             )

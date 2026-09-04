@@ -116,14 +116,47 @@ describe('the two confirmation lines', () => {
       'Cave Cat',
       ['again', 'water', 'people'],
       [{ text: 'The cat found water.' }, { text: 'Again and again it dug.' }],
+      StoryWordSource.Practice,
+      undefined,
+      'Lincoln',
     )
-    expect(msg).toBe('Here\'s your story! "Cave Cat" — it uses your practice words: again, water.')
+    expect(msg).toBe(
+      'Here\'s your story! "Cave Cat" — it uses Lincoln\'s practice words: again, water.',
+    )
   })
 
   it('says so plainly when none of the requested words landed', () => {
-    expect(storyDraftMessage('Cave Cat', ['people'], [{ text: 'The cat dug.' }])).toBe(
-      'Here\'s your story! "Cave Cat" — I couldn\'t fit your practice words in this time.',
+    expect(
+      storyDraftMessage(
+        'Cave Cat',
+        ['people'],
+        [{ text: 'The cat dug.' }],
+        StoryWordSource.Practice,
+        undefined,
+        'Lincoln',
+      ),
+    ).toBe(
+      'Here\'s your story! "Cave Cat" — I couldn\'t fit Lincoln\'s practice words in this time.',
     )
+  })
+
+  it('speaks in ONE voice about the child — the same third person the preview line uses (UX-111)', () => {
+    // Before FEAT-181 the conversation read: "…some of London's practice
+    // words" (preview) → "it uses YOUR practice words" (draft) → "above
+    // London's level" (the FEAT-176 clause). Three voices, three consecutive
+    // lines, one child.
+    const preview = storyWordsPreviewLine(StoryWordSource.Practice, 'London', ['again'])
+    const draft = storyDraftMessage(
+      'Cave Cat',
+      ['again'],
+      [{ text: 'Again it dug.' }],
+      StoryWordSource.Practice,
+      undefined,
+      'London',
+    )
+    expect(preview).toContain("London's practice words")
+    expect(draft).toContain("London's practice words")
+    expect(draft).not.toContain('your practice words')
   })
 
   it('says nothing about words when none were asked for (the pre-FEAT-169 line)', () => {
@@ -271,8 +304,15 @@ describe('the confirmation lines name their source (FEAT-172)', () => {
 
   it('the draft turn keeps the FEAT-169 practice wording for the practice source', () => {
     expect(
-      storyDraftMessage('Hero', ['our'], [{ text: 'Our hero.' }], StoryWordSource.Practice),
-    ).toBe('Here\'s your story! "Hero" — it uses your practice words: our.')
+      storyDraftMessage(
+        'Hero',
+        ['our'],
+        [{ text: 'Our hero.' }],
+        StoryWordSource.Practice,
+        undefined,
+        'London',
+      ),
+    ).toBe('Here\'s your story! "Hero" — it uses London\'s practice words: our.')
   })
 })
 
@@ -329,10 +369,15 @@ describe('storyReadabilityClause (FEAT-176 — say what is above the level)', ()
     )
   })
 
-  it('adds the estimate note — and where to fix it — when the level came from age', () => {
+  it('says the level was a guess, and leaves the how-to-fix to the "?" sheet (UX-111)', () => {
     const clause = storyReadabilityClause('London', { ...failing, levelSource: 'age' })
-    expect(clause).toContain('(estimated from age')
-    expect(clause).toContain("set London's phonics level under Working Levels on the Skill Snapshot")
+    expect(clause).toBe(
+      "2 words may be above London's level: castle, ready. (level estimated from age)",
+    )
+    // The advice itself lives in the Generate-a-Book help sheet now — a book
+    // dialog is the wrong place to send a parent to a Progress tab.
+    expect(clause).not.toContain('Working Levels')
+    expect(clause).not.toContain('Skill Snapshot')
   })
 
   it('says nothing when the story passed, when nothing was measured, or when no words were named', () => {
@@ -385,7 +430,7 @@ describe('storyDraftMessage with a readability report (FEAT-176)', () => {
         'London',
       ),
     ).toBe(
-      'Here\'s your story! "Cave Cat" — it uses your practice words: again.' +
+      'Here\'s your story! "Cave Cat" — it uses London\'s practice words: again.' +
         " 1 word may be above London's level: castle.",
     )
   })
@@ -416,16 +461,30 @@ describe('storyDraftMessage with a readability report (FEAT-176)', () => {
     ).toBe('Here\'s your story! "Cave Cat"')
   })
 
-  it('leaves every pre-FEAT-176 line byte-identical when nothing was measured', () => {
+  it('adds nothing to the line when nothing was measured', () => {
     expect(
-      storyDraftMessage('Cave Cat', ['again'], [{ text: 'Again it dug.' }]),
-    ).toBe('Here\'s your story! "Cave Cat" — it uses your practice words: again.')
+      storyDraftMessage(
+        'Cave Cat',
+        ['again'],
+        [{ text: 'Again it dug.' }],
+        StoryWordSource.Practice,
+        undefined,
+        'London',
+      ),
+    ).toBe('Here\'s your story! "Cave Cat" — it uses London\'s practice words: again.')
     expect(storyDraftMessage('Cave Cat', [], [{ text: 'x' }])).toBe(
       'Here\'s your story! "Cave Cat"',
     )
-    expect(storyDraftMessage('Cave Cat', ['people'], [{ text: 'The cat dug.' }])).toBe(
-      'Here\'s your story! "Cave Cat" — I couldn\'t fit your practice words in this time.',
-    )
+    expect(
+      storyDraftMessage(
+        'Cave Cat',
+        ['people'],
+        [{ text: 'The cat dug.' }],
+        StoryWordSource.Practice,
+        undefined,
+        'London',
+      ),
+    ).toBe('Here\'s your story! "Cave Cat" — I couldn\'t fit London\'s practice words in this time.')
   })
 })
 

@@ -8,7 +8,6 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import WallpaperIcon from '@mui/icons-material/Wallpaper'
 import StarIcon from '@mui/icons-material/Star'
-import SaveAltIcon from '@mui/icons-material/SaveAlt'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 
 import type { ReimagineJob } from './useBackgroundReimagine'
@@ -20,7 +19,6 @@ interface ReimagineResultDialogProps {
   onClose: () => void
   onReplaceBackground: () => void
   onAddAsSticker: () => void
-  onSaveToGallery: () => void
   onDiscard: () => void
 }
 
@@ -30,7 +28,6 @@ export default function ReimagineResultDialog({
   onClose,
   onReplaceBackground,
   onAddAsSticker,
-  onSaveToGallery,
   onDiscard,
 }: ReimagineResultDialogProps) {
   if (!job || job.status !== 'done' || !job.resultUrl) return null
@@ -112,10 +109,10 @@ export default function ReimagineResultDialog({
             >
               <WallpaperIcon color="primary" />
               <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.2 }}>
-                Replace background
+                Replace the picture
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
-                Full page background
+                Fills the whole page
               </Typography>
             </Box>
             <Box
@@ -146,40 +143,13 @@ export default function ReimagineResultDialog({
                 Movable & resizable
               </Typography>
             </Box>
-            <Box
-              onClick={onSaveToGallery}
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 0.5,
-                p: 1.5,
-                borderRadius: 2,
-                border: '2px solid',
-                borderColor: 'divider',
-                cursor: 'pointer',
-                textAlign: 'center',
-                transition: 'all 0.15s',
-                minHeight: 80,
-                justifyContent: 'center',
-                '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' },
-                '&:active': { transform: 'scale(0.97)' },
-              }}
-            >
-              <SaveAltIcon color="primary" />
-              <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.2 }}>
-                Save to gallery
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
-                Save for later
-              </Typography>
-            </Box>
           </Box>
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2, flexDirection: 'column', alignItems: 'stretch', gap: 1 }}>
         <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
-          Saved to your gallery automatically
+          Saved to your gallery automatically. Discard just leaves it off this page —
+          it stays in your gallery.
         </Typography>
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Button

@@ -11,7 +11,7 @@ import type { ArtHelpAudience, ArtHelpDoor, ArtHelpSurface } from '../artHelpCon
 import { GENERATION_STYLES } from '../bookTypes'
 import { FANCY_STYLE_OPTIONS } from '../drawingStickerStyles'
 
-const SURFACES: ArtHelpSurface[] = ['stickers', 'sketch', 'bookImages', 'generateBook', 'kitArt']
+const SURFACES: ArtHelpSurface[] = ['stickers', 'sketch', 'bookImages', 'generateBook', 'kitArt', 'workshop', 'avatarPhoto']
 const AUDIENCES: ArtHelpAudience[] = ['kid', 'parent']
 const DOORS: ArtHelpDoor[] = [
   'makeSticker',
@@ -22,6 +22,10 @@ const DOORS: ArtHelpDoor[] = [
   'illustrateBook',
   'kitArt',
   'kitArtBatch',
+  'workshopGame',
+  'workshopRegenerate',
+  'avatarPhoto',
+  'revisePagePicture',
 ]
 
 // ── The readability proxy ───────────────────────────────────────
@@ -166,6 +170,32 @@ describe('styleBlurb — every look a picker offers', () => {
     expect(artHelpStyles('stickers').map((s) => s.id)).toEqual(FANCY_STYLE_OPTIONS.map((o) => o.id))
     // The Kit Builder has no style picker — its stickers are one fixed look.
     expect(artHelpStyles('kitArt')).toEqual([])
+    // FEAT-184: neither the Workshop nor the photo read offers a look.
+    expect(artHelpStyles('workshop')).toEqual([])
+    expect(artHelpStyles('avatarPhoto')).toEqual([])
+  })
+})
+
+describe('generateHint — the FEAT-184 doors', () => {
+  it('says "up to" when the batch is sized by a step that has not run yet', () => {
+    expect(generateHint('workshopGame', 'kid', 15, { atMost: true })).toBe('Up to 15 pictures. Up to 15 art.')
+    expect(generateHint('workshopGame', 'parent', 15, { atMost: true })).toBe(
+      'The pictures for this game · up to 15 paid image calls',
+    )
+    // A known count reads as a plain count, `atMost` or not for zero.
+    expect(generateHint('workshopGame', 'kid', 9)).toBe('Makes 9 pictures. Uses 9 art.')
+    expect(generateHint('workshopRegenerate', 'parent', 8)).toBe('The missing pictures for this game · 8 paid image calls')
+    expect(generateHint('workshopGame', 'kid', 0, { atMost: true })).toBe('Makes no pictures. Uses no art.')
+  })
+
+  it('never says the photo read makes a picture — it reads one', () => {
+    expect(generateHint('avatarPhoto', 'kid')).toBe('Reads your photo. Uses 1 art.')
+    expect(generateHint('avatarPhoto', 'parent')).toBe("Reads one photo into your hero's look · 1 paid image call")
+  })
+
+  it('holds the kid readability bar on the up-to form and the photo read', () => {
+    expectKidWording(generateHint('workshopGame', 'kid', 15, { atMost: true }), 'workshopGame/atMost')
+    expectKidWording(generateHint('avatarPhoto', 'kid'), 'avatarPhoto')
   })
 })
 

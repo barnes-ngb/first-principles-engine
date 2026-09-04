@@ -50,7 +50,19 @@ import { FANCY_STYLE_OPTIONS } from './drawingStickerStyles'
 
 // ── Shapes ──────────────────────────────────────────────────────
 
-export type ArtHelpSurface = 'stickers' | 'sketch' | 'bookImages' | 'generateBook' | 'kitArt'
+/**
+ * `workshop` (the Game Workshop's board / adventure / card art) and
+ * `avatarPhoto` (the Hero Hub's "Transform!" photo read) joined in FEAT-184 —
+ * the two paid doors a kid could reach that had no cap and no word about cost.
+ */
+export type ArtHelpSurface =
+  | 'stickers'
+  | 'sketch'
+  | 'bookImages'
+  | 'generateBook'
+  | 'kitArt'
+  | 'workshop'
+  | 'avatarPhoto'
 export type ArtHelpAudience = 'kid' | 'parent'
 
 export interface ArtHelpSection {
@@ -59,7 +71,7 @@ export interface ArtHelpSection {
    * sheet fills it from {@link artHelpStyles} so a style added to a picker shows
    * up here without a second list to keep in step.
    */
-  id: 'what' | 'styles' | 'fit' | 'ask' | 'budget' | 'never'
+  id: 'what' | 'styles' | 'fit' | 'level' | 'ask' | 'budget' | 'never'
   heading: string
   lines: string[]
 }
@@ -86,6 +98,20 @@ export type ArtHelpDoor =
   | 'illustrateBook'
   | 'kitArt'
   | 'kitArtBatch'
+  /** "Create My Game!" — the batch of pictures a new game makes (FEAT-184). */
+  | 'workshopGame'
+  /** My Games → "Regenerate Art" — the board set again, for a game missing pieces. */
+  | 'workshopRegenerate'
+  /** The Hero Hub's "Transform!" — reads one photo into the character's look. */
+  | 'avatarPhoto'
+  /**
+   * The review chat's "Change this" (UX-147): a voice note that rewrites one
+   * page and, when the words that describe the scene change with it, redraws
+   * that page's picture. The quietest paid door in the area — the kid says
+   * "make the dragon green" and pays for a picture — and the only CONDITIONAL
+   * one, which is why its hint ignores `count`.
+   */
+  | 'revisePagePicture'
 
 /** What the surface's quota hook currently says. `remaining` may be `Infinity`. */
 export interface ArtBudgetState {
@@ -214,6 +240,10 @@ export function artHelpStyles(surface: ArtHelpSurface): ArtHelpStyleEntry[] {
     case 'sketch':
       return FANCY_STYLE_OPTIONS.map((o) => ({ id: o.id, label: o.label, emoji: o.emoji }))
     case 'kitArt':
+    case 'workshop':
+    case 'avatarPhoto':
+      // No style picker on these surfaces: the Workshop's art is one fixed
+      // children's-game look and the photo read makes no picture at all.
       return []
   }
 }
@@ -309,7 +339,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           heading: 'What you get',
           lines: [
             '"Make a Sticker" turns a few typed words into one cut-out picture you can drop into a book or print on a sheet.',
-            '"From a Drawing" photographs a real drawing and cuts it out. That cleanup is free — only "Make it fancy" spends a picture.',
+            '"From a drawing" photographs a real drawing and cuts it out. That cleanup is free — only "Make it fancy" spends a picture.',
             '"Make it fancy" redraws the same drawing in a look you pick, keeping its shapes, characters and layout.',
             '"Add version" and "Make more versions" each make one more look of a drawing you already have — one picture per tap, and every earlier look stays.',
           ],
@@ -340,7 +370,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
             'Cleaning your drawing is free.',
             'Make it fancy makes a new picture.',
             'It keeps your shapes the same.',
-            'Redo makes one more picture.',
+            'Make it again makes one more.',
           ],
         },
         stylesSection('kid'),
@@ -362,7 +392,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           lines: [
             'Photographing, cropping and cleaning up a drawing is free, and the cut-out sticker you get from that costs nothing.',
             '"Make it fancy" is the paid step: it redraws the child\'s drawing in the look you pick and keeps the same composition, characters and layout.',
-            '"Redo with this style" is another paid picture, not a free retry — both versions stay saveable.',
+            '"Make it with this style" is another paid picture, not a free retry — both versions stay saveable.',
           ],
         },
         stylesSection('parent'),
@@ -388,7 +418,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           id: 'what',
           heading: 'What you get',
           lines: [
-            'Create makes one page picture.',
+            'Make it makes one page picture.',
             'It uses the words you type.',
             'You can redo a page picture.',
             'Adding your own drawing is free.',
@@ -401,7 +431,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           lines: [
             'Show the whole picture fits it all in.',
             'Fill the page cuts the edges off.',
-            'Both live in the background menu.',
+            'Both live in the picture menu.',
           ],
         },
         {
@@ -420,8 +450,8 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           id: 'what',
           heading: 'What you get',
           lines: [
-            '"Create!" makes one background picture for the page you are on, from the scene words you type.',
-            '"Change background" reopens the picture maker for a page that already has one. The new picture replaces the old one and costs another picture.',
+            '"Make it" makes one full-page picture for the page you are on, from the words you type.',
+            '"Change picture" reopens the picture maker for a page that already has one. The new picture replaces the old one and costs another picture.',
             'When you photograph a drawing, "Reimagine" redraws it as a polished illustration — also a paid picture. Cropping, cleaning and using the drawing as it is are all free.',
             'The sticker picker inside the editor can generate a new sticker too, and that counts the same as any other picture.',
           ],
@@ -433,7 +463,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           lines: [
             '"Show the whole picture" fits the entire image inside the page and fills the leftover space with a blurred, enlarged copy of itself.',
             '"Fill the page" crops the image to the frame. That is the original behaviour and stays the default for every background.',
-            'Both live in the "Change background" menu and affect only the background. Stickers and placed pieces never move, on screen or in the PDF.',
+            'Both live in the wallpaper menu above the page and affect only the full-page picture. Stickers and placed pieces never move, on screen or in the PDF.',
           ],
         },
         {
@@ -442,7 +472,7 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           lines: [
             'Describe the place and the moment, not the character. Every page prompt asks the picture maker for the environment only, and it deliberately draws no people.',
             'Add your characters afterwards with a drawing or a sticker — that is the flow the editor is built for.',
-            'Say the style once by tapping it. Writing a style into the scene words as well gives the picture maker two art directions.',
+            'Say the style once by tapping it. Writing a style into the words as well gives the picture maker two art directions.',
           ],
         },
         budgetSection('parent'),
@@ -482,12 +512,26 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
           id: 'what',
           heading: 'What you get',
           lines: [
-            'Writing and revising the story is free. Tapping "I like the whole story!" saves the book and then illustrates it — one picture per page that carries a scene.',
+            'Writing and revising the story is free. Tapping "Make my book!" saves the book and then makes the pictures — one per page that carries a scene.',
             'A page with no scene is skipped and costs nothing.',
             'If the week\'s budget cannot cover the whole book, nothing is spent at all and the story is still saved. A book that stops half-illustrated is the worse outcome.',
           ],
         },
         stylesSection('parent'),
+        {
+          // UX-111 — this used to be a 20-word parenthetical inside the draft
+          // turn, telling a parent inside a book dialog to walk to a Progress
+          // tab she cannot tap through to. The line now just says the level was
+          // a guess; how to fix the guess belongs here, with every other
+          // explanation FEAT-178 moved behind the "?".
+          id: 'level',
+          heading: 'The reading level',
+          lines: [
+            'The story is written to the child\u2019s assessed reading level, and the draft turn says plainly which words came out above it.',
+            'With no assessed level the story is sized from age instead, and the draft turn says so. An age guess is the most likely reason a good story gets flagged.',
+            'Set a real level under Working Levels on the Skill Snapshot (Progress \u2192 Skill Snapshot) and every story after it is written to that.',
+          ],
+        },
         {
           id: 'ask',
           heading: 'How to ask for a good picture',
@@ -550,6 +594,104 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
       ],
     },
   },
+
+  workshop: {
+    kid: {
+      title: 'How game pictures work',
+      sections: [
+        {
+          id: 'what',
+          heading: 'What you get',
+          lines: [
+            'Your game gets a board and cards.',
+            'A story game gets scene pictures.',
+            'A card game gets the most.',
+            'Making the game words is free.',
+          ],
+        },
+        {
+          id: 'ask',
+          heading: 'Ask for a good one',
+          lines: ['Pick a theme you love.', 'Say what your world looks like.'],
+        },
+        budgetSection('kid'),
+        neverSection('kid'),
+      ],
+    },
+    parent: {
+      title: 'How game pictures work',
+      sections: [
+        {
+          id: 'what',
+          heading: 'What you get',
+          lines: [
+            '"Create My Game!" writes the game first — that part is free — and then makes its pictures. A board game makes the board, a title card, four challenge cards and a token for each grown-up who is playing.',
+            'A story adventure makes a title card, up to six scene pictures and a card for each kind of challenge it uses. A card game makes a title, a card back and up to thirteen card faces — the most any game spends.',
+            'The pictures are reserved as one batch before any is made. If the week\'s budget cannot cover the whole set, the game is still made — with no pictures — and nothing is spent; "Regenerate Art" in My Games makes them later.',
+            'The three writing calls (the game, the adventure, the cards) are not art and are not counted against the budget.',
+          ],
+        },
+        {
+          id: 'ask',
+          heading: 'How to ask for a good picture',
+          lines: [
+            'The theme is the one word every picture prompt carries, so a concrete one ("underwater", "dinosaur jungle") draws better than a mood ("fun").',
+            'Every picture is made in one children\'s-game look; there is no style picker here.',
+          ],
+        },
+        budgetSection('parent'),
+        neverSection('parent'),
+      ],
+    },
+  },
+
+  avatarPhoto: {
+    kid: {
+      title: 'How your photo works',
+      sections: [
+        {
+          id: 'what',
+          heading: 'What you get',
+          lines: [
+            'Pick a photo of you.',
+            'Transform reads how you look.',
+            'Your hero gets your look.',
+            'It uses one art each time.',
+          ],
+        },
+        {
+          id: 'ask',
+          heading: 'Ask for a good one',
+          lines: ['Use a clear photo of your face.', 'Good light helps.'],
+        },
+        budgetSection('kid'),
+        neverSection('kid'),
+      ],
+    },
+    parent: {
+      title: 'How the photo transform works',
+      sections: [
+        {
+          id: 'what',
+          heading: 'What you get',
+          lines: [
+            '"Transform!" sends the photo to the picture model once and reads back a set of traits — hair, skin tone, eye colour, glasses — that the 3D character then wears. It makes no picture; the read is what costs.',
+            'Choosing a photo and cropping it is free. Only "Transform!" spends, and it spends the same one call each time it is tapped.',
+            'The photo and the traits it read are saved on the child\'s avatar profile, and nowhere else.',
+          ],
+        },
+        {
+          id: 'ask',
+          heading: 'How to get a good read',
+          lines: [
+            'A clear, well-lit photo of the face, roughly square, reads best — the crop is centred automatically.',
+          ],
+        },
+        budgetSection('parent'),
+        neverSection('parent'),
+      ],
+    },
+  },
 }
 
 /** The help sheet's whole content for one surface, in one audience's words. */
@@ -587,10 +729,37 @@ const DOOR_SUBJECT: Record<ArtHelpDoor, string> = {
   makeItFancy: 'One new picture of this drawing',
   addVersion: 'One more look of this drawing',
   makeVersions: 'One more look of this drawing',
-  bookScene: 'One picture from your scene words',
+  bookScene: 'One picture from the words you type',
   illustrateBook: 'One picture per page with a scene',
   kitArt: 'One sticker for this character',
   kitArtBatch: 'One sticker for each character left',
+  workshopGame: 'The pictures for this game',
+  workshopRegenerate: 'The missing pictures for this game',
+  avatarPhoto: 'Reads one photo into your hero\'s look',
+  revisePagePicture: "Changes this page's words",
+}
+
+/**
+ * Doors whose paid call makes no picture. "Makes 1 picture" would be false for
+ * the photo read, so the kid sentence names what really happens instead.
+ */
+const NON_PICTURE_KID_SUBJECT: Partial<Record<ArtHelpDoor, string>> = {
+  avatarPhoto: 'Reads your photo.',
+}
+
+/**
+ * Doors where the picture is a CONSEQUENCE of the tap, not the tap itself, so
+ * no count is knowable in advance and neither audience may be promised one.
+ * Their hint says "if" rather than "N", and ignores `count` entirely.
+ */
+const CONDITIONAL_DOORS: ReadonlySet<ArtHelpDoor> = new Set<ArtHelpDoor>([
+  'revisePagePicture',
+])
+
+/** The conditional wording, one per audience. Held to the same kid bar. */
+const CONDITIONAL_HINTS: Record<ArtHelpAudience, string> = {
+  kid: 'Changes the words. The picture may change too.',
+  parent: "Changes this page's words \u00b7 if the picture is redrawn too, that is 1 paid image call",
 }
 
 const STICKER_DOORS: ReadonlySet<ArtHelpDoor> = new Set<ArtHelpDoor>([
@@ -628,17 +797,34 @@ const STICKER_DOORS: ReadonlySet<ArtHelpDoor> = new Set<ArtHelpDoor>([
  * At the cap the host shows `ART_QUOTA_MESSAGE` **instead of** this — never
  * both.
  */
-export function generateHint(door: ArtHelpDoor, audience: ArtHelpAudience, count = 1): string {
+export function generateHint(
+  door: ArtHelpDoor,
+  audience: ArtHelpAudience,
+  count = 1,
+  opts: { atMost?: boolean } = {},
+): string {
+  // A door whose picture is conditional cannot honestly print a number, so it
+  // never reaches the counting path below (UX-147) — `count` and `atMost` are
+  // both meaningless there.
+  if (CONDITIONAL_DOORS.has(door)) return CONDITIONAL_HINTS[audience]
   const n = Math.max(0, Math.floor(count))
+  // FEAT-184: the Workshop's adventure and card-game batches are sized by
+  // what the writing step returns, so before that step the honest number is
+  // a ceiling. "Up to N" says so; a fixed N would be the over-statement the
+  // live count exists to prevent.
+  const atMost = Boolean(opts.atMost) && n > 0
   if (audience === 'kid') {
+    const kidSubject = NON_PICTURE_KID_SUBJECT[door]
+    if (kidSubject) return `${kidSubject} Uses ${n} art.`
     if (n === 0) return 'Makes no pictures. Uses no art.'
     const noun = STICKER_DOORS.has(door) ? 'sticker' : 'picture'
     const made = n === 1 ? `1 ${noun}` : `${n} ${noun}s`
+    if (atMost) return `Up to ${made}. Up to ${n} art.`
     return `Makes ${made}. Uses ${n} art.`
   }
   // The door's subject line describes pictures being made, so it is the wrong
   // sentence when none are.
   if (n === 0) return 'No pictures to make here · nothing to pay for'
   const spend = n === 1 ? '1 paid image call' : `${n} paid image calls`
-  return `${DOOR_SUBJECT[door]} · ${spend}`
+  return `${DOOR_SUBJECT[door]} · ${atMost ? 'up to ' : ''}${spend}`
 }

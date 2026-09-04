@@ -68,7 +68,20 @@ import { useWorkshopGames } from './useWorkshopGames'
 import { useTTS } from '../../core/hooks/useTTS'
 import GameCreationScreen from './GameCreationScreen'
 import VoiceRecordingStep from './VoiceRecordingStep'
-import { generateAllArt, generateAdventureArt, generateCardGameArt } from './workshopArt'
+import {
+  buildAdventureArtRequests,
+  buildArtRequests,
+  buildCardGameArtRequests,
+  BOARD_TITLE_AFTER_WORDS,
+  generateAllArt,
+  generateAdventureArt,
+  generateCardGameArt,
+} from './workshopArt'
+import type { GenerateImageFn } from './workshopArt'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import { canReserveWorkshopArt, recordWorkshopArtGeneration, useWorkshopArtQuota } from './useWorkshopArtQuota'
+import Snackbar from '@mui/material/Snackbar'
+import Alert from '@mui/material/Alert'
 import PlaytestView from './PlaytestView'
 import AdventurePlaytestView from './AdventurePlaytestView'
 import PlaytestSummaryView from './PlaytestSummaryView'
@@ -134,9 +147,44 @@ export default function WorkshopPage() {
 
   const { chat, generateImage } = useAI()
   const familyId = useFamilyId()
-  const { activeChildId, children } = useActiveChild()
+  const { activeChildId, children, isChildProfile } = useActiveChild()
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
+
+  // ── The weekly art budget (FEAT-184 — audit #6, UX-100's residual) ──
+  // Every picture this page makes goes through `countedGenerateImage`, and
+  // every batch is reserved whole with `reserveArt` before the first call.
+  // Capability, never name: a kid profile is capped, a parent is not.
+  const {
+    remaining: artRemaining,
+    limit: artLimit,
+    atLimit: artAtLimit,
+    recordGeneration: recordArtGeneration,
+  } = useWorkshopArtQuota()
+  const artAudience = isChildProfile ? 'kid' : 'parent'
+  const artBudget = { limit: artLimit, remaining: artRemaining, capped: isChildProfile }
+  const [artBudgetNotice, setArtBudgetNotice] = useState<string | null>(null)
+  // Readable from inside the async generation flow, which spans several
+  // awaits and renders: the counter's `onSnapshot` moves it as pictures land.
+  const artRemainingRef = useRef(artRemaining)
+  useEffect(() => {
+    artRemainingRef.current = artRemaining
+  }, [artRemaining])
+  /** `generateImage`, counting one against the week for each real picture. Fire-and-forget by construction (FEAT-167). */
+  const countedGenerateImage = useCallback<GenerateImageFn>(
+    async (request) => {
+      const response = await generateImage(request)
+      if (response?.url) recordWorkshopArtGeneration(recordArtGeneration)
+      return response
+    },
+    [generateImage, recordArtGeneration],
+  )
+  /** Reserve a whole batch, or refuse it whole and say so warmly. Never a half-spend. */
+  const reserveArt = useCallback((count: number): boolean => {
+    if (canReserveWorkshopArt(count, artRemainingRef.current)) return true
+    setArtBudgetNotice(ART_QUOTA_MESSAGE)
+    return false
+  }, [])
 
   const isAdventure = currentGame?.gameType === GameType.Adventure
   const isCards = currentGame?.gameType === GameType.Cards
@@ -305,20 +353,22 @@ export default function WorkshopPage() {
           return
         }
 
-        // Generate art for card game
+        // Generate art for card game — the whole batch reserved first (FEAT-184)
         let generatedArt: GeneratedArt | undefined
-        try {
-          const artResult = await generateCardGameArt(
-            generateImage,
-            familyId,
-            inputs,
-            cardGameData,
-          )
-          if (artResult) {
-            generatedArt = artResult.art
+        if (reserveArt(buildCardGameArtRequests(inputs, cardGameData).length)) {
+          try {
+            const artResult = await generateCardGameArt(
+              countedGenerateImage,
+              familyId,
+              inputs,
+              cardGameData,
+            )
+            if (artResult) {
+              generatedArt = artResult.art
+            }
+          } catch (err) {
+            console.warn('Card game art generation failed:', err)
           }
-        } catch (err) {
-          console.warn('Card game art generation failed:', err)
         }
 
         const now = new Date().toISOString()
@@ -407,20 +457,22 @@ export default function WorkshopPage() {
           return
         }
 
-        // Generate art for adventure
+        // Generate art for adventure — the whole batch reserved first (FEAT-184)
         let generatedArt: GeneratedArt | undefined
-        try {
-          const artResult = await generateAdventureArt(
-            generateImage,
-            familyId,
-            inputs,
-            adventureTree,
-          )
-          if (artResult) {
-            generatedArt = artResult.art
+        if (reserveArt(buildAdventureArtRequests(inputs, adventureTree).length)) {
+          try {
+            const artResult = await generateAdventureArt(
+              countedGenerateImage,
+              familyId,
+              inputs,
+              adventureTree,
+            )
+            if (artResult) {
+              generatedArt = artResult.art
+            }
+          } catch (err) {
+            console.warn('Adventure art generation failed:', err)
           }
-        } catch (err) {
-          console.warn('Adventure art generation failed:', err)
         }
 
         const now = new Date().toISOString()
@@ -477,6 +529,12 @@ export default function WorkshopPage() {
         // ── Board game generation (existing flow) ──────────────
         let response: ChatResponse | null = null
         let artResult: Awaited<ReturnType<typeof generateAllArt>> | null = null
+        // The board set plus the title card drawn after the words, reserved as
+        // one batch before either is spent (FEAT-184). The words are written
+        // either way — that call is not art.
+        const boardArtReserved = reserveArt(
+          buildArtRequests(inputs).length + BOARD_TITLE_AFTER_WORDS,
+        )
         try {
           ;[response, artResult] = await Promise.all([
             chat({
@@ -485,10 +543,12 @@ export default function WorkshopPage() {
               taskType: TaskType.Workshop,
               messages: [{ role: 'user', content: JSON.stringify(inputs) }],
             }),
-            generateAllArt(generateImage, familyId, inputs).catch((err) => {
-              console.warn('Art generation batch failed:', err)
-              return null
-            }),
+            boardArtReserved
+              ? generateAllArt(countedGenerateImage, familyId, inputs).catch((err) => {
+                  console.warn('Art generation batch failed:', err)
+                  return null
+                })
+              : Promise.resolve(null),
           ])
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err)
@@ -516,19 +576,21 @@ export default function WorkshopPage() {
           generatedArt = artResult.art
         }
 
-        // Generate title screen with the actual game title
-        try {
-          const titleResult = await generateImage({
-            familyId,
-            prompt: `A title card illustration for a children's board game called '${generatedGame.title}', ${inputs.theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
-            style: 'general',
-            size: '1024x1024',
-          })
-          if (titleResult?.url) {
-            generatedArt = { ...generatedArt, titleScreen: titleResult.url }
+        // Generate title screen with the actual game title (part of the reserved batch)
+        if (boardArtReserved) {
+          try {
+            const titleResult = await countedGenerateImage({
+              familyId,
+              prompt: `A title card illustration for a children's board game called '${generatedGame.title}', ${inputs.theme} themed, exciting, colorful, storybook illustration style, centered composition, no text`,
+              style: 'general',
+              size: '1024x1024',
+            })
+            if (titleResult?.url) {
+              generatedArt = { ...generatedArt, titleScreen: titleResult.url }
+            }
+          } catch (err) {
+            console.warn('Title screen generation failed:', err)
           }
-        } catch (err) {
-          console.warn('Title screen generation failed:', err)
         }
 
         const now = new Date().toISOString()
@@ -583,7 +645,7 @@ export default function WorkshopPage() {
         setPhase(GamePhase.Recording)
       }
     },
-    [chat, generateImage, familyId, activeChildId, draftDocId],
+    [chat, countedGenerateImage, reserveArt, familyId, activeChildId, draftDocId],
   )
 
   const handleRecordingDone = useCallback(
@@ -1067,12 +1129,20 @@ export default function WorkshopPage() {
     setActivePlaytestSession(null)
   }, [])
 
+  /** What "Regenerate Art" will spend for a game — the hint's number and the reservation. */
+  const regenerateArtCount = useCallback(
+    (game: StoryGame) => buildArtRequests(game.storyInputs, game.generatedGame?.title).length,
+    [],
+  )
+
   const handleRegenerateArt = useCallback(
     async (game: StoryGame) => {
       if (!familyId || !game.id) return
+      // Reserved whole, like every other batch on this page (FEAT-184).
+      if (!reserveArt(regenerateArtCount(game))) return
       try {
         const result = await generateAllArt(
-          generateImage,
+          countedGenerateImage,
           familyId,
           game.storyInputs,
           game.generatedGame?.title,
@@ -1091,7 +1161,7 @@ export default function WorkshopPage() {
         console.warn('Art regeneration failed:', err)
       }
     },
-    [familyId, generateImage, currentGame],
+    [familyId, countedGenerateImage, reserveArt, regenerateArtCount, currentGame],
   )
 
   const titleArt = currentGame?.generatedArt?.titleScreen
@@ -1161,6 +1231,9 @@ export default function WorkshopPage() {
               onReviewPlaytest={handleReviewPlaytest}
               onResumeDraft={handleResumeDraft}
               onRegenerateArt={handleRegenerateArt}
+              artAudience={artAudience}
+              artCapReached={artAtLimit}
+              regenerateArtCount={regenerateArtCount}
             />
           )}
         </Box>
@@ -1175,6 +1248,9 @@ export default function WorkshopPage() {
           )}
           <WorkshopWizard
             onComplete={handleWizardComplete}
+            artAudience={artAudience}
+            artBudget={artBudget}
+            artCapReached={artAtLimit}
             onCancel={handleWizardCancel}
             onStepSave={saveDraftStep}
             initialState={currentGame?.status === WorkshopStatus.Draft ? {
@@ -1197,6 +1273,19 @@ export default function WorkshopPage() {
           />
         </>
       )}
+
+      {/* Weekly art cap (FEAT-184): a warm nudge, never an error — the game
+          itself is still made, with no pictures, and nothing was spent. */}
+      <Snackbar
+        open={artBudgetNotice !== null}
+        autoHideDuration={6000}
+        onClose={() => setArtBudgetNotice(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="info" onClose={() => setArtBudgetNotice(null)} sx={{ borderRadius: 3 }}>
+          {artBudgetNotice}
+        </Alert>
+      </Snackbar>
 
       {phase === GamePhase.Generating && (
         generateError ? (

@@ -7,6 +7,12 @@ import { booksCollection } from '../../core/firebase/firestore'
 import { useTTS } from '../../core/hooks/useTTS'
 import type { Book, BookPage } from '../../core/types'
 import { useBookIllustrator } from './useBookIllustrator'
+import {
+  classifyStoryGenerationFailure,
+  storyGenerationFailureMessage,
+  StoryGenerationFailure,
+  PAGE_REVISE_SURFACE,
+} from './storyGenerationFailure'
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -319,7 +325,15 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
 
         const parsed = result?.message ? parseRevisePageResult(result.message) : null
         if (!parsed) {
-          setError('I had trouble changing that page. Try again?')
+          // Named, not vague (UX-112): the same three shapes the Generate chat
+          // classifies, in this surface's own words and pointing at this
+          // surface's own "Try again".
+          setError(
+            storyGenerationFailureMessage(
+              classifyStoryGenerationFailure(result, parsed) ?? 'unreadable',
+              PAGE_REVISE_SURFACE,
+            ),
+          )
           setPhase('awaiting')
           return
         }
@@ -406,7 +420,13 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
           })()
         }
       } catch {
-        setError('I had trouble changing that page. Try again?')
+        // The call threw — nothing came back at all (UX-112).
+        setError(
+          storyGenerationFailureMessage(
+            StoryGenerationFailure.NoReply,
+            PAGE_REVISE_SURFACE,
+          ),
+        )
         setPhase('awaiting')
       }
     },

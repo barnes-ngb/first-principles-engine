@@ -70,7 +70,7 @@ export default function EvaluationBookBanner({ suggestions, childName }: Props) 
           onClick={() => handleCreate(primary)}
           sx={{ alignSelf: 'flex-start', textTransform: 'none', minHeight: 36 }}
         >
-          Create Targeted Story
+          Make a story for these words
         </Button>
       </Stack>
     </Alert>

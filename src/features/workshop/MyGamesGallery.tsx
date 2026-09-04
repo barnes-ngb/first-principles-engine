@@ -20,6 +20,9 @@ import { db, storyGamesCollection, artifactsCollection } from '../../core/fireba
 import { storage } from '../../core/firebase/storage'
 import type { Child, StoryGame } from '../../core/types'
 import { GameType, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
+import { GenerateHint } from '../books/ArtHelpSheet'
+import type { ArtHelpAudience } from '../books/artHelpContent'
+import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 
 /** Check if a game is missing any expected art */
 function hasMissingArt(game: StoryGame): boolean {
@@ -89,6 +92,14 @@ interface MyGamesGalleryProps {
   onReviewPlaytest?: (game: StoryGame) => void
   onResumeDraft?: (game: StoryGame) => void
   onRegenerateArt?: (game: StoryGame) => Promise<void>
+  /**
+   * FEAT-184: "Regenerate Art" is a paid batch. The host says who is reading
+   * (capability, never a name), whether the week's budget is spent, and how
+   * many pictures the batch will make for a game — the hint's number.
+   */
+  artAudience?: ArtHelpAudience
+  artCapReached?: boolean
+  regenerateArtCount?: (game: StoryGame) => number
 }
 
 export default function MyGamesGallery({
@@ -101,6 +112,9 @@ export default function MyGamesGallery({
   onReviewPlaytest,
   onResumeDraft,
   onRegenerateArt,
+  artAudience,
+  artCapReached = false,
+  regenerateArtCount,
 }: MyGamesGalleryProps) {
   const [games, setGames] = useState<StoryGame[]>([])
   const [loading, setLoading] = useState(true)
@@ -506,15 +520,33 @@ export default function MyGamesGallery({
                 </Badge>
               )}
               {isCreator && hasMissingArt(game) && onRegenerateArt && (
-                <Button
-                  variant="text"
-                  size="small"
-                  onClick={() => handleRegenerate(game)}
-                  disabled={isRegenerating}
-                  sx={{ fontSize: '0.7rem' }}
-                >
-                  {isRegenerating ? 'Generating...' : 'Regenerate Art'}
-                </Button>
+                <Box>
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => handleRegenerate(game)}
+                    disabled={isRegenerating || artCapReached}
+                    sx={{ fontSize: '0.7rem' }}
+                  >
+                    {isRegenerating ? 'Generating...' : 'Regenerate Art'}
+                  </Button>
+                  {/* What the tap spends (FEAT-184). At the cap the message
+                      replaces the hint — never both. */}
+                  {artCapReached ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                      {ART_QUOTA_MESSAGE}
+                    </Typography>
+                  ) : (
+                    artAudience &&
+                    regenerateArtCount && (
+                      <GenerateHint
+                        door="workshopRegenerate"
+                        audience={artAudience}
+                        count={regenerateArtCount(game)}
+                      />
+                    )
+                  )}
+                </Box>
               )}
               {canDelete(game, childId, isParent) && (
                 <IconButton

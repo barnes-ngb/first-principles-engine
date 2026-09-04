@@ -31,6 +31,7 @@ function renderKid(
         checklist={mustDo}
         maxChoices={2}
         isLincoln
+        isChildProfile
         isMvd={false}
         gateUnlocked
         gateThreshold={3}

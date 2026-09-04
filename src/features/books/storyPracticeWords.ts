@@ -244,7 +244,9 @@ function escapeRegExp(s: string): string {
  * is what the chat reports back, so it never claims a word the pages don't hold.
  */
 export function practiceWordsUsedIn(
-  pages: ReadonlyArray<{ text: string }>,
+  // `text` is optional because a stored `BookPage` may have none — the body has
+  // always coalesced it, the signature just did not say so.
+  pages: ReadonlyArray<{ text?: string }>,
   words: ReadonlyArray<string>,
 ): string[] {
   const text = pages.map((p) => p.text ?? '').join('\n')
@@ -313,8 +315,9 @@ export const MAX_NAMED_HARD_WORDS = 6
  * ("may be above London's level", never "London can't read"), and it is not an
  * error — the story is perfectly usable and the parent fixes it in the revise
  * chat they already have ("swap castle for a simpler word"). When the level was
- * only estimated it says so and points at where to set the real one, because a
- * wrong estimate is the most likely reason a good story got flagged.
+ * only estimated it says so, because a wrong estimate is the most likely reason
+ * a good story got flagged; *how* to set a real one lives in the surface's "?"
+ * sheet (UX-111), not in a 20-word parenthetical inside a book dialog.
  */
 export function storyReadabilityClause(
   childName: string,
@@ -340,7 +343,7 @@ export function storyReadabilityClause(
   const noun = total === 1 ? 'word' : 'words'
   const estimate =
     readability.levelSource === 'age'
-      ? ` (estimated from age — set ${childName}'s phonics level under Working Levels on the Skill Snapshot for a better fit)`
+      ? ' (level estimated from age)'
       : ''
   return `${total} ${noun} may be above ${childName}'s level: ${list}.${estimate}`
 }
@@ -372,16 +375,46 @@ export function storyDraftMessage(
   readability?: StoryReadabilityNote,
   childName = 'this reader',
 ): string {
+  return appendClause(
+    storyDraftSpokenMessage(title, requestedWords, pages, source, childName),
+    storyReadabilityClause(childName, readability),
+  )
+}
+
+/**
+ * The half of the draft turn a **speaker** may say (UX-109).
+ *
+ * The chat reads the draft turn aloud — the AI line, then every page — and
+ * since FEAT-176 that line can end with the honest clause. The clause was
+ * written for the parent's eyes and is blameless on the page; out loud, beside
+ * the phone, it is a robot voice telling a six-year-old which words are above
+ * his level, by name. The charter says struggles are data, not something a
+ * child is told about himself.
+ *
+ * So the clause has exactly one delivery: the screen. This is the same body
+ * `storyDraftMessage` builds — title, and which requested words actually
+ * landed — with nothing appended. It is not a second copy of that wording:
+ * `storyDraftMessage` is defined as this plus the clause, so the two can never
+ * drift apart.
+ */
+export function storyDraftSpokenMessage(
+  title: string,
+  requestedWords: ReadonlyArray<string>,
+  pages: ReadonlyArray<{ text: string }>,
+  source: StoryWordSource = StoryWordSource.Practice,
+  childName = 'this reader',
+): string {
   const base = `Here's your story! "${title}"`
-  const clause = storyReadabilityClause(childName, readability)
   if (requestedWords.length === 0 || source === StoryWordSource.None) {
-    return appendClause(base, clause)
+    return base
   }
   const label =
-    source === StoryWordSource.Requested ? 'the words you asked for' : 'your practice words'
+    source === StoryWordSource.Requested
+      ? 'the words you asked for'
+      : `${childName}'s practice words`
   const used = practiceWordsUsedIn(pages, requestedWords)
   if (used.length === 0) {
-    return appendClause(`${base} — I couldn't fit ${label} in this time.`, clause)
+    return `${base} — I couldn't fit ${label} in this time.`
   }
-  return appendClause(`${base} — it uses ${label}: ${used.join(', ')}.`, clause)
+  return `${base} — it uses ${label}: ${used.join(', ')}.`
 }

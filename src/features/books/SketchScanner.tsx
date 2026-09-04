@@ -82,7 +82,7 @@ interface SketchScannerProps {
 type Stage = 'capture' | 'crop' | 'cleaning' | 'preview'
 
 /** Default crop box — slightly inset to nudge trimming paper edges, but the
- *  whole image is one tap away ("Use whole image"). */
+ *  whole image is one tap away ("Use the whole picture"). */
 const DEFAULT_CROP: CropFraction = { x: 0.06, y: 0.06, width: 0.88, height: 0.88 }
 type PreviewTab = 'original' | 'cleaned' | 'fancy'
 type SaveVersion = 'cleaned' | 'fancy'
@@ -229,19 +229,19 @@ export default function SketchScanner({
         setStage('preview')
         setPreviewTab('cleaned')
       } catch {
-        setError('Failed to process image. Please try again.')
+        setError('Couldn’t use that picture. Please try again.')
         setStage('capture')
       }
     },
     [defaultLabel],
   )
 
-  // "Use whole image" — keeps today's behavior (clean the full capture).
+  // "Use the whole picture" — keeps today's behavior (clean the full capture).
   const handleUseWholeImage = useCallback(() => {
     if (originalFile) void runClean(originalFile, false)
   }, [originalFile, runClean])
 
-  // "Use this" — crop to the selected box, then clean. The cropped image
+  // "Use it" — crop to the selected box, then clean. The cropped image
   // becomes the working original so the Original tab and "Make it fancy"
   // transform both operate on the chosen region.
   const handleConfirmCrop = useCallback(async () => {
@@ -254,7 +254,7 @@ export default function SketchScanner({
       setOriginalStoragePath(null)
       await runClean(cropped, true)
     } catch {
-      setError('Failed to crop image. Please try again.')
+      setError('Couldn’t crop that picture. Please try again.')
     }
   }, [originalFile, cropFraction, runClean])
 
@@ -320,7 +320,7 @@ export default function SketchScanner({
           return next
         })
       } else {
-        setEnhanceError('Transform returned no image. Please try again.')
+        setEnhanceError('No picture came back. Please try again.')
       }
     } catch (err) {
       setEnhanceError(err instanceof Error ? err.message : 'Transform failed')
@@ -655,7 +655,7 @@ export default function SketchScanner({
                         onClick={() => void handleMakeFancy()}
                         sx={{ textTransform: 'none' }}
                       >
-                        Redo with this style
+                        Make it with this style
                       </Button>
                       {/* A redo is another paid picture, not a free retry
                           (FEAT-178). */}
@@ -740,7 +740,7 @@ export default function SketchScanner({
             <Button onClick={reset}>Retake</Button>
             <Box sx={{ flex: 1 }} />
             <Button onClick={handleUseWholeImage} sx={{ textTransform: 'none' }}>
-              Use whole image
+              Use the whole picture
             </Button>
             <Button
               variant="contained"
@@ -748,7 +748,7 @@ export default function SketchScanner({
               onClick={() => void handleConfirmCrop()}
               sx={{ minHeight: 44, textTransform: 'none' }}
             >
-              Use this
+              Use it
             </Button>
           </>
         )}

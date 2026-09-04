@@ -250,6 +250,16 @@ export interface ChatTurn {
   ts: number
   /** Only AI turns set this. Kid turns omit it. */
   kind?: ChatMessageKind
+  /**
+   * What a speaker may say for this turn, when that is less than what the
+   * screen shows (UX-109). Set on the story-draft turn, whose `content` can
+   * end with the FEAT-176 readability clause — a line written for the parent's
+   * eyes that must never be read aloud to the child sitting beside the phone.
+   *
+   * Additive and optional: absent means "speak `content`", which is what every
+   * turn before this field did and what every other kind still does.
+   */
+  spokenContent?: string
 }
 
 export interface Book {

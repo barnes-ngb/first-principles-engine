@@ -64,7 +64,7 @@ describe('StickerPicker — weekly art budget (FEAT-168)', () => {
   it('at the cap there is no Generate button, and the warm nudge takes its place', async () => {
     renderPicker({ capReached: true, recordGeneration: recordGenerationMock })
 
-    await waitFor(() => expect(screen.queryByRole('button', { name: /generate/i })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('button', { name: /make a sticker/i })).toBeNull())
     expect(screen.getByText(ART_QUOTA_MESSAGE)).toBeTruthy()
     expect(generateImageMock).not.toHaveBeenCalled()
   })
@@ -79,9 +79,9 @@ describe('StickerPicker — weekly art budget (FEAT-168)', () => {
     const user = userEvent.setup()
     renderPicker({ capReached: false, recordGeneration: recordGenerationMock })
 
-    await user.click(await screen.findByRole('button', { name: /generate/i }))
+    await user.click(await screen.findByRole('button', { name: /make a sticker/i }))
     await user.type(screen.getByLabelText(/describe your sticker/i), 'a dragon')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(generateImageMock).toHaveBeenCalledTimes(1))
     expect(recordGenerationMock).toHaveBeenCalledTimes(1)
@@ -93,9 +93,9 @@ describe('StickerPicker — weekly art budget (FEAT-168)', () => {
     generateImageMock.mockResolvedValue(null)
     renderPicker({ capReached: false, recordGeneration: recordGenerationMock })
 
-    await user.click(await screen.findByRole('button', { name: /generate/i }))
+    await user.click(await screen.findByRole('button', { name: /make a sticker/i }))
     await user.type(screen.getByLabelText(/describe your sticker/i), 'a dragon')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(generateImageMock).toHaveBeenCalledTimes(1))
     expect(recordGenerationMock).not.toHaveBeenCalled()
@@ -108,12 +108,12 @@ describe('StickerPicker — weekly art budget (FEAT-168)', () => {
     recordGenerationMock.mockImplementation(() => new Promise<undefined>(() => {}))
     renderPicker({ capReached: false, recordGeneration: recordGenerationMock })
 
-    await user.click(await screen.findByRole('button', { name: /generate/i }))
+    await user.click(await screen.findByRole('button', { name: /make a sticker/i }))
     await user.type(screen.getByLabelText(/describe your sticker/i), 'a dragon')
-    await user.click(screen.getByRole('button', { name: 'Create!' }))
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(screen.getByAltText('Generated sticker')).toBeTruthy())
-    expect(screen.getByRole('button', { name: 'Use This' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Use it' })).toBeTruthy()
   })
 
   it('the cap arriving while the create dialog is open replaces Create with the nudge (Codex P2, PR #1720)', async () => {
@@ -121,8 +121,8 @@ describe('StickerPicker — weekly art budget (FEAT-168)', () => {
     const { rerender } = renderPicker({ capReached: false, recordGeneration: recordGenerationMock })
 
     // Open the nested create dialog below the cap.
-    await user.click(await screen.findByRole('button', { name: /generate/i }))
-    expect(screen.getByRole('button', { name: 'Create!' })).toBeTruthy()
+    await user.click(await screen.findByRole('button', { name: /make a sticker/i }))
+    expect(screen.getByRole('button', { name: 'Make it' })).toBeTruthy()
 
     // The generation that just landed spent the last of the day's budget.
     rerender(
@@ -137,7 +137,7 @@ describe('StickerPicker — weekly art budget (FEAT-168)', () => {
     )
 
     // No visible button that would silently do nothing.
-    expect(screen.queryByRole('button', { name: 'Create!' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Make it' })).toBeNull()
     expect(screen.queryByLabelText(/describe your sticker/i)).toBeNull()
     expect(screen.getAllByText(ART_QUOTA_MESSAGE).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
@@ -147,7 +147,37 @@ describe('StickerPicker — weekly art budget (FEAT-168)', () => {
   it('uncapped by default — a mount that passes neither prop is unchanged', async () => {
     renderPicker()
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /generate/i })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /make a sticker/i })).toBeTruthy())
     expect(screen.queryByText(ART_QUOTA_MESSAGE)).toBeNull()
+  })
+})
+
+// UX-147 — this picker is a second, older "Make a Sticker" that never got
+// FEAT-178's hint or "?" (the Stickers page's own dialog has both).
+
+describe('UX-147 — the picker\'s Make a Sticker door', () => {
+  it('carries a hint under the prompt and a "?" in the title', async () => {
+    const user = userEvent.setup()
+    renderPicker({ artAudience: 'parent', onOpenArtHelp: vi.fn() })
+
+    await user.click(await screen.findByRole('button', { name: /make a sticker/i }))
+    expect(screen.getByText(/1 paid image call/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /how this works/i })).toBeTruthy()
+  })
+
+  it('gives a kid the kid wording, on capability and never a name', async () => {
+    const user = userEvent.setup()
+    renderPicker({ artAudience: 'kid', onOpenArtHelp: vi.fn() })
+
+    await user.click(await screen.findByRole('button', { name: /make a sticker/i }))
+    expect(screen.getByText('Makes 1 sticker. Uses 1 art.')).toBeTruthy()
+    expect(screen.queryByText(/paid image call/)).toBeNull()
+  })
+
+  it('stands down at the cap — the nudge, never both', async () => {
+    renderPicker({ capReached: true, artAudience: 'kid', onOpenArtHelp: vi.fn() })
+
+    await waitFor(() => expect(screen.getByText(ART_QUOTA_MESSAGE)).toBeTruthy())
+    expect(screen.queryByText(/Uses 1 art\./)).toBeNull()
   })
 })

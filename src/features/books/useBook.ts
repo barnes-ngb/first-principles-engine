@@ -35,7 +35,12 @@ interface UseBookResult {
   addPage: () => void
   deletePage: (pageId: string) => void
   reorderPages: (fromIndex: number, toIndex: number) => void
-  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor'>>) => void
+  /**
+   * `childId` is settable because moving a book to another child's shelf is a
+   * real thing the editor's "For" control claims to do (UX-124) — the kid shelf,
+   * the kid Today cards and the reader's hours all query `childId`.
+   */
+  updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor' | 'childId'>>) => void
   addImageToPage: (pageId: string, file: File, options?: { cleanBackground?: boolean }) => Promise<void>
   removeImageFromPage: (pageId: string, imageId: string) => void
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
@@ -291,7 +296,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const updateBookMeta = useCallback(
-    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor'>>) => {
+    (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor' | 'childId'>>) => {
       applyUpdate((prev) => {
         const next = { ...prev, ...changes }
         // If status changes to 'complete', create portfolio artifact + award XP

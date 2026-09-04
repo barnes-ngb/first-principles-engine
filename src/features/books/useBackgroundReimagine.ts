@@ -282,12 +282,6 @@ export function useBackgroundReimagine({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id, job?.status, saveToGallery, saveEnhancedArtifact])
 
-  const handleSaveToGallery = useCallback(async () => {
-    // Already auto-saved, just dismiss
-    setJob(null)
-    setShowChoiceDialog(false)
-  }, [])
-
   const handleDiscard = useCallback(() => {
     // Don't delete from storage — auto-saved to gallery, so the reference remains valid.
     // "Discard" means "don't add to this page right now."
@@ -309,7 +303,6 @@ export function useBackgroundReimagine({
     dismissError,
     handleReplaceBackground,
     handleAddAsSticker,
-    handleSaveToGallery,
     handleDiscard,
     setAutoDismissedMessage,
   }

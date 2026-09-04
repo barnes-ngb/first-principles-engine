@@ -70,22 +70,114 @@ export function classifyStoryGenerationFailure(
 }
 
 /**
+ * What the reader on ONE surface calls the thing that failed, what is still
+ * safe, and the control they tap to try again (UX-112).
+ *
+ * FEAT-169 wrote three honest messages for the Generate chat and hard-coded
+ * that surface's nouns and button into them, so the three sibling paths that
+ * make the same call — the chat's revise loop, the Story Guide, the review
+ * chat's per-page revise — kept their older, vaguer strings rather than say
+ * "tap Yes, start my story!" on a screen with no such button. Naming those
+ * four words per surface is what lets all four share one set of messages
+ * instead of one honest set and three vague ones.
+ */
+export interface StoryFailureSurface {
+  /** What did not come back, as the reader would name it — "The story". */
+  subject: string
+  /** What is still safe, as a clause — "your idea is still here". */
+  kept: string
+  /** The control they tap to try again, named EXACTLY as it appears on screen. */
+  retryLabel: string
+  /**
+   * What to change before retrying a reply that ran out of room — "Try a Short
+   * book". `''` on a surface with no length to shorten, which then just says
+   * to tap again rather than advise something the screen cannot do.
+   */
+  shorten: string
+  /** What the reply ran out of room before reaching — "the last page". */
+  cutShortEnd: string
+}
+
+/**
+ * The Generate chat's own words — FEAT-169's originals, unchanged. The default,
+ * so every existing caller reads exactly as it did.
+ */
+export const STORY_CHAT_SURFACE: StoryFailureSurface = {
+  subject: 'The story',
+  kept: 'your idea is still here',
+  retryLabel: 'Yes, start my story!',
+  shorten: 'Try a Short book',
+  cutShortEnd: 'the last page',
+}
+
+/** The Generate chat's revise loop: a change to a story that already exists. */
+export const STORY_REVISE_SURFACE: StoryFailureSurface = {
+  subject: 'The change',
+  kept: 'your story is unchanged',
+  retryLabel: 'Send',
+  shorten: 'Ask for a smaller change',
+  cutShortEnd: 'the end',
+}
+
+/** The Story Guide: the same generateStory call behind a different door. */
+export const STORY_GUIDE_SURFACE: StoryFailureSurface = {
+  subject: 'The story',
+  kept: 'your answers are still here',
+  retryLabel: 'Make my book \u2192',
+  shorten: 'Try a shorter book',
+  cutShortEnd: 'the last page',
+}
+
+/** The review chat ("Read it to me"): one page rewritten from a voice note. */
+export const PAGE_REVISE_SURFACE: StoryFailureSurface = {
+  subject: 'The new page',
+  kept: 'your page is unchanged',
+  retryLabel: 'Try again',
+  shorten: 'Ask for a smaller change',
+  cutShortEnd: 'the end',
+}
+
+/**
  * Kid-and-parent-readable copy, one per failure. Each names what failed, says
  * nothing was lost, and gives the next step that fits *that* failure — a story
  * that ran out of room wants a shorter book; a reply that never arrived wants
  * the connection checked and a plain retry.
  */
+const FAILURE_TEMPLATES: Readonly<
+  Record<StoryGenerationFailure, (s: StoryFailureSurface) => string>
+> = {
+  [StoryGenerationFailure.NoReply]: (s) =>
+    `${s.subject} didn't come back \u2014 it may not have reached the story writer, or the connection dropped on the way. Nothing was lost: ${s.kept}. Check your connection and tap "${s.retryLabel}" again.`,
+  [StoryGenerationFailure.CutShort]: (s) =>
+    `${s.subject} came back too long to finish \u2014 it ran out of room before ${s.cutShortEnd}. Nothing was lost: ${s.kept}. ${
+      s.shorten ? `${s.shorten}, then tap` : 'Tap'
+    } "${s.retryLabel}" again.`,
+  [StoryGenerationFailure.Unreadable]: (s) =>
+    `${s.subject} came back in a shape I couldn't read. Nothing was lost: ${s.kept}. Tap "${s.retryLabel}" again \u2014 a second try usually works.`,
+}
+
+/**
+ * The message for one failure on one surface. Defaults to the Generate chat,
+ * so FEAT-169's three strings are byte-identical to what they were.
+ */
+export function storyGenerationFailureMessage(
+  kind: StoryGenerationFailure,
+  surface: StoryFailureSurface = STORY_CHAT_SURFACE,
+): string {
+  return FAILURE_TEMPLATES[kind](surface)
+}
+
+/**
+ * The Generate chat's three messages, as FEAT-169 published them. Derived from
+ * the templates rather than written twice, so a change to the wording cannot
+ * leave this behind.
+ */
 export const STORY_GENERATION_FAILURE_MESSAGES: Readonly<
   Record<StoryGenerationFailure, string>
 > = {
-  [StoryGenerationFailure.NoReply]:
-    "The story didn't come back — it may not have reached the story writer, or the connection dropped on the way. Nothing was lost: your idea is still here. Check your connection and tap \"Yes, start my story!\" again.",
-  [StoryGenerationFailure.CutShort]:
-    'The story came back too long to finish — it ran out of room before the last page. Nothing was lost: your idea is still here. Try a Short book, then tap "Yes, start my story!" again.',
-  [StoryGenerationFailure.Unreadable]:
-    "The story came back in a shape I couldn't read. Nothing was lost: your idea is still here. Tap \"Yes, start my story!\" again — a second try usually works.",
-}
-
-export function storyGenerationFailureMessage(kind: StoryGenerationFailure): string {
-  return STORY_GENERATION_FAILURE_MESSAGES[kind]
+  [StoryGenerationFailure.NoReply]: storyGenerationFailureMessage(StoryGenerationFailure.NoReply),
+  [StoryGenerationFailure.CutShort]: storyGenerationFailureMessage(StoryGenerationFailure.CutShort),
+  [StoryGenerationFailure.Unreadable]: storyGenerationFailureMessage(
+    StoryGenerationFailure.Unreadable,
+  ),
 }

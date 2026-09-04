@@ -22,6 +22,7 @@ import Page from '../../components/Page'
 import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { computeAge } from '../../core/profile/childIdentity'
 import { artifactsCollection, hoursCollection } from '../../core/firebase/firestore'
 import type { Book, BookPage } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
@@ -29,6 +30,7 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { useBook } from './useBook'
+import { practiceWordsUsedIn } from './storyPracticeWords'
 import { stackOrder } from './draggableImageUtils'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
@@ -131,7 +133,14 @@ export default function BookReaderPage() {
     childId,
   )
 
-  const childAge = isLincoln ? 10 : 6
+  // FEAT-183 / UX-152 (B4): the comprehension-questions AI gets the child's
+  // REAL age, read off the identity profile the app already stores, not an
+  // age inferred from his name. The name-keyed pair survives only as the
+  // fallback for a doc with no birthdate — the same shape the three sibling
+  // Books surfaces already use (`StoryGuidePage`, `BookGenerateChat`,
+  // `BookReviewChat` each keep a local `ageFromBirthdate`; collapsing the
+  // four copies into one helper is filed, not done here).
+  const childAge = computeAge(activeChild?.birthdate) ?? (isLincoln ? 10 : 6)
   const {
     questions: comprehensionQuestions,
     loading: comprehensionLoading,
@@ -168,12 +177,16 @@ export default function BookReaderPage() {
     if (!book) return []
     // 1. Book's explicit sight words
     const bookWords = book.sightWords ?? []
-    // 2. Child's working words that appear in this book's text
-    const allBookText = book.pages.map((p) => p.text ?? '').join(' ').toLowerCase()
-    const workingWords = [...progressMap.values()]
+    // 2. Child's working words that appear in this book's text — as WHOLE
+    //    words (UX-134). A substring match put "a" on the page of every book,
+    //    "in" on any book with "into" and "at" on any book with "cat", so a
+    //    child with a long practice list got a "Words to Watch For" page full
+    //    of words the book does not contain. `practiceWordsUsedIn` is the same
+    //    check FEAT-169 wrote for the chat, for the same reason.
+    const candidates = [...progressMap.values()]
       .filter((w) => w.masteryLevel === 'new' || w.masteryLevel === 'practicing')
-      .filter((w) => allBookText.includes(w.word.toLowerCase()))
       .map((w) => w.word)
+    const workingWords = practiceWordsUsedIn(book.pages, candidates)
     // 3. Combined, deduplicated
     return [...new Set([...bookWords, ...workingWords])]
   }, [book, progressMap])
@@ -386,7 +399,7 @@ export default function BookReaderPage() {
       })
       if (skippedImageCount > 0) {
         setPrintSkipNotice(
-          `${skippedImageCount} image${skippedImageCount === 1 ? '' : 's'} couldn't be embedded and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
+          `${skippedImageCount} picture${skippedImageCount === 1 ? '' : 's'} couldn't be printed and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
         )
       }
     } finally {
@@ -409,7 +422,7 @@ export default function BookReaderPage() {
           title="Book not found."
           action={
             <Button onClick={() => navigate('/books')} startIcon={<ArrowBackIcon />}>
-              Back to My Books
+              My Books
             </Button>
           }
         />
@@ -868,7 +881,7 @@ export default function BookReaderPage() {
               disabled={printing}
               sx={{ minHeight: 36, color: textColor, borderColor: textColor }}
             >
-              {printing ? 'Creating PDF...' : 'Download PDF'}
+              {printing ? 'Making PDF\u2026' : 'Make a PDF'}
             </Button>
           </>
         )}

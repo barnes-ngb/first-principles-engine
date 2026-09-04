@@ -102,9 +102,9 @@ describe('StickerLibraryTab — grouped preview + select-to-print (FEAT-33 fix)'
     await user.click(screen.getByRole('button', { name: /Select Dragon Original/i }))
     await user.click(screen.getByRole('button', { name: 'Select Wolf' }))
 
-    await user.click(screen.getByRole('button', { name: /print 2 stickers/i }))
-    const optionsDialog = await screen.findByRole('dialog', { name: /print 2 stickers/i })
-    await user.click(within(optionsDialog).getByRole('button', { name: /^print$/i }))
+    await user.click(screen.getByRole('button', { name: /make a pdf of 2 stickers/i }))
+    const optionsDialog = await screen.findByRole('dialog', { name: /make a pdf of 2 stickers/i })
+    await user.click(within(optionsDialog).getByRole('button', { name: /^make a pdf$/i }))
 
     await waitFor(() => expect(printStickerSheetMock).toHaveBeenCalledTimes(1))
     const [sent] = printStickerSheetMock.mock.calls[0] as [Sticker[]]

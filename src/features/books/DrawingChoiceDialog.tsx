@@ -18,6 +18,8 @@ import StarIcon from '@mui/icons-material/Star'
 import WallpaperIcon from '@mui/icons-material/Wallpaper'
 
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
+import type { ArtHelpAudience } from './artHelpContent'
 
 /** Checkerboard background to make transparent regions visible in previews. */
 export const CHECKERBOARD_BG =
@@ -70,6 +72,14 @@ interface DrawingChoiceDialogProps {
    * untouched. Defaults to uncapped.
    */
   capReached?: boolean
+  /**
+   * Which wording the help uses — the host's own capability answer (FEAT-178),
+   * the same one that decides `capReached`. Passed in rather than recomputed so
+   * the two can never disagree. Defaults to the fuller parent wording.
+   */
+  artAudience?: ArtHelpAudience
+  /** Opens the host's "How this works" sheet for the sketch surface (UX-147). */
+  onOpenArtHelp?: () => void
 }
 
 const CHOICES: { value: DrawingChoice; icon: React.ReactNode; label: string; description: string }[] = [
@@ -77,13 +87,13 @@ const CHOICES: { value: DrawingChoice; icon: React.ReactNode; label: string; des
   { value: 'cleanup', icon: <AutoFixHighIcon />, label: 'Clean up', description: 'Remove the background' },
   { value: 'reimagine', icon: <BrushIcon />, label: 'Reimagine', description: 'AI enhances your drawing' },
   { value: 'sticker', icon: <StarIcon />, label: 'Make a sticker', description: 'Turn into a positionable sticker' },
-  { value: 'scene', icon: <WallpaperIcon />, label: 'Make a scene', description: 'Create a background from it' },
+  { value: 'scene', icon: <WallpaperIcon />, label: 'Make a picture', description: 'A full-page picture from it' },
 ]
 
 const POST_CLEANUP_CHOICES: { value: PostCleanupChoice; icon: React.ReactNode; label: string; description: string }[] = [
   { value: 'reimagine-sticker', icon: <BrushIcon />, label: 'Reimagine as sticker', description: 'AI enhances, keeps transparent' },
   { value: 'add-sticker', icon: <StarIcon />, label: 'Add as sticker', description: 'Use cleaned version as-is' },
-  { value: 'reimagine-scene', icon: <WallpaperIcon />, label: 'Reimagine as scene', description: 'AI creates full background' },
+  { value: 'reimagine-scene', icon: <WallpaperIcon />, label: 'Reimagine as a picture', description: 'AI makes a full-page picture' },
   { value: 'save-sticker', icon: <DescriptionIcon />, label: 'Save to gallery', description: 'Save to your sticker library' },
 ]
 
@@ -120,6 +130,8 @@ export default function DrawingChoiceDialog({
   onPickPostCleanup,
   onRetryResult,
   capReached = false,
+  artAudience = 'parent',
+  onOpenArtHelp,
 }: DrawingChoiceDialogProps) {
   const [selectedChoice, setSelectedChoice] = useState<DrawingChoice | null>(null)
   const [reimagineIntensity, setReimagineIntensity] = useState(50)
@@ -207,7 +219,12 @@ export default function DrawingChoiceDialog({
     return (
       <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
         <DialogTitle>
-          {isSticker ? 'Reimagine as sticker' : 'Reimagine as scene'}
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <span>{isSticker ? 'Reimagine as sticker' : 'Reimagine as a picture'}</span>
+            {/* The "?" for this paid door (UX-147) — it used to live only in a
+                different dialog, so this one arrived with nothing. */}
+            {onOpenArtHelp && <ArtHelpButton onClick={onOpenArtHelp} />}
+          </Stack>
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 1, mb: 2 }}>
@@ -254,10 +271,14 @@ export default function DrawingChoiceDialog({
             />
           </Box>
         </DialogContent>
+        {/* What this tap makes and what it spends (UX-147). */}
+        <Box sx={{ px: 3 }}>
+          <GenerateHint door="makeItFancy" audience={artAudience} />
+        </Box>
         <DialogActions>
           <Button onClick={() => setPostCleanupReimagineMode(null)}>Back</Button>
           <Button variant="contained" onClick={handlePostCleanupReimagineGo}>
-            Reimagine!
+            Make it
           </Button>
         </DialogActions>
       </Dialog>
@@ -361,7 +382,7 @@ export default function DrawingChoiceDialog({
             <Button onClick={onRetryResult} disabled={processing}>Try again</Button>
           )}
           <Button variant="contained" onClick={() => { onAcceptResult(); handleClose() }}>
-            Use this
+            Use it
           </Button>
         </DialogActions>
       </Dialog>
@@ -392,7 +413,13 @@ export default function DrawingChoiceDialog({
   if (selectedChoice === 'reimagine' && !processing) {
     return (
       <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
-        <DialogTitle>Reimagine intensity</DialogTitle>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={0.5}>
+            <span>Reimagine intensity</span>
+            {/* The "?" for this paid door (UX-147). */}
+            {onOpenArtHelp && <ArtHelpButton onClick={onOpenArtHelp} />}
+          </Stack>
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 1, mb: 2 }}>
             <Box
@@ -438,10 +465,14 @@ export default function DrawingChoiceDialog({
             />
           </Box>
         </DialogContent>
+        {/* What this tap makes and what it spends (UX-147). */}
+        <Box sx={{ px: 3 }}>
+          <GenerateHint door="makeItFancy" audience={artAudience} />
+        </Box>
         <DialogActions>
           <Button onClick={() => setSelectedChoice(null)}>Back</Button>
           <Button variant="contained" onClick={handleReimaginGo}>
-            Reimagine!
+            Make it
           </Button>
         </DialogActions>
       </Dialog>

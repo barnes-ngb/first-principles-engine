@@ -50,9 +50,17 @@ export default function PrintSettingsDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Print Book</DialogTitle>
+      <DialogTitle>Make a PDF</DialogTitle>
       <DialogContent>
         <Stack spacing={3} sx={{ pt: 1 }}>
+          {/* What this actually does (UX-145): every path here ends in a
+              browser download, never a printer. The sticker sheet's dialog has
+              said so since FEAT-33; the book's had no such line. */}
+          <Typography variant="body2" color="text.secondary">
+            We&apos;ll make a printable PDF you can download, then print at home or
+            take to a shop.
+          </Typography>
+
           {/* Format / page size */}
           <div>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -93,8 +101,9 @@ export default function PrintSettingsDialog({
             )}
             {settings.pageSize === 'booklet' && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                Prints 2 pages per sheet. Fold each sheet in half, stack, and staple the edge to
-                make a mini book!
+                Prints a real fold-in-half book, trimmed to 5.5 x 7 in. Print double-sided (flip
+                on the short edge), fold the whole stack in half, staple at the fold, then cut
+                along the dashed line.
               </Typography>
             )}
           </div>
@@ -120,7 +129,7 @@ export default function PrintSettingsDialog({
                 Light cream
               </ToggleButton>
               <ToggleButton value="dark" sx={{ textTransform: 'none' }}>
-                Original (app colors)
+                Dark (Lincoln&apos;s look)
               </ToggleButton>
             </ToggleButtonGroup>
           </div>
@@ -159,7 +168,7 @@ export default function PrintSettingsDialog({
                     size="small"
                   />
                 }
-                label={`"by [child name]" on cover`}
+                label="Author line on cover"
               />
               <FormControlLabel
                 control={
@@ -239,7 +248,7 @@ export default function PrintSettingsDialog({
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="contained" onClick={() => onPrint(settings)}>
-          Download PDF
+          Make a PDF
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import type { AgeGroup } from '../../core/profile/childIdentity'
+
 // Web Speech API types (not universally present in TS DOM lib)
 interface SpeechRecognition extends EventTarget {
   lang: string
@@ -29,7 +31,14 @@ export interface StoryQuestion {
   hint: string
 }
 
-export const LINCOLN_QUESTIONS: StoryQuestion[] = [
+/**
+ * FEAT-183 / UX-152 (B5): the two question sets are an AGE split, not a name
+ * one — an older reader's set (harder vocabulary, a problem/solution arc) and
+ * a younger one (who / where / a surprise / who helps). They were named after
+ * the two boys, so a third child got the younger set because he isn't called
+ * "Lincoln". Same two sets, same content — only the key changed.
+ */
+export const OLDER_QUESTIONS: StoryQuestion[] = [
   { text: "Who is the hero of your story?", hint: "Is it you? A creeper? A knight?" },
   { text: "Where does the story happen?", hint: "A cave? The nether? A jungle? Outer space?" },
   { text: "What problem does the hero have to solve?", hint: "A monster? A missing treasure? A broken portal?" },
@@ -37,7 +46,7 @@ export const LINCOLN_QUESTIONS: StoryQuestion[] = [
   { text: "How does the story end?", hint: "Win a battle? Find something? Build something cool?" },
 ]
 
-export const LONDON_QUESTIONS: StoryQuestion[] = [
+export const YOUNGER_QUESTIONS: StoryQuestion[] = [
   { text: "Who is in your story?", hint: "A bunny? A princess? A talking flower? YOU?" },
   { text: "Where do they live?", hint: "A garden? A cloud? Under the sea? A cozy cottage?" },
   { text: "What happens one day that's surprising?", hint: "They find something magical? A new friend arrives? Something goes missing?" },
@@ -90,8 +99,9 @@ export type VoiceState = (typeof VoiceState)[keyof typeof VoiceState]
 
 // ── Hook ────────────────────────────────────────────────────────
 
-export function useStoryGuide(isLincoln: boolean) {
-  const questions = isLincoln ? LINCOLN_QUESTIONS : LONDON_QUESTIONS
+export function useStoryGuide(ageGroup: AgeGroup) {
+  const isOlder = ageGroup === 'older'
+  const questions = isOlder ? OLDER_QUESTIONS : YOUNGER_QUESTIONS
 
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<(string | undefined)[]>(Array(5).fill(undefined))
@@ -245,7 +255,7 @@ export function useStoryGuide(isLincoln: boolean) {
     ): StoryBrief => ({
       childId,
       childAge,
-      theme: isLincoln ? 'minecraft' : 'storybook',
+      theme: isOlder ? 'minecraft' : 'storybook',
       hero: answers[0] ?? '',
       setting: answers[1] ?? '',
       problem: answers[2] ?? '',
@@ -254,7 +264,7 @@ export function useStoryGuide(isLincoln: boolean) {
       ...(aiShapingAnswer ? { extraDetail: aiShapingAnswer } : {}),
       ...(sightWords.length > 0 ? { sightWords: sightWords.slice(0, 10) } : {}),
     }),
-    [isLincoln, answers, aiShapingAnswer],
+    [isOlder, answers, aiShapingAnswer],
   )
 
   return {

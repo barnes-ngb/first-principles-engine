@@ -54,6 +54,28 @@ const londonDefaults: ChildDefaults = {
   evidenceDefinitions: londonEvidence,
 }
 
+/**
+ * Every starter template's priority skills, in one list (FEAT-184 / UX-150).
+ *
+ * A **starting frame is not calibration.** The Knowledge Mine gates
+ * (`quest/knowledgeMineAccess.ts`) read `prioritySkills` as evidence that a
+ * child has been evaluated in a domain, and "Load Starter Defaults" writes
+ * these same rows into that same field — so without this list one parent tap
+ * opened the Mine for a child nothing had been tuned for. The gates filter a
+ * skill out when it still has the exact **starter shape** (`isStarterSkill`:
+ * same tag, `Emerging`, `NotYet`) as an entry here. The union of every
+ * template, not one child's, so the gate keeps its snapshot-only signature
+ * (identity cannot leak into the decision) and a child whose band moves —
+ * London at 7 selects Lincoln's template — is still read correctly.
+ *
+ * Only the *shape* is matched: a quest, eval or scan that upgrades one of
+ * these rows makes it real, because the level or gate no longer matches.
+ */
+export const STARTER_PRIORITY_SKILLS: readonly PrioritySkill[] = [
+  ...lincolnPrioritySkills,
+  ...londonPrioritySkills,
+]
+
 /** Highest grade still in the kindergarten band (grade 1 and below). */
 const EARLY_GRADE_CEILING = 1
 

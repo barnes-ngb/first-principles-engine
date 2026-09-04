@@ -128,7 +128,7 @@ describe('BookReaderPage — Story Call mode', () => {
     render(<BookReaderPage />)
 
     expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /download pdf/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /make a pdf/i })).toBeInTheDocument()
   })
 
   it('call mode hides the Edit + Download chrome', () => {
@@ -136,7 +136,7 @@ describe('BookReaderPage — Story Call mode', () => {
     render(<BookReaderPage />)
 
     expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /download pdf/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /make a pdf/i })).not.toBeInTheDocument()
   })
 
   it('renders the book title in both modes (nav retained)', () => {

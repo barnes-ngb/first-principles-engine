@@ -67,6 +67,12 @@ vi.mock('../foundations-review/uploadTimeout', async (importOriginal) => {
   }
 })
 
+// The hook reads the ACTOR's capability (FEAT-184 / UX-151); this file
+// characterises the parent lane, so the actor is a parent throughout.
+vi.mock('../../core/hooks/useActiveChild', () => ({
+  useActiveChild: () => ({ isChildProfile: false }),
+}))
+
 // ── Scan hooks ──────────────────────────────────────────────────────────────
 const runScanMock = vi.fn()
 const syncScanToConfigMock = vi.fn()

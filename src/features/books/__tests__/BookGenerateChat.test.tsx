@@ -18,7 +18,13 @@ const confirmChangeRefinementMock = vi.fn<() => Promise<void>>()
 type ChatKind = 'echo' | 'add-or-change' | 'story-draft' | 'revision'
 
 interface HookState {
-  chatHistory: Array<{ role: 'kid' | 'ai'; content: string; ts: number; kind?: ChatKind }>
+  chatHistory: Array<{
+    role: 'kid' | 'ai'
+    content: string
+    ts: number
+    kind?: ChatKind
+    spokenContent?: string
+  }>
   currentStory: null | {
     title: string
     pages: Array<{ pageNumber: number; text: string; sceneDescription: string }>
@@ -182,15 +188,15 @@ beforeEach(() => {
 })
 
 describe('BookGenerateChat', () => {
-  it('renders the composer and the illustration-style strip on initial mount', () => {
+  it('renders the composer and the picture-style strip on initial mount', () => {
     render(
       <Wrap>
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
     expect(screen.getByLabelText(/type your message/i)).toBeTruthy()
-    expect(screen.getByLabelText(/illustration style: minecraft/i)).toBeTruthy()
-    expect(screen.getByLabelText(/illustration style: storybook/i)).toBeTruthy()
+    expect(screen.getByLabelText(/picture style: minecraft/i)).toBeTruthy()
+    expect(screen.getByLabelText(/picture style: storybook/i)).toBeTruthy()
   })
 
   it('calls sendKidMessage when a message is sent', async () => {
@@ -212,7 +218,7 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    const commitBtn = screen.getByRole('button', { name: /i like the whole story/i })
+    const commitBtn = screen.getByRole('button', { name: /make my book/i })
     expect(commitBtn.hasAttribute('disabled')).toBe(true)
   })
 
@@ -235,7 +241,7 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    const commitBtn = screen.getByRole('button', { name: /i like the whole story/i })
+    const commitBtn = screen.getByRole('button', { name: /make my book/i })
     expect(commitBtn.hasAttribute('disabled')).toBe(false)
   })
 
@@ -246,7 +252,7 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    await user.click(screen.getByLabelText(/illustration style: minecraft/i))
+    await user.click(screen.getByLabelText(/picture style: minecraft/i))
     expect(setIllustrationStyleMock).toHaveBeenCalledWith('minecraft')
   })
 
@@ -580,7 +586,7 @@ describe('BookGenerateChat', () => {
       </Wrap>,
     )
 
-    await user.click(screen.getByRole('button', { name: /i like the whole story/i }))
+    await user.click(screen.getByRole('button', { name: /make my book/i }))
 
     await waitFor(() => expect(onCommit).toHaveBeenCalledWith('book-1'))
   })
@@ -604,7 +610,7 @@ describe('BookGenerateChat', () => {
       </Wrap>,
     )
 
-    await user.click(screen.getByRole('button', { name: /i like the whole story/i }))
+    await user.click(screen.getByRole('button', { name: /make my book/i }))
 
     // The story is saved, the notice is on screen — and navigation waits.
     expect(await screen.findByText(/ask a grown-up if you need more/i)).toBeTruthy()
@@ -615,7 +621,7 @@ describe('BookGenerateChat', () => {
     expect(onCommit).toHaveBeenCalledWith('book-1')
   })
 
-  it('shows an "Illustrating page X of Y…" strip and disables the composer/commit during illustration', () => {
+  it('shows a "Making picture X of Y…" strip and disables the composer/commit during illustration', () => {
     hookState = {
       ...hookState,
       currentStory: {
@@ -641,8 +647,8 @@ describe('BookGenerateChat', () => {
         <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
       </Wrap>,
     )
-    expect(screen.getByText(/illustrating page 1 of 2/i)).toBeTruthy()
-    const preview = screen.getByAltText(/latest illustration preview/i) as HTMLImageElement
+    expect(screen.getByText(/making picture 1 of 2/i)).toBeTruthy()
+    const preview = screen.getByAltText(/latest picture/i) as HTMLImageElement
     expect(preview.src).toContain('preview.png')
 
     // Composer disabled.
@@ -650,7 +656,7 @@ describe('BookGenerateChat', () => {
     expect(input.disabled).toBe(true)
 
     // Commit button disabled while illustrating.
-    const commitBtn = screen.getByRole('button', { name: /i like the whole story/i })
+    const commitBtn = screen.getByRole('button', { name: /make my book/i })
     expect(commitBtn.hasAttribute('disabled')).toBe(true)
   })
 
@@ -676,5 +682,91 @@ describe('BookGenerateChat', () => {
     )
     expect(screen.getByLabelText(/read page 1 aloud/i)).toBeTruthy()
     expect(screen.getByLabelText(/read page 2 aloud/i)).toBeTruthy()
+  })
+})
+
+// ── UX-109 — the honest line is never read aloud ─────────────────
+
+describe('UX-109 — the TTS queue on the first story draft', () => {
+  const HONEST_LINE =
+    'Here\u2019s your story! "The Brave Knight" \u2014 it uses London\u2019s practice words: the, and. ' +
+    '3 words may be above London\u2019s level: castle, dragon, kingdom. (level estimated from age)'
+  const SPOKEN_LINE =
+    'Here\u2019s your story! "The Brave Knight" \u2014 it uses London\u2019s practice words: the, and.'
+
+  function draftState() {
+    return {
+      ...hookState,
+      clarificationPhase: 'ready' as const,
+      currentStory: {
+        title: 'The Brave Knight',
+        pages: [
+          { pageNumber: 1, text: 'The knight rode out.', sceneDescription: 'a knight' },
+          { pageNumber: 2, text: 'He found a castle.', sceneDescription: 'a castle' },
+        ],
+      },
+      chatHistory: [
+        { role: 'kid' as const, content: 'a brave knight', ts: 1 },
+        {
+          role: 'ai' as const,
+          content: HONEST_LINE,
+          spokenContent: SPOKEN_LINE,
+          ts: 2,
+          kind: 'story-draft' as const,
+        },
+      ],
+    }
+  }
+
+  it('speaks no word of the readability clause', () => {
+    hookState = draftState()
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(ttsSpeakQueueMock).toHaveBeenCalledTimes(1)
+    const spoken: string[] = ttsSpeakQueueMock.mock.calls[0][0]
+    const everythingSaid = spoken.join(' ').toLowerCase()
+    for (const fragment of ['above', 'level', 'castle,', 'kingdom', 'estimated']) {
+      expect(everythingSaid, `spoke "${fragment}"`).not.toContain(fragment)
+    }
+    expect(spoken[0]).toBe(SPOKEN_LINE)
+  })
+
+  it('still reads the story line and every page', () => {
+    hookState = draftState()
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    const spoken: string[] = ttsSpeakQueueMock.mock.calls[0][0]
+    expect(spoken).toHaveLength(3)
+    expect(spoken[1]).toContain('The knight rode out.')
+    expect(spoken[2]).toContain('He found a castle.')
+  })
+
+  it('still shows the whole honest line on screen', () => {
+    hookState = draftState()
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(screen.getByText(new RegExp('may be above London.s level'))).toBeTruthy()
+  })
+
+  it('falls back to the rendered line for a turn persisted before this split', () => {
+    const state = draftState()
+    const legacyTurn = { ...state.chatHistory[1] }
+    delete legacyTurn.spokenContent
+    hookState = { ...state, chatHistory: [state.chatHistory[0], legacyTurn] }
+    render(
+      <Wrap>
+        <BookGenerateChat onCommit={vi.fn()} onAbandon={vi.fn()} />
+      </Wrap>,
+    )
+    expect(ttsSpeakQueueMock.mock.calls[0][0][0]).toBe(HONEST_LINE)
   })
 })

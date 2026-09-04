@@ -15,6 +15,7 @@ import { artifactsCollection } from '../../core/firebase/firestore'
 import { storage } from '../../core/firebase/storage'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useTTS } from '../../core/hooks/useTTS'
+import { resolveChildAgeGroup } from '../../core/profile/childIdentity'
 import type { Child } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
@@ -31,17 +32,23 @@ interface KidConundrumResponseProps {
     londonPrompt: string
     londonDrawingPrompt?: string
   }
-  isLincoln: boolean
   child: Child
   familyId: string
 }
 
 export default function KidConundrumResponse({
   conundrum,
-  isLincoln,
   child,
   familyId,
 }: KidConundrumResponseProps) {
+  // FEAT-183 / UX-152 (B3): which response flow a kid gets is an age question.
+  // The audio + quick-picks flow below is for a reader; the listen + picks +
+  // drawing flow (`:3xx`) is the one built for a 6-year-old. It used to be
+  // selected by the name, so a third child fell into the drawing flow by
+  // accident. No change for either boy: Lincoln resolves 'older', London
+  // 'younger', with or without a stored birthdate.
+  const isOlder = resolveChildAgeGroup(child) === 'older'
+
   // TTS for reading the conundrum aloud
   const { speak, cancel, isSpeaking, isSupported: ttsSupported } = useTTS({ rate: 0.85 })
 
@@ -198,8 +205,8 @@ export default function KidConundrumResponse({
     }
   }, [familyId, child.id, conundrum])
 
-  // Lincoln: audio + quick picks response
-  if (isLincoln) {
+  // Older child: audio + quick picks response
+  if (isOlder) {
     if (conundrumSaved) {
       return (
         <SectionCard title={`\u{1F5FA}\u{FE0F} ${conundrum.title}`}>

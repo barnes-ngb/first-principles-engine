@@ -22,6 +22,7 @@ import VoiceInput from '../../components/VoiceInput'
 import { LoadingState } from '../../components/states'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { useBookReview } from './useBookReview'
+import { GenerateHint } from './ArtHelpSheet'
 
 // ── Age helper (mirrors BookGenerateChat) ─────────────────────────
 
@@ -45,7 +46,9 @@ export default function BookReviewChat() {
   const { bookId } = useParams<{ bookId: string }>()
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, isChildProfile } = useActiveChild()
+  // Capability, never a name (FEAT-178): a kid profile reads the kid wording.
+  const artAudience = isChildProfile ? 'kid' : 'parent'
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
 
@@ -133,7 +136,7 @@ export default function BookReviewChat() {
     return (
       <Box sx={{ p: 3 }}>
         <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/books')}>
-          Back to bookshelf
+          My Books
         </Button>
         <Typography sx={{ mt: 2 }}>We couldn't find that book.</Typography>
       </Box>
@@ -156,7 +159,7 @@ export default function BookReviewChat() {
           🎉 All done!
         </Typography>
         <Typography variant="body1">
-          You reviewed {reviewedCount} of {totalPages} pages.
+          &quot;Read it to me&quot; \u2014 you went through {reviewedCount} of {totalPages} pages.
         </Typography>
         <Typography variant="body2" color="text.secondary">
           {totalPages} pages are ready to read or print.
@@ -176,7 +179,7 @@ export default function BookReviewChat() {
             onClick={() => navigate('/books')}
             sx={{ textTransform: 'none', fontWeight: 700 }}
           >
-            🏠 Back to bookshelf
+            🏠 My Books
           </Button>
         </Stack>
       </Stack>
@@ -226,7 +229,7 @@ export default function BookReviewChat() {
           <Box
             component="img"
             src={imageUrl}
-            alt={`Page ${currentPageIndex + 1} illustration`}
+            alt={`Page ${currentPageIndex + 1} picture`}
             sx={{ width: '100%', display: 'block' }}
           />
         ) : (
@@ -370,6 +373,15 @@ export default function BookReviewChat() {
               🎤 Change this
             </Button>
           </Stack>
+          {/* The quietest paid door in the area (UX-147): a voice note rewrites
+              the page's words, and when the scene changes with them the picture
+              is redrawn — a paid call the kid never asked for by name. The hint
+              is CONDITIONAL because the picture is a consequence, not the tap,
+              so it promises no number. It stands down at the cap, where the
+              nudge above already says the picture will not change. */}
+          {!imageCapReached && (
+            <GenerateHint door="revisePagePicture" audience={artAudience} />
+          )}
           <Button
             variant="text"
             onClick={() => void skipRemaining()}

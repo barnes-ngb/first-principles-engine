@@ -62,8 +62,11 @@ import { BOOK_THEMES } from '../../core/types'
 import type { ImageGenRequest } from '../../core/ai/useAI'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import PageEditor from './PageEditor'
+import { GENERATION_STYLES } from './bookTypes'
 import { recordBookArtGeneration, useBookArtQuota } from './useBookArtQuota'
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
+import { describePageContents } from './deletePageSummary'
+import type { ArtHelpSurface } from './artHelpContent'
 import StickerPicker from './StickerPicker'
 import DrawingChoiceDialog from './DrawingChoiceDialog'
 import type { DrawingChoice, PostCleanupChoice } from './DrawingChoiceDialog'
@@ -88,22 +91,6 @@ const SpeechRecognitionClass =
       (window as unknown as Record<string, unknown>).webkitSpeechRecognition
     : null
 const speechAvailable = !!SpeechRecognitionClass
-
-const AI_SCENE_STYLES_LINCOLN = [
-  { value: 'minecraft', label: 'Minecraft' },
-  { value: 'garden-warfare', label: 'Garden Battle' },
-  { value: 'storybook', label: 'Storybook' },
-  { value: 'comic', label: 'Comic Book' },
-  { value: 'realistic', label: 'Realistic' },
-] as const
-
-const AI_SCENE_STYLES_LONDON = [
-  { value: 'storybook', label: 'Storybook' },
-  { value: 'platformer', label: 'Platformer World' },
-  { value: 'comic', label: 'Comic Book' },
-  { value: 'realistic', label: 'Realistic' },
-  { value: 'minecraft', label: 'Pixel Art' },
-] as const
 
 const WORLD_CHIPS_LINCOLN = [
   { emoji: '\u{1F3D4}\uFE0F', label: 'Adventure world' },
@@ -187,6 +174,16 @@ export default function BookEditorPage() {
   const artAudience = isChildProfile ? 'kid' : 'parent'
   const artBudget = { limit: artLimit, remaining: artRemaining, capped: isChildProfile }
   const [showArtHelp, setShowArtHelp] = useState(false)
+  /**
+   * Which sheet the "?" opens (UX-147). The editor hosts doors on two art
+   * surfaces — page pictures and the drawing / sticker flows — and one sheet
+   * cannot honestly answer for both, so the opener names its surface.
+   */
+  const [artHelpSurface, setArtHelpSurface] = useState<ArtHelpSurface>('bookImages')
+  const openArtHelp = useCallback((surface: ArtHelpSurface) => {
+    setArtHelpSurface(surface)
+    setShowArtHelp(true)
+  }, [])
 
   // ── Themed child (drives editor palette / font / world chips) ───
   // Reads from book.createdFor so Shelly can re-theme the editor without
@@ -346,8 +343,19 @@ export default function BookEditorPage() {
     if (book) setActivePageIndex(book.pages.length)
   }, [addPage, book])
 
+  /**
+   * Deleting a page is destructive and NOT undoable (UX-130): the editor's
+   * history is per-page — `trackPageChange` snapshots the active page's own
+   * fields — so a deleted page never enters Undo's stack, and the book
+   * auto-saves. On this same screen, removing one picture asks first. The
+   * house rule the August audit settled (UX-48): destructive and not
+   * undoable → confirm.
+   */
+  const [confirmDeletePage, setConfirmDeletePage] = useState(false)
+
   const handleDeletePage = useCallback(() => {
     if (!activePage || !book || book.pages.length <= 1) return
+    setConfirmDeletePage(false)
     deletePage(activePage.id)
     setActivePageIndex((prev) => Math.max(0, prev - 1))
   }, [activePage, book, deletePage])
@@ -539,9 +547,10 @@ export default function BookEditorPage() {
           transparent ?? false,
         )
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err)
+        // The raw message stays in the console for a developer; a kid reads the
+        // same plain sentence the sketch-upload failure already uses (UX-132e).
         console.error('Reimagine sketch upload failed:', err)
-        setReimagineError(`Reimagine failed: ${errMsg}`)
+        setReimagineError('Reimagine failed \u2014 check your connection and try again.')
         resetDrawingFlow()
       }
       return
@@ -684,9 +693,8 @@ export default function BookEditorPage() {
           wantTransparent,
         )
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Reimagine of cleaned drawing failed:', err)
-        setReimagineError(`Reimagine failed: ${errMsg}`)
+        setReimagineError('Reimagine failed \u2014 check your connection and try again.')
         resetDrawingFlow()
       }
       return
@@ -904,7 +912,7 @@ export default function BookEditorPage() {
       })
       if (skippedImageCount > 0) {
         setPrintSkipNotice(
-          `${skippedImageCount} image${skippedImageCount === 1 ? '' : 's'} couldn't be embedded and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
+          `${skippedImageCount} picture${skippedImageCount === 1 ? '' : 's'} couldn't be printed and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
         )
       }
     } finally {
@@ -972,7 +980,7 @@ export default function BookEditorPage() {
       <Page>
         <Typography color="text.secondary">Book not found.</Typography>
         <Button onClick={() => navigate('/books')} startIcon={<ArrowBackIcon />}>
-          Back to My Books
+          My Books
         </Button>
       </Page>
     )
@@ -1044,8 +1052,12 @@ export default function BookEditorPage() {
         </Alert>
       )}
 
-      {/* Attribution controls: who this book is FOR (drives theming) and BY (who created it) */}
-      {children.length > 0 && (
+      {/* Attribution controls: whose shelf this book is on (and drives theming)
+          and who made it. A parent's bookkeeping row: it moves a book between
+          children and can stamp a grown-up as the author, so it is gated on
+          capability, never on a name (UX-127). A kid in the editor used to see
+          it and could move his own book off his shelf. */}
+      {isParentProfile && children.length > 0 && (
         <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1, py: 0.5 }}>
           <FormControl size="small" sx={{ minWidth: 120 }}>
             <InputLabel id="book-for-label">For</InputLabel>
@@ -1055,9 +1067,15 @@ export default function BookEditorPage() {
               value={book.createdFor ?? themedChild?.id ?? ''}
               onChange={(e) => {
                 const nextFor = e.target.value as string
-                updateBookMeta({ createdFor: nextFor })
-                // Also keep childId aligned to target child for bookshelf queries
-                // (child sees books where childId === their own id)
+                // "For" moves the book (UX-124, owner decision 2026-09-03).
+                // `childId` is what the kid shelf queries, what the kid Today
+                // cards query, and what the reader logs reading minutes and XP
+                // against — so writing `createdFor` alone re-themed the editor
+                // and left the book on the other child's shelf, which is the
+                // opposite of what the label promises. The two now move
+                // together: the book lands on the chosen child's shelf and its
+                // reading minutes follow it there.
+                updateBookMeta({ createdFor: nextFor, childId: nextFor })
               }}
             >
               {children.map((c) => (
@@ -1130,7 +1148,7 @@ export default function BookEditorPage() {
           <>
             <Chip
               icon={<DeleteOutlineIcon />}
-              label="Remove background"
+              label="Remove picture"
               onClick={() => { handleTrackedRemoveImage(selectedEditorImageId); deselect() }}
               color="error"
               size="small"
@@ -1168,7 +1186,7 @@ export default function BookEditorPage() {
             />
           )}
         <Chip
-          label={printing ? 'Building...' : 'Print'}
+          label={printing ? 'Making PDF…' : 'Make a PDF'}
           icon={printing ? <CircularProgress size={14} /> : <PrintIcon />}
           onClick={() => setShowPrintSettings(true)}
           disabled={printing}
@@ -1357,6 +1375,8 @@ export default function BookEditorPage() {
         onPickPostCleanup={(choice, intensity, transparent) => { void handlePostCleanupChoice(choice, intensity, transparent) }}
         onRetryResult={handleRetryDrawingResult}
         capReached={artCapReached}
+        artAudience={artAudience}
+        onOpenArtHelp={() => openArtHelp('sketch')}
       />
 
       {/* Page strip */}
@@ -1494,7 +1514,7 @@ export default function BookEditorPage() {
           onClick={() => { deselect(); setShowDrawingCapture(true) }}
           sx={{ minHeight: 48, fontWeight: 700, fontSize: '0.95rem' }}
         >
-          Add My Drawing
+          Add a drawing
         </Button>
         <Button
           variant="outlined"
@@ -1510,7 +1530,7 @@ export default function BookEditorPage() {
           onClick={() => { deselect(); openAiDialog() }}
           sx={{ minHeight: 48 }}
         >
-          Make a scene
+          Make a picture
         </Button>
         <Button
           variant="outlined"
@@ -1521,13 +1541,13 @@ export default function BookEditorPage() {
           Sticker
         </Button>
 
-        {/* Delete page (only if > 1 page) */}
+        {/* Delete page (only if > 1 page) — asks first (UX-130) */}
         {book.pages.length > 1 && (
           <Button
             variant="text"
             color="error"
             startIcon={<DeleteOutlineIcon />}
-            onClick={handleDeletePage}
+            onClick={() => setConfirmDeletePage(true)}
             sx={{ minHeight: 48, ml: 'auto' }}
           >
             Delete page
@@ -1545,7 +1565,7 @@ export default function BookEditorPage() {
               size="small"
             />
           }
-          label="Clean sketch background"
+          label="Clean up drawings"
           sx={{ ml: 0, '& .MuiTypography-root': { fontSize: '0.75rem' } }}
         />
       )}
@@ -1558,7 +1578,7 @@ export default function BookEditorPage() {
           sx={{ mt: 1 }}
         >
           <Typography variant="body2" gutterBottom fontWeight={600}>
-            Scene added! Now add your characters:
+            Picture added! Now add your characters:
           </Typography>
           <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
             <Button
@@ -1598,7 +1618,7 @@ export default function BookEditorPage() {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Change Background</DialogTitle>
+        <DialogTitle>Change picture</DialogTitle>
         <DialogContent>
           <Stack direction="row" spacing={2} justifyContent="center" sx={{ py: 2 }}>
             <Box
@@ -1616,7 +1636,7 @@ export default function BookEditorPage() {
             >
               <AutoAwesomeIcon sx={{ fontSize: 32, color: 'secondary.main', mb: 0.5 }} />
               <Typography variant="caption" display="block" fontWeight={600}>
-                Make a scene
+                Make a picture
               </Typography>
             </Box>
             <Box
@@ -1673,7 +1693,7 @@ export default function BookEditorPage() {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Pick a background</DialogTitle>
+        <DialogTitle>Pick a picture</DialogTitle>
         <DialogContent>
           {bookBackgrounds.length > 0 && (
             <>
@@ -1689,7 +1709,7 @@ export default function BookEditorPage() {
                   >
                     <img
                       src={img.url}
-                      alt={img.prompt ?? img.label ?? 'Background'}
+                      alt={img.prompt ?? img.label ?? 'Picture'}
                       loading="lazy"
                       style={{ borderRadius: 8, objectFit: 'cover', height: 100, width: '100%' }}
                     />
@@ -1735,7 +1755,7 @@ export default function BookEditorPage() {
 
           {bookBackgrounds.length === 0 && galleryStickers.length === 0 && !galleryStickersLoading && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
-              No backgrounds yet — add some scenes to your book first!
+              No pictures yet — make some pictures in your book first!
             </Typography>
           )}
         </DialogContent>
@@ -1749,11 +1769,11 @@ export default function BookEditorPage() {
       {/* AI Scene generation dialog */}
       <Dialog open={showAiDialog} onClose={() => { setShowAiDialog(false); setReplacingBackgroundIds([]) }} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <Box component="span" sx={{ flex: 1 }}>Make a Scene</Box>
+          <Box component="span" sx={{ flex: 1 }}>Make a picture</Box>
           {/* One "?" for every paid picture in the editor (FEAT-178) — the
               scene generator, reimagine, the sticker picker and the
               show-the-whole-picture control all live on the same sheet. */}
-          <ArtHelpButton onClick={() => setShowArtHelp(true)} />
+          <ArtHelpButton onClick={() => openArtHelp('bookImages')} />
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
@@ -1778,7 +1798,7 @@ export default function BookEditorPage() {
             </Box>
 
             <TextField
-              label="Describe the scene"
+              label="Describe the picture"
               placeholder="Describe the world your character will explore..."
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
@@ -1794,10 +1814,10 @@ export default function BookEditorPage() {
 
             <Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Style
+                Picture style
               </Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap">
-                {(isLincoln ? AI_SCENE_STYLES_LINCOLN : AI_SCENE_STYLES_LONDON).map((s) => (
+                {GENERATION_STYLES.map((s) => (
                   <Chip
                     key={s.value}
                     label={s.label}
@@ -1820,7 +1840,7 @@ export default function BookEditorPage() {
               <Stack alignItems="center" spacing={1}>
                 <CircularProgress size={32} />
                 <Typography variant="body2" color="text.secondary">
-                  Creating your scene...
+                  Making your picture…
                 </Typography>
               </Stack>
             )}
@@ -1830,7 +1850,7 @@ export default function BookEditorPage() {
                 {aiError.message.includes('blocked') || aiError.message.includes('safety') || aiError.message.includes('safety filter') ? (
                   <Stack spacing={1.5}>
                     <Typography variant="body2">
-                      The picture maker couldn&apos;t create that image.
+                      The picture maker couldn&apos;t make that picture.
                     </Typography>
                     <Typography variant="body2">
                       <strong>Try one of these:</strong>
@@ -1887,7 +1907,7 @@ export default function BookEditorPage() {
                     </Stack>
                   </Stack>
                 ) : (
-                  <Typography variant="body2">{aiError.message || 'Failed to generate image. Please try again.'}</Typography>
+                  <Typography variant="body2">{aiError.message || 'Couldn\u2019t make that picture. Please try again.'}</Typography>
                 )}
               </Alert>
             )}
@@ -1907,7 +1927,7 @@ export default function BookEditorPage() {
                 <Box
                   component="img"
                   src={aiResult.url}
-                  alt="Generated scene"
+                  alt="Your new picture"
                   sx={{
                     maxWidth: '100%',
                     maxHeight: 300,
@@ -1930,7 +1950,7 @@ export default function BookEditorPage() {
                 Try again
               </Button>
               <Button variant="contained" onClick={handleUseAiImage}>
-                Use this one
+                Use it
               </Button>
             </>
           ) : (
@@ -1942,15 +1962,38 @@ export default function BookEditorPage() {
                 onClick={() => { void handleGenerateScene() }}
                 disabled={!aiPrompt.trim() || aiLoading}
               >
-                Create!
+                Make it
               </Button>
             )
           )}
         </DialogActions>
       </Dialog>
 
+      {/* Delete page confirm (UX-130). Names what goes, in the counts a person
+          can check against the page in front of them — the shelf's own delete
+          shape. Page deletion is not in Undo's per-page history and the book
+          auto-saves, so this is the only thing standing between a tap and a
+          lost page of story. */}
+      <Dialog
+        open={confirmDeletePage}
+        onClose={() => setConfirmDeletePage(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete page {activePage?.pageNumber ?? ''}?</DialogTitle>
+        <DialogContent>
+          <Typography>{describePageContents(activePage)} This can&apos;t be undone.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeletePage(false)}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={handleDeletePage}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <ArtHelpSheet
-        surface="bookImages"
+        surface={artHelpSurface}
         open={showArtHelp}
         onClose={() => setShowArtHelp(false)}
         audience={artAudience}
@@ -1967,6 +2010,8 @@ export default function BookEditorPage() {
         onSelectSticker={handleSelectSticker}
         capReached={artCapReached}
         recordGeneration={recordGeneration}
+        artAudience={artAudience}
+        onOpenArtHelp={() => openArtHelp('stickers')}
       />
 
       {/* Finish dialog */}
@@ -1977,7 +2022,7 @@ export default function BookEditorPage() {
             {coverCandidates.length > 0 && (
               <>
                 <Typography variant="body2" color="text.secondary">
-                  Pick a cover image:
+                  Pick a cover picture:
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
                   {coverCandidates.map((url) => (
@@ -2159,7 +2204,6 @@ export default function BookEditorPage() {
         onClose={bgReimagine.dismissNotification}
         onReplaceBackground={bgReimagine.handleReplaceBackground}
         onAddAsSticker={bgReimagine.handleAddAsSticker}
-        onSaveToGallery={() => { void bgReimagine.handleSaveToGallery() }}
         onDiscard={bgReimagine.handleDiscard}
       />
 

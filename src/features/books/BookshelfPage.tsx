@@ -127,7 +127,7 @@ export default function BookshelfPage() {
       })
       if (skippedImageCount > 0) {
         setPrintSkipNotice(
-          `${skippedImageCount} image${skippedImageCount === 1 ? '' : 's'} couldn't be embedded and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
+          `${skippedImageCount} picture${skippedImageCount === 1 ? '' : 's'} couldn't be printed and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
         )
       }
       setPrintTarget(null)
@@ -325,13 +325,13 @@ export default function BookshelfPage() {
             All ({books.length})
           </ToggleButton>
           <ToggleButton value="creative" sx={{ textTransform: 'none', minHeight: 36 }}>
-            My Stories ({books.filter((b) => b.bookType !== 'sight-word' && b.bookType !== 'generated').length})
+            Made by hand ({books.filter((b) => b.bookType !== 'sight-word' && b.bookType !== 'generated').length})
           </ToggleButton>
           <ToggleButton value="generated" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Generated ({books.filter((b) => b.bookType === 'generated').length})
+            Written by AI ({books.filter((b) => b.bookType === 'generated').length})
           </ToggleButton>
           <ToggleButton value="sight-word" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Sight Words ({books.filter((b) => b.bookType === 'sight-word').length})
+            Sight-word books ({books.filter((b) => b.bookType === 'sight-word').length})
           </ToggleButton>
         </ToggleButtonGroup>
         <Box sx={{ flex: 1 }} />
@@ -392,7 +392,7 @@ export default function BookshelfPage() {
             variant={creatorFilter === 'all' ? 'filled' : 'outlined'}
           />
           <Chip
-            label={`Mom's Books (${books.filter((b) => (b.createdBy ?? 'parent') === 'parent').length})`}
+            label={`Parents' books (${books.filter((b) => (b.createdBy ?? 'parent') === 'parent').length})`}
             size="small"
             onClick={() => setCreatorFilter('parent')}
             color={creatorFilter === 'parent' ? 'primary' : 'default'}
@@ -568,8 +568,12 @@ export default function BookshelfPage() {
             const coverUrl =
               book.coverImageUrl ?? book.pages.find((p) => p.images.length > 0)?.images[0]?.url
             const by = book.createdBy ?? 'parent'
+            // `createdBy: 'parent'` is Mom OR Dad (see `Book.createdBy`), and a
+            // legacy book with no `createdBy` resolves to it too — so the chip
+            // says "a parent", the same phrase the Watch Library settled on
+            // (UX-02), never a name the data model does not hold (UX-103).
             const creatorLabel = by === 'parent'
-              ? 'By Mom'
+              ? 'By a parent'
               : `By ${allChildren.find((c) => c.id === by)?.name ?? 'Kid'}`
             const isInProgressDraft = book.reviewState?.generateChatState === 'in-progress'
             // Per-Page Review started but not finished (or skipped) yet.
@@ -747,7 +751,7 @@ export default function BookshelfPage() {
                       }}
                     />
                   )}
-                  {book.bookType === 'generated' && (
+                  {(book.source === 'ai-generated' || book.bookType === 'generated') && (
                     <Chip
                       label="AI"
                       size="small"
@@ -788,7 +792,7 @@ export default function BookshelfPage() {
                     />
                   ) : isReviewInProgress ? (
                     <Chip
-                      label="Continue reading →"
+                      label={'Finish "Read it to me" →'}
                       size="small"
                       sx={{
                         ml: 'auto',
@@ -884,7 +888,7 @@ export default function BookshelfPage() {
           <ListItemIcon>
             <DownloadIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>Download PDF</ListItemText>
+          <ListItemText>Make a PDF</ListItemText>
         </MenuItem>
         {/* Add to catalog (FEAT-82) — parent-only, finished books only (§6). */}
         {(() => {
@@ -974,7 +978,7 @@ export default function BookshelfPage() {
         </Alert>
       </Snackbar>
 
-      {/* New book dialog — two tabs: Blank Book / Generate a Book */}
+      {/* New book dialog — two tabs: Blank Book / Write it with AI */}
       <Dialog open={showNewDialog} onClose={handleCloseNewDialog} maxWidth="sm" fullWidth>
         <DialogTitle>{isLincoln ? 'Craft a New Book' : 'Make a New Book'}</DialogTitle>
         <DialogContent>
@@ -984,7 +988,7 @@ export default function BookshelfPage() {
             sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
           >
             <Tab label="Blank Book" sx={{ textTransform: 'none' }} />
-            <Tab label="Generate a Book" sx={{ textTransform: 'none' }} />
+            <Tab label="Write it with AI" sx={{ textTransform: 'none' }} />
           </Tabs>
 
           {/* Tab 0: Blank Book (existing flow) */}
