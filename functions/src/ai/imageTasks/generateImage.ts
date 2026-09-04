@@ -46,22 +46,57 @@ export interface ImageGenResponse {
 // ── Style-specific prompt prefixes ──────────────────────────────
 
 /**
- * The three book-illustration looks that named only adjectives (FEAT-174).
+ * The look each book-illustration style is drawn in — palette, line, shading —
+ * plus, for the three "world" styles, the props that world is made of.
  *
- * Minecraft, Garden Battle and Platformer World always named concrete visual
- * nouns — blocks and terrain, sunflowers and pea shooters, brick platforms and
- * green pipes — so the model had something to separate them by. Comic Book,
- * Storybook and Realistic named only adjectives ("bold", "dynamic", "soft
- * colors", "warm lighting"), and adjectives are what every children's book
- * illustration already is. So all three drifted toward the same generic look and
- * Comic Book did not read as comic — reported by a parent who picked it and got
- * back something that "looks the same as storybook".
+ * **FEAT-174** gave Comic Book, Storybook and Realistic this treatment. They had
+ * named only adjectives ("bold", "dynamic", "soft colors", "warm lighting"),
+ * which is what every children's book illustration already is, so all three
+ * drifted toward one generic look and Comic Book did not read as comic.
  *
- * These reuse the FEAT-159 recipe wording, which already had to solve exactly
- * this for the sticker picker. Palette, line work and shading are the three
- * questions that make a look tell apart at a glance.
+ * **FEAT-189** brought the other three in, for the opposite failure. Minecraft,
+ * Garden Battle and Platformer World named concrete nouns — but as a *scene*,
+ * not as a look: "Bright blue sky, floating brick platforms, green pipes, golden
+ * coins, fluffy clouds with eyes, mushrooms, starry power-ups." `buildImagePrompt`
+ * then appends the page's own scene, so a page reading "Tom had a map. He was in
+ * the hut." reached the model as two incompatible scenes — a platform world AND
+ * the inside of a hut — and the model did the only thing that satisfies both: it
+ * split the canvas. A parent got a platformer strip across the top with a
+ * realistic cabin interior below, and a page whose scene was "Tom saw a big pit"
+ * came back as two half-images side by side. The three recipe styles never did
+ * this, because a recipe describes **how to draw**, not **what**.
+ *
+ * So the world flavour is demoted to optional set-dressing, stated as such by
+ * {@link worldPropsClause}: dress the scene with these props where the scene
+ * allows it, and where it does not — indoors, or anywhere else — keep the LOOK
+ * and drop the props. That one sentence is what stops the split, because it
+ * tells the model what to do when the scene is a hut.
+ *
+ * All six now share one shape, so a style added later has to answer the same
+ * three questions instead of listing a world.
  */
-const BOOK_ILLUSTRATION_RECIPES: Record<string, VisualRecipe> = {
+type BookIllustrationRecipe = VisualRecipe & {
+  /**
+   * The props this world is made of, as a bare noun list. The conditional
+   * framing around them is {@link worldPropsClause}'s, not each recipe's, so the
+   * three world styles cannot state the rule three slightly different ways.
+   */
+  props?: string;
+  /**
+   * Set when this world's props include living things, so the page opens with
+   * {@link BOOK_PAGE_FRAMING_WITH_PROP_CREATURES} instead of {@link
+   * BOOK_PAGE_FRAMING} — forbidding the same things while naming those props as
+   * the one allowed exception, rather than banning them and then taking it back.
+   *
+   * Only Garden Battle needs it, and it is opt-in rather than automatic on every
+   * world style: a blanket exception would invite Minecraft and Platformer World
+   * — whose props are blocks, terrain, pipes and coins — to put creatures in a
+   * picture that should have none.
+   */
+  propsIncludeCreatures?: true;
+};
+
+const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
   "book-illustration-comic": {
     hint: "in a bold comic book illustration style",
     summary: "A bold comic book background panel for a children's story.",
@@ -89,15 +124,112 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, VisualRecipe> = {
     shading:
       "soft directional light with smooth falloff, subtle bounce light, and gentle cast shadows.",
   },
+  "book-illustration-minecraft": {
+    hint: "in a blocky voxel pixel-art style",
+    summary:
+      "A children's book page drawn in the look of a blocky voxel pixel-art world.",
+    palette:
+      "a limited palette of flat, saturated colors — grass green, dirt brown, stone grey — laid down unblended, never mixed.",
+    line: "no outlines at all; every form is built from hard-edged cubes with visible pixel steps.",
+    shading:
+      "flat per-face shading only — one solid tone per cube face, lighter on top, darker on the sides. No gradients, no soft light.",
+    props: "cubic blocks, stepped terrain, torches, ore seams",
+  },
+  "book-illustration-garden-warfare": {
+    hint: "in a bright, silly cartoon garden style",
+    summary:
+      "A children's book page drawn in the look of a bright, silly cartoon garden battle.",
+    palette:
+      "high-saturation leaf green and warm yellow against soft earth brown, in flat cheerful fills.",
+    line: "a bold, rounded outline of even weight on every shape — nothing sharp, nothing spiky, nothing frightening.",
+    shading:
+      "simple two-tone cartoon shading with one soft drop shadow under each shape, lit by broad flat daylight.",
+    props: "sunflowers, pea shooters, walnut barriers, garden pots, silly cartoon zombies in the background",
+    propsIncludeCreatures: true,
+  },
+  "book-illustration-platformer": {
+    hint: "in the look of a classic side-scrolling platformer video game",
+    summary:
+      "A children's book page drawn in the look of a classic side-scrolling platformer video game.",
+    palette:
+      "saturated primaries — bright blue, warm red, gold and green — in flat unblended fills with no gradients.",
+    line: "thick, clean outlines of even weight around chunky rounded shapes; nothing wispy or sketchy.",
+    shading:
+      "flat cel shading in two steps per shape, drawn side-on in 2D with no perspective depth and no soft light.",
+    props: "brick platforms, green pipes, gold coins, question blocks, fluffy clouds, mushroom shapes",
+  },
 };
 
-/** Every book-illustration page prompt ends with this shared framing. */
-const BOOK_PAGE_FRAMING = "Environment and background only, no characters or people. ";
+/**
+ * The unified-scene guardrail, shared by all six styles so the next style added
+ * inherits it. It is the belt to {@link worldPropsClause}'s braces: the props
+ * clause tells the model what to do with a world's props when the scene is
+ * indoors, and this tells it that whatever it decides, the answer is one
+ * picture (FEAT-189).
+ */
+const UNIFIED_SCENE_RULE =
+  "One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. ";
+
+/**
+ * Every book-illustration page prompt opens with this framing: a page picture is
+ * the background a story sits on, and the story's people belong to the words.
+ */
+const BOOK_PAGE_FRAMING =
+  UNIFIED_SCENE_RULE + "Environment and background only, no characters or people. ";
+
+/**
+ * The same framing for a world whose own props are alive (Codex P2 on PR #1758,
+ * then again on PR #1759).
+ *
+ * Before FEAT-189, Garden Battle was the **only** style whose prefix said "no
+ * specific characters" rather than "no characters or people" — deliberately
+ * looser, because a garden battle without its silly cartoon zombies is just a
+ * garden. Routing it through the shared framing swapped that for the strict
+ * wording while still asking for the zombies, so the prompt both demanded and
+ * forbade them.
+ *
+ * The first attempt at a fix appended a later sentence saying those creatures
+ * were "not the story's characters". That was not enough, and Codex was right to
+ * say so: describing what they are not never grants an exemption from a ban
+ * already stated categorically, so the model could still satisfy "no characters"
+ * by dropping them — the very regression the fix was for. An image model asked
+ * to hold a prohibition and a later exception together tends to keep the
+ * prohibition.
+ *
+ * So the contradiction is not patched, it is never emitted: a style whose props
+ * include creatures gets a framing that forbids exactly what the other five
+ * forbid — people, and the story's characters — while naming its own prop
+ * creatures as the one allowed exception, up front and in the same breath.
+ * Scoped to the style that opts in, so the other five keep {@link
+ * BOOK_PAGE_FRAMING} verbatim. It names no prop of its own, so a world's nouns
+ * still appear only inside the props clause.
+ */
+const BOOK_PAGE_FRAMING_WITH_PROP_CREATURES =
+  UNIFIED_SCENE_RULE +
+  "Environment and background only: no people, and none of the story's characters. " +
+  "The one exception is the world's own prop creatures listed below — those ARE allowed and expected: " +
+  "draw them as scenery, small and incidental in the background, never the subject of the picture. ";
+
+/**
+ * The one statement of how a world's props relate to the page's own scene
+ * (FEAT-189). Each world recipe supplies only the noun list; this supplies the
+ * rule, so the three cannot drift apart.
+ */
+function worldPropsClause(recipe: BookIllustrationRecipe): string {
+  return (
+    `Where the scene allows, dress it with the world's props (${recipe.props}); ` +
+    "when the scene is indoors or somewhere else, keep the LOOK and drop the props. "
+  );
+}
 
 function bookIllustrationPrefix(styleKey: string): string {
   const recipe = BOOK_ILLUSTRATION_RECIPES[styleKey];
   if (!recipe) return "";
-  return `${recipe.summary} ${BOOK_PAGE_FRAMING}${recipeDetail(recipe)}`;
+  const framing = recipe.propsIncludeCreatures
+    ? BOOK_PAGE_FRAMING_WITH_PROP_CREATURES
+    : BOOK_PAGE_FRAMING;
+  const props = recipe.props ? worldPropsClause(recipe) : "";
+  return `${recipe.summary} ${framing}${recipeDetail(recipe)}${props}`;
 }
 
 /** The six looks a parent can pick in the book generator's style picker. */
@@ -110,6 +242,15 @@ export const BOOK_ILLUSTRATION_STYLE_KEYS = [
   "book-illustration-platformer",
 ] as const;
 
+/**
+ * Read-only view of the recipe table, for tests and for anything that needs to
+ * check what a look actually says. The prompts themselves come from
+ * {@link STYLE_PREFIXES}.
+ */
+export function bookIllustrationRecipe(styleKey: string): BookIllustrationRecipe | undefined {
+  return BOOK_ILLUSTRATION_RECIPES[styleKey];
+}
+
 export const STYLE_PREFIXES: Record<string, string> = {
   "schedule-card":
     "A friendly, colorful visual schedule card for a child's daily routine. Simple, clear imagery with large icons. ",
@@ -117,15 +258,12 @@ export const STYLE_PREFIXES: Record<string, string> = {
     "A cheerful, motivating reward chart illustration for a child. Bright colors, fun characters, encouraging tone. ",
   "theme-illustration":
     "A warm, educational illustration for a homeschool family learning theme. Kid-friendly, inviting art style. ",
-  "book-illustration-minecraft":
-    "A blocky pixel art voxel world scene for a children's book page. Environment only, no characters or people. Cubic blocks with visible pixel steps, dramatic mined terrain, bright sky. Flat per-face shading only — one solid tone per cube face, lighter on top, darker on the sides. No gradients, no outlines. ",
+  "book-illustration-minecraft": bookIllustrationPrefix("book-illustration-minecraft"),
   "book-illustration-storybook": bookIllustrationPrefix("book-illustration-storybook"),
   "book-illustration-comic": bookIllustrationPrefix("book-illustration-comic"),
   "book-illustration-realistic": bookIllustrationPrefix("book-illustration-realistic"),
-  "book-illustration-garden-warfare":
-    "A fun cartoon garden battle scene for a children's book page. Bright green garden with sunflowers, pea shooters, walnuts as barriers, silly cartoon zombies in the background. Colorful, humorous, family-friendly. Environment only, no specific characters. ",
-  "book-illustration-platformer":
-    "A colorful side-scrolling platformer video game world for a children's book page. Bright blue sky, floating brick platforms, green pipes, golden coins, fluffy clouds with eyes, mushrooms, starry power-ups. Cheerful and inviting. Environment only, no characters. ",
+  "book-illustration-garden-warfare": bookIllustrationPrefix("book-illustration-garden-warfare"),
+  "book-illustration-platformer": bookIllustrationPrefix("book-illustration-platformer"),
   "book-sticker":
     "A single cute cartoon character or object, sticker style. Bold clean outline, colorful flat fill, simple shapes, fun and expressive. Child-friendly, no text, no background elements. ",
   general: "",
@@ -250,9 +388,32 @@ export const generateImage = onCall(
 
     // ── Resolve theme image prefix ──────────────────────────────
     // Only reaches the prompt when the picked style has no look of its own —
-    // see the precedence note on `buildImagePrompt` (FEAT-174). Note this map
-    // has drifted from the client's `PRESET_THEMES`: `sight_words`, `family`,
-    // `science` and `faith` are absent here and so resolve to no prefix at all.
+    // see the precedence note on `buildImagePrompt` (FEAT-174).
+    //
+    // FEAT-190 completed this map: `sight_words`, `family`, `science` and
+    // `faith` were absent, so four of the fifteen ids a parent can pick in the
+    // Book Editor's Finish dialog had no entry at all. Their four strings are
+    // copied verbatim from the client's `PRESET_THEMES[*].imageStylePrefix`
+    // (`src/core/types/books.ts`), which is the text a person can actually read;
+    // the eleven older entries are hand-abridged copies of the same field, and
+    // abridging the new four would only add a fifth variant of one string.
+    //
+    // **No caller in the repo can reach any entry in this map today**, and that
+    // is a separate gap from the missing four. `useBookIllustrator` is the only
+    // caller that sends `themeId`, and it always sends a
+    // `book-illustration-${style}` alongside it, which wins outright (FEAT-174).
+    // The one style that resolves to no prefix — `book-illustration-photo`, from
+    // the `photo` cover style in `useBookReview`'s fallback chain — is not in
+    // `validStyles` above, so that request is rejected at the argument gate
+    // before it ever gets here (caught per page by the illustrator, which marks
+    // the page failed). Completing the map is therefore correct data, not a
+    // behaviour change: routing a caller to it is filed as UX-165/UX-172, not
+    // done here.
+    //
+    // This is still a hand-kept duplicate of the client table, and a third copy
+    // lives in `functions/src/ai/tasks/generateStory.ts` (`PRESET_THEME_MAP`,
+    // where the same four ids are still missing). Consolidating the three is
+    // filed, not done here — see `docs/review/STYLE_AUDIT_2026-09.md` §5.
     let themeImagePrefix: string | undefined;
     if (themeId) {
       // Check preset themes first (server-side map)
@@ -268,6 +429,11 @@ export const generateImage = onCall(
         cooking: "A warm, cheerful kitchen scene for a children's book.",
         sports: "A bright, energetic children's book illustration of kids playing sports.",
         holidays: "A festive, joyful children's book illustration. Holiday decorations, seasonal scenes, warm family celebrations.",
+        // Added by FEAT-190 — verbatim from the client's `PRESET_THEMES`.
+        family: "A warm, cozy children's book illustration of a family together. Soft lighting, happy expressions.",
+        science: "A bright, educational children's book illustration about science. Lab equipment, nature exploration, experiments.",
+        sight_words: "A simple, clean children's book illustration. Clear scenes, minimal detail, bold colors.",
+        faith: "A warm, reverent children's book illustration. Gentle light, nature scenes, peaceful atmosphere.",
       };
       themeImagePrefix = PRESET_IMAGE_PREFIXES[themeId];
 

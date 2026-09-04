@@ -91,6 +91,8 @@ export interface ChatTaskResult {
     /** The TRUE distinct count across the story, never truncated (FEAT-176 / Codex P2). */
     hardWordCount: number;
     revised: boolean;
+    /** The per-story stretch it was written and measured at (FEAT-191), 0-2. */
+    stretch: number;
   };
 }
 

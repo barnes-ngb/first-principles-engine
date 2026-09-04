@@ -26,6 +26,7 @@ import { useBookArtQuota } from './useBookArtQuota'
 import { storyWordsPreviewLine } from './storyPracticeWords'
 import { useBookGenerateChat } from './useBookGenerateChat'
 import StoryLengthSelector from './StoryLengthSelector'
+import StoryLevelStretchSelector from './StoryLevelStretchSelector'
 import { DEFAULT_TARGET_PAGE_COUNT } from './storyPageTargets'
 
 interface Props {
@@ -112,6 +113,8 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     canStartStory,
     pageCount,
     setPageCount,
+    levelStretch,
+    setLevelStretch,
     storyWords,
     storyWordSource,
     storyWordsLoading,
@@ -608,6 +611,20 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
         <StoryLengthSelector
           value={pageCount}
           onChange={setPageCount}
+          disabled={isLoading || isIllustrating}
+        />
+      )}
+
+      {/* How hard are the words (FEAT-191) — a PARENT control, gated on
+          capability and never on a name. A kid never sees it: choosing to write
+          above your own reading level is a teaching decision, and the honest
+          line about what came out above the level is already parent-only.
+          Locked once a draft exists, like the length: the book is written. */}
+      {isParent && !currentStory && (
+        <StoryLevelStretchSelector
+          value={levelStretch}
+          onChange={setLevelStretch}
+          childName={childName}
           disabled={isLoading || isIllustrating}
         />
       )}

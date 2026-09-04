@@ -208,6 +208,65 @@ export function effectivePhonicsLevel(
   return { level: young ? FALLBACK_LEVEL_YOUNG : FALLBACK_LEVEL_OLDER, source: "age" };
 }
 
+// ── The per-story stretch (FEAT-191) ────────────────────────────
+
+/**
+ * The most steps up a parent may ask for on one story. Two rungs is already a
+ * real reach; past that the honest answer is that the assessed level is wrong,
+ * and the Skill Snapshot stepper is where that gets fixed.
+ */
+export const MAX_LEVEL_STRETCH = 2;
+
+/**
+ * A level with the parent's per-story stretch applied.
+ *
+ * `level` is the ONE number both the prompt block and the readability check
+ * read, so a story written one step up is also **measured** one step up: a
+ * stretch that raised the ceiling but not the ruler would flag every word it
+ * had just licensed. `baseLevel` is what the child themselves is assessed (or
+ * estimated) at, kept so the prompt and the parent-facing line can say what the
+ * stretch was measured *from*.
+ */
+export interface StretchedLevel extends EffectiveLevel {
+  /** Steps up the parent asked for, after clamping (0-`MAX_LEVEL_STRETCH`). */
+  stretch: number;
+  /** The child's own level, before the stretch. */
+  baseLevel: number;
+}
+
+/**
+ * Coerce whatever the client sent into a usable number of steps. Anything that
+ * is not a whole number in range — absent, a string, `NaN`, negative, 7 — is
+ * clamped into `0..MAX_LEVEL_STRETCH`, and the default is 0 (the child's own
+ * level), because a stretch is always an explicit parent choice.
+ */
+export function normalizeLevelStretch(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(MAX_LEVEL_STRETCH, Math.max(0, Math.round(n)));
+}
+
+/**
+ * Apply the stretch. Clamped at `DECODABILITY_LEVEL_CAP`, so a Level 8 reader
+ * asked for "two steps up" is still Level 8 — the reported `stretch` is what
+ * was ASKED for, and the honest line reads the level, which did not move.
+ */
+export function applyLevelStretch(base: EffectiveLevel, rawStretch: unknown): StretchedLevel {
+  const stretch = normalizeLevelStretch(rawStretch);
+  const baseLevel = clampLevel(base.level);
+  return {
+    level: Math.min(DECODABILITY_LEVEL_CAP, baseLevel + stretch),
+    source: base.source,
+    stretch,
+    baseLevel,
+  };
+}
+
+/** "one step up" / "two steps up" — the phrase the prompt and the client share. */
+export function levelStretchPhrase(stretch: number): string {
+  return normalizeLevelStretch(stretch) === 1 ? "one step up" : "two steps up";
+}
+
 // ── The classifier ──────────────────────────────────────────────
 
 const CONSONANT_DIGRAPHS = ["sh", "ch", "th", "wh", "ck", "ph", "ng", "gh"];
