@@ -1072,3 +1072,88 @@ Estimated size: ~600 LOC across ~8 files. Two days of work + tests.
 - **AbortController support in the underlying SDK.** The `fetch` calls we route through `useAI.generateImage` need to honor `signal`. Verify via the existing CF caller; if not supported, the fallback is "let the in-flight call finish, just don't start the next one" — slightly worse but acceptable.
 - **Bookshelf cluttered with stale in-progress cards.** If a book gets stuck in `'awaiting'` forever (DALL-E outage, etc.), it pins to the top permanently. Mitigation: 3-dot menu's "Delete" already works; add a "Mark as text-only book" option that flips status to `'complete'` without re-illustrating. Defer to Phase 3 unless we see it in the wild.
 - **Heartbeat write amplification.** A 5-second interval on a single doc is 12 writes/min. Negligible at family scale (2 kids × 1 book in flight at a time), not a concern.
+
+---
+
+## 12. The Story Guide retires — one door, two choices (FEAT-187, 2026-09-04)
+
+**This section supersedes the header's locked decision "Story Guide wizard buried as fallback (not
+deleted)."** It is deleted.
+
+### 12.1 Why the fallback stopped being a fallback
+
+The 2026-09 Books UX audit (`docs/review/UX_AUDIT_BOOKS_2026-09.md`, FEAT-179) walked the area as one
+thing and filed UX-102 / UX-116 / UX-118: three ways to make a book, five verbs (Make / Generate /
+Create / Use), and nothing on any screen saying which door was for what. Two of the three called the
+same `generateStory` with different rules. The audit's test question — *would Shelly know which door
+to use for "a book for London with his words"?* — had two correct answers and one wrong-looking one.
+
+The Story Guide was the wrong-looking one, and by 2026-09 it was behind the chat on every axis the
+last ten runs improved:
+
+| | Story Guide | Generate chat |
+|---|---|---|
+| Illustration style | `isLincoln ? 'minecraft' : 'storybook'` — no picker, so FEAT-174's real one never applied | full `GENERATION_STYLES` strip |
+| Word channel | **always** folded in `getWeakWords().slice(0, 10)`, no opt-out, and passing them as `words` set `book.sightWords` — so its books opened in sight-word mode when a chat book did not (UX-123) | FEAT-169/172: a typed list wins, the child's `practicing`/`new` words are the fallback, and both confirmation lines name the source |
+| Reading level | none | FEAT-176: the level block, the decodability measurement, one fix call, the honest line |
+| Voice | raw `webkitSpeechRecognition` | the `VoiceInput/` Whisper module |
+| Finish | `GenerationProgress` printed a hard-coded "Your book is ready!" over a refused illustration (UX-115), then auto-navigated 1.5 s later — so FEAT-182's honest `message` was on screen for a second and a half | holds for a tap (`pendingCommitId`, FEAT-168) |
+| Back control | "Bookshelf" | "My Books" (FEAT-181) |
+
+**Owner decision (Nathan, 2026-09-04): one door, two choices.** The shelf's "Make a book" opens a
+single sheet asking one question — **"Write it myself"** (a blank book, straight into the editor) or
+**"Make one with Shelly"** (the Generate chat) — each with one verb and one line saying what happens
+next. Create a Sight Word Book keeps its own header entry: it is the "here are the words" door, and
+folding it in is a separate decision (UX-118's remaining half).
+
+### 12.2 What was deleted, and what was kept
+
+Deleted: `StoryGuidePage.tsx`, `StoryGuideQuestion.tsx`, `useStoryGuide.ts`, `GenerationProgress.tsx`,
+their four test files, and `storyGenerationFailure.ts`'s `STORY_GUIDE_SURFACE`. `/books/story-guide`
+is kept as a redirect to `/books` (the ARCH-07 ladders precedent: route kept, page removed).
+
+Kept, because the chat and Create a Sight Word Book also read them:
+
+- **`useBookIllustrator`** — untouched. It is where the FEAT-168 weekly art cap is enforced, and the
+  chat's `commitAndClose` and `useBookReview` both call it.
+- **`inferBookTheme`** — moved from `useBookGenerator.ts` to **`bookThemeInference.ts`**. The file's
+  other export was the wizard's whole generate-and-save hook, which had exactly one caller; a file
+  named `useBookGenerator` holding no hook would be the same kind of lie this batch is closing.
+
+### 12.3 What the wizard had that the chat does not
+
+One thing, recorded here so it can be asked for back rather than rediscovered: **the scaffolded
+question sets.** The chat asks for an idea in one free-text box (plus clarification); the wizard
+walked five questions with hints, chosen by age group (FEAT-183 / UX-152 B5 made that an age split,
+not a name one). For a child who cannot start from a blank prompt, that scaffolding is a real
+affordance. It is not a regression this run introduces — the wizard was reachable only from a buried
+`text.secondary` link — but it is a loss, and the content is preserved verbatim below.
+
+**Older set** (`OLDER_QUESTIONS`):
+
+| Question | Hint |
+|---|---|
+| Who is the hero of your story? | Is it you? A creeper? A knight? |
+| Where does the story happen? | A cave? The nether? A jungle? Outer space? |
+| What problem does the hero have to solve? | A monster? A missing treasure? A broken portal? |
+| How does the hero solve it? | With a sword? Magic? A friend? Being really smart? |
+| How does the story end? | Win a battle? Find something? Build something cool? |
+
+**Younger set** (`YOUNGER_QUESTIONS`):
+
+| Question | Hint |
+|---|---|
+| Who is in your story? | A bunny? A princess? A talking flower? YOU? |
+| Where do they live? | A garden? A cloud? Under the sea? A cozy cottage? |
+| What happens one day that's surprising? | They find something magical? A new friend arrives? Something goes missing? |
+| Who helps them? | A friend? An animal? A fairy? Their family? |
+| What happens at the end that makes everyone happy? | — |
+
+The answers were joined into one paragraph (`assembleStoryPrompt`) and handed to the same
+`generateStory` call the chat makes, so if these come back, they come back as a **way to fill the
+chat's idea box** — a question set feeding the one generator — not as a second generator.
+
+The `GDQ_KIT_BUILDER_DESIGN.md` §D2 plan to reuse `StoryGuideQuestion` and the `useStoryGuide` voice
+primitives for the Kit Builder was never taken (`KitBuilderForm` is its own surface, and the repo's
+voice substrate is now the `VoiceInput/` module). That plan is void; the doc's references are
+historical.

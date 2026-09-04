@@ -13,8 +13,6 @@ import MenuItem from '@mui/material/MenuItem'
 import ListItemIcon from '@mui/material/ListItemIcon'
 import ListItemText from '@mui/material/ListItemText'
 import Stack from '@mui/material/Stack'
-import Tab from '@mui/material/Tab'
-import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
@@ -57,6 +55,12 @@ import type { PrintSettings } from './PrintSettingsDialog'
 import EvaluationBookBanner from './EvaluationBookBanner'
 import { useEvaluationBookSuggestions } from './useEvaluationBookSuggestions'
 import CreateThemeDialog from './CreateThemeDialog'
+import {
+  MAKE_BOOK_DOOR_LABEL,
+  MAKE_BOOK_DOOR_TITLE,
+  MakeBookChoice,
+  makeBookChoices,
+} from './makeBookDoor'
 
 type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
 type CreatorFilter = 'all' | 'parent' | 'kids'
@@ -84,7 +88,13 @@ export default function BookshelfPage() {
   const [themeFilter, setThemeFilter] = useState<BookTheme | 'all'>('all')
   const [stickerTagFilter, setStickerTagFilter] = useState<StickerTag | 'all'>('all')
   const [showNewDialog, setShowNewDialog] = useState(false)
-  const [dialogTab, setDialogTab] = useState(1) // Default to Generate (Story Gen V2 PR-A)
+  /**
+   * Which door the person picked, or `null` while the choice itself is on
+   * screen (FEAT-187 / UX-102). This replaced a `dialogTab` that defaulted
+   * straight into the AI chat: two tabs and a buried "Use Story Guide" link
+   * were three generators with no map. Now the sheet asks once.
+   */
+  const [dialogChoice, setDialogChoice] = useState<MakeBookChoice | null>(null)
   const [resumeBookId, setResumeBookId] = useState<string | undefined>(undefined)
 
   // Blank book state
@@ -161,14 +171,24 @@ export default function BookshelfPage() {
 
   const handleCloseNewDialog = useCallback(() => {
     setShowNewDialog(false)
-    setDialogTab(1)
+    setDialogChoice(null)
     setNewTitle('')
     setResumeBookId(undefined)
   }, [])
 
+  const handleOpenNewDialog = useCallback(() => {
+    setResumeBookId(undefined)
+    setDialogChoice(null)
+    setShowNewDialog(true)
+  }, [])
+
+  /**
+   * Resuming a half-made draft skips the door: the question "which way do you
+   * want to make this?" was already answered when the draft was started.
+   */
   const handleResumeDraft = useCallback((bookId: string) => {
     setResumeBookId(bookId)
-    setDialogTab(1)
+    setDialogChoice(MakeBookChoice.WithShelly)
     setShowNewDialog(true)
   }, [])
 
@@ -354,7 +374,7 @@ export default function BookshelfPage() {
               onClick={() => navigate('/books/create-story')}
               sx={{ minHeight: 36, textTransform: 'none' }}
             >
-              Create Sight Word Story
+              Make a sight word book
             </Button>
             <Button
               size="small"
@@ -518,10 +538,10 @@ export default function BookshelfPage() {
               variant="contained"
               size="large"
               startIcon={<AddIcon />}
-              onClick={() => setShowNewDialog(true)}
+              onClick={handleOpenNewDialog}
               sx={{ minHeight: 56, px: 4 }}
             >
-              Make a new book
+              {MAKE_BOOK_DOOR_LABEL}
             </Button>
           }
         />
@@ -537,13 +557,12 @@ export default function BookshelfPage() {
             gap: 2,
           }}
         >
-          {/* New book card — first position (Story Gen V2 PR-A) */}
+          {/* The "Make a book" tile — first position (Story Gen V2 PR-A), and
+              since FEAT-187 the ONE door: it opens the choice, not a default
+              generator. */}
           <Box
             data-testid="new-book-tile"
-            onClick={() => {
-              setResumeBookId(undefined)
-              setShowNewDialog(true)
-            }}
+            onClick={handleOpenNewDialog}
             sx={{
               p: 2,
               borderRadius: 2,
@@ -560,7 +579,7 @@ export default function BookshelfPage() {
           >
             <AddIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
             <Typography variant="body2" color="text.secondary">
-              New book
+              {MAKE_BOOK_DOOR_LABEL}
             </Typography>
           </Box>
 
@@ -978,21 +997,52 @@ export default function BookshelfPage() {
         </Alert>
       </Snackbar>
 
-      {/* New book dialog — two tabs: Blank Book / Write it with AI */}
+      {/* The one "Make a book" door (FEAT-187 / UX-102): a choice step, then
+          whichever way the person picked. */}
       <Dialog open={showNewDialog} onClose={handleCloseNewDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>{isLincoln ? 'Craft a New Book' : 'Make a New Book'}</DialogTitle>
+        <DialogTitle>{MAKE_BOOK_DOOR_TITLE}</DialogTitle>
         <DialogContent>
-          <Tabs
-            value={dialogTab}
-            onChange={(_, v) => setDialogTab(v)}
-            sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
-          >
-            <Tab label="Blank Book" sx={{ textTransform: 'none' }} />
-            <Tab label="Write it with AI" sx={{ textTransform: 'none' }} />
-          </Tabs>
+          {/* The choice: one verb each, one line saying what happens next. The
+              wording is audience-gated on capability (FEAT-178), never a name;
+              the kid copy is held to the shared readability bar in
+              `makeBookDoor.test.ts`. */}
+          {dialogChoice === null && (
+            <Stack spacing={1.5} sx={{ pt: 1 }}>
+              {makeBookChoices(isParent ? 'parent' : 'kid').map((choice) => (
+                <Box
+                  key={choice.id}
+                  component="button"
+                  type="button"
+                  data-testid={`make-book-choice-${choice.id}`}
+                  onClick={() => setDialogChoice(choice.id)}
+                  sx={{
+                    textAlign: 'left',
+                    font: 'inherit',
+                    color: 'inherit',
+                    p: 2,
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    bgcolor: 'transparent',
+                    cursor: 'pointer',
+                    minHeight: 72,
+                    width: '100%',
+                    '&:hover': { borderColor: 'primary.light', bgcolor: 'action.hover' },
+                  }}
+                >
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                    {choice.label}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {choice.next}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+          )}
 
-          {/* Tab 0: Blank Book (existing flow) */}
-          {dialogTab === 0 && (
+          {/* Write it myself — a blank book, straight into the editor. */}
+          {dialogChoice === MakeBookChoice.Myself && (
             <Stack spacing={3} sx={{ pt: 1 }}>
               <TextField
                 label="Book title"
@@ -1031,29 +1081,12 @@ export default function BookshelfPage() {
             </Stack>
           )}
 
-          {/* Tab 1: Generate a Book — chat surface (Story Gen V2 PR-A) */}
-          {dialogTab === 1 && (
+          {/* Make one with Shelly — the Generate chat (FEAT-169 → 176), the one
+              AI path. The Story Guide link that used to sit above it retired
+              with the wizard (FEAT-187): it was a competing generator, not a
+              sub-mode of this one. */}
+          {dialogChoice === MakeBookChoice.WithShelly && (
             <Stack spacing={1.5} sx={{ pt: 1 }}>
-              {/* Story Guide buried fallback */}
-              <Box>
-                <Button
-                  variant="text"
-                  size="small"
-                  onClick={() => {
-                    handleCloseNewDialog()
-                    navigate('/books/story-guide')
-                  }}
-                  sx={{
-                    textTransform: 'none',
-                    color: 'text.secondary',
-                    fontWeight: 400,
-                    p: 0,
-                    minHeight: 0,
-                  }}
-                >
-                  Use Story Guide (guided questions)
-                </Button>
-              </Box>
               <BookGenerateChat
                 resumeBookId={resumeBookId}
                 onCommit={(bookId) => {
@@ -1069,8 +1102,13 @@ export default function BookshelfPage() {
           )}
         </DialogContent>
         <DialogActions>
-          {dialogTab === 0 ? (
+          {dialogChoice === MakeBookChoice.Myself ? (
             <>
+              {/* A way back to the other choice — the door is a question, and a
+                  question you cannot re-answer is a trap. */}
+              <Button onClick={() => setDialogChoice(null)} sx={{ mr: 'auto' }}>
+                ← Back
+              </Button>
               <Button onClick={handleCloseNewDialog}>Cancel</Button>
               <Button
                 variant="contained"
@@ -1079,7 +1117,7 @@ export default function BookshelfPage() {
                 }}
                 disabled={!newTitle.trim() || creating}
               >
-                {creating ? 'Creating...' : 'Create'}
+                {creating ? 'Making…' : 'Make it'}
               </Button>
             </>
           ) : null}

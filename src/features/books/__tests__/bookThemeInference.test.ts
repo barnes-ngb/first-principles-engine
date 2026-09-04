@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inferBookTheme } from '../useBookGenerator'
+import { inferBookTheme } from '../bookThemeInference'
 import { BOOK_THEMES } from '../../../core/types'
 import type { BookTheme } from '../../../core/types'
 

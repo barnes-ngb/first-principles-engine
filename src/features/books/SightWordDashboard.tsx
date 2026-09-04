@@ -107,7 +107,7 @@ export default function SightWordDashboard() {
       {allProgress.length === 0 ? (
         <EmptyState
           title="No sight words tracked yet"
-          description="Create a sight word story to start tracking progress!"
+          description="Make a sight word book to start tracking progress!"
           action={
             <Button
               variant="contained"
@@ -115,7 +115,7 @@ export default function SightWordDashboard() {
               onClick={() => navigate('/books/create-story')}
               sx={{ minHeight: 48 }}
             >
-              Create Sight Word Story
+              Make a sight word book
             </Button>
           }
         />

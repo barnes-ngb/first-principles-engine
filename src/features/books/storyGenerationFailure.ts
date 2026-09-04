@@ -119,14 +119,10 @@ export const STORY_REVISE_SURFACE: StoryFailureSurface = {
   cutShortEnd: 'the end',
 }
 
-/** The Story Guide: the same generateStory call behind a different door. */
-export const STORY_GUIDE_SURFACE: StoryFailureSurface = {
-  subject: 'The story',
-  kept: 'your answers are still here',
-  retryLabel: 'Make my book \u2192',
-  shorten: 'Try a shorter book',
-  cutShortEnd: 'the last page',
-}
+// The Story Guide had a fourth surface here ("your answers are still here",
+// retry on "Make my book \u2192"). FEAT-187 retired that wizard \u2014 one "Make a book"
+// door, two choices \u2014 so the surface went with its only caller. The three
+// below are the live ones.
 
 /** The review chat ("Read it to me"): one page rewritten from a voice note. */
 export const PAGE_REVISE_SURFACE: StoryFailureSurface = {

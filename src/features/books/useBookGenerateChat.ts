@@ -7,7 +7,7 @@ import { booksCollection } from '../../core/firebase/firestore'
 import type { Book, BookPage, BookTheme, ChatTurn } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
 import { generatePageId } from './bookTypes'
-import { inferBookTheme } from './useBookGenerator'
+import { inferBookTheme } from './bookThemeInference'
 import { clampTargetPageCount } from './storyPageTargets'
 import {
   classifyStoryGenerationFailure,
