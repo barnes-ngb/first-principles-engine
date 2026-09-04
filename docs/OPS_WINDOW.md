@@ -102,9 +102,9 @@ against a **live Firestore export** (repo-only work can't resolve them):
 - [ ] **Model / pricing check** — **Sonnet 5 intro pricing ends Aug 31.**
   Decide keep/adjust before then; verify the `models.ts` table against the
   current Anthropic catalog.
-- [ ] **ARCH-17 Node runtime countdown** — **hard stop Oct 30** (Node 20
-  functions stop deploying). Bump the Functions runtime + `firebase-functions`
-  SDK together before the deadline. Track months remaining here.
+- _Retired 2026-09-04:_ **ARCH-17 Node runtime countdown** — functions run on
+  Node 22 (PR #1751); `firebase-functions` 6.6.0 needed no bump. Nothing left to
+  track here until Node 22's own deprecation (2027-04-30).
 
 ---
 

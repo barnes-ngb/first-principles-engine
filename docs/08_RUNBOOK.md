@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+ (`.nvmrc` pins 22; the Functions runtime is `nodejs22`)
 - Firebase CLI: `npm install -g firebase-tools`
 - Authenticated: `firebase login`
 - Project selected: `firebase use barneshome-3dfbb`
