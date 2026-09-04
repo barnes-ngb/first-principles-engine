@@ -97,8 +97,10 @@ finish-looking summary before it.
    - `CODEX ROUND: none arrived in 10 min — safe to merge`
    - `CODEX ROUND: open — do not merge yet`
 
-Then **stop**. Do not subscribe to the PR, do not schedule a check-in, reminder, wake-up or scheduled
-task of any kind, and do not stay resident to "watch CI" — CI's result is on the PR page. If CI fails
+Then **stop**. Do not subscribe to the PR — and where the harness subscribes for you when the PR is
+created, **unsubscribe before you stop**, or the run stays armed exactly as this protocol exists to prevent.
+Do not schedule a check-in, reminder, wake-up or scheduled task of any kind, and do not stay resident to
+"watch CI" — CI's result is on the PR page. If CI fails
 after you stop, the human pastes the log into a new run. **A merged PR is never touched again by the run
 that opened it**; a fix that is still needed goes on a new branch and PR.
 
