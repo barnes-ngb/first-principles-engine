@@ -228,6 +228,32 @@ describe("world styles are looks, not scene lists (FEAT-189)", () => {
     }
   });
 
+  it("does not both demand and forbid Garden Battle's zombies", () => {
+    // Codex P2 on PR #1758, and a real regression: before FEAT-189, Garden
+    // Battle was the ONLY style saying "no specific characters" instead of "no
+    // characters or people", because its look asks for silly cartoon zombies.
+    // Routing it through the shared framing took the allowance away and kept the
+    // prop, leaving the model to reconcile a prompt that both demands and
+    // forbids them.
+    const garden = STYLE_PREFIXES["book-illustration-garden-warfare"] ?? "";
+    expect(garden).toContain("silly cartoon zombies");
+    expect(garden).toContain("Any creatures among those props are decorative background set dressing");
+  });
+
+  it("keeps the strict no-characters rule on every style that has no creatures", () => {
+    // The carve-out is scoped to the one style that needs it — an unconditional
+    // aside would invite creatures into a Minecraft or Platformer page whose
+    // props are blocks, pipes and coins.
+    for (const key of BOOK_ILLUSTRATION_STYLE_KEYS) {
+      const prefix = STYLE_PREFIXES[key] ?? "";
+      // The shared framing is untouched for all six.
+      expect(prefix, key).toContain("Environment and background only, no characters or people.");
+      if (key !== "book-illustration-garden-warfare") {
+        expect(prefix, key).not.toContain("Any creatures among those props");
+      }
+    }
+  });
+
   it("sends this exact prompt for Platformer World on an indoor page", () => {
     // The reported page: "Tom had a map. He was in the hut." Reviewable in full
     // because the whole point of the fix is what the model is told here.

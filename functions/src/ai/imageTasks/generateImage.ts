@@ -82,6 +82,17 @@ type BookIllustrationRecipe = VisualRecipe & {
    * three world styles cannot state the rule three slightly different ways.
    */
   props?: string;
+  /**
+   * Set when this world's props include living things, so the props clause
+   * carries {@link PROP_CREATURES_ASIDE} and they are not read as a violation of
+   * {@link BOOK_PAGE_FRAMING}'s "no characters or people".
+   *
+   * Only Garden Battle needs it, and it is opt-in rather than automatic on every
+   * world style: an unconditional aside would invite Minecraft and Platformer
+   * World — whose props are blocks, terrain, pipes and coins — to put creatures
+   * in a picture that should have none.
+   */
+  propsIncludeCreatures?: true;
 };
 
 const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
@@ -133,6 +144,7 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
     shading:
       "simple two-tone cartoon shading with one soft drop shadow under each shape, lit by broad flat daylight.",
     props: "sunflowers, pea shooters, walnut barriers, garden pots, silly cartoon zombies in the background",
+    propsIncludeCreatures: true,
   },
   "book-illustration-platformer": {
     hint: "in the look of a classic side-scrolling platformer video game",
@@ -161,21 +173,43 @@ const BOOK_PAGE_FRAMING =
   "Environment and background only, no characters or people. ";
 
 /**
+ * Reconciles a world whose props are alive with {@link BOOK_PAGE_FRAMING}'s
+ * categorical "no characters or people" (Codex P2 on PR #1758).
+ *
+ * Before FEAT-189, Garden Battle was the **only** style whose prefix said "no
+ * specific characters" rather than "no characters or people" — deliberately
+ * looser, because a garden battle without its silly cartoon zombies is just a
+ * garden. Routing it through the shared framing swapped that for the strict
+ * wording while still asking for the zombies, which left the model to reconcile
+ * a prompt that both demands and forbids them.
+ *
+ * The carve-out is scoped to the one style that needs it rather than written
+ * into the shared framing, so the other five keep the strict rule intact — the
+ * page picture is the background a story sits on, and its people belong to the
+ * words. It names no prop of its own, so a world's nouns still appear only
+ * inside the props clause.
+ */
+const PROP_CREATURES_ASIDE =
+  "Any creatures among those props are decorative background set dressing, not the story's characters: " +
+  "keep them small, incidental and in the background, and never the subject of the picture. ";
+
+/**
  * The one statement of how a world's props relate to the page's own scene
  * (FEAT-189). Each world recipe supplies only the noun list; this supplies the
  * rule, so the three cannot drift apart.
  */
-function worldPropsClause(props: string): string {
+function worldPropsClause(recipe: BookIllustrationRecipe): string {
   return (
-    `Where the scene allows, dress it with the world's props (${props}); ` +
-    "when the scene is indoors or somewhere else, keep the LOOK and drop the props. "
+    `Where the scene allows, dress it with the world's props (${recipe.props}); ` +
+    "when the scene is indoors or somewhere else, keep the LOOK and drop the props. " +
+    (recipe.propsIncludeCreatures ? PROP_CREATURES_ASIDE : "")
   );
 }
 
 function bookIllustrationPrefix(styleKey: string): string {
   const recipe = BOOK_ILLUSTRATION_RECIPES[styleKey];
   if (!recipe) return "";
-  const props = recipe.props ? worldPropsClause(recipe.props) : "";
+  const props = recipe.props ? worldPropsClause(recipe) : "";
   return `${recipe.summary} ${BOOK_PAGE_FRAMING}${recipeDetail(recipe)}${props}`;
 }
 
