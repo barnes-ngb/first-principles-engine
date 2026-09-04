@@ -9,7 +9,7 @@ import type {
 } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { maxTokensForPageCount } from "../storyPageBudget.js";
-import { resolveStoryLevelContext } from "../storyLevelContext.js";
+import { loadBookLevelStretch, resolveStoryLevelContext } from "../storyLevelContext.js";
 
 /**
  * Task: reviseStory
@@ -86,12 +86,20 @@ export const handleReviseStory = async (
       pageCount: Number(payload.childCalibration.pageCount ?? pages.length),
     },
     newFeedback: payload.newFeedback,
+    ...(typeof payload.bookId === "string" && payload.bookId
+      ? { bookId: payload.bookId }
+      : {}),
   };
 
   // The READING LEVEL block is SERVER-injected (FEAT-176), after normalization,
   // from the child's assessed level and their own sight words — never off the
   // client payload. Without it a revise could walk the story back up above the
   // level the generation was held to, one "make it more exciting" at a time.
+  //
+  // The per-story stretch (FEAT-191) comes off the BOOK's own record, not the
+  // payload: a revise of a book written one step up has to stay one step up, or
+  // the first "make it more exciting" re-levels it at the child's base and every
+  // word the parent asked for comes back flagged.
   const levelContext = await resolveStoryLevelContext({
     db,
     familyId,
@@ -99,6 +107,7 @@ export const handleReviseStory = async (
     childName: normalizedInput.childCalibration.childName || childData.name || "the reader",
     age: normalizedInput.childCalibration.childAge,
     workingLevels: ctx.snapshotData?.workingLevels,
+    levelStretch: await loadBookLevelStretch(db, familyId, normalizedInput.bookId),
   });
   normalizedInput.readingLevelBlock = levelContext.block;
 

@@ -544,6 +544,10 @@ const CONTENT: Record<ArtHelpSurface, Record<ArtHelpAudience, ArtHelpContent>> =
             'The story is written to the child\u2019s assessed reading level, and the draft turn says plainly which words came out above it.',
             'With no assessed level the story is sized from age instead, and the draft turn says so. An age guess is the most likely reason a good story gets flagged.',
             'Set a real level under Working Levels on the Skill Snapshot (Progress \u2192 Skill Snapshot) and every story after it is written to that.',
+            // FEAT-191 \u2014 the second lever, and where the first one lives. A
+            // parent reaching for "one step up" on every single book is telling
+            // us the assessed level is stale, and this line says so once.
+            '"How hard are the words?" writes just this book one or two rungs above that level, and checks it there too. It never changes the level on the Skill Snapshot \u2014 if every book needs a step up, raise the level itself.',
           ],
         },
         {

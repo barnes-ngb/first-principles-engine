@@ -5,7 +5,7 @@ import { buildRevisePagePrompt, modelForTask } from "../chat.js";
 import type { RevisePageInput, RevisePageOutput } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
-import { resolveStoryLevelContext } from "../storyLevelContext.js";
+import { loadBookLevelStretch, resolveStoryLevelContext } from "../storyLevelContext.js";
 
 /**
  * Task: revisePage
@@ -87,10 +87,15 @@ export const handleRevisePage = async (
       sentenceTarget: String(payload.childCalibration.sentenceTarget ?? ""),
       vocabularyLevel: String(payload.childCalibration.vocabularyLevel ?? ""),
     },
+    ...(typeof payload.bookId === "string" && payload.bookId
+      ? { bookId: payload.bookId }
+      : {}),
   };
 
   // Server-injected READING LEVEL block (FEAT-176) — see reviseStory.ts. A
-  // per-page rewrite is the easiest place for the vocabulary to creep back up.
+  // per-page rewrite is the easiest place for the vocabulary to creep back up,
+  // and (FEAT-191) the easiest place for a stretched book to be quietly pulled
+  // back down: the stretch is read off the book's own record, like the level.
   const levelContext = await resolveStoryLevelContext({
     db,
     familyId,
@@ -98,6 +103,7 @@ export const handleRevisePage = async (
     childName: normalizedInput.childCalibration.childName || childData.name || "the reader",
     age: normalizedInput.childCalibration.childAge,
     workingLevels: ctx.snapshotData?.workingLevels,
+    levelStretch: await loadBookLevelStretch(db, familyId, normalizedInput.bookId),
   });
   normalizedInput.readingLevelBlock = levelContext.block;
 

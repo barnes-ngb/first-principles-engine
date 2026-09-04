@@ -10,6 +10,11 @@ import { generatePageId } from './bookTypes'
 import { inferBookTheme } from './bookThemeInference'
 import { clampTargetPageCount } from './storyPageTargets'
 import {
+  DEFAULT_LEVEL_STRETCH,
+  normalizeLevelStretch,
+} from './storyLevelStretch'
+import type { LevelStretch } from './storyLevelStretch'
+import {
   classifyStoryGenerationFailure,
   storyGenerationFailureMessage,
   STORY_REVISE_SURFACE,
@@ -94,6 +99,15 @@ export interface UseBookGenerateChat {
   /** Live target page count (FEAT-97) — hydrated from a resumed draft. */
   pageCount: number
   setPageCount: (pages: number) => void
+
+  /**
+   * The per-story "one step up" (FEAT-191), 0-2. Sent to `generateStory` as
+   * `levelStretch` and recorded on the draft's own `generationConfig`, so a
+   * resumed draft and every revise of the finished book stay at the level the
+   * book was written at. Never writes a level anywhere.
+   */
+  levelStretch: LevelStretch
+  setLevelStretch: (stretch: LevelStretch) => void
 
   /**
    * The sight words this flow will send to `generateStory` as the structured
@@ -294,6 +308,10 @@ export function useBookGenerateChat(
   )
   const [bookId, setBookId] = useState<string | null>(resumeBookId ?? null)
   const [pageCount, setPageCount] = useState<number>(initialPageCount)
+  // FEAT-191 — a fresh draft is always at the child's own level; a stretch is
+  // only ever an explicit parent tap, and a resumed draft restores the one it
+  // was generated with (below).
+  const [levelStretch, setLevelStretch] = useState<LevelStretch>(DEFAULT_LEVEL_STRETCH)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -372,6 +390,13 @@ export function useBookGenerateChat(
         // publish can never outrun it.
         if (Array.isArray(data.generationConfig?.words)) {
           setResumedStoryWords(data.generationConfig.words.map(String))
+        }
+        // The stretch this draft was generated with (FEAT-191). Restored for the
+        // same reason `pageCount` is: resuming must continue the book that
+        // exists, not re-derive one at today's defaults. An absent field is 0 —
+        // every draft made before this run.
+        if (data.generationConfig?.levelStretch !== undefined) {
+          setLevelStretch(normalizeLevelStretch(data.generationConfig.levelStretch))
         }
         if (state?.chatHistory) setChatHistory(state.chatHistory)
         if (state?.illustrationStyle) setIllustrationStyle(state.illustrationStyle)
@@ -503,6 +528,7 @@ export function useBookGenerateChat(
                 words: wordsForIdea,
                 style,
                 pageCount,
+                levelStretch,
               },
               reviewState: {
                 ...(current.reviewState ?? {}),
@@ -545,6 +571,10 @@ export function useBookGenerateChat(
           words: wordsForIdea,
           style,
           pageCount,
+          // The level this book was written at (FEAT-191) — recorded on the
+          // book so a resumed draft restores it and every later revise is
+          // levelled against the book, not against today's default.
+          levelStretch,
         },
         reviewState: {
           generateChatState,
@@ -564,7 +594,7 @@ export function useBookGenerateChat(
         return null
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, fallbackWords],
+    [familyId, childId, bookId, attribution, pageCount, levelStretch, fallbackWords],
   )
 
   /**
@@ -598,6 +628,7 @@ export function useBookGenerateChat(
                 words: wordsForIdea,
                 style,
                 pageCount,
+                levelStretch,
               },
               reviewState: {
                 ...(current.reviewState ?? {}),
@@ -638,6 +669,10 @@ export function useBookGenerateChat(
           words: wordsForIdea,
           style,
           pageCount,
+          // The level this book was written at (FEAT-191) — recorded on the
+          // book so a resumed draft restores it and every later revise is
+          // levelled against the book, not against today's default.
+          levelStretch,
         },
         reviewState: {
           generateChatState: 'in-progress',
@@ -655,7 +690,7 @@ export function useBookGenerateChat(
         console.error('Failed to create draft clarification book:', err)
       }
     },
-    [familyId, childId, bookId, attribution, pageCount, fallbackWords],
+    [familyId, childId, bookId, attribution, pageCount, levelStretch, fallbackWords],
   )
 
   // ── Send a kid message ───────────────────────────────────────
@@ -683,6 +718,11 @@ export function useBookGenerateChat(
               {
                 role: 'user',
                 content: JSON.stringify({
+                  // The book, not the level (FEAT-191): the server reads the
+                  // stretch off this book's own `generationConfig`, so a revise
+                  // cannot assert a level and cannot silently drop the one the
+                  // book was written at. `null` on a draft whose create failed.
+                  bookId,
                   chatHistory: historyWithKid.map((t) => ({
                     role: t.role,
                     content: t.content,
@@ -842,6 +882,7 @@ export function useBookGenerateChat(
       )
     },
     [
+      bookId,
       chat,
       chatHistory,
       currentStory,
@@ -890,6 +931,12 @@ export function useBookGenerateChat(
               // the child's practice words.
               words: storyWords,
               pageCount,
+              // FEAT-191 — the parent's per-story "one step up". The server
+              // raises the level the story is WRITTEN at and the level it is
+              // CHECKED at together, so a book asked for one rung higher is not
+              // then flagged word by word for being exactly that. 0 (the
+              // default) is byte-for-byte the pre-FEAT-191 request.
+              levelStretch,
               // Deliberately `[]`: with words, inferBookTheme returns
               // `sight_words` and the picked style's theme guidance is lost.
               theme: inferBookTheme(pendingIdea, [], illustrationStyle),
@@ -957,6 +1004,7 @@ export function useBookGenerateChat(
     familyId,
     childId,
     illustrationStyle,
+    levelStretch,
     pageCount,
     pendingIdea,
     pendingRefinement,
@@ -1102,6 +1150,8 @@ export function useBookGenerateChat(
     canStartStory,
     pageCount,
     setPageCount,
+    levelStretch,
+    setLevelStretch,
     storyWords,
     storyWordSource,
     storyWordsLoading,

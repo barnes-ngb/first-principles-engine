@@ -29,6 +29,7 @@
  */
 
 import type { SightWordProgress } from '../../core/types'
+import { levelStretchPhrase, normalizeLevelStretch } from './storyLevelStretch'
 
 /**
  * How many practice words the chat sends. Matches the cap the server's
@@ -293,6 +294,18 @@ export function storyWordsPreviewLine(
 export interface StoryReadabilityNote {
   passed: boolean
   levelSource: 'assessed' | 'age'
+  /**
+   * The level the story was written AND measured at — already stretched
+   * (FEAT-191). Optional for an older deploy; the clause then says the stretch
+   * happened without naming the number rather than naming a wrong one.
+   */
+  phonicsLevel?: number
+  /**
+   * The per-story "one step up" the parent asked for (FEAT-191), 0-2. Absent or
+   * 0 means the story was written at the child's own level — every story before
+   * this run — and the clause reads exactly as it did.
+   */
+  stretch?: number
   /** A capped SAMPLE of the words above the level — the words the line NAMES. */
   hardWords: ReadonlyArray<{ page: number; word: string }>
   /**
@@ -323,7 +336,13 @@ export function storyReadabilityClause(
   childName: string,
   readability: StoryReadabilityNote | undefined,
 ): string {
-  if (!readability || readability.passed) return ''
+  if (!readability) return ''
+  const stretch = normalizeLevelStretch(readability.stretch)
+  // A story written above the child's own level PASSES its check — the ruler
+  // moved with the ceiling (FEAT-191) — so before this the parent got the same
+  // silence as an ordinary book and no way to tell the bigger words were the
+  // ones they asked for. One clause says so.
+  if (readability.passed) return stretch > 0 ? writtenUpClause(stretch, readability) : ''
   const words: string[] = []
   const seen = new Set<string>()
   for (const { word } of readability.hardWords) {
@@ -345,7 +364,35 @@ export function storyReadabilityClause(
     readability.levelSource === 'age'
       ? ' (level estimated from age)'
       : ''
-  return `${total} ${noun} may be above ${childName}'s level: ${list}.${estimate}`
+  // With a stretch, "above <name>'s level" would be misleading — the story was
+  // deliberately written above it. The bar it actually missed is the stretched
+  // level, so the line names that, and names what it was stretched FROM.
+  const bar =
+    stretch > 0
+      ? `above ${levelLabel(readability)} (${levelStretchPhrase(stretch)} from ${childName}'s level)`
+      : `above ${childName}'s level`
+  return `${total} ${noun} may be ${bar}: ${list}.${estimate}`
+}
+
+/** "Level 4", or a bare "the level it was written at" when the number is absent. */
+function levelLabel(readability: StoryReadabilityNote): string {
+  const level = readability.phonicsLevel
+  return typeof level === 'number' && Number.isFinite(level)
+    ? `Level ${Math.round(level)}`
+    : 'the level it was written at'
+}
+
+/**
+ * The pass-with-a-stretch clause (FEAT-191): the words came out bigger on
+ * purpose, and the parent asked for that. Deliberately short and neutral — it
+ * reports on the BOOK, like every other half of this line, and says nothing
+ * about the reader.
+ */
+function writtenUpClause(stretch: number, readability: StoryReadabilityNote): string {
+  const level = readability.phonicsLevel
+  const at =
+    typeof level === 'number' && Number.isFinite(level) ? ` (Level ${Math.round(level)})` : ''
+  return `Written ${levelStretchPhrase(stretch)}${at}.`
 }
 
 /**
