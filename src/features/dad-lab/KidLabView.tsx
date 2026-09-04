@@ -15,7 +15,7 @@ import SectionCard from '../../components/SectionCard'
 import { artifactsCollection, dadLabReportsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import type { Child, DadLabReport } from '../../core/types'
-import { LAB_FRAMEWORKS } from '../../core/types/dadlab'
+import { DAD_LAB_TYPE_LABELS, LAB_FRAMEWORKS } from '../../core/types/dadlab'
 import { DadLabStatus, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { DadLabType } from '../../core/types/enums'
 import { addDoc, updateDoc, doc } from 'firebase/firestore'
@@ -264,8 +264,10 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
             <Typography variant="body2" sx={{ opacity: 0.9, fontStyle: 'italic' }}>
               &ldquo;{activeLab.question}&rdquo;
             </Typography>
+            {/* FEAT-186 / UX-90: this chip used to print the raw enum
+                (`science`, `engineering`, …). One map, one label per type. */}
             <Chip
-              label={activeLab.labType}
+              label={`${LAB_TYPE_ICONS[activeLab.labType] ?? ''} ${DAD_LAB_TYPE_LABELS[activeLab.labType] ?? activeLab.labType}`.trim()}
               size="small"
               sx={{ mt: 1, bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
             />

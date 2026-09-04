@@ -64,12 +64,14 @@ function renderKid(
 describe('KidChecklist — the footer is one count with one noun (UX-75)', () => {
   it('renders the single falling number and the "X of N done" line is gone', () => {
     // The audit scenario: 1 of 3 must-dos done + 3 rituals → the old footer
-    // said "1 of 3 quests done" four lines above "5 quests to go!" (1+5>3).
+    // said "1 of 3 quests done" four lines above "5 jobs to go!" (1+5>3).
+    // (FEAT-186 renamed the noun: "quest" was Lincoln's framing in copy both
+    // kids read. The UX-75 rule — ONE count, ONE noun — is unchanged.)
     renderKid(
       [quest({ completed: true }), quest(), quest()],
       { ritualsRemaining: 3 },
     )
-    expect(screen.getByText('5 quests to go!')).toBeTruthy()
+    expect(screen.getByText('5 jobs to go!')).toBeTruthy()
     // No second count, so no denominator can disagree.
     expect(screen.queryByText(/of \d+ quests done/)).toBeNull()
     expect(screen.queryByText(/skipped$/)).toBeNull()
@@ -79,7 +81,7 @@ describe('KidChecklist — the footer is one count with one noun (UX-75)', () =>
     renderKid([quest({ completed: true }), quest({ completed: true }), quest()], {
       isLincoln: false,
     })
-    expect(screen.getByText('1 quest to go!')).toBeTruthy()
+    expect(screen.getByText('1 job to go!')).toBeTruthy()
     expect(screen.queryByText('1 to go!')).toBeNull()
     expect(screen.queryByText(/of \d+ quests done/)).toBeNull()
   })
@@ -95,7 +97,7 @@ describe('KidChecklist — a skip cannot strand the day (UX-72)', () => {
       quest({ label: 'Draw a map', category: 'choose' }),
     ])
     // Craft is open — no lock copy over a day with zero completable quests left…
-    expect(screen.queryByText(/unlock crafting/i)).toBeNull()
+    expect(screen.queryByText(/must-do jobs first/i)).toBeNull()
     // …and the kid who did the work is celebrated.
     expect(screen.getByText('Quests complete! Craft your adventure!')).toBeTruthy()
   })
@@ -109,11 +111,11 @@ describe('KidChecklist — a skip cannot strand the day (UX-72)', () => {
       quest({ label: 'Phonics', skipped: true }),
       quest({ label: 'Lego build', category: 'choose' }),
     ])
-    expect(screen.queryByText(/unlock crafting/i)).toBeNull()
+    expect(screen.queryByText(/must-do jobs first/i)).toBeNull()
     // No "you did it!" over zero completions (UX-11's cousin).
     expect(screen.queryByText(/Quests complete/i)).toBeNull()
     // And nothing left to count — the footer stays quiet.
-    expect(screen.queryByText(/quests? to go/i)).toBeNull()
+    expect(screen.queryByText(/jobs? to go/i)).toBeNull()
   })
 })
 
@@ -124,7 +126,7 @@ describe('KidChecklist — the last checkbox is answered, not ignored', () => {
     renderKid([quest({ completed: true }), quest({ completed: true })])
 
     expect(screen.getByText('All done! 🎉')).toBeTruthy()
-    expect(screen.queryByText(/quests? to go/i)).toBeNull()
+    expect(screen.queryByText(/jobs? to go/i)).toBeNull()
   })
 
   it('stays quiet on a day where nothing was actually done', () => {
@@ -133,6 +135,6 @@ describe('KidChecklist — the last checkbox is answered, not ignored', () => {
     renderKid([quest({ skipped: true }), quest({ skipped: true })])
 
     expect(screen.queryByText(/All done/i)).toBeNull()
-    expect(screen.queryByText(/quests? to go/i)).toBeNull()
+    expect(screen.queryByText(/jobs? to go/i)).toBeNull()
   })
 })

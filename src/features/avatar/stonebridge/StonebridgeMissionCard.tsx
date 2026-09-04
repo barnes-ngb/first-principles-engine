@@ -147,7 +147,12 @@ export default function StonebridgeMissionCard({ familyId, childId, isLincoln }:
             textAlign: 'right',
           }}
         >
-          {active.current} / {active.target} reading actions
+          {/* FEAT-186: "reading actions" is a parent's noun for a counter that
+              is really book reads + quest completions — so "books read" would
+              be untrue and "actions" is above a six-year-old. The bar above it
+              already says what is being counted; the number just needs a word
+              a kid can read. */}
+          {active.current} / {active.target} done
         </Typography>
 
         {/* Open the full village board (all locations + Banner Hall) */}

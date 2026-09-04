@@ -151,7 +151,7 @@ export default function StonebridgeVillage({
                 {/* State row */}
                 {repaired && (
                   <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '8px' : '11px', opacity: 0.8, mt: 0.25 }}>
-                    ✓ Repaired · tap to revisit
+                    ✓ Fixed · tap to see it
                   </Typography>
                 )}
                 {isActive && active && (
@@ -204,7 +204,7 @@ export default function StonebridgeVillage({
             🎌 Banner Hall
           </Typography>
           <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '8px' : '12px', opacity: 0.72, mt: 0.5, mb: 1.5 }}>
-            Your raised colors — one for every place you've rebuilt.
+            A banner for each place you fixed.
           </Typography>
 
           {bannerCount === 0 ? (

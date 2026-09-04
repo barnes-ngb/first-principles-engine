@@ -291,9 +291,13 @@ describe('WatchPlayer', () => {
     // Library/practice: honest "doesn't count".
     expect(screen.getByText(/doesn't count hours/i)).toBeInTheDocument()
     // Planned Today: it DOES count on "Mark it done" — never the "doesn't count" copy.
+    // FEAT-186 shortened the planned caption to the kid bar ("At the end, tap
+    // “Mark it done”."), so the anchor is the caption itself rather than the
+    // bookkeeping clause it dropped. Both halves of the assertion still hold:
+    // the practice copy is absent and the planned caption is present.
     rerender(<WatchPlayer video={VIDEO} onDone={vi.fn()} onComplete={vi.fn()} />)
     expect(screen.queryByText(/doesn't count hours/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/count your time/i)).toBeInTheDocument()
+    expect(screen.getByText(/at the end, tap/i)).toBeInTheDocument()
   })
 
   it('library flow (no onComplete): the player itself still writes NOTHING through completion', () => {

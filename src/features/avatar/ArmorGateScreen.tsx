@@ -74,9 +74,17 @@ export default function ArmorGateScreen({
             lineHeight: 1.6,
           }}
         >
-          Suit up before starting your day, {childName}.
+          {/* FEAT-186 (part of UX-73). "equipped" is three syllables and
+              "before starting your day" is four words of scaffolding around a
+              two-word instruction. Kid Today already says "pieces on" for the
+              same count, so this now matches it. The Ephesians 6:11 quotation
+              below is left VERBATIM — a quoted verse cannot be shortened
+              without misquoting it, and UX-73's real complaint is the screen's
+              shape (a whole day replaced by one control), which is a design,
+              not a wording pass. UX-73 stays open. */}
+          Suit up first, {childName}.
           <br />
-          {gateStatus.equipped} of {gateStatus.total} pieces equipped.
+          {gateStatus.equipped} of {gateStatus.total} pieces on.
         </Typography>
 
         {/* Progress dots */}

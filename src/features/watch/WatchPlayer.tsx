@@ -375,10 +375,16 @@ export default function WatchPlayer({
       {/* Honest scope. The library practice case (no onComplete) counts nothing;
           the planned Today case (onComplete supplied) credits time on "Mark it
           done" — never show the "doesn't count" copy there (it would say the
-          opposite of what the button does). */}
+          opposite of what the button does).
+
+          FEAT-186: the kid caption lost fourteen words of bookkeeping ("to
+          count your time and save what you saw"). What the tap records is a
+          parent's concern; what the kid needs is when to tap. The practice-case
+          copy is parent-facing (the library is a `RequireParent` route) and is
+          left as it was. */}
       {onComplete ? (
         <Typography variant="caption" color="text.secondary">
-          When it ends, tap “Mark it done” to count your time and save what you saw.
+          At the end, tap “Mark it done”.
         </Typography>
       ) : (
         <Typography variant="caption" color="text.secondary">

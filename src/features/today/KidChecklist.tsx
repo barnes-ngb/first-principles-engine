@@ -246,7 +246,7 @@ export default function KidChecklist({
                       </Button>
                     ) : (
                       <Button size="small" variant="text" disabled sx={{ minHeight: 32, textTransform: 'none' }}>
-                        🔒 Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''}
+                        🔒 Do {gateThreshold - mustDoCompleted} more job{gateThreshold - mustDoCompleted !== 1 ? 's' : ''}
                       </Button>
                     )}
                   </Box>
@@ -335,7 +335,7 @@ export default function KidChecklist({
           )}
           {/* No "then you choose/craft!" tail: this count now includes rituals,
               which don't gate the unlock. The locked Workshop card carries the
-              gate message ("Complete N more quests to unlock!"). */}
+              gate message ("Do N more jobs to open this."). */}
           {/* UX-81: the "to go" line used to vanish at zero, so the last
               checkbox removed the only line tracking the day instead of
               answering it. It resolves now — but only on real work
@@ -349,7 +349,7 @@ export default function KidChecklist({
               textAlign="center"
               sx={{ fontWeight: 500 }}
             >
-              {`${listRemaining} quest${listRemaining !== 1 ? 's' : ''} to go!`}
+              {`${listRemaining} job${listRemaining !== 1 ? 's' : ''} to go!`}
             </Typography>
           ) : mustDoCompleted > 0 ? (
             <Typography
@@ -491,10 +491,13 @@ export default function KidChecklist({
               }}
             >
               <LockIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
+              {/* FEAT-186: one line, not two. The old pair forked the same
+                  sentence by name ("unlock crafting" / "unlock choices") and
+                  both sides were above a six-year-old's reading — `complete`,
+                  `unlock`, `items`. The shorter wording is true for either kid,
+                  so there is nothing left to fork. */}
               <Typography variant="body2" color="text.secondary">
-                {isLincoln
-                  ? 'Complete your quests to unlock crafting!'
-                  : 'Complete your must-do items to unlock choices!'}
+                Do your must-do jobs first.
               </Typography>
             </Stack>
           )}
@@ -571,7 +574,7 @@ export default function KidChecklist({
                           </Button>
                         ) : (
                           <Button size="small" variant="text" disabled sx={{ minHeight: 32, textTransform: 'none' }}>
-                            🔒 Complete {gateThreshold - mustDoCompleted} more quest{gateThreshold - mustDoCompleted !== 1 ? 's' : ''}
+                            🔒 Do {gateThreshold - mustDoCompleted} more job{gateThreshold - mustDoCompleted !== 1 ? 's' : ''}
                           </Button>
                         )}
                       </Box>
