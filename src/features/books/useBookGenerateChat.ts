@@ -311,7 +311,7 @@ export function useBookGenerateChat(
   // FEAT-191 — a fresh draft is always at the child's own level; a stretch is
   // only ever an explicit parent tap, and a resumed draft restores the one it
   // was generated with (below).
-  const [levelStretch, setLevelStretch] = useState<LevelStretch>(DEFAULT_LEVEL_STRETCH)
+  const [levelStretch, setLevelStretchState] = useState<LevelStretch>(DEFAULT_LEVEL_STRETCH)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -338,6 +338,45 @@ export function useBookGenerateChat(
    * `resolveStoryWords` reads it straight out of the idea text, so it wins
    * over both and follows every later edit (FEAT-172).
    */
+  /**
+   * Picking a stretch WRITES it when a draft already exists (Codex P2 on PR
+   * #1763).
+   *
+   * Every other write of this field is a side effect of a message or a
+   * confirmation — `persistClarification` / `persistStory` read it out of the
+   * closure. A tap on the control is neither. So a parent who sends the first
+   * message (creating the draft at the child's own level), THEN picks "One step
+   * up", and then dismisses the enclosing dialog by its backdrop or the Escape
+   * key — neither of which runs any handler here — leaves the choice in React
+   * state only. Resuming that draft hydrates the stored 0 and the book is
+   * silently generated at the wrong level: the one failure this whole feature
+   * exists to prevent, arrived at from the other direction.
+   *
+   * A narrow `merge` write, so it touches `generationConfig.levelStretch` and
+   * nothing else (Firestore deep-merges nested maps, so `words`, `pageCount`
+   * and `storyIdea` are untouched). Before a draft exists there is nothing to
+   * write to, and the first persist carries the current value anyway.
+   */
+  const setLevelStretch = useCallback(
+    (next: LevelStretch) => {
+      const value = normalizeLevelStretch(next)
+      setLevelStretchState(value)
+      if (!bookId) return
+      void (async () => {
+        try {
+          await setDoc(
+            doc(booksCollection(familyId), bookId),
+            { generationConfig: { levelStretch: value } },
+            { merge: true },
+          )
+        } catch (err) {
+          console.warn('Failed to persist the story reading level:', err)
+        }
+      })()
+    },
+    [bookId, familyId],
+  )
+
   const [resumedStoryWords, setResumedStoryWords] = useState<string[] | null>(null)
   const fallbackWords = resumedStoryWords ?? practiceWords
 
@@ -396,7 +435,10 @@ export function useBookGenerateChat(
         // exists, not re-derive one at today's defaults. An absent field is 0 —
         // every draft made before this run.
         if (data.generationConfig?.levelStretch !== undefined) {
-          setLevelStretch(normalizeLevelStretch(data.generationConfig.levelStretch))
+          // The raw setter, deliberately: hydrating is reading, and the
+          // persisting `setLevelStretch` below would echo the value straight
+          // back to the document it just came from.
+          setLevelStretchState(normalizeLevelStretch(data.generationConfig.levelStretch))
         }
         if (state?.chatHistory) setChatHistory(state.chatHistory)
         if (state?.illustrationStyle) setIllustrationStyle(state.illustrationStyle)

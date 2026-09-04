@@ -146,6 +146,46 @@ describe('useBookGenerateChat — the per-story stretch (FEAT-191)', () => {
     expect(created.generationConfig?.levelStretch).toBe(2)
   })
 
+  it('WRITES a change once a draft exists — the dialog can close with no handler running', async () => {
+    // Codex P2 on PR #1763. Sending the first message creates the draft at the
+    // child's own level; picking "One step up" afterwards used to update React
+    // state only, so dismissing the enclosing dialog by its backdrop or Escape
+    // (neither of which runs a handler here) lost the choice, and resuming
+    // generated at the wrong level.
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+
+    await act(async () => {
+      await result.current.sendKidMessage('a ship')
+    })
+    setDocMock.mockClear()
+
+    act(() => {
+      result.current.setLevelStretch(1)
+    })
+
+    await waitFor(() => expect(setDocMock).toHaveBeenCalled())
+    const [, payload, options] = setDocMock.mock.calls[0] as [
+      unknown,
+      { generationConfig?: { levelStretch?: number } },
+      { merge?: boolean },
+    ]
+    expect(payload.generationConfig?.levelStretch).toBe(1)
+    // Narrow: a merge write that touches this one field and leaves the words,
+    // the page count and the idea alone.
+    expect(options?.merge).toBe(true)
+    expect(Object.keys(payload)).toEqual(['generationConfig'])
+    expect(Object.keys(payload.generationConfig ?? {})).toEqual(['levelStretch'])
+  })
+
+  it('writes nothing before a draft exists — the first persist carries it', async () => {
+    const { result } = renderHook(() => useBookGenerateChat(baseOpts))
+    act(() => {
+      result.current.setLevelStretch(2)
+    })
+    expect(setDocMock).not.toHaveBeenCalled()
+    expect(result.current.levelStretch).toBe(2)
+  })
+
   it('restores the stretch a resumed draft was generated with', async () => {
     getDocMock.mockResolvedValue({
       exists: () => true,
