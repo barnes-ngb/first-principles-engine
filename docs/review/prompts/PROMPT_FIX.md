@@ -84,9 +84,11 @@ finish-looking summary before it.
      a clean round does **not** come back as a review. It arrives as a plain top-level comment from the
      reviewer ("Codex Review: Didn't find any major issues", naming the reviewed commit) or as a 👍 reaction,
      and the review endpoints return neither. Either counts **only when it is the Codex reviewer's own**
-     (`chatgpt-codex-connector[bot]`), names or post-dates the head you asked about, and — for a reaction on
-     the PR itself — was added **within this round's window**: a 👍 from a human or another bot is not a
-     review result, and an older one is not this round's. A qualifying clean signal closes the round
+     (`chatgpt-codex-connector[bot]`) and belongs to **this** head: when the comment names a reviewed commit,
+     that commit must **be** the head you asked about — one naming an older SHA is the previous round
+     arriving late, however recent its timestamp — and only when none is named may you fall back to it
+     post-dating the ask; a reaction on the PR itself must have been added **within this round's window**.
+     A 👍 from a human or another bot is not a review result, and an older one is not this round's. A qualifying clean signal closes the round
      immediately; don't burn the rest of the window on it.
 2. **If the round raised no findings, go straight to step 5.** Never re-ask for a review of an unchanged head.
 3. **Address every finding in the same PR**, and push.
