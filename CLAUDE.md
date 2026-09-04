@@ -65,14 +65,14 @@ and belongs to **this** head: when the comment names a reviewed commit, that com
 asked about — one naming an older SHA is the previous round arriving late, however recent its timestamp — and
 only when none is named may you fall back to it post-dating the ask; a reaction on the PR itself must have
 been added **within this round's window**. A 👍 from a human or another bot is not a review result, and an
-older one is not this round's. A qualifying clean signal closes the round immediately; don't burn the rest of the window on it. **If the round raised nothing, go straight to the summary** — never re-ask for a review of an unchanged
-head. If it raised findings: address every one **in the same PR**, push, then **ask** for the next round with
-an `@codex review` comment (Codex reviews on PR open, on a draft going ready, and on that comment — **not**
-on every push, so without the ask the next window times out silently), and poll the same 10-minute window,
-reactions included, against the new head commit. **Repeat for as long as a round keeps raising findings.** At
-most three rounds. If a third round still raises findings, address what you can, post `CODEX ROUND: open — do
-not merge yet` naming exactly what is outstanding and on which head, and stop. The human decides whether to
-merge, open a follow-up, or paste the remainder into a new run.
+older one is not this round's. A qualifying clean signal closes the round immediately; don't burn the rest of
+the window on it. **If the round raised nothing, go straight to the summary** — never re-ask for a review of
+an unchanged head. If it raised findings: address every one **in the same PR**, push, then **ask** for the
+next round with an `@codex review` comment (Codex reviews on PR open, on a draft going ready, and on that
+comment — **not** on every push, so without the ask the next window times out silently), and poll the same
+10-minute window, reactions included, against the new head commit. **Repeat for as long as a round keeps
+raising findings.**
+At most three rounds. If a third round still raises findings, address what you can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding and on which head, and stop. The human decides whether to merge, open a follow-up, or paste the remainder into a new run.
 The round is done when one comes back clean or a whole window passes with nothing — never stop on an
 unanswered one. Then post the run's summary — **its one summary, not a second one after an earlier "done"
 post** — with, as its first line, one of: `CODEX ROUND: done — safe to merge` · `CODEX ROUND: none arrived in
