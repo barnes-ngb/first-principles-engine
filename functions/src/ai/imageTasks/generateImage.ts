@@ -46,22 +46,45 @@ export interface ImageGenResponse {
 // ── Style-specific prompt prefixes ──────────────────────────────
 
 /**
- * The three book-illustration looks that named only adjectives (FEAT-174).
+ * The look each book-illustration style is drawn in — palette, line, shading —
+ * plus, for the three "world" styles, the props that world is made of.
  *
- * Minecraft, Garden Battle and Platformer World always named concrete visual
- * nouns — blocks and terrain, sunflowers and pea shooters, brick platforms and
- * green pipes — so the model had something to separate them by. Comic Book,
- * Storybook and Realistic named only adjectives ("bold", "dynamic", "soft
- * colors", "warm lighting"), and adjectives are what every children's book
- * illustration already is. So all three drifted toward the same generic look and
- * Comic Book did not read as comic — reported by a parent who picked it and got
- * back something that "looks the same as storybook".
+ * **FEAT-174** gave Comic Book, Storybook and Realistic this treatment. They had
+ * named only adjectives ("bold", "dynamic", "soft colors", "warm lighting"),
+ * which is what every children's book illustration already is, so all three
+ * drifted toward one generic look and Comic Book did not read as comic.
  *
- * These reuse the FEAT-159 recipe wording, which already had to solve exactly
- * this for the sticker picker. Palette, line work and shading are the three
- * questions that make a look tell apart at a glance.
+ * **FEAT-189** brought the other three in, for the opposite failure. Minecraft,
+ * Garden Battle and Platformer World named concrete nouns — but as a *scene*,
+ * not as a look: "Bright blue sky, floating brick platforms, green pipes, golden
+ * coins, fluffy clouds with eyes, mushrooms, starry power-ups." `buildImagePrompt`
+ * then appends the page's own scene, so a page reading "Tom had a map. He was in
+ * the hut." reached the model as two incompatible scenes — a platform world AND
+ * the inside of a hut — and the model did the only thing that satisfies both: it
+ * split the canvas. A parent got a platformer strip across the top with a
+ * realistic cabin interior below, and a page whose scene was "Tom saw a big pit"
+ * came back as two half-images side by side. The three recipe styles never did
+ * this, because a recipe describes **how to draw**, not **what**.
+ *
+ * So the world flavour is demoted to optional set-dressing, stated as such by
+ * {@link worldPropsClause}: dress the scene with these props where the scene
+ * allows it, and where it does not — indoors, or anywhere else — keep the LOOK
+ * and drop the props. That one sentence is what stops the split, because it
+ * tells the model what to do when the scene is a hut.
+ *
+ * All six now share one shape, so a style added later has to answer the same
+ * three questions instead of listing a world.
  */
-const BOOK_ILLUSTRATION_RECIPES: Record<string, VisualRecipe> = {
+type BookIllustrationRecipe = VisualRecipe & {
+  /**
+   * The props this world is made of, as a bare noun list. The conditional
+   * framing around them is {@link worldPropsClause}'s, not each recipe's, so the
+   * three world styles cannot state the rule three slightly different ways.
+   */
+  props?: string;
+};
+
+const BOOK_ILLUSTRATION_RECIPES: Record<string, BookIllustrationRecipe> = {
   "book-illustration-comic": {
     hint: "in a bold comic book illustration style",
     summary: "A bold comic book background panel for a children's story.",
@@ -89,15 +112,71 @@ const BOOK_ILLUSTRATION_RECIPES: Record<string, VisualRecipe> = {
     shading:
       "soft directional light with smooth falloff, subtle bounce light, and gentle cast shadows.",
   },
+  "book-illustration-minecraft": {
+    hint: "in a blocky voxel pixel-art style",
+    summary:
+      "A children's book page drawn in the look of a blocky voxel pixel-art world.",
+    palette:
+      "a limited palette of flat, saturated colors — grass green, dirt brown, stone grey — laid down unblended, never mixed.",
+    line: "no outlines at all; every form is built from hard-edged cubes with visible pixel steps.",
+    shading:
+      "flat per-face shading only — one solid tone per cube face, lighter on top, darker on the sides. No gradients, no soft light.",
+    props: "cubic blocks, stepped terrain, torches, ore seams",
+  },
+  "book-illustration-garden-warfare": {
+    hint: "in a bright, silly cartoon garden style",
+    summary:
+      "A children's book page drawn in the look of a bright, silly cartoon garden battle.",
+    palette:
+      "high-saturation leaf green and warm yellow against soft earth brown, in flat cheerful fills.",
+    line: "a bold, rounded outline of even weight on every shape — nothing sharp, nothing spiky, nothing frightening.",
+    shading:
+      "simple two-tone cartoon shading with one soft drop shadow under each shape, lit by broad flat daylight.",
+    props: "sunflowers, pea shooters, walnut barriers, garden pots, silly cartoon zombies in the background",
+  },
+  "book-illustration-platformer": {
+    hint: "in the look of a classic side-scrolling platformer video game",
+    summary:
+      "A children's book page drawn in the look of a classic side-scrolling platformer video game.",
+    palette:
+      "saturated primaries — bright blue, warm red, gold and green — in flat unblended fills with no gradients.",
+    line: "thick, clean outlines of even weight around chunky rounded shapes; nothing wispy or sketchy.",
+    shading:
+      "flat cel shading in two steps per shape, drawn side-on in 2D with no perspective depth and no soft light.",
+    props: "brick platforms, green pipes, gold coins, question blocks, fluffy clouds, mushroom shapes",
+  },
 };
 
-/** Every book-illustration page prompt ends with this shared framing. */
-const BOOK_PAGE_FRAMING = "Environment and background only, no characters or people. ";
+/**
+ * Every book-illustration page prompt ends with this shared framing.
+ *
+ * The unified-scene guardrail sits here rather than on each style so the next
+ * style added inherits it. It is the belt to {@link worldPropsClause}'s braces:
+ * the props clause tells the model what to do with a world's props when the
+ * scene is indoors, and this tells it that whatever it decides, the answer is
+ * one picture (FEAT-189).
+ */
+const BOOK_PAGE_FRAMING =
+  "One single, unified scene filling the whole image — never split panels, halves, strips, collages or borders. " +
+  "Environment and background only, no characters or people. ";
+
+/**
+ * The one statement of how a world's props relate to the page's own scene
+ * (FEAT-189). Each world recipe supplies only the noun list; this supplies the
+ * rule, so the three cannot drift apart.
+ */
+function worldPropsClause(props: string): string {
+  return (
+    `Where the scene allows, dress it with the world's props (${props}); ` +
+    "when the scene is indoors or somewhere else, keep the LOOK and drop the props. "
+  );
+}
 
 function bookIllustrationPrefix(styleKey: string): string {
   const recipe = BOOK_ILLUSTRATION_RECIPES[styleKey];
   if (!recipe) return "";
-  return `${recipe.summary} ${BOOK_PAGE_FRAMING}${recipeDetail(recipe)}`;
+  const props = recipe.props ? worldPropsClause(recipe.props) : "";
+  return `${recipe.summary} ${BOOK_PAGE_FRAMING}${recipeDetail(recipe)}${props}`;
 }
 
 /** The six looks a parent can pick in the book generator's style picker. */
@@ -110,6 +189,15 @@ export const BOOK_ILLUSTRATION_STYLE_KEYS = [
   "book-illustration-platformer",
 ] as const;
 
+/**
+ * Read-only view of the recipe table, for tests and for anything that needs to
+ * check what a look actually says. The prompts themselves come from
+ * {@link STYLE_PREFIXES}.
+ */
+export function bookIllustrationRecipe(styleKey: string): BookIllustrationRecipe | undefined {
+  return BOOK_ILLUSTRATION_RECIPES[styleKey];
+}
+
 export const STYLE_PREFIXES: Record<string, string> = {
   "schedule-card":
     "A friendly, colorful visual schedule card for a child's daily routine. Simple, clear imagery with large icons. ",
@@ -117,15 +205,12 @@ export const STYLE_PREFIXES: Record<string, string> = {
     "A cheerful, motivating reward chart illustration for a child. Bright colors, fun characters, encouraging tone. ",
   "theme-illustration":
     "A warm, educational illustration for a homeschool family learning theme. Kid-friendly, inviting art style. ",
-  "book-illustration-minecraft":
-    "A blocky pixel art voxel world scene for a children's book page. Environment only, no characters or people. Cubic blocks with visible pixel steps, dramatic mined terrain, bright sky. Flat per-face shading only — one solid tone per cube face, lighter on top, darker on the sides. No gradients, no outlines. ",
+  "book-illustration-minecraft": bookIllustrationPrefix("book-illustration-minecraft"),
   "book-illustration-storybook": bookIllustrationPrefix("book-illustration-storybook"),
   "book-illustration-comic": bookIllustrationPrefix("book-illustration-comic"),
   "book-illustration-realistic": bookIllustrationPrefix("book-illustration-realistic"),
-  "book-illustration-garden-warfare":
-    "A fun cartoon garden battle scene for a children's book page. Bright green garden with sunflowers, pea shooters, walnuts as barriers, silly cartoon zombies in the background. Colorful, humorous, family-friendly. Environment only, no specific characters. ",
-  "book-illustration-platformer":
-    "A colorful side-scrolling platformer video game world for a children's book page. Bright blue sky, floating brick platforms, green pipes, golden coins, fluffy clouds with eyes, mushrooms, starry power-ups. Cheerful and inviting. Environment only, no characters. ",
+  "book-illustration-garden-warfare": bookIllustrationPrefix("book-illustration-garden-warfare"),
+  "book-illustration-platformer": bookIllustrationPrefix("book-illustration-platformer"),
   "book-sticker":
     "A single cute cartoon character or object, sticker style. Bold clean outline, colorful flat fill, simple shapes, fun and expressive. Child-friendly, no text, no background elements. ",
   general: "",

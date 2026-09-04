@@ -131,6 +131,30 @@ describe('styleBlurb — every look a picker offers', () => {
     }
   })
 
+  it('tells a parent which outside game each world look is like (FEAT-189)', () => {
+    // The owner picked "Platformer World" from a bare label and could not tell
+    // it was the Mario-ish one. Help copy only — it names a reference so a
+    // parent can choose; it never reaches a prompt.
+    expect(styleBlurb('platformer', 'parent')).toContain('Mario')
+    expect(styleBlurb('garden-warfare', 'parent')).toContain('Plants vs. Zombies')
+    expect(styleBlurb('minecraft', 'parent').toLowerCase()).toContain('voxel')
+
+    // Not in the kid copy: the readability bar, and a six-year-old picks by what
+    // the picture looks like.
+    for (const id of ['platformer', 'garden-warfare', 'minecraft']) {
+      expect(styleBlurb(id, 'kid')).not.toContain('Mario')
+      expect(styleBlurb(id, 'kid')).not.toContain('Plants vs. Zombies')
+    }
+  })
+
+  it('states the FEAT-189 set-dressing rule on the three world looks', () => {
+    // What those looks now actually do: the props are conditional on the page's
+    // own scene, so the help and the server recipe agree.
+    for (const id of ['platformer', 'garden-warfare', 'minecraft']) {
+      expect(styleBlurb(id, 'parent'), id).toContain('drops the props')
+    }
+  })
+
   it('lists the right looks per surface, with the picker’s own labels', () => {
     expect(artHelpStyles('bookImages').map((s) => s.id)).toEqual(
       GENERATION_STYLES.map((s) => s.value),
