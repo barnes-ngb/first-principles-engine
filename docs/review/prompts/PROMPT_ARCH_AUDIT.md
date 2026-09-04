@@ -120,11 +120,13 @@ finish-looking summary before it.
      immediately; don't burn the rest of the window on it.
 2. **If the round raised no findings, go straight to step 5.** Never re-ask for a review of an unchanged head.
 3. **Address every finding in the same PR**, and push.
-4. **Ask for the next round** with an `@codex review` comment — Codex reviews on PR open, on a draft going
-   ready, and on that comment, **not** on every push, so without the ask the next window times out silently
-   — then poll another full 10-minute window, reactions included, against the new head commit. **If that
-   round raises a finding, go back to step 3 and repeat 3–4** — as many times as it takes. The round is done
-   when one comes back clean or a whole window passes with nothing; never stop on an unanswered one.
+4. **Ask for the next round** with an `@codex review` comment — Codex reviews on PR open, on a draft
+   going ready, and on that comment, **not** on every push, so without the ask the next window times out
+   silently — then poll another full 10-minute window, reactions included, against the new head commit.
+   **If that round raises a finding, go back to step 3 and repeat 3–4** — as many times as it takes. The
+   round is done when one comes back clean or a whole window passes with nothing; never stop on an
+   unanswered one.
+   At most three rounds. If a third round still raises findings, address what you can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding and on which head, and stop. The human decides whether to merge, open a follow-up, or paste the remainder into a new run.
 5. **Post the summary**, with as its first line one of:
    - `CODEX ROUND: done — safe to merge`
    - `CODEX ROUND: none arrived in 10 min — safe to merge`
