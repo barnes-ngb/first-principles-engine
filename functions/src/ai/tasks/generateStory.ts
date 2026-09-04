@@ -10,7 +10,7 @@ import {
   maxTokensForPageCount,
   reconcileStoryPageCount,
 } from "../storyPageBudget.js";
-import { checkStoryReadability } from "../storyDecodability.js";
+import { checkStoryReadability, normalizeLevelStretch } from "../storyDecodability.js";
 import type { StoryReadabilityReport } from "../storyDecodability.js";
 import { resolveStoryLevelContext } from "../storyLevelContext.js";
 import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
@@ -334,6 +334,13 @@ export interface StoryReadabilityInfo {
   hardWordCount: number;
   /** True when the one fix attempt ran AND its result was the one returned. */
   revised: boolean;
+  /**
+   * The per-story stretch this book was written and measured at (FEAT-191),
+   * 0-2. `phonicsLevel` above is already the stretched number, so this is what
+   * lets the parent-facing line say *why* it is higher than the child's own —
+   * and say it on a PASS, where the old line said nothing at all.
+   */
+  stretch: number;
 }
 
 /** How many hard words the honest line will name — the rest are counted, not listed. */
@@ -342,6 +349,7 @@ export const MAX_REPORTED_HARD_WORDS = 12;
 export function toReadabilityInfo(
   report: StoryReadabilityReport,
   revised: boolean,
+  stretch = 0,
 ): StoryReadabilityInfo {
   return {
     phonicsLevel: report.phonicsLevel,
@@ -352,6 +360,7 @@ export function toReadabilityInfo(
       .map((h) => ({ page: h.page, word: h.word })),
     hardWordCount: report.distinctHardWords.length,
     revised,
+    stretch: normalizeLevelStretch(stretch),
   };
 }
 
@@ -373,6 +382,12 @@ export const handleGenerateStory = async (
     words?: string[];
     theme?: string;
     pageCount?: number;
+    /**
+     * The parent's per-story "one step up" (FEAT-191), 0-2. Clamped in
+     * `resolveStoryLevelContext`, so an absent / odd value is simply 0 — the
+     * child's own level, which is what every story before this run was.
+     */
+    levelStretch?: number;
   };
   try {
     storyConfig = JSON.parse(messages[0].content);
@@ -432,6 +447,11 @@ export const handleGenerateStory = async (
     age: storyChildAge,
     workingLevels: ctx.snapshotData?.workingLevels,
     requestedWords: storyWords,
+    // FEAT-191 — the parent's per-story stretch. It moves the level the story
+    // is WRITTEN at and the level it is CHECKED at together (one number, read
+    // twice below), so a book asked for one step up is not then flagged word by
+    // word for being exactly what was asked for. It writes no level anywhere.
+    levelStretch: storyConfig.levelStretch,
   });
   const readingLevel = levelContext.readingLevel;
 
@@ -554,7 +574,7 @@ export const handleGenerateStory = async (
       }
     }
 
-    readabilityInfo = toReadabilityInfo(finalReport, revised);
+    readabilityInfo = toReadabilityInfo(finalReport, revised, levelContext.effective.stretch);
   }
 
   // Validate on parse (FEAT-97): the model may return a different count. Accept a
@@ -566,6 +586,7 @@ export const handleGenerateStory = async (
       ` maxTokens=${maxTokens} stopReason=${result.stopReason}` +
       ` words=${storyWords.length} readingLevel=${readingLevel.source}` +
       ` readabilityLevel=${levelContext.effective.level}` +
+      ` stretch=${levelContext.effective.stretch}` +
       (readabilityInfo
         ? ` readability=${readabilityInfo.passed ? "pass" : "fail"}` +
           ` hard=${readabilityInfo.hardWords.length} revised=${readabilityInfo.revised ? "yes" : "no"}`

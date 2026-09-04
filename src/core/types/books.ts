@@ -301,6 +301,17 @@ export interface Book {
     theme?: string
     difficulty?: 'simple' | 'moderate'
     pageCount: number
+    /**
+     * The per-story "one step up" the parent picked (FEAT-191): 0 = the child's
+     * own assessed reading level, 1-2 = written and measured that many rungs
+     * above it, for this book only. Additive — absent means 0, which is every
+     * book made before this field existed.
+     *
+     * It is a property of the BOOK, not of the child: nothing reads it back into
+     * `skillSnapshots`, and it exists here so a revise of this book stays at the
+     * level it was written at (the server reads it off this record).
+     */
+    levelStretch?: 0 | 1 | 2
   }
   /** Review state (Generate Chat + Per-Page Review). Phase 2 V2. */
   reviewState?: ReviewState

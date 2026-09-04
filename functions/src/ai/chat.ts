@@ -7,7 +7,11 @@ import { STONEBRIDGE_BIBLE } from "./stonebridgeBible.js";
 import { ensureWorkbookActivityConfigsForChild } from "./workbookActivityConfigBackfill.js";
 import { MATH_CONCEPT_BANDS_TEXT } from "./levelDefinitions.js";
 import { ALLOWED_OVERRIDE_MODELS, resolveModelForTask } from "./models.js";
-import { DECODABILITY_LEVEL_CAP } from "./storyDecodability.js";
+import {
+  DECODABILITY_LEVEL_CAP,
+  levelStretchPhrase,
+  normalizeLevelStretch,
+} from "./storyDecodability.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -2182,6 +2186,15 @@ export interface ReadingLevelBlockInput {
   safeWords: readonly string[];
   /** The sentence shape for this level (from `sentenceTargetFor`). */
   sentenceTarget: string;
+  /**
+   * The per-story stretch the parent asked for (FEAT-191), 0 when they didn't.
+   * `level` above is ALREADY stretched — this only changes what the block SAYS,
+   * so the model knows the bigger words are a deliberate reach rather than a
+   * mistake about who is reading.
+   */
+  stretch?: number;
+  /** The child's own assessed/estimated level, before the stretch. */
+  baseLevel?: number;
 }
 
 /**
@@ -2223,6 +2236,20 @@ export function buildReadingLevelBlock(input: ReadingLevelBlockInput): string {
       : `ESTIMATED from age — no assessed reading level is on file for ${childName} yet, so this is a deliberately careful floor`;
   const detail = levelText ? `\n${levelText}` : "";
 
+  // FEAT-191 — the parent asked for this ONE story to be written above the
+  // child's own level. Say both numbers and say whose choice it was: a model
+  // told only "Level 4" would take that as what the reader decodes, and the
+  // next revise would quietly settle back toward it.
+  const stretch = normalizeLevelStretch(input.stretch);
+  const baseLevel =
+    typeof input.baseLevel === "number" && Number.isFinite(input.baseLevel)
+      ? Math.min(DECODABILITY_LEVEL_CAP, Math.max(1, Math.round(input.baseLevel)))
+      : level;
+  const heading =
+    stretch > 0
+      ? `READING LEVEL — write this story at phonics Level ${level} of ${DECODABILITY_LEVEL_CAP}. ${childName} decodes at Level ${baseLevel} (${provenance}), and the parent chose to write THIS story ${levelStretchPhrase(stretch)}, at Level ${level}. That is a deliberate reach, not a mistake — write to Level ${level} and no higher.${detail}`
+      : `READING LEVEL — ${childName} decodes at phonics Level ${level} of ${DECODABILITY_LEVEL_CAP} (${provenance}).${detail}`;
+
   const safeWordLine =
     safeWords.length > 0
       ? `SAFE WORDS — use these freely; they need NOT follow the patterns above, because ${childName} already knows them by sight:\n${safeWords.join(", ")}`
@@ -2233,7 +2260,7 @@ export function buildReadingLevelBlock(input: ReadingLevelBlockInput): string {
       ? `- NO CONTRACTIONS at this level. Write "cannot", not "can't"; "it is", not "it's". This overrides "Contractions are fine" in WRITING QUALITY.`
       : `- Contractions are allowed at this level.`;
 
-  return `READING LEVEL — ${childName} decodes at phonics Level ${level} of ${DECODABILITY_LEVEL_CAP} (${provenance}).${detail}
+  return `${heading}
 
 THIS BLOCK OUTRANKS EVERY OTHER VOCABULARY INSTRUCTION IN THIS PROMPT. A book ${childName} cannot read is not a book for ${childName}, however good the story is.
 
@@ -2501,6 +2528,14 @@ export interface ReviseStoryInput {
   };
   newFeedback: string;
   /**
+   * The book this draft belongs to (FEAT-191). The handler reads the per-story
+   * stretch off its own `generationConfig`, so a revise of a book written one
+   * step up stays one step up. Only ever an id: the level itself is never taken
+   * from the client. Optional — absent means "no stretch", the pre-FEAT-191
+   * behaviour.
+   */
+  bookId?: string;
+  /**
    * The concrete READING LEVEL block (FEAT-176). **Server-injected only** — the
    * handler builds it after normalizing the client payload, so a revise can
    * never talk the story up past the level the generation was held to.
@@ -2624,6 +2659,11 @@ export interface RevisePageInput {
     sentenceTarget: string;
     vocabularyLevel: string;
   };
+  /**
+   * The book this page belongs to (FEAT-191) — see `ReviseStoryInput.bookId`.
+   * The handler reads the stretch off the book's own record, never off here.
+   */
+  bookId?: string;
   /**
    * The concrete READING LEVEL block (FEAT-176). **Server-injected only** — set
    * by the handler after normalizing the client payload.

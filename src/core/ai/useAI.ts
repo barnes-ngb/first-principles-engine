@@ -76,6 +76,13 @@ export interface ChatResponse {
     /** The TRUE distinct count across the story, never truncated (FEAT-176). */
     hardWordCount: number
     revised: boolean
+    /**
+     * The per-story "one step up" this book was written AND measured at
+     * (FEAT-191), 0-2. `phonicsLevel` above is already stretched, so this is
+     * what tells the draft line whether a bigger word was asked for.
+     * Optional — an older deploy sends no such field, which means 0.
+     */
+    stretch?: number
   }
 }
 

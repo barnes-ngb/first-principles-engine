@@ -300,6 +300,10 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
             {
               role: 'user',
               content: JSON.stringify({
+                // The book, not the level (FEAT-191): the server reads the
+                // per-story stretch off this book's own `generationConfig`, so
+                // a page rewrite of a book written one step up stays there.
+                bookId: book.id,
                 pageNumber: page.pageNumber,
                 currentText: page.text ?? '',
                 currentSceneDescription: sceneOf(page),
