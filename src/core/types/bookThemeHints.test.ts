@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { PRESET_THEMES } from './books'
@@ -75,5 +78,50 @@ describe('every preset theme names a look, not a scene', () => {
     // supposed to name a world, and the story prompt is where it belongs.
     const adventure = PRESET_THEMES.find((t) => t.id === 'adventure')
     expect(adventure?.storyWorldDescription).toContain('hidden treasures')
+  })
+})
+
+describe('the server carries the same fifteen strings', () => {
+  // FEAT-193 made the client's `PRESET_THEMES` and the server's
+  // `PRESET_IMAGE_PREFIXES` agree, which removed the drift between those two
+  // copies. Nothing structural enforces it — they are still two hand-kept tables
+  // (UX-167, batch B) — so this reads the server file as text and holds the
+  // claim the code comments on both sides make. It is a parity check, not a
+  // consolidation: the app cannot import that module (it pulls in
+  // `firebase-admin`), which is exactly why UX-167 is still open.
+  const server = readFileSync(
+    join(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      'functions',
+      'src',
+      'ai',
+      'imageTasks',
+      'generateImage.ts',
+    ),
+    'utf8',
+  )
+  const table = server.slice(
+    server.indexOf('export const PRESET_IMAGE_PREFIXES'),
+  )
+  const map = table.slice(0, table.indexOf('\n};'))
+
+  it('carries every preset id', () => {
+    for (const theme of PRESET_THEMES) {
+      expect(map, `server map has no entry for "${theme.id}"`).toContain(
+        `${theme.id}:`,
+      )
+    }
+  })
+
+  it('carries each string verbatim', () => {
+    for (const theme of PRESET_THEMES) {
+      expect(
+        map,
+        `server text for "${theme.id}" differs from the client's`,
+      ).toContain(theme.imageStylePrefix)
+    }
   })
 })
