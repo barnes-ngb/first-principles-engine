@@ -38,6 +38,8 @@ import {
   fancyStyleLabel,
 } from './drawingStickerStyles'
 import { generateStickerVersion } from './generateStickerVersion'
+import CustomLookCard from './CustomLookCard'
+import { hasCustomPictureNote } from './customPictureNote'
 import { planDrawingRename } from './stickerLabelEdit'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import type { DrawingGroup } from './stickerGrouping'
@@ -125,6 +127,12 @@ export default function DrawingGroupCard({
    */
   const [versionFailure, setVersionFailure] = useState<ImageGenerationFailure | null>(null)
   const [versionAlternatives, setVersionAlternatives] = useState<string[]>([])
+  /**
+   * The FEAT-197 "+ My own look" note — one subject change riding alongside the
+   * picked look. One-off: it lives as long as the picker dialog does and is
+   * never written to the version it makes.
+   */
+  const [customNote, setCustomNote] = useState('')
   // null = no pending delete; a sticker = delete that version; 'group' = delete all.
   const [deleteTarget, setDeleteTarget] = useState<Sticker | 'group' | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -146,7 +154,7 @@ export default function DrawingGroupCard({
   // `docs/review/UX_AUDIT_2026-08.md` §12 rather than widened into this change.
   const renameTargets = allVersions ?? group.versions
 
-  const handleAddVersion = useCallback(async () => {
+  const handleAddVersion = useCallback(async (noteOverride?: string) => {
     // At the cap the paid call never goes out (FEAT-165) — the picker shows the
     // nudge instead of "Make it", and this guard holds the rule for real.
     if (busy || capReached) return
@@ -154,12 +162,18 @@ export default function DrawingGroupCard({
     setError(null)
     setVersionFailure(null)
     setVersionAlternatives([])
+    // A tapped alternative from the retry card IS the new note (FEAT-197 ×
+    // FEAT-195): it replaces what was typed and starts one new generation,
+    // counted like any other.
+    const note = noteOverride ?? customNote
+    if (noteOverride !== undefined) setCustomNote(noteOverride)
     try {
       // Always adds a new version; repeating a theme keeps both.
       const res = await generateStickerVersion({
         familyId,
         source,
         styleId,
+        customNote: note,
         sourceDrawingId: group.sourceDrawingId,
         label,
         enhanceSketch,
@@ -196,6 +210,7 @@ export default function DrawingGroupCard({
     familyId,
     source,
     styleId,
+    customNote,
     label,
     group.sourceDrawingId,
     onChanged,
@@ -393,7 +408,12 @@ export default function DrawingGroupCard({
         {!selectMode && (
           <Button
             variant="outlined"
-            onClick={() => { setError(null); setPicking(true) }}
+            onClick={() => {
+              setError(null)
+              // One-off per picture (FEAT-197): a fresh open starts blank.
+              setCustomNote('')
+              setPicking(true)
+            }}
             sx={{
               aspectRatio: '1',
               minWidth: 0,
@@ -481,6 +501,14 @@ export default function DrawingGroupCard({
                     />
                   ))}
                 </Box>
+                {/* The second axis (FEAT-197): the look says HOW, this says WHAT
+                    changes. After the chips, never instead of one. */}
+                <CustomLookCard
+                  value={customNote}
+                  onChange={setCustomNote}
+                  audience={audience}
+                  disabled={busy}
+                />
                 {/* One tap, one picture (FEAT-178). Replaced by the cap nudge
                     above, never shown beside it. */}
                 <GenerateHint door="addVersion" audience={audience} />
@@ -492,14 +520,24 @@ export default function DrawingGroupCard({
               </Typography>
             )}
             {/* One card for every way a picture can fail to arrive (FEAT-195).
-                No tappable alternatives on this door — a version re-draws the
-                kid's own saved drawing and sends no words to reword. */}
+                With no note this door sends no words to reword; with one
+                (FEAT-197) the rewordings are of the note, and tapping one
+                replaces it and regenerates. */}
             {versionFailure && (
               <ImageRetryCard
                 failure={versionFailure}
                 audience={audience}
-                door={ImageRetryDoor.Redraw}
+                door={
+                  hasCustomPictureNote(customNote)
+                    ? ImageRetryDoor.RedrawNote
+                    : ImageRetryDoor.Redraw
+                }
                 alternatives={versionAlternatives}
+                onUseAlternative={
+                  hasCustomPictureNote(customNote)
+                    ? (text) => { void handleAddVersion(text) }
+                    : undefined
+                }
                 onRetry={() => { void handleAddVersion() }}
                 retryLabel="Add version"
               />
