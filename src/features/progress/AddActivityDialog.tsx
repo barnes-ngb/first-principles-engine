@@ -10,7 +10,8 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
-import type { ActivityFrequency, ActivityType, SubjectBucket } from '../../core/types/enums'
+import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
+import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
 
 interface AddActivityDialogProps {
   open: boolean
@@ -26,13 +27,18 @@ const TYPE_OPTIONS: { value: ActivityType; label: string }[] = [
   { value: 'app', label: 'App' },
 ]
 
-const SUBJECT_OPTIONS: { value: SubjectBucket; label: string }[] = [
-  { value: 'Reading', label: 'Reading' },
-  { value: 'Math', label: 'Math' },
-  { value: 'LanguageArts', label: 'Language Arts' },
-  { value: 'Science', label: 'Science' },
-  { value: 'Other', label: 'Other' },
-]
+/**
+ * Every bucket, derived from the enum rather than hand-listed (FEAT-199).
+ *
+ * The hand-kept list offered five of the ten, so `PracticalArts` — the bucket
+ * *packing*, chores and life skills belong to — could not be chosen anywhere in
+ * the app, and a family's practical work had to be filed as "Other". Deriving
+ * it means the next bucket added to `SubjectBucket` is offered here on the same
+ * commit, with its own `SubjectBucketLabel` wording.
+ */
+const SUBJECT_OPTIONS: { value: SubjectBucket; label: string }[] = Object.values(
+  SubjectBucket,
+).map((value) => ({ value, label: SubjectBucketLabel[value] }))
 
 const MINUTE_OPTIONS = [10, 15, 20, 30, 45] as const
 
@@ -58,6 +64,10 @@ export default function AddActivityDialog({
   const [scannable, setScannable] = useState(true)
   const [totalUnits, setTotalUnits] = useState('')
   const [currentPosition, setCurrentPosition] = useState('')
+  // FEAT-199. Default off: the quick-log row is for EXTRA work a kid logs
+  // themselves, and most configs are the planned day the checklist already
+  // shows. Opting in is one tap here, or on the activity's own menu later.
+  const [quickLog, setQuickLog] = useState(false)
 
   const reset = () => {
     setName('')
@@ -68,6 +78,7 @@ export default function AddActivityDialog({
     setScannable(true)
     setTotalUnits('')
     setCurrentPosition('')
+    setQuickLog(false)
   }
 
   const handleAdd = () => {
@@ -81,6 +92,9 @@ export default function AddActivityDialog({
       childId,
       sortOrder: nextSortOrder,
       scannable,
+      // Written only when true — `addActivityConfig` spreads this object
+      // straight into `setDoc`, and Firestore rejects an explicit `undefined`.
+      ...(quickLog ? { quickLog: true } : {}),
       ...(scannable && totalUnits ? { totalUnits: Number(totalUnits) } : {}),
       ...(scannable && currentPosition ? { currentPosition: Number(currentPosition) } : {}),
       ...(scannable ? { unitLabel: 'lesson' } : {}),
@@ -176,6 +190,27 @@ export default function AddActivityDialog({
                   onClick={() => setFrequency(opt.value)}
                 />
               ))}
+            </Stack>
+          </Stack>
+
+          {/* FEAT-199 — parent-facing copy, so it is not held to the kid bar. */}
+          <Stack spacing={0.5}>
+            <Typography variant="caption" color="text.secondary">
+              Show on the kids&rsquo; &ldquo;I Did More!&rdquo; chips?
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <Chip
+                label="Yes"
+                variant={quickLog ? 'filled' : 'outlined'}
+                color={quickLog ? 'primary' : 'default'}
+                onClick={() => setQuickLog(true)}
+              />
+              <Chip
+                label="No"
+                variant={!quickLog ? 'filled' : 'outlined'}
+                color={!quickLog ? 'primary' : 'default'}
+                onClick={() => setQuickLog(false)}
+              />
             </Stack>
           </Stack>
 

@@ -7,10 +7,17 @@ import Typography from '@mui/material/Typography'
 
 import SectionCard from '../../components/SectionCard'
 import type { ChecklistItem, DayLog } from '../../core/types'
-import type { SubjectBucket } from '../../core/types/enums'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
+// FEAT-199: a plain read of the family's activity configs. Deliberately NOT
+// `useActivityConfigs` — that hook runs `migrateToActivityConfigs` /
+// `ensureDefaultActivityConfigs` and exposes the writer surface, and a kid
+// opening Today must not seed or migrate anything. This is the same read-only
+// subscribe the Shelly portal made for the same reason (FEAT-135); it is
+// imported rather than copied so there is one definition of it.
+import { useChatActivityConfigs } from '../shelly-chat/useChatActivityConfigs'
+import { resolveQuickLogChips, type QuickLogChip } from './quickLogChips'
 
 interface KidExtraLoggerProps {
   dayLog: DayLog
@@ -28,10 +35,15 @@ export default function KidExtraLogger({
   today,
 }: KidExtraLoggerProps) {
   const [showExtraLog, setShowExtraLog] = useState(false)
-  const [extraActivity, setExtraActivity] = useState<{ label: string; subject: string } | null>(null)
+  const [extraActivity, setExtraActivity] = useState<QuickLogChip | null>(null)
   const [extraMinutes, setExtraMinutes] = useState<number | null>(null)
   const [savingExtra, setSavingExtra] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  // FEAT-199: the chips are the family's, not the code's. Read-only; the
+  // resolver owns the order, the dedupe, the cap and the trailing "Other".
+  const activityConfigs = useChatActivityConfigs(familyId, childId)
+  const quickLogChips = useMemo(() => resolveQuickLogChips(activityConfigs), [activityConfigs])
 
   const extraItems = useMemo(() => {
     const items = dayLog.checklist
@@ -52,7 +64,7 @@ export default function KidExtraLogger({
         label: `${extraActivity.label} (${extraMinutes}m)`,
         completed: true,
         estimatedMinutes: extraMinutes,
-        subjectBucket: extraActivity.subject as SubjectBucket,
+        subjectBucket: extraActivity.subject,
         source: 'manual' as const,
         category: 'choose' as const,
         mvdEssential: false,
@@ -95,9 +107,12 @@ export default function KidExtraLogger({
   // Minecraft framing ("I Did More Mining!") was Lincoln's personality showing
   // up on a six-year-old's screen with no way to opt out — and the old body
   // line named three tablet apps London does not use, in fourteen words.
-  // Neutral, short, true. The preset chips are deliberately left alone: their
+  // Neutral, short, true. The preset chips were deliberately left alone: their
   // labels are written into `days.checklist[].label`, so they are a stored
-  // data shape, not copy (filed, FEAT-186).
+  // data shape, not copy (filed, FEAT-186). FEAT-199 did not reword them
+  // either — it made the row EXTENSIBLE, moving the same six verbatim into
+  // `quickLogChips.ts` as the defaults behind the family's own flagged
+  // activity configs.
   return (
     <SectionCard title="⭐ I Did More!">
       <Stack spacing={2} sx={{ py: 1 }}>
@@ -129,20 +144,13 @@ export default function KidExtraLogger({
             {/* What did you do? — single tap */}
             <Typography variant="subtitle2">What did you work on?</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {[
-                { label: '📖 Reading Eggs', subject: 'Reading' },
-                { label: '🔢 Math App', subject: 'Math' },
-                { label: '📚 Reading', subject: 'Reading' },
-                { label: '✏️ Writing', subject: 'LanguageArts' },
-                { label: '🔬 Science', subject: 'Science' },
-                { label: '🎮 Other', subject: 'Other' },
-              ].map((opt) => (
+              {quickLogChips.map((opt) => (
                 <Chip
-                  key={opt.label}
+                  key={opt.key}
                   label={opt.label}
                   onClick={() => setExtraActivity(opt)}
-                  color={extraActivity?.label === opt.label ? 'primary' : 'default'}
-                  variant={extraActivity?.label === opt.label ? 'filled' : 'outlined'}
+                  color={extraActivity?.key === opt.key ? 'primary' : 'default'}
+                  variant={extraActivity?.key === opt.key ? 'filled' : 'outlined'}
                   sx={{ fontSize: '0.95rem', py: 2.5 }}
                 />
               ))}
