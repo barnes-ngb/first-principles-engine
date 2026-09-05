@@ -394,7 +394,16 @@ export default function PlannerChatPage() {
     [activityConfigs, activeChildId],
   )
 
-  // Adjust hoursPerDay based on energy selection and routine total
+  // Adjust hoursPerDay based on energy selection and routine total.
+  //
+  // UX-206 is NOT wired here — deliberately, see `routineDailyBudgetMinutes`.
+  // Lowering this number alone makes the app LESS coherent, not more: the AI
+  // path never reads it (`buildPlannerPrompt` re-derives its own unweighted
+  // `routineMinutesTotal`), so only the header chip would move and it would then
+  // disagree with the day cards; and the local generator's overflow trimmer only
+  // removes `choose` items, so a lower budget leaves must-do routine items
+  // overflowing a day they cannot be trimmed out of. Weighting the budget
+  // requires cadence to reach day CONSTRUCTION, which is the owner-led redesign.
   useEffect(() => {
     const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
     if (weekEnergy === 'full') {

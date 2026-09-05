@@ -8,6 +8,8 @@ import {
   curriculumActionFootnote,
   describeAddActivityShape,
   describeCurriculumAction,
+  duplicateActivityNotice,
+  findDuplicateActivities,
   isCurriculumAction,
   nextActivitySortOrder,
   resolveCurriculumAction,
@@ -387,5 +389,197 @@ describe('describeCurriculumAction — an applied position card (Codex P2)', () 
     const after: ChatActivityConfig = { ...gatb, currentPosition: 107 }
     const display = resolveCurriculumActionForDisplay(setPosition('cfg-gatb', 107), [after])
     expect(describeCurriculumAction(display!, 'Lincoln')).toBe('GATB Math 3: lesson 107')
+  })
+})
+
+
+// ── UX-205: the card names what an add would duplicate ──────────────────────
+//
+// `addActivity` had no duplicate check anywhere — not at parse, not at stage,
+// not on the card, not at the write — so the owner's curriculum accumulated a
+// second Prayer and Scripture, a second Sight word games, a second Dad's Lab,
+// each of which planned every day and raised the day budget by its own minutes.
+
+const prayer: ChatActivityConfig = {
+  id: 'cfg-prayer',
+  name: 'Prayer and Scripture',
+  childId: 'both',
+  defaultMinutes: 10,
+  type: 'routine',
+  frequency: 'daily',
+  sortOrder: 0,
+}
+
+const londonOnly: ChatActivityConfig = {
+  id: 'cfg-london-art',
+  name: 'Art time',
+  childId: 'london',
+  defaultMinutes: 30,
+  type: 'activity',
+  frequency: '3x',
+  sortOrder: 5,
+}
+
+describe('findDuplicateActivities', () => {
+  it('finds an exact-name match on the live list', () => {
+    const matches = findDuplicateActivities(
+      addActivity({ name: 'Prayer and Scripture' }),
+      [...CONFIGS, prayer],
+    )
+    expect(matches.map((c) => c.id)).toEqual(['cfg-prayer'])
+  })
+
+  it('ignores case, spacing and punctuation', () => {
+    for (const name of ['prayer and scripture', '  Prayer and Scripture!  ', 'PRAYER-AND-SCRIPTURE']) {
+      const matches = findDuplicateActivities(addActivity({ name }), [prayer])
+      expect(matches.map((c) => c.id), `name=${name}`).toEqual(['cfg-prayer'])
+    }
+  })
+
+  it('drops punctuation rather than reading it — "&" is not the word "and"', () => {
+    // The rule strips non-alphanumerics; it does not transliterate them. So
+    // "Prayer & Scripture" keys as "prayerscripture" and does NOT match. That is
+    // the exact-match boundary being honest about itself, not a bug — an add
+    // that reads differently to a person is not a duplicate this check claims.
+    expect(findDuplicateActivities(addActivity({ name: 'Prayer & Scripture' }), [prayer])).toEqual(
+      [],
+    )
+  })
+
+  it('does NOT catch a pair that differs by a real word (UX-207 is separate)', () => {
+    const existing: ChatActivityConfig = {
+      ...prayer,
+      id: 'cfg-gatb-math',
+      name: 'The Good and the Beautiful Math',
+    }
+    expect(
+      findDuplicateActivities(addActivity({ name: 'Good and the Beautiful Math' }), [existing]),
+    ).toEqual([])
+  })
+
+  it('does not report a finished program as a duplicate', () => {
+    expect(
+      findDuplicateActivities(addActivity({ name: 'Explode the Code 3' }), CONFIGS),
+    ).toEqual([])
+  })
+
+  it('only compares against rows the new one would sit beside', () => {
+    // A per-child add is compared against that child's own rows plus shared ones.
+    expect(
+      findDuplicateActivities(
+        addActivity({ childId: 'lincoln', name: 'Art time' }),
+        [londonOnly],
+      ),
+    ).toEqual([])
+    expect(
+      findDuplicateActivities(
+        addActivity({ childId: 'london', name: 'Art time' }),
+        [londonOnly],
+      ).map((c) => c.id),
+    ).toEqual(['cfg-london-art'])
+  })
+
+  // Correct for the list it is HANDED. On the chat surface that list is
+  // `[childId, 'both']` only, so a sibling-only row never reaches it — the
+  // documented UX-210 gap, and a false negative rather than a false alarm.
+  it('a shared add is compared against every row in the list it is given', () => {
+    expect(
+      findDuplicateActivities(
+        addActivity({ childId: 'lincoln', name: 'Art time', shared: true }),
+        [londonOnly],
+      ).map((c) => c.id),
+    ).toEqual(['cfg-london-art'])
+  })
+
+  it('sees nothing when the caller never loaded the sibling row (UX-210)', () => {
+    // What `useChatActivityConfigs` actually hands it on Lincoln's tab: his own
+    // rows plus shared ones. London's `Art time` is simply not in the list.
+    const asTheChatLoadsIt = [prayer]
+    expect(
+      findDuplicateActivities(
+        addActivity({ childId: 'lincoln', name: 'Art time', shared: true }),
+        asTheChatLoadsIt,
+      ),
+    ).toEqual([])
+  })
+
+  it('a per-child add still sees a shared row', () => {
+    expect(
+      findDuplicateActivities(
+        addActivity({ childId: 'lincoln', name: 'Prayer and Scripture' }),
+        [prayer],
+      ).map((c) => c.id),
+    ).toEqual(['cfg-prayer'])
+  })
+
+  it('an empty or punctuation-only name matches nothing rather than everything', () => {
+    expect(findDuplicateActivities(addActivity({ name: '   ' }), [prayer])).toEqual([])
+    expect(findDuplicateActivities(addActivity({ name: '???' }), [prayer])).toEqual([])
+  })
+})
+
+describe('resolveCurriculumAction — duplicates on the offer path', () => {
+  it('still resolves ok: the card warns, it does not refuse', () => {
+    const result = resolveCurriculumAction(
+      addActivity({ name: 'Prayer and Scripture' }),
+      [...CONFIGS, prayer],
+      true,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.resolved.duplicates?.map((c) => c.id)).toEqual(['cfg-prayer'])
+      expect(result.resolved.sortOrder).toBe(nextActivitySortOrder([...CONFIGS, prayer]))
+    }
+  })
+
+  it('reports no duplicates for a genuinely new activity', () => {
+    const result = resolveCurriculumAction(addActivity({ name: 'Typing club' }), CONFIGS, true)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.resolved.duplicates).toEqual([])
+  })
+
+  it('the DISPLAY path never computes duplicates — the write created one', () => {
+    // After a confirmed add, the new config is on the list. Re-computing there
+    // would make an applied card report itself as a duplicate.
+    const resolved = resolveCurriculumActionForDisplay(
+      addActivity({ name: 'Prayer and Scripture' }),
+      [...CONFIGS, prayer],
+    )
+    expect(resolved?.duplicates).toBeUndefined()
+  })
+})
+
+describe('duplicateActivityNotice', () => {
+  it('names what is already there, with its minutes and cadence', () => {
+    const notice = duplicateActivityNotice([prayer])
+    expect(notice).toContain('"Prayer and Scripture"')
+    expect(notice).toContain('10m')
+    expect(notice).toContain('daily')
+  })
+
+  it('says the consequence: both get planned and both cost budget', () => {
+    const notice = duplicateActivityNotice([prayer])
+    expect(notice).toContain('Confirming adds another one')
+    expect(notice).toContain('day budget')
+  })
+
+  it('never quotes a doc id back at the parent', () => {
+    expect(duplicateActivityNotice([prayer, londonOnly])).not.toContain('cfg-')
+  })
+
+  it('counts them when there is already more than one', () => {
+    expect(duplicateActivityNotice([prayer, { ...prayer, id: 'cfg-prayer-2' }])).toContain(
+      '2 activities',
+    )
+  })
+
+  it('is empty when there is nothing to warn about', () => {
+    expect(duplicateActivityNotice([])).toBe('')
+  })
+
+  it('reads without a cadence when the stored config has none', () => {
+    const notice = duplicateActivityNotice([{ ...prayer, frequency: undefined }])
+    expect(notice).toContain('10m')
+    expect(notice).not.toContain('undefined')
   })
 })

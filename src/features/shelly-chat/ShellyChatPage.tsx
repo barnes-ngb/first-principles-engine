@@ -196,6 +196,10 @@ export default function ShellyChatPage() {
   // The planner's 'full energy' branch, which is the right default here: the
   // parent's own words ("make it lighter") shape the week through the prompt,
   // so the budget should start from the real routine rather than pre-shrink it.
+  // Unweighted, exactly as the planner's own budget still is — see UX-206 in
+  // `routineDailyBudgetMinutes`. This surface must not weight it alone: a draft
+  // generated here goes through the planner's `buildPlannerPrompt`, which
+  // derives its own unweighted routine total regardless.
   const hoursPerDay = useMemo(() => {
     const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
     return routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3

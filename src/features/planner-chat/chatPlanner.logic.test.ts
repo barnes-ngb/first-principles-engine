@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import type { ActivityConfig, AssignmentCandidate, DraftWeeklyPlan, SkillSnapshot } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
-import { AssignmentAction, MasteryGate, SkillLevel, SubjectBucket } from '../../core/types/enums'
+import { ActivityFrequency, AssignmentAction, MasteryGate, SkillLevel, SubjectBucket } from '../../core/types/enums'
 import {
   activityConfigsToRoutineText,
   AdjustmentType,
@@ -19,7 +19,10 @@ import {
   isPlanningWeekPast,
   generateDraftPlanFromInputs,
   parseAIResponse,
+  frequencyDaysPerWeek,
   parseRoutineTotalMinutes,
+  routineDailyBudgetMinutes,
+  SCHOOL_DAYS_PER_WEEK,
   planTotalMinutes,
   resetIdCounter,
   resolveSuggestedTags,
@@ -1637,6 +1640,136 @@ describe('activityConfigsToRoutineText', () => {
       makeConfig({ completed: true }),
     ]
     expect(activityConfigsToRoutineText(configs)).toBe('')
+  })
+})
+
+// ─── routineDailyBudgetMinutes (UX-206) ──────────────────────────────────────
+
+describe('routineDailyBudgetMinutes', () => {
+  const cfg = (overrides: Partial<ActivityConfig>): ActivityConfig => ({
+    id: 'cfg-1',
+    name: 'Reading',
+    type: 'routine' as const,
+    subjectBucket: SubjectBucket.Reading,
+    defaultMinutes: 20,
+    frequency: 'daily' as const,
+    childId: 'child-1',
+    sortOrder: 1,
+    completed: false,
+    scannable: false,
+    createdAt: '2026-01-01T00:00:00',
+    updatedAt: '2026-01-01T00:00:00',
+    ...overrides,
+  })
+
+  it('costs a daily activity its full minutes', () => {
+    expect(routineDailyBudgetMinutes([cfg({ defaultMinutes: 20 })])).toBe(20)
+  })
+
+  it('the worked example: a 20m 3x/week item costs 12m a day, not 20', () => {
+    expect(
+      routineDailyBudgetMinutes([cfg({ defaultMinutes: 20, frequency: '3x' })]),
+    ).toBe(12)
+  })
+
+  it('weights 2x and 1x off ActivityFrequency', () => {
+    expect(routineDailyBudgetMinutes([cfg({ defaultMinutes: 30, frequency: '2x' })])).toBe(12)
+    expect(routineDailyBudgetMinutes([cfg({ defaultMinutes: 30, frequency: '1x' })])).toBe(6)
+  })
+
+  it('costs an as-needed activity one day, never zero', () => {
+    expect(
+      routineDailyBudgetMinutes([cfg({ defaultMinutes: 30, frequency: 'as-needed' })]),
+    ).toBe(6)
+  })
+
+  it('is unchanged for an all-daily routine — the old total exactly', () => {
+    const configs = [
+      cfg({ id: 'a', defaultMinutes: 20 }),
+      cfg({ id: 'b', defaultMinutes: 15 }),
+      cfg({ id: 'c', defaultMinutes: 45 }),
+    ]
+    expect(routineDailyBudgetMinutes(configs)).toBe(80)
+    // The prose the app writes still totals the same, unweighted — the string is
+    // deliberately untouched by UX-206.
+    expect(parseRoutineTotalMinutes(activityConfigsToRoutineText(configs))).toBe(80)
+  })
+
+  it('skips completed configs, like the routine text does', () => {
+    expect(
+      routineDailyBudgetMinutes([
+        cfg({ id: 'a', defaultMinutes: 20 }),
+        cfg({ id: 'b', defaultMinutes: 60, completed: true }),
+      ]),
+    ).toBe(20)
+  })
+
+  it('counts activity and app configs — visibility is UX-204, not removal', () => {
+    expect(
+      routineDailyBudgetMinutes([
+        cfg({ id: 'a', type: 'app', defaultMinutes: 45 }),
+        cfg({ id: 'b', type: 'activity', defaultMinutes: 15 }),
+      ]),
+    ).toBe(60)
+  })
+
+  it('rounds once over the whole week, not per config', () => {
+    // 3 × (10m · 3x/week) = 90 weekly minutes = 18/day exactly. Rounding each
+    // config first (10 × 3/5 = 6) happens to agree here; the point is one round.
+    const configs = ['a', 'b', 'c'].map((id) =>
+      cfg({ id, defaultMinutes: 10, frequency: '3x' }),
+    )
+    expect(routineDailyBudgetMinutes(configs)).toBe(18)
+  })
+
+  it('is 0 for an empty list, so callers keep their own fallback', () => {
+    expect(routineDailyBudgetMinutes([])).toBe(0)
+  })
+
+  // Firestore holds whatever was written. The total this replaces never read
+  // `frequency` at all, so it could not be poisoned by one — this one must not
+  // regress on that. A budget of `NaN` breaks the bar for the whole family.
+  it('never returns NaN for an unvalidated stored frequency', () => {
+    const stored = cfg({ defaultMinutes: 20, frequency: undefined as unknown as 'daily' })
+    const total = routineDailyBudgetMinutes([stored])
+    expect(Number.isFinite(total)).toBe(true)
+    // Full daily price — the conservative direction, and what it used to cost.
+    expect(total).toBe(20)
+  })
+
+  it('falls back to daily for a cadence a later build wrote', () => {
+    expect(
+      routineDailyBudgetMinutes([
+        cfg({ defaultMinutes: 20, frequency: '4x' as unknown as 'daily' }),
+      ]),
+    ).toBe(20)
+  })
+
+  it('a NaN or off-type defaultMinutes contributes nothing, and poisons nothing', () => {
+    const total = routineDailyBudgetMinutes([
+      cfg({ id: 'ok', defaultMinutes: 20 }),
+      cfg({ id: 'bad', defaultMinutes: Number.NaN }),
+      cfg({ id: 'worse', defaultMinutes: 'twenty' as unknown as number }),
+      cfg({ id: 'negative', defaultMinutes: -30 }),
+    ])
+    expect(total).toBe(20)
+  })
+})
+
+describe('frequencyDaysPerWeek', () => {
+  it('reads the cadence off ActivityFrequency rather than a private table', () => {
+    expect(frequencyDaysPerWeek(ActivityFrequency.Daily)).toBe(SCHOOL_DAYS_PER_WEEK)
+    expect(frequencyDaysPerWeek(ActivityFrequency.ThreePerWeek)).toBe(3)
+    expect(frequencyDaysPerWeek(ActivityFrequency.TwoPerWeek)).toBe(2)
+    expect(frequencyDaysPerWeek(ActivityFrequency.OnePerWeek)).toBe(1)
+  })
+
+  it('never costs a frequency more than the school week', () => {
+    for (const frequency of Object.values(ActivityFrequency)) {
+      const days = frequencyDaysPerWeek(frequency)
+      expect(days).toBeGreaterThan(0)
+      expect(days).toBeLessThanOrEqual(SCHOOL_DAYS_PER_WEEK)
+    }
   })
 })
 

@@ -10,7 +10,7 @@ import type {
   WeekPlan,
 } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
-import { AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
+import { ActivityFrequency, AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
 import { ALL_SKILL_TAGS, SKILL_TAG_MAP, suggestTagsForSubject } from '../../core/types/skillTags'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { getEffectiveMasteryGate } from './skipAdvisor.logic'
@@ -57,7 +57,118 @@ export function activityConfigsToRoutineText(configs: ActivityConfig[]): string 
     .join('\n')
 }
 
-/** Parse a routine string and return total minutes per day. */
+// ── The day budget, weighted by how often an activity actually runs (UX-206) ──
+
+/** School days in a planning week — the denominator every cadence divides into. */
+export const SCHOOL_DAYS_PER_WEEK = 5
+
+/**
+ * How many of the five school days each cadence runs on.
+ *
+ * Read off `ActivityFrequency` rather than invented: `daily` is all five, `3x`
+ * is three, and so on. `as-needed` is the one member with no cadence in its
+ * name; it is costed as ONE day rather than zero, because the routine text
+ * still emits it and the planner still plans it — a budget that paid nothing
+ * for something the planner puts on the day would understate in the same way
+ * the old total overstated, just in the other direction.
+ *
+ * A `Record` over the whole union, so a new `ActivityFrequency` member fails to
+ * compile until somebody prices it — the same rail `SECTION_FOR_TYPE` holds for
+ * `ActivityType`.
+ */
+export const FREQUENCY_DAYS_PER_WEEK: Record<ActivityFrequency, number> = {
+  [ActivityFrequency.Daily]: SCHOOL_DAYS_PER_WEEK,
+  [ActivityFrequency.ThreePerWeek]: 3,
+  [ActivityFrequency.TwoPerWeek]: 2,
+  [ActivityFrequency.OnePerWeek]: 1,
+  [ActivityFrequency.AsNeeded]: 1,
+}
+
+/**
+ * {@link FREQUENCY_DAYS_PER_WEEK}, safe against what Firestore actually holds.
+ *
+ * The type says `frequency` is required and one of five values; the stored
+ * document says whatever was written to it, including `undefined` or a value
+ * from a build that knew a cadence this one does not. An exhaustive `switch`
+ * would return `undefined` for those and turn the whole budget into `NaN` — and
+ * the total this replaces could not do that, because it never read `frequency`
+ * at all. So an unrecognised cadence falls back to **full daily price**: the
+ * conservative direction, and exactly what such a config used to cost.
+ */
+export function frequencyDaysPerWeek(frequency: ActivityFrequency): number {
+  return FREQUENCY_DAYS_PER_WEEK[frequency] ?? SCHOOL_DAYS_PER_WEEK
+}
+
+/**
+ * The minutes an average school day of this routine costs.
+ *
+ * **NOT WIRED — and that is the finding, not an oversight (UX-206 / UX-209).**
+ *
+ * This was written to replace `parseRoutineTotalMinutes` at the two budget call
+ * sites, and Codex's review of PR #1781 showed that doing so alone makes the app
+ * LESS coherent rather than more. Two mechanisms, both verified in the code:
+ *
+ *  - The AI path never reads this number. {@link buildPlannerPrompt} re-derives
+ *    its own `routineMinutesTotal` from the routine prose and uses THAT as both
+ *    the stated "Daily time budget" and the HARD BUDGET RULE, so a weighted
+ *    `hoursPerDay` would move the header chip and nothing else — leaving the
+ *    header disagreeing with the day cards it sits above.
+ *  - The local generator's overflow pass only removes `category: 'choose'`
+ *    items. Routine items are must-dos, and `activityConfigsToRoutineText`
+ *    still emits every one of them on every day at full minutes, so a lower
+ *    budget produces days whose mandatory items exceed it and cannot be trimmed
+ *    out of it.
+ *
+ * So the budget can only be weighted once **cadence reaches day construction** —
+ * the routine carrying its frequency, the MUST-DO rule saying "on the days it
+ * runs", and the generator placing a 3x/week item on three days. That decides
+ * what a day contains, which is the owner-led day-as-a-menu redesign this run
+ * was told not to anticipate. Wiring half of it is worse than neither half.
+ *
+ * Kept here, exported and tested, as the primitive that redesign will use, and
+ * because the arithmetic is the part worth pinning down in advance.
+ *
+ * **What was wrong with the number it was meant to replace**, both still true:
+ *
+ *  1. `activityConfigsToRoutineText` emits every non-completed config at its
+ *     full `defaultMinutes` with no cadence weighting, so a `20m · 3x/week`
+ *     activity is costed at 20 minutes on all five days — 100 minutes a week of
+ *     budget for 60 minutes of activity. Weighted, it costs 12m/day.
+ *  2. The total is recovered by RE-PARSING the prose the app had just written,
+ *     with a regex whose miss case silently contributes 15 minutes
+ *     ({@link parseRoutineTotalMinutes}). Reading the configs directly cannot
+ *     miss, and cannot drift from the string's formatting.
+ *
+ * Summed as exact fractions and rounded once, so five 3x/week items don't
+ * accumulate five separate rounding errors.
+ *
+ * Deliberately unchanged: WHICH configs are counted. Every non-completed config
+ * counts, of every type — making the orphaned `activity`/`app` rows visible is
+ * UX-204's job, and removing one from the routine is the owner's decision, one
+ * row at a time.
+ */
+export function routineDailyBudgetMinutes(configs: ActivityConfig[]): number {
+  const weekly = configs
+    .filter((c) => !c.completed)
+    .reduce((total, c) => {
+      // `defaultMinutes` is unvalidated stored data too: a `NaN` or off-type
+      // value must contribute nothing rather than poison the whole total.
+      const minutes = Number(c.defaultMinutes)
+      if (!Number.isFinite(minutes) || minutes <= 0) return total
+      return total + minutes * frequencyDaysPerWeek(c.frequency)
+    }, 0)
+  return Math.round(weekly / SCHOOL_DAYS_PER_WEEK)
+}
+
+/**
+ * Parse a routine string and return total minutes per day.
+ *
+ * **Still the live budget path**, unweighted, exactly as before — see
+ * {@link routineDailyBudgetMinutes} for why replacing it is not a one-line
+ * change. Two known defects, both recorded rather than fixed here: it re-parses
+ * prose the app itself generated, and a line its regex does not match
+ * contributes a silent **15 minutes** rather than failing.
+ */
 export function parseRoutineTotalMinutes(routine: string): number {
   if (!routine) return 0
   let total = 0
