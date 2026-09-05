@@ -48,8 +48,15 @@ import { isWorkbookMatch, useScanToActivityConfig } from '../../core/hooks/useSc
 import type { ActivityConfig, CertificateScanResult, ScanRecord, ScanResult } from '../../core/types'
 import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
+import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
 import EditRoutinesDialog from './EditRoutinesDialog'
+import {
+  CURRICULUM_SECTION_TITLE,
+  CurriculumSection,
+  groupCurriculumConfigs,
+  OTHER_ACTIVITIES_DESCRIPTION,
+} from './curriculumGrouping'
 import { processScanBatch } from './multiPageScan'
 import {
   buildDeleteActivityPrompt,
@@ -107,25 +114,27 @@ export default function CurriculumTab() {
     return unsub
   }, [familyId, activeChildId])
 
-  // Group configs by type
-  const workbooks = configs.filter((c) => c.type === 'workbook' && !c.completed)
-  const routines = configs.filter(
-    (c) => (c.type === 'routine' || c.type === 'formation') && !c.completed,
+  // Group configs by type — a PARTITION, not a set of filters (UX-204). Four
+  // independent filters over a six-member enum left `activity` and `app` configs
+  // rendered nowhere while they went on planning every day; `groupCurriculumConfigs`
+  // places every type by a `Record<ActivityType, …>` a new member cannot escape.
+  const { workbooks, routines, other, evaluations, completed } = useMemo(
+    () => groupCurriculumConfigs(configs),
+    [configs],
   )
-  const evaluations = configs.filter((c) => c.type === 'evaluation' && !c.completed)
-  const completed = configs.filter((c) => c.completed)
 
   // Match scans to workbooks
   const scansForWorkbook = useCallback(
     (config: ActivityConfig): ScanRecord[] => {
-      const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      // UX-205: the one shared name-comparison rule, not a fourth copy of it.
+      const norm = nameKey
       const configName = norm(config.name)
-      const configCurriculum = norm(config.curriculum || '')
+      const configCurriculum = norm(config.curriculum)
       return recentScans.filter((s) => {
         if (!s.results || s.results.pageType === 'certificate') return false
-        const scanSubject = norm(s.results.subject || '')
+        const scanSubject = norm(s.results.subject)
         const detected = s.results.curriculumDetected
-        const scanCurr = norm(detected?.name || '')
+        const scanCurr = norm(detected?.name)
         return (
           (configName && scanSubject.includes(configName)) ||
           (configName && scanCurr.includes(configName)) ||
@@ -521,7 +530,7 @@ export default function CurriculumTab() {
         </SectionCard>
 
         {/* Active Workbooks */}
-        <SectionCard title="Active Workbooks">
+        <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Workbooks]}>
           {workbooks.length === 0 ? (
             <EmptyState
               title="No workbooks configured"
@@ -549,7 +558,7 @@ export default function CurriculumTab() {
 
         {/* Routine Activities */}
         <SectionCard
-          title="Routine Activities"
+          title={CURRICULUM_SECTION_TITLE[CurriculumSection.Routines]}
           action={
             <Button size="small" startIcon={<EditIcon />} onClick={() => setEditRoutinesOpen(true)}>
               Edit routines
@@ -582,9 +591,45 @@ export default function CurriculumTab() {
           )}
         </SectionCard>
 
+        {/*
+          Apps & Other Activities (UX-204) — the section that did not exist.
+
+          `activity` and `app` configs plan every school day and count toward the
+          day budget, and until now they appeared on no screen: no row, no menu,
+          no way to delete one. Rendered with the SAME `ListItem` + `openMenu`
+          shape as Routine Activities, so the existing ⋮ menu (mark complete /
+          quick-log toggle / delete permanently) comes with it rather than
+          growing a second, weaker one. Nothing is auto-retyped or auto-removed:
+          the rows are the owner's data, and the fix is that he can now see them.
+        */}
+        {other.length > 0 && (
+          <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Other]}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              {OTHER_ACTIVITIES_DESCRIPTION}
+            </Typography>
+            <List dense disablePadding>
+              {other.map((config) => (
+                <ListItem
+                  key={config.id}
+                  secondaryAction={
+                    <IconButton size="small" onClick={(e) => openMenu(e, config)}>
+                      <MoreVertIcon fontSize="small" />
+                    </IconButton>
+                  }
+                >
+                  <ListItemText
+                    primary={config.name}
+                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </SectionCard>
+        )}
+
         {/* Evaluations (auto-managed) */}
         {evaluations.length > 0 && (
-          <SectionCard title="Evaluations (auto-managed)">
+          <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Evaluations]}>
             <List dense disablePadding>
               {evaluations.map((config) => (
                 <ListItem key={config.id}>

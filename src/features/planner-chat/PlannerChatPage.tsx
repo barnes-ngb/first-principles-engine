@@ -99,7 +99,7 @@ import {
 import MoveToDayDialog from '../today/MoveToDayDialog'
 import { useAppliedWeekDays } from './useAppliedWeekDays'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
-import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
+import { activityConfigsToRoutineText, defaultAppBlocks, routineDailyBudgetMinutes } from './chatPlanner.logic'
 import {
   buildPlannerPrompt,
   dateKeyForDayPlan,
@@ -394,9 +394,14 @@ export default function PlannerChatPage() {
     [activityConfigs, activeChildId],
   )
 
-  // Adjust hoursPerDay based on energy selection and routine total
+  // Adjust hoursPerDay based on energy selection and routine total.
+  //
+  // UX-206: the total is read from the CONFIGS, weighted by how often each one
+  // actually runs — not re-parsed out of the routine prose the app just wrote.
+  // A `20m · 3x/week` activity used to cost 20 minutes of budget on all five
+  // days; it now costs 12. The energy multipliers below are untouched.
   useEffect(() => {
-    const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
+    const routineTotal = routineDailyBudgetMinutes(activityConfigs)
     if (weekEnergy === 'full') {
       setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3)
     } else if (weekEnergy === 'lighter') {
@@ -404,7 +409,7 @@ export default function PlannerChatPage() {
     } else {
       setHoursPerDay(TOUGH_WEEK_FIXED_MINUTES / 60)
     }
-  }, [weekEnergy, dailyRoutine])
+  }, [weekEnergy, activityConfigs])
 
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),

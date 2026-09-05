@@ -18,6 +18,8 @@
 
 import { WORKBOOK_OWNER_REASON } from '../../core/firebase/activityConfigWrites'
 import type { ChatAction } from '../../core/types'
+import { ActivityFrequencyLabel } from '../../core/types/enums'
+import { nameKey } from '../../core/utils/nameKey'
 import type { ChatActivityConfig } from './useShellyChatActions'
 
 /** The curriculum kinds, narrowed off the `ChatAction` union. */
@@ -47,6 +49,13 @@ export interface ResolvedCurriculumAction {
   config?: ChatActivityConfig
   /** The `sortOrder` a new config will land at. Only set for an add. */
   sortOrder?: number
+  /**
+   * Live activities this add would sit beside under the same name (UX-205).
+   * Only ever set for an `addActivity` that is being OFFERED — never for a card
+   * being re-rendered after the write, where the newly-created config would
+   * match itself.
+   */
+  duplicates?: ChatActivityConfig[]
 }
 
 export type CurriculumResolution =
@@ -71,6 +80,74 @@ export const CURRICULUM_NOTICES = {
     "That didn't match one of your activities, so nothing was changed. Try naming it as it appears in Progress → Curriculum.",
   sharedWorkbook: WORKBOOK_OWNER_REASON,
 } as const
+
+/**
+ * The live activities an add would duplicate by name (UX-205).
+ *
+ * The chat had no duplicate check at all: `resolveCurriculumAction` resolves the
+ * other two kinds by id and the docblock notes that an add "names no existing
+ * doc", so nothing ever compared the proposed name against the family's list.
+ * The owner's curriculum accumulated a second "Prayer and Scripture", a second
+ * "Sight word games", a second "Dad's Lab: micro:bit" — each one raising the day
+ * budget by its own minutes, so the app never saw the number as wrong.
+ *
+ * **Exact-key match only.** {@link nameKey} drops punctuation and case, so
+ * "Booster cards" matches "booster cards!" — but "The Good and the Beautiful
+ * Math" does NOT match "Good and the Beautiful Math", because those differ by a
+ * real word. A looser near-match would catch that pair and would also catch
+ * genuinely different activities; a false "this already exists" on a new
+ * activity is a worse failure than a duplicate the parent can now see and
+ * delete. The near-match is filed separately (UX-207).
+ *
+ * **Audience-scoped.** Only configs the new one would actually sit beside
+ * count: a shared add is compared against everything, a per-child add against
+ * that child's own rows plus the shared ones.
+ *
+ * **Completed configs are excluded.** A finished program is history, and
+ * starting it again is a legitimate thing to do rather than a duplicate.
+ */
+export function findDuplicateActivities(
+  action: Extract<CurriculumAction, { kind: 'addActivity' }>,
+  configs: ChatActivityConfig[],
+): ChatActivityConfig[] {
+  const key = nameKey(action.name)
+  if (!key) return []
+  const audience = action.shared === true ? 'both' : action.childId
+  return configs.filter(
+    (c) =>
+      !c.completed &&
+      nameKey(c.name) === key &&
+      (audience === 'both' || c.childId === 'both' || c.childId === audience),
+  )
+}
+
+/**
+ * "You already have …" — the line the confirm card shows above an add that
+ * would create a second row with the same name.
+ *
+ * Deliberately NOT a refusal. The parent may genuinely want two Prayer and
+ * Scripture blocks, and blocking an add the model got right would be worse than
+ * the duplicate. The card states what is already there — with its minutes and
+ * its cadence, so she can tell a real duplicate from a differently-shaped
+ * second block — and she still taps Confirm.
+ */
+export function duplicateActivityNotice(matches: ChatActivityConfig[]): string {
+  if (matches.length === 0) return ''
+  const [first] = matches
+  const shape = [`${first.defaultMinutes}m`, frequencyPhrase(first)].filter(Boolean).join(' · ')
+  const already =
+    matches.length === 1
+      ? `You already have "${first.name}" (${shape}).`
+      : `You already have ${matches.length} activities called "${first.name}" (the first is ${shape}).`
+  return `${already} Confirming adds another one — both will be planned, and both will count toward the day budget.`
+}
+
+/** An existing config's cadence in words, or '' when it stored an odd value. */
+function frequencyPhrase(config: ChatActivityConfig): string {
+  const frequency = config.frequency
+  if (!frequency) return ''
+  return ActivityFrequencyLabel[frequency] ?? frequency
+}
 
 /** "GATB Math 3 is already finished" — never quoting an id back. */
 export function alreadyCompleteNotice(name: string): string {
@@ -160,7 +237,16 @@ export function resolveCurriculumAction(
     if (action.type === 'workbook' && action.shared) {
       return { ok: false, notice: CURRICULUM_NOTICES.sharedWorkbook }
     }
-    return { ok: true, resolved: { action, sortOrder: nextActivitySortOrder(configs) } }
+    return {
+      ok: true,
+      resolved: {
+        action,
+        sortOrder: nextActivitySortOrder(configs),
+        // UX-205 — computed on the OFFER path only. Re-computing at display
+        // time would match the config the confirmed write just created.
+        duplicates: findDuplicateActivities(action, configs),
+      },
+    }
   }
 
   const config = resolveExistingConfig(configs, action)

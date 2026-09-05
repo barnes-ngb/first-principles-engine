@@ -1050,6 +1050,14 @@ Rules:
  *  - **There is no delete, and no un-finish.** Completion is the only removal,
  *    and nothing in the app reverses it. The model must say so before proposing.
  *
+ * A third rule joined them in UX-205: **check ACTIVITIES before adding.** The
+ * owner's curriculum accumulated a second "Prayer and Scripture", a second
+ * "Sight word games" and three near-paraphrases of Good and the Beautiful
+ * titles, each planning every day and each raising the day budget. This is a
+ * prompt and therefore a wish — the CONTROL is the confirm card, which now
+ * names what the add would duplicate — but a model told what already exists has
+ * no reason to propose a second copy of it.
+ *
  * Kept explicitly distinct from its three neighbours, because the failure mode
  * is reaching for the wrong one: changing WHAT curriculum exists is this action;
  * changing how long one runs is `setActivityMinutes`; changing what is on a day
@@ -1078,6 +1086,7 @@ Rules for addActivity:
 - WORKBOOKS BELONG TO ONE CHILD. A workbook is the same book at a different page for each child, so "shared":true with "type":"workbook" is rejected outright. Add a separate workbook per child instead. "shared":true is fine for a routine or an activity both boys genuinely do together — and TELL the parent it lands on both boys' lists before you propose it.
 - "totalUnits" and "currentPosition" are optional whole numbers of at least 1, and the position can't be past the total. Include them only when the parent gives you real numbers — never invent a book's length.
 - Do NOT pick an ordering; the app puts a new activity at the end of the list.
+- CHECK THE ACTIVITIES SECTION FIRST. It lists what already exists. If the parent's ask is already there under any name, say so and offer to change THAT row — its minutes with setActivityMinutes, or its position with setActivityPosition — instead of adding a second one. Only propose an add for something genuinely new. If she clearly wants a second block of something she already has, add it and SAY that it will sit beside the existing one.
 
 Rules for markActivityComplete:
 - This RETIRES the program: it stops appearing in future plans. Everything already logged against it stays exactly where it is — no hours move, no day changes.

@@ -10,7 +10,7 @@ import type {
   WeekPlan,
 } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
-import { AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
+import { ActivityFrequency, AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
 import { ALL_SKILL_TAGS, SKILL_TAG_MAP, suggestTagsForSubject } from '../../core/types/skillTags'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { getEffectiveMasteryGate } from './skipAdvisor.logic'
@@ -57,7 +57,78 @@ export function activityConfigsToRoutineText(configs: ActivityConfig[]): string 
     .join('\n')
 }
 
-/** Parse a routine string and return total minutes per day. */
+// ── The day budget, weighted by how often an activity actually runs (UX-206) ──
+
+/** School days in a planning week — the denominator every cadence divides into. */
+export const SCHOOL_DAYS_PER_WEEK = 5
+
+/**
+ * How many of the five school days an activity runs on.
+ *
+ * Read off `ActivityFrequency` rather than invented: `daily` is all five, `3x`
+ * is three, and so on. `as-needed` is the one member with no cadence in its
+ * name; it is costed as ONE day rather than zero, because the routine text
+ * still emits it and the planner still plans it — a budget that paid nothing
+ * for something the planner puts on the day would understate in the same way
+ * the old total overstated, just in the other direction.
+ */
+export function frequencyDaysPerWeek(frequency: ActivityFrequency): number {
+  switch (frequency) {
+    case ActivityFrequency.Daily:
+      return SCHOOL_DAYS_PER_WEEK
+    case ActivityFrequency.ThreePerWeek:
+      return 3
+    case ActivityFrequency.TwoPerWeek:
+      return 2
+    case ActivityFrequency.OnePerWeek:
+      return 1
+    case ActivityFrequency.AsNeeded:
+      return 1
+  }
+}
+
+/**
+ * The minutes an average school day of this routine costs.
+ *
+ * **The fix for UX-206's narrow half.** Two things were wrong with the number
+ * this replaces:
+ *
+ *  1. `activityConfigsToRoutineText` emits every non-completed config at its
+ *     full `defaultMinutes` with no cadence weighting, so a `20m · 3x/week`
+ *     activity was costed at 20 minutes on all five days — 100 minutes a week
+ *     of budget for 60 minutes of activity. Weighted, it costs 12m/day.
+ *  2. The total was recovered by RE-PARSING the prose the app had just written,
+ *     with a regex whose miss case silently contributed 15 minutes
+ *     ({@link parseRoutineTotalMinutes}). Reading the configs directly cannot
+ *     miss, and cannot drift from the string's formatting.
+ *
+ * Summed as exact fractions and rounded once, so five 3x/week items don't
+ * accumulate five separate rounding errors.
+ *
+ * Deliberately unchanged: WHICH configs are counted. Every non-completed config
+ * still counts, of every type — making the orphaned `activity`/`app` rows
+ * visible is UX-204's job, and removing one from the routine is the owner's
+ * decision, one row at a time.
+ */
+export function routineDailyBudgetMinutes(configs: ActivityConfig[]): number {
+  const weekly = configs
+    .filter((c) => !c.completed)
+    .reduce(
+      (total, c) => total + c.defaultMinutes * frequencyDaysPerWeek(c.frequency),
+      0,
+    )
+  return Math.round(weekly / SCHOOL_DAYS_PER_WEEK)
+}
+
+/**
+ * Parse a routine string and return total minutes per day.
+ *
+ * @deprecated UX-206 — do not reach for this for a budget. It re-parses prose
+ * the app itself generated, and a line its regex does not match contributes a
+ * silent 15 minutes rather than failing. {@link routineDailyBudgetMinutes} reads
+ * the configs directly and weights each one by how often it actually runs.
+ * Retained only for routine text that has no configs behind it.
+ */
 export function parseRoutineTotalMinutes(routine: string): number {
   if (!routine) return 0
   let total = 0

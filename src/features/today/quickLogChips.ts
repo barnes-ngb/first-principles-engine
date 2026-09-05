@@ -91,6 +91,7 @@
 
 import type { ActivityConfig } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
+import { nameKey } from '../../core/utils/nameKey'
 
 export interface QuickLogChip {
   /** What the kid reads on the chip. */
@@ -139,9 +140,15 @@ export const OTHER_QUICK_LOG_CHIP: QuickLogChip =
  *
  * "📚 Reading" and a family config named "Reading" are the same chip to a kid,
  * and showing both is the kind of small mess that makes a row feel broken.
+ *
+ * UX-205: the rule itself now has ONE definition in `core/utils/nameKey`, which
+ * the chat's duplicate-activity check and Curriculum's scan matcher also read —
+ * this keeps its name and its callers, and delegates. Two surfaces disagreeing
+ * about whether two names are the same thing is exactly the bug that made a
+ * duplicated activity invisible.
  */
 export function quickLogLabelKey(label: string): string {
-  return label.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return nameKey(label)
 }
 
 /** Does this config want to appear on the quick-log row? */
