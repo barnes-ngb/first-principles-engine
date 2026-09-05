@@ -48,6 +48,9 @@ import {
   ImageRetryDoor,
   type ImageGenerationFailure,
 } from './imageGenerationFailure'
+import CustomLookCard from './CustomLookCard'
+import { hasCustomPictureNote } from './customPictureNote'
+import { drawnAsLine } from './revisedPromptLine'
 import { StickerCategory } from '../../core/types/enums'
 import type { Sticker, StickerTag } from '../../core/types'
 import { STICKER_TAG_LABELS } from '../../core/types'
@@ -158,6 +161,14 @@ export default function SketchScanner({
    */
   const [fancyFailure, setFancyFailure] = useState<ImageGenerationFailure | null>(null)
   const [fancyAlternatives, setFancyAlternatives] = useState<string[]>([])
+  /**
+   * The FEAT-197 "+ My own look" note — one subject change riding alongside the
+   * picked look ("put her in a space suit"). One-off: it is never saved, and it
+   * is cleared with the rest of the dialog's state on reset.
+   */
+  const [customNote, setCustomNote] = useState('')
+  /** The rewriter's version of the note, when it changed the words (FEAT-197). */
+  const [revisedNote, setRevisedNote] = useState<string | undefined>(undefined)
 
   // Shared tagging (applies to whichever version is saved)
   const [tags, setTags] = useState<StickerTag[]>([])
@@ -175,6 +186,14 @@ export default function SketchScanner({
   const sourceDrawingIdRef = useRef<string | null>(null)
   const { enhanceSketch, imageFailureRef } = useAI()
 
+  // A note is the only free text this door has (FEAT-197), so it decides both
+  // whether the retry card's advice can be about wording and whether a tapped
+  // rewording has anywhere to land.
+  const retryDoor = hasCustomPictureNote(customNote)
+    ? ImageRetryDoor.RedrawNote
+    : ImageRetryDoor.Redraw
+  const drawnAs = drawnAsLine(customNote, revisedNote, audience)
+
   const reset = useCallback(() => {
     setStage('capture')
     setPreviewTab('cleaned')
@@ -191,6 +210,9 @@ export default function SketchScanner({
     setEnhanceError(null)
     setFancyFailure(null)
     setFancyAlternatives([])
+    // One-off, so it never survives a dialog (FEAT-197).
+    setCustomNote('')
+    setRevisedNote(undefined)
     resetLabel()
     setTags([])
     setProfile(childProfile ?? 'both')
@@ -289,7 +311,7 @@ export default function SketchScanner({
     }
   }, [originalFile, originalStoragePath, familyId])
 
-  const handleMakeFancy = useCallback(async () => {
+  const handleMakeFancy = useCallback(async (noteOverride?: string) => {
     // At the cap the paid call never goes out (FEAT-166) — and neither does the
     // Storage upload behind it: the guard sits ahead of `ensureOriginalUploaded`
     // so a capped tap costs nothing at all. The style controls already show the
@@ -299,7 +321,14 @@ export default function SketchScanner({
     setEnhanceError(null)
     setFancyFailure(null)
     setFancyAlternatives([])
+    setRevisedNote(undefined)
     setPreviewTab('fancy')
+
+    // A tapped alternative from the retry card IS the new note (FEAT-197 ×
+    // FEAT-195) — it replaces what was typed rather than opening a second path,
+    // and the generation it starts counts as one like any other.
+    const note = noteOverride ?? customNote
+    if (noteOverride !== undefined) setCustomNote(noteOverride)
 
     try {
       const storagePath = await ensureOriginalUploaded()
@@ -311,12 +340,13 @@ export default function SketchScanner({
       const result = await enhanceSketch({
         familyId,
         sketchStoragePath: storagePath,
-        ...resolveFancyEnhanceParams(styleId),
+        ...resolveFancyEnhanceParams(styleId, note),
       })
 
       if (result?.url) {
         setFancyUrl(result.url)
         setFancyStoragePath(result.storagePath)
+        setRevisedNote(result.revisedNote)
         // A real image came back: count the paid call (FEAT-166). A redo with
         // another style counts again — each is another real call.
         //
@@ -359,6 +389,7 @@ export default function SketchScanner({
     enhanceSketch,
     familyId,
     styleId,
+    customNote,
     recordGeneration,
     imageFailureRef,
   ])
@@ -624,6 +655,15 @@ export default function SketchScanner({
                               />
                             ))}
                           </Box>
+                          {/* The second axis (FEAT-197): a look says HOW the
+                              drawing is redrawn, this says WHAT changes in it.
+                              After the chips and never instead of one. */}
+                          <CustomLookCard
+                            value={customNote}
+                            onChange={setCustomNote}
+                            audience={audience}
+                            disabled={enhancing}
+                          />
                           <Box>
                             <Button
                               variant="contained"
@@ -645,15 +685,21 @@ export default function SketchScanner({
                         </Typography>
                       )}
                       {/* One card for every way a picture can fail to arrive
-                          (FEAT-195). No tappable alternatives here: this door
-                          sends no caption, so there are no words of the kid's to
-                          reword — the card shows the written tips instead. */}
+                          (FEAT-195). With no note this door sends no words at
+                          all, so the card shows the written tips; with one
+                          (FEAT-197) the server's rewordings ARE rewordings of
+                          the note, and tapping one replaces it and regenerates. */}
                       {fancyFailure && (
                         <ImageRetryCard
                           failure={fancyFailure}
                           audience={audience}
-                          door={ImageRetryDoor.Redraw}
+                          door={retryDoor}
                           alternatives={fancyAlternatives}
+                          onUseAlternative={
+                            hasCustomPictureNote(customNote)
+                              ? (text) => { void handleMakeFancy(text) }
+                              : undefined
+                          }
                           onRetry={() => { void handleMakeFancy() }}
                           retryLabel="Make it fancy"
                         />
@@ -667,6 +713,14 @@ export default function SketchScanner({
             {/* Re-style controls once a fancy version exists */}
             {previewTab === 'fancy' && fancyUrl && !enhancing && (
               <Stack spacing={1}>
+                {/* What the picture maker was actually asked for, when the
+                    copyright rewriter changed the note (FEAT-195 × FEAT-197).
+                    Parent audience only, and only when the words moved. */}
+                {drawnAs && (
+                  <Typography variant="caption" color="text.secondary">
+                    {drawnAs}
+                  </Typography>
+                )}
                 {capReached ? (
                   /* "Try another style" is the same paid call as the first one,
                      so the cap closes this door too (FEAT-166). The fancy
@@ -688,6 +742,13 @@ export default function SketchScanner({
                         />
                       ))}
                     </Box>
+                    {/* Same second axis on the redo (FEAT-197). */}
+                    <CustomLookCard
+                      value={customNote}
+                      onChange={setCustomNote}
+                      audience={audience}
+                      disabled={enhancing}
+                    />
                     <Box>
                       <Button
                         size="small"
@@ -713,8 +774,13 @@ export default function SketchScanner({
                   <ImageRetryCard
                     failure={fancyFailure}
                     audience={audience}
-                    door={ImageRetryDoor.Redraw}
+                    door={retryDoor}
                     alternatives={fancyAlternatives}
+                    onUseAlternative={
+                      hasCustomPictureNote(customNote)
+                        ? (text) => { void handleMakeFancy(text) }
+                        : undefined
+                    }
                     onRetry={() => { void handleMakeFancy() }}
                     retryLabel="Make it with this style"
                   />

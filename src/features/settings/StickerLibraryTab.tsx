@@ -41,6 +41,8 @@ import {
 } from '../books/imageGenerationFailure'
 import { planStickerEdit } from '../books/stickerLabelEdit'
 import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from '../books/drawingStickerStyles'
+import CustomLookCard from '../books/CustomLookCard'
+import { hasCustomPictureNote } from '../books/customPictureNote'
 import { CHECKERBOARD_BG } from '../books/DrawingChoiceDialog'
 import { printStickerSheet } from '../books/printStickerSheet'
 import {
@@ -179,6 +181,12 @@ export default function StickerLibraryTab({
    */
   const [makeFailure, setMakeFailure] = useState<ImageGenerationFailure | null>(null)
   const [makeAlternatives, setMakeAlternatives] = useState<string[]>([])
+  /**
+   * The FEAT-197 "+ My own look" note — one subject change riding alongside the
+   * picked look. One-off: it lives as long as the dialog and is never written to
+   * the version it makes.
+   */
+  const [makeCustomNote, setMakeCustomNote] = useState('')
 
   const load = useCallback(async () => {
     if (!familyId) return
@@ -305,7 +313,7 @@ export default function StickerLibraryTab({
     if (result.ok) setEditTarget(null)
   }, [persistPendingEdit, saving])
 
-  const handleMakeVersion = useCallback(async () => {
+  const handleMakeVersion = useCallback(async (noteOverride?: string) => {
     if (!editTarget?.id || makingVersion) return
     // At the cap, refuse before *anything* happens (FEAT-165): no paid call, and
     // no adoption write either — a sticker must not be pulled into a drawing
@@ -315,6 +323,10 @@ export default function StickerLibraryTab({
     setMakeError(null)
     setMakeFailure(null)
     setMakeAlternatives([])
+    // A tapped alternative from the retry card IS the new note (FEAT-197 ×
+    // FEAT-195): it replaces what was typed and starts one new generation.
+    const note = noteOverride ?? makeCustomNote
+    if (noteOverride !== undefined) setMakeCustomNote(noteOverride)
     try {
       // Commit anything typed in the edit dialog first, so a rename entered here
       // is not discarded by generating, and the new version carries the name the
@@ -338,6 +350,7 @@ export default function StickerLibraryTab({
         familyId,
         source,
         styleId: makeStyleId,
+        customNote: note,
         sourceDrawingId,
         label: persisted.label,
         enhanceSketch,
@@ -368,6 +381,7 @@ export default function StickerLibraryTab({
     makingVersion,
     capReached,
     makeStyleId,
+    makeCustomNote,
     familyId,
     enhanceSketch,
     load,
@@ -905,7 +919,12 @@ export default function StickerLibraryTab({
             <Button
               variant="outlined"
               startIcon={<AutoAwesomeIcon />}
-              onClick={() => { setMakeError(null); setMakeVersionsOpen(true) }}
+              onClick={() => {
+                setMakeError(null)
+                // One-off per picture (FEAT-197): a fresh open starts blank.
+                setMakeCustomNote('')
+                setMakeVersionsOpen(true)
+              }}
               sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
             >
               Make more versions
@@ -964,6 +983,14 @@ export default function StickerLibraryTab({
                     />
                   ))}
                 </Box>
+                {/* The second axis (FEAT-197): the look says HOW, this says
+                    WHAT changes. After the chips, never instead of one. */}
+                <CustomLookCard
+                  value={makeCustomNote}
+                  onChange={setMakeCustomNote}
+                  audience={audience}
+                  disabled={makingVersion}
+                />
                 {/* One tap, one picture (FEAT-178). At the cap this whole branch
                     is the nudge instead, so the hint and ART_QUOTA_MESSAGE are
                     never both on screen. */}
@@ -976,14 +1003,24 @@ export default function StickerLibraryTab({
               </Typography>
             )}
             {/* One card for every way a picture can fail to arrive (FEAT-195).
-                No tappable alternatives — a version re-draws a saved drawing and
-                sends no words to reword. */}
+                With no note this door sends no words to reword; with one
+                (FEAT-197) the rewordings are of the note, and tapping one
+                replaces it and regenerates. */}
             {makeFailure && (
               <ImageRetryCard
                 failure={makeFailure}
                 audience={audience}
-                door={ImageRetryDoor.Redraw}
+                door={
+                  hasCustomPictureNote(makeCustomNote)
+                    ? ImageRetryDoor.RedrawNote
+                    : ImageRetryDoor.Redraw
+                }
                 alternatives={makeAlternatives}
+                onUseAlternative={
+                  hasCustomPictureNote(makeCustomNote)
+                    ? (text) => { void handleMakeVersion(text) }
+                    : undefined
+                }
                 onRetry={() => { void handleMakeVersion() }}
                 retryLabel="Make more versions"
               />

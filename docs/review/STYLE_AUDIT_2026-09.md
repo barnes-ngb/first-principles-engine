@@ -435,6 +435,43 @@ existing `themeImagePrefix` argument carries it with no signature change.
 
 ---
 
+### ✅ HALF-CLOSED — FEAT-197 (2026-09-05): the subject half is built, the look half is not
+
+**This section asked the wrong question, and the owner's report said so.** It assumed the want was
+to describe a *look* in free text, and proposed a chip that sets the style to `general` so the
+parent's words become the style. Two stickers of one drawing in the `space` look showed otherwise:
+*"it seems to make everything just space-filled… I was thinking put them in a space suit."* Putting
+someone in a space suit changes **what is in** the picture; every look in the picker changes **how**
+it is drawn. That is two axes, and the design above only had one.
+
+**What shipped** is therefore a *subject* clause, not a style one: `EnhanceSketchRequest.customNote`
+lands after the whole recipe as *"Also change what is in the picture: …"*, with the prompt itself
+stating that the art style is fixed by the block above and that any part of the note naming a style,
+medium or look is to be ignored. The recipe is byte-identical with and without one. The picked look
+still owns the picture. FEAT-174's precedence is untouched — it was never reopened, because the note
+never becomes a style prefix.
+
+**The costs this section priced were right, and are paid:** the note goes through
+`rewriteForCopyright` (its own call, on the same Haiku), the cap and normalization are one shared
+function both projects compile (`functions/src/shared/customPictureNote.ts`), and `artHelpContent`
+gained its "you wrote this one" case as a line per surface per audience rather than a `styleBlurb` —
+the note is not a picker entry, so the "every id has a blurb" invariant is untouched.
+
+**Two calls this section made that the owner's report overturned, both deliberate:**
+
+- *"Kid surfaces: parent-gated."* It is **not** parent-gated. The doors are the boys' own, the ask
+  was theirs, and a kid typing "give her a cape" is the feature working — so the kid copy is held to
+  the shared readability bar instead.
+- *"Not a new field but a chip that sets the style to `general`."* That would have made the words the
+  style, which is the half still unbuilt. The chip is beside the looks and deselects none of them.
+
+**Still open, and now the whole of UX-177:** describing a **look** in free text. Unbuilt, and the
+reason is unchanged — a free-text look is a second art direction reaching the same prompt as the
+recipe. Also filed: **UX-180**, the Book Editor's scene door, which FEAT-197 deliberately did not
+touch (one run, one surface).
+
+---
+
 ## 8. Owner-reported
 
 > *"I'm not sure the themes vary the sketch a lot — cartoon vs fantasy was small."*
@@ -495,7 +532,7 @@ path, six theme recipes are unreachable, and the custom-theme feature cannot rea
 
 | # | ID | P | One line | Batch |
 |---|---|---|---|---|
-| 1 | **UX-160** | P1 | ✅ **FIXED — FEAT-194.** Custom book themes were a write-only dead end: a parent filled in four fields, no book could ever carry the id, the client never read the collection, and creating one silently blanked the shelf. **Retired** (the recommended half of Batch B item 8): `CreateThemeDialog`, the shelf's *+ New Theme* chip, `bookThemesCollection` and **both** server custom-theme lookups are deleted; existing `bookThemes` documents are left in place, unread. The want behind it is per-book, not reusable, so it returns as the one-off `generationConfig.customTheme` — a parent-only *Custom…* card on the two theme surfaces, threaded into the STORY prompt only and never into an image prompt (FEAT-189's lesson, one table over). The dropped *"What style should pictures be?"* field has no replacement by design — that is **UX-177** | B |
+| 1 | **UX-160** | P1 | ✅ **FIXED — FEAT-194.** Custom book themes were a write-only dead end: a parent filled in four fields, no book could ever carry the id, the client never read the collection, and creating one silently blanked the shelf. **Retired** (the recommended half of Batch B item 8): `CreateThemeDialog`, the shelf's *+ New Theme* chip, `bookThemesCollection` and **both** server custom-theme lookups are deleted; existing `bookThemes` documents are left in place, unread. The want behind it is per-book, not reusable, so it returns as the one-off `generationConfig.customTheme` — a parent-only *Custom…* card on the two theme surfaces, threaded into the STORY prompt only and never into an image prompt (FEAT-189's lesson, one table over). The dropped *"What style should pictures be?"* field has no replacement by design — that is **UX-177**, whose *subject* half landed as FEAT-197 and whose *look* half is still open | B |
 | 2 | **UX-179** | P1 | Cartoon and Fantasy are the only two of nine sticker looks naming the **same medium** (watercolor washes + a soft ink line), and the one axis that fully separates them — palette — is the axis a re-draw of the child's own drawing most constrains. **The measured cause of the owner's report** | A ✅ |
 | 3 | **UX-161** | P1 | "Keep my style" sends the full watercolor recipe under *"follow it exactly"*; three labelled intensity bands resolve to two styles, two of which are identical; "Full reimagine" says cartoon and sends comic halftones | A ✅ + B |
 | 4 | **UX-172** | P1 | Four theme ids still reach the **story** writer as nothing — including `sight_words`, which `inferBookTheme` returns for *every* book made from a word list | B |
@@ -511,7 +548,7 @@ UX-168 (Blocky sends two paths) · UX-169 (`STYLE_RECIPES.realistic` unreachable
 UX-170 (six theme recipes unreachable) · UX-171 (`garden-warfare` ↔ `platformer`, the closest measured
 pair — **fixed, FEAT-193**) · UX-173 (`IMAGE STYLE:` reaches the story writer while a different table draws the picture) ·
 UX-174 (a fourth copy of `GENERATION_STYLES`) · UX-175 (`autoSuggestTheme`, a fifth classifier, maps to
-a dead id) · UX-177 (the free-text look — design) · UX-178 (`schedule-card` / `reward-chart` /
+a dead id) · UX-177 (the free-text look — design; the SUBJECT half built as FEAT-197, the LOOK half still open) · UX-178 (`schedule-card` / `reward-chart` /
 `theme-illustration` have no caller).
 
 ---
@@ -656,7 +693,7 @@ a **story-prompt** change, outside the sanctioned exception. Filed as **UX-172**
 ### Batch C — design + naming (human-ranked)
 
 14. **UX-177** — the free-text look, as the "+ My own look" chip (§7), with the copyright-rewriter cost
-    stated up front.
+    stated up front. **Half-landed 2026-09-05 as FEAT-197** — as a *subject* card, not a style one; see §7.
 15. **UX-176** — the five renames (§6).
 
 ---

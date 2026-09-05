@@ -197,6 +197,16 @@ export const ImageRetryDoor = {
    * the Workshop's batch. What they CAN change is the style, or the drawing.
    */
   Redraw: 'redraw',
+  /**
+   * A redraw that DOES carry words — a sticker door with a FEAT-197 "+ My own
+   * look" note on it. The same door as {@link ImageRetryDoor.Redraw} in every
+   * other respect, but its one free-text field is exactly what the safety filter
+   * refused, so here the wording advice is followable and the server's
+   * rewordings are rewordings of the note. Splitting it out rather than
+   * loosening `Redraw` keeps that door's promise intact: with no note there is
+   * still nothing on screen to reword.
+   */
+  RedrawNote: 'redraw-note',
 } as const
 export type ImageRetryDoor = (typeof ImageRetryDoor)[keyof typeof ImageRetryDoor]
 
@@ -235,6 +245,15 @@ const TIPS: Readonly<
       'Try another drawing, or crop it closer to just the character.',
     ],
     kid: ['Try a new style.', 'Try a new drawing.'],
+  },
+  // The same door with a note typed on it (FEAT-197): here there ARE words, and
+  // they are what got refused, so the first tip is about them.
+  [ImageRetryDoor.RedrawNote]: {
+    parent: [
+      'Say what the change looks like instead of naming it — "a sparkly blue ice dress" works where a name from a film gets blocked.',
+      'Try a smaller change, or clear it and use the style on its own.',
+    ],
+    kid: ['Say what it looks like.', 'Try a smaller change.'],
   },
 }
 
