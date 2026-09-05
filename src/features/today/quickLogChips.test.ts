@@ -325,6 +325,16 @@ describe('familyQuickLogActivities — the one shared answer', () => {
     expect(flatten(resolveCapturePresetGroups(configs)).map((p) => p.label)).toContain('Packing')
   })
 
+  it('narrows an off-type stored duration instead of passing NaN to a form field', () => {
+    // `defaultMinutes` is typed `number` but comes from unvalidated Firestore.
+    for (const bad of [undefined, null, 'twenty', NaN]) {
+      const [activity] = familyQuickLogActivities([
+        config({ id: 'x', name: 'Packing', quickLog: true, defaultMinutes: bad as unknown as number }),
+      ])
+      expect(activity.minutes).toBe(0)
+    }
+  })
+
   it('drops a nameless config rather than offering a blank chip', () => {
     expect(familyQuickLogActivities([config({ id: 'x', name: '   ', quickLog: true })])).toEqual([])
   })

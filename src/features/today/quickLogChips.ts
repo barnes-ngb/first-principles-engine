@@ -243,7 +243,12 @@ export function familyQuickLogActivities(
       id: config.id,
       label,
       subject: config.subjectBucket ?? 'Other',
-      minutes: config.defaultMinutes,
+      // Narrowed rather than trusted: `defaultMinutes` is typed `number` but
+      // arrives from unvalidated Firestore, and a stored `null`/`"20"`/`NaN`
+      // would reach the capture panel's duration field and render there. Zero
+      // means "suggest nothing", which the field already handles. (The same
+      // structural-narrowing rule ARCH-47 slice 4 applied to the hours fold.)
+      minutes: Number.isFinite(config.defaultMinutes) ? Number(config.defaultMinutes) : 0,
     })
   }
   return out
