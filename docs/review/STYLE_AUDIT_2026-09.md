@@ -467,7 +467,7 @@ the note is not a picker entry, so the "every id has a blurb" invariant is untou
 
 **Still open, and now the whole of UX-177:** describing a **look** in free text. Unbuilt, and the
 reason is unchanged — a free-text look is a second art direction reaching the same prompt as the
-recipe. Also filed: **UX-180**, the Book Editor's scene door, which FEAT-197 deliberately did not
+recipe. Also filed: **UX-181**, the Book Editor's scene door, which FEAT-197 deliberately did not
 touch (one run, one surface).
 
 ---
