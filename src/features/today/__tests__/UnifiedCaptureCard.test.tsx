@@ -3,11 +3,16 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import UnifiedCaptureCard from '../UnifiedCaptureCard'
-import type { Child } from '../../../core/types'
+import type { ActivityConfig, Child } from '../../../core/types'
 
 type AddDocCall = { collectionKey: string; data: Record<string, unknown> }
 const addDocCalls: AddDocCall[] = []
 const updateDocCalls: Record<string, unknown>[] = []
+
+// UX-184: the card now reads the family's activity configs (read-only) so a
+// flagged activity is offered here as well as on "⭐ I Did More!". Tests set
+// this before rendering; `[]` is the shape every family has today.
+let familyConfigs: ActivityConfig[] = []
 
 vi.mock('firebase/firestore', () => ({
   addDoc: vi.fn((col: { __key: string }, data: Record<string, unknown>) => {
@@ -19,11 +24,18 @@ vi.mock('firebase/firestore', () => ({
     updateDocCalls.push(data)
     return Promise.resolve()
   }),
+  query: vi.fn(() => ({ __key: 'activityConfigs' })),
+  where: vi.fn(() => ({})),
+  onSnapshot: vi.fn((_q: unknown, next: (snap: unknown) => void) => {
+    next({ docs: familyConfigs.map((c) => ({ id: c.id, data: () => c })) })
+    return () => {}
+  }),
 }))
 
 vi.mock('../../../core/firebase/firestore', () => ({
   artifactsCollection: vi.fn(() => ({ __key: 'artifacts' })),
   hoursCollection: vi.fn(() => ({ __key: 'hours' })),
+  activityConfigsCollection: vi.fn(() => ({ __key: 'activityConfigs' })),
 }))
 
 vi.mock('../../../core/firebase/upload', () => ({
@@ -89,9 +101,11 @@ function renderCard(overrides: {
   selectedChildId?: string
   variant?: 'parent' | 'kid'
   activeChild?: Child
+  familyConfigs?: ActivityConfig[]
 } = {}) {
   addDocCalls.length = 0
   updateDocCalls.length = 0
+  familyConfigs = overrides.familyConfigs ?? []
   const onSnackMessage = vi.fn()
   const setTodayArtifacts = vi.fn()
   const selectedChildId = overrides.selectedChildId ?? 'lincoln'
@@ -542,5 +556,130 @@ describe('UnifiedCaptureCard (kid variant)', () => {
     // 45 → -5 ten times = -5, clamped to 0
     for (let i = 0; i < 10; i++) fireEvent.click(minus)
     expect(getKidDuration().textContent).toBe('0')
+  })
+})
+
+// ── UX-184 ───────────────────────────────────────────────────────────────────
+//
+// The owner flagged two activities for the kids' quick log, opened his son's
+// Today page, read the FIRST quick-log panel he came to — this one — and
+// reported them missing. They were: FEAT-199 rewired "⭐ I Did More!" further
+// down the page and left this panel hardcoded. The pure resolver is covered in
+// `quickLogChips.test.ts`; these assert the panel actually renders it, which is
+// the half that was broken.
+describe('UnifiedCaptureCard — the family’s quick-log activities (UX-184)', () => {
+  const packing = {
+    id: 'pack',
+    name: 'Packing',
+    type: 'routine',
+    subjectBucket: 'PracticalArts',
+    defaultMinutes: 30,
+    frequency: 'daily',
+    childId: 'both',
+    sortOrder: 1,
+    completed: false,
+    scannable: false,
+    quickLog: true,
+    createdAt: '2026-09-05T00:00:00.000Z',
+    updatedAt: '2026-09-05T00:00:00.000Z',
+  } as ActivityConfig
+
+  it('offers a flagged activity on the kid’s capture panel, in the family’s words', () => {
+    renderCard({ variant: 'kid', familyConfigs: [packing] })
+    expect(screen.getByRole('button', { name: /^Packing$/ })).toBeInTheDocument()
+    // Under its own heading, ahead of the built-in groups.
+    expect(screen.getByText('Yours')).toBeInTheDocument()
+  })
+
+  it('offers it on the parent’s capture panel too', () => {
+    renderCard({ familyConfigs: [packing] })
+    expect(screen.getByRole('button', { name: /^Packing$/ })).toBeInTheDocument()
+  })
+
+  it('shows only the eight built-ins when the family has flagged nothing', () => {
+    renderCard({ familyConfigs: [] })
+    expect(screen.getByRole('button', { name: /Lego build/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Zoo \/ museum trip/i })).toBeInTheDocument()
+    expect(screen.queryByText('Yours')).not.toBeInTheDocument()
+  })
+
+  it('logs the config’s own subject bucket and minutes — not a guess from its name', () => {
+    renderCard({ variant: 'kid', familyConfigs: [packing] })
+    fireEvent.click(screen.getByRole('button', { name: /^Packing$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /save my time/i }))
+
+    return waitFor(() => {
+      expect(addDocCalls.length).toBe(1)
+      expect(addDocCalls[0].collectionKey).toBe('hours')
+      expect(addDocCalls[0].data).toMatchObject({
+        childId: 'lincoln',
+        minutes: 30,
+        // "Packing" guessed from its letters would be Other, which is exactly
+        // what a season of real practical work used to read back as.
+        subjectBucket: 'PracticalArts',
+        source: 'unified-capture',
+        notes: 'Packing',
+      })
+    })
+  })
+
+  // Codex round 1, P2 on PR #1779. A family preset is child-scoped, so changing
+  // the Child field replaces the chip row while its name / subject / minutes
+  // stay in the fields — and a save would then write one child's activity onto
+  // the other child's hours with no chip on screen to explain it.
+  it('clears a family preset’s fields when the parent changes child', async () => {
+    renderCard({ familyConfigs: [packing] })
+    fireEvent.click(screen.getByRole('button', { name: /^Packing$/ }))
+    expect(getActivityNameInput().value).toBe('Packing')
+    expect(getDurationInput().value).toBe('30')
+
+    fireEvent.mouseDown(screen.getByLabelText(/^child$/i))
+    fireEvent.click(await screen.findByRole('option', { name: 'London' }))
+
+    await waitFor(() => {
+      expect(getActivityNameInput().value).toBe('')
+      expect(getDurationInput().value).toBe('')
+    })
+  })
+
+  it('does not carry one child’s activity onto the other child’s hours', async () => {
+    renderCard({ familyConfigs: [packing] })
+    fireEvent.click(screen.getByRole('button', { name: /^Packing$/ }))
+    fireEvent.mouseDown(screen.getByLabelText(/^child$/i))
+    fireEvent.click(await screen.findByRole('option', { name: 'London' }))
+
+    // Nothing to save: the preset's minutes went with it, so the save writes
+    // no hours rather than 30 minutes of "Packing" against London.
+    await waitFor(() => expect(getDurationInput().value).toBe(''))
+    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+    await waitFor(() => {
+      expect(addDocCalls.filter((c) => c.collectionKey === 'hours')).toHaveLength(0)
+    })
+  })
+
+  it('keeps a BUILT-IN preset across a child change — it is valid for any child', async () => {
+    renderCard({ familyConfigs: [packing] })
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    expect(getActivityNameInput().value).toBe('Lego build')
+
+    fireEvent.mouseDown(screen.getByLabelText(/^child$/i))
+    fireEvent.click(await screen.findByRole('option', { name: 'London' }))
+
+    await waitFor(() => expect(getActivityNameInput().value).toBe('Lego build'))
+    expect(getDurationInput().value).toBe('45')
+  })
+
+  it('leaves the built-in presets writing exactly what they always wrote', () => {
+    renderCard({ variant: 'kid', familyConfigs: [packing] })
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save my time/i }))
+
+    return waitFor(() => {
+      expect(addDocCalls[0].data).toMatchObject({
+        minutes: 45,
+        subjectBucket: 'PracticalArts',
+        notes: 'Lego build',
+      })
+    })
   })
 })

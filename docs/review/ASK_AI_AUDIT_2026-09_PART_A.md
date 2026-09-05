@@ -651,7 +651,7 @@ followed.**
    `settings/pendingPlanAdjustment_{childId}` via `stagePlanAdjustment`; the existing test at
    `useShellyChatActions.logic.test.ts:2129–2134` asserts a kid profile keeps the card. Part B owns the kind,
    so Part B owns the finding — but it is a **child-reachable write path**, so it should be ranked alongside
-   F3/UX-184 rather than treated as an ordinary part-B row. *Surfaced by Codex round 3 on this PR.*
+   F3/UX-188 rather than treated as an ordinary part-B row. *Surfaced by Codex round 3 on this PR.*
 
 ---
 

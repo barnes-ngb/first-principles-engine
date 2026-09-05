@@ -12,11 +12,19 @@ import Typography from '@mui/material/Typography'
 
 import type { BookLookupResult, BookProgress, ChapterBook, WorkbookConfig } from '../../core/types'
 import ChapterBookPicker from './ChapterBookPicker'
+import { generateButtonLabel } from './planningWeekSelection'
 import { weekEnergyLabel } from './weekEnergyLabels'
 
 interface PlannerCompactSetupProps {
   childName: string
   weekRangeLabel: string
+  /**
+   * The resolved week (UX-183). This surface's header already named the week, so
+   * its bare "Generate Plan" was vague rather than contradicting — but the two
+   * setup surfaces answer the same question and should answer it the same way.
+   * Optional so a caller with no resolved week falls back to the bare wording.
+   */
+  weekStart?: string
   weekEnergy: 'full' | 'lighter' | 'mvd'
   onWeekEnergyChange: (v: 'full' | 'lighter' | 'mvd') => void
   hoursPerDay: number
@@ -44,6 +52,7 @@ interface PlannerCompactSetupProps {
 export default function PlannerCompactSetup({
   childName,
   weekRangeLabel,
+  weekStart,
   weekEnergy,
   onWeekEnergyChange,
   hoursPerDay,
@@ -180,7 +189,11 @@ export default function PlannerCompactSetup({
           startIcon={generatingWeek ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
           sx={{ py: 1.5, fontWeight: 'bold' }}
         >
-          {generatingWeek ? 'Generating...' : 'Generate Plan'}
+          {generatingWeek
+            ? 'Generating...'
+            : weekStart
+              ? generateButtonLabel(weekStart)
+              : 'Generate Plan'}
         </Button>
         <Button
           variant="outlined"
