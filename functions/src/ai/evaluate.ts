@@ -665,30 +665,78 @@ async function loadCurriculumSnapshot(
 }
 
 /**
- * The parent's existing answer for this week, if any (UX-214).
+ * What we know about the parent's existing answer for this week (UX-214).
  *
- * Both write paths below `.set()` the whole review document, so a regenerate
- * would silently delete a judgement a person recorded. Carrying it forward is
- * the only reason this read exists — nothing here ever writes or changes an
- * answer.
+ * **Three states, not two, and the third is the whole point.** Both write paths
+ * below `.set()` the WHOLE review document, so a regenerate would silently
+ * delete a judgement a person recorded unless it is carried forward. A read that
+ * *failed* is not a confirmed absence — treating it as one is exactly how the
+ * answer gets deleted by a transient network blip — so the caller writes with
+ * `merge` on that path instead of replacing the document.
+ */
+type ExistingReflection =
+  | { known: true; reflection: Record<string, unknown> | undefined }
+  | { known: false };
+
+/**
+ * Read the existing review's reflection. Never throws, never guesses.
+ *
+ * Nothing here writes or changes an answer; its only job is to tell the caller
+ * whether the document's current answer is known.
  */
 async function loadExistingReflection(
   db: Firestore,
   familyId: string,
   reviewDocId: string,
-): Promise<Record<string, unknown> | undefined> {
+): Promise<ExistingReflection> {
   try {
     const snap = await db
       .doc(`families/${familyId}/weeklyReviews/${reviewDocId}`)
       .get();
-    if (!snap.exists) return undefined;
+    if (!snap.exists) return { known: true, reflection: undefined };
     const reflection = (snap.data() ?? {}).reflection;
-    if (!reflection || typeof reflection !== "object") return undefined;
-    return reflection as Record<string, unknown>;
+    if (!reflection || typeof reflection !== "object") {
+      return { known: true, reflection: undefined };
+    }
+    return { known: true, reflection: reflection as Record<string, unknown> };
   } catch (err) {
-    console.warn("[UX-214] Failed to read existing reflection", err);
-    return undefined;
+    console.warn("[UX-214] Could not read the existing reflection", err);
+    return { known: false };
   }
+}
+
+/**
+ * Write the review, preserving an answer we could not read (UX-214).
+ *
+ * The happy path is the replacement `.set()` this function has always done —
+ * every field of a regenerated review is rewritten, and a carried-forward
+ * `reflection` rides along in `review`. When the carry-forward read FAILED we do
+ * not know whether an answer exists, so the document is merged instead of
+ * replaced: every field the new review carries still lands, and a `reflection`
+ * we could not see survives rather than being deleted by a transient error.
+ *
+ * The one residual, stated rather than hidden: on that merge path, if this run
+ * ALSO failed to read the activity configs, a `curriculumPositions` snapshot
+ * recorded earlier stays on the document. It is a real earlier reading, stamped
+ * with the moment it was taken, and every consumer measures elapsed time from
+ * that stamp — so the cost is a slightly stale coverage line for one week, which
+ * is plainly the lesser loss next to deleting a parent's judgement.
+ */
+async function writeReviewDoc(
+  db: Firestore,
+  familyId: string,
+  reviewDocId: string,
+  review: WeeklyReviewDoc,
+  existing: ExistingReflection,
+): Promise<void> {
+  const ref = db
+    .collection(`families/${familyId}/weeklyReviews`)
+    .doc(reviewDocId);
+  if (existing.known) {
+    await ref.set(review);
+    return;
+  }
+  await ref.set(review, { merge: true });
 }
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
@@ -1021,11 +1069,10 @@ export async function generateReviewForChild(
       createdAt: new Date().toISOString(),
     };
     if (curriculumPositions) emptyReview.curriculumPositions = curriculumPositions;
-    if (reflection) emptyReview.reflection = reflection;
-    await db
-      .collection(`families/${familyId}/weeklyReviews`)
-      .doc(reviewDocId)
-      .set(emptyReview);
+    if (reflection.known && reflection.reflection) {
+      emptyReview.reflection = reflection.reflection;
+    }
+    await writeReviewDoc(db, familyId, reviewDocId, emptyReview, reflection);
     return emptyReview;
   }
 
@@ -1096,12 +1143,11 @@ export async function generateReviewForChild(
   );
   if (curriculumPositions) reviewData.curriculumPositions = curriculumPositions;
   const existingReflection = await loadExistingReflection(db, familyId, reviewDocId);
-  if (existingReflection) reviewData.reflection = existingReflection;
+  if (existingReflection.known && existingReflection.reflection) {
+    reviewData.reflection = existingReflection.reflection;
+  }
 
-  await db
-    .collection(`families/${familyId}/weeklyReviews`)
-    .doc(reviewDocId)
-    .set(reviewData);
+  await writeReviewDoc(db, familyId, reviewDocId, reviewData, existingReflection);
 
   // Log AI usage
   await logAiUsage(db, familyId, {

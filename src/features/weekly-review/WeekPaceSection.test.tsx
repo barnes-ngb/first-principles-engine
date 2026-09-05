@@ -48,7 +48,11 @@ const snapshot = (
 const review = (curriculumPositions?: CurriculumSnapshot): WeeklyReview =>
   ({ childId: 'c1', weekKey: '2026-08-30', curriculumPositions } as unknown as WeeklyReview)
 
-function renderSection(current?: CurriculumSnapshot, priors: CurriculumSnapshot[] = []) {
+function renderSection(
+  current?: CurriculumSnapshot,
+  priors: CurriculumSnapshot[] = [],
+  historyState: { loading?: boolean; failed?: boolean } = {},
+) {
   return render(
     <WeekPaceSection
       familyId="fam-1"
@@ -56,6 +60,8 @@ function renderSection(current?: CurriculumSnapshot, priors: CurriculumSnapshot[
       weekKey="2026-08-30"
       review={review(current)}
       history={priors.map((s) => review(s))}
+      historyLoading={historyState.loading ?? false}
+      historyFailed={historyState.failed ?? false}
     />,
   )
 }
@@ -122,6 +128,24 @@ describe('the hours line states a number with no target', () => {
     renderSection()
     expect(screen.getByText('No hours logged this week.')).toBeInTheDocument()
   })
+
+  it('never presents a failed read as an affirmative zero', () => {
+    // A network, permission or index failure leaves the source arrays empty and
+    // would otherwise fold to "No hours logged this week." — a records claim
+    // made on no records.
+    mockUseWeekHours.mockReturnValue({
+      totalMinutes: 0,
+      loading: false,
+      error: new Error('permission-denied'),
+    })
+    renderSection()
+    expect(screen.queryByText('No hours logged this week.')).not.toBeInTheDocument()
+    expect(
+      screen.getByText('Couldn’t read this week’s hours. Try again in a moment.'),
+    ).toBeInTheDocument()
+    // And it does not claim to be the compliance count while it has no count.
+    expect(screen.queryByText(/Counted the same way/)).not.toBeInTheDocument()
+  })
 })
 
 // ── The four states of the rate line (UX-213) ───────────────────────────────
@@ -156,6 +180,25 @@ describe('the observed-rate line, in each state', () => {
       ),
     ).toBeInTheDocument()
     expect(container.textContent).not.toMatch(/behind|should|must|falling|failed/i)
+  })
+
+  it('says nothing about a rate while the earlier weeks are still loading', () => {
+    // The history arrives asynchronously, so an empty list means "not yet",
+    // not "there are none" — flashing "First week recorded" on every page load
+    // of a child who has months of snapshots would make the line untrustworthy.
+    const { container } = renderSection(snapshot(SEP_07, 14), [], { loading: true })
+    expect(container.textContent).not.toMatch(/rate needs two/)
+    expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
+  })
+
+  it('reports a failed history read as unavailable, never as a first week', () => {
+    const { container } = renderSection(snapshot(SEP_07, 14), [], { failed: true })
+    expect(container.textContent).not.toMatch(/rate needs two/)
+    expect(
+      screen.getByText(
+        'Couldn’t read the earlier weeks, so there’s no rate to show yet.',
+      ),
+    ).toBeInTheDocument()
   })
 })
 

@@ -72,11 +72,11 @@ export default function WeeklyReviewPage() {
   // One read, two consumers (UX-213 / UX-214): the observed-rate line needs the
   // most recent earlier position snapshot, and the week's question needs the
   // earlier answers so a run of the same answer is visible.
-  const { reviews: history } = useWeeklyReviewHistory(
-    familyId,
-    activeChildId,
-    weekKey,
-  )
+  const {
+    reviews: history,
+    loading: historyLoading,
+    failed: historyFailed,
+  } = useWeeklyReviewHistory(familyId, activeChildId, weekKey)
 
   // Load weekly review for active child (real-time)
   useEffect(() => {
@@ -294,6 +294,8 @@ export default function WeeklyReviewPage() {
               weekKey={weekKey}
               review={review}
               history={history}
+              historyLoading={historyLoading}
+              historyFailed={historyFailed}
             />
           </SectionErrorBoundary>
 

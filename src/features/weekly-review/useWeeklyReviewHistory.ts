@@ -12,6 +12,13 @@ export interface UseWeeklyReviewHistoryResult {
   /** Earlier reviews for this child, newest first. Missing weeks are absent. */
   reviews: WeeklyReview[]
   loading: boolean
+  /**
+   * True when the read failed. Distinct from an empty list, and the distinction
+   * matters: an empty list means there are genuinely no earlier weeks, while a
+   * failed read means we do not know — and reporting "First week recorded" on a
+   * dropped connection would be a claim made on no evidence.
+   */
+  failed: boolean
 }
 
 /**
@@ -35,6 +42,7 @@ export function useWeeklyReviewHistory(
 ): UseWeeklyReviewHistoryResult {
   const [reviews, setReviews] = useState<WeeklyReview[]>([])
   const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
 
   // Reset during render rather than inside the effect, so one child's earlier
   // answers can never render under another child's name.
@@ -43,6 +51,7 @@ export function useWeeklyReviewHistory(
   if (lastKey !== requestKey) {
     setLastKey(requestKey)
     setReviews([])
+    setFailed(false)
     setLoading(true)
   }
 
@@ -66,11 +75,13 @@ export function useWeeklyReviewHistory(
               id: snap.id,
             })),
         )
+        setFailed(false)
         setLoading(false)
       })
       .catch((err: unknown) => {
         if (cancelled) return
         console.error('[UX-213] Failed to load weekly review history', err)
+        setFailed(true)
         setLoading(false)
       })
 
@@ -79,5 +90,5 @@ export function useWeeklyReviewHistory(
     }
   }, [familyId, childId, weekKey])
 
-  return { reviews, loading }
+  return { reviews, loading, failed }
 }

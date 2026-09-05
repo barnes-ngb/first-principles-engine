@@ -36,6 +36,27 @@
 export const HOURS_SOURCE_CAPTION =
   'Counted the same way as the Records page and the compliance pack.'
 
+/**
+ * What is said when the read failed, instead of a number.
+ *
+ * A failed read is **not** an empty week. Rendering "No hours logged this week."
+ * after a dropped connection or a permission error would present a failure as an
+ * affirmative records result — the one thing a compliance-adjacent surface must
+ * never do.
+ */
+export const HOURS_UNAVAILABLE_LINE =
+  'Couldn’t read this week’s hours. Try again in a moment.'
+
+/**
+ * What is said when the earlier weeks could not be read.
+ *
+ * Same rule one level up: with no history we cannot tell "there is no earlier
+ * week" from "we failed to look", and *"First week recorded"* is a claim. So the
+ * line reports the rate as unavailable rather than asserting a first week.
+ */
+export const HISTORY_UNAVAILABLE_LINE =
+  'Couldn’t read the earlier weeks, so there’s no rate to show yet.'
+
 /** One decimal, with a trailing `.0` dropped: 4.8, 5, 0.5. */
 function formatHours(minutes: number): string {
   const hours = minutes / 60

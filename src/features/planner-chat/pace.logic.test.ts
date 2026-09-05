@@ -134,6 +134,21 @@ describe('computeObservedCoverage', () => {
     expect(result.entries).toEqual([])
   })
 
+  it('tolerates the scheduled run’s own jitter between two weekly recordings', () => {
+    // Snapshots are taken inside the Sunday run, after variable context,
+    // synthesis and model latency and after the earlier children in the family,
+    // so consecutive weekly readings land a few hours short of 168 apart. A
+    // strict seven days would reject last week and claim a first week.
+    const current = snapshot(SEP_07, [{ configId: 'w1', currentPosition: 14 }])
+    const lastSunday = snapshot('2026-08-31T04:30:00.000Z', [
+      { configId: 'w1', currentPosition: 12 },
+    ])
+    const result = computeObservedCoverage(current, [lastSunday])
+    expect(result.notice).toBeNull()
+    expect(result.entries[0].unitsCovered).toBe(2)
+    expect(result.entries[0].weeks).toBe(1)
+  })
+
   it('will not build a rate from two readings taken less than a week apart', () => {
     // A parent regenerating an old review re-reads TODAY's positions and stamps
     // them onto a months-old week. Measuring on the week key would report "no
@@ -143,6 +158,13 @@ describe('computeObservedCoverage', () => {
       { configId: 'w1', currentPosition: 14 },
     ])
     expect(computeObservedCoverage(current, [sameDay]).notice).toBe(
+      NO_BASELINE_NOTICE,
+    )
+    // …and a couple of days is still a re-read, not a second week.
+    const twoDaysBack = snapshot('2026-09-05T01:00:00.000Z', [
+      { configId: 'w1', currentPosition: 14 },
+    ])
+    expect(computeObservedCoverage(current, [twoDaysBack]).notice).toBe(
       NO_BASELINE_NOTICE,
     )
   })
@@ -295,11 +317,22 @@ describe('normalizeCurriculumSnapshot', () => {
         { configId: 'w1', name: 'Math', currentPosition: 10, totalUnits: 60 },
         { configId: 'w2', name: 'Bad', currentPosition: Number.NaN },
         { configId: 'w3', name: 'Worse', currentPosition: 'twelve' },
+        // Negative, matching the server writer's own rule — this would
+        // otherwise print as "lesson -3" and poison the delta.
+        { configId: 'w4', name: 'Negative', currentPosition: -3 },
         { configId: '', name: 'Nameless', currentPosition: 4 },
         null,
       ],
     })
     expect(result?.positions.map((p) => p.configId)).toEqual(['w1'])
+  })
+
+  it('keeps position zero, which is a real reading — not started', () => {
+    const result = normalizeCurriculumSnapshot({
+      recordedAt: AUG_17,
+      positions: [{ configId: 'w1', name: 'New', currentPosition: 0 }],
+    })
+    expect(result?.positions[0].currentPosition).toBe(0)
   })
 
   it('keeps only the optional fields that are actually usable', () => {

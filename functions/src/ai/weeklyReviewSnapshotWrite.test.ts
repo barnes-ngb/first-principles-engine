@@ -18,14 +18,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 interface FakeState {
   configs: Array<{ id: string; data: Record<string, unknown> }>;
   existing: Record<string, unknown> | undefined;
+  /** When true, reading the existing review document throws. */
+  existingReadFails: boolean;
   written: Record<string, unknown> | undefined;
+  writeOptions: unknown;
   configQueries: unknown[][];
 }
 
 const state: FakeState = {
   configs: [],
   existing: undefined,
+  existingReadFails: false,
   written: undefined,
+  writeOptions: undefined,
   configQueries: [],
 };
 
@@ -41,16 +46,20 @@ vi.mock("firebase-admin/firestore", () => ({
         };
       },
       doc: (id: string) => ({
-        set: async (data: Record<string, unknown>) => {
+        set: async (data: Record<string, unknown>, options?: unknown) => {
           state.written = { ...data, __path: `${path}/${id}` };
+          state.writeOptions = options;
         },
       }),
     }),
     doc: () => ({
-      get: async () => ({
-        exists: state.existing !== undefined,
-        data: () => (state.existing ? { reflection: state.existing } : {}),
-      }),
+      get: async () => {
+        if (state.existingReadFails) throw new Error("unavailable");
+        return {
+          exists: state.existing !== undefined,
+          data: () => (state.existing ? { reflection: state.existing } : {}),
+        };
+      },
     }),
   }),
 }));
@@ -77,7 +86,9 @@ const emptyWeek: WeekContext = {
 beforeEach(() => {
   state.configs = [];
   state.existing = undefined;
+  state.existingReadFails = false;
   state.written = undefined;
+  state.writeOptions = undefined;
   state.configQueries = [];
 });
 
@@ -128,5 +139,29 @@ describe("a regenerate does not delete the parent's answer (UX-214)", () => {
   it("writes no reflection key when the parent has not answered", async () => {
     await generateReviewForChild("fam-1", emptyWeek, "key");
     expect(state.written).not.toHaveProperty("reflection");
+    // A confirmed absence is a replacement, as it always was.
+    expect(state.writeOptions).toBeUndefined();
+  });
+
+  it("merges instead of replacing when the carry-forward read FAILED", async () => {
+    // A failed read is not a confirmed absence. Replacing the document on that
+    // path would delete an answer we simply could not see — a transient network
+    // blip silently destroying a judgement a person recorded.
+    state.existingReadFails = true;
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.written).not.toHaveProperty("reflection");
+    expect(state.writeOptions).toEqual({ merge: true });
+  });
+
+  it("still records the week's snapshot on that merge path", async () => {
+    state.existingReadFails = true;
+    state.configs = [{ id: "w1", data: { name: "Math", currentPosition: 7 } }];
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.written?.curriculumPositions).toBeDefined();
+    expect(state.writeOptions).toEqual({ merge: true });
   });
 });

@@ -114,8 +114,20 @@ export function calculateAllPaces(
 //   • **Zero is reported plainly.** "No lessons covered in 3 weeks" is the
 //     sentence that does the work, and it is not softened in either direction.
 
-/** Two snapshots must be at least this far apart to describe a rate. */
-export const MIN_BASELINE_DAYS = 7
+/**
+ * Two snapshots must be at least this far apart to describe a rate.
+ *
+ * Six days, not seven, and the day of slack is load-bearing. Snapshots are
+ * recorded inside the Sunday review run, *after* a variable amount of context
+ * assembly, synthesis and model latency — and after however long the earlier
+ * children in the family took — so two consecutive weekly recordings are
+ * routinely a few hours short of exactly 168 apart. A strict seven would then
+ * reject last week's snapshot and either claim "first week recorded" or silently
+ * reach for a much older baseline. Six still excludes what this guard exists to
+ * exclude: a same-day or next-day regenerate re-reading today's positions onto
+ * an old week.
+ */
+export const MIN_BASELINE_DAYS = 6
 
 /** The one thing said when positions are recorded but no baseline exists yet. */
 export const NO_BASELINE_NOTICE = 'First week recorded — a rate needs two.'
@@ -172,7 +184,10 @@ export function normalizeCurriculumSnapshot(
     if (!entry || typeof entry !== 'object') continue
     const p = entry as Record<string, unknown>
     if (typeof p.configId !== 'string' || p.configId === '') continue
-    if (!isFiniteNumber(p.currentPosition)) continue
+    // Non-negative, matching the server writer exactly. A stored `-3` would
+    // otherwise print as "lesson -3" and poison the delta — it must degrade to
+    // unknown like every other unreadable value.
+    if (!isFiniteNumber(p.currentPosition) || p.currentPosition < 0) continue
     const record: CurriculumPositionRecord = {
       configId: p.configId,
       name: typeof p.name === 'string' && p.name ? p.name : 'Workbook',
