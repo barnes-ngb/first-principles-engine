@@ -43,6 +43,14 @@ import {
   SubjectBucket,
   SubjectBucketLabel,
 } from '../../core/types/enums'
+// UX-184: the quick-log presets — the family's own and the eight built-ins —
+// have one definition, shared with Kid Today's "⭐ I Did More!" row. See the
+// note below, where they used to live.
+import { resolveCapturePresetGroups, type CapturePreset } from './quickLogChips'
+// A plain read of the family's configs, for the same reason `KidExtraLogger`
+// takes it: a KID opening Today must not seed or migrate anything, which
+// `useActivityConfigs` would.
+import { useChatActivityConfigs } from '../shelly-chat/useChatActivityConfigs'
 
 const MAX_DURATION_MINUTES = 240
 const DURATION_STEP = 5
@@ -61,14 +69,6 @@ const DURATION_STEP = 5
 // still pre-fills the name, the subject and a suggested duration the person can
 // edit, and the subject on a family chip is the config's own `subjectBucket` —
 // never guessed from its name.
-import {
-  resolveCapturePresetGroups,
-  type CapturePreset,
-} from './quickLogChips'
-// A plain read of the family's configs, for the same reason `KidExtraLogger`
-// takes it: a KID opening Today must not seed or migrate anything, which
-// `useActivityConfigs` would.
-import { useChatActivityConfigs } from '../shelly-chat/useChatActivityConfigs'
 
 type MediaTab = 'note' | 'photo' | 'audio'
 

@@ -63,9 +63,9 @@ import {
   applyChapterPoolToAll,
   collectExistingChapterPool,
 } from './applyChapterPoolForChild'
+import DayStatusRow from './DayStatusRow'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
-import DayStatusRow from './DayStatusRow'
 import LifeDayCard from './LifeDayCard'
 import MineRecapCard from './MineRecapCard'
 import TeachBackSection from './TeachBackSection'
@@ -185,7 +185,6 @@ export default function TodayPage() {
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
-  /** FEAT-200: anchor for the day-type menu behind the plan-type chip. */
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [printingMaterials, setPrintingMaterials] = useState(false)
