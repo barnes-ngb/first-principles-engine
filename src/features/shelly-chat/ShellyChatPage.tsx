@@ -99,7 +99,7 @@ const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: 
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
   const { activeChildId, children } = useActiveChild()
-  const { chat, generateImage, lastErrorRef } = useAI()
+  const { chat, generateImage, lastErrorRef, imageFailureRef } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -278,6 +278,7 @@ export default function ShellyChatPage() {
     chat,
     generateImage,
     lastErrorRef,
+    imageFailureRef,
     setSearchParams,
     stagePendingActions,
     dropPendingForContext,

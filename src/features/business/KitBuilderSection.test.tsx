@@ -16,6 +16,7 @@ const {
   createProductMock,
   updateProductMock,
   generateImageMock,
+  imageFailureRef,
 } = vi.hoisted(() => ({
   useKitRostersMock: vi.fn(),
   useChildrenMock: vi.fn(),
@@ -29,6 +30,7 @@ const {
     url: 'https://img/hero.png',
     storagePath: 'families/fam-1/generated-images/hero.png',
   })),
+  imageFailureRef: { current: null as unknown },
 }))
 
 vi.mock('./useKitRosters', () => ({
@@ -44,7 +46,7 @@ vi.mock('../../core/hooks/useChildren', () => ({
 }))
 
 vi.mock('../../core/ai/useAI', () => ({
-  useAI: () => ({ generateImage: generateImageMock }),
+  useAI: () => ({ imageFailureRef, generateImage: generateImageMock }),
 }))
 
 vi.mock('../../core/auth/useAuth', () => ({
@@ -211,6 +213,7 @@ beforeEach(() => {
   createProductMock.mockClear()
   updateProductMock.mockClear()
   generateImageMock.mockClear()
+  imageFailureRef.current = null
   downloadArtFilesMock.mockClear()
   recordGenerationMock.mockClear()
   generateImageMock.mockResolvedValue({
@@ -504,6 +507,28 @@ describe('KitBuilderSection', () => {
     await waitFor(() => expect(setRosterArtMock).toHaveBeenCalledTimes(1))
     // Each successful (paid) generation counts toward the cap.
     expect(recordGenerationMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a refused picture comes back as a NAMED failure, and spends no quota (FEAT-195)', async () => {
+    // Was `KitArtRef | null`: the form could not tell a refusal from a rate
+    // limit from a missing key, so every one read "Couldn't make that sticker".
+    const user = userEvent.setup()
+    imageFailureRef.current = {
+      code: 'functions/invalid-argument',
+      message: "That prompt was blocked by the image generator's safety filter.",
+      details: { failure: 'blocked' },
+    }
+    generateImageMock.mockResolvedValueOnce(null)
+    setRosters([roster({ id: 'kit-7', vaultName: 'Editable' })])
+    render(<KitBuilderSection activeChildId="lincoln" canEdit={false} />)
+
+    await user.click(screen.getByText('Editable'))
+    await user.click(screen.getByRole('button', { name: 'gen-hero' }))
+
+    await waitFor(() => expect(generateImageMock).toHaveBeenCalledTimes(1))
+    // No picture, so no roster write and nothing counted against the week.
+    expect(setRosterArtMock).not.toHaveBeenCalled()
+    expect(recordGenerationMock).not.toHaveBeenCalled()
   })
 
   it('generating writes the art ref atomically per-key via setRosterArt (book-sticker, verbatim prompt)', async () => {

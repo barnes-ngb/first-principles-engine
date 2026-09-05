@@ -21,6 +21,11 @@ import { KitRosterStatus } from '../../core/types/business'
 import { ART_QUOTA_MESSAGE } from './useArtQuota'
 import type { ArtBudgetState, ArtHelpAudience } from '../books/artHelpContent'
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from '../books/ArtHelpSheet'
+import ImageRetryCard from '../books/ImageRetryCard'
+import {
+  ImageRetryDoor,
+  type ImageGenerationFailure,
+} from '../books/imageGenerationFailure'
 import { defenderArtKey, heroDescriptor, HERO_ART_KEY, invaderArtKey } from './kitArt'
 import type { NewKitRoster } from './useKitRosters'
 
@@ -31,14 +36,28 @@ export interface KitArtCharacter {
 }
 
 /**
+ * What one character's art generation came back with (FEAT-195).
+ *
+ * Was `KitArtRef | null`, which is why every failure on this door read
+ * "Couldn't make that sticker — try again." — the form could not tell a refused
+ * prompt from a rate limit from a missing API key, because `null` carries no
+ * more than "no". The section classifies the rejection (it owns the `useAI`
+ * call) and names the kind here; the form renders the shared card for it.
+ */
+export type KitArtOutcome =
+  | { ok: true; ref: KitArtRef }
+  | { ok: false; failure: ImageGenerationFailure }
+
+/**
  * Generate art for one character: build the prompt, call the image function,
- * persist the ref. Returns the new ref, or `null` on failure (the caller shows
- * an honest error and keeps any existing art). Injected by `KitBuilderSection`.
+ * persist the ref. Returns the new ref, or which failure it was (the caller
+ * shows the shared card and keeps any existing art). Injected by
+ * `KitBuilderSection`.
  */
 export type GenerateKitArt = (
   characterKey: string,
   character: KitArtCharacter,
-) => Promise<KitArtRef | null>
+) => Promise<KitArtOutcome>
 
 let idCounter = 0
 function newId(prefix: string): string {
@@ -77,8 +96,8 @@ function draftFromRoster(roster?: KitRoster): RosterDraft {
  * art; the generate button renders whenever `canGenerate` — which, since FEAT-94,
  * is true for kids too (making art on your own kit is kid effort, not money or
  * public exposure). Loading + honest-error are per-character (FEAT-61): the
- * spinner is scoped to this row, a failure shows an inline message, and existing
- * art is never lost on a failed retry.
+ * spinner is scoped to this row, a failure shows the shared retry card
+ * (FEAT-195), and existing art is never lost on a failed retry.
  *
  * FEAT-92: the ~56px thumbnail is a button that opens a lightbox `Dialog` with
  * the full-size image + the character's name. Viewing is kid-safe (everyone with
@@ -91,7 +110,8 @@ function CharacterArtControl({
   art,
   canGenerate,
   busy,
-  error,
+  failure,
+  audience,
   onGenerate,
 }: {
   characterKey: string
@@ -99,7 +119,9 @@ function CharacterArtControl({
   art?: KitArtRef
   canGenerate: boolean
   busy: boolean
-  error: string | null
+  /** Which failure the last attempt was (FEAT-195), or `null` if none. */
+  failure: ImageGenerationFailure | null
+  audience: ArtHelpAudience
   onGenerate: (characterKey: string, character: KitArtCharacter) => void
 }) {
   const hasContent = character.name.trim() !== '' || character.descriptor.trim() !== ''
@@ -144,10 +166,16 @@ function CharacterArtControl({
           >
             {busy ? 'Making…' : art?.url ? 'Regenerate' : 'Make sticker'}
           </Button>
-          {error && (
-            <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5 }}>
-              {error}
-            </Typography>
+          {/* One card for every way a picture can fail to arrive (FEAT-195).
+              No tappable alternatives on this door: the prompt is composed from
+              the roster's own fields, so there is no single box to put reworded
+              text back into. The row's own generate button is the retry. */}
+          {failure && (
+            <ImageRetryCard
+              failure={failure}
+              audience={audience}
+              door={ImageRetryDoor.Redraw}
+            />
           )}
         </Box>
       )}
@@ -170,10 +198,14 @@ function CharacterArtControl({
                 bgcolor: 'action.hover',
               }}
             />
-            {canGenerate && error && (
-              <Typography variant="caption" color="error" display="block" sx={{ mt: 1 }}>
-                {error}
-              </Typography>
+            {/* The lightbox's own Regenerate is the retry, so the card here
+                names the failure and offers no second button (FEAT-195). */}
+            {canGenerate && failure && (
+              <ImageRetryCard
+              failure={failure}
+              audience={audience}
+              door={ImageRetryDoor.Redraw}
+            />
             )}
           </DialogContent>
           <DialogActions>
@@ -278,7 +310,12 @@ export default function KitBuilderForm({
   // + error are keyed by character so each row is independent (FEAT-61).
   const [art, setArt] = useState<Record<string, KitArtRef>>(() => roster?.art ?? {})
   const [generatingKey, setGeneratingKey] = useState<string | null>(null)
-  const [artErrors, setArtErrors] = useState<Record<string, string>>({})
+  /**
+   * Which failure the last attempt on each row was (FEAT-195). Was a map of one
+   * string — "Couldn't make that sticker — try again." — for a refused prompt, a
+   * rate limit, a missing API key and a dropped connection alike.
+   */
+  const [artFailures, setArtFailures] = useState<Record<string, ImageGenerationFailure>>({})
   const [confirmBatch, setConfirmBatch] = useState(false)
 
   // Generation is a paid, persisted-roster affordance offered to parents AND
@@ -313,22 +350,24 @@ export default function KitBuilderForm({
   const generateOne = async (characterKey: string, character: KitArtCharacter): Promise<boolean> => {
     if (!onGenerateArt || generatingKey) return false
     setGeneratingKey(characterKey)
-    setArtErrors((prev) => {
+    setArtFailures((prev) => {
       if (!(characterKey in prev)) return prev
       const next = { ...prev }
       delete next[characterKey]
       return next
     })
     try {
-      const ref = await onGenerateArt(characterKey, character)
-      if (!ref) {
-        setArtErrors((prev) => ({ ...prev, [characterKey]: "Couldn't make that sticker — try again." }))
+      const outcome = await onGenerateArt(characterKey, character)
+      if (!outcome.ok) {
+        setArtFailures((prev) => ({ ...prev, [characterKey]: outcome.failure }))
         return false
       }
-      setArt((prev) => ({ ...prev, [characterKey]: ref }))
+      setArt((prev) => ({ ...prev, [characterKey]: outcome.ref }))
       return true
     } catch {
-      setArtErrors((prev) => ({ ...prev, [characterKey]: "Couldn't make that sticker — try again." }))
+      // A throw we did not classify — the shared card's honest default is a
+      // plain retry, which is exactly what an unknown failure deserves.
+      setArtFailures((prev) => ({ ...prev, [characterKey]: 'no-image' }))
       return false
     } finally {
       setGeneratingKey(null)
@@ -461,7 +500,8 @@ export default function KitBuilderForm({
               art={art[HERO_ART_KEY]}
               canGenerate={canGenerateNow}
               busy={generatingKey === HERO_ART_KEY}
-              error={artErrors[HERO_ART_KEY] ?? null}
+              failure={artFailures[HERO_ART_KEY] ?? null}
+              audience={audience}
               onGenerate={(k, c) => void generateOne(k, c)}
             />
           )}
@@ -517,7 +557,8 @@ export default function KitBuilderForm({
                     art={art[defenderArtKey(d.id)]}
                     canGenerate={canGenerateNow}
                     busy={generatingKey === defenderArtKey(d.id)}
-                    error={artErrors[defenderArtKey(d.id)] ?? null}
+                    failure={artFailures[defenderArtKey(d.id)] ?? null}
+                    audience={audience}
                     onGenerate={(k, c) => void generateOne(k, c)}
                   />
                 )}
@@ -579,7 +620,8 @@ export default function KitBuilderForm({
                     art={art[invaderArtKey(inv.id)]}
                     canGenerate={canGenerateNow}
                     busy={generatingKey === invaderArtKey(inv.id)}
-                    error={artErrors[invaderArtKey(inv.id)] ?? null}
+                    failure={artFailures[invaderArtKey(inv.id)] ?? null}
+                    audience={audience}
                     onGenerate={(k, c) => void generateOne(k, c)}
                   />
                 )}

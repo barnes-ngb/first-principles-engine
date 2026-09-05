@@ -9,7 +9,7 @@ const { enhanceSketchMock, recordGenerationMock } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../core/ai/useAI', () => ({
-  useAI: () => ({ enhanceSketch: enhanceSketchMock }),
+  useAI: () => ({ imageFailureRef: { current: null }, enhanceSketch: enhanceSketchMock }),
 }))
 
 vi.mock('../../../core/firebase/firestore', () => ({

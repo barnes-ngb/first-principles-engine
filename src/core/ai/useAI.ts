@@ -124,7 +124,33 @@ export interface ImageGenRequest {
 export interface ImageGenResponse {
   url: string
   storagePath: string
+  /**
+   * What the picture maker was actually asked to draw, when that is NOT what
+   * the person typed (FEAT-195). The server rewrites every prompt for
+   * copyright before the image call, so a child who asks for a named character
+   * gets a picture of someone else; this is the field that lets a surface say
+   * so. `undefined` when the ask was unchanged, and from an older deploy —
+   * treat it as "nothing to report", never as "unchanged".
+   */
   revisedPrompt?: string
+}
+
+/**
+ * A failed image call, as the callable rejected it (FEAT-195).
+ *
+ * `error` above flattens a rejection to one string, which is all four picture
+ * doors ever had — so each sniffed that string for the word "blocked" and got a
+ * different answer. This keeps the `code` and the handler's structured
+ * `details` intact so `books/imageGenerationFailure.ts` can classify the
+ * failure and read the alternatives the server sent, rather than guess from
+ * prose. Non-image callables are unaffected.
+ */
+export interface ImageCallFailure {
+  /** e.g. `functions/invalid-argument`. */
+  code?: string
+  message?: string
+  /** The handler's `ImageFailureDetails` payload, when this deploy sends one. */
+  details?: unknown
 }
 
 // ── Sketch enhancement types (mirrored from functions/src/ai/imageTasks/enhanceSketch.ts) ──
@@ -209,10 +235,37 @@ const analyzePatternsFn = httpsCallable<AnalyzePatternsRequest, AnalyzePatternsR
   'analyzeEvaluationPatterns',
 )
 
+/**
+ * The readable message for a callable rejection.
+ *
+ * `details` was read as a message string here since the beginning, which was
+ * right while nothing sent structured details. FEAT-195 attaches an object to
+ * every image failure, and `object || message` would have printed
+ * "[object Object]" on screen — so a non-string `details` is now skipped rather
+ * than stringified, and the server's own message wins.
+ */
+function callableMessage(err: unknown): string {
+  const fireErr = err as { message?: string; details?: unknown }
+  if (typeof fireErr?.details === 'string' && fireErr.details) return fireErr.details
+  return fireErr?.message || (err instanceof Error ? err.message : String(err))
+}
+
 export function useAI() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const lastErrorRef = useRef<string | null>(null)
+  /**
+   * The structured rejection of the last image call (FEAT-195) — kept beside
+   * `error`, never instead of it, so existing readers are untouched. Cleared at
+   * the start of every image call, so a card can never show a stale failure over
+   * a picture that did arrive.
+   *
+   * A **ref**, not state, and deliberately: every caller reads it on the line
+   * after `await generateImage(...)` returns `null`, and a state setter has not
+   * applied by then — the host would classify the *previous* failure, or none at
+   * all on the first one. `lastErrorRef` is a ref for the same reason.
+   */
+  const imageFailureRef = useRef<ImageCallFailure | null>(null)
 
   const chat = useCallback(async (request: ChatRequest): Promise<ChatResponse | null> => {
     setLoading(true)
@@ -237,15 +290,23 @@ export function useAI() {
     async (request: ImageGenRequest): Promise<ImageGenResponse | null> => {
       setLoading(true)
       setError(null)
+      imageFailureRef.current = null
       lastErrorRef.current = null
       try {
         const result = await imageGenFn(request)
         return result.data
       } catch (err) {
-        const fireErr = err as { code?: string; message?: string; details?: string }
-        const message =
-          fireErr.details || fireErr.message || (err instanceof Error ? err.message : String(err))
+        const fireErr = err as ImageCallFailure
+        const message = callableMessage(err)
         setError(new Error(message))
+        // Keep the code and the handler's declared details, not just the prose
+        // (FEAT-195) — that is what lets the door tell a refused prompt from a
+        // rate limit, and read the alternatives the server sent back.
+        imageFailureRef.current = {
+          code: fireErr.code,
+          message,
+          details: fireErr.details,
+        }
         lastErrorRef.current = message
         return null
       } finally {
@@ -259,14 +320,19 @@ export function useAI() {
     async (request: EnhanceSketchRequest): Promise<EnhanceSketchResponse | null> => {
       setLoading(true)
       setError(null)
+      imageFailureRef.current = null
       try {
         const result = await enhanceSketchFn(request)
         return result.data
       } catch (err) {
-        const fireErr = err as { code?: string; message?: string; details?: string }
-        const message =
-          fireErr.details || fireErr.message || (err instanceof Error ? err.message : String(err))
+        const fireErr = err as ImageCallFailure
+        const message = callableMessage(err)
         setError(new Error(message))
+        imageFailureRef.current = {
+          code: fireErr.code,
+          message,
+          details: fireErr.details,
+        }
         return null
       } finally {
         setLoading(false)
@@ -295,7 +361,16 @@ export function useAI() {
     [],
   )
 
-  return { chat, generateImage, enhanceSketch, analyzePatterns, loading, error, lastErrorRef } as const
+  return {
+    chat,
+    generateImage,
+    enhanceSketch,
+    analyzePatterns,
+    loading,
+    error,
+    imageFailureRef,
+    lastErrorRef,
+  } as const
 }
 
 export function useGenerateActivity() {

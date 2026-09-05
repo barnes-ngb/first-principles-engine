@@ -9,7 +9,7 @@ const { generateImageMock, addDocMock, setDocMock } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../core/ai/useAI', () => ({
-  useAI: () => ({ generateImage: generateImageMock, loading: false, error: null }),
+  useAI: () => ({ imageFailureRef: { current: null }, generateImage: generateImageMock, loading: false, error: null }),
 }))
 
 vi.mock('../../../core/firebase/firestore', () => ({ stickerLibraryCollection: () => ({}) }))

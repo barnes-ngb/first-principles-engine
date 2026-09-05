@@ -80,6 +80,12 @@ import {
 } from './workshopArt'
 import type { GenerateImageFn } from './workshopArt'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
+import ImageRetryCard from '../books/ImageRetryCard'
+import {
+  ImageRetryDoor,
+  classifyImageGenerationFailure,
+  type ImageGenerationFailure,
+} from '../books/imageGenerationFailure'
 import { canReserveWorkshopArt, recordWorkshopArtGeneration, useWorkshopArtQuota } from './useWorkshopArtQuota'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
@@ -146,7 +152,7 @@ export default function WorkshopPage() {
     endingType?: string
   } | null>(null)
 
-  const { chat, generateImage } = useAI()
+  const { chat, generateImage, imageFailureRef } = useAI()
   const familyId = useFamilyId()
   const { activeChildId, children, isChildProfile } = useActiveChild()
   const { profile } = useProfile()
@@ -165,6 +171,19 @@ export default function WorkshopPage() {
   const artAudience = isChildProfile ? 'kid' : 'parent'
   const artBudget = { limit: artLimit, remaining: artRemaining, capped: isChildProfile }
   const [artBudgetNotice, setArtBudgetNotice] = useState<string | null>(null)
+  /**
+   * Why the last batch's pictures didn't come back (FEAT-195).
+   *
+   * The Workshop's four image doors are a `Promise.allSettled` batch, and a
+   * picture that failed used to be a `console.warn` and nothing else: the game
+   * was made without it and nobody was told. The batch has no single prompt, so
+   * there are no tappable rewordings here — what the card offers is the honest
+   * name of the failure and "Regenerate Art", which is the retry this surface
+   * already has.
+   */
+  const [artFailure, setArtFailure] = useState<ImageGenerationFailure | null>(null)
+  /** The last picture failure inside a batch — read after `allSettled` resolves. */
+  const lastArtFailureRef = useRef<ImageGenerationFailure | null>(null)
   // Readable from inside the async generation flow, which spans several
   // awaits and renders: the counter's `onSnapshot` moves it as pictures land.
   const artRemainingRef = useRef(artRemaining)
@@ -175,10 +194,18 @@ export default function WorkshopPage() {
   const countedGenerateImage = useCallback<GenerateImageFn>(
     async (request) => {
       const response = await generateImage(request)
-      if (response?.url) recordWorkshopArtGeneration(recordArtGeneration)
+      if (response?.url) {
+        recordWorkshopArtGeneration(recordArtGeneration)
+      } else {
+        // Remember WHY, so the batch can say more than "some pictures are
+        // missing" (FEAT-195). Last failure wins: the pictures in one batch fail
+        // for the same reason in practice, and a rate limit reported as a
+        // refusal would send the kid to reword words that were fine.
+        lastArtFailureRef.current = classifyImageGenerationFailure(imageFailureRef.current)
+      }
       return response
     },
-    [generateImage, recordArtGeneration],
+    [generateImage, recordArtGeneration, imageFailureRef],
   )
   /** Reserve a whole batch, or refuse it whole and say so warmly. Never a half-spend. */
   const reserveArt = useCallback((count: number): boolean => {
@@ -310,6 +337,9 @@ export default function WorkshopPage() {
     async (inputs: StoryInputs, gameType: GameType) => {
       setPhase(GamePhase.Generating)
       setGenerateError(null)
+      // A new run starts with no picture failure on screen (FEAT-195).
+      setArtFailure(null)
+      lastArtFailureRef.current = null
       setLastWizardInputs({ inputs, gameType })
 
       if (!familyId || !activeChildId) {
@@ -366,9 +396,13 @@ export default function WorkshopPage() {
             )
             if (artResult) {
               generatedArt = artResult.art
+              if (artResult.failures.length > 0) {
+                setArtFailure(lastArtFailureRef.current ?? 'no-image')
+              }
             }
           } catch (err) {
             console.warn('Card game art generation failed:', err)
+            setArtFailure(lastArtFailureRef.current ?? 'no-image')
           }
         }
 
@@ -470,9 +504,13 @@ export default function WorkshopPage() {
             )
             if (artResult) {
               generatedArt = artResult.art
+              if (artResult.failures.length > 0) {
+                setArtFailure(lastArtFailureRef.current ?? 'no-image')
+              }
             }
           } catch (err) {
             console.warn('Adventure art generation failed:', err)
+            setArtFailure(lastArtFailureRef.current ?? 'no-image')
           }
         }
 
@@ -575,6 +613,9 @@ export default function WorkshopPage() {
         let generatedArt: GeneratedArt | undefined
         if (artResult) {
           generatedArt = artResult.art
+          if (artResult.failures.length > 0) {
+            setArtFailure(lastArtFailureRef.current ?? 'no-image')
+          }
         }
 
         // Generate title screen with the actual game title (part of the reserved batch)
@@ -588,9 +629,16 @@ export default function WorkshopPage() {
             })
             if (titleResult?.url) {
               generatedArt = { ...generatedArt, titleScreen: titleResult.url }
+            } else {
+              // The title card is drawn AFTER the words, so it lands past the
+              // batch's own failure check above (Codex P2, PR #1768). Without
+              // this the game quietly lost its title art and the card never
+              // opened — the exact silence FEAT-195 exists to end.
+              setArtFailure(lastArtFailureRef.current ?? 'no-image')
             }
           } catch (err) {
             console.warn('Title screen generation failed:', err)
+            setArtFailure(lastArtFailureRef.current ?? 'no-image')
           }
         }
 
@@ -1141,6 +1189,8 @@ export default function WorkshopPage() {
       if (!familyId || !game.id) return
       // Reserved whole, like every other batch on this page (FEAT-184).
       if (!reserveArt(regenerateArtCount(game))) return
+      setArtFailure(null)
+      lastArtFailureRef.current = null
       try {
         const result = await generateAllArt(
           countedGenerateImage,
@@ -1158,8 +1208,14 @@ export default function WorkshopPage() {
             setCurrentGame({ ...currentGame, generatedArt: merged })
           }
         }
+        // Say so when pictures are missing, instead of only logging it
+        // (FEAT-195). Nothing was counted for the ones that failed.
+        if (result.failures.length > 0) {
+          setArtFailure(lastArtFailureRef.current ?? 'no-image')
+        }
       } catch (err) {
         console.warn('Art regeneration failed:', err)
+        setArtFailure(lastArtFailureRef.current ?? 'no-image')
       }
     },
     [familyId, countedGenerateImage, reserveArt, regenerateArtCount, currentGame],
@@ -1274,6 +1330,53 @@ export default function WorkshopPage() {
           />
         </>
       )}
+
+      {/* Some pictures didn't come back (FEAT-195). The game itself is made
+          either way and nothing was counted for a picture that never arrived —
+          but a silent `console.warn` was the whole of what this surface used to
+          say. No tappable rewordings here: a batch has no single prompt, so the
+          honest offer is the failure's name and the retry this page already
+          owns. Shown as a dialog, not the snackbar below, because a card you can
+          act on cannot live in something that hides itself after six seconds. */}
+      <Dialog
+        open={artFailure !== null}
+        onClose={() => setArtFailure(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Some pictures didn&apos;t come back</DialogTitle>
+        <DialogContent>
+          {/* Retry only where "Regenerate Art" actually remakes THIS game's
+              pictures (Codex P2, PR #1768). `handleRegenerateArt` calls
+              `generateAllArt` unconditionally — a board-game generator — so
+              offering it for a card or adventure game would spend the week's
+              budget on board backgrounds and still leave the missing card faces
+              or scene art missing. That mis-dispatch predates this PR (it is
+              what the gallery's own button has always done; filed as ARCH-49),
+              and what this run must not do is newly point people at it. A card
+              or adventure failure still says plainly what happened. */}
+          {artFailure && (
+            <ImageRetryCard
+              failure={artFailure}
+              audience={artAudience}
+              door={ImageRetryDoor.Redraw}
+              {...(currentGame?.gameType === GameType.Board
+                ? {
+                    onRetry: () => {
+                      const game = currentGame
+                      setArtFailure(null)
+                      void handleRegenerateArt(game)
+                    },
+                    retryLabel: 'Regenerate Art',
+                  }
+                : {})}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setArtFailure(null)}>Keep the game as it is</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Weekly art cap (FEAT-184): a warm nudge, never an error — the game
           itself is still made, with no pictures, and nothing was spent. */}

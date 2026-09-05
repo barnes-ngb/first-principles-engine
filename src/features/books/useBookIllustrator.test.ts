@@ -7,6 +7,7 @@ const { generateImageMock } = vi.hoisted(() => ({
 
 vi.mock('../../core/ai/useAI', () => ({
   useAI: () => ({
+    imageFailureRef: { current: null },
     chat: vi.fn(),
     generateImage: generateImageMock,
     loading: false,

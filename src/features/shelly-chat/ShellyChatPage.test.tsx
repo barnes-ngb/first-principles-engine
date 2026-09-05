@@ -60,6 +60,7 @@ vi.mock('../../core/profile/useProfile', () => ({
 vi.mock('../../core/ai/useAI', () => ({
   TaskType: { ShellyChat: 'shellyChat' },
   useAI: () => ({
+    imageFailureRef: { current: null },
     chat: vi.fn(async () => ({ message: 'hi' })),
     generateImage: vi.fn(async () => ({ url: '' })),
     lastErrorRef: { current: null },

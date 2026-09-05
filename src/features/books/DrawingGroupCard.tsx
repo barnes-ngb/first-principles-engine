@@ -25,6 +25,13 @@ import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import type { ArtHelpAudience } from './artHelpContent'
 import { GenerateHint } from './ArtHelpSheet'
 import { recordStickerArtGeneration } from './useStickerArtQuota'
+import ImageRetryCard from './ImageRetryCard'
+import {
+  classifyImageGenerationFailure,
+  imageFailureAlternatives,
+  ImageRetryDoor,
+  type ImageGenerationFailure,
+} from './imageGenerationFailure'
 import {
   FANCY_STYLE_OPTIONS,
   DEFAULT_FANCY_STYLE_ID,
@@ -105,11 +112,19 @@ export default function DrawingGroupCard({
   recordGeneration,
   audience = 'parent',
 }: DrawingGroupCardProps) {
-  const { enhanceSketch } = useAI()
+  const { enhanceSketch, imageFailureRef } = useAI()
   const [picking, setPicking] = useState(false)
   const [styleId, setStyleId] = useState(DEFAULT_FANCY_STYLE_ID)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * Why the last version didn't come back (FEAT-195). Replaces "That didn't
+   * work — try again." for every failure there is; the `error` string above
+   * survives for the thrown paths (the library write, an unexpected throw),
+   * which are not image-call failures.
+   */
+  const [versionFailure, setVersionFailure] = useState<ImageGenerationFailure | null>(null)
+  const [versionAlternatives, setVersionAlternatives] = useState<string[]>([])
   // null = no pending delete; a sticker = delete that version; 'group' = delete all.
   const [deleteTarget, setDeleteTarget] = useState<Sticker | 'group' | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -137,6 +152,8 @@ export default function DrawingGroupCard({
     if (busy || capReached) return
     setBusy(true)
     setError(null)
+    setVersionFailure(null)
+    setVersionAlternatives([])
     try {
       // Always adds a new version; repeating a theme keeps both.
       const res = await generateStickerVersion({
@@ -149,8 +166,10 @@ export default function DrawingGroupCard({
       })
       if (!res.ok) {
         // The model produced nothing usable — no image, so no charge to the
-        // kid's weekly budget.
-        setError(res.error)
+        // kid's weekly budget. Which failure it was comes off the raw rejection
+        // (FEAT-195), not the module's one-size string.
+        setVersionFailure(classifyImageGenerationFailure(imageFailureRef.current))
+        setVersionAlternatives(imageFailureAlternatives(imageFailureRef.current))
         return
       }
       // A real version came back: count the paid call (FEAT-165). Repeating a
@@ -181,6 +200,7 @@ export default function DrawingGroupCard({
     group.sourceDrawingId,
     onChanged,
     recordGeneration,
+    imageFailureRef,
   ])
 
   const handleOpenRename = useCallback(() => {
@@ -470,6 +490,19 @@ export default function DrawingGroupCard({
               <Typography variant="body2" color="error">
                 {error}
               </Typography>
+            )}
+            {/* One card for every way a picture can fail to arrive (FEAT-195).
+                No tappable alternatives on this door — a version re-draws the
+                kid's own saved drawing and sends no words to reword. */}
+            {versionFailure && (
+              <ImageRetryCard
+                failure={versionFailure}
+                audience={audience}
+                door={ImageRetryDoor.Redraw}
+                alternatives={versionAlternatives}
+                onRetry={() => { void handleAddVersion() }}
+                retryLabel="Add version"
+              />
             )}
           </Stack>
         </DialogContent>

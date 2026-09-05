@@ -28,6 +28,7 @@ const { chatMock, generateImageMock, sightWordState, illustrateMock } = vi.hoist
 
 vi.mock('../../core/ai/useAI', () => ({
   useAI: () => ({
+    imageFailureRef: { current: null },
     chat: chatMock,
     generateImage: generateImageMock,
     loading: false,

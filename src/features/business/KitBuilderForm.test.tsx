@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { KitArtRef, KitRoster } from '../../core/types/business'
 import KitBuilderForm from './KitBuilderForm'
 import type { NewKitRoster } from './useKitRosters'
+import type { KitArtOutcome } from './KitBuilderForm'
 
 function renderForm(roster?: KitRoster) {
   const onSave = vi.fn<(body: NewKitRoster, id?: string) => Promise<void>>(async () => undefined)
@@ -32,8 +33,8 @@ function renderArtForm(
   const onCancel = vi.fn()
   const onGenerateArt =
     opts.onGenerateArt ??
-    vi.fn<(key: string, c: { name: string; descriptor: string }) => Promise<KitArtRef | null>>(
-      async () => artRef('new'),
+    vi.fn<(key: string, c: { name: string; descriptor: string }) => Promise<KitArtOutcome>>(
+      async () => ({ ok: true, ref: artRef('new') }),
     )
   render(
     <KitBuilderForm
@@ -261,8 +262,8 @@ describe('KitBuilderForm', () => {
   it('generating one character calls onGenerateArt with its key + verbatim words, then shows the thumbnail', async () => {
     const user = userEvent.setup({ delay: null })
     const onGenerateArt = vi.fn<
-      (key: string, c: { name: string; descriptor: string }) => Promise<KitArtRef | null>
-    >(async () => artRef('https://img/hero.png'))
+      (key: string, c: { name: string; descriptor: string }) => Promise<KitArtOutcome>
+    >(async () => ({ ok: true, ref: artRef('https://img/hero.png') }))
     renderArtForm(savedRoster({ defenders: [], invaders: [] }), { onGenerateArt })
 
     await user.click(screen.getByRole('button', { name: /make sticker$/i }))
@@ -276,9 +277,12 @@ describe('KitBuilderForm', () => {
     )
   })
 
-  it('a failed generation shows an honest error and keeps existing art', async () => {
+  it('a failed generation names WHICH failure it was and keeps existing art', async () => {
     const user = userEvent.setup({ delay: null })
-    const onGenerateArt = vi.fn(async () => null) // failure
+    // FEAT-195: a refusal is not "couldn't make that sticker" any more — the
+    // shared card says the picture maker would not draw that one, which is a
+    // different next step from a rate limit or a missing API key.
+    const onGenerateArt = vi.fn(async () => ({ ok: false as const, failure: 'blocked' as const }))
     renderArtForm(
       savedRoster({
         defenders: [],
@@ -292,7 +296,9 @@ describe('KitBuilderForm', () => {
     expect(screen.getByAltText(/Zappy sticker/i)).toHaveAttribute('src', 'https://img/OLD.png')
     await user.click(screen.getByRole('button', { name: /regenerate/i }))
 
-    await waitFor(() => expect(screen.getByText(/couldn't make that sticker/i)).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByText(/wouldn't draw that one/i)).toBeInTheDocument(),
+    )
     // Prior art is not lost.
     expect(screen.getByAltText(/Zappy sticker/i)).toHaveAttribute('src', 'https://img/OLD.png')
   })
@@ -310,7 +316,7 @@ describe('KitBuilderForm', () => {
 
   it('the batch button confirms the count and never auto-generates', async () => {
     const user = userEvent.setup({ delay: null })
-    const onGenerateArt = vi.fn(async () => artRef('x'))
+    const onGenerateArt = vi.fn(async () => ({ ok: true as const, ref: artRef('x') }))
     renderArtForm(savedRoster(), { onGenerateArt })
 
     // 4 characters, none with art → "the rest (4)".
@@ -381,7 +387,7 @@ describe('KitBuilderForm', () => {
 
   it('bounds the batch to the remaining weekly allowance, not the character count', async () => {
     const user = userEvent.setup({ delay: null })
-    const onGenerateArt = vi.fn(async () => artRef('x'))
+    const onGenerateArt = vi.fn(async () => ({ ok: true as const, ref: artRef('x') }))
     // 4 characters with no art, but only 2 generations left this week.
     renderArtForm(savedRoster(), { onGenerateArt, remainingArt: 2 })
 
@@ -398,7 +404,7 @@ describe('KitBuilderForm', () => {
 
   it('an uncapped parent batch generates every remaining character', async () => {
     const user = userEvent.setup({ delay: null })
-    const onGenerateArt = vi.fn(async () => artRef('x'))
+    const onGenerateArt = vi.fn(async () => ({ ok: true as const, ref: artRef('x') }))
     // Default remainingArt is Infinity (parent) → all 4 generate.
     renderArtForm(savedRoster(), { onGenerateArt })
 
