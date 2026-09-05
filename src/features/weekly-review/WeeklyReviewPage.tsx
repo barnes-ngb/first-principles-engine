@@ -36,6 +36,9 @@ import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
 import { lastCompletedWeekKey } from '../../core/utils/time'
 import { formatWeekShort } from '../../core/utils/dateKey'
 import WeekInEvidence from './WeekInEvidence'
+import WeekPaceSection from './WeekPaceSection'
+import WeekReflectionCard from './WeekReflectionCard'
+import { useWeeklyReviewHistory } from './useWeeklyReviewHistory'
 
 const functions = getFunctions(app)
 const generateReviewFn = httpsCallable<
@@ -65,6 +68,15 @@ export default function WeeklyReviewPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
+
+  // One read, two consumers (UX-213 / UX-214): the observed-rate line needs the
+  // most recent earlier position snapshot, and the week's question needs the
+  // earlier answers so a run of the same answer is visible.
+  const { reviews: history } = useWeeklyReviewHistory(
+    familyId,
+    activeChildId,
+    weekKey,
+  )
 
   // Load weekly review for active child (real-time)
   useEffect(() => {
@@ -274,6 +286,17 @@ export default function WeeklyReviewPage() {
             </Typography>
           </SectionCard>
 
+          {/* Hours + observed coverage rate — parent-only (UX-211 / UX-213) */}
+          <SectionErrorBoundary section="week-pace">
+            <WeekPaceSection
+              familyId={familyId}
+              childId={activeChildId}
+              weekKey={weekKey}
+              review={review}
+              history={history}
+            />
+          </SectionErrorBoundary>
+
           {/* Week in Evidence — raw counts (books + teach-backs) */}
           {review.evidence && (
             <SectionErrorBoundary section="week-in-evidence">
@@ -344,6 +367,18 @@ export default function WeeklyReviewPage() {
               </Stack>
             </SectionCard>
           )}
+
+          {/* The week's one question — answered by a person (UX-214) */}
+          <SectionErrorBoundary section="week-reflection">
+            <WeekReflectionCard
+              familyId={familyId}
+              childId={activeChildId}
+              weekKey={weekKey}
+              review={review}
+              history={history}
+              onSaved={setSnack}
+            />
+          </SectionErrorBoundary>
 
           {/* Actions */}
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
