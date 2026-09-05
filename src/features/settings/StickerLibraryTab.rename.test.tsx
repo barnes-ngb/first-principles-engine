@@ -10,7 +10,7 @@ import type { Sticker } from '../../core/types'
 vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'family-1' }))
 vi.mock('../../core/firebase/firestore', () => ({ db: {}, stickerLibraryCollection: () => ({}) }))
 const enhanceSketchMock = vi.fn()
-vi.mock('../../core/ai/useAI', () => ({ useAI: () => ({ enhanceSketch: enhanceSketchMock }) }))
+vi.mock('../../core/ai/useAI', () => ({ useAI: () => ({ imageFailureRef: { current: null }, enhanceSketch: enhanceSketchMock }) }))
 
 const generateStickerVersionMock = vi.fn()
 vi.mock('../books/generateStickerVersion', () => ({

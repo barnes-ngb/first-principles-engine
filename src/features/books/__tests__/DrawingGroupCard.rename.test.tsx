@@ -33,7 +33,7 @@ vi.mock('../../../core/firebase/firestore', () => ({
 }))
 
 vi.mock('../../../core/ai/useAI', () => ({
-  useAI: () => ({ enhanceSketch: vi.fn() }),
+  useAI: () => ({ imageFailureRef: { current: null }, enhanceSketch: vi.fn() }),
 }))
 
 import DrawingGroupCard from '../DrawingGroupCard'

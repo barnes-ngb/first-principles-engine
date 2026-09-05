@@ -53,6 +53,13 @@ import PhotoCapture from '../../components/PhotoCapture'
 import SaveIndicator from '../../components/SaveIndicator'
 import { stickerLibraryCollection } from '../../core/firebase/firestore'
 import { useFamilyId } from '../../core/auth/useAuth'
+import CustomStoryThemeCard from './CustomStoryThemeCard'
+import {
+  CUSTOM_STORY_THEME_EXCLUSIVE_HINT,
+  chooseStoryTheme,
+  hasCustomStoryTheme,
+  normalizeCustomStoryTheme,
+} from './customStoryTheme'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import { SubjectBucket, UserProfile } from '../../core/types/enums'
@@ -65,6 +72,14 @@ import PageEditor from './PageEditor'
 import { GENERATION_STYLES } from './bookTypes'
 import { recordBookArtGeneration, useBookArtQuota } from './useBookArtQuota'
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
+import ImageRetryCard from './ImageRetryCard'
+import {
+  ImageRetryDoor,
+  classifyImageGenerationFailure,
+  imageFailureAlternatives,
+  type ImageGenerationFailure,
+} from './imageGenerationFailure'
+import { drawnAsLine } from './revisedPromptLine'
 import { describePageContents } from './deletePageSummary'
 import type { ArtHelpSurface } from './artHelpContent'
 import StickerPicker from './StickerPicker'
@@ -81,6 +96,7 @@ import ReimagineResultDialog from './ReimagineResultDialog'
 import { useEditorHistory, useUndoRedoKeys } from './useEditorHistory'
 import UndoIcon from '@mui/icons-material/Undo'
 import RedoIcon from '@mui/icons-material/Redo'
+import { reimagineCaption } from './reimagineCaptions'
 
 type VoiceMode = 'record' | 'dictate'
 
@@ -151,7 +167,7 @@ export default function BookEditorPage() {
     restoreImageVersion,
   } = useBook(familyId, bookId)
 
-  const { generateImage, loading: aiLoading, error: aiError } = useAI()
+  const { generateImage, loading: aiLoading, imageFailureRef } = useAI()
 
   // Cost guard (FEAT-168 / UX-100): every control in this editor that spends a
   // paid image call asks the budget question exactly once, here, and the answer
@@ -228,7 +244,23 @@ export default function BookEditorPage() {
   const [showAiDialog, setShowAiDialog] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiStyle, setAiStyle] = useState<string>('storybook')
-  const [aiResult, setAiResult] = useState<{ url: string; storagePath: string } | null>(null)
+  const [aiResult, setAiResult] = useState<{
+    url: string
+    storagePath: string
+    /** What the picture maker was actually asked to draw, when it differs (FEAT-195). */
+    revisedPrompt?: string
+    /** The words that produced THIS picture — an alternative tap replaces `aiPrompt`. */
+    askedFor: string
+  } | null>(null)
+  /**
+   * Why the last picture didn't come back (FEAT-195). This dialog had the area's
+   * only good refusal copy — two written suggestions and two free exits — but as
+   * prose the parent had to retype. The suggestions are now the server's own
+   * rewordings and tapping one IS the retry; the two written ones survive as
+   * `BLOCKED_TIPS`, shown when the suggester had nothing to offer.
+   */
+  const [aiFailure, setAiFailure] = useState<ImageGenerationFailure | null>(null)
+  const [aiAlternatives, setAiAlternatives] = useState<string[]>([])
 
   // Re-sync default AI scene style when themed child changes (e.g. Shelly
   // switches "For" from Lincoln to London). User can still override by
@@ -318,6 +350,12 @@ export default function BookEditorPage() {
   const [showFinishDialog, setShowFinishDialog] = useState(false)
   const [selectedCoverUrl, setSelectedCoverUrl] = useState<string | null>(null)
   const [selectedTheme, setSelectedTheme] = useState<BookTheme | undefined>(undefined)
+  /**
+   * The one-off note for this book (FEAT-194). `''` = none. Exclusive with
+   * `selectedTheme` — every change to either goes through `chooseStoryTheme`,
+   * so the two can never both be set.
+   */
+  const [selectedCustomTheme, setSelectedCustomTheme] = useState('')
   const [showCelebration, setShowCelebration] = useState(false)
 
   // Print state
@@ -526,12 +564,9 @@ export default function BookEditorPage() {
         const { imageId, storagePath } = sketchResult
         const imageUrl = URL.createObjectURL(drawingFile)
 
-        // Build caption from intensity
-        const caption = (reimagineIntensity ?? 50) <= 25
-          ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
-          : (reimagineIntensity ?? 50) >= 75
-            ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
-            : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
+        // The same captions as the post-cleanup route below — one definition,
+        // because both routes are the same slider and both spend a paid call.
+        const caption = reimagineCaption(reimagineIntensity ?? 50)
 
         // Close the dialog — kid goes back to editing
         resetDrawingFlow()
@@ -677,11 +712,7 @@ export default function BookEditorPage() {
         const { imageId, storagePath } = sketchResult
         const cleanedUrl = drawingResultUrl ?? URL.createObjectURL(drawingResultFile)
         const intensity = reimagineIntensity ?? 50
-        const caption = intensity <= 25
-          ? 'Lightly clean up this child\'s drawing, keeping their art style and line work. Just smooth edges and brighten colors.'
-          : intensity >= 75
-            ? 'Reimagine this child\'s drawing as a professional illustration. Keep the subject matter but create it in a polished cartoon style.'
-            : 'Enhance this child\'s drawing into a polished illustration while keeping the original composition and character design.'
+        const caption = reimagineCaption(intensity)
         resetDrawingFlow()
         void bgReimagine.startReimagine(
           imageId,
@@ -765,6 +796,8 @@ export default function BookEditorPage() {
       : ''
     setAiPrompt(prefill)
     setAiResult(null)
+    setAiFailure(null)
+    setAiAlternatives([])
     setShowAiDialog(true)
   }, [activePage])
 
@@ -814,26 +847,49 @@ export default function BookEditorPage() {
       : ''
     setAiPrompt(prefill)
     setAiResult(null)
+    setAiFailure(null)
+    setAiAlternatives([])
     setShowAiDialog(true)
   }, [activePage])
 
-  const handleGenerateScene = useCallback(async () => {
+  /**
+   * Generate from `words`. An alternative tap (FEAT-195) passes the reworded
+   * text, which becomes the description in the box so what is on screen and what
+   * was sent stay the same thing. It is a NEW paid call and counts as one — and
+   * it goes through the same cap guard, so a refusal is never a way round the
+   * week's budget.
+   */
+  const handleGenerateScene = useCallback(async (words?: string) => {
+    const asked = (words ?? aiPrompt).trim()
     // At the cap, refuse *before* spending — the paid call never goes out
     // (FEAT-168). The nudge in the dialog says so; nothing is styled as an error.
-    if (!aiPrompt.trim() || artCapReached) return
+    if (!asked || artCapReached) return
+    if (words !== undefined) setAiPrompt(words)
+    setAiFailure(null)
+    setAiAlternatives([])
     const result = await generateImage({
       familyId,
-      prompt: aiPrompt.trim(),
+      prompt: asked,
       style: `book-illustration-${aiStyle}` as ImageGenRequest['style'],
       size: '1024x1024',
     })
     if (result) {
-      setAiResult({ url: result.url, storagePath: result.storagePath })
+      setAiResult({
+        url: result.url,
+        storagePath: result.storagePath,
+        revisedPrompt: result.revisedPrompt,
+        askedFor: asked,
+      })
       // A real image arrived, so a real call was made: count it. "Try again"
       // counts too — each retry is another paid call. Never awaited (FEAT-167).
       recordBookArtGeneration(recordGeneration)
+      return
     }
-  }, [aiPrompt, aiStyle, artCapReached, familyId, generateImage, recordGeneration])
+    // Nothing came back — nothing counted, and the card says which failure it
+    // was rather than one line for all five.
+    setAiFailure(classifyImageGenerationFailure(imageFailureRef.current))
+    setAiAlternatives(imageFailureAlternatives(imageFailureRef.current))
+  }, [aiPrompt, aiStyle, artCapReached, familyId, generateImage, recordGeneration, imageFailureRef])
 
   const handleUseAiImage = useCallback(() => {
     if (!activePage || !aiResult) return
@@ -881,8 +937,11 @@ export default function BookEditorPage() {
     (sticker: Sticker) => {
       if (!activePage) return
       addStickerToPage(activePage.id, sticker.url, sticker.storagePath, sticker.label, sticker.tags)
-      // Auto-suggest theme if book has none
-      if (book && !book.theme) {
+      // Auto-suggest theme if book has none. A book carrying a one-off note has
+      // a theme — the parent's own words (FEAT-194) — so a sticker's tag must
+      // not quietly hand it a preset id and leave both stored. The suggester
+      // itself is untouched; this is its gate.
+      if (book && !book.theme && !hasCustomStoryTheme(book.generationConfig?.customTheme)) {
         // Build what the book will look like after sticker is added
         const updatedPages = book.pages.map((p) =>
           p.id === activePage.id
@@ -940,24 +999,79 @@ export default function BookEditorPage() {
   const handleOpenFinishDialog = useCallback(() => {
     setSelectedCoverUrl(book?.coverImageUrl ?? coverCandidates[0] ?? null)
     setSelectedTheme(book?.theme)
+    // The note the book carries, restored the same way the theme is: reopening
+    // shows what is stored, never a stale draft.
+    setSelectedCustomTheme(normalizeCustomStoryTheme(book?.generationConfig?.customTheme))
     setShowFinishDialog(true)
-  }, [coverCandidates, book?.coverImageUrl, book?.theme])
+  }, [
+    coverCandidates,
+    book?.coverImageUrl,
+    book?.theme,
+    book?.generationConfig?.customTheme,
+  ])
+
+  /**
+   * The `generationConfig` patch the finish handlers write, or `{}` when there
+   * is nothing to record (FEAT-194).
+   *
+   * Nothing to record means: this book has no `generationConfig` AND the parent
+   * typed no note. A hand-written book finished with the preset chips must not
+   * gain a fabricated one — `words: []` and a page count it never generated
+   * against would be a write this dialog has no business making.
+   *
+   * When there IS something to record and the book has no config yet, the two
+   * required fields are seeded honestly rather than invented: no word list was
+   * in play (`[]`, exactly what it means everywhere else) and the page count is
+   * the pages the book actually has.
+   *
+   * `''` rather than `undefined` for a cleared note: the app runs Firestore with
+   * `ignoreUndefinedProperties`, so `undefined` would leave a stored note in
+   * place on any merge write.
+   */
+  const themeGenerationConfig = useCallback(
+    (note: string): Pick<Book, 'generationConfig'> | Record<string, never> => {
+      const value = normalizeCustomStoryTheme(note)
+      const existing = book?.generationConfig
+      if (!existing && !value) return {}
+      return {
+        generationConfig: {
+          words: [],
+          pageCount: book?.pages.length ?? 0,
+          ...(existing ?? {}),
+          customTheme: value,
+        },
+      }
+    },
+    [book?.generationConfig, book?.pages.length],
+  )
 
   const handleSaveCover = useCallback(() => {
     if (!book) return
     updateBookMeta({
       ...(selectedCoverUrl ? { coverImageUrl: selectedCoverUrl } : { coverImageUrl: undefined }),
       ...(selectedTheme ? { theme: selectedTheme } : { theme: undefined }),
+      ...themeGenerationConfig(selectedCustomTheme),
     })
     setShowFinishDialog(false)
-  }, [book, selectedCoverUrl, selectedTheme, updateBookMeta])
+  }, [
+    book,
+    selectedCoverUrl,
+    selectedTheme,
+    selectedCustomTheme,
+    themeGenerationConfig,
+    updateBookMeta,
+  ])
 
   const handleFinishBook = useCallback(() => {
     if (!book) return
     updateBookMeta({
       status: 'complete',
       ...(selectedCoverUrl ? { coverImageUrl: selectedCoverUrl } : {}),
-      ...(selectedTheme ? { theme: selectedTheme } : {}),
+      // Not a conditional spread like the cover: a book whose theme was replaced
+      // by a note must have its preset id CLEARED, or both would be stored and
+      // the one-source rule would hold only in the dialog's own state.
+      theme: selectedTheme,
+      ...themeGenerationConfig(selectedCustomTheme),
     })
     setShowFinishDialog(false)
     setShowCelebration(true)
@@ -965,7 +1079,16 @@ export default function BookEditorPage() {
       setShowCelebration(false)
       navigate(`/books/${bookId}/read`)
     }, 2000)
-  }, [book, selectedCoverUrl, selectedTheme, updateBookMeta, navigate, bookId])
+  }, [
+    book,
+    selectedCoverUrl,
+    selectedTheme,
+    selectedCustomTheme,
+    themeGenerationConfig,
+    updateBookMeta,
+    navigate,
+    bookId,
+  ])
 
   if (loading) {
     return (
@@ -1845,71 +1968,47 @@ export default function BookEditorPage() {
               </Stack>
             )}
 
-            {aiError && !aiLoading && (
-              <Alert severity="warning" sx={{ mt: 1 }}>
-                {aiError.message.includes('blocked') || aiError.message.includes('safety') || aiError.message.includes('safety filter') ? (
-                  <Stack spacing={1.5}>
-                    <Typography variant="body2">
-                      The picture maker couldn&apos;t make that picture.
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Try one of these:</strong>
-                    </Typography>
-                    <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
-                      <li>
-                        <Typography variant="body2">
-                          Describe the <strong>world</strong> instead of characters
-                          — &quot;a colorful world with brick castles&quot; works great
-                        </Typography>
-                      </li>
-                      <li>
-                        <Typography variant="body2">
-                          Use a different style (Storybook or Comic Book work best)
-                        </Typography>
-                      </li>
-                    </Box>
-                    <Divider />
-                    <Typography variant="body2" color="text.secondary">
-                      Or add your own picture:
-                    </Typography>
-                    <Stack direction="row" spacing={1}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<PhotoCameraIcon />}
-                        onClick={() => {
-                          setShowAiDialog(false)
-                          setShowDrawingCapture(true)
-                        }}
-                      >
-                        Add a drawing
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<AddPhotoAlternateIcon />}
-                        onClick={() => {
-                          setShowAiDialog(false)
-                          const input = document.createElement('input')
-                          input.type = 'file'
-                          input.accept = 'image/*'
-                          input.onchange = (e) => {
-                            const file = (e.target as HTMLInputElement).files?.[0]
-                            if (file && activePage) {
-                              void addImageToPage(activePage.id, file, { cleanBackground: autoCleanSketch })
-                            }
-                          }
-                          input.click()
-                        }}
-                      >
-                        Import a drawing
-                      </Button>
-                    </Stack>
-                  </Stack>
-                ) : (
-                  <Typography variant="body2">{aiError.message || 'Couldn\u2019t make that picture. Please try again.'}</Typography>
-                )}
-              </Alert>
+            {/* One card for every way a picture can fail to arrive (FEAT-195).
+                This dialog's two written suggestions and two free exits were the
+                area's only good refusal copy — but static prose the parent had
+                to retype, and only here. They live in the shared card now: the
+                suggestions come from the server as taps, the two written ones
+                survive as the fallback when the suggester had nothing, and the
+                exits are handed in below because only this surface has them. */}
+            {aiFailure && !aiLoading && (
+              <ImageRetryCard
+                failure={aiFailure}
+                audience={artAudience}
+                alternatives={aiAlternatives}
+                onUseAlternative={(text) => { void handleGenerateScene(text) }}
+                exits={[
+                  {
+                    label: 'Add a drawing',
+                    icon: <PhotoCameraIcon />,
+                    onClick: () => {
+                      setShowAiDialog(false)
+                      setShowDrawingCapture(true)
+                    },
+                  },
+                  {
+                    label: 'Import a drawing',
+                    icon: <AddPhotoAlternateIcon />,
+                    onClick: () => {
+                      setShowAiDialog(false)
+                      const input = document.createElement('input')
+                      input.type = 'file'
+                      input.accept = 'image/*'
+                      input.onchange = (e) => {
+                        const file = (e.target as HTMLInputElement).files?.[0]
+                        if (file && activePage) {
+                          void addImageToPage(activePage.id, file, { cleanBackground: autoCleanSketch })
+                        }
+                      }
+                      input.click()
+                    },
+                  },
+                ]}
+              />
             )}
 
             {/* Weekly cap reached (FEAT-168): a warm nudge in place of the Create
@@ -1936,6 +2035,14 @@ export default function BookEditorPage() {
                     borderColor: 'divider',
                   }}
                 />
+                {/* What the picture maker was actually asked to draw, when the
+                    copyright rewrite changed it (FEAT-195). Parent-only and
+                    silent when the ask went through unchanged. */}
+                {drawnAsLine(aiResult.askedFor, aiResult.revisedPrompt, artAudience) && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    {drawnAsLine(aiResult.askedFor, aiResult.revisedPrompt, artAudience)}
+                  </Typography>
+                )}
               </Box>
             )}
           </Stack>
@@ -2077,10 +2184,42 @@ export default function BookEditorPage() {
                     label={`${t.emoji} ${t.label}`}
                     size="small"
                     variant={selectedTheme === t.id ? 'filled' : 'outlined'}
-                    onClick={() => setSelectedTheme(selectedTheme === t.id ? undefined : t.id)}
+                    onClick={() => {
+                      // One or the other (FEAT-194): picking a preset drops any
+                      // note, and the same chip again clears the preset.
+                      const next = chooseStoryTheme(
+                        { theme: selectedTheme, customTheme: selectedCustomTheme },
+                        { kind: 'preset', id: t.id },
+                      )
+                      setSelectedTheme(next.theme as BookTheme | undefined)
+                      setSelectedCustomTheme(next.customTheme)
+                    }}
                   />
                 ))}
+                {/* One-off custom feel (FEAT-194) — a PARENT control, gated on
+                    capability and never on a name. A kid never sees it: the
+                    presets are the kid-legible choices, and a free-text field
+                    has no readability bar to hold it to. Sits at the end of the
+                    row because it is the same choice, in the parent's words. */}
+                {isParentProfile && (
+                  <CustomStoryThemeCard
+                    value={selectedCustomTheme}
+                    onChange={(note) => {
+                      const next = chooseStoryTheme(
+                        { theme: selectedTheme, customTheme: selectedCustomTheme },
+                        { kind: 'custom', note },
+                      )
+                      setSelectedTheme(next.theme as BookTheme | undefined)
+                      setSelectedCustomTheme(next.customTheme)
+                    }}
+                  />
+                )}
               </Box>
+              {isParentProfile && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  {selectedCustomTheme || CUSTOM_STORY_THEME_EXCLUSIVE_HINT}
+                </Typography>
+              )}
             </Box>
             <Typography variant="body2" color="text.secondary">
               You can always come back and edit!
@@ -2164,16 +2303,47 @@ export default function BookEditorPage() {
         </Paper>
       )}
 
-      {/* ── Background reimagine: failure snackbar ── */}
-      <Snackbar
+      {/* ── Background reimagine: failure ── */}
+      {/* Was a 6-second auto-hiding snackbar carrying one sentence (FEAT-195).
+          A card you can tap cannot live in something that hides itself, and a
+          refusal, a rate limit and a dropped connection were all the same
+          sentence anyway — so it is a dialog holding the shared card. The
+          client-side timeout still has no `failure` kind (it is our own
+          stopwatch, not a call that came back), so it keeps its own message. */}
+      <Dialog
         open={bgReimagine.job?.status === 'failed'}
-        autoHideDuration={6000}
         onClose={bgReimagine.dismissError}
+        maxWidth="xs"
+        fullWidth
       >
-        <Alert severity="warning" onClose={bgReimagine.dismissError} sx={{ width: '100%' }}>
-          {bgReimagine.job?.error ?? 'Reimagine didn\'t work this time — try again or use a different drawing'}
-        </Alert>
-      </Snackbar>
+        <DialogTitle>That picture didn&apos;t come back</DialogTitle>
+        <DialogContent>
+          {bgReimagine.job?.failure ? (
+            <ImageRetryCard
+              failure={bgReimagine.job.failure}
+              audience={artAudience}
+              door={ImageRetryDoor.Redraw}
+              alternatives={bgReimagine.job.alternatives ?? []}
+              onUseAlternative={(text) => {
+                bgReimagine.dismissError()
+                bgReimagine.retryReimagine(text)
+              }}
+              onRetry={() => {
+                bgReimagine.dismissError()
+                bgReimagine.retryReimagine()
+              }}
+            />
+          ) : (
+            <Alert severity="warning">
+              {bgReimagine.job?.error ??
+                'Reimagine didn\'t work this time — try again or use a different drawing'}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={bgReimagine.dismissError}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Background reimagine: auto-dismiss notification ── */}
       <Snackbar

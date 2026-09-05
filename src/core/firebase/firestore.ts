@@ -16,7 +16,6 @@ import type {
   AvatarProfile,
   Book,
   BookProgress,
-  BookThemeConfig,
   ArtQuota,
   BusinessGoal,
   BusinessLogEntry,
@@ -406,9 +405,6 @@ export const booksCollection = (familyId: string): CollectionReference<Book> =>
 
 export const stickerLibraryCollection = (familyId: string): CollectionReference<Sticker> =>
   collection(db, `families/${familyId}/stickerLibrary`) as CollectionReference<Sticker>
-
-export const bookThemesCollection = (familyId: string): CollectionReference<BookThemeConfig> =>
-  collection(db, `families/${familyId}/bookThemes`) as CollectionReference<BookThemeConfig>
 
 // ── Sight Word Progress ──────────────────────────────────────────
 

@@ -24,6 +24,14 @@ import { GenerateHint } from './ArtHelpSheet'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
 import { recordStickerArtGeneration } from './useStickerArtQuota'
+import ImageRetryCard from './ImageRetryCard'
+import {
+  classifyImageGenerationFailure,
+  imageFailureAlternatives,
+  ImageRetryDoor,
+  type ImageGenerationFailure,
+} from './imageGenerationFailure'
+import { drawnAsLine } from './revisedPromptLine'
 
 interface MakeStickerDialogProps {
   open: boolean
@@ -71,8 +79,22 @@ export default function MakeStickerDialog({
   audience = 'parent',
 }: MakeStickerDialogProps) {
   const [prompt, setPrompt] = useState('')
-  const [generationPreview, setGenerationPreview] = useState<{ url: string; storagePath: string } | null>(null)
-  const [generationError, setGenerationError] = useState(false)
+  const [generationPreview, setGenerationPreview] = useState<{
+    url: string
+    storagePath: string
+    /** What the picture maker was actually asked to draw, when it differs (FEAT-195). */
+    revisedPrompt?: string
+    /** The words that produced THIS picture — an alternative tap replaces `prompt`. */
+    askedFor: string
+  } | null>(null)
+  /**
+   * Why the last picture didn't come back (FEAT-195). Replaces a boolean that
+   * said only "something failed" and a message-sniffing Alert underneath it that
+   * said something different — a refusal, a rate limit and a dropped connection
+   * now read as three different things with three different next steps.
+   */
+  const [failure, setFailure] = useState<ImageGenerationFailure | null>(null)
+  const [alternatives, setAlternatives] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   /**
    * What a failed write says (UX-93). Both writes in this flow used to fail
@@ -86,12 +108,13 @@ export default function MakeStickerDialog({
   const [pendingTags, setPendingTags] = useState<StickerTag[]>([])
   const [pendingProfile, setPendingProfile] = useState<'lincoln' | 'london' | 'both'>('both')
 
-  const { generateImage, loading: generating, error: generateError } = useAI()
+  const { generateImage, loading: generating, imageFailureRef } = useAI()
 
   const resetAll = useCallback(() => {
     setPrompt('')
     setGenerationPreview(null)
-    setGenerationError(false)
+    setFailure(null)
+    setAlternatives([])
     setPendingSticker(null)
     setPendingTags([])
     setPendingProfile('both')
@@ -104,23 +127,42 @@ export default function MakeStickerDialog({
     onClose()
   }, [generating, saving, resetAll, onClose])
 
-  const handleGenerate = useCallback(async () => {
+  /**
+   * Generate from `words`. An alternative tap passes the reworded text and it
+   * becomes the description in the box, so what the kid sees and what was sent
+   * stay the same thing (FEAT-195). Tapping one is a NEW paid call and is
+   * counted below exactly like typing the words by hand.
+   */
+  const handleGenerate = useCallback(async (words?: string) => {
+    const asked = (words ?? prompt).trim()
     // At the cap, refuse *before* spending — the paid call never goes out
     // (FEAT-165). The nudge below says so; nothing here is styled as an error.
-    if (!prompt.trim() || capReached) return
-    setGenerationError(false)
+    // An alternative tap goes through this same guard, so a refusal cannot
+    // become a way round the week's budget.
+    if (!asked || capReached) return
+    if (words !== undefined) setPrompt(words)
+    setFailure(null)
+    setAlternatives([])
     const result = await generateImage({
       familyId,
-      prompt: prompt.trim(),
+      prompt: asked,
       style: 'book-sticker',
       size: '1024x1024',
     })
     if (!result) {
-      // Nothing came back — don't charge the kid's weekly budget for it.
-      setGenerationError(true)
+      // Nothing came back — don't charge the kid's weekly budget for it. The
+      // classifier reads `imageFailureRef`, the raw rejection, not a message
+      // string; see `imageGenerationFailure.ts`.
+      setFailure(classifyImageGenerationFailure(imageFailureRef.current))
+      setAlternatives(imageFailureAlternatives(imageFailureRef.current))
       return
     }
-    setGenerationPreview({ url: result.url, storagePath: result.storagePath })
+    setGenerationPreview({
+      url: result.url,
+      storagePath: result.storagePath,
+      revisedPrompt: result.revisedPrompt,
+      askedFor: asked,
+    })
     // A real image arrived, so a real call was made: count it. "Try Again"
     // counts too — each retry is another paid call (FEAT-94's rule).
     //
@@ -129,11 +171,12 @@ export default function MakeStickerDialog({
     // `await` here means the next line added below it silently reintroduces the
     // wedge the other two doors had. The counter is fire-and-forget everywhere.
     recordStickerArtGeneration(recordGeneration)
-  }, [prompt, capReached, familyId, generateImage, recordGeneration])
+  }, [prompt, capReached, familyId, generateImage, recordGeneration, imageFailureRef])
 
   const handleTryAgain = useCallback(() => {
     setGenerationPreview(null)
-    setGenerationError(false)
+    setFailure(null)
+    setAlternatives([])
     // Keep the prompt pre-filled so they can tweak it.
   }, [])
 
@@ -299,6 +342,14 @@ export default function MakeStickerDialog({
                 background: CHECKERBOARD_BG,
               }}
             />
+            {/* What the picture maker was actually asked to draw, when the
+                copyright rewrite changed it (FEAT-195). Quiet, parent-only, and
+                silent when the ask went through unchanged. */}
+            {drawnAsLine(generationPreview.askedFor, generationPreview.revisedPrompt, audience) && (
+              <Typography variant="caption" color="text.secondary" textAlign="center">
+                {drawnAsLine(generationPreview.askedFor, generationPreview.revisedPrompt, audience)}
+              </Typography>
+            )}
             {/* The library write failed and said so (UX-93) — the picture is
                 still on screen, so "Use it" is still the way forward. */}
             {saveError && <Alert severity="warning">{saveError}</Alert>}
@@ -315,15 +366,21 @@ export default function MakeStickerDialog({
               </Button>
             </Stack>
           </Stack>
-        ) : generationError ? (
-          <Stack spacing={2} alignItems="center" sx={{ pt: 1 }}>
-            <Typography variant="body2" color="text.secondary" textAlign="center">
-              Couldn&apos;t make that sticker. Try describing it differently.
-            </Typography>
-            <Button variant="outlined" onClick={handleTryAgain}>
-              Try Again
-            </Button>
-          </Stack>
+        ) : failure ? (
+          /* One card for every way a picture can fail to arrive (FEAT-195).
+             Replaces a single line that said the same thing for a refusal, a
+             rate limit and a dropped connection, and had nothing to tap. At the
+             cap `handleGenerate` still refuses before spending, so an
+             alternative tap can never get round the week's budget. */
+          <ImageRetryCard
+            failure={failure}
+            audience={audience}
+            door={ImageRetryDoor.Sticker}
+            alternatives={alternatives}
+            onUseAlternative={(text) => { void handleGenerate(text) }}
+            onRetry={handleTryAgain}
+            retryLabel="Try Again"
+          />
         ) : capReached ? (
           /* Weekly cap reached (FEAT-165): a warm nudge, never an error styling
              — the same copy and posture as the Kit Builder's cap. The prompt
@@ -359,16 +416,9 @@ export default function MakeStickerDialog({
             )}
           </>
         )}
-        {generateError && !generating && (
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            {generateError.message.includes('blocked') || generateError.message.includes('safety')
-              ? 'That description was blocked — try describing what it looks like instead of using a character name!'
-              : `Something went wrong: ${generateError.message}`}
-          </Alert>
-        )}
       </DialogContent>
       <DialogActions>
-        {!generationPreview && !generationError && (
+        {!generationPreview && !failure && (
           <>
             <Button onClick={handleClose} disabled={generating}>
               {capReached ? 'Close' : 'Cancel'}

@@ -104,7 +104,12 @@ Each preset also carries a story-side triple, which is the half that works well:
 `storyTone` / `storyWorldDescription` / `storyVocabularyLevel` → `THEME GUIDANCE` in the story prompt
 (`chat.ts:2407-2416`) — for the 11 ids `PRESET_THEME_MAP` covers.
 
-### 1c. Custom themes — `bookThemes` (`CreateThemeDialog.tsx`)
+### 1c. Custom themes — `bookThemes` (`CreateThemeDialog.tsx`) — ✅ **RETIRED (FEAT-194)**
+
+> The table below is the state this audit found. It no longer exists: `CreateThemeDialog`, the shelf's
+> *+ New Theme* chip, `bookThemesCollection` and both server lookups are deleted, and the existing
+> documents are left in place unread. What replaced it is a one-off note on the book itself
+> (`generationConfig.customTheme`), story-side only. See **UX-160**.
 
 | Field the parent fills in | Where it is stored | Where it reaches a model |
 |---|---|---|
@@ -325,7 +330,7 @@ FEAT-159 designed.
   routing gap is **UX-165**.
 - `family` / `science` / `sight_words` / `faith` on the **story** path — still nothing. **UX-172.**
 - `other` (`BOOK_THEMES`) — matches no map anywhere.
-- Every field of a custom theme. **UX-160.**
+- Every field of a custom theme. **UX-160** — ✅ retired in FEAT-194; the control is gone rather than fixed.
 - **Photo Album** (`COVER_STYLES`) on the regen path. **UX-165.**
 
 **Reaches by two paths:**
@@ -385,10 +390,9 @@ drawn; **theme** = the book's world tag), *theme* currently means **five** thing
 3. `ImageGenRequest.themeId` → keep the wire name (it selects a *book theme* record) but rename the
    field it reads from `imageStylePrefix` → `pictureHint`, so nothing calls it a style.
 4. Workshop `inputs.theme` → `inputs.subject`.
-5. User-facing: `CreateThemeDialog`'s *"What style should pictures be?"* is the only place a person is
-   asked for a style inside a theme; if UX-160 is fixed by removing custom themes, the question goes
-   with it. If it is fixed by wiring them up, the field is genuinely a style and the dialog should say
-   so.
+5. User-facing: `CreateThemeDialog`'s *"What style should pictures be?"* was the only place a person was
+   asked for a style inside a theme. UX-160 was fixed by **removing** custom themes, so the question
+   went with it (FEAT-194) — and describing a look in free text is now wholly **UX-177**, unbuilt.
 
 **UX-176.**
 
@@ -400,7 +404,9 @@ drawn; **theme** = the book's world tag), *theme* currently means **five** thing
 
 - The Workshop's **Custom card back** (`CardStyleStep.tsx:26-28`, `workshopArt.ts:403-407`) — typed
   text reaches the prompt verbatim. It works.
-- `CreateThemeDialog`'s **"What style should pictures be?"** — typed text reaches nothing (§1c).
+- `CreateThemeDialog`'s **"What style should pictures be?"** — typed text reached nothing (§1c), and
+  the field is **deleted** as of FEAT-194. So this design has no half-built precedent to inherit: it
+  starts from the chip described below.
 
 **Where it would plug in.** `buildImagePrompt` already takes a third argument for exactly this shape
 (`generateImage.ts:242-246`), and the callable already resolves a custom string out of Firestore
@@ -489,21 +495,21 @@ path, six theme recipes are unreachable, and the custom-theme feature cannot rea
 
 | # | ID | P | One line | Batch |
 |---|---|---|---|---|
-| 1 | **UX-160** | P1 | Custom book themes are a write-only dead end: a parent fills in four fields, no book can ever carry the id, the client never reads the collection, and creating one silently blanks the shelf | B |
-| 2 | **UX-179** | P1 | Cartoon and Fantasy are the only two of nine sticker looks naming the **same medium** (watercolor washes + a soft ink line), and the one axis that fully separates them — palette — is the axis a re-draw of the child's own drawing most constrains. **The measured cause of the owner's report** | A |
-| 3 | **UX-161** | P1 | "Keep my style" sends the full watercolor recipe under *"follow it exactly"*; three labelled intensity bands resolve to two styles, two of which are identical; "Full reimagine" says cartoon and sends comic halftones | A + B |
+| 1 | **UX-160** | P1 | ✅ **FIXED — FEAT-194.** Custom book themes were a write-only dead end: a parent filled in four fields, no book could ever carry the id, the client never read the collection, and creating one silently blanked the shelf. **Retired** (the recommended half of Batch B item 8): `CreateThemeDialog`, the shelf's *+ New Theme* chip, `bookThemesCollection` and **both** server custom-theme lookups are deleted; existing `bookThemes` documents are left in place, unread. The want behind it is per-book, not reusable, so it returns as the one-off `generationConfig.customTheme` — a parent-only *Custom…* card on the two theme surfaces, threaded into the STORY prompt only and never into an image prompt (FEAT-189's lesson, one table over). The dropped *"What style should pictures be?"* field has no replacement by design — that is **UX-177** | B |
+| 2 | **UX-179** | P1 | Cartoon and Fantasy are the only two of nine sticker looks naming the **same medium** (watercolor washes + a soft ink line), and the one axis that fully separates them — palette — is the axis a re-draw of the child's own drawing most constrains. **The measured cause of the owner's report** | A ✅ |
+| 3 | **UX-161** | P1 | "Keep my style" sends the full watercolor recipe under *"follow it exactly"*; three labelled intensity bands resolve to two styles, two of which are identical; "Full reimagine" says cartoon and sends comic halftones | A ✅ + B |
 | 4 | **UX-172** | P1 | Four theme ids still reach the **story** writer as nothing — including `sight_words`, which `inferBookTheme` returns for *every* book made from a word list | B |
-| 5 | **UX-166** | P2 | All fifteen theme picture-prefixes are subject lists — the exact shape FEAT-189 removed from three styles, still live one table over, held harmless only by FEAT-174's precedence rule | A |
+| 5 | **UX-166** | P2 | All fifteen theme picture-prefixes are subject lists — the exact shape FEAT-189 removed from three styles, still live one table over, held harmless only by FEAT-174's precedence rule | A ✅ |
 | 6 | **UX-167** | P2 | Four look recipes exist twice inside `functions/`, and 8 of their 12 axes have drifted; the help copy asserts two of them are identical | B |
-| 7 | **UX-163** | P2 | The Game Workshop sends `style: 'general'` — an empty prefix — for every picture, and the help sheet tells the parent it is "one fixed children's-game look" | A |
-| 8 | **UX-164** | P2 | `book-sticker`, the fixed look behind three paid doors, is adjective-only — the one look never given the `VisualRecipe` treatment | A |
+| 7 | **UX-163** | P2 | The Game Workshop sends `style: 'general'` — an empty prefix — for every picture, and the help sheet tells the parent it is "one fixed children's-game look" | A ✅ |
+| 8 | **UX-164** | P2 | `book-sticker`, the fixed look behind three paid doors, is adjective-only — the one look never given the `VisualRecipe` treatment | A ✅ |
 | 9 | **UX-165** | P2 | "Cover style" renders no cover; its only effect is a hidden regen fallback, where **"Photo Album" is rejected at the callable's argument gate** and the page just fails. Also the reason `PRESET_IMAGE_PREFIXES` is unreachable from every path | B |
-| 10 | **UX-162** | P2 | Three of the nine fancy looks ask for cast/long/drop shadows that the transparent-cutout clause removes; two more (`family`, `space`) are ambiguous and need real output to judge | A |
+| 10 | **UX-162** | P2 | Three of the nine fancy looks ask for cast/long/drop shadows that the transparent-cutout clause removes; two more (`family`, `space`) are ambiguous and need real output to judge | A ⚠️ |
 
 **The rest:** UX-176 ("theme" means five things; five mechanical renames settle it) ·
 UX-168 (Blocky sends two paths) · UX-169 (`STYLE_RECIPES.realistic` unreachable) ·
 UX-170 (six theme recipes unreachable) · UX-171 (`garden-warfare` ↔ `platformer`, the closest measured
-pair) · UX-173 (`IMAGE STYLE:` reaches the story writer while a different table draws the picture) ·
+pair — **fixed, FEAT-193**) · UX-173 (`IMAGE STYLE:` reaches the story writer while a different table draws the picture) ·
 UX-174 (a fourth copy of `GENERATION_STYLES`) · UX-175 (`autoSuggestTheme`, a fifth classifier, maps to
 a dead id) · UX-177 (the free-text look — design) · UX-178 (`schedule-card` / `reward-chart` /
 `theme-illustration` have no caller).
@@ -555,34 +561,89 @@ a **story-prompt** change, outside the sanctioned exception. Filed as **UX-172**
 
 ### Batch A — recipe and copy rewrites (server strings, cheap, no plumbing)
 
-1. **UX-179 — the owner's pair, and the highest-leverage single change here.** Give `fantasy` a medium
+> **All seven done — FEAT-193, 2026-09-04.** Two carry a deliberate remainder,
+> named on the item: **UX-162** left `family` and `space` alone (this audit could
+> not settle them from the text, and said so), and **UX-161** fixed only the
+> captions (161a) — the routing half is 161b, batch B.
+
+
+1. **UX-179 — the owner's pair, and the highest-leverage single change here.** ✅ **FIXED (FEAT-193).**
+   Give `fantasy` a medium
    of its own, or give `cartoon` one; they are the only two watercolors in a nine-option picker.
    Cheapest: move `fantasy` to *"coloured pencil and ink with a soft glow"* and leave `cartoon` as the
    house watercolor. While there, check the three options that name **no** medium at all (`adventure`,
    `faith`, `holidays`/`cooking`/`sports` in the wider table) — a look with no medium separates on
    palette alone, and palette is the axis this surface constrains.
-2. **UX-162** — make the three demonstrably-conflicting recipes cutout-aware: give `VisualRecipe` an
+   *Landed:* `fantasy` → **opaque matte gouache**, not the coloured pencil suggested here —
+   `family` already owns a pencil-textured line in the same picker, which the new medium rule
+   forbids. `cartoon` keeps the house watercolor. `adventure` (acrylic), `faith` (chalk pastel),
+   `animals` (marker) and `science` (technical pen) gained one, as did the six unreachable
+   recipes, `sight_words` and `STYLE_RECIPES.realistic` — so **every** recipe in both tables
+   names a medium and no two options in a picker share one, enforced by `recipeMediums` plus a
+   per-picker distinctness test.
+2. **UX-162** — ⚠️ **PARTIALLY FIXED (FEAT-193) — `family` and `space` deliberately left.**
+   Make the three demonstrably-conflicting recipes cutout-aware: give `VisualRecipe` an
    optional `shadingCutout` used when `transparent`, or rewrite those shading lines to describe shading
    *on the subject* (`faith`: "warm light falling across the form from one side, no cast shadow").
    Before touching `family` and `space`, generate one sticker in each and look — the audit could not
    settle those two from the text.
-3. **UX-166** — rewrite the fifteen `imageStylePrefix` strings as *hints*, not scenes ("a warm domestic
+   *Landed:* the `shadingCutout` route — the book reimagine can still ask for a whole scene,
+   where a cast shadow is right, so only the cutout path swaps. Applied to `adventure`, `faith`
+   and `science`, plus `sports` and `STYLE_RECIPES.realistic`, which name ground shadows and
+   would hit the same defect the moment either became reachable. **`family` and `space` are
+   untouched and this item stays open for them** — each needs one real generated sticker, which
+   is the owner's call rather than a guess.
+3. **UX-166** — ✅ **FIXED (FEAT-193).** Rewrite the fifteen `imageStylePrefix` strings as *hints*, not scenes ("a warm domestic
    picture-book look" rather than "Soft lighting, happy expressions"), so the theme can never be a
    second scene if precedence ever changes.
-4. **UX-163** — give the Workshop one real look. Simplest honest version: send
+   *Landed:* both **picture** copies — the client's `PRESET_THEMES` and the server's
+   `PRESET_IMAGE_PREFIXES` — rewritten to the same fifteen strings, which also removes the drift
+   between those two (still two hand-kept tables; **UX-167 stands**). The server map was hoisted
+   out of the callable so a test can read it, no behaviour change. `generateStory.ts`'s third
+   copy feeds the *story* writer rather than a picture and is left to UX-172 / UX-173.
+4. **UX-163** — ✅ **FIXED (FEAT-193).** Give the Workshop one real look. Simplest honest version: send
    `style: 'book-illustration-storybook'` (or a new `game-art` recipe) instead of `'general'`, and make
    `artHelpContent`'s claim true.
-5. **UX-164** — promote `book-sticker` to a `VisualRecipe`.
-6. **UX-161a** — fix the three reimagine captions so they describe what the style actually does.
-7. **UX-171** — add one structural clause to `garden-warfare` so it does not rest on palette alone.
+   *Landed:* a new **`game-art`** recipe rather than `book-illustration-storybook` — that style's
+   framing bans characters and people, which would break every challenge card and token. It is
+   **look-only** — it states no framing at all, and its shading is cutout-safe — because that one
+   prefix also reaches the parent token ("a circular icon, on transparent background"), which runs
+   on `background: 'auto'`; each Workshop prompt keeps saying what shape it has to be, which is
+   the FEAT-189 split. All **five** call sites send it (the fifth is `WorkshopPage`'s
+   after-the-words title card), and the inline adjective phrases came out of the prompts in the
+   same change — leaving them would put two art directions in one prompt.
+5. **UX-164** — ✅ **FIXED (FEAT-193).** Promote `book-sticker` to a `VisualRecipe`.
+   *Landed:* flat vector fills, a bold even outline closed all the way round, one turned-away
+   tone and one highlight, and no shadow of any kind (it is always transparent). Its
+   single-subject rule moved into a separate `STICKER_FRAMING`, so the recipe answers only the
+   three look questions and "a sticker" cannot come back as a *sheet* of them. A sticker is not a
+   scene, so it gets its own subject sentence rather than the page styles' — "one single, unified
+   **scene** filling the whole image" followed by "no background elements, no **scene**" would
+   state a rule and take it back. The rule keeps one definition (`NEVER_SPLIT_CLAUSE`, composed by
+   both framings), so the six page styles' framing is byte-identical.
+6. **UX-161a** — ✅ **FIXED (FEAT-193).** Fix the three reimagine captions so they describe what the style actually does.
+   *Landed:* the three captions and both slider end labels ("Keep my style" → *Watercolor look*,
+   "Full reimagine" → *Comic-book look*) moved into a pure `reimagineCaptions.ts`;
+   `reimagineStyleFor` was extracted verbatim out of the hook so a test holds the copy to the
+   routing itself rather than to a copy of it. **161b — three bands, two styles — is untouched
+   and stays in batch B.**
+7. **UX-171** — ✅ **FIXED (FEAT-193).** Add one structural clause to `garden-warfare` so it does not rest on palette alone.
+   *Landed:* *"seen from a low three-quarter view looking slightly down across the ground with
+   everything standing upright in real depth"* — deliberately the opposite of Platformer World's
+   *"drawn side-on in 2D with no perspective depth"* — plus its own medium (gouache against the
+   platformer's vector fills).
 
 ### Batch B — plumbing (one source of truth; some of it propose-and-confirm)
 
-8. **UX-160** — decide custom themes: **wire them up** (a "Theme" chip row that includes custom themes
-   in the Finish dialog, and read `bookThemes` on the client) or **retire them** (delete
-   `CreateThemeDialog`, the "+ New Theme" chip, and the two server custom-theme lookups — the ARCH-07
-   precedent). *Recommend retire:* the story-side triple is the half that works, and it already ships
-   fifteen presets.
+8. **UX-160** — ✅ **DONE (FEAT-194).** Decided: **retired**, as recommended. `CreateThemeDialog`, the
+   "+ New Theme" chip, `bookThemesCollection` and both server custom-theme lookups are deleted; the
+   orphan `bookThemes` documents are left in place, unread (a parent's typed words — a data delete is
+   propose-and-confirm and no run has that go-ahead). The story-side half that works came back as a
+   **one-off note on the book** rather than a reusable record (owner, 2026-09-04): *"I don't think it
+   makes sense to support a different theme, but maybe a slight augmentation… a card at the bottom
+   could say custom and support only one-off."* It reaches `buildStoryPrompt`'s THEME GUIDANCE and
+   **never** `buildImagePrompt` — free text is the most likely thing in the app to name a subject, and
+   a subject arriving beside the page's own scene is the split canvas FEAT-189 measured.
 9. **UX-172 + UX-167 + UX-174** — one server theme module; the four shared looks into `visualRecipe.ts`;
    `BookGenerateChat` imports `GENERATION_STYLES`.
 10. **UX-161b** — three intensity bands → three distinct styles, or two labelled bands.
@@ -602,6 +663,13 @@ a **story-prompt** change, outside the sanctioned exception. Filed as **UX-172**
 
 *Filed by the FEAT-190 run, 2026-09-04. Read-only except §11. Nothing near quota, hours, XP,
 compliance or `firestore.rules`.*
+
+*Batch A landed in full on 2026-09-04 as **FEAT-193** — the seven items above carry a `Landed:`
+note each. Two keep a named remainder: `family` and `space` (UX-162) were left for the owner to
+judge from a real generated sticker, and UX-161b's routing was left where it was filed. The
+audit's measured findings held up under the fix: the medium scan of §3 is now a test
+(`recipeMediums`, per picker), and every claim this document makes about what a look sends was
+re-checked against the rewritten recipes rather than carried forward.*
 
 *Revised 2026-09-04 after a Codex review on PR #1760 raised two P2s, both of which were verified and
 both of which were right: the §11 blast-radius claim was wrong (the `photo` path is rejected at the

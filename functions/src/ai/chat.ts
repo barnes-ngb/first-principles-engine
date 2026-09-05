@@ -1978,12 +1978,25 @@ export interface StoryGenInput {
    * FEAT-173's one-line rule, so an older caller is unchanged.
    */
   readingLevelBlock?: ReadingLevelBlockInput;
-  /** Theme-engine guidance (injected from BookThemeConfig) */
+  /**
+   * Theme guidance for the story. Exactly one of two shapes, never a mix
+   * (`generateStory.resolveThemeGuidance` is the one place that builds it):
+   *   - a PRESET's story triple (world / tone / vocabulary style), or
+   *   - `customNote` — the parent's own one-off words for this one book
+   *     (FEAT-194), which carry no `imageStylePrefix` by construction.
+   */
   themeGuidance?: {
     storyTone?: string;
     storyWorldDescription?: string;
     storyVocabularyLevel?: string;
     imageStylePrefix?: string;
+    /**
+     * FEAT-194. The parent's one-off note. Rendered as its own THEME GUIDANCE
+     * body — never folded into `storyWorldDescription`, because a note is
+     * whatever the parent meant by "what should this story feel like?" and
+     * labelling it with a noun they did not choose puts words in their mouth.
+     */
+    customNote?: string;
   };
 }
 
@@ -2431,7 +2444,17 @@ VOCABULARY:
 Calibrate vocabulary against the ${readingLevelBlock ? "READING LEVEL block above" : "SKILL SNAPSHOT section above (if present)"}. Use words ${childName} can decode comfortably with 1-2 stretch words sprinkled in if they're already in the mastered set.
 `;
 
-  const themeSection = themeGuidance
+  // FEAT-194: a parent's one-off note replaces the preset block outright — one
+  // world, one tone. Its closing clause restates the READING LEVEL block's
+  // precedence in the same breath, because free text is exactly where "make it
+  // sophisticated and literary" would otherwise arrive as an instruction.
+  const themeSection = themeGuidance?.customNote
+    ? `
+THEME GUIDANCE — the parent's own words for this one book:
+STORY WORLD AND TONE: ${themeGuidance.customNote}
+Write the story so it feels this way: it shapes the world, the tone and the scene descriptions. It does NOT change the vocabulary — the READING LEVEL block above outranks it, so write this feeling with words at that level.
+`
+    : themeGuidance
     ? `
 THEME GUIDANCE:
 ${themeGuidance.storyWorldDescription ? `STORY WORLD: ${themeGuidance.storyWorldDescription}` : ""}

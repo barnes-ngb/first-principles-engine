@@ -127,3 +127,112 @@ export async function rewriteForCopyright(
     return fallbackCopyrightStrip(prompt);
   }
 }
+
+// ── Alternatives after a refusal (FEAT-195) ────────────────────────
+
+/** How many rewordings a refused prompt comes back with. */
+export const ALTERNATIVES_MAX = 3;
+
+/**
+ * The same cheap Haiku that already rewrites every prompt, asked a different
+ * question: the picture was refused anyway — what else could this person have
+ * meant? Three answers, so the card offers a choice rather than a single
+ * take-it-or-leave-it.
+ *
+ * Deliberately NOT a general "make it safe" rewrite: {@link rewriteForCopyright}
+ * already ran and the model still said no, so the useful move is to vary the
+ * *subject* the person described, not to strip names again.
+ */
+const ALTERNATIVES_SYSTEM = `A child asked for a picture and the image generator's safety filter refused it. Suggest what they could ask for instead.
+
+Write EXACTLY 3 alternative picture descriptions, one per line.
+
+RULES:
+- Keep what they actually wanted — the same subject, mood and action, described differently.
+- Make the three genuinely different from each other. Not one description reworded three ways.
+- NEVER use a character name, franchise name, game name or brand name. Describe how it LOOKS.
+- Describe a picture, not a story: what is in it and what it looks like.
+- Nothing violent, frightening, or involving real people.
+- Under 20 words each. Plain words a child can read.
+
+OUTPUT: three lines. No numbering, no bullets, no quotes, no preamble, no blank lines.`;
+
+/** What kind of picture each mode is asking for, so the suggestions fit the door. */
+const ALTERNATIVES_ASK: Record<RewriteMode, string> = {
+  sticker: "They asked for a sticker — one thing on its own, no background.",
+  scene: "They asked for a scene — a world or background, not a character portrait.",
+  sketch: "They asked to redraw their own drawing. Describe what the drawing shows.",
+};
+
+/**
+ * Parse the suggester's reply into at most {@link ALTERNATIVES_MAX} clean lines.
+ *
+ * Pure, and strict about two things: a line that still names a franchise
+ * character would be refused again (so it is dropped rather than offered as a
+ * fix), and a line long enough to be a paragraph is not a tappable choice.
+ */
+export function parsePromptAlternatives(
+  raw: string,
+  max: number = ALTERNATIVES_MAX,
+): string[] {
+  return raw
+    .split("\n")
+    .map((line) =>
+      line
+        // Leading bullet or "1." / "1)" numbering, however the model formats it.
+        .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "")
+        .replace(/^["'“]+|["'”]+$/g, "")
+        .trim(),
+    )
+    .filter(
+      (line) =>
+        line.length > 0 &&
+        line.length <= 300 &&
+        // Still names an IP character → it would just be refused again.
+        line.match(COPYRIGHT_NAMES) === null,
+    )
+    .slice(0, max);
+}
+
+/**
+ * Ask for alternative descriptions of a refused prompt.
+ *
+ * **Spends one cheap call, and only on the refusal path** — every caller invokes
+ * this from inside a `catch` that has already decided the image was blocked, so
+ * a successful generation never pays for it. Never throws and never rejects:
+ * an empty list means the client shows its own static tips, which is a worse
+ * card but still a card.
+ */
+export async function suggestPromptAlternatives(
+  prompt: string,
+  mode: RewriteMode,
+  apiKey: string,
+): Promise<string[]> {
+  // Nothing to reword — an uncaptioned sketch, say. Skip the call entirely.
+  if (!prompt.trim()) return [];
+  try {
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const claude = new Anthropic({ apiKey });
+
+    const result = await claude.messages.create({
+      model: CLAUDE_HAIKU,
+      max_tokens: 300,
+      system: ALTERNATIVES_SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content: `${ALTERNATIVES_ASK[mode]}\n\nThey asked for: ${prompt}`,
+        },
+      ],
+    });
+
+    const firstBlock = result.content[0];
+    if (firstBlock?.type === "text") {
+      return parsePromptAlternatives(firstBlock.text);
+    }
+    return [];
+  } catch (err) {
+    console.warn("Alternative suggester failed:", err);
+    return [];
+  }
+}

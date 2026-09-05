@@ -6,9 +6,10 @@ import type { Sticker } from '../../../core/types'
 import { StickerCategory } from '../../../core/types/enums'
 import type { DrawingGroup } from '../stickerGrouping'
 
-const { enhanceSketchMock, addDocMock } = vi.hoisted(() => ({
+const { enhanceSketchMock, addDocMock, imageFailureRef } = vi.hoisted(() => ({
   enhanceSketchMock: vi.fn(),
   addDocMock: vi.fn(),
+  imageFailureRef: { current: null as unknown },
 }))
 
 vi.mock('firebase/firestore', () => ({
@@ -25,7 +26,7 @@ vi.mock('../../../core/firebase/firestore', () => ({
 }))
 
 vi.mock('../../../core/ai/useAI', () => ({
-  useAI: () => ({ enhanceSketch: enhanceSketchMock }),
+  useAI: () => ({ imageFailureRef, enhanceSketch: enhanceSketchMock }),
 }))
 
 import DrawingGroupCard from '../DrawingGroupCard'
@@ -58,6 +59,7 @@ async function openPicker(user: ReturnType<typeof userEvent.setup>) {
 describe('DrawingGroupCard — weekly art cap (FEAT-165 / UX-95)', () => {
   beforeEach(() => {
     enhanceSketchMock.mockReset()
+    imageFailureRef.current = null
     enhanceSketchMock.mockResolvedValue({ url: 'https://x.test/v.png', storagePath: 'p/v.png' })
     addDocMock.mockReset()
     addDocMock.mockResolvedValue({ id: 'v1' })
@@ -120,6 +122,33 @@ describe('DrawingGroupCard — weekly art cap (FEAT-165 / UX-95)', () => {
     await user.click(screen.getByRole('button', { name: 'Make it' }))
 
     await waitFor(() => expect(enhanceSketchMock).toHaveBeenCalledTimes(1))
+    expect(recordGeneration).not.toHaveBeenCalled()
+  })
+
+  it('names WHICH failure it was, and a refusal still spends nothing (FEAT-195)', async () => {
+    // "That didn't work — try again." was the whole of what this door said, for
+    // every failure there is.
+    const user = userEvent.setup()
+    const recordGeneration = vi.fn().mockResolvedValue(undefined)
+    imageFailureRef.current = {
+      code: 'functions/resource-exhausted',
+      message: 'Image enhancement is busy right now.',
+      details: { failure: 'busy' },
+    }
+    enhanceSketchMock.mockResolvedValue({ url: '', storagePath: '' })
+    render(
+      <DrawingGroupCard
+        group={makeGroup()}
+        familyId="f1"
+        onChanged={() => {}}
+        recordGeneration={recordGeneration}
+      />,
+    )
+
+    await openPicker(user)
+    await user.click(screen.getByRole('button', { name: 'Make it' }))
+
+    expect(await screen.findByText(/busy right now/i)).toBeInTheDocument()
     expect(recordGeneration).not.toHaveBeenCalled()
   })
 

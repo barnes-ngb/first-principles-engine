@@ -10,7 +10,6 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import Alert from '@mui/material/Alert'
 import AddIcon from '@mui/icons-material/Add'
 import FileUploadIcon from '@mui/icons-material/FileUpload'
 import { addDoc, getDocs, orderBy, query, doc, setDoc } from 'firebase/firestore'
@@ -24,6 +23,14 @@ import { StickerCategory } from '../../core/types/enums'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
+import ImageRetryCard from './ImageRetryCard'
+import {
+  classifyImageGenerationFailure,
+  imageFailureAlternatives,
+  ImageRetryDoor,
+  type ImageGenerationFailure,
+} from './imageGenerationFailure'
+import { drawnAsLine } from './revisedPromptLine'
 import { recordBookArtGeneration } from './useBookArtQuota'
 import { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
 import type { ArtHelpAudience } from './artHelpContent'
@@ -111,15 +118,24 @@ export default function StickerPicker({
   const [createPrompt, setCreatePrompt] = useState('')
 
   // Generation preview state (shown before saving to library)
-  const [generationPreview, setGenerationPreview] = useState<{ url: string; storagePath: string } | null>(null)
-  const [generationError, setGenerationError] = useState(false)
+  const [generationPreview, setGenerationPreview] = useState<{
+    url: string
+    storagePath: string
+    /** What the picture maker was actually asked to draw, when it differs (FEAT-195). */
+    revisedPrompt?: string
+    /** The words that produced THIS picture — an alternative tap replaces `createPrompt`. */
+    askedFor: string
+  } | null>(null)
+  /** Why the last picture didn't come back (FEAT-195) — see `imageGenerationFailure.ts`. */
+  const [failure, setFailure] = useState<ImageGenerationFailure | null>(null)
+  const [alternatives, setAlternatives] = useState<string[]>([])
 
   // Post-generation tagging state
   const [pendingSticker, setPendingSticker] = useState<Sticker | null>(null)
   const [pendingTags, setPendingTags] = useState<StickerTag[]>([])
   const [pendingProfile, setPendingProfile] = useState<'lincoln' | 'london' | 'both'>('both')
 
-  const { generateImage, loading: generating, error: generateError } = useAI()
+  const { generateImage, loading: generating, imageFailureRef } = useAI()
 
   // Load stickers from Firestore
   useEffect(() => {
@@ -160,28 +176,43 @@ export default function StickerPicker({
     [onSelectSticker, onClose],
   )
 
-  const handleCreateSticker = useCallback(async () => {
+  /**
+   * Generate from `words`. An alternative tap (FEAT-195) passes the reworded
+   * text, which becomes the description in the box so what the kid reads and
+   * what was sent stay the same thing. It is a NEW paid call and counts as one.
+   */
+  const handleCreateSticker = useCallback(async (words?: string) => {
+    const asked = (words ?? createPrompt).trim()
     // At the cap, refuse *before* spending — the paid call never goes out
     // (FEAT-168). The nudge below says so; nothing here is styled as an error.
-    if (!createPrompt.trim() || capReached) return
-    setGenerationError(false)
+    // An alternative tap comes through this same guard.
+    if (!asked || capReached) return
+    if (words !== undefined) setCreatePrompt(words)
+    setFailure(null)
+    setAlternatives([])
     const result = await generateImage({
       familyId,
-      prompt: createPrompt.trim(),
+      prompt: asked,
       style: 'book-sticker',
       size: '1024x1024',
     })
     if (!result) {
       // Nothing came back — don't charge the kid's weekly budget for it.
-      setGenerationError(true)
+      setFailure(classifyImageGenerationFailure(imageFailureRef.current))
+      setAlternatives(imageFailureAlternatives(imageFailureRef.current))
       return
     }
     // Show preview instead of saving immediately
-    setGenerationPreview({ url: result.url, storagePath: result.storagePath })
+    setGenerationPreview({
+      url: result.url,
+      storagePath: result.storagePath,
+      revisedPrompt: result.revisedPrompt,
+      askedFor: asked,
+    })
     // A real image arrived, so a real call was made: count it. "Try Again"
     // counts too — each retry is another paid call. Never awaited (FEAT-167).
     recordBookArtGeneration(recordGeneration)
-  }, [createPrompt, capReached, familyId, generateImage, recordGeneration])
+  }, [createPrompt, capReached, familyId, generateImage, recordGeneration, imageFailureRef])
 
   const handleUseGeneratedSticker = useCallback(async () => {
     if (!generationPreview) return
@@ -214,7 +245,8 @@ export default function StickerPicker({
 
   const handleTryAgain = useCallback(() => {
     setGenerationPreview(null)
-    setGenerationError(false)
+    setFailure(null)
+    setAlternatives([])
     // Keep the prompt pre-filled so they can tweak it
   }, [])
 
@@ -506,7 +538,7 @@ export default function StickerPicker({
       {/* Create sticker dialog */}
       <Dialog
         open={showCreateDialog}
-        onClose={() => { if (!generating) { setShowCreateDialog(false); setGenerationPreview(null); setGenerationError(false) } }}
+        onClose={() => { if (!generating) { setShowCreateDialog(false); setGenerationPreview(null); setFailure(null); setAlternatives([]) } }}
         maxWidth="xs"
         fullWidth
       >
@@ -531,6 +563,14 @@ export default function StickerPicker({
                   background: CHECKERBOARD_BG,
                 }}
               />
+              {/* What the picture maker was actually asked to draw, when the
+                  copyright rewrite changed it (FEAT-195). Parent-only, quiet,
+                  and absent when the ask went through unchanged. */}
+              {drawnAsLine(generationPreview.askedFor, generationPreview.revisedPrompt, artAudience) && (
+                <Typography variant="caption" color="text.secondary" textAlign="center">
+                  {drawnAsLine(generationPreview.askedFor, generationPreview.revisedPrompt, artAudience)}
+                </Typography>
+              )}
               <Stack direction="row" spacing={1.5}>
                 <Button
                   variant="outlined"
@@ -546,15 +586,18 @@ export default function StickerPicker({
                 </Button>
               </Stack>
             </Stack>
-          ) : generationError ? (
-            <Stack spacing={2} alignItems="center" sx={{ pt: 1 }}>
-              <Typography variant="body2" color="text.secondary" textAlign="center">
-                Couldn&apos;t make that sticker. Try describing it differently.
-              </Typography>
-              <Button variant="outlined" onClick={handleTryAgain}>
-                Try Again
-              </Button>
-            </Stack>
+          ) : failure ? (
+            /* One card for every way a picture can fail to arrive (FEAT-195) —
+               the same one the Stickers page and the Book Editor show. */
+            <ImageRetryCard
+              failure={failure}
+              audience={artAudience}
+              door={ImageRetryDoor.Sticker}
+              alternatives={alternatives}
+              onUseAlternative={(text) => { void handleCreateSticker(text) }}
+              onRetry={handleTryAgain}
+              retryLabel="Try Again"
+            />
           ) : capReached ? (
             /* The cap can arrive while this nested dialog is already open —
                the generation that just succeeded may have spent the last of
@@ -590,18 +633,11 @@ export default function StickerPicker({
               )}
             </>
           )}
-          {generateError && !generating && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              {generateError.message.includes('blocked') || generateError.message.includes('safety')
-                ? 'That description was blocked — try describing what it looks like instead of using a character name!'
-                : `Something went wrong: ${generateError.message}`}
-            </Alert>
-          )}
         </DialogContent>
         <DialogActions>
-          {!generationPreview && !generationError && (
+          {!generationPreview && !failure && (
             <>
-              <Button onClick={() => { setShowCreateDialog(false); setGenerationError(false) }} disabled={generating}>
+              <Button onClick={() => { setShowCreateDialog(false); setFailure(null) }} disabled={generating}>
                 {capReached ? 'Close' : 'Cancel'}
               </Button>
               {/* No Create button at the cap — refusing before the spend, not
