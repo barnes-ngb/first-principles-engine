@@ -63,7 +63,7 @@ export function activityConfigsToRoutineText(configs: ActivityConfig[]): string 
 export const SCHOOL_DAYS_PER_WEEK = 5
 
 /**
- * How many of the five school days an activity runs on.
+ * How many of the five school days each cadence runs on.
  *
  * Read off `ActivityFrequency` rather than invented: `daily` is all five, `3x`
  * is three, and so on. `as-needed` is the one member with no cadence in its
@@ -71,20 +71,32 @@ export const SCHOOL_DAYS_PER_WEEK = 5
  * still emits it and the planner still plans it — a budget that paid nothing
  * for something the planner puts on the day would understate in the same way
  * the old total overstated, just in the other direction.
+ *
+ * A `Record` over the whole union, so a new `ActivityFrequency` member fails to
+ * compile until somebody prices it — the same rail `SECTION_FOR_TYPE` holds for
+ * `ActivityType`.
+ */
+export const FREQUENCY_DAYS_PER_WEEK: Record<ActivityFrequency, number> = {
+  [ActivityFrequency.Daily]: SCHOOL_DAYS_PER_WEEK,
+  [ActivityFrequency.ThreePerWeek]: 3,
+  [ActivityFrequency.TwoPerWeek]: 2,
+  [ActivityFrequency.OnePerWeek]: 1,
+  [ActivityFrequency.AsNeeded]: 1,
+}
+
+/**
+ * {@link FREQUENCY_DAYS_PER_WEEK}, safe against what Firestore actually holds.
+ *
+ * The type says `frequency` is required and one of five values; the stored
+ * document says whatever was written to it, including `undefined` or a value
+ * from a build that knew a cadence this one does not. An exhaustive `switch`
+ * would return `undefined` for those and turn the whole budget into `NaN` — and
+ * the total this replaces could not do that, because it never read `frequency`
+ * at all. So an unrecognised cadence falls back to **full daily price**: the
+ * conservative direction, and exactly what such a config used to cost.
  */
 export function frequencyDaysPerWeek(frequency: ActivityFrequency): number {
-  switch (frequency) {
-    case ActivityFrequency.Daily:
-      return SCHOOL_DAYS_PER_WEEK
-    case ActivityFrequency.ThreePerWeek:
-      return 3
-    case ActivityFrequency.TwoPerWeek:
-      return 2
-    case ActivityFrequency.OnePerWeek:
-      return 1
-    case ActivityFrequency.AsNeeded:
-      return 1
-  }
+  return FREQUENCY_DAYS_PER_WEEK[frequency] ?? SCHOOL_DAYS_PER_WEEK
 }
 
 /**
@@ -113,10 +125,13 @@ export function frequencyDaysPerWeek(frequency: ActivityFrequency): number {
 export function routineDailyBudgetMinutes(configs: ActivityConfig[]): number {
   const weekly = configs
     .filter((c) => !c.completed)
-    .reduce(
-      (total, c) => total + c.defaultMinutes * frequencyDaysPerWeek(c.frequency),
-      0,
-    )
+    .reduce((total, c) => {
+      // `defaultMinutes` is unvalidated stored data too: a `NaN` or off-type
+      // value must contribute nothing rather than poison the whole total.
+      const minutes = Number(c.defaultMinutes)
+      if (!Number.isFinite(minutes) || minutes <= 0) return total
+      return total + minutes * frequencyDaysPerWeek(c.frequency)
+    }, 0)
   return Math.round(weekly / SCHOOL_DAYS_PER_WEEK)
 }
 

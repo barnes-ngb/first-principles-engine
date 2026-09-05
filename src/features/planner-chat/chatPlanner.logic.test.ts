@@ -1725,6 +1725,35 @@ describe('routineDailyBudgetMinutes', () => {
   it('is 0 for an empty list, so callers keep their own fallback', () => {
     expect(routineDailyBudgetMinutes([])).toBe(0)
   })
+
+  // Firestore holds whatever was written. The total this replaces never read
+  // `frequency` at all, so it could not be poisoned by one — this one must not
+  // regress on that. A budget of `NaN` breaks the bar for the whole family.
+  it('never returns NaN for an unvalidated stored frequency', () => {
+    const stored = cfg({ defaultMinutes: 20, frequency: undefined as unknown as 'daily' })
+    const total = routineDailyBudgetMinutes([stored])
+    expect(Number.isFinite(total)).toBe(true)
+    // Full daily price — the conservative direction, and what it used to cost.
+    expect(total).toBe(20)
+  })
+
+  it('falls back to daily for a cadence a later build wrote', () => {
+    expect(
+      routineDailyBudgetMinutes([
+        cfg({ defaultMinutes: 20, frequency: '4x' as unknown as 'daily' }),
+      ]),
+    ).toBe(20)
+  })
+
+  it('a NaN or off-type defaultMinutes contributes nothing, and poisons nothing', () => {
+    const total = routineDailyBudgetMinutes([
+      cfg({ id: 'ok', defaultMinutes: 20 }),
+      cfg({ id: 'bad', defaultMinutes: Number.NaN }),
+      cfg({ id: 'worse', defaultMinutes: 'twenty' as unknown as number }),
+      cfg({ id: 'negative', defaultMinutes: -30 }),
+    ])
+    expect(total).toBe(20)
+  })
 })
 
 describe('frequencyDaysPerWeek', () => {
