@@ -10,6 +10,13 @@
 // chat tab should not migrate anything or create configs, and the portal's only
 // activity write goes through the narrow `updateActivityConfigMinutes` helper.
 // So this is a plain read: subscribe, sort, hand back.
+//
+// **A second reader since FEAT-199:** Kid Today's quick-log row
+// (`today/KidExtraLogger` → `today/quickLogChips`) needs the same live configs
+// for the same reason — a KID opening Today must not seed or migrate anything —
+// so it imports this rather than growing a third copy of the subscribe. The
+// name still says "chat" because that is where it was written and a rename
+// touches more files than it is worth; read it as *the read-only one*.
 
 import { useEffect, useState } from 'react'
 import { onSnapshot, query, where } from 'firebase/firestore'

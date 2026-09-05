@@ -1076,6 +1076,13 @@ export interface ActivityConfig {
   droppableOnLightDay?: boolean
   /** Building toward this — don't count as missed if unchecked */
   aspirational?: boolean
+  /**
+   * Offer this activity as a chip on Kid Today's "⭐ I Did More!" quick-log row
+   * (FEAT-199). Additive and opt-in: absent or `false` — every config that
+   * exists today — means the row shows only its built-in defaults. Resolved by
+   * `features/today/quickLogChips.ts`, which owns the ordering and the cap.
+   */
+  quickLog?: boolean
 
   // Metadata
   /** Shelly's notes */

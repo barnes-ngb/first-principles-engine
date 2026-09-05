@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
+import StarOutlineIcon from '@mui/icons-material/StarOutline'
 import CloseIcon from '@mui/icons-material/Close'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
@@ -232,6 +233,22 @@ export default function CurriculumTab() {
     } finally {
       setDeleting(false)
     }
+  }
+
+  /**
+   * FEAT-199: flip whether this activity is offered on Kid Today's "I Did More!"
+   * quick-log row. One boolean on one doc — no day, no hour and no plan moves,
+   * and it changes only what chips a kid is OFFERED, never what a logged item
+   * already says.
+   */
+  const handleToggleQuickLog = async (config: ActivityConfig) => {
+    const next = config.quickLog !== true
+    await updateConfig(config.id, { quickLog: next })
+    setSnack(
+      next
+        ? `"${config.name}" added to the kids' quick log`
+        : `"${config.name}" removed from the kids' quick log`,
+    )
   }
 
   const handleReassign = async (config: ActivityConfig, childId: string) => {
@@ -698,6 +715,19 @@ export default function CurriculumTab() {
         >
           <CheckCircleOutlineIcon fontSize="small" sx={{ mr: 1 }} />
           Mark as complete
+        </MenuItem>
+        {/* FEAT-199: the quick-log row is the family's, and this is where a
+            season's activity — packing, independent play — joins or leaves it. */}
+        <MenuItem
+          onClick={() => {
+            if (menuConfig) void handleToggleQuickLog(menuConfig)
+            closeMenu()
+          }}
+        >
+          <StarOutlineIcon fontSize="small" sx={{ mr: 1 }} />
+          {menuConfig?.quickLog === true
+            ? "Remove from the kids' quick log"
+            : "Show on the kids' quick log"}
         </MenuItem>
         {menuConfig?.type === 'workbook' && (
           <MenuItem
