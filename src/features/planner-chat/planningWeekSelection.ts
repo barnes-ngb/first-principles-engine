@@ -218,6 +218,36 @@ export function applyButtonLabel(weekStart: string): string {
 }
 
 /**
+ * The Generate button's label — "Generate Plan for Sep 7–11" (UX-183).
+ *
+ * FEAT-196 put a This week / Next week selector above this button and left the
+ * button's own string hardcoded as *"Generate This Week's Plan"*. So a parent who
+ * picked **Next week** — on a Saturday, where the selector greys "This week" out
+ * as *already passed* — read a button telling her it was about to write the week
+ * the app had just crossed out. The owner did exactly that and did not tap it,
+ * which is the correct response to a control that contradicts the one above it.
+ * A feature meant to remove a doubt introduced one.
+ *
+ * The fix is FEAT-196's own principle applied one control further along: **say
+ * which week, with the real dates**, rather than retreating to a vague "Generate
+ * Plan" that dodges the question by refusing to answer it. Same dates, same
+ * formatter, same resolved `weekStart` the Apply path writes to — a second copy
+ * of the week logic here is precisely the bug being fixed.
+ *
+ * The literal `Generate Plan` prefix is load-bearing: three of the planner's chat
+ * messages tell the parent to tap *"Generate Plan"* by name, and a label that
+ * dropped those words would make them false.
+ *
+ * `photoCount` keeps the existing photo affordance, which named neither week.
+ * An unparseable start falls back to the bare wording rather than an empty range.
+ */
+export function generateButtonLabel(weekStart: string, photoCount = 0): string {
+  const dates = planningWeekDates(weekStart)
+  const photos = photoCount > 0 ? ` (${photoCount} photo${photoCount > 1 ? 's' : ''})` : ''
+  return dates ? `Generate Plan for ${dates}${photos}` : `Generate Plan${photos}`
+}
+
+/**
  * The confirmation after the write — "Plan applied to Sep 7–11. It's on Today."
  *
  * The same dates the button carried, said back. A parent who tapped the wrong

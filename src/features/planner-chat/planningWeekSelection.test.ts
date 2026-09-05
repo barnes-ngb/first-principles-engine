@@ -5,6 +5,7 @@ import {
   applyButtonLabel,
   appliedConfirmation,
   defaultPlanningWeekChoice,
+  generateButtonLabel,
   planningWeekDates,
   planningWeekOptions,
   planningWeekRangeFor,
@@ -194,5 +195,59 @@ describe('copy', () => {
     expect(planningWeekDates(NEXT_WEEK)).toBe('Jul 20–24')
     expect(applyButtonLabel(NEXT_WEEK)).toContain(planningWeekDates(NEXT_WEEK))
     expect(appliedConfirmation(NEXT_WEEK)).toContain(planningWeekDates(NEXT_WEEK))
+  })
+})
+
+// ── UX-183: the Generate button and the selector must agree ──────────────────
+//
+// The owner's screenshot: the selector reading "This week — Aug 31–Sep 4 ·
+// already passed" / "Next week — Sep 7–11" (selected), and directly beneath it a
+// button reading "Generate This Week's Plan". He did not tap it, and was right
+// not to. These assert the button now names the week the selector holds.
+describe('generateButtonLabel', () => {
+  it('names next week when next week is what was picked', () => {
+    const label = generateButtonLabel(planningWeekRangeFor('next', WED).start)
+    expect(label).toBe('Generate Plan for Jul 20–24')
+    // The exact words the old hardcoded string said, whichever week was picked.
+    expect(label).not.toContain("This Week's")
+    expect(label).not.toContain('This Week\u2019s')
+  })
+
+  it('names this week when this week is what was picked', () => {
+    expect(generateButtonLabel(planningWeekRangeFor('this', WED).start)).toBe(
+      'Generate Plan for Jul 13–17',
+    )
+  })
+
+  it('reproduces the owner’s screenshot, with the label corrected', () => {
+    // Sat Sep 5 2026 — "this week" (Aug 31–Sep 4) has passed, so the selector
+    // greys it out and defaults to next week, Sep 7–11.
+    const saturday = new Date(2026, 8, 5)
+    const resolved = resolvePlanningWeek(null, saturday)
+    expect(resolved.choice).toBe('next')
+    expect(generateButtonLabel(resolved.range.start)).toBe('Generate Plan for Sep 7–11')
+  })
+
+  it('names the week on the photo variant too, which named neither before', () => {
+    expect(generateButtonLabel(NEXT_WEEK, 1)).toBe('Generate Plan for Jul 20–24 (1 photo)')
+    expect(generateButtonLabel(NEXT_WEEK, 3)).toBe('Generate Plan for Jul 20–24 (3 photos)')
+  })
+
+  it('keeps the literal "Generate Plan" the chat messages tell a parent to tap', () => {
+    for (const start of [THIS_WEEK, NEXT_WEEK, 'not-a-date']) {
+      expect(generateButtonLabel(start)).toContain('Generate Plan')
+    }
+  })
+
+  it('drops the range rather than showing an empty one, exactly like Apply', () => {
+    expect(generateButtonLabel('not-a-date')).toBe('Generate Plan')
+    expect(generateButtonLabel('not-a-date', 2)).toBe('Generate Plan (2 photos)')
+  })
+
+  it('takes its dates from the one formatter, like every other label here', () => {
+    expect(generateButtonLabel(NEXT_WEEK)).toContain(planningWeekDates(NEXT_WEEK))
+    // And therefore says the same week the Apply button will.
+    expect(planningWeekDates(NEXT_WEEK)).not.toBe('')
+    expect(applyButtonLabel(NEXT_WEEK)).toContain(planningWeekDates(NEXT_WEEK))
   })
 })

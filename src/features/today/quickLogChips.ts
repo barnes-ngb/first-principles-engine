@@ -51,6 +51,43 @@
 //
 // **Nothing here writes.** The chip carries a `subject` and the logger writes
 // exactly the `ChecklistItem` it always wrote.
+//
+// ── UX-184: there were TWO kid quick-log surfaces, and FEAT-199 rewired one ──
+//
+// Kid Today renders `KidExtraLogger` — the row above — AND, higher up the page,
+// `UnifiedCaptureCard`'s *Capture → Quick logs* panel, whose eight chips were
+// hardcoded in that component. FEAT-199 made the lower one family-defined and
+// left the upper one alone, so the owner flagged *Packing* and *Independent
+// play*, opened his son's Today page, looked at the first quick-log panel he
+// came to, and reported the new activities "don't show as options anywhere". He
+// was reading the surface FEAT-199 did not touch.
+//
+// Two paths to one product means one is always behind — and the one nearer the
+// top of the page is the one the user finds. So the capture panel resolves from
+// the same flag, through this module, and a family chip appears on both.
+//
+// ── Reconciling the two shapes ──────────────────────────────────────────────
+//
+// They genuinely differ, and neither was wrong for its own surface: the logger's
+// row is FLAT chips carrying a subject; the capture panel is GROUPED presets
+// carrying an emoji, a subject and a suggested duration that pre-fills its
+// duration field. What they share is the ANSWER to one question — *which of the
+// family's activities are offered as a quick log* — so that is what is shared
+// (`familyQuickLogActivities`), and each surface projects it into its own shape.
+// Sharing the flag rather than the widget is what keeps the panel's duration
+// field and the row's XP award from having to become the same thing.
+//
+// ── The two rails, and why they land differently on the two surfaces ────────
+//
+// `QUICK_LOG_MAX_CHIPS` and the always-last `🎮 Other` are rules about a KID
+// PICKING FROM ONE ROW on a phone, and `resolveQuickLogChips` is byte-for-byte
+// unchanged, cap and escape hatch included. The capture panel is a different
+// object: grouped, headed, wrapping, and with no `Other` chip at all (its escape
+// hatch is the free-text field beneath). So the cap applies there to the FAMILY
+// group only — a family that flags twenty configs still gets a bounded group —
+// and the eight built-in presets are never dropped to make room. Dropping *Zoo /
+// museum trip* from a parent's capture card to fit a family chip would be a
+// regression traded for a feature, which is not the trade being made here.
 
 import type { ActivityConfig } from '../../core/types'
 import type { SubjectBucket } from '../../core/types/enums'
@@ -140,16 +177,13 @@ export function resolveQuickLogChips(configs: readonly ActivityConfig[]): QuickL
     row.push(chip)
   }
 
-  const family = configs
-    .filter(offersQuickLog)
-    .slice()
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-
-  for (const config of family) {
+  // The shared answer — "which of the family's activities are offered as a
+  // quick log" — has one definition, which the capture panel reads too (UX-184).
+  for (const activity of familyQuickLogActivities(configs)) {
     push({
-      label: (config.name ?? '').trim(),
-      subject: config.subjectBucket ?? 'Other',
-      key: `config:${config.id}`,
+      label: activity.label,
+      subject: activity.subject,
+      key: `config:${activity.id}`,
       fromFamily: true,
     })
   }
@@ -158,4 +192,155 @@ export function resolveQuickLogChips(configs: readonly ActivityConfig[]): QuickL
 
   // The cap leaves one slot for `Other`, which is then appended unconditionally.
   return [...row.slice(0, QUICK_LOG_MAX_CHIPS - 1), OTHER_QUICK_LOG_CHIP]
+}
+
+// ── The shared answer, and the capture panel's projection of it ─────────────
+
+/**
+ * One of the family's own activities, offered as a quick log.
+ *
+ * The shape BOTH surfaces are built from: the config's own name, its own
+ * `subjectBucket` (never guessed from the name — a chip called "Packing" is
+ * `PracticalArts` because the parent said so, and would otherwise land in
+ * `Other`, which is the whole reason FEAT-199 exists) and its own
+ * `defaultMinutes`.
+ */
+export interface FamilyQuickLogActivity {
+  /** The config's `id` — a stable key on both surfaces. */
+  id: string
+  /** The config's own name, trimmed. Empty names are dropped by the resolver. */
+  label: string
+  subject: SubjectBucket
+  /** The config's own `defaultMinutes`, for surfaces that suggest a duration. */
+  minutes: number
+}
+
+/**
+ * The family's flagged activities, in the order they should be offered.
+ *
+ * Flagged, uncompleted, sorted by the config's own `sortOrder`, nameless
+ * configs dropped, and de-duped by label letters so a family cannot produce two
+ * chips a kid reads as the same word. **Nothing surface-specific here** — no
+ * cap, no defaults, no `Other`: those are each surface's own rule, applied by
+ * its own resolver below.
+ */
+export function familyQuickLogActivities(
+  configs: readonly ActivityConfig[],
+): FamilyQuickLogActivity[] {
+  const seen = new Set<string>()
+  const out: FamilyQuickLogActivity[] = []
+  const flagged = configs
+    .filter(offersQuickLog)
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+
+  for (const config of flagged) {
+    const label = (config.name ?? '').trim()
+    const key = quickLogLabelKey(label)
+    if (key === '' || seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      id: config.id,
+      label,
+      subject: config.subjectBucket ?? 'Other',
+      minutes: config.defaultMinutes,
+    })
+  }
+  return out
+}
+
+/**
+ * One chip on `UnifiedCaptureCard`'s *Quick logs* panel.
+ *
+ * `emoji` is optional and absent on family chips **on purpose**: picking one for
+ * "Packing" would mean matching an emoji to a word, which is guessing at the
+ * family's meaning in exactly the way the subject bucket is not allowed to. A
+ * chip that reads *Packing* is honest; a chip that reads *📦 Packing* is the app
+ * deciding what packing looks like.
+ */
+export interface CapturePreset {
+  id: string
+  label: string
+  emoji?: string
+  subjectBucket: SubjectBucket
+  suggestedMinutes: number
+  /** True when this chip came from one of the family's activity configs. */
+  fromFamily: boolean
+}
+
+export interface CapturePresetGroup {
+  label: string
+  presets: CapturePreset[]
+}
+
+/** The heading the family's own chips sit under, beside *Creative* and *Active*. */
+export const FAMILY_CAPTURE_GROUP_LABEL = 'Yours'
+
+/**
+ * The capture panel's built-in presets — byte-for-byte the eight that were
+ * written into `UnifiedCaptureCard`, in their two groups, in order.
+ *
+ * These labels are a stored data shape for the same reason the row's defaults
+ * are: the capture form writes the label into the artifact title and the hours
+ * note, so renaming one forks a family's history. Held to that by
+ * `quickLogChips.test.ts`; not to be reworded.
+ */
+export const BUILT_IN_CAPTURE_GROUPS: readonly CapturePresetGroup[] = [
+  {
+    label: 'Creative',
+    presets: [
+      { id: 'lego', label: 'Lego build', emoji: '🧱', subjectBucket: 'PracticalArts', suggestedMinutes: 45, fromFamily: false },
+      { id: 'baking', label: 'Baking / cooking', emoji: '🥖', subjectBucket: 'PracticalArts', suggestedMinutes: 30, fromFamily: false },
+      { id: 'drawing', label: 'Drawing / art', emoji: '🎨', subjectBucket: 'Art', suggestedMinutes: 30, fromFamily: false },
+      { id: 'music', label: 'Music practice', emoji: '🎵', subjectBucket: 'Music', suggestedMinutes: 20, fromFamily: false },
+      { id: 'reading', label: 'Reading session', emoji: '📚', subjectBucket: 'Reading', suggestedMinutes: 30, fromFamily: false },
+    ],
+  },
+  {
+    label: 'Active',
+    presets: [
+      { id: 'nature', label: 'Nature / park', emoji: '🌳', subjectBucket: 'Science', suggestedMinutes: 45, fromFamily: false },
+      { id: 'sports', label: 'Sports / PE', emoji: '⚽', subjectBucket: 'PE', suggestedMinutes: 45, fromFamily: false },
+      { id: 'fieldtrip', label: 'Zoo / museum trip', emoji: '🦁', subjectBucket: 'Science', suggestedMinutes: 120, fromFamily: false },
+    ],
+  },
+]
+
+/**
+ * The groups the capture panel shows: the family's own first, then the built-ins.
+ *
+ * Guarantees:
+ *   - the family group leads, because a family's own words are what a person is
+ *     looking for, and it is omitted entirely when nothing is flagged (a
+ *     family that has flagged nothing sees exactly what it saw before);
+ *   - a family chip whose label matches a built-in's is dropped rather than
+ *     shown twice — the built-in keeps its emoji and its suggested minutes;
+ *   - the family group is capped at `QUICK_LOG_MAX_CHIPS`; the eight built-ins
+ *     are never dropped (see the header for why the cap lands differently here
+ *     than on the logger's single row);
+ *   - every family chip's subject and minutes come from its own config.
+ */
+export function resolveCapturePresetGroups(
+  configs: readonly ActivityConfig[],
+): CapturePresetGroup[] {
+  const builtInLabelKeys = new Set(
+    BUILT_IN_CAPTURE_GROUPS.flatMap((g) => g.presets.map((p) => quickLogLabelKey(p.label))),
+  )
+  const family = familyQuickLogActivities(configs)
+    .filter((a) => !builtInLabelKeys.has(quickLogLabelKey(a.label)))
+    .slice(0, QUICK_LOG_MAX_CHIPS)
+    .map<CapturePreset>((a) => ({
+      id: `config:${a.id}`,
+      label: a.label,
+      subjectBucket: a.subject,
+      suggestedMinutes: a.minutes,
+      fromFamily: true,
+    }))
+
+  return [
+    ...(family.length > 0
+      ? [{ label: FAMILY_CAPTURE_GROUP_LABEL, presets: family }]
+      : []),
+    ...BUILT_IN_CAPTURE_GROUPS,
+  ]
 }
