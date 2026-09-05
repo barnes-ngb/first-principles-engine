@@ -53,9 +53,10 @@ hides `type`, the field that decides whether the thing you just created is a wor
 (**F8**). Net: use the chat for all four; fix the two cards.
 
 **The two answers that are not per-kind.** First: **`/chat` is nav-gated, not route-gated, and seven of
-the eleven kinds have no capability gate at all.** Every part-B kind is `canEdit`-checked at three
-layers; the two sight-word kinds, `editProfileField` and all four snapshot kinds are checked at none. A
-child profile that reaches `/chat` by URL can confirm a write to `skillSnapshots` (**F3**). Second: the
+the eleven kinds have no capability gate at all.** Eight of the nine part-B kinds are `canEdit`-checked at
+three layers — the exception is `proposePlanAdjustment`, which is ungated too (see §6, item 8) — while the
+two sight-word kinds, `editProfileField` and all four snapshot kinds are checked at none. A child profile
+that reaches `/chat` by URL can confirm a write to `skillSnapshots` (**F3**). Second: the
 chat's **image door is ungated and unmetered** — no `isParent`, and `src/features/shelly-chat/` contains
 no reference to `artQuota` whatsoever, so it stands outside the "one counter, five surfaces" accounting
 FEAT-175 describes (**F4**). Neither of these is about whether Ask AI is a good door. They are about who
@@ -337,6 +338,16 @@ kinds — at stage time, at `rejectReason`, and again in the write lane. It gate
 `addSightWord`, `removeSightWord`, `editProfileField`, `addPrioritySkill`, `addSupport`, `addStopRule`,
 `markSkillProgress`.
 
+**One part-B kind is ungated too, and it is not in this finding's count.** `proposePlanAdjustment` falls
+through the stage filter's default branch (`if (action.kind !== 'setActivityMinutes') return true`), has no
+parent check in `rejectReason`, and on confirm calls `stagePlanAdjustment`, which writes
+`settings/pendingPlanAdjustment_{childId}`. The repo's own test asserts the behaviour — *"A kid profile: the
+draft never becomes a card, so suppressing the handoff too would leave the turn with nothing at all"*
+(`useShellyChatActions.logic.test.ts:2129–2134`). It is excluded from the "seven of eleven" count because it
+is a part-B kind and it writes a planner inbox rather than a child's record, but it is a child-reachable
+write path and it is handed to Part B in §6. *Added after Codex round 3, which correctly flagged the original
+blanket claim that every part-B kind was gated.*
+
 `/chat` is outside `RequireParent` (`router.tsx:105`); the nav entry is `parentOnly` but the URL is open,
 which the code's own comments state as a known fact. The system prompt is not profile-aware — a fact
 `stagePendingActions` writes down explicitly — so a child on Lincoln's tab gets the full grammar and full
@@ -438,9 +449,20 @@ skipped, silently and by design, at five gates:
 
 1. a shared (`'both'`) config, or one with no resolvable `name`/`curriculum` (`syncActivityPositionToModel`);
 2. `no-bridge` / `ambiguous` — the workbook name matches no curated bridge, or ties two;
-3. `pending-curation` — the matched bridge has no curated `lessonToUnit` map (the Fast Phonics case);
+3. `pending-curation` — the matched bridge has no `lessonToUnit` map, so a family lesson number cannot be
+   translated to the bridge's native unit;
 4. `no-model` — the child has no `learnerModels` document yet;
 5. `no-coverage` — the native position covers no concepts, or none that are not already at that state.
+
+   *Corrected after Codex round 3:* gate 3 originally cited "the Fast Phonics case", which is wrong.
+   `fastPhonicsWorkbookBridge` **does** define `lessonToUnit` — the provisional `ceil(lesson / 5)` divisor at
+   `fastPhonicsBridge.ts:367–376` — so every positive lesson clears this gate. Fast Phonics is instead the
+   `positionIsProvisional: true` case: its guessed position is capped against directly-witnessed peaks by
+   `resolveSyncNativePosition`, and it can still be stopped by gates 4 and 5. The error came from copying
+   `workbookPositionSync.ts`'s own header comment ("*no curated `lessonToUnit` (the Fast Phonics case)*"),
+   which is **stale** — it predates the divisor. That comment is worth a one-line fix in some future run;
+   it is recorded here rather than as its own numbered finding because it is a stale comment, not a defect,
+   and because it is the thing that misled this audit.
 
 So for many families and many activities, confirming the card updates **only** `activityConfigs`, and the
 footnote is complete. The defect is narrower than "the card hides a second write": it is that **when the
@@ -624,6 +646,12 @@ followed.**
 7. **`SkillSnapshotPage` persists whole snapshots directly rather than through `writeSnapshotUpdate`** —
    a second write lane to `skillSnapshots`. Already tracked as **ARCH-12**; noted here because F2's fix
    would have to hold on both lanes.
+8. **`proposePlanAdjustment` has no capability gate** — the one part-B kind that does not. It falls through
+   the stage filter's default branch, has no parent check in `rejectReason`, and on confirm writes
+   `settings/pendingPlanAdjustment_{childId}` via `stagePlanAdjustment`; the existing test at
+   `useShellyChatActions.logic.test.ts:2129–2134` asserts a kid profile keeps the card. Part B owns the kind,
+   so Part B owns the finding — but it is a **child-reachable write path**, so it should be ranked alongside
+   F3/UX-184 rather than treated as an ordinary part-B row. *Surfaced by Codex round 3 on this PR.*
 
 ---
 
