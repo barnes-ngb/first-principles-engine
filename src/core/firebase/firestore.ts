@@ -149,10 +149,18 @@ export const hoursAdjustmentsCollection = (
     `families/${familyId}/hoursAdjustments`,
   ) as CollectionReference<HoursAdjustment>
 
-/** Normalize legacy planType values: 'A' → 'normal', 'B' → 'mvd'. */
-function normalizePlanType(raw: string): DailyPlan['planType'] {
+/**
+ * Normalize legacy planType values: 'A' → 'normal', 'B' → 'mvd'.
+ *
+ * FEAT-200 adds `'life'`, which has no legacy alias — it never existed under the
+ * A/B scheme. Anything unrecognised (a future member read by an older client, a
+ * corrupt field, a missing one) still falls back to `'normal'`: the day renders
+ * as an ordinary planned day rather than throwing or rendering nothing.
+ */
+export function normalizePlanType(raw: string): DailyPlan['planType'] {
   if (raw === 'A' || raw === 'normal') return 'normal'
   if (raw === 'B' || raw === 'mvd') return 'mvd'
+  if (raw === 'life') return 'life'
   return 'normal'
 }
 

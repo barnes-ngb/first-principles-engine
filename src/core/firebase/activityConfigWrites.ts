@@ -41,6 +41,8 @@ export interface NewActivityConfig {
   currentPosition?: number
   unitLabel?: string
   notes?: string
+  /** FEAT-199: offer this on Kid Today's quick-log row. Omitted = not offered. */
+  quickLog?: boolean
 }
 
 /**

@@ -18,6 +18,13 @@ export interface GenerateStickerVersionArgs {
   source: Sticker
   /** A `FANCY_STYLE_OPTIONS` id selecting the theme/style for this version. */
   styleId: string
+  /**
+   * The FEAT-197 "+ My own look" note — one **subject** change riding alongside
+   * the picked look ("put her in a space suit"). Deliberately NOT recorded on
+   * the saved sticker: it is one-off by design, and the version's `theme` field
+   * stays the look it was made in.
+   */
+  customNote?: string
   /** Group key linking every version of one drawing. */
   sourceDrawingId: string
   /** Drawing label carried onto the new version. */
@@ -43,6 +50,7 @@ export async function generateStickerVersion({
   familyId,
   source,
   styleId,
+  customNote,
   sourceDrawingId,
   label,
   enhanceSketch,
@@ -50,7 +58,7 @@ export async function generateStickerVersion({
   const result = await enhanceSketch({
     familyId,
     sketchStoragePath: source.storagePath,
-    ...resolveFancyEnhanceParams(styleId),
+    ...resolveFancyEnhanceParams(styleId, customNote),
   })
   if (!result?.url) {
     return { ok: false, error: "That didn't work — try again." }

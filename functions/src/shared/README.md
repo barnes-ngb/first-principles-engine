@@ -114,6 +114,17 @@ Migrated:
   is retired: the compiler replaced it, and its coverage lives on in
   `hoursContributions.test.ts` as the union of both old suites.
 
+Added after the four slices (not a consolidation — a rule that was *born* here rather
+than ported into it):
+
+- `customPictureNote.ts` (FEAT-197 / UX-177) — `normalizeCustomPictureNote` and its
+  cap: how the "+ My own look" note on the sticker doors is coerced into one bounded
+  sentence. Both sides enforce it and they must agree — the client caps as a courtesy
+  so a person sees the limit while typing, the server clamps again because a length
+  only the client enforces is not a limit. FEAT-194 kept the equivalent story-theme
+  rule as two copies with a comment naming the mirror; this is that same rule with the
+  comment replaced by the compiler.
+
 Still a hand-kept copy (named while consolidating slice 4, out of all four slices'
 scope):
 

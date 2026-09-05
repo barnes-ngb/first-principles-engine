@@ -1,4 +1,5 @@
 import type { ChecklistItem } from '../../core/types'
+import { PlanType } from '../../core/types/enums'
 
 /** Allow ~10% overrun above the stated budget before trimming kicks in. */
 const BUDGET_GRACE_RATIO = 0.1
@@ -116,13 +117,20 @@ export function enforceDailyBudget(
 /**
  * Resolve the effective budget for a given day, honoring MVD/overwhelmed energy.
  * Returns 0 when the day has no budget configured (callers should skip enforcement).
+ *
+ * `planType` reads the shared `PlanType` union rather than a hand-written copy of
+ * its members (FEAT-200): the copy silently excluded any new member, so adding
+ * `Life` failed to compile here instead of quietly falling through. Only MVD
+ * halves — a Life Day renders no checklist at all, so budget trimming has nothing
+ * to act on either way, and both existing types keep their exact behaviour.
  */
 export function resolveDailyBudget(
   dailyBudgetMinutes: number | undefined,
-  options: { planType?: 'normal' | 'mvd'; energy?: string } = {},
+  options: { planType?: PlanType; energy?: string } = {},
 ): number {
   if (!dailyBudgetMinutes || dailyBudgetMinutes <= 0) return 0
   const { planType, energy } = options
-  const shouldHalve = planType === 'mvd' || energy === 'low' || energy === 'overwhelmed'
+  const shouldHalve =
+    planType === PlanType.Mvd || energy === 'low' || energy === 'overwhelmed'
   return shouldHalve ? Math.ceil(dailyBudgetMinutes / 2) : dailyBudgetMinutes
 }

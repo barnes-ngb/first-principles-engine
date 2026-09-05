@@ -165,11 +165,24 @@ export interface EnhanceSketchRequest {
   theme?: string
   /** When true, render the result with a transparent background so it can be used as a sticker. */
   transparent?: boolean
+  /**
+   * The FEAT-197 "+ My own look" note — one **subject** instruction ("put her in
+   * a space suit"), never a style one. Capped and normalized by the shared rule
+   * on both sides (`functions/src/shared/customPictureNote.ts`) and run through
+   * the same copyright rewriter every other prompt goes through.
+   */
+  customNote?: string
 }
 
 export interface EnhanceSketchResponse {
   url: string
   storagePath: string
+  /**
+   * The custom note as the copyright rewriter left it, present only when the
+   * rewrite changed the words (FEAT-197). Rendered as the FEAT-195
+   * "Drawn as: …" line.
+   */
+  revisedNote?: string
 }
 
 // ── Pattern analysis types (mirrored from functions/src/ai/chat.ts) ──

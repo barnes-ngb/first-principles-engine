@@ -1,5 +1,6 @@
 import type { EnhanceSketchRequest } from '../../core/ai/useAI'
 import { getPresetTheme } from '../../core/types/books'
+import { normalizeCustomPictureNote } from '../../../functions/src/shared/customPictureNote'
 
 /**
  * "Make it fancy" style options for the drawing → sticker flow (FEAT-33).
@@ -86,15 +87,26 @@ export function fancyStyleLabel(themeId: string): string {
  * `enhanceSketch` request. Always returns the transparent-sticker knobs
  * (`transparent: true`) so the enhanced result is a clean cutout. Falls back to
  * the default option for an unknown id.
+ *
+ * `customNote` is the FEAT-197 "+ My own look" note — a **subject** instruction
+ * that rides *alongside* the picked look, never instead of it, which is why it
+ * is a second argument here rather than another entry in
+ * {@link FANCY_STYLE_OPTIONS}. It is normalized on the way out (and again on the
+ * server, by the same shared function), and the key is omitted entirely when
+ * there is nothing to send, so a request without a note is byte-identical to
+ * what it was before FEAT-197.
  */
 export function resolveFancyEnhanceParams(
   styleId: string,
-): Pick<EnhanceSketchRequest, 'style' | 'theme' | 'transparent'> {
+  customNote?: string,
+): Pick<EnhanceSketchRequest, 'style' | 'theme' | 'transparent' | 'customNote'> {
   const option =
     FANCY_STYLE_OPTIONS.find((o) => o.id === styleId) ?? FANCY_STYLE_OPTIONS[0]
+  const note = normalizeCustomPictureNote(customNote)
   return {
     style: option.style,
     theme: option.theme,
     transparent: true,
+    ...(note ? { customNote: note } : {}),
   }
 }

@@ -500,6 +500,14 @@ export interface ChatMessage {
   photoLabels?: PhotoLabel[]
   /** Draft plan snapshot attached to this message */
   draftPlan?: DraftWeeklyPlan
+  /**
+   * True only for text the parent typed (or tapped as a quick suggestion)
+   * herself (FEAT-198). The planner also writes synthetic user turns of its own
+   * ("Generate a plan for this week.", "Uploaded 2 workbook photos.", the setup
+   * card's context summary); only flagged turns are forwarded to the model as
+   * her request. Additive and optional — an older conversation simply has none.
+   */
+  typedByParent?: boolean
   createdAt: string
 }
 
@@ -1076,6 +1084,13 @@ export interface ActivityConfig {
   droppableOnLightDay?: boolean
   /** Building toward this — don't count as missed if unchecked */
   aspirational?: boolean
+  /**
+   * Offer this activity as a chip on Kid Today's "⭐ I Did More!" quick-log row
+   * (FEAT-199). Additive and opt-in: absent or `false` — every config that
+   * exists today — means the row shows only its built-in defaults. Resolved by
+   * `features/today/quickLogChips.ts`, which owns the ordering and the cap.
+   */
+  quickLog?: boolean
 
   // Metadata
   /** Shelly's notes */

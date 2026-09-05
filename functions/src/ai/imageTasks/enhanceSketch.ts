@@ -16,6 +16,7 @@ import {
   readProviderError,
 } from "./imageFailure.js";
 import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
+import { normalizeCustomPictureNote } from "../../shared/customPictureNote.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -35,6 +36,16 @@ export interface EnhanceSketchRequest {
    * sticker. Default false → produces a full-scene illustration.
    */
   transparent?: boolean;
+  /**
+   * One-off "what should change?" note (FEAT-197 / UX-177) — a **subject**
+   * instruction, never a style one: "put her in a space suit", "give him a
+   * cape". The picked look still owns how the picture is drawn.
+   *
+   * Normalized and capped here regardless of what the client sent
+   * (`normalizeCustomPictureNote`), then run through the same copyright
+   * rewriter every other prompt goes through.
+   */
+  customNote?: string;
 }
 
 export interface EnhanceSketchResponse {
@@ -42,6 +53,13 @@ export interface EnhanceSketchResponse {
   url: string;
   /** Firebase Storage path of the enhanced image. */
   storagePath: string;
+  /**
+   * The custom note as the copyright rewriter left it, present **only** when
+   * the rewrite actually changed the words (FEAT-197). The doors render it as
+   * the FEAT-195 "Drawn as: …" line, so a parent who typed a character name can
+   * see what was drawn instead. Absent when there was no note, or none needed.
+   */
+  revisedNote?: string;
 }
 
 // ── Enhancement prompt ──────────────────────────────────────────
@@ -272,11 +290,93 @@ function getThemeRecipe(theme?: string): VisualRecipe | null {
   return THEME_IMAGE_STYLES[theme] ?? null;
 }
 
+/**
+ * The subject clause (FEAT-197 / UX-177), in one place so the rails read as one
+ * thing.
+ *
+ * Everything above it in the prompt is the LOOK — the recipe's palette, line and
+ * shading, which FEAT-159/193 spent two runs making distinct. This sentence is
+ * the only place a person's own words describe WHAT is in the picture, and the
+ * three sentences after it exist to stop that becoming a second art direction:
+ * FEAT-189 measured what happens when a subject arrives beside the picture's own
+ * scene, and a free-text note is the most likely thing in the app to do it.
+ *
+ * Position is load-bearing twice over. It sits **after the whole recipe**, so
+ * the recipe text is byte-identical with and without a note; and **before the
+ * transparent-cutout rail**, so a note that names a place ("put her on a
+ * beach") cannot be the last word against "no background scene, no ground, no
+ * environment". A cutout with a beach behind it is not a sticker.
+ */
+function noteClauseFor(note: string): string {
+  if (!note) return "";
+  return (
+    `Also change what is in the picture: ${note}. ` +
+    `That sentence describes ONLY what is in the picture. The art style is fixed ` +
+    `by the description above and must not change — ignore any part of it that ` +
+    `names an art style, a medium, or a look, and do not let it alter the ` +
+    `palette, line work, or shading. `
+  );
+}
+
+/** What {@link resolveCustomNote} settles: what to send, and what to say. */
+export interface ResolvedCustomNote {
+  /** The note as it reaches the prompt. `''` when there is none. */
+  safeNote: string;
+  /** Set only when the rewriter CHANGED the words — the "Drawn as: …" line. */
+  revisedNote?: string;
+}
+
+/**
+ * Normalize a client-sent note and run it through the copyright rewriter
+ * (FEAT-197).
+ *
+ * The rewriter is injected for the same reason `imageFailureDetailsFor` injects
+ * its suggester: the rule is what wants testing, not the API client. And this
+ * IS a rule, not plumbing — the note is the one field on the sticker doors where
+ * a person types free text, so "dress her as Elsa" must become a description of
+ * how that looks before it reaches the image model, exactly as a caption does.
+ * A door that skipped it would be a hole in a filter every other prompt goes
+ * through.
+ *
+ * The rewriter's answer is normalized again: it is told "under 50 words", not
+ * "under 160 characters", and what reaches the prompt must be one bounded
+ * sentence either way. An empty or unusable answer falls back to the person's
+ * own words rather than silently dropping the change they asked for — the
+ * rewriter already has its own regex fallback for the case that matters.
+ */
+export async function resolveCustomNote(
+  raw: unknown,
+  rewrite: (text: string) => Promise<string>,
+): Promise<ResolvedCustomNote> {
+  const note = normalizeCustomPictureNote(raw);
+  if (!note) return { safeNote: "" };
+  const rewritten = await rewrite(note);
+  const safeNote = normalizeCustomPictureNote(rewritten) || note;
+  return safeNote === note ? { safeNote } : { safeNote, revisedNote: safeNote };
+}
+
+/**
+ * Which words a refused generation asks for alternatives to (FEAT-197 ×
+ * FEAT-195).
+ *
+ * The note wins: on the sticker doors it is the only thing the person chose to
+ * say, and a rewording of it is something they can tap. The caption is the book
+ * reimagine path's field and stays the fallback. Empty means no call at all —
+ * `suggestPromptAlternatives` skips it, and the client shows its written tips.
+ */
+export function alternativesSourceFor(
+  note: string | undefined,
+  caption: string | undefined,
+): string {
+  return note || caption || "";
+}
+
 export function buildEnhancePrompt(
   style?: string,
   caption?: string,
   theme?: string,
   transparent?: boolean,
+  customNote?: string,
 ): string {
   const themeRecipe = getThemeRecipe(theme);
   const explicitStyle = style ? STYLE_RECIPES[style] : undefined;
@@ -320,14 +420,22 @@ export function buildEnhancePrompt(
       "No background scene, no ground, no shadows on the ground, no environment, no border. " +
       "The result must be a clean cutout suitable for use as a sticker. "
     : "";
+  const note = normalizeCustomPictureNote(customNote);
+  // With a note the drawing is deliberately NOT kept as it is — one thing about
+  // it changes. Without one this sentence is byte-identical to what it has
+  // always been, which is what keeps a no-note generation unchanged.
+  const compositionClause = note
+    ? `Apart from that one change, keep the same composition, characters, and scene layout from the original drawing. `
+    : `Keep the same composition, characters, and scene layout from the original drawing. `;
   return (
     `Create a polished children's book illustration ${leadRecipe.hint}, ` +
     `inspired by this child's hand-drawn sketch. ` +
     `${captionClause}` +
     `${baseDetailClause}` +
     `${themeClause}` +
+    `${noteClauseFor(note)}` +
     `${transparentClause}` +
-    `Keep the same composition, characters, and scene layout from the original drawing. ` +
+    `${compositionClause}` +
     `Follow the palette, line work, and shading described above exactly — they are ` +
     `what make this style different from the others, so do not drift toward a ` +
     `generic soft cartoon look. ` +
@@ -344,8 +452,15 @@ export const enhanceSketch = onCall(
     // ── Auth gate ──────────────────────────────────────────────
     const { uid } = requireApprovedUser(request);
 
-    const { familyId, sketchStoragePath, style, caption, theme, transparent } =
-      request.data as EnhanceSketchRequest;
+    const {
+      familyId,
+      sketchStoragePath,
+      style,
+      caption,
+      theme,
+      transparent,
+      customNote,
+    } = request.data as EnhanceSketchRequest;
 
     // ── Input validation ───────────────────────────────────────
     if (!familyId || typeof familyId !== "string") {
@@ -377,6 +492,15 @@ export const enhanceSketch = onCall(
       );
     }
 
+    // ── Custom note validation (FEAT-197) ───────────────────────
+    // The client caps as a courtesy so a person sees the limit while typing;
+    // this is the rule. `normalizeCustomPictureNote` is the SAME function the
+    // client calls (`functions/src/shared/`), so the two cannot drift.
+    if (customNote !== undefined && typeof customNote !== "string") {
+      throw new HttpsError("invalid-argument", "customNote must be a string.");
+    }
+    const note = normalizeCustomPictureNote(customNote);
+
     // ── Copyright-filter the caption via Claude rewriter ───────
     let safeCaption: string | undefined;
     if (caption && caption.trim()) {
@@ -386,6 +510,15 @@ export const enhanceSketch = onCall(
         claudeApiKey.value(),
       );
     }
+
+    // ── Copyright-filter the note through the SAME rewriter ────
+    // Its own call, not merged with the caption's, so the two fields stay
+    // separate — and in practice only one is ever sent (the sticker doors send
+    // no caption; the book reimagine sends no note). The rule itself lives in
+    // `resolveCustomNote` above, where it can be tested.
+    const { safeNote, revisedNote } = await resolveCustomNote(note, (text) =>
+      rewriteForCopyright(text, "sketch", claudeApiKey.value()),
+    );
 
     // ── Download original sketch from Storage ──────────────────
     const bucket = getStorage().bucket();
@@ -400,12 +533,19 @@ export const enhanceSketch = onCall(
 
     // ── Enhance via gpt-image-1.5 edit endpoint ────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-    const prompt = buildEnhancePrompt(style, safeCaption, theme, transparent);
+    const prompt = buildEnhancePrompt(
+      style,
+      safeCaption,
+      theme,
+      transparent,
+      safeNote,
+    );
 
     console.log("enhanceSketch: starting API call", {
       sketchStoragePath,
       style: style ?? "storybook",
       transparent: transparent ?? false,
+      hasCustomNote: !!safeNote,
       sketchBufferLength: sketchBuffer.length,
       promptLength: prompt.length,
     });
@@ -440,10 +580,21 @@ export const enhanceSketch = onCall(
       // else; an UNCAPTIONED sketch has no words to reword either, and
       // `suggestPromptAlternatives` skips the call entirely for empty text, so
       // that case costs nothing and the client shows its written tips.
+      //
+      // FEAT-197: a custom note is the words the person actually chose on this
+      // door, so it is what gets reworded — "dress her as Elsa" comes back as
+      // "in a sparkly blue ice-princess dress", which the door offers as a tap
+      // that replaces the NOTE. The pre-rewrite note, deliberately: the
+      // alternatives are alternatives to what they asked for.
       const reason = readProviderError(errMsg);
       const details = await imageFailureDetailsFor(
         PROVIDER_ERROR_KIND[reason],
-        () => suggestPromptAlternatives(caption ?? "", "sketch", claudeApiKey.value()),
+        () =>
+          suggestPromptAlternatives(
+            alternativesSourceFor(note, caption),
+            "sketch",
+            claudeApiKey.value(),
+          ),
       );
 
       switch (reason) {
@@ -533,6 +684,11 @@ export const enhanceSketch = onCall(
       createdAt: new Date().toISOString(),
     });
 
-    return { url: downloadUrl, storagePath };
+    // `revisedNote` is present only where the rewriter changed the words
+    // (FEAT-197) — the door renders it as the FEAT-195 "Drawn as: …" line, and
+    // a note used verbatim needs no line.
+    return revisedNote
+      ? { url: downloadUrl, storagePath, revisedNote }
+      : { url: downloadUrl, storagePath };
   },
 );
