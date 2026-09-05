@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -46,7 +46,11 @@ import {
 // UX-184: the quick-log presets — the family's own and the eight built-ins —
 // have one definition, shared with Kid Today's "⭐ I Did More!" row. See the
 // note below, where they used to live.
-import { resolveCapturePresetGroups, type CapturePreset } from './quickLogChips'
+import {
+  isFamilyCapturePresetId,
+  resolveCapturePresetGroups,
+  type CapturePreset,
+} from './quickLogChips'
 // A plain read of the family's configs, for the same reason `KidExtraLogger`
 // takes it: a KID opening Today must not seed or migrate anything, which
 // `useActivityConfigs` would.
@@ -157,6 +161,29 @@ export default function UnifiedCaptureCard({
   useEffect(() => {
     setChildId(selectedChildId)
   }, [selectedChildId])
+
+  // UX-184 follow-up (Codex round 1, P2): a family preset is CHILD-SCOPED — it
+  // is offered because a config for this child (or 'both') is flagged — so
+  // changing child replaces the chip row while the preset's name, subject and
+  // minutes stay in the fields it filled. Saving then writes one child's
+  // activity, with its category and duration, onto the OTHER child's hours,
+  // with no chip on screen to explain where it came from.
+  //
+  // Clears exactly the three fields a preset fills, the same set
+  // `handlePresetTap`'s de-select branch clears. The eight built-ins are valid
+  // for every child, so a built-in selection survives the switch untouched —
+  // and the check is on the id's own shape rather than on the resolved list,
+  // which by this point no longer holds the preset being asked about.
+  const prevChildIdRef = useRef(childId)
+  useEffect(() => {
+    if (prevChildIdRef.current === childId) return
+    prevChildIdRef.current = childId
+    if (!isFamilyCapturePresetId(selectedPresetId)) return
+    setSelectedPresetId(null)
+    setActivityName('')
+    setSubjectBucket(SubjectBucket.Other)
+    setDurationInput('')
+  }, [childId, selectedPresetId])
 
   const parsedDuration = useMemo(() => {
     if (durationInput.trim() === '') return 0

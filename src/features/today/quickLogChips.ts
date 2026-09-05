@@ -278,6 +278,32 @@ export interface CapturePresetGroup {
   presets: CapturePreset[]
 }
 
+/**
+ * The `id` prefix a family-derived capture preset carries.
+ *
+ * One definition, beside the code that builds the id, because a caller needs to
+ * answer "was the selected preset one of the family's?" at a moment when the
+ * resolved list may not contain it any more — a child switch, where the chips
+ * have already been replaced (Codex round 1, P2 on PR #1779). A prefix test
+ * spelled out at the call site would be a second definition of this shape.
+ */
+export const FAMILY_CAPTURE_PRESET_PREFIX = 'config:'
+
+export function familyCapturePresetId(configId: string): string {
+  return `${FAMILY_CAPTURE_PRESET_PREFIX}${configId}`
+}
+
+/**
+ * True for a preset that came from one of the family's activity configs.
+ *
+ * A family preset is **child-scoped** — it is offered because a config for THIS
+ * child (or `'both'`) is flagged — where the eight built-ins are valid for
+ * every child. That difference is why a caller has to ask.
+ */
+export function isFamilyCapturePresetId(id: string | null | undefined): boolean {
+  return typeof id === 'string' && id.startsWith(FAMILY_CAPTURE_PRESET_PREFIX)
+}
+
 /** The heading the family's own chips sit under, beside *Creative* and *Active*. */
 export const FAMILY_CAPTURE_GROUP_LABEL = 'Yours'
 
@@ -335,7 +361,7 @@ export function resolveCapturePresetGroups(
     .filter((a) => !builtInLabelKeys.has(quickLogLabelKey(a.label)))
     .slice(0, QUICK_LOG_MAX_CHIPS)
     .map<CapturePreset>((a) => ({
-      id: `config:${a.id}`,
+      id: familyCapturePresetId(a.id),
       label: a.label,
       subjectBucket: a.subject,
       suggestedMinutes: a.minutes,

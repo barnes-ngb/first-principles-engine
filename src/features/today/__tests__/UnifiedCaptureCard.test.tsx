@@ -623,6 +623,52 @@ describe('UnifiedCaptureCard — the family’s quick-log activities (UX-184)', 
     })
   })
 
+  // Codex round 1, P2 on PR #1779. A family preset is child-scoped, so changing
+  // the Child field replaces the chip row while its name / subject / minutes
+  // stay in the fields — and a save would then write one child's activity onto
+  // the other child's hours with no chip on screen to explain it.
+  it('clears a family preset’s fields when the parent changes child', async () => {
+    renderCard({ familyConfigs: [packing] })
+    fireEvent.click(screen.getByRole('button', { name: /^Packing$/ }))
+    expect(getActivityNameInput().value).toBe('Packing')
+    expect(getDurationInput().value).toBe('30')
+
+    fireEvent.mouseDown(screen.getByLabelText(/^child$/i))
+    fireEvent.click(await screen.findByRole('option', { name: 'London' }))
+
+    await waitFor(() => {
+      expect(getActivityNameInput().value).toBe('')
+      expect(getDurationInput().value).toBe('')
+    })
+  })
+
+  it('does not carry one child’s activity onto the other child’s hours', async () => {
+    renderCard({ familyConfigs: [packing] })
+    fireEvent.click(screen.getByRole('button', { name: /^Packing$/ }))
+    fireEvent.mouseDown(screen.getByLabelText(/^child$/i))
+    fireEvent.click(await screen.findByRole('option', { name: 'London' }))
+
+    // Nothing to save: the preset's minutes went with it, so the save writes
+    // no hours rather than 30 minutes of "Packing" against London.
+    await waitFor(() => expect(getDurationInput().value).toBe(''))
+    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+    await waitFor(() => {
+      expect(addDocCalls.filter((c) => c.collectionKey === 'hours')).toHaveLength(0)
+    })
+  })
+
+  it('keeps a BUILT-IN preset across a child change — it is valid for any child', async () => {
+    renderCard({ familyConfigs: [packing] })
+    fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
+    expect(getActivityNameInput().value).toBe('Lego build')
+
+    fireEvent.mouseDown(screen.getByLabelText(/^child$/i))
+    fireEvent.click(await screen.findByRole('option', { name: 'London' }))
+
+    await waitFor(() => expect(getActivityNameInput().value).toBe('Lego build'))
+    expect(getDurationInput().value).toBe('45')
+  })
+
   it('leaves the built-in presets writing exactly what they always wrote', () => {
     renderCard({ variant: 'kid', familyConfigs: [packing] })
     fireEvent.click(screen.getByRole('button', { name: /Lego build/i }))
