@@ -10,8 +10,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ChatResponse } from '../../core/ai/useAI'
 import { TaskType } from '../../core/ai/useAI'
 import { buildPlannerPrompt } from '../planner-chat/chatPlanner.logic'
+// FEAT-198: the fencing has one definition, shared with the planner itself.
+import { buildInstructionSection } from '../planner-chat/plannerRequest'
 import {
-  buildInstructionSection,
   generateNextWeekDraft,
   type GenerateNextWeekDraftInput,
 } from './generateNextWeekDraft'
@@ -76,6 +77,13 @@ describe('generateNextWeekDraft — reuse, not reinvention', () => {
     })
     expect(sent).toContain(plannerPrompt)
     expect(sent).toContain('lighter, math every day but short')
+  })
+
+  it('puts the parent’s request LAST, from the one shared builder (FEAT-198)', async () => {
+    const chat = vi.fn().mockResolvedValue(response(validPlan))
+    await generateNextWeekDraft(input({ chat }))
+    const sent = chat.mock.calls[0][0].messages[0].content as string
+    expect(sent.endsWith(buildInstructionSection('lighter, math every day but short'))).toBe(true)
   })
 
   it('sends exactly one user message — no conversation history leaks in', async () => {

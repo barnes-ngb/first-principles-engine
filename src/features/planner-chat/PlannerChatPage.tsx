@@ -121,6 +121,12 @@ import {
   type PlanningWeekChoice,
 } from './planningWeekSelection'
 import PlanningWeekSelector from './PlanningWeekSelector'
+import {
+  buildPlannerRequestSection,
+  collectPlannerRequestAsks,
+  composePlannerMessage,
+  formatShapedByLine,
+} from './plannerRequest'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
 import ContextDrawer from './ContextDrawer'
@@ -754,6 +760,24 @@ export default function PlannerChatPage() {
     ].join('\n')
   }, [masterySummary])
 
+  // ── FEAT-198: what the parent actually asked for ───────────────────────────
+  // Her setup note plus every turn she typed herself, accumulated in order —
+  // "less math this week" and a later "add a nature walk Thursday" must BOTH
+  // reach the model. `buildPlannerRequestSection` fences it; every AI plan call
+  // below sends it as the LAST section, after the planner prompt and its
+  // context blocks, so the most authoritative thing the model reads is her
+  // request rather than a generic block of baselines.
+  const parentRequestAsks = useMemo(
+    () => collectPlannerRequestAsks({ weekNotes, messages }),
+    [weekNotes, messages],
+  )
+  const parentRequestSection = useMemo(
+    () => buildPlannerRequestSection(parentRequestAsks),
+    [parentRequestAsks],
+  )
+  /** One honest line naming what was SENT — never a claim the plan honoured it. */
+  const shapedByLine = useMemo(() => formatShapedByLine(parentRequestAsks), [parentRequestAsks])
+
   const masteryReviewLine = useMemo(() => {
     if (!masterySummary) return ''
     const formatSkillLabel = (tag: string) => {
@@ -1207,7 +1231,11 @@ Return as JSON:
       // AI path: send context to Cloud Function
       const prompt = buildPlannerPrompt(inputs)
       const photoContext = buildPhotoContextSection(photoLabels)
-      const fullPrompt = [prompt, masteryPromptContext, photoContext].filter(Boolean).join('\n\n')
+      // FEAT-198: her request goes last, fenced — see `plannerRequest.ts`.
+      const fullPrompt = composePlannerMessage(
+        [prompt, masteryPromptContext, photoContext],
+        parentRequestSection,
+      )
       const aiMessages: AIChatMessage[] = [{ role: 'user', content: fullPrompt }]
       const response = await aiChat({
         familyId,
@@ -1244,7 +1272,7 @@ Return as JSON:
     const assistantMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.Assistant,
-      text: `Here's your draft plan${aiLabel} based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".`,
+      text: `Here's your draft plan${aiLabel} based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}`,
       draftPlan: draft,
       createdAt: new Date().toISOString(),
     }
@@ -1257,7 +1285,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext])
+  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -1281,7 +1309,13 @@ Return as JSON:
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const prompt = buildPlannerPrompt(inputs)
       const photoContext = buildPhotoContextSection(photoLabels)
-      const fullPrompt = [prompt, masteryPromptContext, photoContext].filter(Boolean).join('\n\n')
+      // FEAT-198: her turns are in the history above, but history is not
+      // precedence — the assembled prompt is the last thing read, so her
+      // accumulated asks are restated, fenced, at the end of it.
+      const fullPrompt = composePlannerMessage(
+        [prompt, masteryPromptContext, photoContext],
+        parentRequestSection,
+      )
       const aiMessages: AIChatMessage[] = [
         ...messages.map((m) => ({
           role: m.role as 'user' | 'assistant',
@@ -1338,7 +1372,7 @@ Return as JSON:
     const assistantMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.Assistant,
-      text: `Here's your draft plan${aiLabel}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot. ` : ''}You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".`,
+      text: `Here's your draft plan${aiLabel}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot. ` : ''}You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}`,
       draftPlan: draft,
       createdAt: new Date().toISOString(),
     }
@@ -1351,7 +1385,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext])
+  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -1364,7 +1398,10 @@ Return as JSON:
     const isPlanRequest = /\b(generate|create|build|make)\b.*\b(plan|schedule|week)\b/i.test(text)
     if (isPlanRequest && !currentDraft) {
       setInputText('')
-      // Add the user message to chat for visual continuity
+      // Add the user message to chat for visual continuity.
+      // Deliberately NOT flagged `typedByParent` (FEAT-198): "generate a plan
+      // for this week" is the button she didn't tap, not a description of the
+      // week she wants, so it is not forwarded as a request.
       const userMsg: ChatMessage = {
         id: generateItemId(),
         role: ChatMessageRole.User,
@@ -1377,10 +1414,15 @@ Return as JSON:
       return
     }
 
+    // FEAT-198: everything that reaches `handleSend` is the parent's own ask —
+    // typed, or tapped as a quick suggestion. Flagging it here is what lets a
+    // later re-generate carry "less math this week" AND "add a nature walk
+    // Thursday", while the planner's own synthetic user turns stay out.
     const userMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.User,
       text,
+      typedByParent: true,
       createdAt: new Date().toISOString(),
     }
 
@@ -1575,15 +1617,17 @@ Return as JSON:
     if (readAloudBook) {
       contextParts.push(`Read-aloud book this week: ${readAloudBook}${readAloudChapters ? ` (${readAloudChapters})` : ''}. Connect the readingTieIn to this book's themes.`)
     }
-    if (weekNotes) {
-      contextParts.push(`Parent notes: ${weekNotes}`)
-    }
+    // The parent's notes used to be pushed here, mid-prompt and unfenced, where
+    // they read as background for the theme. FEAT-198 sends them (with every
+    // other ask she has made) as the fenced request section at the END of the
+    // prompt instead — same words, a position that carries precedence. Not
+    // duplicated here: two copies of a request is two requests.
     if (workbookConfigs.length > 0) {
       contextParts.push('Configured workbooks this week:')
       contextParts.push(...workbookConfigs.map((wb) => `- ${wb.name}: ${wb.unitLabel} ${wb.currentPosition + 1} (${wb.subjectBucket})`))
     }
     return contextParts.join('\n')
-  }, [readAloudBook, readAloudChapters, weekNotes, workbookConfigs])
+  }, [readAloudBook, readAloudChapters, workbookConfigs])
 
   const parsePlanThemeFields = useCallback((message: string): Partial<WeekPlan> | null => {
     try {
@@ -1641,13 +1685,20 @@ Return as JSON:
         const focusInstruction = skipFocusGeneration
           ? `Reuse this existing weekly focus (do NOT regenerate theme fields):\ntheme: ${weekPlan.theme}\nvirtue: ${weekPlan.virtue}\nscriptureRef: ${weekPlan.scriptureRef}\nheartQuestion: ${weekPlan.heartQuestion}\nGenerate ONLY the daily plan schedule (days[].items[]).`
           : 'Return one JSON payload that includes BOTH weekly themed content and the complete daily plan.\nInclude fields: theme, virtue, scriptureRef, scriptureText, heartQuestion, formationPrompt, conundrum, weekSkipSummary, days[].items[].'
-        const fullPrompt = [
-          prompt,
-          masteryPromptContext,
-          `Weekly focus context:\n${buildWeekFocusContext()}`,
-          `Daily routine context:\n${filteredDailyRoutine}`,
-          focusInstruction,
-        ].filter(Boolean).join('\n\n')
+        // FEAT-198: her request is the last section, after the focus
+        // instruction — the setup card's note used to arrive mid-prompt as one
+        // unfenced "Parent notes:" line inside the weekly-focus context, where
+        // it shaped the theme and nothing else.
+        const fullPrompt = composePlannerMessage(
+          [
+            prompt,
+            masteryPromptContext,
+            `Weekly focus context:\n${buildWeekFocusContext()}`,
+            `Daily routine context:\n${filteredDailyRoutine}`,
+            focusInstruction,
+          ],
+          parentRequestSection,
+        )
         const response = await aiChat({
           familyId,
           childId: activeChildId,
@@ -1686,7 +1737,7 @@ Return as JSON:
       const assistantMsg: ChatMessage = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
-        text: `Here's your draft plan${usedAI ? ' (AI-powered)' : ''}.`,
+        text: `Here's your draft plan${usedAI ? ' (AI-powered)' : ''}.${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}`,
         draftPlan: draft,
         createdAt: new Date().toISOString(),
       }
@@ -1696,7 +1747,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, parentRequestSection, shapedByLine])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
