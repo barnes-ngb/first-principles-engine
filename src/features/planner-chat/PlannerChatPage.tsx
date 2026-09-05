@@ -77,7 +77,6 @@ import {
 } from '../../core/types/enums'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
-import { getPlanningWeekRange } from '../../core/utils/time'
 import { todayKey } from '../../core/utils/dateKey'
 import { useTodayKey } from '../../core/hooks/useTodayKey'
 import { buildChapterPoolItem } from '../today/chapterPool.logic'
@@ -114,7 +113,14 @@ import {
   WEEK_DAYS,
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
-import { applyDraftWeek } from './applyWeekPlan'
+import { applyDraftWeek, WeekApplyError } from './applyWeekPlan'
+import {
+  appliedConfirmation,
+  applyButtonLabel,
+  resolvePlanningWeek,
+  type PlanningWeekChoice,
+} from './planningWeekSelection'
+import PlanningWeekSelector from './PlanningWeekSelector'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
 import ContextDrawer from './ContextDrawer'
@@ -238,14 +244,27 @@ export default function PlannerChatPage() {
   const isParent = profile === UserProfile.Parents
   // Keyed to the live day (FEAT-112): a phone-first tab is rarely closed, so the
   // planning week must not freeze at mount. `useTodayKey` refreshes on focus /
-  // visibility / minute-tick, and `getPlanningWeekRange` rolls a Saturday
-  // forward so weekend planning always targets the UPCOMING Mon–Fri, not the
-  // week that already passed.
+  // visibility / minute-tick, and the default rolls Friday and Saturday forward
+  // so late-week planning targets the UPCOMING Mon–Fri, not the week that is
+  // ending (FEAT-196 corrected Friday, which FEAT-112 left behind).
   const [todayKeyLive, refreshTodayKey] = useTodayKey()
-  const weekRange = useMemo(
-    () => getPlanningWeekRange(parseDateYmd(todayKeyLive) ?? new Date()),
-    [todayKeyLive],
+  // FEAT-196: the parent's explicit This week / Next week pick, or `null` while
+  // they have said nothing. `null` is deliberately NOT "they chose the default":
+  // an untouched selector keeps tracking the clock, so a tab opened on Thursday
+  // and used on Friday moves to next week by itself, exactly as the live
+  // `weekRange` memo has always done.
+  const [weekChoice, setWeekChoice] = useState<PlanningWeekChoice | null>(null)
+  const planningWeek = useMemo(
+    () => resolvePlanningWeek(weekChoice, parseDateYmd(todayKeyLive) ?? new Date()),
+    [weekChoice, todayKeyLive],
   )
+  // Every read and write on this page derives from `weekRange` — the conversation
+  // doc id, the WeekPlan ref, the day cards' dates, Apply's target. Routing the
+  // selection through that ONE memo is what makes "the parent picks a week and
+  // Apply writes it" true by construction rather than by threading a second value
+  // to twenty call sites and hoping none was missed.
+  const weekRange = planningWeek.range
+  const effectiveWeekChoice = planningWeek.choice
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
@@ -2192,7 +2211,11 @@ Generate a plan for Monday through Friday.`.trim()
     // dead dates. An explicit override (the forward-shift itself) skips the guard.
     const effectiveWeekStart = overrideWeekStart ?? weekRange.start
     if (!overrideWeekStart && isPlanningWeekPast(effectiveWeekStart, todayKey())) {
-      const shifted = getPlanningWeekRange(new Date()).start
+      // The shift target is the DEFAULT week as of right now — `resolvePlanningWeek`
+      // with no explicit choice, i.e. the same answer `getPlanningWeekRange` gives,
+      // read through the one resolver so the selector and the shift cannot disagree
+      // about which week is "upcoming".
+      const shifted = resolvePlanningWeek(null, new Date()).range.start
       setPastWeekBlock({ attempted: effectiveWeekStart, shifted })
       return
     }
@@ -2298,6 +2321,13 @@ Generate a plan for Monday through Friday.`.trim()
         // lane passes the real capability. If the planner is ever route-gated,
         // this is the line that should start reading it.
         canEdit: true,
+        // FEAT-196: hand Apply the parent's pick so it re-resolves the week at
+        // the write and refuses one that rolled over while the draft sat open.
+        // An explicit override IS a named week (the forward-shift's own target),
+        // not a choice, so it deliberately carries no `weekChoice` — checking a
+        // shifted week against "this/next" would refuse the very correction the
+        // dialog just offered.
+        ...(overrideWeekStart ? {} : { weekChoice: effectiveWeekChoice }),
       })
 
       // Persist readAloudBookId to plannerDefaults so it carries to the next week
@@ -2315,7 +2345,9 @@ Generate a plan for Monday through Friday.`.trim()
         role: ChatMessageRole.Assistant,
         // UX-63: there is no "Week" page in the nav — pointing at one sent the
         // parent hunting for a screen that does not exist. Today is where it lands.
-        text: "Plan applied! Your weekly plan and daily checklists have been updated. It's all on Today.",
+        // FEAT-196 names the week it landed on, so a wrong pick surfaces here
+        // rather than on Monday morning.
+        text: `Plan applied to ${formatPlanningWeekLabel(effectiveWeekStart) || 'the week'}! Your weekly plan and daily checklists have been updated. It's all on Today.`,
         createdAt: new Date().toISOString(),
       }
       const updatedMessages = [...messages, appliedMsg]
@@ -2345,13 +2377,17 @@ Generate a plan for Monday through Friday.`.trim()
         // post-shift edits on the shifted conversation). Await the applied-
         // conversation write first so the re-keyed subscription finds it.
         await persistPromise.catch(() => {})
+        // FEAT-196: drop any explicit pick as well as catching the day key up.
+        // The shift wrote the DEFAULT week; leaving a stale "This week" selected
+        // would leave the selector claiming a week the page is no longer on.
+        setWeekChoice(null)
         refreshTodayKey()
       } else {
         void persistPromise
       }
 
       // UX-63: "This Week" is not a page either — see the applied message above.
-      setSnack({ text: "Plan applied! It's on Today.", severity: 'success' })
+      setSnack({ text: appliedConfirmation(effectiveWeekStart), severity: 'success' })
 
       // Non-blocking (FEAT-43): batch-generate inline Help Card bodies for the
       // must-do Reading/Math items. Fire-and-forget — lock-in already succeeded;
@@ -2478,9 +2514,17 @@ Generate a plan for Monday through Friday.`.trim()
       }
     } catch (err) {
       console.error('Failed to apply plan', err)
-      setSnack({ text: 'Failed to apply plan.', severity: 'error' })
+      // A refusal Apply wrote FOR the parent (a stale week, a capability block)
+      // is shown verbatim — it names what happened and what to do. A genuine
+      // write failure keeps the generic line: its message is a Firestore string
+      // and putting that on screen is noise, not honesty (FEAT-196).
+      const refusal = err instanceof WeekApplyError ? err.reason : undefined
+      setSnack({
+        text: refusal ? (err as WeekApplyError).message : 'Failed to apply plan.',
+        severity: refusal === 'stale-week' ? 'warning' : 'error',
+      })
     }
-  }, [activeChildId, familyId, weekRange.start, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey])
+  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -2840,6 +2884,17 @@ ${dayPrompts}`
             </Alert>
           )}
 
+          {/* FEAT-196: which week is being planned, said out loud and picked by
+              the parent rather than guessed from the weekday. Live in every
+              phase — a conversation is stored per week, so switching loads that
+              week's own draft rather than discarding this one, and switching
+              back brings it straight back. */}
+          <PlanningWeekSelector
+            options={planningWeek.options}
+            value={effectiveWeekChoice}
+            onChange={setWeekChoice}
+          />
+
           {/* Plan Summary Panel (pinned above chat) */}
           <PlanSummaryPanel
             hoursPerDay={hoursPerDay}
@@ -2996,7 +3051,11 @@ ${dayPrompts}`
               {/* FEAT-111 P3: sticky/floating Apply bar — pinned to the viewport
                   bottom while the seven day cards scroll above it, so Apply is
                   reachable on a phone without scrolling past every card. */}
-              <StickyApplyBar planDirty={planDirty} onApply={() => handleApplyPlan()} />
+              <StickyApplyBar
+                planDirty={planDirty}
+                onApply={() => handleApplyPlan()}
+                applyLabel={applyButtonLabel(weekRange.start)}
+              />
             </Box>
           )}
 

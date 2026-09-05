@@ -36,6 +36,13 @@
 // surface (FEAT-142's live-day add writes a checklist row and no block at all).
 // Through this module the chat inherits the lane legitimately, because it is the
 // same lane, not a copy of it.
+//
+// ── Which week (FEAT-196) ────────────────────────────────────────────────────
+// `weekStart` is what the caller says it is writing to. When the caller also
+// passes the parent's `weekChoice`, that claim is CHECKED here — re-resolved
+// against the clock at the moment of the write — and a week that has rolled over
+// underneath an open draft is refused rather than written. One check, in the one
+// Apply, so no caller can be the one that forgot it.
 
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
@@ -64,6 +71,11 @@ import {
   WEEK_DAYS,
   type WeekDay,
 } from './chatPlanner.logic'
+import {
+  planningWeekStillMatches,
+  staleWeekNotice,
+  type PlanningWeekChoice,
+} from './planningWeekSelection'
 
 /**
  * The slice of an `ActivityConfig` the FEAT-62 workbook join needs.
@@ -109,6 +121,24 @@ export interface ApplyWeekPlanInput {
    * site away from being absent.
    */
   canEdit: boolean
+  /**
+   * The parent's This week / Next week pick, when the caller has one (FEAT-196).
+   *
+   * Passing it turns `weekStart` from an assertion into a **claim that is
+   * checked**: the choice is re-resolved against the clock here, at the write,
+   * and a mismatch refuses instead of writing. That is the rail a planner tab
+   * left open across a week boundary needs — the card still reads "Next week —
+   * Sep 14–18" while `'next'` has come to mean Sep 21–25, and one of those two
+   * weeks is not the one the parent read.
+   *
+   * Optional because the chat's lane already holds its own equivalent rail
+   * (`isNextWeekStart`, re-resolved inside `writeNextWeekDraft`) and a caller
+   * with no selector — a forward-shift's explicit override, say — is naming a
+   * week directly rather than choosing one.
+   */
+  weekChoice?: PlanningWeekChoice
+  /** Clock for the {@link weekChoice} re-resolve. Injected only by tests. */
+  now?: Date
 }
 
 export interface ApplyWeekPlanResult {
@@ -131,15 +161,24 @@ export interface ApplyWeekPlanResult {
 export class WeekApplyError extends Error {
   readonly daysWritten: string[]
   readonly weekPlanWritten: boolean
+  /**
+   * Set on the two refusals whose message is written FOR a parent to read —
+   * a capability refusal and FEAT-196's stale week. Absent on a write that
+   * genuinely failed, whose message is a Firestore string and is not something
+   * to put on screen. A caller shows `message` verbatim when this is present and
+   * its own wording when it is not.
+   */
+  readonly reason?: 'not-permitted' | 'stale-week'
   constructor(
     message: string,
     partial: ApplyWeekPlanResult,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; reason?: 'not-permitted' | 'stale-week' },
   ) {
     super(message, options)
     this.name = 'WeekApplyError'
     this.daysWritten = partial.daysWritten
     this.weekPlanWritten = partial.weekPlanWritten
+    if (options?.reason) this.reason = options.reason
   }
 }
 
@@ -343,12 +382,27 @@ export async function applyDraftWeek(
     activityConfigs,
     lessonCardMap = new Map<string, string>(),
     canEdit,
+    weekChoice,
+    now: clock = new Date(),
   } = input
 
   if (!canEdit) {
     throw new WeekApplyError(
       'Applying a week is a parent action.',
       { daysWritten: [], weekPlanWritten: false },
+      { reason: 'not-permitted' },
+    )
+  }
+
+  // FEAT-196: re-resolve the parent's pick at the write. A draft that sat on
+  // screen across a week boundary carries a `weekStart` its label no longer
+  // means, and the honest answer to that is to write nothing and say so — the
+  // same failure mode, and the same closed door, as the chat's `weekMoved`.
+  if (weekChoice && !planningWeekStillMatches(weekChoice, weekStart, clock)) {
+    throw new WeekApplyError(
+      staleWeekNotice(weekStart),
+      { daysWritten: [], weekPlanWritten: false },
+      { reason: 'stale-week' },
     )
   }
 
