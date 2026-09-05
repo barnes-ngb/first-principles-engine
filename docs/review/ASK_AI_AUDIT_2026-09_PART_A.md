@@ -66,7 +66,7 @@ correctly to things she wanted." FEAT-198 diagnosed and fixed exactly that on 20
 request now goes last and fenced in every planner prompt. This audit found the *structural* reason the
 chat felt more responsive than the planner: **the chat's request has always been the last message**, and
 the planner's was not. That asymmetry is closed. What this audit adds is a number for the other side of
-it: the chat's system prompt carries a **41,620-character static floor before any family data**, of which
+it: the chat's system prompt carries a **41,635-character static floor before any family data**, of which
 **68.6% is action grammar** (§4). Whether eleven grammars competing in one prompt is why some sentences
 produce a card and some don't is not something this audit can answer without live calls — but the number
 is now on the record, and nobody had looked at it.
@@ -191,10 +191,16 @@ other paths do not (**F17**).
 
 ## 4 · The prompt measurement
 
-Measured by building the real builders (`buildShellyChatRoleSection` + the nine action grammars + friction
-capture + web search + `CHARTER_PREAMBLE`) for a child-scoped call with two children, **plus the fixed
-follow-up postamble** the handler appends at `shellyChat.ts:1858–1863`. This is the **static floor**: every
-row below is present on every child-tab turn before a single byte of family data.
+Measured by **assembling the real template** at `shellyChat.ts:1841–1863` byte for byte — the nine action
+grammars, `buildShellyChatRoleSection`, friction capture, web search, `CHARTER_PREAMBLE` and the fixed
+follow-up postamble — for a child-scoped call with two children, with the two per-family slices left empty.
+This is the **static floor**: every row below is present on every child-tab turn before a single byte of
+family data.
+
+Measured on the assembled string, not by summing the rows: the template's own separators are part of the
+prompt. The components total 41,620 characters and the assembled prompt is **41,635** — 15 newlines the
+template inserts (four around `supplementalContext`, eleven between `roleSection` and the builders that
+follow it).
 
 | Section | Chars | ~Tokens |
 |---|---:|---:|
@@ -212,10 +218,12 @@ row below is present on every child-tab turn before a single byte of family data
 | friction capture | 864 | 216 |
 | web search | 1,301 | 325 |
 | follow-up postamble | 412 | 103 |
-| **TOTAL (static floor)** | **41,620** | **~10,405** |
+| template separators | 15 | ~4 |
+| **TOTAL (assembled static floor)** | **41,635** | **~10,409** |
 | **of which action grammar** | **28,557** | **~7,139 — 68.6%** |
 
 **Part A's four grammars are 11,380 chars (27.3% of the floor); Part B's five are 17,177 (41.3%).**
+(The three shares are unchanged by the separator correction at this precision.)
 
 On top of this sit the per-family slices — charter extras, child profile, learner model, engagement,
 grade results, recent eval, sight words, week focus, word mastery, workbook paces, skill snapshot, child
@@ -453,11 +461,19 @@ The card shows `subjectBucket · defaultMinutes · frequency` plus position. The
 `unitLabel: 'lesson'`. `type` is the field that decides whether the row is a workbook — which decides
 DATA-08 ownership, whether the scan pipeline can match a photo to it, and how the planner treats it.
 
-**Failure scenario.** Shelly says *"add the new Explode the Code book for Lincoln, 15 minutes, 4 days a
-week"*. The model picks `type: "activity"` instead of `"workbook"`. The card reads *"Add "Explode the Code
-4" to Lincoln's curriculum · LanguageArts · 15m · 3x"* — everything she can check is right. Weeks later a
-workbook photo scan finds nothing to advance, because the row is not scannable and has no position.
-Nothing on the card let her catch it.
+**Failure scenario.** Shelly says *"add Explode the Code 4 for Lincoln, 15 minutes a day — he's on lesson 1
+of 60"*. Every number she gave is representable, so the model emits `frequency: "daily"`, `totalUnits: 60`,
+`currentPosition: 1` — and the router therefore derives `scannable: true` and `unitLabel: 'lesson'`. The card
+reads *"Add "Explode the Code 4" to Lincoln's curriculum"* over *"LanguageArts · 15m · daily · lesson 1 of
+60"*: **every visible field is correct**. But the model picked `type: "activity"` rather than `"workbook"`,
+and `resolveScannableWorkbook` filters `c.type === 'workbook' && c.scannable !== false`
+(`workbookMatching.ts:111`) — so the row is flagged scannable and is still never matched by a workbook photo
+scan, and `PlannerChatPage.tsx:376`'s `cfg.type === 'workbook'` filter skips it too. The one field that broke
+it is the one field the card does not show.
+
+*Scenario corrected after Codex round 2: the original used "4 days a week", which has no `ActivityFrequency`
+member and would surface on the card as a visibly wrong `3x`, and supplied no units — which alone would have
+made the row non-scannable, so the hidden `type` was not what caused the failure being described.*
 
 ---
 
@@ -620,7 +636,7 @@ Stated plainly, because an audit that overstates its coverage is worse than a sm
   `markSkillProgress` for *"he finally got his 'th' sound"* — as opposed to prose, or the wrong kind — is
   unmeasured. The Shelly walk in this document traces what **would** happen to each sentence's action, not
   that the sentence produces one.
-- **The per-family half of the system prompt was not measured.** §4's 41,620 characters is the static
+- **The per-family half of the system prompt was not measured.** §4's 41,635 characters is the static
   floor only; the context slices need Firestore. The handler already logs the real numbers, so this is
   recoverable from one production log rather than from more analysis.
 - **Firestore merge semantics were not verified against an emulator.** F1 rests on reading
