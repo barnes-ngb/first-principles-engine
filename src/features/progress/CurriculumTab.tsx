@@ -600,7 +600,7 @@ export default function CurriculumTab() {
           shape as Routine Activities, so the existing ⋮ menu (mark complete /
           quick-log toggle / delete permanently) comes with it rather than
           growing a second, weaker one. Nothing is auto-retyped or auto-removed:
-          the rows are the owner's data, and the fix is that he can now see them.
+          the rows are the owner's data, and the fix is that they are now visible.
         */}
         {other.length > 0 && (
           <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Other]}>
