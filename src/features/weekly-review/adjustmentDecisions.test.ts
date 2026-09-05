@@ -8,7 +8,10 @@ import {
   setDecision,
 } from './adjustmentDecisions'
 
-const adjustment = (id: string, decision = AdjustmentDecision.Pending) =>
+const adjustment = (
+  id: string,
+  decision: AdjustmentDecision = AdjustmentDecision.Pending,
+) =>
   ({
     id,
     area: `Area ${id}`,

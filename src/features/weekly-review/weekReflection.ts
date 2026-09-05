@@ -110,18 +110,21 @@ export interface PastReflection {
  * app must not imply that they did.
  */
 export function pastReflections(reviews: WeeklyReview[]): PastReflection[] {
-  return reviews
-    .map((review) => {
-      const reflection = normalizeWeekReflection(review.reflection)
-      if (!reflection) return null
-      return {
-        weekKey: review.weekKey,
-        weekLabel: formatDateShort(review.weekKey),
-        answer: reflection.answer,
-        label: WeekReflectionAnswerLabel[reflection.answer],
-        note: reflection.note,
-      }
-    })
-    .filter((entry): entry is PastReflection => entry !== null)
-    .sort((a, b) => b.weekKey.localeCompare(a.weekKey))
+  const entries: PastReflection[] = []
+  for (const review of reviews) {
+    const reflection = normalizeWeekReflection(review.reflection)
+    if (!reflection) continue
+    const entry: PastReflection = {
+      weekKey: review.weekKey,
+      weekLabel: formatDateShort(review.weekKey),
+      answer: reflection.answer,
+      label: WeekReflectionAnswerLabel[reflection.answer],
+    }
+    // Assigned only when there is one — `note` is optional, and under
+    // `exactOptionalPropertyTypes` an explicit `undefined` is not the same as
+    // an absent key.
+    if (reflection.note) entry.note = reflection.note
+    entries.push(entry)
+  }
+  return entries.sort((a, b) => b.weekKey.localeCompare(a.weekKey))
 }
