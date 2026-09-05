@@ -500,6 +500,14 @@ export interface ChatMessage {
   photoLabels?: PhotoLabel[]
   /** Draft plan snapshot attached to this message */
   draftPlan?: DraftWeeklyPlan
+  /**
+   * True only for text the parent typed (or tapped as a quick suggestion)
+   * herself (FEAT-198). The planner also writes synthetic user turns of its own
+   * ("Generate a plan for this week.", "Uploaded 2 workbook photos.", the setup
+   * card's context summary); only flagged turns are forwarded to the model as
+   * her request. Additive and optional — an older conversation simply has none.
+   */
+  typedByParent?: boolean
   createdAt: string
 }
 
