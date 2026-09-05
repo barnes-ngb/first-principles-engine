@@ -31,14 +31,16 @@ const countOf = (text: string, re: RegExp): number =>
   (text.match(re) ?? []).length
 
 describe('every weekly-review write is a merge', () => {
-  it('never calls setDoc without { merge: true }', () => {
+  it('never writes the document without { merge: true }', () => {
     for (const { file, text } of sources()) {
-      const writes = countOf(text, /\bsetDoc\(/g)
+      // Both shapes that reach this document: the plain client write, and the
+      // transactional one the Apply handler uses.
+      const writes = countOf(text, /\bsetDoc\(|\btx\.set\(/g)
       if (writes === 0) continue
       const merges = countOf(text, /merge:\s*true/g)
       expect(
         merges,
-        `${file} has ${writes} setDoc call(s) but ${merges} merge flag(s) — a whole-document write here deletes the parent's answer`,
+        `${file} has ${writes} write(s) but ${merges} merge flag(s) — a whole-document write here deletes the parent's answer`,
       ).toBe(writes)
     }
   })

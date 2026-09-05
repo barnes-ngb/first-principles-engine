@@ -115,6 +115,67 @@ describe('the week question (UX-214)', () => {
     expect(screen.getByText('Aug 16 — We can do more')).toBeInTheDocument()
   })
 
+  it('picks up an answer changed on the same document in another tab', async () => {
+    // Keying the re-seed on the document id alone meant an onSnapshot update to
+    // `review.reflection` never reached the controls: the card went on showing
+    // the old answer and would have written it back over the newer one.
+    const { rerender } = renderCard({
+      answer: 'good-week',
+      answeredAt: '2026-09-01T10:00:00.000Z',
+    })
+    expect(screen.getByRole('button', { name: 'Yes, good week' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    rerender(
+      <WeekReflectionCard
+        familyId="fam-1"
+        childId="c1"
+        weekKey="2026-08-30"
+        review={review({
+          answer: 'can-do-more',
+          answeredAt: '2026-09-02T10:00:00.000Z',
+        })}
+        history={[]}
+        onSaved={onSaved}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'We can do more' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByRole('button', { name: 'Yes, good week' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+
+  it('does not overwrite an answer the parent is part-way through choosing', async () => {
+    const user = userEvent.setup()
+    const { rerender } = renderCard()
+
+    await user.click(screen.getByRole('button', { name: 'We can do more' }))
+
+    // Something else lands on the document while they are deciding.
+    rerender(
+      <WeekReflectionCard
+        familyId="fam-1"
+        childId="c1"
+        weekKey="2026-08-30"
+        review={review({ answer: 'good-week', answeredAt: 'x' })}
+        history={[]}
+        onSaved={onSaved}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'We can do more' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
   it('renders nothing for a child profile — a kid is never asked to grade the week', () => {
     mockUseActiveChild.mockReturnValue({ isChildProfile: true })
     const { container } = renderCard()

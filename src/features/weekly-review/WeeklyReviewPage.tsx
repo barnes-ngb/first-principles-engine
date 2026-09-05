@@ -18,7 +18,7 @@ import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
 import EventNoteIcon from '@mui/icons-material/EventNote'
 import ThumbDownIcon from '@mui/icons-material/ThumbDown'
 import ThumbUpIcon from '@mui/icons-material/ThumbUp'
-import { doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { doc, onSnapshot, runTransaction, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 
 import ChildSelector from '../../components/ChildSelector'
@@ -29,12 +29,18 @@ import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { app } from '../../core/firebase/firebase'
-import { weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
+import { db, weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
 import { lastCompletedWeekKey } from '../../core/utils/time'
 import { formatWeekShort } from '../../core/utils/dateKey'
+import {
+  applyDecisionDraft,
+  countAccepted,
+  setDecision,
+} from './adjustmentDecisions'
+import type { DecisionDraft } from './adjustmentDecisions'
 import WeekInEvidence from './WeekInEvidence'
 import WeekPaceSection from './WeekPaceSection'
 import WeekReflectionCard from './WeekReflectionCard'
@@ -103,27 +109,33 @@ export default function WeeklyReviewPage() {
     return unsubscribe
   }, [familyId, activeChildId, weekKey])
 
+  // Accept/reject ticks live in their own draft, not inside `review` (UX-214).
+  // `review` is replaced wholesale every time the listener fires, so recording a
+  // choice there meant any write to the document — the parent saving their
+  // answer to the week's question included — silently threw the ticks away.
+  const [decisionDraft, setDecisionDraft] = useState<DecisionDraft>({})
+
   // Reset loading when child switches
   const [loadedChildId, setLoadedChildId] = useState(activeChildId)
   if (loadedChildId !== activeChildId) {
     setLoadedChildId(activeChildId)
     setReview(null)
+    setDecisionDraft({})
     setIsLoading(true)
   }
 
   const handleAdjustmentDecision = useCallback(
     (adjustmentId: string, decision: AdjustmentDecision) => {
-      setReview((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          paceAdjustments: prev.paceAdjustments.map((adj) =>
-            adj.id === adjustmentId ? { ...adj, decision } : adj,
-          ),
-        }
-      })
+      setDecisionDraft((prev) => setDecision(prev, adjustmentId, decision))
     },
     [],
+  )
+
+  // What the parent is looking at: the document's adjustments with their own
+  // un-applied ticks on top.
+  const adjustments = useMemo(
+    () => applyDecisionDraft(review?.paceAdjustments ?? [], decisionDraft),
+    [review?.paceAdjustments, decisionDraft],
   )
 
   const handleMarkReviewed = useCallback(async () => {
@@ -157,41 +169,60 @@ export default function WeeklyReviewPage() {
     if (!review || !activeChildId) return
     setIsSaving(true)
 
-    const acceptedAdjustments = review.paceAdjustments.filter(
-      (adj) => adj.decision === AdjustmentDecision.Accepted,
-    )
-
-    if (acceptedAdjustments.length === 0) {
+    if (countAccepted(adjustments) === 0) {
       setSnack({ text: 'No adjustments accepted to apply.', severity: 'error' })
       setIsSaving(false)
       return
     }
 
     const docId = weeklyReviewDocId(weekKey, activeChildId)
-    // Merge only this button's own fields (UX-214) — the accept/reject decisions
-    // it exists to persist, plus the status stamps. A whole-document replacement
-    // from local state would delete a reflection saved since the last snapshot.
-    const updated: Partial<WeeklyReview> = {
-      status: ReviewStatus.Applied,
-      paceAdjustments: review.paceAdjustments,
-      reviewedAt: review.reviewedAt ?? new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
+    const ref = doc(weeklyReviewsCollection(familyId), docId)
 
+    // Transactional, and merging only this button's own fields (UX-214). Two
+    // things it must not do: delete an answer saved since the last snapshot
+    // (so: merge, never a whole-document replacement), and resurrect
+    // suggestions from a review that was regenerated in another tab (so: the
+    // ticks are resolved against the document's CURRENT adjustments, inside the
+    // transaction, and a tick whose suggestion no longer exists is dropped).
     try {
-      await setDoc(doc(weeklyReviewsCollection(familyId), docId), updated, {
-        merge: true,
+      const applied = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref)
+        if (!snap.exists()) throw new Error('review-missing')
+        const current = snap.data() as WeeklyReview
+        const next = applyDecisionDraft(
+          current.paceAdjustments ?? [],
+          decisionDraft,
+        )
+        const accepted = countAccepted(next)
+        if (accepted === 0) return 0
+        const updated: Partial<WeeklyReview> = {
+          status: ReviewStatus.Applied,
+          paceAdjustments: next,
+          reviewedAt: current.reviewedAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        tx.set(ref, updated, { merge: true })
+        return accepted
       })
-      setSnack({
-        text: `Applied ${acceptedAdjustments.length} adjustment${acceptedAdjustments.length > 1 ? 's' : ''}. Changes visible in next planner session.`,
-        severity: 'success',
-      })
+
+      if (applied === 0) {
+        setSnack({
+          text: 'Those suggestions are no longer on this review — it was regenerated.',
+          severity: 'error',
+        })
+      } else {
+        setDecisionDraft({})
+        setSnack({
+          text: `Applied ${applied} adjustment${applied > 1 ? 's' : ''}. Changes visible in next planner session.`,
+          severity: 'success',
+        })
+      }
     } catch (err) {
       console.error('Failed to apply adjustments', err)
       setSnack({ text: 'Failed to apply. Try again.', severity: 'error' })
     }
     setIsSaving(false)
-  }, [review, activeChildId, weekKey, familyId])
+  }, [review, activeChildId, weekKey, familyId, adjustments, decisionDraft])
 
   const handleRegenerateReview = useCallback(async () => {
     if (!activeChildId) return
@@ -211,9 +242,7 @@ export default function WeeklyReviewPage() {
     setGenerating(false)
   }, [activeChildId, familyId, weekKey])
 
-  const acceptedCount = review?.paceAdjustments.filter(
-    (a) => a.decision === AdjustmentDecision.Accepted,
-  ).length ?? 0
+  const acceptedCount = countAccepted(adjustments)
 
   return (
     <Page>
@@ -347,14 +376,14 @@ export default function WeeklyReviewPage() {
           )}
 
           {/* Pace Adjustments — accept/reject per item */}
-          {review.paceAdjustments.length > 0 && (
+          {adjustments.length > 0 && (
             <SectionCard title="Pace Adjustments">
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 Review each suggested adjustment. Accept the ones you'd like applied to
                 next week's plan.
               </Typography>
               <Stack spacing={2}>
-                {review.paceAdjustments.map((adj) => (
+                {adjustments.map((adj) => (
                   <PaceAdjustmentCard
                     key={adj.id}
                     adjustment={adj}
@@ -402,7 +431,7 @@ export default function WeeklyReviewPage() {
                 {isSaving ? 'Saving...' : 'Mark as Reviewed'}
               </Button>
             )}
-            {review.paceAdjustments.length > 0 && review.status !== ReviewStatus.Applied && (
+            {adjustments.length > 0 && review.status !== ReviewStatus.Applied && (
               <Button
                 variant="contained"
                 onClick={handleApplyAdjustments}

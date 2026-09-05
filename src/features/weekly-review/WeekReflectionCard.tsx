@@ -71,14 +71,24 @@ function WeekReflectionBody({
   )
   const [note, setNote] = useState(saved?.note ?? '')
   const [isSaving, setIsSaving] = useState(false)
+  // True once the parent has touched either control since the last seed. Their
+  // half-typed answer is theirs; an incoming snapshot must not overwrite it.
+  const [dirty, setDirty] = useState(false)
 
-  // Re-seed when the stored answer changes underneath (child switch, snapshot).
-  const [seededFor, setSeededFor] = useState(review.id ?? weekKey)
-  const currentKey = review.id ?? weekKey
-  if (seededFor !== currentKey) {
-    setSeededFor(currentKey)
+  // Re-seed on the STORED ANSWER, not merely on the document id. Keying on the
+  // id alone meant an `onSnapshot` update to `review.reflection` — this same
+  // week's document, edited in another tab — never reached the controls: the
+  // card went on showing the old answer and would have written it back over the
+  // newer one. A different document (child switch) re-seeds unconditionally; the
+  // same document re-seeds only when the parent has no unsaved edit in progress.
+  const docKey = review.id ?? weekKey
+  const storedKey = `${docKey}|${saved?.answer ?? ''}|${saved?.answeredAt ?? ''}`
+  const [seeded, setSeeded] = useState({ docKey, storedKey })
+  if (seeded.docKey !== docKey || (seeded.storedKey !== storedKey && !dirty)) {
+    setSeeded({ docKey, storedKey })
     setAnswer(saved?.answer ?? null)
     setNote(saved?.note ?? '')
+    setDirty(false)
   }
 
   const earlier = useMemo(() => pastReflections(history), [history])
@@ -93,6 +103,8 @@ function WeekReflectionBody({
         weekKey,
         buildWeekReflection(answer, note, new Date()),
       )
+      // The listener will deliver the saved value back; let it re-seed.
+      setDirty(false)
       onSaved({ text: 'Answer saved.', severity: 'success' })
     } catch (err) {
       console.error('[UX-214] Failed to save week reflection', err)
@@ -117,7 +129,9 @@ function WeekReflectionBody({
         exclusive
         value={answer}
         onChange={(_e, next: WeekReflectionAnswer | null) => {
-          if (next !== null) setAnswer(next)
+          if (next === null) return
+          setAnswer(next)
+          setDirty(true)
         }}
         aria-label={WEEK_QUESTION}
         sx={{ flexWrap: 'wrap' }}
@@ -132,7 +146,10 @@ function WeekReflectionBody({
       <TextField
         label="Anything worth remembering (optional)"
         value={note}
-        onChange={(e) => setNote(e.target.value.slice(0, REFLECTION_NOTE_MAX))}
+        onChange={(e) => {
+          setNote(e.target.value.slice(0, REFLECTION_NOTE_MAX))
+          setDirty(true)
+        }}
         multiline
         minRows={2}
         fullWidth
