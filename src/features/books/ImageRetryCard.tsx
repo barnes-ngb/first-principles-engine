@@ -11,9 +11,10 @@ import type { ArtHelpAudience } from './artHelpContent'
 import {
   ALTERNATIVES_HEADING,
   ALTERNATIVE_COST_NOTE,
-  BLOCKED_TIPS,
   FREE_EXITS_HEADING,
   ImageGenerationFailure,
+  ImageRetryDoor,
+  blockedTips,
   imageFailureMessage,
   offersAlternatives,
 } from './imageGenerationFailure'
@@ -31,6 +32,12 @@ export interface ImageRetryCardProps {
   failure: ImageGenerationFailure
   /** The host's `useActiveChild().isChildProfile` — capability, never a name. */
   audience: ArtHelpAudience
+  /**
+   * What kind of picture this door makes, which decides the written suggestions
+   * shown when the server sent none (Codex P2, PR #1768). Defaults to the
+   * Book Editor's case, which is where those words were written.
+   */
+  door?: ImageRetryDoor
   /**
    * The server's rewordings of what was asked for, from
    * `imageFailureAlternatives`. Rendered as taps only on a refusal AND only
@@ -70,6 +77,7 @@ export interface ImageRetryCardProps {
 export default function ImageRetryCard({
   failure,
   audience,
+  door = ImageRetryDoor.Scene,
   alternatives = [],
   onUseAlternative,
   onRetry,
@@ -79,8 +87,8 @@ export default function ImageRetryCard({
   // Only a refusal can be answered with different words (see `offersAlternatives`).
   const wantsAlternatives = offersAlternatives(failure)
   const tappable = wantsAlternatives && !!onUseAlternative ? alternatives : []
-  // The Book Editor's two written suggestions, shown when the suggester gave us
-  // nothing to tap. Advice, not prompts — so never rendered as a tap.
+  // Written suggestions for THIS door, shown when the suggester gave us nothing
+  // to tap. Advice, not prompts — so never rendered as a tap.
   const showTips = wantsAlternatives && tappable.length === 0
 
   return (
@@ -125,7 +133,7 @@ export default function ImageRetryCard({
               <strong>{ALTERNATIVES_HEADING[audience]}</strong>
             </Typography>
             <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
-              {BLOCKED_TIPS[audience].map((tip) => (
+              {blockedTips(door, audience).map((tip) => (
                 <li key={tip}>
                   <Typography variant="body2">{tip}</Typography>
                 </li>

@@ -22,7 +22,10 @@ import { ART_QUOTA_MESSAGE } from './useArtQuota'
 import type { ArtBudgetState, ArtHelpAudience } from '../books/artHelpContent'
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from '../books/ArtHelpSheet'
 import ImageRetryCard from '../books/ImageRetryCard'
-import type { ImageGenerationFailure } from '../books/imageGenerationFailure'
+import {
+  ImageRetryDoor,
+  type ImageGenerationFailure,
+} from '../books/imageGenerationFailure'
 import { defenderArtKey, heroDescriptor, HERO_ART_KEY, invaderArtKey } from './kitArt'
 import type { NewKitRoster } from './useKitRosters'
 
@@ -168,7 +171,11 @@ function CharacterArtControl({
               the roster's own fields, so there is no single box to put reworded
               text back into. The row's own generate button is the retry. */}
           {failure && (
-            <ImageRetryCard failure={failure} audience={audience} />
+            <ImageRetryCard
+              failure={failure}
+              audience={audience}
+              door={ImageRetryDoor.Redraw}
+            />
           )}
         </Box>
       )}
@@ -194,7 +201,11 @@ function CharacterArtControl({
             {/* The lightbox's own Regenerate is the retry, so the card here
                 names the failure and offers no second button (FEAT-195). */}
             {canGenerate && failure && (
-              <ImageRetryCard failure={failure} audience={audience} />
+              <ImageRetryCard
+              failure={failure}
+              audience={audience}
+              door={ImageRetryDoor.Redraw}
+            />
             )}
           </DialogContent>
           <DialogActions>

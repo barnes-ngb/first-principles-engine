@@ -37,7 +37,7 @@ import { buildImageMessageContent, MAX_UPLOAD_FILES } from './imageMarkers'
 import {
   classifyImageGenerationFailure,
   imageFailureAlternatives,
-  imageFailureMessage,
+  imageFailureChatMessage,
 } from '../books/imageGenerationFailure'
 
 type AI = ReturnType<typeof useAI>
@@ -603,12 +603,15 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         // every other reply in this thread is written in.
         const failure = classifyImageGenerationFailure(imageFailureRef.current)
         const alternatives = imageFailureAlternatives(imageFailureRef.current)
-        const userMessage = [
-          imageFailureMessage(failure, 'parent'),
-          ...(alternatives.length > 0
-            ? ['', 'Try one of these — just ask me for it:', ...alternatives.map((a) => `• ${a}`)]
-            : []),
-        ].join('\n')
+        // One classifier and one set of words, instead of this door's own
+        // three-way message sniff (FEAT-195). A chat reply cannot hold the
+        // shared card — it is persisted text, not a component — so
+        // `imageFailureChatMessage` composes the same content as one string,
+        // and holds the rule that a refusal ALWAYS ends with something to do:
+        // an empty suggester falls back to the written tips here exactly as it
+        // does on the component doors (Codex P2, PR #1768). Parent voice, the
+        // register every other reply in this thread is written in.
+        const userMessage = imageFailureChatMessage(failure, alternatives, 'parent')
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
           content: userMessage,

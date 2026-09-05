@@ -27,6 +27,7 @@ import ImageRetryCard from './ImageRetryCard'
 import {
   classifyImageGenerationFailure,
   imageFailureAlternatives,
+  ImageRetryDoor,
   type ImageGenerationFailure,
 } from './imageGenerationFailure'
 import { drawnAsLine } from './revisedPromptLine'
@@ -591,6 +592,7 @@ export default function StickerPicker({
             <ImageRetryCard
               failure={failure}
               audience={artAudience}
+              door={ImageRetryDoor.Sticker}
               alternatives={alternatives}
               onUseAlternative={(text) => { void handleCreateSticker(text) }}
               onRetry={handleTryAgain}

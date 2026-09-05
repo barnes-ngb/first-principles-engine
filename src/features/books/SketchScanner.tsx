@@ -45,6 +45,7 @@ import ImageRetryCard from './ImageRetryCard'
 import {
   classifyImageGenerationFailure,
   imageFailureAlternatives,
+  ImageRetryDoor,
   type ImageGenerationFailure,
 } from './imageGenerationFailure'
 import { StickerCategory } from '../../core/types/enums'
@@ -651,6 +652,7 @@ export default function SketchScanner({
                         <ImageRetryCard
                           failure={fancyFailure}
                           audience={audience}
+                          door={ImageRetryDoor.Redraw}
                           alternatives={fancyAlternatives}
                           onRetry={() => { void handleMakeFancy() }}
                           retryLabel="Make it fancy"
@@ -711,6 +713,7 @@ export default function SketchScanner({
                   <ImageRetryCard
                     failure={fancyFailure}
                     audience={audience}
+                    door={ImageRetryDoor.Redraw}
                     alternatives={fancyAlternatives}
                     onRetry={() => { void handleMakeFancy() }}
                     retryLabel="Make it with this style"

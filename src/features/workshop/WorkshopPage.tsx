@@ -82,6 +82,7 @@ import type { GenerateImageFn } from './workshopArt'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import ImageRetryCard from '../books/ImageRetryCard'
 import {
+  ImageRetryDoor,
   classifyImageGenerationFailure,
   type ImageGenerationFailure,
 } from '../books/imageGenerationFailure'
@@ -1349,6 +1350,7 @@ export default function WorkshopPage() {
             <ImageRetryCard
               failure={artFailure}
               audience={artAudience}
+              door={ImageRetryDoor.Redraw}
               {...(currentGame
                 ? {
                     onRetry: () => {

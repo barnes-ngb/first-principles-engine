@@ -33,8 +33,10 @@
  * person actually asked for and attach them to the `HttpsError` details
  * (`functions/src/ai/imageTasks/imageFailure.ts`). Where that call itself fails
  * — or the door has no words to reword, like an uncaptioned sketch — the list
- * arrives empty and {@link BLOCKED_TIPS} carries the Book Editor's two written
- * suggestions instead. The card is never empty because a helper failed.
+ * arrives empty and {@link blockedTips} carries written suggestions instead —
+ * per door, because advice you cannot follow on the door you are standing at is
+ * the same dead end one step removed. The card is never empty because a helper
+ * failed.
  *
  * Pure: nothing here calls a function, reads Firestore, spends a generation or
  * touches quota math. The classifier never throws — an error shape it has never
@@ -157,7 +159,7 @@ export function classifyImageGenerationFailure(
 /**
  * The alternatives the server sent for a refused prompt, cleaned. Empty for
  * every other kind, for an older deploy, and when the suggester itself failed —
- * the card then falls back to {@link BLOCKED_TIPS}.
+ * the card then falls back to {@link blockedTips}.
  */
 export function imageFailureAlternatives(
   err: ImageErrorShape | Error | null | undefined,
@@ -172,19 +174,76 @@ export function imageFailureAlternatives(
 }
 
 /**
- * The Book Editor's two written suggestions, lifted here (FEAT-195). They are
+ * What KIND of picture a door makes — and therefore what advice it can honestly
+ * give when the suggester came back with nothing (Codex P2, PR #1768).
+ *
+ * The first cut lifted the Book Editor's two suggestions and showed them
+ * everywhere, which made them wrong in two different ways: a sticker door told
+ * the person to "describe the world" when what they want is one thing on its
+ * own, and a door with no prompt field at all — a sketch redraw, a new version,
+ * Kit Builder, the Workshop batch — told them to reword something they cannot
+ * reach. Advice you cannot follow is the dead end this run is closing, one step
+ * removed. So the tips are named per door, the way `storyGenerationFailure.ts`
+ * names its surfaces.
+ */
+export const ImageRetryDoor = {
+  /** A whole page picture or a chat image, from free text — the Book Editor's case. */
+  Scene: 'scene',
+  /** One thing on its own, from free text — the two sticker makers. */
+  Sticker: 'sticker',
+  /**
+   * A picture made from a drawing the person already has, with no prompt field
+   * to reword: Make it fancy, Add version, Make more versions, Kit Builder art,
+   * the Workshop's batch. What they CAN change is the style, or the drawing.
+   */
+  Redraw: 'redraw',
+} as const
+export type ImageRetryDoor = (typeof ImageRetryDoor)[keyof typeof ImageRetryDoor]
+
+/**
+ * The written suggestions shown when the server sent no alternatives. They are
  * advice, not prompts, so they are shown as text and never as a tappable card —
  * a tap that pasted "Try a different style" into the description box would be a
  * worse dead end than the one this run is closing.
  *
- * Used only when the server sent no alternatives.
+ * Every line names something the reader can actually do **on that door**.
  */
-export const BLOCKED_TIPS: Readonly<Record<ArtHelpAudience, string[]>> = {
-  parent: [
-    'Describe the world instead of characters — "a colorful world with brick castles" works great.',
-    'Try a different style (Storybook or Comic Book work best).',
-  ],
-  kid: ['Say what it looks like.', 'Try a new style.'],
+const TIPS: Readonly<
+  Record<ImageRetryDoor, Record<ArtHelpAudience, string[]>>
+> = {
+  // The Book Editor's own two, verbatim — this is the door they were written for.
+  [ImageRetryDoor.Scene]: {
+    parent: [
+      'Describe the world instead of characters — "a colorful world with brick castles" works great.',
+      'Try a different style (Storybook or Comic Book work best).',
+    ],
+    kid: ['Say what it looks like.', 'Try a new style.'],
+  },
+  // A sticker is one thing on its own. Telling someone to describe a world here
+  // would be advice against what the door makes.
+  [ImageRetryDoor.Sticker]: {
+    parent: [
+      'Say what it looks like instead of naming it — "a small round yellow creature with pointy ears" works.',
+      'Ask for one thing on its own, not a whole scene.',
+    ],
+    kid: ['Say what it looks like.', 'Ask for one thing.'],
+  },
+  // No prompt field on this door, so neither tip may be about wording.
+  [ImageRetryDoor.Redraw]: {
+    parent: [
+      'Try a different style — some looks are stricter than others.',
+      'Try another drawing, or crop it closer to just the character.',
+    ],
+    kid: ['Try a new style.', 'Try a new drawing.'],
+  },
+}
+
+/** The written suggestions for one door, in one audience's words. */
+export function blockedTips(
+  door: ImageRetryDoor,
+  audience: ArtHelpAudience,
+): string[] {
+  return TIPS[door][audience]
 }
 
 /**
@@ -263,4 +322,33 @@ export const ALTERNATIVE_COST_NOTE: Readonly<Record<ArtHelpAudience, string>> = 
 export const FREE_EXITS_HEADING: Readonly<Record<ArtHelpAudience, string>> = {
   parent: 'Or add your own picture — these are free:',
   kid: 'Or add your own picture.',
+}
+
+/**
+ * The whole reply for a surface that can only render TEXT — the Shelly chat's
+ * image door, whose failures are persisted Firestore messages and so cannot
+ * hold a component (Codex P2, PR #1768).
+ *
+ * The rule it exists to hold: **a refusal always ends with something to do.**
+ * The suggester coming back empty is an expected path (it failed, or this is an
+ * older deploy), and leaving the reply at "wouldn't draw that one" would be a
+ * worse dead end than the line it replaced — so the written tips stand in there
+ * exactly as they do on the component doors. Every other kind gets its sentence
+ * alone, because for those there is nothing to suggest.
+ *
+ * Pure. Returns one string with newlines; the caller writes it as the message.
+ */
+export function imageFailureChatMessage(
+  kind: ImageGenerationFailure,
+  alternatives: string[],
+  audience: ArtHelpAudience,
+  door: ImageRetryDoor = ImageRetryDoor.Scene,
+): string {
+  const head = imageFailureMessage(kind, audience)
+  if (!offersAlternatives(kind)) return head
+  const lines =
+    alternatives.length > 0
+      ? ['Try one of these — just ask me for it:', ...alternatives.map((a) => `\u2022 ${a}`)]
+      : ['Try one of these:', ...blockedTips(door, audience).map((t) => `\u2022 ${t}`)]
+  return [head, '', ...lines].join('\n')
 }

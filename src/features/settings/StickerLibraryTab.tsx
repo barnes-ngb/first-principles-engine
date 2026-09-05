@@ -36,6 +36,7 @@ import ImageRetryCard from '../books/ImageRetryCard'
 import {
   classifyImageGenerationFailure,
   imageFailureAlternatives,
+  ImageRetryDoor,
   type ImageGenerationFailure,
 } from '../books/imageGenerationFailure'
 import { planStickerEdit } from '../books/stickerLabelEdit'
@@ -981,6 +982,7 @@ export default function StickerLibraryTab({
               <ImageRetryCard
                 failure={makeFailure}
                 audience={audience}
+                door={ImageRetryDoor.Redraw}
                 alternatives={makeAlternatives}
                 onRetry={() => { void handleMakeVersion() }}
                 retryLabel="Make more versions"

@@ -74,6 +74,7 @@ import { recordBookArtGeneration, useBookArtQuota } from './useBookArtQuota'
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
 import ImageRetryCard from './ImageRetryCard'
 import {
+  ImageRetryDoor,
   classifyImageGenerationFailure,
   imageFailureAlternatives,
   type ImageGenerationFailure,
@@ -2321,6 +2322,7 @@ export default function BookEditorPage() {
             <ImageRetryCard
               failure={bgReimagine.job.failure}
               audience={artAudience}
+              door={ImageRetryDoor.Redraw}
               alternatives={bgReimagine.job.alternatives ?? []}
               onUseAlternative={(text) => {
                 bgReimagine.dismissError()

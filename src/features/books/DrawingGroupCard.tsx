@@ -29,6 +29,7 @@ import ImageRetryCard from './ImageRetryCard'
 import {
   classifyImageGenerationFailure,
   imageFailureAlternatives,
+  ImageRetryDoor,
   type ImageGenerationFailure,
 } from './imageGenerationFailure'
 import {
@@ -497,6 +498,7 @@ export default function DrawingGroupCard({
               <ImageRetryCard
                 failure={versionFailure}
                 audience={audience}
+                door={ImageRetryDoor.Redraw}
                 alternatives={versionAlternatives}
                 onRetry={() => { void handleAddVersion() }}
                 retryLabel="Add version"

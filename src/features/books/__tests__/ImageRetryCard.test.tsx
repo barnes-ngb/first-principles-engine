@@ -4,8 +4,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import ImageRetryCard from '../ImageRetryCard'
 import {
-  BLOCKED_TIPS,
   ImageGenerationFailure,
+  ImageRetryDoor,
+  blockedTips,
   imageFailureMessage,
 } from '../imageGenerationFailure'
 
@@ -56,10 +57,10 @@ describe('ImageRetryCard — a refusal', () => {
     // The Book Editor's two, lifted into the module. Advice, not prompts — so
     // shown as text, never as a tap that would paste "Try a different style"
     // into the description box.
-    for (const tip of BLOCKED_TIPS.parent) {
+    for (const tip of blockedTips(ImageRetryDoor.Scene, 'parent')) {
       expect(screen.getByText(tip)).toBeInTheDocument()
     }
-    expect(screen.queryByRole('button', { name: BLOCKED_TIPS.parent[0] })).toBeNull()
+    expect(screen.queryByRole('button', { name: blockedTips(ImageRetryDoor.Scene, 'parent')[0] })).toBeNull()
   })
 
   it('shows the tips rather than untappable alternatives when the host cannot re-run text', () => {
@@ -74,7 +75,7 @@ describe('ImageRetryCard — a refusal', () => {
       />,
     )
     expect(screen.queryByRole('button', { name: 'a red plumber' })).toBeNull()
-    expect(screen.getByText(BLOCKED_TIPS.parent[0])).toBeInTheDocument()
+    expect(screen.getByText(blockedTips(ImageRetryDoor.Scene, 'parent')[0])).toBeInTheDocument()
   })
 })
 
@@ -90,7 +91,7 @@ describe('ImageRetryCard — everything that is not a refusal', () => {
     )
     expect(screen.queryByRole('button', { name: 'a red plumber' })).toBeNull()
     expect(screen.queryByText(/try one of these/i)).toBeNull()
-    expect(screen.queryByText(BLOCKED_TIPS.parent[0])).toBeNull()
+    expect(screen.queryByText(blockedTips(ImageRetryDoor.Scene, 'parent')[0])).toBeNull()
     expect(screen.getByText(imageFailureMessage(ImageGenerationFailure.Busy, 'parent'))).toBeInTheDocument()
   })
 
@@ -148,5 +149,41 @@ describe('ImageRetryCard — the free exits', () => {
   it('renders nothing about exits on a surface that has none', () => {
     render(<ImageRetryCard failure={ImageGenerationFailure.Blocked} audience="parent" />)
     expect(screen.queryByText(/these are free/i)).toBeNull()
+  })
+})
+
+describe('ImageRetryCard — the fallback tips follow the door', () => {
+  it('a sticker door shows sticker advice, not the scene advice', () => {
+    render(
+      <ImageRetryCard
+        failure={ImageGenerationFailure.Blocked}
+        audience="parent"
+        door={ImageRetryDoor.Sticker}
+        alternatives={[]}
+        onUseAlternative={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByText(blockedTips(ImageRetryDoor.Sticker, 'parent')[0]),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(blockedTips(ImageRetryDoor.Scene, 'parent')[0]),
+    ).toBeNull()
+  })
+
+  it('a door with no prompt field shows advice it can act on', () => {
+    render(
+      <ImageRetryCard
+        failure={ImageGenerationFailure.Blocked}
+        audience="parent"
+        door={ImageRetryDoor.Redraw}
+      />,
+    )
+    for (const tip of blockedTips(ImageRetryDoor.Redraw, 'parent')) {
+      expect(screen.getByText(tip)).toBeInTheDocument()
+    }
+    expect(
+      screen.queryByText(blockedTips(ImageRetryDoor.Scene, 'parent')[0]),
+    ).toBeNull()
   })
 })

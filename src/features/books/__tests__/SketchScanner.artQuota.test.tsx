@@ -48,6 +48,7 @@ vi.mock('../cleanSketch', () => ({
 vi.mock('../SketchCropStage', () => ({ default: () => <div data-testid="crop-stage" /> }))
 
 import SketchScanner from '../SketchScanner'
+import { ImageRetryDoor, blockedTips } from '../imageGenerationFailure'
 
 const CAP_MESSAGE = /that's a lot of art this week/i
 
@@ -192,8 +193,13 @@ describe('SketchScanner — weekly art cap on "Make it fancy" (FEAT-166 / UX-95)
     // No picture was made, so nothing is charged to the week.
     expect(recordGeneration).not.toHaveBeenCalled()
     // The written tips stand in: this door sends no caption, so the server has
-    // no words of the kid's to reword.
-    expect(screen.getByText(/describe the world instead of characters/i)).toBeInTheDocument()
+    // no words of the kid's to reword. And they are the tips for THIS door —
+    // there is no prompt field here, so neither may advise rewording (Codex P2,
+    // PR #1768; the first cut showed the Book Editor's scene advice everywhere).
+    for (const tip of blockedTips(ImageRetryDoor.Redraw, 'parent')) {
+      expect(screen.getByText(tip)).toBeInTheDocument()
+    }
+    expect(screen.queryByText(/describe the world instead of characters/i)).toBeNull()
   })
 
   it('tells a rate limit apart from a refusal — different failure, different words', async () => {
