@@ -11,6 +11,7 @@ import SectionCard from '../../components/SectionCard'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { WeeklyReview } from '../../core/types'
 import type { WeekReflectionAnswer } from '../../core/types/enums'
+import { formatDateShort } from '../../core/utils/dateKey'
 import {
   REFLECTION_CHOICES,
   REFLECTION_NOTE_MAX,
@@ -148,7 +149,7 @@ function WeekReflectionBody({
         </Button>
         {saved && (
           <Typography variant="caption" color="text.secondary">
-            Answered {saved.answeredAt.slice(0, 10)}
+            Answered {formatDateShort(saved.answeredAt.slice(0, 10))}
           </Typography>
         )}
       </Stack>
