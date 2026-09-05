@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -43,46 +43,36 @@ import {
   SubjectBucket,
   SubjectBucketLabel,
 } from '../../core/types/enums'
+// UX-184: the quick-log presets — the family's own and the eight built-ins —
+// have one definition, shared with Kid Today's "⭐ I Did More!" row. See the
+// note below, where they used to live.
+import {
+  isFamilyCapturePresetId,
+  resolveCapturePresetGroups,
+  type CapturePreset,
+} from './quickLogChips'
+// A plain read of the family's configs, for the same reason `KidExtraLogger`
+// takes it: a KID opening Today must not seed or migrate anything, which
+// `useActivityConfigs` would.
+import { useChatActivityConfigs } from '../shelly-chat/useChatActivityConfigs'
 
 const MAX_DURATION_MINUTES = 240
 const DURATION_STEP = 5
 
-interface CapturePreset {
-  id: string
-  label: string
-  emoji: string
-  subjectBucket: SubjectBucket
-  suggestedMinutes: number
-}
-
-interface PresetGroup {
-  label: string
-  presets: CapturePreset[]
-}
-
-// v1 preset list, grouped by mental model. Subject buckets match the existing
-// `SubjectBucket` enum (Reading | LanguageArts | Math | Science | SocialStudies |
-// Music | Art | PracticalArts | PE | Other).
-const PRESET_GROUPS: PresetGroup[] = [
-  {
-    label: 'Creative',
-    presets: [
-      { id: 'lego', label: 'Lego build', emoji: '🧱', subjectBucket: SubjectBucket.PracticalArts, suggestedMinutes: 45 },
-      { id: 'baking', label: 'Baking / cooking', emoji: '🥖', subjectBucket: SubjectBucket.PracticalArts, suggestedMinutes: 30 },
-      { id: 'drawing', label: 'Drawing / art', emoji: '🎨', subjectBucket: SubjectBucket.Art, suggestedMinutes: 30 },
-      { id: 'music', label: 'Music practice', emoji: '🎵', subjectBucket: SubjectBucket.Music, suggestedMinutes: 20 },
-      { id: 'reading', label: 'Reading session', emoji: '📚', subjectBucket: SubjectBucket.Reading, suggestedMinutes: 30 },
-    ],
-  },
-  {
-    label: 'Active',
-    presets: [
-      { id: 'nature', label: 'Nature / park', emoji: '🌳', subjectBucket: SubjectBucket.Science, suggestedMinutes: 45 },
-      { id: 'sports', label: 'Sports / PE', emoji: '⚽', subjectBucket: SubjectBucket.PE, suggestedMinutes: 45 },
-      { id: 'fieldtrip', label: 'Zoo / museum trip', emoji: '🦁', subjectBucket: SubjectBucket.Science, suggestedMinutes: 120 },
-    ],
-  },
-]
+// ── UX-184: the quick-log chips come from the family here too ───────────────
+//
+// This panel's eight presets were written into this file while FEAT-199 made
+// Kid Today's OTHER quick-log row (`KidExtraLogger`, further down the same page)
+// family-defined. The owner flagged two activities, opened his son's Today page,
+// read the first quick-log panel he came to — this one — and reported the new
+// activities missing. They were; this surface was the one FEAT-199 did not
+// touch.
+//
+// The eight built-ins moved verbatim into `quickLogChips.ts`, which now owns the
+// answer for both surfaces. Nothing about what a chip WRITES changed: a preset
+// still pre-fills the name, the subject and a suggested duration the person can
+// edit, and the subject on a family chip is the config's own `subjectBucket` —
+// never guessed from its name.
 
 type MediaTab = 'note' | 'photo' | 'audio'
 
@@ -153,6 +143,15 @@ export default function UnifiedCaptureCard({
   const [photoDialogOpen, setPhotoDialogOpen] = useState(false)
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null)
   const [childId, setChildId] = useState(selectedChildId)
+
+  // UX-184: the family's flagged activities lead the panel, ahead of the
+  // built-ins. Read-only, keyed to the child being logged for — so a parent
+  // switching child in the form below gets that child's chips.
+  const activityConfigs = useChatActivityConfigs(familyId, childId)
+  const presetGroups = useMemo(
+    () => resolveCapturePresetGroups(activityConfigs),
+    [activityConfigs],
+  )
   const [activityName, setActivityName] = useState('')
   const [subjectBucket, setSubjectBucket] = useState<SubjectBucket>(SubjectBucket.Other)
   const [durationInput, setDurationInput] = useState('')
@@ -162,6 +161,29 @@ export default function UnifiedCaptureCard({
   useEffect(() => {
     setChildId(selectedChildId)
   }, [selectedChildId])
+
+  // UX-184 follow-up (Codex round 1, P2): a family preset is CHILD-SCOPED — it
+  // is offered because a config for this child (or 'both') is flagged — so
+  // changing child replaces the chip row while the preset's name, subject and
+  // minutes stay in the fields it filled. Saving then writes one child's
+  // activity, with its category and duration, onto the OTHER child's hours,
+  // with no chip on screen to explain where it came from.
+  //
+  // Clears exactly the three fields a preset fills, the same set
+  // `handlePresetTap`'s de-select branch clears. The eight built-ins are valid
+  // for every child, so a built-in selection survives the switch untouched —
+  // and the check is on the id's own shape rather than on the resolved list,
+  // which by this point no longer holds the preset being asked about.
+  const prevChildIdRef = useRef(childId)
+  useEffect(() => {
+    if (prevChildIdRef.current === childId) return
+    prevChildIdRef.current = childId
+    if (!isFamilyCapturePresetId(selectedPresetId)) return
+    setSelectedPresetId(null)
+    setActivityName('')
+    setSubjectBucket(SubjectBucket.Other)
+    setDurationInput('')
+  }, [childId, selectedPresetId])
 
   const parsedDuration = useMemo(() => {
     if (durationInput.trim() === '') return 0
@@ -449,13 +471,18 @@ export default function UnifiedCaptureCard({
   }, [parsedDuration])
 
   // ── Chip rendering helpers ──
+  // A family chip carries no emoji by design (see `quickLogChips.ts`), so the
+  // label is the name alone rather than a leading space where one would go.
+  const presetChipLabel = (preset: CapturePreset) =>
+    preset.emoji ? `${preset.emoji} ${preset.label}` : preset.label
+
   const renderChip = (preset: CapturePreset) => {
     const selected = selectedPresetId === preset.id
     if (isKid && kidTheme) {
       return (
         <Chip
           key={preset.id}
-          label={`${preset.emoji} ${preset.label}`}
+          label={presetChipLabel(preset)}
           onClick={() => handlePresetTap(preset)}
           variant={selected ? 'filled' : 'outlined'}
           sx={{
@@ -481,7 +508,7 @@ export default function UnifiedCaptureCard({
     return (
       <Chip
         key={preset.id}
-        label={`${preset.emoji} ${preset.label}`}
+        label={presetChipLabel(preset)}
         onClick={() => handlePresetTap(preset)}
         color={selected ? 'primary' : 'default'}
         variant={selected ? 'filled' : 'outlined'}
@@ -520,7 +547,7 @@ export default function UnifiedCaptureCard({
               Quick logs
             </Typography>
             <Stack spacing={1.5}>
-              {PRESET_GROUPS.map((group) => (
+              {presetGroups.map((group) => (
                 <Box key={group.label}>
                   <Typography
                     variant="caption"

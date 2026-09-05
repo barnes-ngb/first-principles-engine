@@ -25,6 +25,7 @@ import { ActivityFrequencyLabel } from '../../core/types/enums'
 import type { ActivityFrequency } from '../../core/types/enums'
 import ChapterBookPicker from './ChapterBookPicker'
 import PhotoLabelForm from './PhotoLabelForm'
+import { generateButtonLabel } from './planningWeekSelection'
 import { weekEnergyLabel } from './weekEnergyLabels'
 
 type MasterySummary = {
@@ -35,6 +36,13 @@ type MasterySummary = {
 
 interface PlannerSetupWizardProps {
   childName: string
+  /**
+   * The week the page has RESOLVED (`PlannerChatPage`'s one `weekRange` memo),
+   * so the Generate button names the week Apply will actually write (UX-183).
+   * Passed in rather than resolved here on purpose: a second copy of "which week"
+   * living next to the button is the bug, not the fix.
+   */
+  weekStart: string
   weekEnergy: 'full' | 'lighter' | 'mvd'
   onWeekEnergyChange: (v: 'full' | 'lighter' | 'mvd') => void
   hoursPerDay: number
@@ -73,6 +81,7 @@ interface PlannerSetupWizardProps {
 
 export default function PlannerSetupWizard({
   childName,
+  weekStart,
   weekEnergy,
   onWeekEnergyChange,
   hoursPerDay,
@@ -228,11 +237,13 @@ export default function PlannerSetupWizard({
         startIcon={generatingWeek ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
         sx={{ py: 1.5, fontWeight: 'bold', fontSize: '1rem' }}
       >
+        {/* UX-183: the button names the week the selector above it actually has.
+            It used to say "Generate This Week's Plan" no matter which week was
+            picked — contradicting, on a Saturday, the very option the selector
+            had greyed out as already passed. */}
         {generatingWeek
           ? 'Generating your week...'
-          : photoLabels.length > 0
-            ? `Generate Plan (${photoLabels.length} photo${photoLabels.length > 1 ? 's' : ''})`
-            : 'Generate This Week\u2019s Plan'}
+          : generateButtonLabel(weekStart, photoLabels.length)}
       </Button>
     </Stack>
   )

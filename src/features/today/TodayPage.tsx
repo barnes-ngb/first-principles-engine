@@ -1,21 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Chip from '@mui/material/Chip'
 import Fab from '@mui/material/Fab'
 import IconButton from '@mui/material/IconButton'
-import Menu from '@mui/material/Menu'
-import MenuItem from '@mui/material/MenuItem'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import {
   doc,
@@ -33,7 +27,6 @@ import ChildSelector from '../../components/ChildSelector'
 import ContextBar from '../../components/ContextBar'
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
-import SaveIndicator from '../../components/SaveIndicator'
 import SectionCard from '../../components/SectionCard'
 import { LoadingState } from '../../components/states'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
@@ -54,9 +47,7 @@ import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
   EnergyLevel,
-  EnergyLevelLabel,
   PlanType,
-  PlanTypeLabel,
   SkipReason,
   SubjectBucket,
   UserProfile,
@@ -72,10 +63,10 @@ import {
   applyChapterPoolToAll,
   collectExistingChapterPool,
 } from './applyChapterPoolForChild'
+import DayStatusRow from './DayStatusRow'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
 import LifeDayCard from './LifeDayCard'
-import { DAY_TYPE_CHOICES } from './dayTypeChoices'
 import MineRecapCard from './MineRecapCard'
 import TeachBackSection from './TeachBackSection'
 import { useLatestMineSession } from './useLatestMineSession'
@@ -194,8 +185,6 @@ export default function TodayPage() {
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
-  /** FEAT-200: anchor for the day-type menu behind the plan-type chip. */
-  const [dayTypeAnchor, setDayTypeAnchor] = useState<HTMLElement | null>(null)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [printingMaterials, setPrintingMaterials] = useState(false)
@@ -675,7 +664,6 @@ export default function TodayPage() {
     (newPlanType: PlanType) => {
       setPlanType(newPlanType)
       void saveDailyPlan(energy, newPlanType)
-      setDayTypeAnchor(null)
     },
     [saveDailyPlan, energy],
   )
@@ -1138,77 +1126,18 @@ export default function TodayPage() {
 
       <HelperPanel template={activeTemplate} />
 
-      {/* --- Energy selector --- */}
-      <SectionCard title="How's today going?">
-        <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-          <Typography color="text.secondary" variant="body2">
-            How&apos;s your energy today?
-          </Typography>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <ToggleButtonGroup
-              value={energy}
-              exclusive
-              size="small"
-              onChange={(_e, value) => { if (value) handleEnergyChange(value as EnergyLevel) }}
-            >
-              {Object.values(EnergyLevel).map((level) => (
-                <ToggleButton key={level} value={level}>
-                  {EnergyLevelLabel[level]}
-                </ToggleButton>
-              ))}
-            </ToggleButtonGroup>
-            {/* FEAT-200: the plan-type chip became the day-type CONTROL. Same
-                slot, same row — it now says what kind of day this is and lets a
-                parent say otherwise. Parent-only by capability (`canEditLiveDay`);
-                a kid never reaches here at all, since kid profiles return
-                `KidTodayView` above. */}
-            <Chip
-              size="small"
-              label={PlanTypeLabel[planType]}
-              color={
-                planType === PlanType.Normal
-                  ? 'success'
-                  : planType === PlanType.Life
-                    ? 'default'
-                    : 'info'
-              }
-              variant="outlined"
-              onClick={
-                canEditLiveDay ? (e) => setDayTypeAnchor(e.currentTarget) : undefined
-              }
-              deleteIcon={canEditLiveDay ? <ArrowDropDownIcon /> : undefined}
-              onDelete={
-                canEditLiveDay ? (e) => setDayTypeAnchor(e.currentTarget) : undefined
-              }
-              aria-label={
-                canEditLiveDay
-                  ? `Kind of day: ${PlanTypeLabel[planType]}. Change it.`
-                  : undefined
-              }
-            />
-            <Menu
-              anchorEl={dayTypeAnchor}
-              open={Boolean(dayTypeAnchor)}
-              onClose={() => setDayTypeAnchor(null)}
-            >
-              {DAY_TYPE_CHOICES.map((choice) => (
-                <MenuItem
-                  key={choice.value}
-                  selected={planType === choice.value}
-                  onClick={() => handleDayTypeChange(choice.value)}
-                  sx={{ display: 'block', maxWidth: 320, whiteSpace: 'normal' }}
-                >
-                  <Typography variant="body2">{PlanTypeLabel[choice.value]}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {choice.description}
-                  </Typography>
-                </MenuItem>
-              ))}
-            </Menu>
-            <SaveIndicator state={saveState} />
-          </Stack>
-        </Stack>
-      </SectionCard>
+      {/* --- Energy + day type (UX-182) ---
+           Extracted to `DayStatusRow` so the two questions get a line each: on a
+           phone the old single row clipped FEAT-200's day-type control off the
+           right edge and pushed the save indicator off-screen entirely. --- */}
+      <DayStatusRow
+        energy={energy}
+        onEnergyChange={handleEnergyChange}
+        planType={planType}
+        canEditDayType={canEditLiveDay}
+        onDayTypeChange={handleDayTypeChange}
+        saveState={saveState}
+      />
 
       {/* --- FEAT-200: on a Life Day, Today is a place to RECORD, not a list to
            finish. The checklist is HIDDEN, never deleted — the day doc is

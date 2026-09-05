@@ -2974,6 +2974,9 @@ ${dayPrompts}`
           {phase === 'setup' && hasPriorPlan === false && (
             <PlannerSetupWizard
               childName={activeChild?.name ?? 'your child'}
+              // UX-183: the Generate button names the week the selector holds —
+              // the SAME resolved `weekRange` Apply writes to, never a second copy.
+              weekStart={weekRange.start}
               weekEnergy={weekEnergy}
               onWeekEnergyChange={setWeekEnergy}
               hoursPerDay={hoursPerDay}
@@ -3011,6 +3014,7 @@ ${dayPrompts}`
             <PlannerCompactSetup
               childName={activeChild?.name ?? 'your child'}
               weekRangeLabel={`Planning ${formatPlanningWeekLabel(weekRange.start)}`}
+              weekStart={weekRange.start}
               weekEnergy={weekEnergy}
               onWeekEnergyChange={setWeekEnergy}
               hoursPerDay={hoursPerDay}
