@@ -18,10 +18,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 interface FakeState {
   configs: Array<{ id: string; data: Record<string, unknown> }>;
   existing: Record<string, unknown> | undefined;
-  /** When true, reading the existing review document throws. */
+  /** When true, the transactional read of the review document throws. */
   existingReadFails: boolean;
+  /** Set by the caller to simulate an answer saved DURING the transaction. */
+  onTransactionRead: (() => void) | undefined;
   written: Record<string, unknown> | undefined;
   writeOptions: unknown;
+  /** True when the write went through a transaction rather than a plain set. */
+  wroteInTransaction: boolean;
   configQueries: unknown[][];
 }
 
@@ -29,10 +33,22 @@ const state: FakeState = {
   configs: [],
   existing: undefined,
   existingReadFails: false,
+  onTransactionRead: undefined,
   written: undefined,
   writeOptions: undefined,
+  wroteInTransaction: false,
   configQueries: [],
 };
+
+/** Read the review document the way the real transaction would. */
+function readReviewDoc() {
+  if (state.existingReadFails) throw new Error("unavailable");
+  state.onTransactionRead?.();
+  return {
+    exists: state.existing !== undefined,
+    data: () => (state.existing ? { reflection: state.existing } : {}),
+  };
+}
 
 vi.mock("firebase-admin/firestore", () => ({
   getFirestore: () => ({
@@ -53,14 +69,23 @@ vi.mock("firebase-admin/firestore", () => ({
       }),
     }),
     doc: () => ({
-      get: async () => {
-        if (state.existingReadFails) throw new Error("unavailable");
-        return {
-          exists: state.existing !== undefined,
-          data: () => (state.existing ? { reflection: state.existing } : {}),
-        };
-      },
+      get: async () => readReviewDoc(),
     }),
+    runTransaction: async (
+      fn: (tx: {
+        get: (ref: unknown) => Promise<unknown>;
+        set: (ref: unknown, data: Record<string, unknown>) => void;
+      }) => Promise<void>,
+    ) => {
+      await fn({
+        get: async () => readReviewDoc(),
+        set: (_ref, data) => {
+          state.written = { ...data };
+          state.writeOptions = undefined;
+          state.wroteInTransaction = true;
+        },
+      });
+    },
   }),
 }));
 
@@ -87,8 +112,10 @@ beforeEach(() => {
   state.configs = [];
   state.existing = undefined;
   state.existingReadFails = false;
+  state.onTransactionRead = undefined;
   state.written = undefined;
   state.writeOptions = undefined;
+  state.wroteInTransaction = false;
   state.configQueries = [];
 });
 
@@ -136,14 +163,39 @@ describe("a regenerate does not delete the parent's answer (UX-214)", () => {
     expect(state.written?.reflection).toEqual(state.existing);
   });
 
+  it("carries it forward ATOMICALLY, inside the write's own transaction", async () => {
+    // A read-then-write pair loses an answer saved in the gap between them.
+    // Firestore retries a transaction whose document changed underneath, so the
+    // read and the write have to be the same unit — asserted by the write
+    // arriving through the transaction rather than a plain set.
+    state.existing = { answer: "about-right", answeredAt: "x" };
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+    expect(state.wroteInTransaction).toBe(true);
+  });
+
+  it("sees an answer saved during the write, not the one that was there before", async () => {
+    // The parent taps Save while the review is regenerating. The transactional
+    // read is what decides, so the newly saved answer is what survives.
+    state.existing = undefined;
+    state.onTransactionRead = () => {
+      state.existing = { answer: "can-do-more", answeredAt: "later" };
+      state.onTransactionRead = undefined;
+    };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.written?.reflection).toEqual({
+      answer: "can-do-more",
+      answeredAt: "later",
+    });
+  });
+
   it("writes no reflection key when the parent has not answered", async () => {
     await generateReviewForChild("fam-1", emptyWeek, "key");
     expect(state.written).not.toHaveProperty("reflection");
-    // A confirmed absence is a replacement, as it always was.
-    expect(state.writeOptions).toBeUndefined();
   });
 
-  it("merges instead of replacing when the carry-forward read FAILED", async () => {
+  it("merges instead of replacing when the transaction cannot complete", async () => {
     // A failed read is not a confirmed absence. Replacing the document on that
     // path would delete an answer we simply could not see — a transient network
     // blip silently destroying a judgement a person recorded.
@@ -153,9 +205,10 @@ describe("a regenerate does not delete the parent's answer (UX-214)", () => {
 
     expect(state.written).not.toHaveProperty("reflection");
     expect(state.writeOptions).toEqual({ merge: true });
+    expect(state.wroteInTransaction).toBe(false);
   });
 
-  it("still records the week's snapshot on that merge path", async () => {
+  it("still records the week's snapshot on that fallback path", async () => {
     state.existingReadFails = true;
     state.configs = [{ id: "w1", data: { name: "Math", currentPosition: 7 } }];
 

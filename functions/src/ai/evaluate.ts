@@ -629,7 +629,17 @@ export function toCurriculumPositions(
     if (typeof data.unitLabel === "string" && data.unitLabel) {
       record.unitLabel = data.unitLabel;
     }
-    if (data.completed === true) record.completed = true;
+    // Completion has TWO supported shapes, and the workbook loader in
+    // `chat.ts` (`data.completed || data.curriculumMeta?.completed`) already
+    // honours both. Reading only the top-level flag would record a legacy
+    // finished program as active, and two snapshots later the review would
+    // report "no lessons covered" about a program that is done.
+    const meta = data.curriculumMeta;
+    const metaCompleted =
+      !!meta &&
+      typeof meta === "object" &&
+      (meta as { completed?: unknown }).completed === true;
+    if (data.completed === true || metaCompleted) record.completed = true;
     positions.push(record);
   }
   return positions;
@@ -665,78 +675,63 @@ async function loadCurriculumSnapshot(
 }
 
 /**
- * What we know about the parent's existing answer for this week (UX-214).
+ * Write the review, preserving the parent's answer (UX-214).
  *
- * **Three states, not two, and the third is the whole point.** Both write paths
- * below `.set()` the WHOLE review document, so a regenerate would silently
- * delete a judgement a person recorded unless it is carried forward. A read that
- * *failed* is not a confirmed absence — treating it as one is exactly how the
- * answer gets deleted by a transient network blip — so the caller writes with
- * `merge` on that path instead of replacing the document.
- */
-type ExistingReflection =
-  | { known: true; reflection: Record<string, unknown> | undefined }
-  | { known: false };
-
-/**
- * Read the existing review's reflection. Never throws, never guesses.
+ * **The carry-forward is TRANSACTIONAL, and it has to be.** Every write path
+ * here `.set()`s the WHOLE review document, so a regenerate deletes the
+ * `reflection` unless it is carried forward — and a read-then-write pair does
+ * not carry it forward safely. Two ways that pair loses a judgement a person
+ * recorded:
  *
- * Nothing here writes or changes an answer; its only job is to tell the caller
- * whether the document's current answer is known.
- */
-async function loadExistingReflection(
-  db: Firestore,
-  familyId: string,
-  reviewDocId: string,
-): Promise<ExistingReflection> {
-  try {
-    const snap = await db
-      .doc(`families/${familyId}/weeklyReviews/${reviewDocId}`)
-      .get();
-    if (!snap.exists) return { known: true, reflection: undefined };
-    const reflection = (snap.data() ?? {}).reflection;
-    if (!reflection || typeof reflection !== "object") {
-      return { known: true, reflection: undefined };
-    }
-    return { known: true, reflection: reflection as Record<string, unknown> };
-  } catch (err) {
-    console.warn("[UX-214] Could not read the existing reflection", err);
-    return { known: false };
-  }
-}
-
-/**
- * Write the review, preserving an answer we could not read (UX-214).
+ *   1. the read FAILS transiently, and a `undefined` result is mistaken for a
+ *      confirmed absence; and
+ *   2. the read SUCCEEDS, and the parent taps *Save answer* in the moment
+ *      between it and the write — the replacement then overwrites an answer
+ *      that was saved after we looked.
  *
- * The happy path is the replacement `.set()` this function has always done —
- * every field of a regenerated review is rewritten, and a carried-forward
- * `reflection` rides along in `review`. When the carry-forward read FAILED we do
- * not know whether an answer exists, so the document is merged instead of
- * replaced: every field the new review carries still lands, and a `reflection`
- * we could not see survives rather than being deleted by a transient error.
+ * A transaction closes both: the reflection is read and the document written
+ * inside one atomic unit, and Firestore retries the whole thing if the document
+ * changed underneath. If the transaction cannot complete at all, the fallback is
+ * a `merge` write — every field of the new review still lands, and a
+ * `reflection` we never managed to see is left alone rather than deleted.
  *
- * The one residual, stated rather than hidden: on that merge path, if this run
+ * The one residual on that fallback, stated rather than hidden: if the same run
  * ALSO failed to read the activity configs, a `curriculumPositions` snapshot
  * recorded earlier stays on the document. It is a real earlier reading, stamped
  * with the moment it was taken, and every consumer measures elapsed time from
- * that stamp — so the cost is a slightly stale coverage line for one week, which
- * is plainly the lesser loss next to deleting a parent's judgement.
+ * that stamp — a slightly stale coverage line for one week is plainly the lesser
+ * loss next to deleting a parent's judgement.
+ *
+ * Nothing here ever writes, changes or invents an answer.
  */
 async function writeReviewDoc(
   db: Firestore,
   familyId: string,
   reviewDocId: string,
   review: WeeklyReviewDoc,
-  existing: ExistingReflection,
 ): Promise<void> {
   const ref = db
     .collection(`families/${familyId}/weeklyReviews`)
     .doc(reviewDocId);
-  if (existing.known) {
-    await ref.set(review);
-    return;
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const payload: WeeklyReviewDoc = { ...review };
+      delete payload.reflection;
+      const existing = snap.exists ? (snap.data() ?? {}).reflection : undefined;
+      if (existing && typeof existing === "object") {
+        payload.reflection = existing as Record<string, unknown>;
+      }
+      tx.set(ref, payload);
+    });
+  } catch (err) {
+    console.warn(
+      "[UX-214] Transactional review write failed; merging so any saved answer survives",
+      err,
+    );
+    await ref.set(review, { merge: true });
   }
-  await ref.set(review, { merge: true });
 }
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
@@ -1051,7 +1046,6 @@ export async function generateReviewForChild(
     const curriculumPositions = await loadCurriculumSnapshot(
       db, familyId, ctx.child.id, ctx.weekKey,
     );
-    const reflection = await loadExistingReflection(db, familyId, reviewDocId);
     const emptyReview: WeeklyReviewDoc = {
       childId: ctx.child.id,
       weekKey: ctx.weekKey,
@@ -1069,10 +1063,8 @@ export async function generateReviewForChild(
       createdAt: new Date().toISOString(),
     };
     if (curriculumPositions) emptyReview.curriculumPositions = curriculumPositions;
-    if (reflection.known && reflection.reflection) {
-      emptyReview.reflection = reflection.reflection;
-    }
-    await writeReviewDoc(db, familyId, reviewDocId, emptyReview, reflection);
+    // `writeReviewDoc` carries any saved reflection forward transactionally.
+    await writeReviewDoc(db, familyId, reviewDocId, emptyReview);
     return emptyReview;
   }
 
@@ -1134,20 +1126,16 @@ export async function generateReviewForChild(
 
   const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
 
-  // Additive, and neither can stop a review being written (UX-212 / UX-214):
-  // the position snapshot is the only record of where the workbooks stood this
-  // week, and the reflection is carried forward because this `.set()` replaces
-  // the whole document and would otherwise delete an answer a parent gave.
+  // Additive, and it cannot stop a review being written (UX-212): the position
+  // snapshot is the only record of where the workbooks stood this week. The
+  // parent's answer is carried forward inside `writeReviewDoc`'s transaction,
+  // because this write replaces the whole document (UX-214).
   const curriculumPositions = await loadCurriculumSnapshot(
     db, familyId, ctx.child.id, ctx.weekKey,
   );
   if (curriculumPositions) reviewData.curriculumPositions = curriculumPositions;
-  const existingReflection = await loadExistingReflection(db, familyId, reviewDocId);
-  if (existingReflection.known && existingReflection.reflection) {
-    reviewData.reflection = existingReflection.reflection;
-  }
 
-  await writeReviewDoc(db, familyId, reviewDocId, reviewData, existingReflection);
+  await writeReviewDoc(db, familyId, reviewDocId, reviewData);
 
   // Log AI usage
   await logAiUsage(db, familyId, {

@@ -131,16 +131,20 @@ export default function WeeklyReviewPage() {
     setIsSaving(true)
 
     const docId = weeklyReviewDocId(weekKey, activeChildId)
-    const updated: WeeklyReview = {
-      ...review,
+    // Merge only what this button changes (UX-214). It used to replace the whole
+    // document from local state, which is a snapshot of what the listener had
+    // last delivered — so an answer saved a second earlier, or in another tab,
+    // was deleted by a tap on this button. Writing three fields cannot.
+    const updated: Partial<WeeklyReview> = {
       status: ReviewStatus.Reviewed,
       reviewedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
-    delete updated.id
 
     try {
-      await setDoc(doc(weeklyReviewsCollection(familyId), docId), updated)
+      await setDoc(doc(weeklyReviewsCollection(familyId), docId), updated, {
+        merge: true,
+      })
       setSnack({ text: 'Marked as reviewed!', severity: 'success' })
     } catch (err) {
       console.error('Failed to save review', err)
@@ -164,16 +168,20 @@ export default function WeeklyReviewPage() {
     }
 
     const docId = weeklyReviewDocId(weekKey, activeChildId)
-    const updated: WeeklyReview = {
-      ...review,
+    // Merge only this button's own fields (UX-214) — the accept/reject decisions
+    // it exists to persist, plus the status stamps. A whole-document replacement
+    // from local state would delete a reflection saved since the last snapshot.
+    const updated: Partial<WeeklyReview> = {
       status: ReviewStatus.Applied,
+      paceAdjustments: review.paceAdjustments,
       reviewedAt: review.reviewedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
-    delete updated.id
 
     try {
-      await setDoc(doc(weeklyReviewsCollection(familyId), docId), updated)
+      await setDoc(doc(weeklyReviewsCollection(familyId), docId), updated, {
+        merge: true,
+      })
       setSnack({
         text: `Applied ${acceptedAdjustments.length} adjustment${acceptedAdjustments.length > 1 ? 's' : ''}. Changes visible in next planner session.`,
         severity: 'success',

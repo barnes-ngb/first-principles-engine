@@ -70,6 +70,32 @@ describe("toCurriculumPositions", () => {
     expect(Object.values(record).some((v) => v === undefined)).toBe(false);
   });
 
+  it("recognises completion in EITHER supported shape", () => {
+    // Legacy configs carry it in `curriculumMeta.completed`, and the workbook
+    // loader in `chat.ts` already honours both. Reading only the top-level flag
+    // would record a finished program as active and, two snapshots later, have
+    // the review report "no lessons covered" about a program that is done.
+    const [record] = toCurriculumPositions([
+      config("w1", {
+        name: "Reading Eggs",
+        currentPosition: 120,
+        curriculumMeta: { provider: "reading-eggs", completed: true },
+      }),
+    ]);
+    expect(record.completed).toBe(true);
+  });
+
+  it("does not read completion out of an unrelated curriculumMeta", () => {
+    const [record] = toCurriculumPositions([
+      config("w1", {
+        name: "Reading Eggs",
+        currentPosition: 120,
+        curriculumMeta: { provider: "reading-eggs", level: "Level 4" },
+      }),
+    ]);
+    expect(record).not.toHaveProperty("completed");
+  });
+
   it("records a finished program, flagged, so its final position is on file", () => {
     expect(
       toCurriculumPositions([
