@@ -99,7 +99,7 @@ import {
 import MoveToDayDialog from '../today/MoveToDayDialog'
 import { useAppliedWeekDays } from './useAppliedWeekDays'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
-import { activityConfigsToRoutineText, defaultAppBlocks, routineDailyBudgetMinutes } from './chatPlanner.logic'
+import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
 import {
   buildPlannerPrompt,
   dateKeyForDayPlan,
@@ -396,12 +396,16 @@ export default function PlannerChatPage() {
 
   // Adjust hoursPerDay based on energy selection and routine total.
   //
-  // UX-206: the total is read from the CONFIGS, weighted by how often each one
-  // actually runs — not re-parsed out of the routine prose the app just wrote.
-  // A `20m · 3x/week` activity used to cost 20 minutes of budget on all five
-  // days; it now costs 12. The energy multipliers below are untouched.
+  // UX-206 is NOT wired here — deliberately, see `routineDailyBudgetMinutes`.
+  // Lowering this number alone makes the app LESS coherent, not more: the AI
+  // path never reads it (`buildPlannerPrompt` re-derives its own unweighted
+  // `routineMinutesTotal`), so only the header chip would move and it would then
+  // disagree with the day cards; and the local generator's overflow trimmer only
+  // removes `choose` items, so a lower budget leaves must-do routine items
+  // overflowing a day they cannot be trimmed out of. Weighting the budget
+  // requires cadence to reach day CONSTRUCTION, which is the owner-led redesign.
   useEffect(() => {
-    const routineTotal = routineDailyBudgetMinutes(activityConfigs)
+    const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
     if (weekEnergy === 'full') {
       setHoursPerDay(routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3)
     } else if (weekEnergy === 'lighter') {
@@ -409,7 +413,7 @@ export default function PlannerChatPage() {
     } else {
       setHoursPerDay(TOUGH_WEEK_FIXED_MINUTES / 60)
     }
-  }, [weekEnergy, activityConfigs])
+  }, [weekEnergy, dailyRoutine])
 
   const conversationDocId = useMemo(
     () => (activeChildId ? plannerConversationDocId(weekRange.start, activeChildId) : ''),

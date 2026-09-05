@@ -37,7 +37,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
 import {
   activityConfigsToRoutineText,
-  routineDailyBudgetMinutes,
+  parseRoutineTotalMinutes,
 } from '../planner-chat/chatPlanner.logic'
 import { useProfile } from '../../core/profile/useProfile'
 import type { ChatContext } from '../../core/types'
@@ -196,14 +196,14 @@ export default function ShellyChatPage() {
   // The planner's 'full energy' branch, which is the right default here: the
   // parent's own words ("make it lighter") shape the week through the prompt,
   // so the budget should start from the real routine rather than pre-shrink it.
-  // UX-206: read from the configs and weighted by cadence, the same way the
-  // planner's own budget now is — a `3x/week` activity costs three fifths of a
-  // day, not a whole one. Reading the configs rather than re-parsing the routine
-  // string is what keeps the two surfaces from drifting apart.
+  // Unweighted, exactly as the planner's own budget still is — see UX-206 in
+  // `routineDailyBudgetMinutes`. This surface must not weight it alone: a draft
+  // generated here goes through the planner's `buildPlannerPrompt`, which
+  // derives its own unweighted routine total regardless.
   const hoursPerDay = useMemo(() => {
-    const routineTotal = routineDailyBudgetMinutes(activityConfigs)
+    const routineTotal = parseRoutineTotalMinutes(dailyRoutine)
     return routineTotal > 0 ? Math.round((routineTotal / 60) * 10) / 10 : 3
-  }, [activityConfigs])
+  }, [dailyRoutine])
   // The same derivation the planner uses (FEAT-72): the snapshot's priority tags
   // target `parseAIResponse`'s parse-time catalog-tag backfill, so a week drafted
   // here lands on tags the FEAT-68/69 re-test bridge can map. Empty is fine.

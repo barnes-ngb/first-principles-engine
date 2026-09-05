@@ -479,13 +479,28 @@ describe('findDuplicateActivities', () => {
     ).toEqual(['cfg-london-art'])
   })
 
-  it('a shared add is compared against every child s rows', () => {
+  // Correct for the list it is HANDED. On the chat surface that list is
+  // `[childId, 'both']` only, so a sibling-only row never reaches it — the
+  // documented UX-210 gap, and a false negative rather than a false alarm.
+  it('a shared add is compared against every row in the list it is given', () => {
     expect(
       findDuplicateActivities(
         addActivity({ childId: 'lincoln', name: 'Art time', shared: true }),
         [londonOnly],
       ).map((c) => c.id),
     ).toEqual(['cfg-london-art'])
+  })
+
+  it('sees nothing when the caller never loaded the sibling row (UX-210)', () => {
+    // What `useChatActivityConfigs` actually hands it on Lincoln's tab: his own
+    // rows plus shared ones. London's `Art time` is simply not in the list.
+    const asTheChatLoadsIt = [prayer]
+    expect(
+      findDuplicateActivities(
+        addActivity({ childId: 'lincoln', name: 'Art time', shared: true }),
+        asTheChatLoadsIt,
+      ),
+    ).toEqual([])
   })
 
   it('a per-child add still sees a shared row', () => {

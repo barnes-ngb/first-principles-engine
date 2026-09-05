@@ -99,9 +99,19 @@ export const CURRICULUM_NOTICES = {
  * activity is a worse failure than a duplicate the parent can now see and
  * delete. The near-match is filed separately (UX-207).
  *
- * **Audience-scoped.** Only configs the new one would actually sit beside
- * count: a shared add is compared against everything, a per-child add against
- * that child's own rows plus the shared ones.
+ * **Audience-scoped, within the list it is given.** Only configs the new one
+ * would sit beside count: a per-child add is compared against that child's own
+ * rows plus the shared ones, and a shared add against every row in `configs`.
+ *
+ * **It can only see what the caller loaded, and on the chat that is not the
+ * whole family** (Codex P2, PR #1781). `useChatActivityConfigs` queries
+ * `where('childId','in',[childId,'both'])`, so a SIBLING-ONLY row is absent
+ * from `configs` and a shared add that would land beside it shows no notice.
+ * That is a false negative, which is the safe direction — the notice never
+ * claims a duplicate that isn't there — but it is a real gap, and closing it
+ * needs a family-wide read this resolver has no business opening. Filed as
+ * UX-210. The function is written to be correct for whatever list it is handed,
+ * so a family-wide caller gets the family-wide answer with no change here.
  *
  * **Completed configs are excluded.** A finished program is history, and
  * starting it again is a legitimate thing to do rather than a duplicate.

@@ -102,15 +102,40 @@ export function frequencyDaysPerWeek(frequency: ActivityFrequency): number {
 /**
  * The minutes an average school day of this routine costs.
  *
- * **The fix for UX-206's narrow half.** Two things were wrong with the number
- * this replaces:
+ * **NOT WIRED — and that is the finding, not an oversight (UX-206 / UX-209).**
+ *
+ * This was written to replace `parseRoutineTotalMinutes` at the two budget call
+ * sites, and Codex's review of PR #1781 showed that doing so alone makes the app
+ * LESS coherent rather than more. Two mechanisms, both verified in the code:
+ *
+ *  - The AI path never reads this number. {@link buildPlannerPrompt} re-derives
+ *    its own `routineMinutesTotal` from the routine prose and uses THAT as both
+ *    the stated "Daily time budget" and the HARD BUDGET RULE, so a weighted
+ *    `hoursPerDay` would move the header chip and nothing else — leaving the
+ *    header disagreeing with the day cards it sits above.
+ *  - The local generator's overflow pass only removes `category: 'choose'`
+ *    items. Routine items are must-dos, and `activityConfigsToRoutineText`
+ *    still emits every one of them on every day at full minutes, so a lower
+ *    budget produces days whose mandatory items exceed it and cannot be trimmed
+ *    out of it.
+ *
+ * So the budget can only be weighted once **cadence reaches day construction** —
+ * the routine carrying its frequency, the MUST-DO rule saying "on the days it
+ * runs", and the generator placing a 3x/week item on three days. That decides
+ * what a day contains, which is the owner-led day-as-a-menu redesign this run
+ * was told not to anticipate. Wiring half of it is worse than neither half.
+ *
+ * Kept here, exported and tested, as the primitive that redesign will use, and
+ * because the arithmetic is the part worth pinning down in advance.
+ *
+ * **What was wrong with the number it was meant to replace**, both still true:
  *
  *  1. `activityConfigsToRoutineText` emits every non-completed config at its
  *     full `defaultMinutes` with no cadence weighting, so a `20m · 3x/week`
- *     activity was costed at 20 minutes on all five days — 100 minutes a week
- *     of budget for 60 minutes of activity. Weighted, it costs 12m/day.
- *  2. The total was recovered by RE-PARSING the prose the app had just written,
- *     with a regex whose miss case silently contributed 15 minutes
+ *     activity is costed at 20 minutes on all five days — 100 minutes a week of
+ *     budget for 60 minutes of activity. Weighted, it costs 12m/day.
+ *  2. The total is recovered by RE-PARSING the prose the app had just written,
+ *     with a regex whose miss case silently contributes 15 minutes
  *     ({@link parseRoutineTotalMinutes}). Reading the configs directly cannot
  *     miss, and cannot drift from the string's formatting.
  *
@@ -118,9 +143,9 @@ export function frequencyDaysPerWeek(frequency: ActivityFrequency): number {
  * accumulate five separate rounding errors.
  *
  * Deliberately unchanged: WHICH configs are counted. Every non-completed config
- * still counts, of every type — making the orphaned `activity`/`app` rows
- * visible is UX-204's job, and removing one from the routine is the owner's
- * decision, one row at a time.
+ * counts, of every type — making the orphaned `activity`/`app` rows visible is
+ * UX-204's job, and removing one from the routine is the owner's decision, one
+ * row at a time.
  */
 export function routineDailyBudgetMinutes(configs: ActivityConfig[]): number {
   const weekly = configs
@@ -138,11 +163,11 @@ export function routineDailyBudgetMinutes(configs: ActivityConfig[]): number {
 /**
  * Parse a routine string and return total minutes per day.
  *
- * @deprecated UX-206 — do not reach for this for a budget. It re-parses prose
- * the app itself generated, and a line its regex does not match contributes a
- * silent 15 minutes rather than failing. {@link routineDailyBudgetMinutes} reads
- * the configs directly and weights each one by how often it actually runs.
- * Retained only for routine text that has no configs behind it.
+ * **Still the live budget path**, unweighted, exactly as before — see
+ * {@link routineDailyBudgetMinutes} for why replacing it is not a one-line
+ * change. Two known defects, both recorded rather than fixed here: it re-parses
+ * prose the app itself generated, and a line its regex does not match
+ * contributes a silent **15 minutes** rather than failing.
  */
 export function parseRoutineTotalMinutes(routine: string): number {
   if (!routine) return 0
