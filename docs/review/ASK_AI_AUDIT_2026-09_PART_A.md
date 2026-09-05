@@ -66,8 +66,8 @@ correctly to things she wanted." FEAT-198 diagnosed and fixed exactly that on 20
 request now goes last and fenced in every planner prompt. This audit found the *structural* reason the
 chat felt more responsive than the planner: **the chat's request has always been the last message**, and
 the planner's was not. That asymmetry is closed. What this audit adds is a number for the other side of
-it: the chat's system prompt carries a **41,271-character static floor before any family data**, of which
-**69.2% is action grammar** (§4). Whether eleven grammars competing in one prompt is why some sentences
+it: the chat's system prompt carries a **41,620-character static floor before any family data**, of which
+**68.6% is action grammar** (§4). Whether eleven grammars competing in one prompt is why some sentences
 produce a card and some don't is not something this audit can answer without live calls — but the number
 is now on the record, and nobody had looked at it.
 
@@ -138,10 +138,11 @@ confirmed:
 - `updateActivityConfigMinutes` writes `defaultMinutes` + `updatedAt`, nothing else.
 - `addActivityConfig` / `completeActivityConfig` write one `activityConfigs` doc.
 - **The one surprise:** `setActivityConfigPosition` additionally calls `syncActivityPositionToModel` →
-  `syncWorkbookPositionToModel`, which merge-writes `learnerModels.conceptStates`, `openQuestions`,
-  `changeFeed` and `synthesisStaleAt` (`activityConfigWrites.ts:200`, `workbookPositionSync.ts:118`).
-  This is **parity with the Curriculum surface**, not a chat-only path, and it is upgrade-only — so it is
-  not a P1. But the card does not say it (**F7**).
+  `syncWorkbookPositionToModel`, which **can** merge-write `learnerModels.conceptStates`, `openQuestions`,
+  `changeFeed` and `synthesisStaleAt` (`activityConfigWrites.ts:200`, `workbookPositionSync.ts:118`). It is a
+  **conditional** side effect, not an unconditional second write — see **F7** for the five gates it has to
+  clear. This is **parity with the Curriculum surface**, not a chat-only path, and it is upgrade-only, so it
+  is not a P1. But when it does fire, the card does not say so.
 
 There is **no reachable path from any part-A kind to an hours or XP write.** The invariant holds.
 
@@ -182,16 +183,18 @@ written as one assistant message carrying `imageUrl` (`useShellyChatFlows.ts:584
 thread's `chatContext`, which is the name-keyed tab (F11). So an image Shelly generates in Ask AI is not
 evidence, cannot be tagged, will not appear in a portfolio or a monthly review book, and cannot be
 back-filled by child the way B14's artifact backfill does. Separately, every chat generation sends
-`style: 'general'` — the empty prefix FEAT-193 moved the Game Workshop *off* — so the chat's pictures get
-no recipe at all (**F17**).
+`style: 'general'`, the prefix FEAT-193 moved the Game Workshop *off*, so the **server** contributes no
+visual recipe and the whole look rides on the composed prompt — which the refinement path supplies and the
+other paths do not (**F17**).
 
 ---
 
 ## 4 · The prompt measurement
 
 Measured by building the real builders (`buildShellyChatRoleSection` + the nine action grammars + friction
-capture + web search + `CHARTER_PREAMBLE`) for a child-scoped call with two children. This is the
-**static floor**: it is present on every child-tab turn before a single byte of family data.
+capture + web search + `CHARTER_PREAMBLE`) for a child-scoped call with two children, **plus the fixed
+follow-up postamble** the handler appends at `shellyChat.ts:1858–1863`. This is the **static floor**: every
+row below is present on every child-tab turn before a single byte of family data.
 
 | Section | Chars | ~Tokens |
 |---|---:|---:|
@@ -208,10 +211,11 @@ capture + web search + `CHARTER_PREAMBLE`) for a child-scoped call with two chil
 | next-week-draft grammar | 2,817 | 704 |
 | friction capture | 864 | 216 |
 | web search | 1,301 | 325 |
-| **TOTAL (static floor)** | **41,271** | **~10,318** |
-| **of which action grammar** | **28,557** | **~7,139 — 69.2%** |
+| follow-up postamble | 412 | 103 |
+| **TOTAL (static floor)** | **41,620** | **~10,405** |
+| **of which action grammar** | **28,557** | **~7,139 — 68.6%** |
 
-**Part A's four grammars are 11,380 chars (27.6% of the floor); Part B's five are 17,177 (41.6%).**
+**Part A's four grammars are 11,380 chars (27.3% of the floor); Part B's five are 17,177 (41.3%).**
 
 On top of this sit the per-family slices — charter extras, child profile, learner model, engagement,
 grade results, recent eval, sight words, week focus, word mastery, workbook paces, skill snapshot, child
@@ -221,8 +225,7 @@ responses, teach-backs, concept arcs). Those need Firestore and were **not** mea
 logs their real size at `shellyChat.ts:1802` (`sharedContextLength` / `supplementalLength`), so the true
 figure is recoverable from a production log without further work.
 
-Then the last instruction in the prompt asks for `[FOLLOWUP]` questions, and only the **last 20 messages**
-are sent (`shellyChat.ts:1868`).
+Only the **last 20 messages** are sent (`shellyChat.ts:1868`).
 
 ### Contradictions found
 
@@ -416,19 +419,29 @@ waiting on a card that will never appear"* — does not cover this case, because
 
 ---
 
-**F7 · `setActivityPosition` also writes the learner model; the card's footnote says only "future plans".**
-`src/core/firebase/activityConfigWrites.ts:189–201` · `src/core/foundations/workbookPositionSync.ts:84–125`
+**F7 · `setActivityPosition` can also write the learner model, and the card's footnote never mentions it.**
+`src/core/firebase/activityConfigWrites.ts:155–201` · `src/core/foundations/workbookPositionSync.ts:84–125`
 · footnote at `curriculumActions.ts:301`
 
 `setActivityConfigPosition` fires `syncActivityPositionToModel` → `syncWorkbookPositionToModel`, which
 merge-writes `learnerModels.conceptStates`, `openQuestions`, `changeFeed`, `updatedAt` and
-`synthesisStaleAt` for the child. The card's footnote reads *"Where future plans pick up. This week and
-anything already recorded stay as they are."*
+`synthesisStaleAt`. **This is a conditional side effect, not a second write on every position set** — it is
+skipped, silently and by design, at five gates:
 
-This is parity with the Curriculum surface (same writer, same trigger) and it is upgrade-only, so the data
-is not wrong. But the parent confirms a card that describes one write and gets two — and the second one
-surfaces as new "What moved" entries on the Foundations tab and stales the LLM synthesis. A parent who
-reads the footnote has been told the write is narrower than it is.
+1. a shared (`'both'`) config, or one with no resolvable `name`/`curriculum` (`syncActivityPositionToModel`);
+2. `no-bridge` / `ambiguous` — the workbook name matches no curated bridge, or ties two;
+3. `pending-curation` — the matched bridge has no curated `lessonToUnit` map (the Fast Phonics case);
+4. `no-model` — the child has no `learnerModels` document yet;
+5. `no-coverage` — the native position covers no concepts, or none that are not already at that state.
+
+So for many families and many activities, confirming the card updates **only** `activityConfigs`, and the
+footnote is complete. The defect is narrower than "the card hides a second write": it is that **when the
+write does fire the card gave no hint it could**, and there is nothing on the card to distinguish the two
+cases. The write itself is parity with the Curriculum surface (same writer, same trigger) and upgrade-only,
+so no data is wrong — which is why this is P2 and not P1. When it fires it surfaces as new "What moved"
+entries on the Foundations tab and stales the LLM synthesis.
+
+*Scope corrected after Codex round 1 flagged the original wording as claiming an unconditional write.*
 
 ---
 
@@ -548,10 +561,20 @@ ACTIVITIES>"`, which is a non-empty string and passes `nonEmptyString`. It reach
 match, and the parent reads *"That didn't match one of your activities…Try naming it as it appears in
 Progress → Curriculum"* when the true reason is that she has no activities yet.
 
-**F17 · The chat's image door sends `style: 'general'`.** `useShellyChatFlows.ts:575`. FEAT-193 identified
-`general` as the empty prefix and moved the Game Workshop onto a real `game-art` recipe for exactly this
-reason. The chat still sends it, so its images get no medium, no palette, no line and no shading
-direction.
+**F17 · The chat's image door sends `style: 'general'`, so all visual direction rides on the composed
+prompt — and two of its paths compose none.** `useShellyChatFlows.ts:575`. **FEAT-193** identified `general`
+as the prefix that contributes nothing and moved the Game Workshop onto a real `game-art` recipe. The chat
+still sends `general`, but that does **not** mean its pictures lack a medium: the refinement path
+(`handleImageIdeaSubmit` → `handleImageRefinementGenerate`) asks the parent preference questions — its own
+seed example is literally `"What style?"` with `["Realistic photo", "Cartoon/illustrated", "Minecraft-style",
+"Watercolor"]` — then folds the answers into a detailed prompt via `[BUILD_IMAGE_PROMPT]`, and a reference
+image is described back including *"style, colors, composition"*. Those generations are well directed. The
+gap is the paths that compose nothing: `handleJustGenerate` sends the raw idea unless a reference image is
+attached, and `handleGenerateImageDirect` reached from a bare prompt sends it verbatim. There the server adds
+no recipe and the parent supplied none, so the model is free-running. **The fix is not to swap `general` for
+a fixed recipe** — that would fight a look the parent explicitly chose in the refinement flow. It is either a
+default that applies only when the composed prompt carries no visual direction, or an accepted non-issue.
+*Scope corrected after Codex round 1 flagged the original wording as overstating the affected case.*
 
 **F18 · FEAT-195's alternatives are prose in the chat, not taps.** Detailed at Q-I3. The classifier and
 copy are correctly shared; the affordance is not. Worth recording because FEAT-195's own notes count
@@ -597,7 +620,7 @@ Stated plainly, because an audit that overstates its coverage is worse than a sm
   `markSkillProgress` for *"he finally got his 'th' sound"* — as opposed to prose, or the wrong kind — is
   unmeasured. The Shelly walk in this document traces what **would** happen to each sentence's action, not
   that the sentence produces one.
-- **The per-family half of the system prompt was not measured.** §4's 41,271 characters is the static
+- **The per-family half of the system prompt was not measured.** §4's 41,620 characters is the static
   floor only; the context slices need Firestore. The handler already logs the real numbers, so this is
   recoverable from one production log rather than from more analysis.
 - **Firestore merge semantics were not verified against an emulator.** F1 rests on reading
