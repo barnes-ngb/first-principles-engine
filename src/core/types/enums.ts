@@ -253,9 +253,24 @@ export const PaceStatus = {
 } as const
 export type PaceStatus = (typeof PaceStatus)[keyof typeof PaceStatus]
 
+/**
+ * How today is being run. Three kinds, and the third is not a smaller version of
+ * the first two (FEAT-200).
+ *
+ *  - `Normal` and `Mvd` are **plans**: a checklist assembled in advance and
+ *    worked through. MVD is the floor of that shape, not a different shape.
+ *  - `Life` is a **record**. Nothing was planned and real learning happened
+ *    anyway — blocks, outside, the tablet, helping, packing the house — and the
+ *    job is to write down what happened, not to complete a list. A checklist is
+ *    the wrong instrument for that however short you make it: an unfinished list
+ *    on a hard day is a reproach, and the charter is explicitly no-shame.
+ *
+ * These are peers. Nothing in the app may rank them.
+ */
 export const PlanType = {
   Normal: 'normal',
   Mvd: 'mvd',
+  Life: 'life',
 } as const
 export type PlanType = (typeof PlanType)[keyof typeof PlanType]
 
@@ -263,6 +278,7 @@ export type PlanType = (typeof PlanType)[keyof typeof PlanType]
 export const PlanTypeLabel: Record<PlanType, string> = {
   [PlanType.Normal]: 'Normal Day',
   [PlanType.Mvd]: 'Minimum Viable Day',
+  [PlanType.Life]: 'Life Day',
 }
 
 export const DayType = {

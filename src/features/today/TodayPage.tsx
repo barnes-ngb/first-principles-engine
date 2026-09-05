@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
@@ -9,6 +10,8 @@ import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Fab from '@mui/material/Fab'
 import IconButton from '@mui/material/IconButton'
+import Menu from '@mui/material/Menu'
+import MenuItem from '@mui/material/MenuItem'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import ToggleButton from '@mui/material/ToggleButton'
@@ -71,6 +74,8 @@ import {
 } from './applyChapterPoolForChild'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
+import LifeDayCard from './LifeDayCard'
+import { DAY_TYPE_CHOICES } from './dayTypeChoices'
 import MineRecapCard from './MineRecapCard'
 import TeachBackSection from './TeachBackSection'
 import { useLatestMineSession } from './useLatestMineSession'
@@ -189,6 +194,8 @@ export default function TodayPage() {
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
+  /** FEAT-200: anchor for the day-type menu behind the plan-type chip. */
+  const [dayTypeAnchor, setDayTypeAnchor] = useState<HTMLElement | null>(null)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
   const [teachHelperOpen, setTeachHelperOpen] = useState(false)
   const [printingMaterials, setPrintingMaterials] = useState(false)
@@ -646,11 +653,31 @@ export default function TodayPage() {
   const handleEnergyChange = useCallback(
     (newEnergy: EnergyLevel) => {
       setEnergy(newEnergy)
-      const newPlanType = energyToPlanType(newEnergy)
+      // FEAT-200: a Life Day is an explicit choice about what KIND of day this
+      // is, so the energy toggle must not silently undo it. Energy still derives
+      // Normal/MVD for every day that was never marked a Life Day — byte-for-byte
+      // the prior behaviour — but on a Life Day it records energy alone.
+      const newPlanType =
+        planType === PlanType.Life ? PlanType.Life : energyToPlanType(newEnergy)
       setPlanType(newPlanType)
       void saveDailyPlan(newEnergy, newPlanType)
     },
-    [saveDailyPlan],
+    [saveDailyPlan, planType],
+  )
+
+  /**
+   * FEAT-200: the parent names the kind of day directly. Writes ONLY
+   * `dailyPlans.planType` — the day's checklist and blocks are never touched, in
+   * either direction, so switching to a Life Day hides the checklist and
+   * switching back restores it exactly. A day is not destroyed by relabelling it.
+   */
+  const handleDayTypeChange = useCallback(
+    (newPlanType: PlanType) => {
+      setPlanType(newPlanType)
+      void saveDailyPlan(energy, newPlanType)
+      setDayTypeAnchor(null)
+    },
+    [saveDailyPlan, energy],
   )
 
   // Load artifacts scoped to child + date (reload when child changes)
@@ -1130,19 +1157,77 @@ export default function TodayPage() {
                 </ToggleButton>
               ))}
             </ToggleButtonGroup>
+            {/* FEAT-200: the plan-type chip became the day-type CONTROL. Same
+                slot, same row — it now says what kind of day this is and lets a
+                parent say otherwise. Parent-only by capability (`canEditLiveDay`);
+                a kid never reaches here at all, since kid profiles return
+                `KidTodayView` above. */}
             <Chip
               size="small"
               label={PlanTypeLabel[planType]}
-              color={planType === PlanType.Normal ? 'success' : 'info'}
+              color={
+                planType === PlanType.Normal
+                  ? 'success'
+                  : planType === PlanType.Life
+                    ? 'default'
+                    : 'info'
+              }
               variant="outlined"
+              onClick={
+                canEditLiveDay ? (e) => setDayTypeAnchor(e.currentTarget) : undefined
+              }
+              deleteIcon={canEditLiveDay ? <ArrowDropDownIcon /> : undefined}
+              onDelete={
+                canEditLiveDay ? (e) => setDayTypeAnchor(e.currentTarget) : undefined
+              }
+              aria-label={
+                canEditLiveDay
+                  ? `Kind of day: ${PlanTypeLabel[planType]}. Change it.`
+                  : undefined
+              }
             />
+            <Menu
+              anchorEl={dayTypeAnchor}
+              open={Boolean(dayTypeAnchor)}
+              onClose={() => setDayTypeAnchor(null)}
+            >
+              {DAY_TYPE_CHOICES.map((choice) => (
+                <MenuItem
+                  key={choice.value}
+                  selected={planType === choice.value}
+                  onClick={() => handleDayTypeChange(choice.value)}
+                  sx={{ display: 'block', maxWidth: 320, whiteSpace: 'normal' }}
+                >
+                  <Typography variant="body2">{PlanTypeLabel[choice.value]}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {choice.description}
+                  </Typography>
+                </MenuItem>
+              ))}
+            </Menu>
             <SaveIndicator state={saveState} />
           </Stack>
         </Stack>
       </SectionCard>
 
+      {/* --- FEAT-200: on a Life Day, Today is a place to RECORD, not a list to
+           finish. The checklist is HIDDEN, never deleted — the day doc is
+           untouched, so switching back restores it exactly. --- */}
+      {selectedChild && planType === PlanType.Life && (
+        <SectionErrorBoundary section="life day">
+          <LifeDayCard
+            // Keyed by the day it records: the note field's local draft resets
+            // with the day rather than following the parent onto another child.
+            key={`${selectedChildId}_${today}`}
+            dayLog={dayLog}
+            persistDayLogImmediate={persistDayLogImmediate}
+            canEdit={canEditLiveDay}
+          />
+        </SectionErrorBoundary>
+      )}
+
       {/* --- Today's Plan checklist (PRIMARY) --- */}
-      {selectedChild && (
+      {selectedChild && planType !== PlanType.Life && (
         <SectionErrorBoundary section="checklist">
         <TodayChecklist
           dayLog={dayLog}
