@@ -20,6 +20,7 @@ import type {
   SubjectBucket,
   SupportTag,
   TrackType,
+  WeekReflectionAnswer,
 } from './enums'
 import type { SkillTag } from './common'
 
@@ -998,6 +999,49 @@ export interface WeekEvidence {
   teachBacks: TeachBacksWeekSummary
 }
 
+/**
+ * One workbook's position as it stood when a week's review was generated
+ * (UX-212).
+ *
+ * `ActivityConfig.currentPosition` is a single mutable field — the repo has no
+ * position history anywhere — so a rate of coverage cannot be computed
+ * retroactively. Recording the position at review time is what makes one
+ * possible from the *next* week onward; nothing here is ever back-filled or
+ * estimated.
+ */
+export interface CurriculumPositionRecord {
+  /** The `activityConfigs` doc id this position was read from. */
+  configId: string
+  name: string
+  currentPosition: number
+  totalUnits?: number
+  unitLabel?: string
+  /** True when the program was already marked finished at snapshot time. */
+  completed?: boolean
+}
+
+/** Every active workbook position for one child at one moment. */
+export interface CurriculumSnapshot {
+  /** ISO timestamp of the moment the positions were actually read. */
+  recordedAt: string
+  /** The review week this snapshot was recorded alongside. */
+  weekKey: string
+  positions: CurriculumPositionRecord[]
+}
+
+/**
+ * The parent's answer to *"Was that enough this week?"* (UX-214).
+ *
+ * A record of a human judgement. It is never fed back into planning, never
+ * gates anything, and never changes a plan, an hours figure or a snapshot.
+ */
+export interface WeekReflection {
+  answer: WeekReflectionAnswer
+  /** Optional free line. Absent when the parent left it empty. */
+  note?: string
+  answeredAt: string
+}
+
 export interface WeeklyReview {
   id?: string
   childId: string
@@ -1025,6 +1069,15 @@ export interface WeeklyReview {
    * even if the AI narrative doesn't mention them.
    */
   evidence?: WeekEvidence
+  /**
+   * Workbook positions as they stood when this review was generated (UX-212).
+   * Written server-side by `generateReviewForChild`; read only by the
+   * parent-facing observed-rate line. Absent on every review generated before
+   * UX-212 — a missing snapshot is reported as unknown, never estimated.
+   */
+  curriculumPositions?: CurriculumSnapshot
+  /** The parent's answer to the week's one question (UX-214). */
+  reflection?: WeekReflection
   reviewedAt?: string
   createdAt?: string
   updatedAt?: string
