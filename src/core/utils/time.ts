@@ -21,20 +21,33 @@ export const getWeekRange = (date: Date = new Date(), weekStartsOn = 0): WeekRan
 }
 
 /**
- * Sunday-start week range for *planning the school week*.
+ * The **default** Sunday-start week range for *planning the school week*.
  *
  * The school body is Monday–Friday (`WEEK_DAYS` in `chatPlanner.logic.ts`), but
- * `getWeekRange` returns the Sun–Sat week that *contains* `now`. From Saturday
- * onward the Mon–Fri body of that week is already in the past, so planning on a
- * Saturday against the plain `getWeekRange` start targets days that have gone by
- * (the FEAT-112 bug: a weekend plan landed on the previous Mon–Fri).
+ * `getWeekRange` returns the Sun–Sat week that *contains* `now`. From Friday
+ * onward the Mon–Fri body of that week is spent, so planning against the plain
+ * `getWeekRange` start targets days that have gone by (the FEAT-112 bug: a
+ * weekend plan landed on the previous Mon–Fri).
  *
  * The rule, in one sentence: **plan the Mon–Fri of the Sun–Sat week containing
- * today, except on Saturday — when that block has fully passed — roll forward
- * to the next week, so weekend planning always targets the upcoming school
+ * today, except from Friday on — when that block is over or ending — roll
+ * forward to the next week, so late-week planning targets the upcoming school
  * week.** (Sunday needs no roll: `getWeekRange(Sunday)` already starts on that
- * Sunday, so its Mon–Fri is tomorrow-onward. Monday–Friday resolve to the
+ * Sunday, so its Mon–Fri is tomorrow-onward. Sunday–Thursday resolve to the
  * in-progress week, unchanged.)
+ *
+ * **Friday was FEAT-112's remaining hole (FEAT-196).** It rolled only on
+ * Saturday, and called Friday's in-progress week correct in this very comment.
+ * It is not: on Friday afternoon four days of the Mon–Fri body are gone and the
+ * fifth is ending, so a parent opening the planner means *next* week — which is
+ * exactly what the owner hit ("I think Shelly tried to plan the next week on
+ * Friday"). Sunday–Thursday keep the containing week.
+ *
+ * This is a **default, not a verdict.** Any weekday guess is wrong for someone —
+ * re-planning next week on a Wednesday is ordinary and no roll rule can express
+ * it — so the planner pairs this with an explicit This week / Next week selector
+ * (`planner-chat/planningWeekSelection.ts`), which resolves the default *from
+ * this function* rather than restating the rule.
  *
  * This is deliberately planning-specific and does **not** touch `getWeekRange`,
  * which stays the shared Sun–Sat helper for hours / compliance / records week
@@ -42,9 +55,9 @@ export const getWeekRange = (date: Date = new Date(), weekStartsOn = 0): WeekRan
  */
 export const getPlanningWeekRange = (now: Date = new Date()): WeekRange => {
   const base = getWeekRange(now) // Sun–Sat week containing `now`
-  // Sun (0) already resolves to the upcoming Mon–Fri; Mon–Fri (1–5) to the
-  // in-progress week. Only Saturday (6) needs rolling forward a week.
-  if (now.getDay() !== 6) return base
+  // Sun (0) already resolves to the upcoming Mon–Fri; Mon–Thu (1–4) to the
+  // in-progress week. Friday (5) and Saturday (6) roll forward a week.
+  if (now.getDay() < 5) return base
 
   const start = new Date(base.start + 'T00:00:00')
   start.setDate(start.getDate() + 7)

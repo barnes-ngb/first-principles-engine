@@ -483,3 +483,68 @@ describe('applyDraftWeek', () => {
     expect((err as WeekApplyError).cause).toBeInstanceOf(Error)
   })
 })
+
+// ── FEAT-196: the week is re-resolved at the write ───────────────────────────
+//
+// A planner tab is rarely closed, so a draft can sit on screen across a week
+// boundary. When it does, the card still names the week it was built for while
+// the parent's pick has come to mean a different one — and applying then writes
+// a week nobody read. `weekChoice` turns `weekStart` from an assertion into a
+// claim that is checked here, in the one Apply.
+describe('applyDraftWeek — stale-week refusal (FEAT-196)', () => {
+  // WEEK_START is Sunday 2026-08-16, so its Sun–Sat window is Aug 16–22.
+  const INSIDE_THIS_WEEK = new Date(2026, 7, 19) // Wed Aug 19
+  const THE_WEEK_BEFORE = new Date(2026, 7, 12) // Wed Aug 12
+  const AFTER_ROLLOVER = new Date(2026, 7, 24) // Mon Aug 24
+
+  it('writes normally while the pick still resolves to the named week', async () => {
+    const result = await applyDraftWeek(
+      baseInput({ weekChoice: 'this', now: INSIDE_THIS_WEEK }),
+    )
+    expect(result.daysWritten).toEqual([MONDAY, TUESDAY])
+  })
+
+  it('accepts a "next week" pick made in the week before', async () => {
+    const result = await applyDraftWeek(
+      baseInput({ weekChoice: 'next', now: THE_WEEK_BEFORE }),
+    )
+    expect(result.daysWritten).toEqual([MONDAY, TUESDAY])
+  })
+
+  it('refuses a pick whose week rolled over, writing NOTHING', async () => {
+    const err = await applyDraftWeek(
+      baseInput({ weekChoice: 'this', now: AFTER_ROLLOVER }),
+    ).catch((e) => e as WeekApplyError)
+
+    expect(err).toBeInstanceOf(WeekApplyError)
+    expect((err as WeekApplyError).reason).toBe('stale-week')
+    expect((err as WeekApplyError).daysWritten).toEqual([])
+    expect((err as WeekApplyError).weekPlanWritten).toBe(false)
+    // Not a single read or write — the refusal is before the WeekPlan upsert.
+    expect(setDocMock).not.toHaveBeenCalled()
+    expect(setDayLogGuardedMock).not.toHaveBeenCalled()
+  })
+
+  it('names the refused week and says nothing was written', async () => {
+    const err = await applyDraftWeek(
+      baseInput({ weekChoice: 'next', now: AFTER_ROLLOVER }),
+    ).catch((e) => e as WeekApplyError)
+    expect((err as WeekApplyError).message).toContain('Week of Aug 17–21')
+    expect((err as WeekApplyError).message).toContain('nothing was written')
+  })
+
+  // The chat's lane holds its own equivalent rail (`isNextWeekStart`, re-resolved
+  // inside `writeNextWeekDraft`) and names its week directly, so a caller with no
+  // selector must stay byte-for-byte unaffected by this check.
+  it('skips the check entirely when no choice is passed', async () => {
+    const result = await applyDraftWeek(baseInput({ now: AFTER_ROLLOVER }))
+    expect(result.daysWritten).toEqual([MONDAY, TUESDAY])
+  })
+
+  it('flags the capability refusal too, so a caller can show its wording', async () => {
+    const err = await applyDraftWeek(baseInput({ canEdit: false })).catch(
+      (e) => e as WeekApplyError,
+    )
+    expect((err as WeekApplyError).reason).toBe('not-permitted')
+  })
+})

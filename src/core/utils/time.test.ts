@@ -76,9 +76,23 @@ describe('getPlanningWeekRange', () => {
   const mondayOf = (r: { start: string }) => dayFrom(r.start, 1)
   const fridayOf = (r: { start: string }) => dayFrom(r.start, 5)
 
-  it('Friday plans the current (in-progress) Mon–Fri week', () => {
+  // FEAT-196: the hole FEAT-112 left. This test used to assert the opposite —
+  // that Friday plans the week it is the last day of — and the owner hit it:
+  // "I think Shelly tried to plan the next week on Friday". By Friday four of the
+  // five school days are spent and the fifth is ending, so an unprompted parent
+  // means next week. (Sunday–Thursday still resolve to the containing week, and
+  // a parent who really does mean the in-progress week says so with the selector.)
+  it('Friday rolls forward to the UPCOMING Mon–Fri week (FEAT-196)', () => {
     const fri = new Date(2026, 6, 17) // Fri Jul 17, 2026
     const range = getPlanningWeekRange(fri)
+    expect(range.start).toBe('2026-07-19') // NEXT Sunday, not Jul 12
+    expect(mondayOf(range)).toBe(MON)
+    expect(fridayOf(range)).toBe(FRI)
+  })
+
+  it('Thursday still plans the current (in-progress) Mon–Fri week', () => {
+    const thu = new Date(2026, 6, 16) // Thu Jul 16, 2026
+    const range = getPlanningWeekRange(thu)
     expect(range.start).toBe('2026-07-12') // this week's Sunday
     expect(mondayOf(range)).toBe('2026-07-13')
     expect(fridayOf(range)).toBe('2026-07-17')
@@ -108,12 +122,21 @@ describe('getPlanningWeekRange', () => {
     expect(fridayOf(range)).toBe(FRI)
   })
 
-  it('Saturday/Sunday/Monday all agree on the same upcoming week', () => {
+  it('Friday/Saturday/Sunday/Monday all agree on the same upcoming week', () => {
+    const fri = getPlanningWeekRange(new Date(2026, 6, 17))
     const sat = getPlanningWeekRange(new Date(2026, 6, 18))
     const sun = getPlanningWeekRange(new Date(2026, 6, 19))
     const mon = getPlanningWeekRange(new Date(2026, 6, 20))
+    expect(fri.start).toBe(sat.start)
     expect(sat.start).toBe(sun.start)
     expect(sun.start).toBe(mon.start)
+  })
+
+  it('the Friday roll handles a month boundary', () => {
+    const fri = new Date(2026, 7, 28) // Fri Aug 28, 2026 (week Aug 23–29)
+    const range = getPlanningWeekRange(fri)
+    expect(range.start).toBe('2026-08-30') // next Sunday
+    expect(range.end).toBe('2026-09-05')
   })
 
   it('Saturday roll handles month/year boundary crossings', () => {
@@ -121,6 +144,15 @@ describe('getPlanningWeekRange', () => {
     const range = getPlanningWeekRange(sat)
     expect(range.start).toBe('2025-12-28') // next Sunday
     expect(range.end).toBe('2026-01-03') // Saturday in January
+  })
+
+  // The line FEAT-196 must not cross: `getWeekRange` is what hours, compliance
+  // and records fold over. Only the planning helper rolls.
+  it('leaves getWeekRange alone — the compliance week never rolls', () => {
+    for (const day of [16, 17, 18]) { // Thu, Fri, Sat of Jul 2026
+      expect(getWeekRange(new Date(2026, 6, day)).start).toBe('2026-07-12')
+    }
+    expect(getPlanningWeekRange(new Date(2026, 6, 17)).start).toBe('2026-07-19')
   })
 
   it('forward-shift invariant: the derived week is NEVER entirely in the past', () => {
