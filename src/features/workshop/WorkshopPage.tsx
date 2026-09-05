@@ -1346,12 +1346,21 @@ export default function WorkshopPage() {
       >
         <DialogTitle>Some pictures didn&apos;t come back</DialogTitle>
         <DialogContent>
+          {/* Retry only where "Regenerate Art" actually remakes THIS game's
+              pictures (Codex P2, PR #1768). `handleRegenerateArt` calls
+              `generateAllArt` unconditionally — a board-game generator — so
+              offering it for a card or adventure game would spend the week's
+              budget on board backgrounds and still leave the missing card faces
+              or scene art missing. That mis-dispatch predates this PR (it is
+              what the gallery's own button has always done; filed as ARCH-49),
+              and what this run must not do is newly point people at it. A card
+              or adventure failure still says plainly what happened. */}
           {artFailure && (
             <ImageRetryCard
               failure={artFailure}
               audience={artAudience}
               door={ImageRetryDoor.Redraw}
-              {...(currentGame
+              {...(currentGame?.gameType === GameType.Board
                 ? {
                     onRetry: () => {
                       const game = currentGame

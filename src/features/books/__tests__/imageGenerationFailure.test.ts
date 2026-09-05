@@ -6,6 +6,7 @@ import {
   FREE_EXITS_HEADING,
   ImageGenerationFailure,
   ImageRetryDoor,
+  CHAT_ALTERNATIVES_LEAD,
   blockedTips,
   classifyImageGenerationFailure,
   imageFailureChatMessage,
@@ -295,6 +296,21 @@ describe('imageFailureChatMessage', () => {
     expect(msg).toContain('\u2022 a cheerful hero')
   })
 
+  it('names the control that actually makes a picture, not "ask me" (Codex P2)', () => {
+    // Typing a picture request into the composer reaches the text `chat`
+    // callable, and Shelly's own system prompt answers image requests by saying
+    // to tap the image button. "Just ask me for it" named an action that
+    // produces another conversational turn and no picture.
+    const msg = imageFailureChatMessage(
+      ImageGenerationFailure.Blocked,
+      ['a red plumber'],
+      'parent',
+    )
+    expect(msg).toContain(CHAT_ALTERNATIVES_LEAD)
+    expect(CHAT_ALTERNATIVES_LEAD.toLowerCase()).toMatch(/image button/)
+    expect(msg.toLowerCase()).not.toMatch(/ask me for it/)
+  })
+
   it('falls back to the written tips when the suggester gave nothing', () => {
     const msg = imageFailureChatMessage(ImageGenerationFailure.Blocked, [], 'parent')
     for (const tip of blockedTips(ImageRetryDoor.Scene, 'parent')) {
@@ -303,13 +319,17 @@ describe('imageFailureChatMessage', () => {
   })
 
   it('never leaves a refusal without a next step, whatever came back', () => {
+    // The rule, not the wording: a refusal always carries more than its own
+    // sentence, and what it carries is a list the reader can act on.
+    const head = imageFailureMessage(ImageGenerationFailure.Blocked, 'parent')
     for (const alternatives of [[], ['a red plumber']]) {
       const msg = imageFailureChatMessage(
         ImageGenerationFailure.Blocked,
         alternatives,
         'parent',
       )
-      expect(msg).toMatch(/try one of these/i)
+      expect(msg).not.toBe(head)
+      expect(msg.split('\n').filter((l) => l.startsWith('\u2022')).length).toBeGreaterThan(0)
     }
   })
 

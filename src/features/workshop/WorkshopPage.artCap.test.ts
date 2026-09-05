@@ -97,4 +97,13 @@ describe('Workshop — a missing picture is reported (FEAT-195)', () => {
     expect(code).not.toMatch(/onUseAlternative/)
     expect(code).toMatch(/retryLabel: 'Regenerate Art'/)
   })
+
+  it('offers Regenerate Art only for a board game — the generator it actually calls', () => {
+    // Codex P2 (PR #1768): `handleRegenerateArt` calls `generateAllArt`
+    // unconditionally, so pointing a card or adventure failure at it would spend
+    // the week's budget on board backgrounds and leave the missing card faces or
+    // scene art missing. The mis-dispatch predates this PR (ARCH-49); what this
+    // run must not do is newly send people to it.
+    expect(code).toMatch(/currentGame\?\.gameType === GameType\.Board\s*\?/)
+  })
 })

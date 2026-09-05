@@ -325,6 +325,20 @@ export const FREE_EXITS_HEADING: Readonly<Record<ArtHelpAudience, string>> = {
 }
 
 /**
+ * How the chat tells someone to use one of the alternatives (Codex P2, PR
+ * #1768).
+ *
+ * It used to read "just ask me for it", which does not work: typing a picture
+ * request into the composer reaches the text `chat` callable, and Shelly's own
+ * system prompt answers image requests by saying to tap the image button. So
+ * the line named an action that produces another conversational turn and no
+ * picture. It names the control instead — the same control the system prompt
+ * already points at.
+ */
+export const CHAT_ALTERNATIVES_LEAD =
+  'Tap the image button and use one of these:'
+
+/**
  * The whole reply for a surface that can only render TEXT — the Shelly chat's
  * image door, whose failures are persisted Firestore messages and so cannot
  * hold a component (Codex P2, PR #1768).
@@ -348,7 +362,7 @@ export function imageFailureChatMessage(
   if (!offersAlternatives(kind)) return head
   const lines =
     alternatives.length > 0
-      ? ['Try one of these — just ask me for it:', ...alternatives.map((a) => `\u2022 ${a}`)]
+      ? [CHAT_ALTERNATIVES_LEAD, ...alternatives.map((a) => `\u2022 ${a}`)]
       : ['Try one of these:', ...blockedTips(door, audience).map((t) => `\u2022 ${t}`)]
   return [head, '', ...lines].join('\n')
 }
