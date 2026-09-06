@@ -363,10 +363,10 @@ All under `families/{familyId}/`:
 
 ### Providers
 - **Claude (Anthropic):** Primary provider for reasoning, planning, evaluation, content generation
-- **OpenAI:** Image generation (DALL-E) for visual materials
+- **OpenAI:** Image generation (gpt-image-1.5) for visual materials
 
 ### AI Rules of Engagement
-1. **Feature flags for AI paths.** Local logic in planner-chat stays as fallback. AI paths are opt-in via config.
+1. **Feature flags for AI paths.** Local logic in planner-chat stays as fallback. There is one flag — `ai_planning` — and it is **enabled by default** (`DEFAULT_ENABLED_FLAGS` in `src/core/ai/featureFlags.ts`), so the AI planner path is on unless a user turns it off; the local draft planner remains the fallback.
 2. **System prompts are version-controlled** in `src/core/ai/prompts/`. Every prompt is reviewable.
 3. **Charter values are injected** into every system prompt. See `docs/SYSTEM_PROMPTS.md`.
 4. **Child context is assembled per-request** from Firestore (skill snapshot, pace data, recent sessions).

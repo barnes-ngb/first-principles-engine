@@ -628,4 +628,4 @@ Every task that includes the `charter` slice gets the CHARTER_PREAMBLE injected 
 
 ### Feature Flags
 
-AI paths are opt-in via config. Local logic stays as fallback. The planner-chat has local draft plan generation that works without AI.
+There is one AI feature flag — `ai_planning` — and it is **enabled by default** (`DEFAULT_ENABLED_FLAGS` in `src/core/ai/featureFlags.ts`), so the AI planner path is on unless a user turns it off. Local logic stays as fallback: the planner-chat has local draft plan generation that works without AI.
