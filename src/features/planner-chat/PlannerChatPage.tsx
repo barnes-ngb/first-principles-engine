@@ -127,6 +127,8 @@ import {
   composePlannerMessage,
   formatShapedByLine,
 } from './plannerRequest'
+import { plannerPhaseLine } from './plannerPhaseLine'
+import { LOCAL_PLANNER_FALLBACK_SNACK, draftTurnText } from './plannerDraftNotice'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
 import { formatCoverageSummaryText, buildCoverageSummary } from './coverageSummary'
 import ContextDrawer from './ContextDrawer'
@@ -1688,6 +1690,10 @@ Return as JSON:
       const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
       let draft: DraftWeeklyPlan
       let usedAI = false
+      // UX-233: distinguishes "the flag is off, this is the local planner as
+      // designed" from "the AI planner was asked and did not answer". Only the
+      // second is worth telling the parent about, and only the second was silent.
+      let fellBackToLocal = false
 
       if (isEnabled(AIFeatureFlag.AiPlanning)) {
         const prompt = buildPlannerPrompt(inputs)
@@ -1735,7 +1741,13 @@ Return as JSON:
             }
           }
         } else {
+          // `useAI().chat` returns null on a failure rather than throwing, so
+          // this branch IS the AI failing — not a configuration choice. It used
+          // to be indistinguishable from the flag-off branch below and said
+          // nothing at all (UX-233).
           draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+          fellBackToLocal = true
+          setSnack({ text: LOCAL_PLANNER_FALLBACK_SNACK, severity: 'info' })
         }
       } else {
         draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
@@ -1746,7 +1758,7 @@ Return as JSON:
       const assistantMsg: ChatMessage = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
-        text: `Here's your draft plan${usedAI ? ' (AI-powered)' : ''}.${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}`,
+        text: draftTurnText({ usedAI, fellBackToLocal, shapedByLine }),
         draftPlan: draft,
         createdAt: new Date().toISOString(),
       }
@@ -2026,14 +2038,29 @@ Generate a plan for Monday through Friday.`.trim()
       // and the remove confirmation would even open onto a no-op. Lock and say so.
       if (!appliedWeekDaysLoaded) return 'Checking this week’s days…'
       const row = resolveLiveRow(dayIndex, itemIndex)
-      // Loaded, but the day doesn't hold this row: an item that was never
-      // accepted at Apply, or one already removed elsewhere. Also locked, with
-      // the reason, rather than an enabled button that does nothing.
-      if (!row) return liveDayEditLockReason('not-found', activeChild?.name)
+      // Loaded, but the day doesn't hold this row. Two different situations wore
+      // one sentence, and the common one was the wrong sentence (UX-230):
+      //
+      //  - the parent unticked it, so Apply never wrote it (`applyDraftWeek`
+      //    filters on `accepted`). Nothing is missing — it was never sent. On a
+      //    week with a few rows left out, EVERY one of them read "isn't on the
+      //    day any more", which on the screen a parent opens to confirm the
+      //    week landed says the opposite of what happened;
+      //  - it really was removed since, elsewhere. That is the original wording.
+      //
+      // The draft row itself is the authority on which: `accepted` is the flag
+      // Apply read.
+      if (!row) {
+        const draftItem = currentDraft?.days[dayIndex]?.items[itemIndex]
+        return liveDayEditLockReason(
+          draftItem && !draftItem.accepted ? 'not-planned' : 'not-found',
+          activeChild?.name,
+        )
+      }
       const lock = checklistItemEditLock(row.saved)
       return lock ? liveDayEditLockReason(lock, activeChild?.name) : null
     },
-    [applied, isParent, appliedWeekDaysLoaded, resolveLiveRow, activeChild?.name],
+    [applied, isParent, appliedWeekDaysLoaded, resolveLiveRow, currentDraft, activeChild?.name],
   )
 
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
@@ -2894,11 +2921,19 @@ ${dayPrompts}`
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Box>
           <Typography variant="h4" component="h1">Plan My Week</Typography>
+          {/* UX-243: the subtitle says which of the three steps this screen is,
+              instead of describing all three identically on each of them. */}
           <Typography color="text.secondary" variant="body2">
-            Set up your week, review the plan, and you&apos;re done.
+            {plannerPhaseLine(phase)}
           </Typography>
         </Box>
-        <IconButton onClick={() => setDrawerOpen(true)} title="View context">
+        {/* UX-242: `title` is a hover tooltip and never opens on a phone, so on
+            the device this page is built for the control had no name at all. */}
+        <IconButton
+          onClick={() => setDrawerOpen(true)}
+          title="What Shelly is planning with"
+          aria-label="What Shelly is planning with"
+        >
           <InfoOutlinedIcon />
         </IconButton>
       </Stack>
@@ -2988,7 +3023,6 @@ ${dayPrompts}`
               weekStart={weekRange.start}
               weekEnergy={weekEnergy}
               onWeekEnergyChange={setWeekEnergy}
-              hoursPerDay={hoursPerDay}
               chapterBooks={chapterBooks}
               selectedBook={selectedBook}
               onSelectedBookChange={handleSelectedBookChange}
@@ -3013,6 +3047,11 @@ ${dayPrompts}`
               onScanClear={clearScan}
               onScanAccept={handleScanAccept}
               activityConfigs={activityConfigs}
+              // UX-241: the card's "View/Edit Activities" link is gated on this
+              // callback and the page never passed one, so the wall of activity
+              // names — the surface where a week of duplicates sat visible
+              // (UX-231) — had no way out to the screen that can fix them.
+              onViewActivities={() => navigate('/progress?tab=curriculum')}
               onSubmitPhotos={handleSubmitPhotos}
               onSetupComplete={handleSetupComplete}
               generatingWeek={generatingWeek}
@@ -3026,7 +3065,6 @@ ${dayPrompts}`
               weekStart={weekRange.start}
               weekEnergy={weekEnergy}
               onWeekEnergyChange={setWeekEnergy}
-              hoursPerDay={hoursPerDay}
               chapterBooks={chapterBooks}
               selectedBook={selectedBook}
               onSelectedBookChange={handleSelectedBookChange}
@@ -3095,7 +3133,11 @@ ${dayPrompts}`
               <PlanDayCards
                 draft={currentDraft}
                 hoursPerDay={hoursPerDay}
-                masteryReviewLine={masteryReviewLine}
+                // UX-244: `PlanSummaryPanel` is pinned above this card in every
+                // phase and already carries this exact sentence, so passing it
+                // here printed it twice on one screen. The pinned copy is the
+                // one kept — it is also the only one at setup, where there are
+                // no day cards.
                 readAloudBook={readAloudBook}
                 weekStart={weekRange.start}
                 snapshot={snapshot}
@@ -3175,7 +3217,7 @@ ${dayPrompts}`
                 <PlanDayCards
                   draft={currentDraft}
                   hoursPerDay={hoursPerDay}
-                  masteryReviewLine={masteryReviewLine}
+                  // UX-244 — see the review-phase card above.
                   readAloudBook={readAloudBook}
                   weekStart={weekRange.start}
                   snapshot={snapshot}
@@ -3203,9 +3245,10 @@ ${dayPrompts}`
 
           {phase === 'review' && currentDraft && (
             <>
-              <Typography variant="caption" color="text.secondary">
-                Want to adjust anything?
-              </Typography>
+              {/* UX-245: this used to carry its own "Want to adjust anything?"
+                  caption directly above `QuickSuggestionButtons`, which renders
+                  "Quick adjustments:" as its first line — two labels, stacked,
+                  for one row of chips. */}
               <QuickSuggestionButtons onSelect={handleQuickSuggestion} visible />
 
               {/* Apply now lives in the sticky bar above the day cards (FEAT-111
@@ -3231,7 +3274,11 @@ ${dayPrompts}`
                 fullWidth
                 size="small"
               >
-                Start Over (Redo Plan)
+                {/* UX-246: one action, one name. The button said "Start Over
+                    (Redo Plan)" — two names for one destructive control — and
+                    the dialog it opens is titled "Redo Plan?" and confirms with
+                    "Redo Plan". The dialog's word wins. */}
+                Redo Plan
               </Button>
 
               <Dialog open={confirmNewPlan} onClose={() => setConfirmNewPlan(false)}>

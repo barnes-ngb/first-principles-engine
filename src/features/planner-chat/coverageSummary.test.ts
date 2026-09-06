@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest'
 import type { DraftWeeklyPlan, PrioritySkill } from '../../core/types'
 import { SkillLevel, SubjectBucket } from '../../core/types/enums'
 import { MathTags, ReadingTags } from '../../core/types/skillTags'
-import { buildCoverageSummary, formatCoverageSummaryText } from './coverageSummary'
+import {
+  COVERAGE_DETAIL_LIMIT,
+  buildCoverageSummary,
+  formatCoverageSummaryText,
+} from './coverageSummary'
 
 const makePlan = (items: Array<{ subject: string; minutes: number; tags: string[]; accepted?: boolean }>): DraftWeeklyPlan => ({
   days: [
@@ -78,6 +82,36 @@ describe('coverageSummary', () => {
       const entries = buildCoverageSummary(plan, prioritySkills)
       const reading = entries.find((e) => e.subject === SubjectBucket.Reading)
       expect(reading?.details.some((d) => d.includes('2x'))).toBe(true)
+    })
+
+    // ── UX-237 ──────────────────────────────────────────────────────────────
+    it('never names a tag the catalog cannot label, but still counts it', () => {
+      const plan = makePlan([
+        { subject: SubjectBucket.Reading, minutes: 10, tags: ['reading.short-i-vs-e'] },
+        { subject: SubjectBucket.Reading, minutes: 10, tags: ['reading.ful'] },
+      ])
+      const entries = buildCoverageSummary(plan, [])
+      const reading = entries.find((e) => e.subject === SubjectBucket.Reading)
+      // The blocks are real work and are counted…
+      expect(reading?.totalBlocks).toBe(2)
+      // …but a raw identifier never reaches parent-facing copy.
+      expect(reading?.details).toEqual([])
+    })
+
+    it('caps the named details so the chip cannot truncate mid-word', () => {
+      const manyTags = [
+        ReadingTags.CvcBlend,
+        ReadingTags.LetterSound,
+        ReadingTags.SightWords,
+        ReadingTags.PhonemicAwareness,
+      ]
+      const plan = makePlan(
+        manyTags.map((tag) => ({ subject: SubjectBucket.Reading, minutes: 10, tags: [tag] })),
+      )
+      const entries = buildCoverageSummary(plan, [])
+      const reading = entries.find((e) => e.subject === SubjectBucket.Reading)
+      expect(reading?.totalBlocks).toBe(4)
+      expect(reading?.details).toHaveLength(COVERAGE_DETAIL_LIMIT)
     })
   })
 

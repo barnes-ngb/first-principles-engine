@@ -46,7 +46,7 @@ describe('the planner cannot plan a Life Day', () => {
   it('keeps its own week-energy choices to the three it always had', () => {
     const values = ['full', 'lighter', 'mvd'] as const
     for (const value of values) {
-      const label = weekEnergyLabel(value, 2.5)
+      const label = weekEnergyLabel(value)
       expect(label).toBeTruthy()
       expect(label.toLowerCase()).not.toContain('life')
     }

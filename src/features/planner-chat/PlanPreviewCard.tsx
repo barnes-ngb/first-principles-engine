@@ -4,6 +4,7 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import OndemandVideoIcon from '@mui/icons-material/OndemandVideo'
 import SwitchVideoIcon from '@mui/icons-material/SwitchVideo'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import CircleIcon from '@mui/icons-material/Circle'
 import CloseIcon from '@mui/icons-material/Close'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
@@ -217,8 +218,28 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                     )}
                   </IconButton>
                 ) : (
+                  /* UX-240: no toggle means this card is a MIRROR, not a
+                     worksheet — the applied week, or the chat's read-only next-
+                     week draft. A green tick there answers a question the card
+                     cannot answer: whether the child has done it. That lives on
+                     Today, and every row on a freshly-applied week wore the tick
+                     the moment it was written. An included row gets a neutral
+                     bullet; an excluded one keeps the empty ring it already had,
+                     beside the strike-through the row already carries. */
                   item.accepted ? (
-                    <CheckCircleIcon fontSize="small" color={isRoutine ? 'action' : 'success'} sx={{ mr: 0.5 }} />
+                    <Box
+                      data-testid="plan-row-bullet"
+                      sx={{
+                        width: 20,
+                        mr: 0.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <CircleIcon sx={{ fontSize: 8, color: 'text.disabled' }} aria-hidden />
+                    </Box>
                   ) : (
                     <RadioButtonUncheckedIcon fontSize="small" sx={{ mr: 0.5, opacity: 0.4 }} />
                   )
@@ -461,7 +482,7 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                     </Box>
                   )}
 
-                  {/* TODAY'S FOCUS section — highlighted, themed */}
+                  {/* FOCUS section — highlighted, themed */}
                   {focusItems.length > 0 && (
                     <Box
                       sx={{
@@ -477,7 +498,11 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                         color="secondary.main"
                         sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6 }}
                       >
-                        Today&apos;s Focus{focusItems.length >= 3 ? ' \u00b7 Choose 2' : ''}
+                        {/* UX-239: it is Monday's focus, or Thursday's \u2014 the
+                            day is named in the header two lines up. Every day
+                            card in a five-day plan said "Today's", including on
+                            a plan for a week that has not started. */}
+                        Focus{focusItems.length >= 3 ? ' \u00b7 Choose 2' : ''}
                       </Typography>
                       <Stack spacing={0.25}>
                         {focusItems.map(item => renderItem(item, false))}

@@ -13,6 +13,16 @@ export interface CoverageEntry {
 }
 
 /**
+ * How many tag details a coverage entry names before it stops (UX-237).
+ *
+ * The chip that renders these has one line on a phone. Six details produce a
+ * string the chip truncates mid-word — the owner's screenshot ends
+ * *"…comparin"* — which reads as a rendering fault rather than a list that ran
+ * long. Three fit; the block count is the number that matters anyway.
+ */
+export const COVERAGE_DETAIL_LIMIT = 3
+
+/**
  * Build a coverage summary from a draft plan and priority skills.
  * Groups accepted items by subject, counts priority-skill alignment.
  */
@@ -50,10 +60,18 @@ export function buildCoverageSummary(
 
   const entries: CoverageEntry[] = []
   for (const [subject, data] of subjectMap) {
+    // UX-237: a tag with no entry in the catalog used to fall back to its own
+    // last path segment, so parent-facing copy read "short-i-vs-e 5x, ful 5x".
+    // Those are identifiers — a slug and a suffix — not things a person says.
+    // A tag the catalog cannot name is still COUNTED in `totalBlocks`; it just
+    // isn't named, because naming it wrongly is worse than not naming it. See
+    // `skillTags.ts` for the catalog; adding a label there brings a tag back
+    // into this list with no change here.
     const details: string[] = []
     for (const [tag, count] of data.tagCounts) {
-      const def = SKILL_TAG_MAP[tag]
-      const label = def?.label ?? tag.split('.').pop() ?? tag
+      const label = SKILL_TAG_MAP[tag]?.label
+      if (!label) continue
+      if (details.length >= COVERAGE_DETAIL_LIMIT) break
       details.push(`${label} ${count}x`)
     }
     entries.push({

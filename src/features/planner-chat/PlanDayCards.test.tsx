@@ -143,11 +143,11 @@ describe('PlanDayCards — acceptance toggle is inert once applied (FEAT-133)', 
   const toggle = (container: HTMLElement) =>
     container.querySelector('[data-testid="CheckCircleIcon"]')?.closest('button') ?? null
 
-  it('renders the toggle as a static icon, not a button, once applied', () => {
+  it('renders a static marker, not a button, once applied', () => {
     const onToggleItem = vi.fn()
     const { container } = renderCards(true, () => {}, onToggleItem)
-    // The icon is still shown (the parent can see what was accepted)…
-    expect(container.querySelector('[data-testid="CheckCircleIcon"]')).not.toBeNull()
+    // An included row is still marked (the parent can see what was accepted)…
+    expect(container.querySelector('[data-testid="plan-row-bullet"]')).not.toBeNull()
     // …but there is nothing to press.
     expect(toggle(container)).toBeNull()
   })
@@ -155,9 +155,20 @@ describe('PlanDayCards — acceptance toggle is inert once applied (FEAT-133)', 
   it('cannot mutate the draft from the applied view', () => {
     const onToggleItem = vi.fn()
     const { container } = renderCards(true, () => {}, onToggleItem)
-    const icon = container.querySelector('[data-testid="CheckCircleIcon"]')!
-    fireEvent.click(icon)
+    const marker = container.querySelector('[data-testid="plan-row-bullet"]')!
+    fireEvent.click(marker)
     expect(onToggleItem).not.toHaveBeenCalled()
+  })
+
+  /**
+   * UX-240: the static marker used to be the SAME green/grey check the live
+   * checklist uses for "done". On a week the parent had just applied, every row
+   * wore it — a card claiming the week was already finished the moment it was
+   * written. A mirror cannot answer a question it does not read; Today can.
+   */
+  it('never wears a completion tick on a read-only card', () => {
+    const { container } = renderCards(true, () => {}, () => {})
+    expect(container.querySelector('[data-testid="CheckCircleIcon"]')).toBeNull()
   })
 
   it('still toggles before Apply, where the draft IS the plan (characterization)', () => {
@@ -165,5 +176,51 @@ describe('PlanDayCards — acceptance toggle is inert once applied (FEAT-133)', 
     const { container } = renderCards(false, () => {}, onToggleItem)
     fireEvent.click(toggle(container)!)
     expect(onToggleItem).toHaveBeenCalledWith(0, 'm1')
+  })
+})
+
+/**
+ * UX-239: every day card in a five-day plan headed its non-routine rows
+ * "TODAY'S FOCUS" — including a plan for a week that had not started. It is
+ * Monday's focus, or Thursday's, and the day is named in the header two lines
+ * above it.
+ */
+describe('PlanDayCards — the focus section belongs to its day (UX-239)', () => {
+  const focusPlan: DraftWeeklyPlan = {
+    days: [
+      {
+        day: 'Monday',
+        timeBudgetMinutes: 120,
+        items: [
+          {
+            id: 'f1',
+            title: 'Nature walk',
+            subjectBucket: SubjectBucket.Science,
+            estimatedMinutes: 20,
+            skillTags: [],
+            accepted: true,
+            category: 'choose',
+          },
+        ],
+      },
+    ],
+    skipSuggestions: [],
+    minimumWin: '',
+  }
+
+  it('never says "Today\'s" on a plan for another week', () => {
+    render(
+      <PlanDayCards
+        draft={focusPlan}
+        hoursPerDay={2}
+        readAloudBook=""
+        weekStart="2026-09-06"
+        generatingItemId={null}
+        applied={false}
+        onToggleItem={() => {}}
+      />,
+    )
+    expect(screen.getByText(/^Focus$/)).toBeInTheDocument()
+    expect(screen.queryByText(/Today's Focus/i)).not.toBeInTheDocument()
   })
 })

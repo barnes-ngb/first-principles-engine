@@ -25,8 +25,9 @@ import { ActivityFrequencyLabel } from '../../core/types/enums'
 import type { ActivityFrequency } from '../../core/types/enums'
 import ChapterBookPicker from './ChapterBookPicker'
 import PhotoLabelForm from './PhotoLabelForm'
+import { PLANNER_REQUEST_LABEL, PLANNER_REQUEST_PLACEHOLDER } from './plannerRequest'
 import { generateButtonLabel } from './planningWeekSelection'
-import { weekEnergyLabel } from './weekEnergyLabels'
+import { WEEK_ENERGY_QUESTION, weekEnergyLabel } from './weekEnergyLabels'
 
 type MasterySummary = {
   gotIt: string[]
@@ -45,7 +46,6 @@ interface PlannerSetupWizardProps {
   weekStart: string
   weekEnergy: 'full' | 'lighter' | 'mvd'
   onWeekEnergyChange: (v: 'full' | 'lighter' | 'mvd') => void
-  hoursPerDay: number
   chapterBooks: ChapterBook[]
   selectedBook: ChapterBook | null
   onSelectedBookChange: (book: ChapterBook | null) => void
@@ -84,7 +84,6 @@ export default function PlannerSetupWizard({
   weekStart,
   weekEnergy,
   onWeekEnergyChange,
-  hoursPerDay,
   chapterBooks,
   selectedBook,
   onSelectedBookChange,
@@ -120,11 +119,11 @@ export default function PlannerSetupWizard({
 
       {/* Step 1: Energy selection */}
       <Box>
-        <Typography variant="subtitle2" gutterBottom>How&apos;s this week looking?</Typography>
+        <Typography variant="subtitle2" gutterBottom>{WEEK_ENERGY_QUESTION}</Typography>
         <ToggleButtonGroup value={weekEnergy} exclusive onChange={(_, v) => { if (v) onWeekEnergyChange(v) }} size="small" fullWidth>
-          <ToggleButton value="full">{weekEnergyLabel('full', hoursPerDay)}</ToggleButton>
-          <ToggleButton value="lighter">{weekEnergyLabel('lighter', hoursPerDay)}</ToggleButton>
-          <ToggleButton value="mvd">{weekEnergyLabel('mvd', hoursPerDay)}</ToggleButton>
+          <ToggleButton value="full">{weekEnergyLabel('full')}</ToggleButton>
+          <ToggleButton value="lighter">{weekEnergyLabel('lighter')}</ToggleButton>
+          <ToggleButton value="mvd">{weekEnergyLabel('mvd')}</ToggleButton>
         </ToggleButtonGroup>
       </Box>
 
@@ -144,8 +143,8 @@ export default function PlannerSetupWizard({
       {/* Step 1c: Notes */}
       <TextField
         size="small"
-        label="Anything different this week?"
-        placeholder="Field trip Tuesday afternoon, doctor Thursday morning..."
+        label={PLANNER_REQUEST_LABEL}
+        placeholder={PLANNER_REQUEST_PLACEHOLDER}
         value={weekNotes}
         onChange={(e) => onWeekNotesChange(e.target.value)}
         fullWidth
