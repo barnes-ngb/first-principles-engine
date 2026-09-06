@@ -446,6 +446,37 @@ describe('ActionConfirmCard — addActivity (FEAT-143)', () => {
     expect(screen.getByText('Math · 20m · daily · lesson 98 of 140')).toBeInTheDocument()
   })
 
+  // ── UX-205 ────────────────────────────────────────────────────────────────
+  //
+  // The owner's list grew a second "Prayer and Scripture", a second "Sight word
+  // games" and a second "Dad's Lab: micro:bit" through this card, because every
+  // field on it was correct and none of them said "you already have this".
+  it('names what an add would duplicate, with its minutes and cadence', () => {
+    const existing: ChatActivityConfig = {
+      id: 'cfg_prayer',
+      name: 'Prayer and Scripture',
+      childId: 'both',
+      defaultMinutes: 10,
+      type: 'routine',
+      frequency: 'daily',
+      sortOrder: 0,
+    }
+    renderCard(
+      curriculumPending({ ...ADD, type: 'routine', name: 'Prayer and Scripture' }),
+      [...CURRICULUM_CONFIGS, existing],
+    )
+    expect(
+      screen.getByText(/You already have "Prayer and Scripture" \(10m · daily\)/),
+    ).toBeInTheDocument()
+    // A warning, never a refusal — the parent may genuinely want a second one.
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument()
+  })
+
+  it('says nothing about duplicates for a genuinely new activity', () => {
+    renderCard(curriculumPending(ADD), CURRICULUM_CONFIGS)
+    expect(screen.queryByText(/You already have/)).not.toBeInTheDocument()
+  })
+
   // DATA-08 — the one add the card must refuse to render.
   it('renders no card for a shared workbook', () => {
     renderCard(

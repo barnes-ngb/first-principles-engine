@@ -87,7 +87,7 @@ import { shellyChatMessagesCollection } from '../../core/firebase/firestore'
 import { updateActivityConfigMinutes } from '../../core/firebase/updateActivityMinutes'
 import { updateChildSoftProfile } from '../../core/family/updateChildSoftProfile'
 import type { ChatAction, Child, WatchVideo } from '../../core/types'
-import type { ActivityType } from '../../core/types/enums'
+import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
 import { todayKey } from '../../core/utils/dateKey'
 import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import { addSightWord, removeSightWord } from '../books/useSightWordProgress'
@@ -180,6 +180,12 @@ export interface ChatActivityConfig {
   completed?: boolean
   /** FEAT-143 — `'workbook'` carries the DATA-08 owner rule. */
   type?: ActivityType
+  /**
+   * UX-205 — how often this activity runs, for the duplicate notice's shape
+   * line ("10m · daily"). Optional because this interface is a structural
+   * narrowing of whatever Firestore stored, not a promise about it.
+   */
+  frequency?: ActivityFrequency
   /** FEAT-143 — where the child is now; absent when the activity has no position. */
   currentPosition?: number
   /** FEAT-143 — the end of the book; the upper bound on a position set. */

@@ -24,6 +24,7 @@ import {
   curriculumActionFootnote,
   describeAddActivityShape,
   describeCurriculumAction,
+  duplicateActivityNotice,
   isCurriculumAction,
   resolveCurriculumAction,
   resolveCurriculumActionForDisplay,
@@ -364,9 +365,12 @@ function CurriculumPreview({
   childName: string
   allChildNames: string[]
 }) {
-  const { action } = resolved
+  const { action, duplicates } = resolved
   const isAdd = action.kind === 'addActivity'
   const shared = isAdd && action.shared === true
+  // UX-205 — only ever populated on the OFFER path, so an applied card does not
+  // report the config its own confirmation just created as a duplicate.
+  const duplicateLine = isAdd && duplicates?.length ? duplicateActivityNotice(duplicates) : ''
   return (
     <Stack spacing={0.25}>
       <Typography
@@ -401,6 +405,14 @@ function CurriculumPreview({
               childName,
             )}
           </Typography>
+          {duplicateLine && (
+            <Typography
+              variant="caption"
+              sx={{ display: 'block', fontWeight: 700, color: 'warning.main' }}
+            >
+              {duplicateLine}
+            </Typography>
+          )}
         </>
       )}
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
