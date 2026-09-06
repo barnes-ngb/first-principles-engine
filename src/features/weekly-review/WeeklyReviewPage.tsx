@@ -115,13 +115,24 @@ function WeeklyReviewBody() {
   // week two back — the owner read "Week of Aug 23–29" on Sat Sep 5 while Aug
   // 31–Sep 4 had finished the day before.
   //
-  // Recomputed every render rather than memoised on `[]`, the way the
-  // planner's `weekRange` is: this is a phone-first surface whose tab is rarely
-  // closed, so a page opened on Friday and looked at on Saturday would
-  // otherwise keep naming the week the fix exists to move off. The value is a
-  // string, so an unchanged week is `===` and the subscription below does not
-  // re-fire.
-  const weekKey = lastCompletedSchoolWeekKey(new Date())
+  // Resolved once, at mount. An earlier commit in this PR recomputed it every
+  // render, reasoning that a phone tab is rarely closed and one opened on
+  // Friday should roll on Saturday. **Codex round 2 (P1) showed that does not
+  // work, and it was right**: recomputing a value during render does not cause
+  // React to render, so revisiting the tab on Saturday schedules nothing and
+  // the DOM and the subscription stay on Friday's answer regardless — while the
+  // dynamic key made a mid-session week change *possible* on any unrelated
+  // re-render, which then left `review`, `isLoading` and `decisionDraft` keyed
+  // to the old week (rounds 2 and 3 found both). It bought nothing and cost
+  // consistency, so it is reverted to the behaviour that shipped.
+  //
+  // The residual is stated rather than hidden: a tab left open across the
+  // Friday→Saturday boundary still names the older week until it is reloaded.
+  // Closing it properly needs a visibility/focus-driven date state plus a
+  // week-keyed reset of every piece of week-scoped state on this page — a real
+  // change, not a one-line one, and beyond what UX-218 asked for (a page
+  // *opened* on Saturday, which this fixes).
+  const weekKey = useMemo(() => lastCompletedSchoolWeekKey(new Date()), [])
   // Named the FEAT-196 way — "Week of Aug 31–Sep 4", the school days themselves —
   // from the planner's own formatter rather than a second copy of it. The
   // Sun–Sat fallback covers an unparseable key, which that formatter reports as
@@ -132,6 +143,11 @@ function WeeklyReviewBody() {
   )
 
   const [review, setReview] = useState<WeeklyReview | null>(null)
+  // A dropped or permission-denied listener leaves `review` null with loading
+  // finished, which is indistinguishable from "the cron has not run yet" unless
+  // we record which it was (Codex round 3, P2). This page's one rule, third
+  // instance: a failed read is never rendered as a result.
+  const [reviewFailed, setReviewFailed] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
@@ -163,10 +179,12 @@ function WeeklyReviewBody() {
         } else {
           setReview(null)
         }
+        setReviewFailed(false)
         setIsLoading(false)
       },
       (err) => {
         console.error('Failed to load weekly review', err)
+        setReviewFailed(true)
         setIsLoading(false)
       },
     )
@@ -184,6 +202,7 @@ function WeeklyReviewBody() {
   if (loadedChildId !== activeChildId) {
     setLoadedChildId(activeChildId)
     setReview(null)
+    setReviewFailed(false)
     setDecisionDraft({})
     setIsLoading(true)
   }
@@ -304,6 +323,7 @@ function WeeklyReviewBody() {
               childId={activeChildId}
               weekKey={weekKey}
               review={review}
+              reviewFailed={reviewFailed}
               history={history}
               historyLoading={historyLoading}
               historyFailed={historyFailed}

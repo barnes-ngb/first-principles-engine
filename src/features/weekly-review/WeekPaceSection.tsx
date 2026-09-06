@@ -14,7 +14,9 @@ import {
   HOURS_SOURCE_CAPTION,
   HOURS_UNAVAILABLE_LINE,
   POSITIONS_PENDING_LINE,
+  REVIEW_UNAVAILABLE_LINE,
   hoursLoggedLine,
+  reviewWasGenerated,
 } from './weekHours'
 import { weekEvidenceCountsLine } from './weekEvidenceCounts'
 import { useWeekHours } from './useWeekHours'
@@ -33,6 +35,15 @@ export interface WeekPaceSectionProps {
    * renders — it simply has no snapshot to build a rate from, and says so.
    */
   review: WeeklyReview | null
+  /**
+   * True when the review document itself could not be read (Codex round 3, P2).
+   *
+   * A third place the page's one rule applies: a failed read is not a result. A
+   * dropped listener leaves `review` null with loading finished, which is
+   * indistinguishable from "the cron has not run" unless the caller says which
+   * it was.
+   */
+  reviewFailed: boolean
   /** Earlier reviews for the same child, for the baseline snapshot. */
   history: WeeklyReview[]
   /** True while the earlier weeks are still being read. */
@@ -72,6 +83,7 @@ function WeekPaceBody({
   childId,
   weekKey,
   review,
+  reviewFailed,
   history,
   historyLoading,
   historyFailed,
@@ -118,24 +130,29 @@ function WeekPaceBody({
       </Stack>
 
       {/*
-        The Saturday case — and ONLY it (Codex round 1, P2).
+        The Saturday case — and ONLY it. Three states, kept apart, because two
+        Codex rounds showed that collapsing any two of them makes this sentence
+        lie:
 
-        This line promises a date, so it may only be shown where that promise is
-        true: the review document does not exist yet, so the Sunday cron has not
-        run for this week and the positions genuinely are still to come.
+          • the read FAILED       → say so, claim nothing (round 3, P2);
+          • the cron HAS run      → say nothing here; a review with no usable
+            snapshot is silent about coverage, because `loadCurriculumSnapshot`
+            omits the field for a child with no positioned workbook config and
+            when the config read throws (round 1, P2);
+          • the cron has NOT run  → the promise, which is now true.
 
-        It keys on the missing DOCUMENT, not on the missing snapshot, because
-        the two are different facts. `loadCurriculumSnapshot`
-        (`functions/src/ai/evaluate.ts:654-674`) omits `curriculumPositions`
-        when the child has no positioned workbook config at all, and again when
-        the `activityConfigs` read throws — in both cases a review exists, the
-        cron HAS run, and nothing further will arrive on Sunday. Keying on the
-        snapshot would have shown a family with no positioned workbooks a
-        promise that never came true, every week, indefinitely. A review that
-        exists without a usable snapshot says nothing about coverage instead,
-        which is what the engine below already does.
+        The third is read from `reviewWasGenerated`, not from the document
+        existing: this PR made `writeWeekReflection` create the document when a
+        parent answers on Saturday, so presence stopped meaning "generated"
+        (round 3, P2).
       */}
-      {review === null && (
+      {reviewFailed && (
+        <Typography variant="body2" color="text.secondary">
+          {REVIEW_UNAVAILABLE_LINE}
+        </Typography>
+      )}
+
+      {!reviewFailed && !reviewWasGenerated(review) && (
         <Typography variant="body2" color="text.secondary">
           {POSITIONS_PENDING_LINE}
         </Typography>

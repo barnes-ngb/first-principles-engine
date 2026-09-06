@@ -45,8 +45,16 @@ const snapshot = (
   ],
 })
 
+// A review the cron GENERATED. `status` is the marker `reviewWasGenerated`
+// reads — the reflection merge writes no status, so presence of one is what
+// separates "the cron ran" from "a parent answered on Saturday".
 const review = (curriculumPositions?: CurriculumSnapshot): WeeklyReview =>
-  ({ childId: 'c1', weekKey: '2026-08-30', curriculumPositions } as unknown as WeeklyReview)
+  ({
+    childId: 'c1',
+    weekKey: '2026-08-30',
+    status: 'draft',
+    curriculumPositions,
+  }) as unknown as WeeklyReview
 
 /** A week's evidence summary, as the Cloud Function assembles it. */
 const evidenceOf = (
@@ -77,7 +85,7 @@ const evidenceOf = (
 function renderWithReview(
   doc: WeeklyReview | null,
   priors: CurriculumSnapshot[] = [],
-  historyState: { loading?: boolean; failed?: boolean } = {},
+  historyState: { loading?: boolean; failed?: boolean; reviewFailed?: boolean } = {},
 ) {
   return render(
     <WeekPaceSection
@@ -85,6 +93,7 @@ function renderWithReview(
       childId="c1"
       weekKey="2026-08-30"
       review={doc}
+      reviewFailed={historyState.reviewFailed ?? false}
       history={priors.map((s) => review(s))}
       historyLoading={historyState.loading ?? false}
       historyFailed={historyState.failed ?? false}
@@ -103,6 +112,7 @@ function renderSection(
       childId="c1"
       weekKey="2026-08-30"
       review={review(current)}
+      reviewFailed={false}
       history={priors.map((s) => review(s))}
       historyLoading={historyState.loading ?? false}
       historyFailed={historyState.failed ?? false}
@@ -312,10 +322,38 @@ describe('the Saturday state — the week is named before its review exists', ()
     const { container } = renderWithReview({
       childId: 'c1',
       weekKey: '2026-08-30',
+      status: 'draft',
     } as unknown as WeeklyReview)
     expect(container.textContent).not.toMatch(/saved Sunday evening/)
     // And it makes no other claim about coverage either.
     expect(container.textContent).not.toMatch(/rate needs two|lesson/i)
+  })
+
+  it('still promises Sunday after a parent answers on Saturday', () => {
+    // Codex round 3, P2. `writeWeekReflection` CREATES the document when the
+    // answer is saved before the cron runs, so a non-null review stopped
+    // meaning "generated" — and keying on presence would have made the only
+    // explanation of the missing rate vanish the moment the parent used the
+    // page. `status` is the marker, and the reflection merge writes none.
+    const { container } = renderWithReview({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      reflection: { answer: 'about-right', answeredAt: '2026-09-05T18:00:00.000Z' },
+    } as unknown as WeeklyReview)
+    expect(container.textContent).toMatch(/saved Sunday evening/)
+  })
+
+  it('never presents a failed review read as "the cron hasn’t run"', () => {
+    // Codex round 3, P2, the other direction: a dropped listener leaves the
+    // review null with loading finished, which is indistinguishable from the
+    // Saturday case unless the caller says which it was.
+    const { container } = renderWithReview(null, [], { reviewFailed: true })
+    expect(container.textContent).not.toMatch(/saved Sunday evening/)
+    expect(
+      screen.getByText(
+        'Couldn’t read this week’s review, so there’s nothing to say about coverage yet.',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('renders nothing for a child profile even with no document', () => {

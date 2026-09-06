@@ -52,8 +52,18 @@ vi.mock('./useWeeklyReviewHistory', () => ({
 // One document, delivered synchronously. `null` is the Saturday case: the
 // Sunday cron has not written anything for the week the page names.
 let currentDoc: WeeklyReview | null = null
+/** When true the listener errors instead of delivering — the dropped-read case. */
+let listenerFails = false
 const mockOnSnapshot = vi.fn(
-  (_ref: unknown, next: (snap: unknown) => void) => {
+  (
+    _ref: unknown,
+    next: (snap: unknown) => void,
+    onError: (err: unknown) => void,
+  ) => {
+    if (listenerFails) {
+      onError(new Error('permission-denied'))
+      return () => {}
+    }
     next({
       exists: () => currentDoc !== null,
       data: () => currentDoc,
@@ -64,8 +74,9 @@ const mockOnSnapshot = vi.fn(
 )
 vi.mock('firebase/firestore', () => ({
   doc: vi.fn(() => ({})),
-  onSnapshot: (...args: [unknown, (snap: unknown) => void]) =>
-    mockOnSnapshot(...args),
+  onSnapshot: (
+    ...args: [unknown, (snap: unknown) => void, (err: unknown) => void]
+  ) => mockOnSnapshot(...args),
   runTransaction: vi.fn(),
 }))
 
@@ -105,6 +116,7 @@ const withNarrative = (): WeeklyReview =>
 beforeEach(() => {
   vi.clearAllMocks()
   currentDoc = null
+  listenerFails = false
   mockUseActiveChild.mockReturnValue(PARENT)
   mockUseFamilyId.mockReturnValue('fam-1')
   mockUseWeekHours.mockReturnValue({ totalMinutes: 288, loading: false, error: null })
@@ -225,6 +237,21 @@ describe('a week with nothing in it is still a week (UX-219)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('never renders a dropped review read as a quiet Saturday', () => {
+    // Codex round 3, P2. Without the explicit failure state, an errored
+    // listener leaves `review` null with loading finished — which the pending
+    // line would have reported as "the cron hasn't run yet", a claim about the
+    // server made on nothing from it.
+    listenerFails = true
+    render(<WeeklyReviewPage />)
+    expect(
+      screen.getByText(
+        'Couldn’t read this week’s review, so there’s nothing to say about coverage yet.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/saved Sunday evening/)).not.toBeInTheDocument()
   })
 
   it('shows no adjustments section when the review has none', () => {
