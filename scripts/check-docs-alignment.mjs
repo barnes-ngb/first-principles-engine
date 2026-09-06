@@ -162,13 +162,44 @@ export function findOpenPrStatusRows(md) {
 }
 
 /**
- * The phrasings a status cell uses to claim its PR HAS landed.
+ * The phrasings a status cell uses to claim its PR AFFIRMATIVELY LANDED.
  *
- * Deliberately narrow — a landed marker, not a general "looks done": these are
- * the words the house convention actually uses to flip a row on the final
- * pre-merge commit.
+ * NARROW ON PURPOSE, and the narrowness was earned (Codex P1 on PR #1787).
+ * The first draft of this list was `FIXED` / `RESOLVED` / `merged`, which is
+ * wrong: those words describe the WORK being complete, not the PR being in.
+ * A row may legitimately read
+ *
+ *     **FIXED** (FEAT-183, PR open, branch `claude/london-run-a-…`)
+ *
+ * — and two really did (ARCH-42 and UX-152, commit `bfb8991`). Matching on
+ * `FIXED` alone would have made check 11b reject exactly the in-flight rows
+ * check 11 deliberately leaves SOFT, which is the false-positive class
+ * `findOpenPrStatusRows`' docblock warns gets a rule deleted rather than fixed.
+ * `/\bmerged\b/` alone was wrong for a second reason: it also matches the
+ * negation "not merged".
+ *
+ * So a landed claim must name the landing, not the completion — ONE pattern: a
+ * specific PR by number, followed by a merge word or an ISO date.
+ * `(PR #1785, 2026-09-06)` and `PR #1785, merged` are the house's flipped-on-
+ * merge form, and the first is exactly what the broken UX-218 cell said.
+ *
+ * A bare `/\bmerged\b/` was tried and dropped. Sweeping all 134 historical
+ * revisions of the ledger found it firing on FEAT-177's legitimately in-flight
+ * cell (`1a6b1d80`), which reads "BUILT (PR open, 2026-09-03) — do not merge;
+ * cell flips to the house `**MERGED** (PR #NNNN, …)` wording on the final
+ * commit" — prose ABOUT the merged wording, in a row that had not merged. That
+ * is the same class as the `FIXED` mistake and would have reddened a correct
+ * PR. Negation lookbehinds would not have saved it either; the word simply is
+ * not evidence on its own.
+ *
+ * "PR open" carries no number-plus-date, so the ARCH-42 shape is untouched. The
+ * list stays at one pattern until a real episode proves a gap — the same rule
+ * `OPEN_PR_STATUS_PATTERNS` grew under. **Validated against every historical
+ * revision, not reasoned about**; the test re-runs that sweep.
  */
-const LANDED_STATUS_PATTERNS = [/\bFIXED\b/i, /\bRESOLVED\b/i, /\bmerged\b/i]
+const LANDED_STATUS_PATTERNS = [
+  /\bPR\s*#\d+\s*,\s*(?:merged\b|\d{4}-\d{2}-\d{2})/i,
+]
 
 /**
  * Ledger rows whose status cell claims BOTH that its PR landed and that it has
@@ -189,10 +220,11 @@ const LANDED_STATUS_PATTERNS = [/\bFIXED\b/i, /\bRESOLVED\b/i, /\bmerged\b/i]
  * as a status cell the pair is nonsense, and it sailed through four SOFT
  * pre-merge runs before turning the push to `main` red.
  *
- * A cell claiming both is wrong wherever it appears and whatever the branch, so
- * this one is unconditionally HARD — which puts it back on the PR, where the
- * author can see it. It does NOT widen `OPEN_PR_STATUS_PATTERNS`: the honest
- * in-flight wording is untouched and stays SOFT off `main`.
+ * A cell naming a landed PR while also saying it must not be merged is wrong
+ * wherever it appears and whatever the branch, so this one is unconditionally
+ * HARD — which puts it back on the PR, where the author can see it. It does NOT
+ * widen `OPEN_PR_STATUS_PATTERNS`: the honest in-flight wording is untouched and
+ * stays SOFT off `main`.
  *
  * Status-cell-only, for the same reason as `findOpenPrStatusRows`: row bodies
  * quote these words as prose while narrating history, and matching bodies would

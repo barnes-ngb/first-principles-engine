@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
@@ -437,11 +438,77 @@ describe('findContradictoryStatusRows', () => {
 
   it('fires on the "awaiting review/merge" wording too, not just "do not merge"', () => {
     const md =
-      '| **FEAT-99** | 2 | **FIXED** (PR #1681) — awaiting human review + merge | t | e |'
+      '| **FEAT-99** | 2 | **FIXED** (PR #1681, merged) — awaiting human review + merge | t | e |'
     expect(findContradictoryStatusRows(md).map((r) => r.id)).toEqual(['FEAT-99'])
   })
 
-  it('holds on the real ledger', () => {
+  // ── The two false positives that shaped LANDED_STATUS_PATTERNS ────────────
+  // Both are REAL historical cells, not invented ones. Codex found the first
+  // (PR #1787, P1); the 134-revision sweep below found the second.
+
+  it('leaves ARCH-42 alone — "FIXED" describes the work, not the landing', () => {
+    // Commit bfb8991, legitimately in flight at the time. The first draft of
+    // this check matched on `FIXED` and would have reddened a correct PR.
+    const md =
+      '| **ARCH-42** | 2 | **FIXED** (FEAT-183, PR open, branch ' +
+      '`claude/london-run-a-capability-gates-skzsxc`) — the branch keys on ' +
+      '`resolveChildAgeGroup` | t | e |'
+    expect(findContradictoryStatusRows(md)).toEqual([])
+    expect(findOpenPrStatusRows(md).map((r) => r.id)).toEqual(['ARCH-42'])
+  })
+
+  it('leaves FEAT-177 alone — prose ABOUT the merged wording is not a merge claim', () => {
+    // Commit 1a6b1d80. A bare /\bmerged\b/ pattern fired on this and was
+    // dropped: the cell says it has NOT merged, while naming the wording it
+    // will use when it does.
+    const md =
+      '| **FEAT-177** | 2 | **BUILT (PR open, 2026-09-03) — do not merge; cell ' +
+      'flips to the house `**MERGED** (PR #NNNN, …)` wording on the final ' +
+      'commit** | t | e |'
+    expect(findContradictoryStatusRows(md)).toEqual([])
+  })
+
+  it('holds across every historical revision of the real ledger', () => {
+    // The claim this check rests on is empirical, so the test measures it
+    // rather than restating it: replay the guard over every commit that
+    // touched the ledger. Exactly one revision may hit — 1a7c568, the cell
+    // that turned `main` red and that this PR fixes. Any other hit is a false
+    // positive on a row that was correct at the time, which is the failure
+    // mode that gets a rule deleted rather than fixed.
+    const repo = join(import.meta.dirname, '..')
+    const revs = execFileSync(
+      'git',
+      ['log', '--format=%H', '--', 'docs/review/REVIEW_HOME_BASE.md'],
+      { cwd: repo, maxBuffer: 1 << 28 },
+    )
+      .toString()
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+
+    expect(revs.length).toBeGreaterThan(50) // the sweep is meaningless if empty
+
+    const offenders = []
+    for (const rev of revs) {
+      let md
+      try {
+        md = execFileSync('git', ['show', `${rev}:docs/review/REVIEW_HOME_BASE.md`], {
+          cwd: repo,
+          maxBuffer: 1 << 28,
+        }).toString()
+      } catch {
+        continue
+      }
+      for (const row of findContradictoryStatusRows(md)) {
+        offenders.push(`${rev.slice(0, 10)}:${row.id}`)
+      }
+    }
+
+    // Only the known-bad cell, and only on the commit that introduced it.
+    expect([...new Set(offenders.map((o) => o.split(':')[1]))]).toEqual(['UX-218'])
+  })
+
+  it('holds on the live ledger', () => {
     const md = readFileSync(
       join(import.meta.dirname, '..', 'docs', 'review', 'REVIEW_HOME_BASE.md'),
       'utf8',
