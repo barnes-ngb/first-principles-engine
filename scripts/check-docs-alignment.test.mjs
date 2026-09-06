@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
   parseLedgerIds,
   parseLedgerStatusCells,
   findOpenPrStatusRows,
+  findContradictoryStatusRows,
   ledgerStatusIsHard,
   parseLedgerAnchors,
   parseIndexRows,
@@ -391,5 +394,60 @@ describe('findUnroutedDayWrites (day-write routing invariant, FEAT-114)', () => 
       "await deleteDoc(doc(weeksCollection(familyId), weekId))",
     ].join('\n')
     expect(findUnroutedDayWrites(content)).toEqual([])
+  })
+})
+
+describe('findContradictoryStatusRows', () => {
+  // The episode: PR #1785's final pre-merge commit flipped UX-218 to FIXED and
+  // recorded the run's own "CODEX ROUND: open — do not merge yet" line in the
+  // SAME cell. Both halves were true about the run; as a status cell the pair
+  // is nonsense, and because [ledger-status] is SOFT off `main` it passed four
+  // pre-merge runs and then turned the push to `main` red.
+  const realCell =
+    '| **UX-218** | 2 | **FIXED** (PR #1785, 2026-09-06) — cell flipped on the ' +
+    'final pre-merge commit, so the run summary reads `CODEX ROUND: open — do ' +
+    'not merge yet` and the merge decision is the owner\'s | title | ev |'
+
+  it('catches the cell that actually broke main', () => {
+    expect(findContradictoryStatusRows(realCell).map((r) => r.id)).toEqual(['UX-218'])
+  })
+
+  it('leaves an honest in-flight row alone — that is check 11 s job, and it is SOFT off main', () => {
+    const md = '| **ARCH-99** | 2 | BUILT (PR open) — do not merge | title | ev |'
+    expect(findContradictoryStatusRows(md)).toEqual([])
+    // …and the existing rule still sees it, so nothing was widened.
+    expect(findOpenPrStatusRows(md).map((r) => r.id)).toEqual(['ARCH-99'])
+  })
+
+  it('leaves a plainly landed row alone', () => {
+    const md = [
+      '| **FEAT-10** | 2 | **FIXED** (PR #1785, merged 2026-09-06) | title | ev |',
+      '| **FEAT-11** | 3 | **RESOLVED** 2026-08-01 | title | ev |',
+      '| **FEAT-12** | 3 | OPEN | title | ev |',
+    ].join('\n')
+    expect(findContradictoryStatusRows(md)).toEqual([])
+  })
+
+  it('reads the status cell only, so a body narrating the drift never fires', () => {
+    const md =
+      '| **DOC-11** | 3 | **FIXED** (PR #1657, merged) | sweep | rows reading ' +
+      '"PR open" / "do not merge" long after the PR merged |'
+    expect(findContradictoryStatusRows(md)).toEqual([])
+  })
+
+  it('fires on the "awaiting review/merge" wording too, not just "do not merge"', () => {
+    const md =
+      '| **FEAT-99** | 2 | **FIXED** (PR #1681) — awaiting human review + merge | t | e |'
+    expect(findContradictoryStatusRows(md).map((r) => r.id)).toEqual(['FEAT-99'])
+  })
+
+  it('holds on the real ledger', () => {
+    const md = readFileSync(
+      join(import.meta.dirname, '..', 'docs', 'review', 'REVIEW_HOME_BASE.md'),
+      'utf8',
+    )
+    // Unlike check 11, this one is safe to assert against the live document on
+    // any branch: a contradiction is never the correct in-flight wording.
+    expect(findContradictoryStatusRows(md)).toEqual([])
   })
 })

@@ -162,6 +162,53 @@ export function findOpenPrStatusRows(md) {
 }
 
 /**
+ * The phrasings a status cell uses to claim its PR HAS landed.
+ *
+ * Deliberately narrow — a landed marker, not a general "looks done": these are
+ * the words the house convention actually uses to flip a row on the final
+ * pre-merge commit.
+ */
+const LANDED_STATUS_PATTERNS = [/\bFIXED\b/i, /\bRESOLVED\b/i, /\bmerged\b/i]
+
+/**
+ * Ledger rows whose status cell claims BOTH that its PR landed and that it has
+ * not — always a contradiction, on any branch.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS SEPARATE FROM [ledger-status] (2026-09-06).
+ * `[ledger-status]` is HARD on `main` and SOFT elsewhere for a good reason
+ * (see {@link ledgerStatusIsHard}): a run's own in-flight row legitimately
+ * reads "BUILT (PR open) — do not merge", so an always-HARD rule would redden
+ * every feature PR on its own correct row. The cost of that split is that a bad
+ * cell is only *warned* about until the merge commit, and then reddens `main` —
+ * where it blocks everyone, not just its author.
+ *
+ * PR #1785 hit exactly that. Its final pre-merge commit flipped UX-218 to
+ * "**FIXED** (PR #1785, 2026-09-06)" and, in the SAME cell, recorded that the
+ * run had ended under the three-round cap with the summary line
+ * "CODEX ROUND: open — do not merge yet". Both halves were true about the run;
+ * as a status cell the pair is nonsense, and it sailed through four SOFT
+ * pre-merge runs before turning the push to `main` red.
+ *
+ * A cell claiming both is wrong wherever it appears and whatever the branch, so
+ * this one is unconditionally HARD — which puts it back on the PR, where the
+ * author can see it. It does NOT widen `OPEN_PR_STATUS_PATTERNS`: the honest
+ * in-flight wording is untouched and stays SOFT off `main`.
+ *
+ * Status-cell-only, for the same reason as `findOpenPrStatusRows`: row bodies
+ * quote these words as prose while narrating history, and matching bodies would
+ * fire on rows that are already correct.
+ *
+ * @returns {{ id: string, status: string, line: number }[]}
+ */
+export function findContradictoryStatusRows(md) {
+  return parseLedgerStatusCells(md).filter(
+    (r) =>
+      LANDED_STATUS_PATTERNS.some((re) => re.test(r.status)) &&
+      OPEN_PR_STATUS_PATTERNS.some((re) => re.test(r.status)),
+  )
+}
+
+/**
  * Is the [ledger-status] rule HARD for this run? HARD only when the checker is
  * running against `main`; SOFT (warn) everywhere else.
  *
@@ -914,6 +961,34 @@ export function runChecks({ fix = false } = {}) {
         log(`        ${m}`)
         soft.push({ check: 'ledger-status', message: m })
       }
+    }
+  }
+  log('')
+
+  // ── Check 11b: a status cell may not claim a PR both landed and open ──────
+  // Unconditionally HARD, unlike check 11: "FIXED (PR #123)" AND "do not merge"
+  // in one cell is a contradiction on every branch, so there is no in-flight
+  // case to protect and no reason to defer it to the merge commit. See
+  // findContradictoryStatusRows() for the episode that earned it.
+  const contradictoryRows = findContradictoryStatusRows(ledgerMd)
+  if (contradictoryRows.length === 0) {
+    log(
+      paint(
+        GREEN,
+        `PASS  [ledger-status-contradiction] no row claims its PR both landed and open`,
+      ),
+    )
+  } else {
+    log(
+      paint(
+        RED,
+        `FAIL  [ledger-status-contradiction] status cell(s) claiming the PR both landed AND not:`,
+      ),
+    )
+    for (const r of contradictoryRows) {
+      const m = `${r.id} (line ${r.line}) status reads "${r.status}" — a landed row cannot also say "PR open" / "do not merge"; move the round record into the row body`
+      log(`        ${m}`)
+      hard.push({ check: 'ledger-status-contradiction', message: m })
     }
   }
   log('')
