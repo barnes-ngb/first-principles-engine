@@ -394,7 +394,7 @@ Run these 5 checks to verify the app is functional:
 | **"You do not have access to this family"** | `auth.uid !== familyId` | Family doc ID must match the authenticated user's UID |
 | **Enriched context missing** | Firestore collections empty or query failed | Check that `sessions`, `workbookConfigs`, `weeks`, `hours` collections have data; check for missing composite indexes |
 | **Weekly review not generating** | Scheduled function not deployed or no data | Deploy with `firebase deploy --only functions`; verify children exist; check that the previous week has session/hours data |
-| **Image generation fails** | OpenAI API key missing or DALL-E quota exceeded | Set `OPENAI_API_KEY` secret; check OpenAI billing dashboard |
+| **Image generation fails** | OpenAI API key missing or gpt-image-1.5 quota exceeded | Set `OPENAI_API_KEY` secret; check OpenAI billing dashboard |
 | **`<finding>` blocks not extracted** | AI response doesn't include the XML-like tags | Check evaluation system prompt is being sent; may need to re-run the evaluation |
 | **Hours showing 0 despite logging** | Wrong school year boundary | Hours query filters by `date >= schoolYearStart` (Aug 1); verify dates are stored as `YYYY-MM-DD` |
 | **MVD mode shows all items** | Items not properly tagged with `category` or `mvdEssential` | Check plan data in Firestore; `mvdEssential: true` and `category: "must-do"` required |

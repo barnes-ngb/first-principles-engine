@@ -58,7 +58,7 @@ Lincoln's role as **Playtester** is built and structured:
 #### 🎲 Board Games
 - Wizard Steps: Game Type → Theme → Players → Goal → Challenges → Board Style
 - CSS Grid board with snaking path, player tokens, challenge/bonus/setback/shortcut spaces
-- DALL-E generated board background with overlay for readability
+- gpt-image-1.5 generated board background with overlay for readability
 - Challenge cards: Reading, Math, Story, Action types
 - Difficulty calibration: majority at London's skill level, 1-2 stretch "boss" cards
 - 15/25/35 space boards (Short/Medium/Long)
@@ -68,7 +68,7 @@ Lincoln's role as **Playtester** is built and structured:
 - AI generates branching story tree (nodes with 2-3 choices each)
 - No dead ends — retry endings loop back to previous choice
 - Embedded challenge cards at some nodes
-- Scene illustrations via DALL-E at key narrative nodes
+- Scene illustrations via gpt-image-1.5 at key narrative nodes
 - Short (5 choices, ~5 min), Medium (8 choices, ~10 min), Long (12 choices, ~15 min)
 
 #### 🃏 Card Games (three mechanics)
@@ -92,7 +92,7 @@ Lincoln's role as **Playtester** is built and structured:
 
 **Player Selection** (shared by all types):
 - Family member cards: Lincoln and London with Minecraft avatars from `avatarProfiles`
-- Mom/Dad with DALL-E generated themed tokens
+- Mom/Dad with gpt-image-1.5 generated themed tokens
 - London auto-selected (Story Keeper, always plays)
 - Minimum 2, maximum 4 players
 - Read-aloud tile pattern on all player cards
@@ -101,7 +101,7 @@ Lincoln's role as **Playtester** is built and structured:
 
 **Draft auto-save:** Wizard progress saves after each step. If London exits mid-creation, his draft appears in Game Workshop with "Continue Creating" at the last incomplete step. Drafts visible only to the creator.
 
-### DALL-E Art Generation
+### Image Art Generation
 
 Art generates in parallel with game data during a loading screen ("Painting your world...", "Drawing the challenges..."):
 
@@ -115,7 +115,7 @@ Art generates in parallel with game data during a loading screen ("Painting your
 | Card back design | Card game card backs | One design per game |
 | Card face art | Card game individual cards | Cost-capped at 15 images per game |
 
-Uses `Promise.allSettled` — if any DALL-E call fails, game is fully playable with CSS/emoji fallbacks. "Regenerate Art" retry button in gallery for failed generations. Title screen waits for game data (needs real title); all other art runs in parallel.
+Uses `Promise.allSettled` — if any image call fails, game is fully playable with CSS/emoji fallbacks. "Regenerate Art" retry button in gallery for failed generations. Title screen waits for game data (needs real title); all other art runs in parallel.
 
 ### Play Experience (All Game Types)
 
@@ -300,7 +300,7 @@ interface StoryGame {
 ### Cloud Function
 - Existing `chat` function with `taskType: 'workshop'`
 - Handles: board game generation, adventure tree generation, card game generation, card fix suggestions
-- Existing `generateImage` function handles all DALL-E art
+- Existing `generateImage` function handles all image art
 
 ---
 
@@ -358,7 +358,7 @@ Built for the workshop, available app-wide:
 | Challenge difficulty | Mix — most at skill level, 1-2 stretch "boss" cards |
 | Hours categorization | Split by challenge card types proportionally |
 | Today page | Yes — "new game" and "continue game" cards |
-| Character vs player tokens | Players ARE the family — avatars for kids, DALL-E for parents |
+| Character vs player tokens | Players ARE the family — avatars for kids, gpt-image-1.5 for parents |
 | Art generation timing | During wizard completion, parallel with game generation |
 | Cross-device visibility | All family games visible; drafts creator-only |
 | Multi-device play | Deferred — pass-and-play for now |
