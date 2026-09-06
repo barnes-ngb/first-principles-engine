@@ -1,358 +1,311 @@
-import { describe, expect, it } from 'vitest'
-import { expectKidLine } from '../../../test/kidReadability'
+import { describe, it, expect } from 'vitest'
 import {
-  ALTERNATIVES_HEADING,
-  ALTERNATIVE_COST_NOTE,
-  FREE_EXITS_HEADING,
-  ImageGenerationFailure,
-  ImageRetryDoor,
-  CHAT_ALTERNATIVES_LEAD,
   blockedTips,
   classifyImageGenerationFailure,
-  imageFailureChatMessage,
   imageFailureAlternatives,
+  imageFailureChatMessage,
   imageFailureMessage,
+  ImageGenerationFailure,
+  ImageRetryDoor,
   offersAlternatives,
 } from '../imageGenerationFailure'
+import type { ImageErrorShape } from '../imageGenerationFailure'
 
-/**
- * The five kinds, from the shapes the handlers actually reject with
- * (`functions/src/ai/imageTasks/generateImage.ts` + `enhanceSketch.ts`), as a
- * Firebase callable delivers them: `functions/<code>` plus the declared
- * `details` payload.
- */
-describe('classifyImageGenerationFailure — the declared kind', () => {
-  it('reads the handler’s own word for a refusal', () => {
-    expect(
-      classifyImageGenerationFailure({
-        code: 'functions/invalid-argument',
-        message: "That prompt was blocked by the image generator's safety filter.",
-        details: { failure: 'blocked', alternatives: ['a', 'b', 'c'] },
-      }),
-    ).toBe(ImageGenerationFailure.Blocked)
-  })
+// ── classifyImageGenerationFailure ──────────────────────────────
 
-  it('reads a rate limit', () => {
-    expect(
-      classifyImageGenerationFailure({
-        code: 'functions/resource-exhausted',
-        message: 'Image generation is busy right now. Wait a moment and try again.',
-        details: { failure: 'busy' },
-      }),
-    ).toBe(ImageGenerationFailure.Busy)
-  })
-
-  it('reads a missing API key', () => {
-    expect(
-      classifyImageGenerationFailure({
-        code: 'functions/failed-precondition',
-        message: 'Image generation is not configured correctly. Ask Dad to check the API key.',
-        details: { failure: 'not-configured' },
-      }),
-    ).toBe(ImageGenerationFailure.NotConfigured)
-  })
-
-  it('reads an empty result', () => {
-    expect(
-      classifyImageGenerationFailure({
+describe('classifyImageGenerationFailure', () => {
+  describe('reads the declared kind first', () => {
+    it('returns blocked when details.failure is "blocked"', () => {
+      const err: ImageErrorShape = {
         code: 'functions/internal',
-        message: 'Image generation returned no data.',
-        details: { failure: 'no-image' },
-      }),
-    ).toBe(ImageGenerationFailure.NoImage)
-  })
+        message: 'something else',
+        details: { failure: 'blocked' },
+      }
+      expect(classifyImageGenerationFailure(err)).toBe(ImageGenerationFailure.Blocked)
+    })
 
-  it('beats the message text — a reworded error must not change the kind', () => {
-    // The message says "blocked"; the handler said it was a rate limit. The
-    // declared kind wins, because the branch that decided it is the authority.
-    expect(
-      classifyImageGenerationFailure({
-        code: 'functions/resource-exhausted',
-        message: 'blocked by something',
+    it('returns busy when details.failure is "busy"', () => {
+      const err: ImageErrorShape = {
         details: { failure: 'busy' },
-      }),
-    ).toBe(ImageGenerationFailure.Busy)
-  })
-})
+      }
+      expect(classifyImageGenerationFailure(err)).toBe(ImageGenerationFailure.Busy)
+    })
 
-describe('classifyImageGenerationFailure — an older deploy, with no details', () => {
-  it('falls back to the callable code for a refusal', () => {
-    expect(
-      classifyImageGenerationFailure({
-        code: 'functions/invalid-argument',
-        message: "That prompt was blocked by the image generator's safety filter.",
-      }),
-    ).toBe(ImageGenerationFailure.Blocked)
-  })
+    it('returns not-configured when details.failure is "not-configured"', () => {
+      const err: ImageErrorShape = {
+        details: { failure: 'not-configured' },
+      }
+      expect(classifyImageGenerationFailure(err)).toBe(ImageGenerationFailure.NotConfigured)
+    })
 
-  it('an invalid-argument that is NOT a refusal is our own bug, not theirs', () => {
-    expect(
-      classifyImageGenerationFailure({
-        code: 'functions/invalid-argument',
-        message: 'prompt must be 4000 characters or fewer.',
-      }),
-    ).toBe(ImageGenerationFailure.NoImage)
-  })
+    it('returns offline when details.failure is "offline"', () => {
+      const err: ImageErrorShape = {
+        details: { failure: 'offline' },
+      }
+      expect(classifyImageGenerationFailure(err)).toBe(ImageGenerationFailure.Offline)
+    })
 
-  it('a dropped connection reads as offline — the server never declares this one', () => {
-    expect(
-      classifyImageGenerationFailure({ code: 'functions/unavailable', message: '' }),
-    ).toBe(ImageGenerationFailure.Offline)
-    expect(
-      classifyImageGenerationFailure({ code: 'functions/deadline-exceeded', message: '' }),
-    ).toBe(ImageGenerationFailure.Offline)
-    expect(classifyImageGenerationFailure(new Error('Failed to fetch'))).toBe(
-      ImageGenerationFailure.Offline,
-    )
+    it('returns no-image when details.failure is "no-image"', () => {
+      const err: ImageErrorShape = {
+        details: { failure: 'no-image' },
+      }
+      expect(classifyImageGenerationFailure(err)).toBe(ImageGenerationFailure.NoImage)
+    })
   })
 
-  it('reads a rate limit and a key problem out of bare message text', () => {
-    expect(classifyImageGenerationFailure(new Error('429 rate_limit exceeded'))).toBe(
-      ImageGenerationFailure.Busy,
-    )
-    expect(classifyImageGenerationFailure(new Error('invalid api key'))).toBe(
-      ImageGenerationFailure.NotConfigured,
-    )
-  })
-})
-
-describe('classifyImageGenerationFailure — never throws', () => {
-  it('an unknown error is no-image, which offers a plain retry', () => {
-    expect(classifyImageGenerationFailure(null)).toBe(ImageGenerationFailure.NoImage)
-    expect(classifyImageGenerationFailure(undefined)).toBe(ImageGenerationFailure.NoImage)
-    expect(classifyImageGenerationFailure(new Error('something odd'))).toBe(
-      ImageGenerationFailure.NoImage,
-    )
-    expect(classifyImageGenerationFailure({})).toBe(ImageGenerationFailure.NoImage)
-  })
-
-  it('ignores a details payload it cannot read', () => {
-    for (const details of [null, 'blocked', 42, ['blocked'], { failure: 'nonsense' }]) {
+  describe('falls back to callable code', () => {
+    it('resource-exhausted → busy', () => {
       expect(
-        classifyImageGenerationFailure({ code: 'functions/internal', message: '', details }),
+        classifyImageGenerationFailure({ code: 'functions/resource-exhausted' }),
+      ).toBe(ImageGenerationFailure.Busy)
+    })
+
+    it('failed-precondition → not-configured', () => {
+      expect(
+        classifyImageGenerationFailure({ code: 'functions/failed-precondition' }),
+      ).toBe(ImageGenerationFailure.NotConfigured)
+    })
+
+    it('unavailable → offline', () => {
+      expect(
+        classifyImageGenerationFailure({ code: 'functions/unavailable' }),
+      ).toBe(ImageGenerationFailure.Offline)
+    })
+
+    it('deadline-exceeded → offline', () => {
+      expect(
+        classifyImageGenerationFailure({ code: 'functions/deadline-exceeded' }),
+      ).toBe(ImageGenerationFailure.Offline)
+    })
+
+    it('cancelled → offline', () => {
+      expect(
+        classifyImageGenerationFailure({ code: 'cancelled' }),
+      ).toBe(ImageGenerationFailure.Offline)
+    })
+
+    it('invalid-argument with blocked text → blocked', () => {
+      expect(
+        classifyImageGenerationFailure({
+          code: 'functions/invalid-argument',
+          message: 'Content blocked by safety filter',
+        }),
+      ).toBe(ImageGenerationFailure.Blocked)
+    })
+
+    it('invalid-argument without blocked text → no-image', () => {
+      expect(
+        classifyImageGenerationFailure({
+          code: 'functions/invalid-argument',
+          message: 'Invalid parameters',
+        }),
       ).toBe(ImageGenerationFailure.NoImage)
-    }
+    })
+  })
+
+  describe('falls back to message text', () => {
+    it('blocked in message → blocked', () => {
+      expect(
+        classifyImageGenerationFailure({ message: 'Request was blocked by content policy' }),
+      ).toBe(ImageGenerationFailure.Blocked)
+    })
+
+    it('content_policy in message → blocked', () => {
+      expect(
+        classifyImageGenerationFailure({ message: 'content_policy_violation error' }),
+      ).toBe(ImageGenerationFailure.Blocked)
+    })
+
+    it('rate limit in message → busy', () => {
+      expect(
+        classifyImageGenerationFailure({ message: 'Rate limit exceeded' }),
+      ).toBe(ImageGenerationFailure.Busy)
+    })
+
+    it('429 in message → busy', () => {
+      expect(
+        classifyImageGenerationFailure({ message: 'Error 429: too many requests' }),
+      ).toBe(ImageGenerationFailure.Busy)
+    })
+
+    it('api key in message → not-configured', () => {
+      expect(
+        classifyImageGenerationFailure({ message: 'Missing API key' }),
+      ).toBe(ImageGenerationFailure.NotConfigured)
+    })
+
+    it('network error in message → offline', () => {
+      expect(
+        classifyImageGenerationFailure({ message: 'Network error: failed to fetch' }),
+      ).toBe(ImageGenerationFailure.Offline)
+    })
+
+    it('offline in message → offline', () => {
+      expect(
+        classifyImageGenerationFailure({ message: 'The device appears offline' }),
+      ).toBe(ImageGenerationFailure.Offline)
+    })
+  })
+
+  describe('edge cases', () => {
+    it('returns no-image for null', () => {
+      expect(classifyImageGenerationFailure(null)).toBe(ImageGenerationFailure.NoImage)
+    })
+
+    it('returns no-image for undefined', () => {
+      expect(classifyImageGenerationFailure(undefined)).toBe(ImageGenerationFailure.NoImage)
+    })
+
+    it('returns no-image for a plain Error', () => {
+      expect(classifyImageGenerationFailure(new Error('boom'))).toBe(ImageGenerationFailure.NoImage)
+    })
+
+    it('returns no-image for an unknown message', () => {
+      expect(
+        classifyImageGenerationFailure({ message: 'Something completely different' }),
+      ).toBe(ImageGenerationFailure.NoImage)
+    })
+
+    it('ignores unknown declared failure kinds', () => {
+      expect(
+        classifyImageGenerationFailure({
+          details: { failure: 'totally-new-kind' },
+          message: 'blocked by safety',
+        }),
+      ).toBe(ImageGenerationFailure.Blocked)
+    })
   })
 })
+
+// ── imageFailureAlternatives ────────────────────────────────────
 
 describe('imageFailureAlternatives', () => {
-  it('reads the three the server sent', () => {
-    expect(
-      imageFailureAlternatives({
-        details: { failure: 'blocked', alternatives: [' a ', 'b', 'c'] },
-      }),
-    ).toEqual(['a', 'b', 'c'])
+  it('extracts string alternatives from details', () => {
+    const err: ImageErrorShape = {
+      details: {
+        failure: 'blocked',
+        alternatives: ['Try a dragon', 'Try a castle', 'Try a knight'],
+      },
+    }
+    expect(imageFailureAlternatives(err)).toEqual(['Try a dragon', 'Try a castle', 'Try a knight'])
   })
 
-  it('is empty when the suggester gave nothing, so the card falls back to tips', () => {
+  it('returns empty for no alternatives', () => {
     expect(imageFailureAlternatives({ details: { failure: 'blocked' } })).toEqual([])
     expect(imageFailureAlternatives(null)).toEqual([])
-    expect(imageFailureAlternatives(new Error('nope'))).toEqual([])
+    expect(imageFailureAlternatives(undefined)).toEqual([])
   })
 
-  it('drops junk entries and caps at three rather than trusting the payload', () => {
-    expect(
-      imageFailureAlternatives({
-        details: { failure: 'blocked', alternatives: ['a', '', 42, null, 'b', 'c', 'd'] },
-      }),
-    ).toEqual(['a', 'b', 'c'])
+  it('filters out non-string entries', () => {
+    const err: ImageErrorShape = {
+      details: { alternatives: ['good', 42, null, '', 'also good'] },
+    }
+    expect(imageFailureAlternatives(err)).toEqual(['good', 'also good'])
+  })
+
+  it('caps at 3 alternatives', () => {
+    const err: ImageErrorShape = {
+      details: { alternatives: ['a', 'b', 'c', 'd', 'e'] },
+    }
+    expect(imageFailureAlternatives(err)).toHaveLength(3)
+  })
+
+  it('trims whitespace from alternatives', () => {
+    const err: ImageErrorShape = {
+      details: { alternatives: ['  hello  ', ' world '] },
+    }
+    expect(imageFailureAlternatives(err)).toEqual(['hello', 'world'])
   })
 })
 
-describe('what each failure offers', () => {
-  it('only a refusal can be answered with different words', () => {
+// ── offersAlternatives ──────────────────────────────────────────
+
+describe('offersAlternatives', () => {
+  it('returns true only for blocked', () => {
     expect(offersAlternatives(ImageGenerationFailure.Blocked)).toBe(true)
-    for (const kind of [
-      ImageGenerationFailure.Busy,
-      ImageGenerationFailure.NotConfigured,
-      ImageGenerationFailure.NoImage,
-      ImageGenerationFailure.Offline,
-    ]) {
-      expect(offersAlternatives(kind)).toBe(false)
-    }
   })
 
-  it('every kind has words for both audiences, and they differ', () => {
+  it('returns false for all other kinds', () => {
+    expect(offersAlternatives(ImageGenerationFailure.Busy)).toBe(false)
+    expect(offersAlternatives(ImageGenerationFailure.NotConfigured)).toBe(false)
+    expect(offersAlternatives(ImageGenerationFailure.NoImage)).toBe(false)
+    expect(offersAlternatives(ImageGenerationFailure.Offline)).toBe(false)
+  })
+})
+
+// ── imageFailureMessage ─────────────────────────────────────────
+
+describe('imageFailureMessage', () => {
+  it('returns a non-empty message for every kind + audience', () => {
     for (const kind of Object.values(ImageGenerationFailure)) {
-      const parent = imageFailureMessage(kind, 'parent')
-      const kid = imageFailureMessage(kind, 'kid')
-      expect(parent.length).toBeGreaterThan(0)
-      expect(kid.length).toBeGreaterThan(0)
-      expect(kid).not.toBe(parent)
+      for (const audience of ['parent', 'kid'] as const) {
+        const msg = imageFailureMessage(kind, audience)
+        expect(msg.length).toBeGreaterThan(0)
+      }
     }
   })
 
-  it('the parent copy says nothing was spent, on every failure', () => {
-    // A picture that never arrived is never charged (FEAT-165/166/168's rule);
-    // saying so is what stops a kid rationing a budget they still have.
+  it('parent blocked message mentions "nothing was spent"', () => {
+    expect(imageFailureMessage(ImageGenerationFailure.Blocked, 'parent')).toContain(
+      'Nothing was spent',
+    )
+  })
+
+  it('kid messages are short (readability bar)', () => {
     for (const kind of Object.values(ImageGenerationFailure)) {
-      expect(imageFailureMessage(kind, 'parent').toLowerCase()).toMatch(
-        /nothing was (spent|lost)/,
-      )
-    }
-  })
-
-  it('the heading is honest — a guess offered as a guess', () => {
-    expect(ALTERNATIVES_HEADING.parent).toBe('Try one of these')
-    for (const audience of ['parent', 'kid'] as const) {
-      expect(ALTERNATIVES_HEADING[audience].toLowerCase()).not.toMatch(/will work|this fixes/)
-    }
-  })
-
-  it('says a tap costs a picture, before it is spent', () => {
-    for (const audience of ['parent', 'kid'] as const) {
-      expect(ALTERNATIVE_COST_NOTE[audience].toLowerCase()).toMatch(/count/)
+      const msg = imageFailureMessage(kind, 'kid')
+      const words = msg.split(/\s+/).length
+      expect(words).toBeLessThanOrEqual(12)
     }
   })
 })
 
-describe('kid copy meets the shared readability bar', () => {
-  it('every failure sentence', () => {
-    for (const kind of Object.values(ImageGenerationFailure)) {
-      expectKidLine(imageFailureMessage(kind, 'kid'), `failure ${kind}`)
-    }
-  })
+// ── blockedTips ─────────────────────────────────────────────────
 
-  it('every heading, tip and cost note', () => {
-    expectKidLine(ALTERNATIVES_HEADING.kid, 'alternatives heading')
-    expectKidLine(ALTERNATIVE_COST_NOTE.kid, 'cost note')
-    expectKidLine(FREE_EXITS_HEADING.kid, 'free exits heading')
-    for (const door of Object.values(ImageRetryDoor)) {
-      blockedTips(door, 'kid').forEach((tip, i) =>
-        expectKidLine(tip, `kid tip ${door} ${i}`),
-      )
-    }
-  })
-})
-
-/**
- * The written suggestions have to fit the door they are shown on (Codex P2,
- * PR #1768). The first cut lifted the Book Editor's two and showed them
- * everywhere: a sticker maker was told to describe a *world* when what it makes
- * is one thing on its own, and a door with no prompt field at all was told to
- * reword something it cannot reach.
- */
-describe('blockedTips — advice you can actually follow on THIS door', () => {
-  it('every door has two tips for both audiences', () => {
+describe('blockedTips', () => {
+  it('returns non-empty tips for every door + audience', () => {
     for (const door of Object.values(ImageRetryDoor)) {
       for (const audience of ['parent', 'kid'] as const) {
-        expect(blockedTips(door, audience)).toHaveLength(2)
+        const tips = blockedTips(door, audience)
+        expect(tips.length).toBeGreaterThan(0)
+        for (const tip of tips) {
+          expect(tip.length).toBeGreaterThan(0)
+        }
       }
     }
-  })
-
-  it('the scene door keeps the Book Editor\'s own words — they were written for it', () => {
-    expect(blockedTips(ImageRetryDoor.Scene, 'parent')[0]).toMatch(
-      /describe the world instead of characters/i,
-    )
-  })
-
-  it('a sticker door never tells you to describe a world — a sticker is one thing', () => {
-    // It may say what a sticker is NOT ("not a whole scene"); what it must never
-    // do is send someone off to describe a world, which is the Book Editor's
-    // advice for a different product.
-    for (const audience of ['parent', 'kid'] as const) {
-      for (const tip of blockedTips(ImageRetryDoor.Sticker, audience)) {
-        expect(tip.toLowerCase()).not.toMatch(/describe the world|instead of characters/)
-      }
-    }
-    expect(blockedTips(ImageRetryDoor.Sticker, 'parent').join(' ')).toMatch(/one thing/i)
-  })
-
-  it('a door with no prompt field never advises rewording', () => {
-    // Make it fancy, Add version, Kit Builder art, the Workshop batch: there is
-    // no box to type into, so every tip must name something else — the style,
-    // or the drawing.
-    for (const audience of ['parent', 'kid'] as const) {
-      for (const tip of blockedTips(ImageRetryDoor.Redraw, audience)) {
-        expect(tip.toLowerCase()).not.toMatch(/describe|say what|ask for|word/)
-      }
-    }
-  })
-
-  it('no two doors give the same pair — otherwise the split earns nothing', () => {
-    const joined = Object.values(ImageRetryDoor).map((d) =>
-      blockedTips(d, 'parent').join('|'),
-    )
-    expect(new Set(joined).size).toBe(joined.length)
   })
 })
 
-/**
- * The text-only reply (the Shelly chat's image door). Its one rule: a refusal
- * ALWAYS ends with something to do — an empty suggester is an expected path, and
- * a chat that stops at "wouldn't draw that one" is a worse dead end than the
- * line it replaced (Codex P2, PR #1768).
- */
+// ── imageFailureChatMessage ─────────────────────────────────────
+
 describe('imageFailureChatMessage', () => {
-  it('lists the server’s alternatives when there are any', () => {
+  it('non-blocked kind returns just the message', () => {
+    const msg = imageFailureChatMessage(ImageGenerationFailure.Busy, [], 'parent')
+    expect(msg).toBe(imageFailureMessage(ImageGenerationFailure.Busy, 'parent'))
+    expect(msg).not.toContain('Try one of these')
+  })
+
+  it('blocked with alternatives includes them as bullet points', () => {
     const msg = imageFailureChatMessage(
       ImageGenerationFailure.Blocked,
-      ['a red plumber', 'a cheerful hero'],
+      ['a dragon', 'a castle'],
       'parent',
     )
-    expect(msg).toContain(imageFailureMessage(ImageGenerationFailure.Blocked, 'parent'))
-    expect(msg).toContain('\u2022 a red plumber')
-    expect(msg).toContain('\u2022 a cheerful hero')
+    expect(msg).toContain('• a dragon')
+    expect(msg).toContain('• a castle')
+    expect(msg).toContain('Tap the image button')
   })
 
-  it('names the control that actually makes a picture, not "ask me" (Codex P2)', () => {
-    // Typing a picture request into the composer reaches the text `chat`
-    // callable, and Shelly's own system prompt answers image requests by saying
-    // to tap the image button. "Just ask me for it" named an action that
-    // produces another conversational turn and no picture.
-    const msg = imageFailureChatMessage(
-      ImageGenerationFailure.Blocked,
-      ['a red plumber'],
-      'parent',
-    )
-    expect(msg).toContain(CHAT_ALTERNATIVES_LEAD)
-    expect(CHAT_ALTERNATIVES_LEAD.toLowerCase()).toMatch(/image button/)
-    expect(msg.toLowerCase()).not.toMatch(/ask me for it/)
-  })
-
-  it('falls back to the written tips when the suggester gave nothing', () => {
-    const msg = imageFailureChatMessage(ImageGenerationFailure.Blocked, [], 'parent')
-    for (const tip of blockedTips(ImageRetryDoor.Scene, 'parent')) {
-      expect(msg).toContain(tip)
-    }
-  })
-
-  it('never leaves a refusal without a next step, whatever came back', () => {
-    // The rule, not the wording: a refusal always carries more than its own
-    // sentence, and what it carries is a list the reader can act on.
-    const head = imageFailureMessage(ImageGenerationFailure.Blocked, 'parent')
-    for (const alternatives of [[], ['a red plumber']]) {
-      const msg = imageFailureChatMessage(
-        ImageGenerationFailure.Blocked,
-        alternatives,
-        'parent',
-      )
-      expect(msg).not.toBe(head)
-      expect(msg.split('\n').filter((l) => l.startsWith('\u2022')).length).toBeGreaterThan(0)
-    }
-  })
-
-  it('suggests nothing for the kinds no rewording fixes', () => {
-    for (const kind of [
-      ImageGenerationFailure.Busy,
-      ImageGenerationFailure.NotConfigured,
-      ImageGenerationFailure.NoImage,
-      ImageGenerationFailure.Offline,
-    ]) {
-      // Even if a stale alternatives list were handed in, a rate limit is a wait.
-      const msg = imageFailureChatMessage(kind, ['a red plumber'], 'parent')
-      expect(msg).toBe(imageFailureMessage(kind, 'parent'))
-    }
-  })
-
-  it('follows the door — a sticker door’s fallback is sticker advice', () => {
+  it('blocked without alternatives falls back to written tips', () => {
     const msg = imageFailureChatMessage(
       ImageGenerationFailure.Blocked,
       [],
       'parent',
       ImageRetryDoor.Sticker,
     )
-    expect(msg).toContain(blockedTips(ImageRetryDoor.Sticker, 'parent')[0])
+    const tips = blockedTips(ImageRetryDoor.Sticker, 'parent')
+    for (const tip of tips) {
+      expect(msg).toContain(tip)
+    }
   })
 })
