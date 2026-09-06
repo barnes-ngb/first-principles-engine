@@ -246,10 +246,11 @@ describe('imageFailureMessage', () => {
     }
   })
 
-  it('parent blocked message mentions "nothing was spent"', () => {
-    expect(imageFailureMessage(ImageGenerationFailure.Blocked, 'parent')).toContain(
-      'Nothing was spent',
-    )
+  it('every parent message mentions "Nothing was spent" (no-spend invariant)', () => {
+    for (const kind of Object.values(ImageGenerationFailure)) {
+      const msg = imageFailureMessage(kind, 'parent')
+      expect(msg).toContain('Nothing was spent')
+    }
   })
 
   it('kid messages meet the shared kid-readability bar', () => {
@@ -282,15 +283,40 @@ describe('blockedTips', () => {
       }
     }
   })
+
+  it('Sticker tips never mention describing a world (not actionable on that door)', () => {
+    for (const audience of ['parent', 'kid'] as const) {
+      for (const tip of blockedTips(ImageRetryDoor.Sticker, audience)) {
+        expect(tip.toLowerCase()).not.toContain('world')
+      }
+    }
+  })
+
+  it('Redraw tips never mention rewording a prompt (no prompt field on that door)', () => {
+    for (const audience of ['parent', 'kid'] as const) {
+      for (const tip of blockedTips(ImageRetryDoor.Redraw, audience)) {
+        expect(tip.toLowerCase()).not.toMatch(/reword|rephrase|describe/)
+      }
+    }
+  })
 })
 
 // ── imageFailureChatMessage ─────────────────────────────────────
 
 describe('imageFailureChatMessage', () => {
-  it('non-blocked kind returns just the message', () => {
-    const msg = imageFailureChatMessage(ImageGenerationFailure.Busy, [], 'parent')
-    expect(msg).toBe(imageFailureMessage(ImageGenerationFailure.Busy, 'parent'))
-    expect(msg).not.toContain('Try one of these')
+  it('non-blocked kind returns just the message, even with stale alternatives', () => {
+    const nonBlocked = [
+      ImageGenerationFailure.Busy,
+      ImageGenerationFailure.NotConfigured,
+      ImageGenerationFailure.NoImage,
+      ImageGenerationFailure.Offline,
+    ]
+    for (const kind of nonBlocked) {
+      const msg = imageFailureChatMessage(kind, ['stale alt 1', 'stale alt 2'], 'parent')
+      expect(msg).toBe(imageFailureMessage(kind, 'parent'))
+      expect(msg).not.toContain('Try one of these')
+      expect(msg).not.toContain('stale alt')
+    }
   })
 
   it('blocked with alternatives includes them as bullet points', () => {

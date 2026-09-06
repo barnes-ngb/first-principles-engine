@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   chooseStoryTheme,
+  CUSTOM_STORY_THEME_HINT,
   CUSTOM_STORY_THEME_MAX_LENGTH,
   customStoryThemeChipLabel,
   CUSTOM_STORY_THEME_CHIP_LABEL,
@@ -157,5 +158,17 @@ describe('customStoryThemeChipLabel', () => {
   it('returns the default label when no note is present', () => {
     expect(customStoryThemeChipLabel('')).toBe(CUSTOM_STORY_THEME_CHIP_LABEL)
     expect(customStoryThemeChipLabel(undefined)).toBe(CUSTOM_STORY_THEME_CHIP_LABEL)
+  })
+})
+
+// ── CUSTOM_STORY_THEME_HINT (story-only contract) ───────────────
+
+describe('CUSTOM_STORY_THEME_HINT', () => {
+  it('mentions the story', () => {
+    expect(CUSTOM_STORY_THEME_HINT.toLowerCase()).toContain('story')
+  })
+
+  it('explicitly excludes pictures', () => {
+    expect(CUSTOM_STORY_THEME_HINT.toLowerCase()).toContain('not the pictures')
   })
 })
