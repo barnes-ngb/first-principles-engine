@@ -57,6 +57,22 @@ export const HOURS_UNAVAILABLE_LINE =
 export const HISTORY_UNAVAILABLE_LINE =
   'Couldn’t read the earlier weeks, so there’s no rate to show yet.'
 
+/**
+ * What is said when this week has no position snapshot yet (UX-219).
+ *
+ * The page now names the school week the moment its Friday is over (UX-218), so
+ * on Saturday it names a week the Sunday cron has not written a document for.
+ * The positions for that week genuinely do not exist yet — `currentPosition` is
+ * a single mutable field with no history (UX-212), so nothing can be
+ * reconstructed after the fact and nothing may be estimated.
+ *
+ * Same rule as the two lines above: say what is not known and when it will be,
+ * rather than falling through to *"First week recorded"* — which is a claim, and
+ * on a Saturday a false one.
+ */
+export const POSITIONS_PENDING_LINE =
+  'This week’s workbook positions haven’t been recorded yet — they’re saved Sunday evening.'
+
 /** One decimal, with a trailing `.0` dropped: 4.8, 5, 0.5. */
 function formatHours(minutes: number): string {
   const hours = minutes / 60

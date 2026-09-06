@@ -13,16 +13,26 @@ import {
   HISTORY_UNAVAILABLE_LINE,
   HOURS_SOURCE_CAPTION,
   HOURS_UNAVAILABLE_LINE,
+  POSITIONS_PENDING_LINE,
   hoursLoggedLine,
 } from './weekHours'
+import { weekEvidenceCountsLine } from './weekEvidenceCounts'
 import { useWeekHours } from './useWeekHours'
 
 export interface WeekPaceSectionProps {
   familyId: string
   childId: string
   weekKey: string
-  /** This week's review — read for its recorded positions only. */
-  review: WeeklyReview
+  /**
+   * This week's review — read for its recorded positions and evidence counts
+   * only.
+   *
+   * **Nullable since UX-219.** The page names the school week as soon as its
+   * Friday is over, so on a Saturday there is no document yet: the Sunday cron
+   * has not fired. The hours are read live and still true, so the section
+   * renders — it simply has no snapshot to build a rate from, and says so.
+   */
+  review: WeeklyReview | null
   /** Earlier reviews for the same child, for the baseline snapshot. */
   history: WeeklyReview[]
   /** True while the earlier weeks are still being read. */
@@ -68,13 +78,22 @@ function WeekPaceBody({
 }: WeekPaceSectionProps) {
   const { totalMinutes, loading, error } = useWeekHours(familyId, childId, weekKey)
 
+  const current = useMemo(
+    () => normalizeCurriculumSnapshot(review?.curriculumPositions),
+    [review?.curriculumPositions],
+  )
+
   const coverage = useMemo(() => {
-    const current = normalizeCurriculumSnapshot(review.curriculumPositions)
     const priors = history
       .map((r) => normalizeCurriculumSnapshot(r.curriculumPositions))
       .filter((s): s is CurriculumSnapshot => s !== null)
     return computeObservedCoverage(current, priors)
-  }, [review.curriculumPositions, history])
+  }, [current, history])
+
+  // The week's own counts, read off the review the cron wrote. `null` means
+  // there is no summary to read — not a week with nothing in it — so nothing is
+  // said, and the pending line below explains when it lands.
+  const evidenceLine = weekEvidenceCountsLine(review?.evidence)
 
   // A failed read is not an empty result, and a read still in flight is not a
   // first week. Both would otherwise print as an affirmative claim.
@@ -90,12 +109,25 @@ function WeekPaceBody({
     <SectionCard title="Hours and Coverage">
       <Stack spacing={0.5}>
         <Typography variant="body1">{hoursLine}</Typography>
+        {evidenceLine && <Typography variant="body1">{evidenceLine}</Typography>}
         {!error && (
           <Typography variant="caption" color="text.secondary">
             {HOURS_SOURCE_CAPTION}
           </Typography>
         )}
       </Stack>
+
+      {/*
+        No snapshot for this week — the Saturday case, and every review written
+        before UX-212. Said as a pending fact with a date on it, never as
+        "first week recorded", which the coverage engine would otherwise be
+        asked to guess at.
+      */}
+      {current === null && (
+        <Typography variant="body2" color="text.secondary">
+          {POSITIONS_PENDING_LINE}
+        </Typography>
+      )}
 
       {historyFailed && (
         <Typography variant="body2" color="text.secondary">

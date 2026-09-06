@@ -70,18 +70,55 @@ export const getPlanningWeekRange = (now: Date = new Date()): WeekRange => {
 }
 
 /**
- * Return the Sunday-start key of the most recently completed Sun–Sat week.
- * Mirrors `lastWeekKey` in `functions/src/ai/evaluate.ts` so the weekly
- * review page and the scheduled Cloud Function agree on which week's doc
- * to read/write. The school week runs Sunday–Saturday; this returns the
- * Sunday that started the week ending on the most recent Saturday.
+ * The Sunday key of the most recent school week whose **Mon–Fri body has
+ * ended** (UX-218).
+ *
+ * This used to answer a different question — the most recent Sun–Sat week whose
+ * *Saturday* had passed — and on a Saturday that is two school weeks back. The
+ * owner opened the review on **Saturday Sep 5, 2026** and read *"Week of Aug
+ * 23–29"*, while the week he had just finished, Aug 31–Sep 4, had ended the day
+ * before and was nowhere on the page.
+ *
+ * **It is FEAT-196's Friday hole, one surface over.** The planner learned that
+ * the school body is Mon–Fri and rolled its default forward accordingly
+ * (`getPlanningWeekRange` above); the review kept counting whole Sun–Sat weeks.
+ * The two rules are neighbours and disagreed, which is why this one is built on
+ * `getWeekRange` — the same helper the planner's roll resolves from — rather
+ * than on a second copy of the date arithmetic. Writing that second copy is what
+ * produced the bug.
+ *
+ * The rule, in one sentence: **the Mon–Fri of the Sun–Sat week containing today,
+ * except that on any day but Saturday that body is still ahead or in progress,
+ * so step back one week.** Saturday is the only day on which the containing
+ * week's school days are all behind us.
+ *
+ * | Called on          | Returns   | School week it names |
+ * |--------------------|-----------|----------------------|
+ * | Sat Sep 5          | Aug 30    | Aug 31 – Sep 4       |
+ * | Sun Sep 6          | Aug 30    | Aug 31 – Sep 4       |
+ * | Mon Sep 7 – Fri 11 | Aug 30    | Aug 31 – Sep 4       |
+ * | Sat Sep 12         | Sep 6     | Sep 7 – Sep 11       |
+ *
+ * **Still agrees with the Cloud Function on the day that matters.** The
+ * scheduled review fires Sunday 19:00 CT, and `lastWeekKey` in
+ * `functions/src/ai/evaluate.ts` returns the previous Sunday when called on a
+ * Sunday — the same key this returns on a Sunday. So the page reads the document
+ * the cron writes, and on Saturday it names the week whose document has not been
+ * written yet (which the page says, rather than showing an older week instead).
+ *
+ * Renamed from `lastCompletedWeekKey` deliberately: the semantics changed from
+ * "the last whole Sun–Sat week" to "the last completed school week", and a name
+ * that still promised the old rule would invite the next caller to reuse it for
+ * records or compliance math. `getWeekRange` remains the shared Sun–Sat helper
+ * for those; nothing here touches it.
  */
-export const lastCompletedWeekKey = (today: Date = new Date()): string => {
-  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  const dayOfWeek = d.getDay()
-  const offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7
-  d.setDate(d.getDate() - offset)
-  return formatDateYmd(d)
+export const lastCompletedSchoolWeekKey = (today: Date = new Date()): string => {
+  const base = getWeekRange(today) // Sun–Sat week containing `today`
+  if (today.getDay() === 6) return base.start
+
+  const start = new Date(base.start + 'T00:00:00')
+  start.setDate(start.getDate() - 7)
+  return formatDateYmd(start)
 }
 
 type SchoolYearRange = {

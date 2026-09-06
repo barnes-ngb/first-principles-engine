@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { getPlanningWeekRange, getSchoolYearRange, getWeekRange, lastCompletedWeekKey } from './time'
+import {
+  getPlanningWeekRange,
+  getSchoolYearRange,
+  getWeekRange,
+  lastCompletedSchoolWeekKey,
+} from './time'
 
 describe('getWeekRange', () => {
   it('returns Sun–Sat range for a Wednesday (default weekStartsOn=0)', () => {
@@ -172,30 +177,81 @@ describe('getPlanningWeekRange', () => {
   })
 })
 
-describe('lastCompletedWeekKey', () => {
+describe('lastCompletedSchoolWeekKey', () => {
   it('returns the previous Sunday when called on a Sunday', () => {
-    // Sunday Apr 19, 2026 — just-completed week started Apr 12
+    // Sunday Apr 19, 2026 — the just-finished school week is Apr 13–17,
+    // whose Sunday key is Apr 12.
     const sun = new Date(2026, 3, 19)
-    expect(lastCompletedWeekKey(sun)).toBe('2026-04-12')
+    expect(lastCompletedSchoolWeekKey(sun)).toBe('2026-04-12')
   })
 
   it('returns the same Sunday when called on Monday the next week', () => {
-    // Monday Apr 20, 2026 — last-completed week started Apr 12
+    // Monday Apr 20, 2026 — this week's Mon–Fri has only just begun.
     const mon = new Date(2026, 3, 20)
-    expect(lastCompletedWeekKey(mon)).toBe('2026-04-12')
+    expect(lastCompletedSchoolWeekKey(mon)).toBe('2026-04-12')
   })
 
   it('returns the same Sunday when called mid-week', () => {
-    // Wed Apr 22, 2026 — last-completed week still started Apr 12
     const wed = new Date(2026, 3, 22)
-    expect(lastCompletedWeekKey(wed)).toBe('2026-04-12')
+    expect(lastCompletedSchoolWeekKey(wed)).toBe('2026-04-12')
   })
 
-  it('returns the prior Sunday on Saturday of the current week', () => {
-    // Sat Apr 18, 2026 — the current week (Apr 12–18) is not yet complete,
-    // so the most recently completed week is Apr 5–11
+  it('still returns the previous week on Friday — the body is not over yet', () => {
+    // Fri Apr 24, 2026. Friday is a school day in progress: the week the
+    // parent is looking back on is still Apr 13–17.
+    const fri = new Date(2026, 3, 24)
+    expect(lastCompletedSchoolWeekKey(fri)).toBe('2026-04-12')
+  })
+
+  // ── UX-218 — the bug the owner hit ────────────────────────────────────────
+
+  it('names the week that just finished when called on a Saturday', () => {
+    // Sat Apr 18, 2026. Mon–Fri Apr 13–17 ended yesterday, so THAT is the
+    // week to look back on — not Apr 5–11, which is what the old Sun–Sat
+    // rule returned (a whole school week that had already been reviewed).
     const sat = new Date(2026, 3, 18)
-    expect(lastCompletedWeekKey(sat)).toBe('2026-04-05')
+    expect(lastCompletedSchoolWeekKey(sat)).toBe('2026-04-12')
+  })
+
+  it('reproduces the owner’s Saturday, Sep 5 2026', () => {
+    // He read "Week of Aug 23–29" — two weeks back — while Aug 31–Sep 4 had
+    // finished the day before. The key for that school week is Aug 30.
+    const sat = new Date(2026, 8, 5)
+    expect(lastCompletedSchoolWeekKey(sat)).toBe('2026-08-30')
+  })
+
+  it('agrees with the Cloud Function on the day the cron fires', () => {
+    // `lastWeekKey` in functions/src/ai/evaluate.ts: on a Sunday it goes back
+    // exactly 7 days. The scheduled review only ever runs on a Sunday, so the
+    // page must return that same key or it reads a document nobody wrote.
+    for (const sunday of [
+      new Date(2026, 8, 6),
+      new Date(2026, 8, 13),
+      new Date(2026, 0, 4),
+    ]) {
+      const cronKey = new Date(sunday)
+      cronKey.setDate(cronKey.getDate() - 7)
+      const expected = `${cronKey.getFullYear()}-${String(cronKey.getMonth() + 1).padStart(2, '0')}-${String(cronKey.getDate()).padStart(2, '0')}`
+      expect(lastCompletedSchoolWeekKey(sunday)).toBe(expected)
+    }
+  })
+
+  it('never names a week whose Friday is still ahead', () => {
+    // Walk a year. Whatever day it is called on, the Friday of the week it
+    // names must already be in the past — that is the whole rule.
+    const cursor = new Date(2026, 0, 1)
+    for (let i = 0; i < 365; i++) {
+      const key = lastCompletedSchoolWeekKey(cursor)
+      const friday = new Date(key + 'T00:00:00')
+      friday.setDate(friday.getDate() + 5) // Sunday key + 5 = Friday
+      expect(friday.getTime()).toBeLessThan(cursor.getTime())
+      // …and it is the MOST recent such week: the next week's Friday has not
+      // gone by. Without this half, "always return 1970" would pass.
+      const nextFriday = new Date(friday)
+      nextFriday.setDate(nextFriday.getDate() + 7)
+      expect(nextFriday.getTime()).toBeGreaterThanOrEqual(cursor.getTime())
+      cursor.setDate(cursor.getDate() + 1)
+    }
   })
 })
 
