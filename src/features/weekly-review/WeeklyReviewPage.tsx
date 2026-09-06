@@ -114,7 +114,14 @@ function WeeklyReviewBody() {
   // one. It used to be the last whole Sun–Sat week, which on a Saturday named a
   // week two back — the owner read "Week of Aug 23–29" on Sat Sep 5 while Aug
   // 31–Sep 4 had finished the day before.
-  const weekKey = useMemo(() => lastCompletedSchoolWeekKey(new Date()), [])
+  //
+  // Recomputed every render rather than memoised on `[]`, the way the
+  // planner's `weekRange` is: this is a phone-first surface whose tab is rarely
+  // closed, so a page opened on Friday and looked at on Saturday would
+  // otherwise keep naming the week the fix exists to move off. The value is a
+  // string, so an unchanged week is `===` and the subscription below does not
+  // re-fire.
+  const weekKey = lastCompletedSchoolWeekKey(new Date())
   // Named the FEAT-196 way — "Week of Aug 31–Sep 4", the school days themselves —
   // from the planner's own formatter rather than a second copy of it. The
   // Sun–Sat fallback covers an unparseable key, which that formatter reports as
