@@ -5,21 +5,14 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
-import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
-import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
-import EventNoteIcon from '@mui/icons-material/EventNote'
 import ThumbDownIcon from '@mui/icons-material/ThumbDown'
 import ThumbUpIcon from '@mui/icons-material/ThumbUp'
-import { doc, onSnapshot, runTransaction, setDoc } from 'firebase/firestore'
-import { getFunctions, httpsCallable } from 'firebase/functions'
+import { doc, onSnapshot, runTransaction } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
 import HelpStrip from '../../components/HelpStrip'
@@ -28,13 +21,13 @@ import SectionCard from '../../components/SectionCard'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { app } from '../../core/firebase/firebase'
 import { db, weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
-import { lastCompletedWeekKey } from '../../core/utils/time'
+import { lastCompletedSchoolWeekKey } from '../../core/utils/time'
 import { formatWeekShort } from '../../core/utils/dateKey'
+import { formatPlanningWeekLabel } from '../planner-chat/chatPlanner.logic'
 import {
   applyDecisionDraft,
   countAccepted,
@@ -46,13 +39,66 @@ import WeekPaceSection from './WeekPaceSection'
 import WeekReflectionCard from './WeekReflectionCard'
 import { useWeeklyReviewHistory } from './useWeeklyReviewHistory'
 
-const functions = getFunctions(app)
-const generateReviewFn = httpsCallable<
-  { familyId: string; childId: string; weekKey: string },
-  { success: boolean }
->(functions, 'generateWeeklyReviewNow')
-
+/**
+ * The week is a **log**, not a report (UX-219).
+ *
+ * Owner, 2026-09-06, looking at this page on his phone: *"I'm not sure what
+ * review is doing. Basically useless, the month is better."* He is right, and
+ * the reason generalises: a five-day AI narrative mostly restates the checklist,
+ * and on a thin week the generator writes nothing — so the page rendered blank
+ * cards under bold headings (*This Week's Celebration*, *Wins*, *Growth Areas*)
+ * and told a parent the app had nothing to say about her week. **A report
+ * surface that is usually empty is worse than no surface.** Narrative needs
+ * enough signal to be true; a week rarely has it and a month does, so the
+ * narrative lives on the monthly review book now.
+ *
+ * What is left is the honest layer FEAT-203 built underneath, and it can never
+ * be empty:
+ *
+ *   1. **Hours** — stated, never against a target (UX-211).
+ *   2. **The evidence counts** — books, reading sessions, teach-backs (UX-219).
+ *   3. **The observed rate** — parent-only, observed, never required (UX-213).
+ *   4. **Pace adjustments** — the one weekly AI output with a real job, because
+ *      it feeds next week's plan. Rendered **only when there are any**.
+ *   5. **The week's question** — answered by a person (UX-214).
+ *
+ * There is **no empty state**, because there is nothing left that can be empty:
+ * a week with nothing logged reads *"No hours logged this week."*, *"No books or
+ * teach-backs logged this week."*, the rate line's own honest wording, and the
+ * question. That is a log of a quiet week, not a broken report.
+ *
+ * ── The narrative is still WRITTEN; it is no longer READ here ───────────────
+ *
+ * Checked before deciding, as the run required. Two server consumers read the
+ * weekly narrative fields:
+ *
+ *   • `functions/src/ai/tasks/monthlyReviewData.ts` reads `celebration`,
+ *     `summary`, `wins`, `growthAreas`, `recommendations` and `energyPattern`
+ *     off each week's document, and `tasks/monthlyReview.ts` folds them into the
+ *     monthly prompt.
+ *   • `functions/src/ai/tasks/shellyChat.ts` builds its RECENT WEEKLY REVIEWS
+ *     context strip from `summary` / `celebration` / `growthAreas`.
+ *
+ * So the weekly generation **is** the month's raw material, and stopping it
+ * would quietly degrade the surface the owner says is the good one. The cron is
+ * untouched; only the rendering is gone. The schema does not shrink either — no
+ * migration, no backfill, nothing stored is deleted.
+ *
+ * ── Parent-only, at the page ────────────────────────────────────────────────
+ *
+ * The route already sits inside `RequireParent`, and UX-213/214 gated the two
+ * sections that must never leak. Removing the narrative left `WeekInEvidence`
+ * and the adjustments un-gated, so the gate moved up here: one capability check
+ * above the Firestore subscription, so a child profile renders nothing and costs
+ * zero reads. Capability, never a name.
+ */
 export default function WeeklyReviewPage() {
+  const { isChildProfile } = useActiveChild()
+  if (isChildProfile) return null
+  return <WeeklyReviewBody />
+}
+
+function WeeklyReviewBody() {
   const familyId = useFamilyId()
   const {
     children,
@@ -63,16 +109,47 @@ export default function WeeklyReviewPage() {
     addChild,
   } = useActiveChild()
 
-  // Review the most recently completed Sun–Sat week. Matches the
-  // scheduled Sunday 7pm CT Cloud Function's docId so the page finds
-  // the review regardless of which day of the following week it loads.
-  const weekKey = useMemo(() => lastCompletedWeekKey(new Date()), [])
-  const weekRangeLabel = useMemo(() => formatWeekShort(weekKey), [weekKey])
+  // The most recent school week whose Mon–Fri has ended (UX-218). On Saturday
+  // and Sunday that is the week just finished; Monday–Friday it is the previous
+  // one. It used to be the last whole Sun–Sat week, which on a Saturday named a
+  // week two back — the owner read "Week of Aug 23–29" on Sat Sep 5 while Aug
+  // 31–Sep 4 had finished the day before.
+  //
+  // Resolved once, at mount. An earlier commit in this PR recomputed it every
+  // render, reasoning that a phone tab is rarely closed and one opened on
+  // Friday should roll on Saturday. **Codex round 2 (P1) showed that does not
+  // work, and it was right**: recomputing a value during render does not cause
+  // React to render, so revisiting the tab on Saturday schedules nothing and
+  // the DOM and the subscription stay on Friday's answer regardless — while the
+  // dynamic key made a mid-session week change *possible* on any unrelated
+  // re-render, which then left `review`, `isLoading` and `decisionDraft` keyed
+  // to the old week (rounds 2 and 3 found both). It bought nothing and cost
+  // consistency, so it is reverted to the behaviour that shipped.
+  //
+  // The residual is stated rather than hidden: a tab left open across the
+  // Friday→Saturday boundary still names the older week until it is reloaded.
+  // Closing it properly needs a visibility/focus-driven date state plus a
+  // week-keyed reset of every piece of week-scoped state on this page — a real
+  // change, not a one-line one, and beyond what UX-218 asked for (a page
+  // *opened* on Saturday, which this fixes).
+  const weekKey = useMemo(() => lastCompletedSchoolWeekKey(new Date()), [])
+  // Named the FEAT-196 way — "Week of Aug 31–Sep 4", the school days themselves —
+  // from the planner's own formatter rather than a second copy of it. The
+  // Sun–Sat fallback covers an unparseable key, which that formatter reports as
+  // an empty string.
+  const weekRangeLabel = useMemo(
+    () => formatPlanningWeekLabel(weekKey) || `Week of ${formatWeekShort(weekKey)}`,
+    [weekKey],
+  )
 
   const [review, setReview] = useState<WeeklyReview | null>(null)
+  // A dropped or permission-denied listener leaves `review` null with loading
+  // finished, which is indistinguishable from "the cron has not run yet" unless
+  // we record which it was (Codex round 3, P2). This page's one rule, third
+  // instance: a failed read is never rendered as a result.
+  const [reviewFailed, setReviewFailed] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
-  const [generating, setGenerating] = useState(false)
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
 
   // One read, two consumers (UX-213 / UX-214): the observed-rate line needs the
@@ -84,7 +161,10 @@ export default function WeeklyReviewPage() {
     failed: historyFailed,
   } = useWeeklyReviewHistory(familyId, activeChildId, weekKey)
 
-  // Load weekly review for active child (real-time)
+  // Load weekly review for active child (real-time). A missing document is a
+  // normal state now, not an empty state: on Saturday the Sunday cron has not
+  // fired for the week the page names, and everything except the adjustments
+  // still renders.
   useEffect(() => {
     if (!activeChildId) return
 
@@ -99,10 +179,12 @@ export default function WeeklyReviewPage() {
         } else {
           setReview(null)
         }
+        setReviewFailed(false)
         setIsLoading(false)
       },
       (err) => {
         console.error('Failed to load weekly review', err)
+        setReviewFailed(true)
         setIsLoading(false)
       },
     )
@@ -120,6 +202,7 @@ export default function WeeklyReviewPage() {
   if (loadedChildId !== activeChildId) {
     setLoadedChildId(activeChildId)
     setReview(null)
+    setReviewFailed(false)
     setDecisionDraft({})
     setIsLoading(true)
   }
@@ -137,33 +220,6 @@ export default function WeeklyReviewPage() {
     () => applyDecisionDraft(review?.paceAdjustments ?? [], decisionDraft),
     [review?.paceAdjustments, decisionDraft],
   )
-
-  const handleMarkReviewed = useCallback(async () => {
-    if (!review || !activeChildId) return
-    setIsSaving(true)
-
-    const docId = weeklyReviewDocId(weekKey, activeChildId)
-    // Merge only what this button changes (UX-214). It used to replace the whole
-    // document from local state, which is a snapshot of what the listener had
-    // last delivered — so an answer saved a second earlier, or in another tab,
-    // was deleted by a tap on this button. Writing three fields cannot.
-    const updated: Partial<WeeklyReview> = {
-      status: ReviewStatus.Reviewed,
-      reviewedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
-
-    try {
-      await setDoc(doc(weeklyReviewsCollection(familyId), docId), updated, {
-        merge: true,
-      })
-      setSnack({ text: 'Marked as reviewed!', severity: 'success' })
-    } catch (err) {
-      console.error('Failed to save review', err)
-      setSnack({ text: 'Failed to save. Try again.', severity: 'error' })
-    }
-    setIsSaving(false)
-  }, [review, activeChildId, weekKey, familyId])
 
   const handleApplyAdjustments = useCallback(async () => {
     if (!review || !activeChildId) return
@@ -224,25 +280,8 @@ export default function WeeklyReviewPage() {
     setIsSaving(false)
   }, [review, activeChildId, weekKey, familyId, adjustments, decisionDraft])
 
-  const handleRegenerateReview = useCallback(async () => {
-    if (!activeChildId) return
-    const confirmed = window.confirm(
-      'This will regenerate the weekly review from scratch. Any current review data will be replaced. Continue?',
-    )
-    if (!confirmed) return
-
-    setGenerating(true)
-    try {
-      await generateReviewFn({ familyId, childId: activeChildId, weekKey })
-      setSnack({ text: 'Review regenerated!', severity: 'success' })
-    } catch (err) {
-      console.error('Failed to regenerate review', err)
-      setSnack({ text: 'Failed to regenerate. Try again.', severity: 'error' })
-    }
-    setGenerating(false)
-  }, [activeChildId, familyId, weekKey])
-
   const acceptedCount = countAccepted(adjustments)
+  const alreadyApplied = review?.status === ReviewStatus.Applied
 
   return (
     <Page>
@@ -250,11 +289,18 @@ export default function WeeklyReviewPage() {
         Weekly Review
       </Typography>
       <Typography variant="body2" color="text.secondary">
-        Week of {weekRangeLabel}
+        {weekRangeLabel}
       </Typography>
+      {/*
+        The provenance sentence has to be exactly true (Codex round 1, P2). An
+        earlier draft read "Nothing here is written by AI" — right about the
+        hours, the counts, the rate and the question, and wrong about Pace
+        Adjustments, the one section that IS weekly AI output and the one a
+        parent might act on.
+      */}
       <HelpStrip
         pageKey="weekly-review"
-        text="The weekly review analyzes everything logged on the Today page — completed items, engagement feedback, and grade notes. The more you capture during the week, the better the review."
+        text="A record of the week that just ended — the hours it held, what got made, how fast the workbooks are moving, and your own read on it. None of it is scored against a target. The one AI-written part is Pace Adjustments, which appears only when the weekly review has suggestions for next week's plan."
         maxShowCount={3}
       />
 
@@ -266,78 +312,28 @@ export default function WeeklyReviewPage() {
         isLoading={childrenLoading}
       />
 
-      {!childrenLoading && !isLoading && activeChildId && !review && (
-        <EmptyReviewState
-          childName={activeChild?.name ?? 'this child'}
-          familyId={familyId}
-          childId={activeChildId}
-          weekKey={weekKey}
-          onSnack={setSnack}
-        />
-      )}
-
-      {!childrenLoading && !isLoading && review && (
+      {!childrenLoading && !isLoading && activeChildId && (
         <>
-          {/* Status chip */}
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              icon={review.status === ReviewStatus.Reviewed ? <CheckCircleIcon /> : undefined}
-              label={review.status === ReviewStatus.Reviewed ? 'Reviewed' : 'Pending Review'}
-              color={review.status === ReviewStatus.Reviewed ? 'success' : 'warning'}
-              variant="outlined"
-            />
-            {review.status === ReviewStatus.Applied && (
-              <Chip label="Adjustments Applied" color="info" variant="outlined" />
-            )}
-          </Stack>
-
-          {/* Celebration — prominent, warm, affirming */}
-          <Card
-            elevation={3}
-            sx={{
-              background: (theme) =>
-                `linear-gradient(135deg, ${theme.palette.success.light}22, ${theme.palette.warning.light}22)`,
-              border: '2px solid',
-              borderColor: 'success.light',
-            }}
-          >
-            <CardContent>
-              <Stack spacing={1.5}>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <EmojiEventsIcon sx={{ color: 'warning.main', fontSize: 32 }} />
-                  <Typography variant="h6" color="success.dark" fontWeight={700}>
-                    This Week's Celebration
-                  </Typography>
-                </Stack>
-                <Typography variant="body1" sx={{ fontSize: '1.1rem', lineHeight: 1.6 }}>
-                  {review.celebration}
-                </Typography>
-              </Stack>
-            </CardContent>
-          </Card>
-
-          {/* Summary */}
-          <SectionCard title="Week Summary">
-            <Typography variant="body1" sx={{ lineHeight: 1.7 }}>
-              {review.summary}
-            </Typography>
-          </SectionCard>
-
-          {/* Hours + observed coverage rate — parent-only (UX-211 / UX-213) */}
+          {/* Hours, evidence counts and the observed coverage rate (UX-211 /
+              UX-213 / UX-219). Renders with or without a review document — the
+              hours are folded live and never came from it. */}
           <SectionErrorBoundary section="week-pace">
             <WeekPaceSection
               familyId={familyId}
               childId={activeChildId}
               weekKey={weekKey}
               review={review}
+              reviewFailed={reviewFailed}
               history={history}
               historyLoading={historyLoading}
               historyFailed={historyFailed}
             />
           </SectionErrorBoundary>
 
-          {/* Week in Evidence — raw counts (books + teach-backs) */}
-          {review.evidence && (
+          {/* Week in Evidence — the same counts in full, with titles and audio.
+              Absent until the cron has assembled them; it renders nothing when
+              there is nothing in it, which is why it is not a blank card. */}
+          {review?.evidence && (
             <SectionErrorBoundary section="week-in-evidence">
               <WeekInEvidence
                 childName={activeChild?.name ?? 'this child'}
@@ -346,40 +342,15 @@ export default function WeeklyReviewPage() {
             </SectionErrorBoundary>
           )}
 
-          {/* Wins */}
-          {review.wins.length > 0 && (
-            <SectionCard title="Wins">
-              <Stack spacing={1}>
-                {review.wins.map((win, idx) => (
-                  <Stack key={idx} direction="row" spacing={1} alignItems="flex-start">
-                    <CheckCircleOutlineIcon
-                      sx={{ color: 'success.main', fontSize: 20, mt: 0.3 }}
-                    />
-                    <Typography variant="body2">{win}</Typography>
-                  </Stack>
-                ))}
-              </Stack>
-            </SectionCard>
-          )}
-
-          {/* Growth Areas */}
-          {review.growthAreas.length > 0 && (
-            <SectionCard title="Growth Areas">
-              <Stack spacing={1}>
-                {review.growthAreas.map((area, idx) => (
-                  <Typography key={idx} variant="body2" sx={{ pl: 1 }}>
-                    {area}
-                  </Typography>
-                ))}
-              </Stack>
-            </SectionCard>
-          )}
-
-          {/* Pace Adjustments — accept/reject per item */}
+          {/* Pace Adjustments — the one weekly AI output that still has a job,
+              because accepting one reaches next week's plan. Rendered only when
+              the list is non-empty: an empty section under a bold heading is
+              exactly the defect this run retired. */}
           {adjustments.length > 0 && (
             <SectionCard title="Pace Adjustments">
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Review each suggested adjustment. Accept the ones you'd like applied to
+                Written by the weekly review AI from what was logged — the one
+                AI-written thing on this page. Accept the ones you'd like applied to
                 next week's plan.
               </Typography>
               <Stack spacing={2}>
@@ -391,23 +362,32 @@ export default function WeeklyReviewPage() {
                   />
                 ))}
               </Stack>
-            </SectionCard>
-          )}
-
-          {/* Recommendations */}
-          {review.recommendations.length > 0 && (
-            <SectionCard title="Recommendations for Next Week">
-              <Stack spacing={1}>
-                {review.recommendations.map((rec, idx) => (
-                  <Typography key={idx} variant="body2" sx={{ pl: 1 }}>
-                    {rec}
-                  </Typography>
-                ))}
+              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
+                {!alreadyApplied && (
+                  <Button
+                    variant="contained"
+                    onClick={handleApplyAdjustments}
+                    disabled={isSaving || acceptedCount === 0}
+                    startIcon={<ThumbUpIcon />}
+                  >
+                    {isSaving
+                      ? 'Applying...'
+                      : `Apply ${acceptedCount} Adjustment${acceptedCount !== 1 ? 's' : ''}`}
+                  </Button>
+                )}
+                {alreadyApplied && (
+                  <Alert severity="success" sx={{ flex: 1 }}>
+                    Accepted adjustments have been applied. Changes will be visible in your
+                    next planner session.
+                  </Alert>
+                )}
               </Stack>
             </SectionCard>
           )}
 
-          {/* The week's one question — answered by a person (UX-214) */}
+          {/* The week's one question — answered by a person (UX-214). Writable
+              before the cron has written anything: the merge creates the
+              document and the CF carries the answer forward. */}
           <SectionErrorBoundary section="week-reflection">
             <WeekReflectionCard
               familyId={familyId}
@@ -418,53 +398,12 @@ export default function WeeklyReviewPage() {
               onSaved={setSnack}
             />
           </SectionErrorBoundary>
-
-          {/* Actions */}
-          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-            {review.status !== ReviewStatus.Reviewed && (
-              <Button
-                variant="outlined"
-                onClick={handleMarkReviewed}
-                disabled={isSaving}
-                startIcon={<CheckCircleOutlineIcon />}
-              >
-                {isSaving ? 'Saving...' : 'Mark as Reviewed'}
-              </Button>
-            )}
-            {adjustments.length > 0 && review.status !== ReviewStatus.Applied && (
-              <Button
-                variant="contained"
-                onClick={handleApplyAdjustments}
-                disabled={isSaving || acceptedCount === 0}
-                startIcon={<ThumbUpIcon />}
-              >
-                {isSaving
-                  ? 'Applying...'
-                  : `Apply ${acceptedCount} Adjustment${acceptedCount !== 1 ? 's' : ''}`}
-              </Button>
-            )}
-            <Button
-              variant="outlined"
-              color="warning"
-              onClick={handleRegenerateReview}
-              disabled={generating || isSaving}
-              startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
-            >
-              {generating ? 'Regenerating…' : 'Regenerate Review'}
-            </Button>
-            {review.status === ReviewStatus.Applied && (
-              <Alert severity="success" sx={{ flex: 1 }}>
-                Accepted adjustments have been applied. Changes will be visible in your next
-                planner session.
-              </Alert>
-            )}
-          </Stack>
         </>
       )}
 
       {(childrenLoading || isLoading) && activeChildId && (
         <SectionCard title="Loading">
-          <LoadingState label="Loading review…" />
+          <LoadingState label="Loading this week…" />
         </SectionCard>
       )}
 
@@ -484,54 +423,6 @@ export default function WeeklyReviewPage() {
         </Alert>
       </Snackbar>
     </Page>
-  )
-}
-
-// ── Empty Review State ──────────────────────────────────────────
-
-interface EmptyReviewStateProps {
-  childName: string
-  familyId: string
-  childId: string
-  weekKey: string
-  onSnack: (snack: { text: string; severity: 'success' | 'error' }) => void
-}
-
-function EmptyReviewState({ childName, familyId, childId, weekKey, onSnack }: EmptyReviewStateProps) {
-  const [generating, setGenerating] = useState(false)
-
-  const handleGenerateNow = async () => {
-    setGenerating(true)
-    try {
-      await generateReviewFn({ familyId, childId, weekKey })
-      onSnack({ text: `Review generated for ${childName}!`, severity: 'success' })
-    } catch (err) {
-      console.error('Failed to generate review on demand', err)
-      onSnack({ text: 'Failed to generate review. Try again.', severity: 'error' })
-    }
-    setGenerating(false)
-  }
-
-  return (
-    <SectionCard title="No Review Yet">
-      <Stack spacing={2} alignItems="center" sx={{ py: 2, textAlign: 'center' }}>
-        <EventNoteIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
-        <Typography color="text.secondary">
-          Your weekly review for {childName} will be generated Sunday evening at 7 PM and covers the week that just ended (Sun–Sat).
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          For the best review, log your daily activities on the Today page throughout the week.
-        </Typography>
-        <Button
-          variant="outlined"
-          startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
-          onClick={handleGenerateNow}
-          disabled={generating}
-        >
-          {generating ? 'Generating\u2026' : 'Generate Now'}
-        </Button>
-      </Stack>
-    </SectionCard>
   )
 }
 

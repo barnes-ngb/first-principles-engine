@@ -1,8 +1,12 @@
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
   parseLedgerIds,
   parseLedgerStatusCells,
   findOpenPrStatusRows,
+  findContradictoryStatusRows,
   ledgerStatusIsHard,
   parseLedgerAnchors,
   parseIndexRows,
@@ -391,5 +395,149 @@ describe('findUnroutedDayWrites (day-write routing invariant, FEAT-114)', () => 
       "await deleteDoc(doc(weeksCollection(familyId), weekId))",
     ].join('\n')
     expect(findUnroutedDayWrites(content)).toEqual([])
+  })
+})
+
+describe('findContradictoryStatusRows', () => {
+  // The episode: PR #1785's final pre-merge commit flipped UX-218 to FIXED and
+  // recorded the run's own "CODEX ROUND: open — do not merge yet" line in the
+  // SAME cell. Both halves were true about the run; as a status cell the pair
+  // is nonsense, and because [ledger-status] is SOFT off `main` it passed four
+  // pre-merge runs and then turned the push to `main` red.
+  const realCell =
+    '| **UX-218** | 2 | **FIXED** (PR #1785, 2026-09-06) — cell flipped on the ' +
+    'final pre-merge commit, so the run summary reads `CODEX ROUND: open — do ' +
+    'not merge yet` and the merge decision is the owner\'s | title | ev |'
+
+  it('catches the cell that actually broke main', () => {
+    expect(findContradictoryStatusRows(realCell).map((r) => r.id)).toEqual(['UX-218'])
+  })
+
+  it('leaves an honest in-flight row alone — that is check 11 s job, and it is SOFT off main', () => {
+    const md = '| **ARCH-99** | 2 | BUILT (PR open) — do not merge | title | ev |'
+    expect(findContradictoryStatusRows(md)).toEqual([])
+    // …and the existing rule still sees it, so nothing was widened.
+    expect(findOpenPrStatusRows(md).map((r) => r.id)).toEqual(['ARCH-99'])
+  })
+
+  it('leaves a plainly landed row alone', () => {
+    const md = [
+      '| **FEAT-10** | 2 | **FIXED** (PR #1785, merged 2026-09-06) | title | ev |',
+      '| **FEAT-11** | 3 | **RESOLVED** 2026-08-01 | title | ev |',
+      '| **FEAT-12** | 3 | OPEN | title | ev |',
+    ].join('\n')
+    expect(findContradictoryStatusRows(md)).toEqual([])
+  })
+
+  it('reads the status cell only, so a body narrating the drift never fires', () => {
+    const md =
+      '| **DOC-11** | 3 | **FIXED** (PR #1657, merged) | sweep | rows reading ' +
+      '"PR open" / "do not merge" long after the PR merged |'
+    expect(findContradictoryStatusRows(md)).toEqual([])
+  })
+
+  it('fires on the "awaiting review/merge" wording too, not just "do not merge"', () => {
+    const md =
+      '| **FEAT-99** | 2 | **FIXED** (PR #1681, merged) — awaiting human review + merge | t | e |'
+    expect(findContradictoryStatusRows(md).map((r) => r.id)).toEqual(['FEAT-99'])
+  })
+
+  // ── The two false positives that shaped LANDED_STATUS_PATTERNS ────────────
+  // Both are REAL historical cells, not invented ones. Codex found the first
+  // (PR #1787, P1); the 134-revision sweep below found the second.
+
+  it('leaves ARCH-42 alone — "FIXED" describes the work, not the landing', () => {
+    // Commit bfb8991, legitimately in flight at the time. The first draft of
+    // this check matched on `FIXED` and would have reddened a correct PR.
+    const md =
+      '| **ARCH-42** | 2 | **FIXED** (FEAT-183, PR open, branch ' +
+      '`claude/london-run-a-capability-gates-skzsxc`) — the branch keys on ' +
+      '`resolveChildAgeGroup` | t | e |'
+    expect(findContradictoryStatusRows(md)).toEqual([])
+    expect(findOpenPrStatusRows(md).map((r) => r.id)).toEqual(['ARCH-42'])
+  })
+
+  it('leaves FEAT-177 alone — prose ABOUT the merged wording is not a merge claim', () => {
+    // Commit 1a6b1d80. A bare /\bmerged\b/ pattern fired on this and was
+    // dropped: the cell says it has NOT merged, while naming the wording it
+    // will use when it does.
+    const md =
+      '| **FEAT-177** | 2 | **BUILT (PR open, 2026-09-03) — do not merge; cell ' +
+      'flips to the house `**MERGED** (PR #NNNN, …)` wording on the final ' +
+      'commit** | t | e |'
+    expect(findContradictoryStatusRows(md)).toEqual([])
+  })
+
+  it('holds across every historical revision of the real ledger', () => {
+    // The claim this check rests on is empirical, so this measures it rather
+    // than restating it: replay the guard over every commit that touched the
+    // ledger. Exactly one revision may hit — 1a7c568, the cell that turned
+    // `main` red — and any other hit is a false positive on a row that was
+    // correct at the time, which is the failure mode that gets a rule deleted
+    // rather than fixed. It is how the FEAT-177 pattern was found.
+    //
+    // SKIPPED ON A SHALLOW CLONE, and that is not a cop-out (Codex round 2,
+    // P1). CI checks out with `actions/checkout@v4` and no `fetch-depth`, so
+    // the runner has depth 1: `git log` returns ONE revision there, and an
+    // unconditional assertion would have failed every CI run — on the very PR
+    // whose purpose is unbreaking CI. Verified against a real `--depth 1`
+    // clone, not assumed.
+    //
+    // The alternative — adding `fetch-depth: 0` to the test job — buys one
+    // test a full-history fetch on every run of this workflow, and buys
+    // nothing else. The two false positives this sweep found are pinned above
+    // as verbatim fixtures, so the REGRESSION guarantee is CI-safe and lives
+    // there; this stays a deep probe for anyone running it with history, which
+    // is where a NEW bad pattern would be discovered.
+    const repo = join(import.meta.dirname, '..')
+    const run = (args) =>
+      execFileSync('git', args, { cwd: repo, maxBuffer: 1 << 28 }).toString()
+
+    // "Not shallow" is not proof that every historical object is readable
+    // (Codex round 3, P2): a partial or offline clone reports
+    // `--is-shallow-repository false` and still fails the traversal itself. So
+    // the traversal is guarded too — capability-checked, not assumed.
+    let revs
+    try {
+      if (run(['rev-parse', '--is-shallow-repository']).trim() === 'true') return
+      revs = run(['log', '--format=%H', '--', 'docs/review/REVIEW_HOME_BASE.md'])
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+    } catch {
+      return // history unavailable — the fixtures above carry the guarantee
+    }
+
+    // Keep the REVISION alongside the id (Codex round 3, P2). Reducing to a set
+    // of ids alone would let a future pattern change match a *different*,
+    // historically valid UX-218 cell and still read `['UX-218']` — the probe
+    // would pass while silently covering a new false positive.
+    const offenders = []
+    for (const rev of revs) {
+      let md
+      try {
+        md = run(['show', `${rev}:docs/review/REVIEW_HOME_BASE.md`])
+      } catch {
+        continue // one unreadable tree is not a finding
+      }
+      for (const row of findContradictoryStatusRows(md)) {
+        offenders.push(`${rev.slice(0, 10)}:${row.id}`)
+      }
+    }
+
+    // Exactly one revision, exactly one row: the commit that introduced the
+    // cell this PR fixes. Any additional match — same row or not — is a false
+    // positive on a row that was correct at the time.
+    expect(offenders).toEqual(['1a7c56858f:UX-218'])
+  })
+
+  it('holds on the live ledger', () => {
+    const md = readFileSync(
+      join(import.meta.dirname, '..', 'docs', 'review', 'REVIEW_HOME_BASE.md'),
+      'utf8',
+    )
+    // Unlike check 11, this one is safe to assert against the live document on
+    // any branch: a contradiction is never the correct in-flight wording.
+    expect(findContradictoryStatusRows(md)).toEqual([])
   })
 })

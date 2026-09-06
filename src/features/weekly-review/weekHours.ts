@@ -57,6 +57,71 @@ export const HOURS_UNAVAILABLE_LINE =
 export const HISTORY_UNAVAILABLE_LINE =
   'Couldn’t read the earlier weeks, so there’s no rate to show yet.'
 
+/**
+ * What is said when the week's review has not been written yet (UX-219).
+ *
+ * The page now names the school week the moment its Friday is over (UX-218), so
+ * on Saturday it names a week the Sunday cron has not written a document for.
+ * The positions for that week genuinely do not exist yet — `currentPosition` is
+ * a single mutable field with no history (UX-212), so nothing can be
+ * reconstructed after the fact and nothing may be estimated.
+ *
+ * Same rule as the two lines above: say what is not known and when it will be,
+ * rather than falling through to *"First week recorded"* — which is a claim, and
+ * on a Saturday a false one.
+ *
+ * **It promises a date, so it is shown only where that promise is true**, and
+ * getting that guard right took two rounds:
+ *
+ *   • **Round 1 (P2)** — it keyed on the missing *snapshot*. A review can exist
+ *     with no `curriculumPositions`: the server omits the field when the child
+ *     has no positioned workbook config, and when the config read throws. In
+ *     both, the cron has run and nothing more is coming, so the promise would
+ *     have repeated every week and never come true.
+ *   • **Round 2/3 (P2)** — it then keyed on the missing *document*, which this
+ *     same PR had just made unreliable in both directions: `writeWeekReflection`
+ *     now CREATES the document when a parent answers on Saturday (so a non-null
+ *     review no longer implies the cron ran), and a failed listener read leaves
+ *     the review null with loading finished (so a null review no longer implies
+ *     it did not).
+ *
+ * So the guard reads an explicit generation marker instead — see
+ * `reviewWasGenerated` below — and a failed read gets its own line.
+ */
+export const POSITIONS_PENDING_LINE =
+  'This week’s workbook positions haven’t been recorded yet — they’re saved Sunday evening.'
+
+/**
+ * What is said when the week's review document could not be read at all.
+ *
+ * The third instance of this page's one rule (Codex round 3, P2): a failed read
+ * is not a result. Without this line, a dropped or permission-denied listener
+ * left the review `null` with loading finished, which
+ * {@link POSITIONS_PENDING_LINE} would have reported as *"the cron hasn't run
+ * yet"* — a claim about the server made on no information from it.
+ */
+export const REVIEW_UNAVAILABLE_LINE =
+  'Couldn’t read this week’s review, so there’s nothing to say about coverage yet.'
+
+/**
+ * Did the Sunday cron actually generate this week's review?
+ *
+ * **Not the same question as "does the document exist"** (Codex round 3, P2),
+ * and this PR is what made them come apart: `writeWeekReflection` creates the
+ * document when a parent answers on Saturday, before any review has been
+ * generated.
+ *
+ * `status` is the marker because only generation writes it — `evaluate.ts`
+ * stamps `'draft'` on the AI path and `'no-data'` on the empty-week path, while
+ * the reflection merge writes `{childId, weekKey, reflection}` and nothing else.
+ * (The page's *Apply adjustments* also writes a status, but it is reachable only
+ * on a document that already carries `paceAdjustments`, which only generation
+ * puts there.) Structural, because this reads an unvalidated Firestore document.
+ */
+export function reviewWasGenerated(review: { status?: unknown } | null): boolean {
+  return typeof review?.status === 'string' && review.status !== ''
+}
+
 /** One decimal, with a trailing `.0` dropped: 4.8, 5, 0.5. */
 function formatHours(minutes: number): string {
   const hours = minutes / 60
