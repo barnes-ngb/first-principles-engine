@@ -304,6 +304,30 @@ export const AdjustmentDecision = {
 export type AdjustmentDecision =
   (typeof AdjustmentDecision)[keyof typeof AdjustmentDecision]
 
+/**
+ * The parent's own answer to the weekly review's one question — *"Was that
+ * enough this week?"* (UX-214).
+ *
+ * Deliberately **not** computed, scored, ranked or AI-generated. It is a record
+ * of a judgement a person made, and nothing in the app may read it back into
+ * planning, an hours figure, a plan or a snapshot. The three members are peers:
+ * no ordering, no numeric value, no "better" end.
+ */
+export const WeekReflectionAnswer = {
+  GoodWeek: 'good-week',
+  AboutRight: 'about-right',
+  CanDoMore: 'can-do-more',
+} as const
+export type WeekReflectionAnswer =
+  (typeof WeekReflectionAnswer)[keyof typeof WeekReflectionAnswer]
+
+/** The words a parent taps. Never a score, never a rank. */
+export const WeekReflectionAnswerLabel: Record<WeekReflectionAnswer, string> = {
+  [WeekReflectionAnswer.GoodWeek]: 'Yes, good week',
+  [WeekReflectionAnswer.AboutRight]: 'About right',
+  [WeekReflectionAnswer.CanDoMore]: 'We can do more',
+}
+
 export const EvaluationDomain = {
   Reading: 'reading',
   Math: 'math',

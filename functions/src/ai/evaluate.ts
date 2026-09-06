@@ -73,9 +73,50 @@ export interface WeeklyReviewDoc {
   recommendations: string[];
   energyPattern: string;
   evidence?: WeekEvidence;
+  /** Workbook positions as they stood when this review was generated (UX-212). */
+  curriculumPositions?: CurriculumSnapshotDoc;
+  /** The parent's answer to the week's one question (UX-214). Never written
+   * here — only carried forward so a regenerate cannot delete it. */
+  reflection?: Record<string, unknown>;
   model: string;
   usage: { inputTokens: number; outputTokens: number };
   createdAt: string;
+}
+
+/**
+ * One workbook's position at review time (UX-212).
+ *
+ * `ActivityConfig.currentPosition` is a single mutable field and the repo has no
+ * position history anywhere, so a rate of coverage cannot be computed
+ * retroactively — recording the positions each week is what makes one possible
+ * from the *next* week onward. Nothing is ever back-filled or estimated.
+ *
+ * Recorded here, on **generate**, rather than when a parent opens or answers the
+ * review, and deliberately: the scheduled Sunday run fires whether or not
+ * anyone looks, so the series survives exactly the month-goes-by case the rate
+ * exists to make visible. Recording on open would be a write on read; recording
+ * on answer would go blind precisely on the weeks nobody reviewed.
+ *
+ * Structurally parallel to the app's `CurriculumPositionRecord` /
+ * `CurriculumSnapshot` in `src/core/types/planning.ts`, the same way
+ * `WeeklyReviewDoc` already parallels `WeeklyReview`. The reader narrows what it
+ * finds (`normalizeCurriculumSnapshot`), so a drift here degrades to "unknown"
+ * rather than to a wrong number.
+ */
+export interface CurriculumPositionDoc {
+  configId: string;
+  name: string;
+  currentPosition: number;
+  totalUnits?: number;
+  unitLabel?: string;
+  completed?: boolean;
+}
+
+export interface CurriculumSnapshotDoc {
+  /** ISO timestamp of the moment the positions were actually read. */
+  recordedAt: string;
+  weekKey: string;
+  positions: CurriculumPositionDoc[];
 }
 
 interface ChildProfile {
@@ -555,6 +596,144 @@ async function loadSnapshotData(
   return snap.data() as SnapshotData;
 }
 
+/**
+ * Turn raw `activityConfigs` documents into the week's position records
+ * (UX-212). Pure — no Firestore, no clock.
+ *
+ * Only configs that actually carry a position are recorded. A routine or
+ * formation config has none, and a config whose stored `currentPosition` is not
+ * a finite number is DROPPED rather than coerced to zero: zero is a claim ("no
+ * lessons covered") the rate line would then make on no evidence.
+ *
+ * Finished programs ARE recorded, flagged `completed`, so the week a program was
+ * finished still has its final position on file; the reader hides them, because
+ * a finished program's position stops moving and "no lessons covered in three
+ * weeks" would be a false alarm.
+ */
+export function toCurriculumPositions(
+  configs: Array<{ id: string; data: Record<string, unknown> }>,
+): CurriculumPositionDoc[] {
+  const positions: CurriculumPositionDoc[] = [];
+  for (const { id, data } of configs) {
+    const pos = data.currentPosition;
+    if (typeof pos !== "number" || !Number.isFinite(pos) || pos < 0) continue;
+    const record: CurriculumPositionDoc = {
+      configId: id,
+      name: typeof data.name === "string" && data.name ? data.name : "Workbook",
+      currentPosition: pos,
+    };
+    const total = data.totalUnits;
+    if (typeof total === "number" && Number.isFinite(total) && total > 0) {
+      record.totalUnits = total;
+    }
+    if (typeof data.unitLabel === "string" && data.unitLabel) {
+      record.unitLabel = data.unitLabel;
+    }
+    // Completion has TWO supported shapes, and the workbook loader in
+    // `chat.ts` (`data.completed || data.curriculumMeta?.completed`) already
+    // honours both. Reading only the top-level flag would record a legacy
+    // finished program as active, and two snapshots later the review would
+    // report "no lessons covered" about a program that is done.
+    const meta = data.curriculumMeta;
+    const metaCompleted =
+      !!meta &&
+      typeof meta === "object" &&
+      (meta as { completed?: unknown }).completed === true;
+    if (data.completed === true || metaCompleted) record.completed = true;
+    positions.push(record);
+  }
+  return positions;
+}
+
+/**
+ * Read the child's workbook positions for the snapshot (UX-212).
+ *
+ * Same `childId in [child, 'both']` audience filter every other
+ * `activityConfigs` reader uses. Never throws — a snapshot is additive evidence,
+ * and failing to record one must not stop a review being written.
+ */
+async function loadCurriculumSnapshot(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  weekKey: string,
+): Promise<CurriculumSnapshotDoc | undefined> {
+  try {
+    const snap = await db
+      .collection(`families/${familyId}/activityConfigs`)
+      .where("childId", "in", [childId, "both"])
+      .get();
+    const positions = toCurriculumPositions(
+      snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),
+    );
+    if (positions.length === 0) return undefined;
+    return { recordedAt: new Date().toISOString(), weekKey, positions };
+  } catch (err) {
+    console.warn("[UX-212] Failed to record curriculum positions", err);
+    return undefined;
+  }
+}
+
+/**
+ * Write the review, preserving the parent's answer (UX-214).
+ *
+ * **The carry-forward is TRANSACTIONAL, and it has to be.** Every write path
+ * here `.set()`s the WHOLE review document, so a regenerate deletes the
+ * `reflection` unless it is carried forward — and a read-then-write pair does
+ * not carry it forward safely. Two ways that pair loses a judgement a person
+ * recorded:
+ *
+ *   1. the read FAILS transiently, and a `undefined` result is mistaken for a
+ *      confirmed absence; and
+ *   2. the read SUCCEEDS, and the parent taps *Save answer* in the moment
+ *      between it and the write — the replacement then overwrites an answer
+ *      that was saved after we looked.
+ *
+ * A transaction closes both: the reflection is read and the document written
+ * inside one atomic unit, and Firestore retries the whole thing if the document
+ * changed underneath. If the transaction cannot complete at all, the fallback is
+ * a `merge` write — every field of the new review still lands, and a
+ * `reflection` we never managed to see is left alone rather than deleted.
+ *
+ * The one residual on that fallback, stated rather than hidden: if the same run
+ * ALSO failed to read the activity configs, a `curriculumPositions` snapshot
+ * recorded earlier stays on the document. It is a real earlier reading, stamped
+ * with the moment it was taken, and every consumer measures elapsed time from
+ * that stamp — a slightly stale coverage line for one week is plainly the lesser
+ * loss next to deleting a parent's judgement.
+ *
+ * Nothing here ever writes, changes or invents an answer.
+ */
+async function writeReviewDoc(
+  db: Firestore,
+  familyId: string,
+  reviewDocId: string,
+  review: WeeklyReviewDoc,
+): Promise<void> {
+  const ref = db
+    .collection(`families/${familyId}/weeklyReviews`)
+    .doc(reviewDocId);
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const payload: WeeklyReviewDoc = { ...review };
+      delete payload.reflection;
+      const existing = snap.exists ? (snap.data() ?? {}).reflection : undefined;
+      if (existing && typeof existing === "object") {
+        payload.reflection = existing as Record<string, unknown>;
+      }
+      tx.set(ref, payload);
+    });
+  } catch (err) {
+    console.warn(
+      "[UX-214] Transactional review write failed; merging so any saved answer survives",
+      err,
+    );
+    await ref.set(review, { merge: true });
+  }
+}
+
 export function buildEvaluationPrompt(ctx: WeekContext): string {
   // Compute week totals from dayLogs
   let totalItems = 0;
@@ -861,6 +1040,12 @@ export async function generateReviewForChild(
   // Skip AI call if there's no data for the week
   if (!hasAnyEvidence(ctx)) {
     const db = getFirestore();
+    const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
+    // A week with nothing logged is exactly the week the rate exists to make
+    // visible, so the positions are recorded here too (UX-212).
+    const curriculumPositions = await loadCurriculumSnapshot(
+      db, familyId, ctx.child.id, ctx.weekKey,
+    );
     const emptyReview: WeeklyReviewDoc = {
       childId: ctx.child.id,
       weekKey: ctx.weekKey,
@@ -877,11 +1062,9 @@ export async function generateReviewForChild(
       usage: { inputTokens: 0, outputTokens: 0 },
       createdAt: new Date().toISOString(),
     };
-    const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
-    await db
-      .collection(`families/${familyId}/weeklyReviews`)
-      .doc(reviewDocId)
-      .set(emptyReview);
+    if (curriculumPositions) emptyReview.curriculumPositions = curriculumPositions;
+    // `writeReviewDoc` carries any saved reflection forward transactionally.
+    await writeReviewDoc(db, familyId, reviewDocId, emptyReview);
     return emptyReview;
   }
 
@@ -942,10 +1125,17 @@ export async function generateReviewForChild(
   };
 
   const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
-  await db
-    .collection(`families/${familyId}/weeklyReviews`)
-    .doc(reviewDocId)
-    .set(reviewData);
+
+  // Additive, and it cannot stop a review being written (UX-212): the position
+  // snapshot is the only record of where the workbooks stood this week. The
+  // parent's answer is carried forward inside `writeReviewDoc`'s transaction,
+  // because this write replaces the whole document (UX-214).
+  const curriculumPositions = await loadCurriculumSnapshot(
+    db, familyId, ctx.child.id, ctx.weekKey,
+  );
+  if (curriculumPositions) reviewData.curriculumPositions = curriculumPositions;
+
+  await writeReviewDoc(db, familyId, reviewDocId, reviewData);
 
   // Log AI usage
   await logAiUsage(db, familyId, {
