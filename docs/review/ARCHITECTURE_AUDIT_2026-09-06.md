@@ -131,11 +131,57 @@ Confirmed via `git log --oneline a78a180..HEAD -- functions/src/ai/tasks/shellyC
 At 1,949L, 51L below the 2,000L auto-flag line. Standing recommendation (name it in CLAUDE.md the moment
 it crosses) correctly deferred again.
 
-### 1.4 Bundle (ARCH-05/ARCH-08) — growth tripled this window, still zero code-splitting
+### 1.4 Bundle (ARCH-05/ARCH-08) — growth tripled this window; concrete split proposal below
 
-+64.51 kB / +24.30 kB gzip since 08-30 (see Step 0), roughly 3× the prior week's rate. `AvatarThumbnail.
-tsx` still statically imports `three` into always-rendered nav chrome (unchanged). **Band 1, ARCH-05/
-ARCH-08, OPEN — unchanged**, growth rate worth watching if it compounds.
++64.51 kB / +24.30 kB gzip since 08-30 (see Step 0), roughly 3× the prior week's rate. `grep -n
+"React.lazy\|lazy(" src/app/router.tsx` still returns zero matches — every one of the 30 route
+components in `src/app/router.tsx` is a static top-of-file import (lines 4-32), so nothing is
+route-split today.
+
+**Heaviest imports and the routes that pull them (this cycle's required analysis, not repeated from
+prior cycles verbatim):**
+
+- **`three` (the single biggest split candidate).** `grep -rl "from 'three'"` finds it imported by
+  `AvatarThumbnail.tsx`, `VoxelCharacter.tsx` (1,606L), `BrothersVoxelScene.tsx`, and all ~18 files in
+  `src/features/avatar/voxel/` (character/armor/pose/material geometry builders). **The actual blocker
+  is not the `/avatar` or `/workshop` routes themselves — it's `AvatarThumbnail.tsx`**, which is imported
+  by `ContextBar.tsx`, `ChildSelector.tsx`, `ProfileMenu.tsx`, and directly by `AppShell.tsx` — and
+  `AppShell` wraps **every** route (`router.tsx:44-48`, `<AppShell><Outlet/></AppShell>` is the root
+  element of the entire route tree). So `three` and the whole `voxel/` build pipeline load on `/today`,
+  `/records`, `/settings` — routes with zero 3D content — today, not just on the two routes that
+  legitimately need it.
+- **Confirmed the fix is available, not just theoretical:** `AvatarThumbnail`'s own `animated` prop
+  defaults to `false` (`AvatarThumbnail.tsx:43`), and none of the four always-mounted nav-chrome call
+  sites (`ContextBar`/`ChildSelector`/`ProfileMenu`/`AppShell`) pass `animated={true}` — they all render
+  a single **static** frame through a full `THREE.WebGLRenderer` scene just to draw a small nav icon.
+- **`jspdf`** (see 1.12) — only `printBook.ts`/`printStickerSheet.ts` import it, both reachable from the
+  `/books/:bookId` route's eager `BookEditorPage` import, but the library is only exercised when a parent
+  actually taps "Make a PDF" — a pure point-of-use dependency today shipped unconditionally.
+
+**Concrete 3-step plan (proposal only, not applied here):**
+
+1. **Prerequisite:** decouple `AvatarThumbnail`'s default (non-animated, nav-chrome) render path from
+   live Three.js — cache a rendered PNG/canvas snapshot on avatar/equip change and draw that as a plain
+   `<img>`/2D `<canvas>` bitmap by default; keep the live `THREE.WebGLRenderer` path only behind
+   `animated={true}` (already opt-in, already unused by any always-mounted caller), loaded via a nested
+   dynamic import so the WebGL renderer itself isn't in the initial graph either. This is what actually
+   removes `three` from every route's dependency graph, not the route wrapping below.
+2. **Then wrap `/avatar` (`MyAvatarPage` → `VoxelCharacter.tsx` + the ~18-file `voxel/` directory) and
+   `/workshop` (`WorkshopPage.tsx`, now 1,816L) in `React.lazy()` at the route table** — these are the
+   two routes with a legitimate reason to pay for `three`, and after step 1 they're the only ones left
+   that do.
+3. **Move `printBook.ts`'s `jspdf` import to a dynamic `import('jspdf')` at the "Make a PDF" action site**
+   inside `BookEditorPage.tsx`/`BookshelfPage.tsx`, rather than an eager top-of-file import — nobody pays
+   for the PDF library until they tap print.
+
+**Estimated reduction:** not measured this cycle (a `rollup-plugin-visualizer` pass would give an exact
+per-chunk figure and is the right next step before a fix run starts moving code) — but `three` is a
+well-known several-hundred-kB-minified dependency on its own, before the ~18-file `voxel/` geometry
+pipeline it pulls in, against a 4,427.50 kB main chunk; a conservative order-of-magnitude estimate is a
+double-digit percentage reduction in the *initial* bundle once step 1 removes it from the AppShell-reachable
+graph, independent of whether the two route-lazy wraps in step 2 also land. **Band 1, ARCH-05/ARCH-08,
+OPEN — unchanged in status, but now backed by a concrete, sequenced plan** rather than a repeated
+"zero code-splitting" observation.
 
 ### 1.5 Test coverage (TEST-01) — same two standing gaps, plus a new narrower observation
 
@@ -303,18 +349,28 @@ rows for FEAT-157) is **still open, unfixed** — the doc's last touch (`git log
 the exact boundary before this window began. Confirmed by direct grep: zero hits for `conceptArcs`,
 `dadLabReports`, `learnerModel`, or `curriculumPositions` anywhere in the file.
 
-**A materially bigger gap has opened underneath it.** In the ~1-week window since 08-30, `learnerModels`
-has grown into a full parallel "current academic state" system with real production writers:
-`evalModelWriteback.ts` (Eval Apply projects findings onto it *alongside* the unchanged `skillSnapshots`
-write), `questTargeting.ts`/`questModelSync.ts` (quest results fold back), `dailySignalTargeting.ts`
-(daily struggle signals write frontier concepts), `writeReviewAction.ts` (Foundations Review confirmed
-actions), plus `workbookPositionSync.ts` and `useUnifiedCapture.ts` (`grep -rl learnerModels src/` → 21
-files). The FUNC-01 ruling's own words: *"`skillSnapshots/{childId}` is the single authority for current
-academic state… the answer to 'what do we teach next.'"* But `FoundationsTab.tsx` now surfaces
-`learnerModels`'s `synthesis.whatMattersNext` as the parent-facing answer to exactly that question — a
-second store answering the question the ruling assigns solely to `skillSnapshots`. The decision doc
-doesn't acknowledge `learnerModels` exists at all, let alone rule on whether it's a peer authority, a
-derived cache (like `dispositionCache`), or a source that should write-through to `skillSnapshots`.
+**A materially bigger gap sits underneath it — but it is not new this window, and the first draft of this
+report wrongly implied it was (corrected on Codex round 2 P2).** `learnerModels` has real production
+writers well beyond the `conceptArcs`/`dadLabReports` pair `DOC-17` already named: `evalModelWriteback.ts`
+(Eval Apply projects findings onto it *alongside* the unchanged `skillSnapshots` write),
+`questTargeting.ts`/`questModelSync.ts` (quest results fold back), `dailySignalTargeting.ts` (daily
+struggle signals write frontier concepts), `writeReviewAction.ts` (Foundations Review confirmed actions),
+and `workbookPositionSync.ts` (`grep -rl learnerModels src/` → 21 files). **Checked against
+`git log --oneline a78a180..HEAD -- <file>` for each: every one of these returns zero commits — they
+predate this window entirely**, dating to FEAT-54/63/66/68/76 (roughly July 2026). Only
+`useUnifiedCapture.ts` had a commit in this window, and it was a same-behavior refactor
+(`bb198ca2`, "extract handleUnifiedCapture into shared useUnifiedCapture hook"), not new `learnerModels`
+wiring. **The correct framing: this is a newly-discovered, pre-existing gap this audit series had not
+previously flagged — not new growth this cycle.** That arguably makes it more notable, not less: the
+decision doc has been silent on a ~6-writer, months-old subsystem since before this audit series started
+naming it, and no prior cycle's `ARCH-43`-style census or `DOC-1x` doc-currency sweep caught it. The
+substance stands regardless of timeline: the FUNC-01 ruling's own words are *"`skillSnapshots/{childId}`
+is the single authority for current academic state… the answer to 'what do we teach next.'"* But
+`FoundationsTab.tsx` surfaces `learnerModels`'s `synthesis.whatMattersNext` as the parent-facing answer to
+exactly that question — a second store answering the question the ruling assigns solely to
+`skillSnapshots`. The decision doc doesn't acknowledge `learnerModels` exists at all, let alone rule on
+whether it's a peer authority, a derived cache (like `dispositionCache`), or a source that should
+write-through to `skillSnapshots`.
 
 **Filed below as new `FUNC-17`** (this cycle's highest-leverage finding — see 5.2). `DOC-17` stays open
 unchanged; its scope should widen to cover this on next touch rather than being closed as "just two
@@ -322,7 +378,13 @@ rows added." Secondary, lower-severity: `weeklyReviews.curriculumPositions` (UX-
 workbook-position snapshot) is correctly non-authoritative and doesn't create an authority conflict, but
 has no row in the decision doc's "execution-record stores" block either — folds into the same fix.
 
-### 2.2 Loop integrity — traced the weekly-review restructure end to end; holds, no dead end
+### 2.2 Loop integrity — expanded in this round to cover the prompt's full required scope
+
+**Expanded on Codex round 2 P2** — the first draft of this section traced only the weekly-review
+restructure and never re-checked the audit prompt's named weak links or followed an evaluation finding
+through planner/checklist consumption. Both are now covered below.
+
+**A. The weekly-review restructure, traced end to end (original scope, unchanged from round 1):**
 
 - `functions/src/ai/evaluate.ts`'s `generateReviewForChild` writes `curriculumPositions` on **both** the
   no-data early-return and the normal AI-review path — the snapshot is written every week the CF runs,
@@ -339,8 +401,58 @@ has no row in the decision doc's "execution-record stores" block either — fold
   `NO_EVIDENCE_LINE` on a present-but-empty one — "no data yet" and "a real zero" are correctly kept
   distinct, matching UX-219's own no-empty-state claim on direct read.
 
-**No dead end, no orphaned state found.** Flagged as a **verified-clean positive finding**, not a defect
-— worth a ledger note so a future audit doesn't have to re-derive this trace from scratch.
+No dead end, no orphaned state found in this path.
+
+**B. An evaluation finding traced through planner and checklist consumption, end to end (new this
+round):**
+
+1. An `EvaluationFinding` (from the evaluate chat or Knowledge Mine) writes a `prioritySkill` onto
+   `skillSnapshots/{childId}` via the central `skillSnapshotWrites.ts` writer (the one sanctioned write
+   path per `CLAUDE.md`'s invariant).
+2. The deterministic planner reads those priority skills and, per FEAT-73's `resolveSuggestedTags`
+   (`src/features/planner-chat/chatPlanner.logic.ts:661`,
+   `resolveSuggestedTags(assignment.subjectBucket, prioritySkillTags)`), stamps generated checklist items
+   with a real catalog `skillTag` — witnessed-priority-matched tags win, an unwitnessed cross-domain guess
+   is suppressed (`[]`). This is the "no-guess" rule CLAUDE.md documents for FEAT-72/73, confirmed present
+   at the cited line, not just asserted in prose.
+3. The tagged item lands on a `DailyPlan`'s checklist. If a child struggles on it (`mastery: 'stuck'`,
+   `engagement: 'struggled'`, or a flagged Quick Review note), `src/core/foundations/
+   dailySignalTargeting.ts` bridges the item's `skillTag` → concept via `tagConceptBridge.ts` and
+   `enqueueStuckRetests` writes it into the `learnerModels` re-test queue (FEAT-68/69, per CLAUDE.md).
+4. The next Knowledge Mine session's `selectQuestTargets` reads that queue and re-tests the concept —
+   closing the loop back to evaluation. The weekly review (traced in A above) then reads the resulting
+   `learnerModel` state via `WEEKLY_REVIEW_ADDENDUM`'s learner-model context slice.
+
+**No dead end found in this path either** — each handoff (finding → snapshot → planner tag → checklist
+item → struggle signal → re-test queue → next quest → review) has a concrete, named consumer, not a
+silent drop. This mechanism itself is not new (FEAT-68/69/72/73, documented in `CLAUDE.md`); this audit's
+contribution is confirming it still holds after this window's changes, since none of the touched files in
+this trace (`chatPlanner.logic.ts`, `dailySignalTargeting.ts`) appear in a way that would break it — see
+1.1/1.8 for `chatPlanner.logic.ts`'s +111L growth this window (UX-204/205/206 day-budget work, unrelated
+to the tagging logic cited here).
+
+**C. Named weak links re-checked (per `docs/PROCESS_OVERVIEW.md` (iii) and Step 0.5 lens 1) — all
+unchanged, no regression, no resolution:**
+
+- **Sparse-upload days** ("when little is captured, evaluation and planning have thin signal; the loop
+  quietly starves rather than failing loudly") — still no dedicated detection mechanism in the codebase
+  (`grep -rl "sparse"` finds no upload-volume-monitoring code; the hits are unrelated — Dad Lab prompt
+  text, sketch cleanup, etc.). Still an open, structural, undetected risk, unchanged from every prior
+  cycle's framing.
+- **Lincoln doing Knowledge Mine only ~weekly** — no cadence-tracking/staleness-alert code found
+  (`grep -rl "daysSinceLastMine\|mineFrequency"` returns nothing); `useLatestMineSession.ts` reads the
+  latest session but computes no "how long has it been" signal. Unchanged, still an untracked risk.
+- **Learning Map under-reporting** — `git log --oneline a78a180..HEAD -- src/features/progress/
+  learning-map` returns zero commits; still correctly marked **RESOLVED** (FEAT-35/36, 2026-06-20) per
+  `PROCESS_OVERVIEW.md`, no regression.
+  Knowledge Mine level ceilings — `FEAT-08`/`FEAT-10` (ledger, math slice fixed, comprehension L7 /
+  phonics L9+ still open) untouched this window (only `knowledgeMineAccess.ts` changed, for the
+  unrelated FEAT-184 London-name-gate closure, confirmed via `git log --oneline a78a180..HEAD --
+  src/features/quest`). Unchanged, still open per the standing ledger rows.
+
+No new ledger action from this section — items A and B are **verified-clean positive findings** (worth a
+note so a future audit doesn't re-derive them from scratch); item C confirms the standing weak-link rows
+are still accurate and unchanged, not a new finding.
 
 ### 2.3 Shelly's path — no-shame check: Life Day and Week Reflection both pass
 
@@ -475,13 +587,15 @@ ledgered as MERGED/FIXED; no status change needed beyond the re-verification not
 
 ### 5.2 New rows added this cycle
 
-- **`FUNC-17`** (Band 2, high severity) — `learnerModels` has grown into a de facto second "current
-  academic state" authority (≈6 real writers, surfaced to parents via `FoundationsTab`'s
-  `whatMattersNext`) that `DECISION_FUNC-01_source_of_truth.md` does not acknowledge at all, despite that
-  doc's own ruling assigning sole authority to `skillSnapshots`. This is a genuine open architecture
-  question, not a mechanical doc-currency gap like `DOC-17` — recommend a dedicated decision-session
-  ruling on whether `learnerModels` is a peer authority, a derived/composing read-model (like
-  `dispositionCache`), or should write-through to `skillSnapshots`. See 2.1.
+- **`FUNC-17`** (Band 2, high severity) — `learnerModels` is a de facto second "current academic state"
+  authority (≈6 real writers dating to FEAT-54/63/66/68/76, months-old — **not new this window**,
+  corrected on Codex round 2 after the first draft misattributed these pre-existing writers as recent
+  growth), surfaced to parents via `FoundationsTab`'s `whatMattersNext`, that `DECISION_FUNC-01_source_
+  of_truth.md` does not acknowledge at all despite that doc's own ruling assigning sole authority to
+  `skillSnapshots`. This is a newly-**discovered**, long-**standing** gap, not a mechanical doc-currency
+  issue like `DOC-17` — recommend a dedicated decision-session ruling on whether `learnerModels` is a
+  peer authority, a derived/composing read-model (like `dispositionCache`), or should write-through to
+  `skillSnapshots`. See 2.1.
 - **`ARCH-50`** (Band 1, moderate severity, new) — production npm-audit vulnerabilities regressed on both
   trees this window after being 0/0 for at least two consecutive cycles: root `fflate` (via `jspdf`,
   real print-path dependency) and functions `qs`/`body-parser`/`express` (via `firebase-functions`). Both
@@ -495,7 +609,7 @@ ledgered as MERGED/FIXED; no status change needed beyond the re-verification not
 | **ARCH-02** | OPEN, untouched 3 cycles running | OPEN — **file touched this window (+123L) for unrelated reasons; extraction still not done, now 4th cycle unaddressed** | see 1.2 |
 | **ARCH-03** | OPEN (2,113L reported) | OPEN — **now 2,414L (+253L this window)** | see 1.1 |
 | ARCH-04, 06, 14, 44 | OPEN | OPEN, unchanged (0L or negligible growth) | |
-| ARCH-05, 08 | OPEN | OPEN, unchanged — bundle +64.51 kB/+24.30 kB gzip this window, ~3× prior rate | see 1.4 |
+| ARCH-05, 08 | OPEN | OPEN, unchanged in status — bundle +64.51 kB/+24.30 kB gzip this window, ~3× prior rate; **this cycle adds the required heaviest-imports/routes analysis and a concrete sequenced `React.lazy` + `AvatarThumbnail` decoupling plan** (root blocker identified: `AppShell`-reachable `three` import via nav-chrome, not the `/avatar`/`/workshop` routes themselves) | see 1.4 |
 | **ARCH-43** | OPEN (20 sites/19 files, 2026-09-03 count) | OPEN — **this window's diff shows only removals, no additions; the standing count is likely now stale on the optimistic side; a fresh full census (ARCH-46's broadened pattern) is still recommended and still not executed** | see 1.9 |
 | ARCH-46 | OPEN (methodology proposal) | OPEN, unchanged — still recommend a dedicated `PROMPT_FIX` run | |
 | **ARCH-47** | MERGED, one named leftover (`dadLabReportArtifacts.ts`'s hand-kept trio) | MERGED, unchanged — **leftover still open (no slice 5)**; **positive: the ARCH-47 discipline held cleanly on the new weekly-review surface with no dedicated review step forcing it** | see 1.7 |
@@ -541,10 +655,11 @@ files; functions: clean lint/tsc, 1,371/1,371 tests across 61 files; build clean
 regressed on production dependencies for the first time in at least three cycles** — root 1 moderate
 (`fflate` via `jspdf`), functions 3 moderate (`qs`/`body-parser`/`express` via `firebase-functions`),
 both with non-`--force` fixes available — filed as new `ARCH-50`). **Top 3 findings by leverage:**
-(1) new `FUNC-17` — `learnerModels` has quietly grown into a real second "current academic state"
-authority with ~6 production writers and a parent-facing surface (`FoundationsTab`), while the FUNC-01
-decision doc that's supposed to be the single source of truth on this exact question doesn't mention it
-exists — this needs an owner ruling, not another mechanical doc-currency pass; (2) `ARCH-02`
+(1) new `FUNC-17` — `learnerModels` is a real second "current academic state" authority with ~6
+production writers (months-old, not new this window — corrected on Codex round 2) and a parent-facing
+surface (`FoundationsTab`), while the FUNC-01 decision doc that's supposed to be the single source of
+truth on this exact question doesn't mention it exists — this needs an owner ruling, not another
+mechanical doc-currency pass; (2) `ARCH-02`
 (`PlannerChatPage.tsx`'s live-day-edit handler trio extraction) is now unaddressed for a **4th**
 consecutive cycle, and this cycle demonstrated the compounding risk directly — unrelated feature work
 (FEAT-196/UX-183) landed in the same file while the extraction sat untouched; (3) new `ARCH-50` —
