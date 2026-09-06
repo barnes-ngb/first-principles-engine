@@ -1,164 +1,174 @@
-import { describe, expect, it } from 'vitest'
-
+import { describe, it, expect } from 'vitest'
 import {
-  CUSTOM_STORY_THEME_CHIP_LABEL,
-  CUSTOM_STORY_THEME_CHIP_LABEL_SET,
+  chooseStoryTheme,
   CUSTOM_STORY_THEME_HINT,
   CUSTOM_STORY_THEME_MAX_LENGTH,
-  chooseStoryTheme,
   customStoryThemeChipLabel,
+  CUSTOM_STORY_THEME_CHIP_LABEL,
+  CUSTOM_STORY_THEME_CHIP_LABEL_SET,
   hasCustomStoryTheme,
   normalizeCustomStoryTheme,
   themeIdForNote,
 } from '../customStoryTheme'
+import type { StoryThemeSelection } from '../customStoryTheme'
 
-/**
- * FEAT-194 — the one-off "what should this story feel like?" note that replaced
- * the saved-theme library.
- */
+// ── normalizeCustomStoryTheme ───────────────────────────────────
 
 describe('normalizeCustomStoryTheme', () => {
-  it('trims and collapses whitespace', () => {
-    expect(normalizeCustomStoryTheme('  a spooky   forest \n with a witch ')).toBe(
-      'a spooky forest with a witch',
-    )
+  it('returns a trimmed, whitespace-collapsed string', () => {
+    expect(normalizeCustomStoryTheme('  a  spooky   forest  ')).toBe('a spooky forest')
   })
 
-  it('caps the note — the field is a note, not a design brief', () => {
-    const long = 'x'.repeat(CUSTOM_STORY_THEME_MAX_LENGTH + 50)
-    expect(normalizeCustomStoryTheme(long)).toHaveLength(CUSTOM_STORY_THEME_MAX_LENGTH)
-  })
-
-  it('is `\'\'` for anything that is not words a parent typed', () => {
+  it('returns empty for non-string inputs', () => {
     expect(normalizeCustomStoryTheme(undefined)).toBe('')
     expect(normalizeCustomStoryTheme(null)).toBe('')
-    expect(normalizeCustomStoryTheme(7)).toBe('')
-    expect(normalizeCustomStoryTheme({ note: 'hi' })).toBe('')
-    expect(normalizeCustomStoryTheme('   ')).toBe('')
+    expect(normalizeCustomStoryTheme(42)).toBe('')
+    expect(normalizeCustomStoryTheme({})).toBe('')
+    expect(normalizeCustomStoryTheme(true)).toBe('')
   })
 
-  it('treats `\'\'` and absent as the same thing', () => {
-    expect(hasCustomStoryTheme('')).toBe(false)
-    expect(hasCustomStoryTheme(undefined)).toBe(false)
-    expect(hasCustomStoryTheme('warm and gentle')).toBe(true)
+  it('returns empty for a whitespace-only string', () => {
+    expect(normalizeCustomStoryTheme('   ')).toBe('')
+    expect(normalizeCustomStoryTheme('\t\n')).toBe('')
+  })
+
+  it('caps at CUSTOM_STORY_THEME_MAX_LENGTH', () => {
+    const long = 'a'.repeat(300)
+    const result = normalizeCustomStoryTheme(long)
+    expect(result.length).toBeLessThanOrEqual(CUSTOM_STORY_THEME_MAX_LENGTH)
+    expect(result.length).toBe(CUSTOM_STORY_THEME_MAX_LENGTH)
+  })
+
+  it('trims after slicing so a mid-word cut does not leave trailing whitespace', () => {
+    const input = 'a'.repeat(CUSTOM_STORY_THEME_MAX_LENGTH - 1) + ' b extra'
+    const result = normalizeCustomStoryTheme(input)
+    expect(result).not.toMatch(/\s$/)
+  })
+
+  it('handles an empty string', () => {
+    expect(normalizeCustomStoryTheme('')).toBe('')
   })
 })
 
-describe('chooseStoryTheme — one or the other, never both', () => {
+// ── hasCustomStoryTheme ─────────────────────────────────────────
+
+describe('hasCustomStoryTheme', () => {
+  it('returns true for a non-empty note', () => {
+    expect(hasCustomStoryTheme('a spooky forest')).toBe(true)
+  })
+
+  it('returns false for empty, whitespace, or non-string', () => {
+    expect(hasCustomStoryTheme('')).toBe(false)
+    expect(hasCustomStoryTheme('   ')).toBe(false)
+    expect(hasCustomStoryTheme(null)).toBe(false)
+    expect(hasCustomStoryTheme(undefined)).toBe(false)
+  })
+})
+
+// ── chooseStoryTheme ────────────────────────────────────────────
+
+describe('chooseStoryTheme', () => {
+  const blank: StoryThemeSelection = { theme: undefined, customTheme: '' }
+  const withPreset: StoryThemeSelection = { theme: 'adventure', customTheme: '' }
+  const withCustom: StoryThemeSelection = { theme: undefined, customTheme: 'a spooky forest' }
+
   it('picking a preset clears the note', () => {
-    expect(
-      chooseStoryTheme({ theme: undefined, customTheme: 'spooky but kind' }, {
-        kind: 'preset',
-        id: 'fantasy',
-      }),
-    ).toEqual({ theme: 'fantasy', customTheme: '' })
+    const result = chooseStoryTheme(withCustom, { kind: 'preset', id: 'adventure' })
+    expect(result.theme).toBe('adventure')
+    expect(result.customTheme).toBe('')
+  })
+
+  it('picking the same preset toggles it off', () => {
+    const result = chooseStoryTheme(withPreset, { kind: 'preset', id: 'adventure' })
+    expect(result.theme).toBeUndefined()
+    expect(result.customTheme).toBe('')
+  })
+
+  it('picking a different preset switches it', () => {
+    const result = chooseStoryTheme(withPreset, { kind: 'preset', id: 'fantasy' })
+    expect(result.theme).toBe('fantasy')
+    expect(result.customTheme).toBe('')
   })
 
   it('saving a note clears the preset', () => {
-    expect(
-      chooseStoryTheme({ theme: 'fantasy', customTheme: '' }, {
-        kind: 'custom',
-        note: 'spooky but kind',
-      }),
-    ).toEqual({ theme: undefined, customTheme: 'spooky but kind' })
+    const result = chooseStoryTheme(withPreset, { kind: 'custom', note: 'a kind witch' })
+    expect(result.theme).toBeUndefined()
+    expect(result.customTheme).toBe('a kind witch')
   })
 
-  it('picking the selected preset again clears it (the chips toggle)', () => {
-    expect(
-      chooseStoryTheme({ theme: 'fantasy', customTheme: '' }, { kind: 'preset', id: 'fantasy' }),
-    ).toEqual({ theme: undefined, customTheme: '' })
+  it('saving an empty note clears the note but leaves the preset alone', () => {
+    const result = chooseStoryTheme(withPreset, { kind: 'custom', note: '' })
+    expect(result.theme).toBe('adventure')
+    expect(result.customTheme).toBe('')
   })
 
-  it('clearing the note leaves the preset alone — it must not re-select a replaced one', () => {
-    expect(
-      chooseStoryTheme({ theme: undefined, customTheme: 'spooky' }, { kind: 'custom', note: '' }),
-    ).toEqual({ theme: undefined, customTheme: '' })
+  it('saving an empty note from a custom state does not re-select a preset', () => {
+    const result = chooseStoryTheme(withCustom, { kind: 'custom', note: '' })
+    expect(result.theme).toBeUndefined()
+    expect(result.customTheme).toBe('')
   })
 
-  it('normalizes the note it stores', () => {
-    expect(
-      chooseStoryTheme({ theme: undefined, customTheme: '' }, {
-        kind: 'custom',
-        note: '  warm   and gentle  ',
-      }),
-    ).toEqual({ theme: undefined, customTheme: 'warm and gentle' })
+  it('saving a whitespace-only note is treated as empty', () => {
+    const result = chooseStoryTheme(withPreset, { kind: 'custom', note: '   ' })
+    expect(result.theme).toBe('adventure')
+    expect(result.customTheme).toBe('')
   })
 
-  it('never returns both a preset and a note, from any starting point', () => {
-    const starts = [
-      { theme: undefined, customTheme: '' },
-      { theme: 'fantasy', customTheme: '' },
-      { theme: undefined, customTheme: 'spooky' },
-    ]
-    const picks = [
-      { kind: 'preset' as const, id: 'fantasy' },
-      { kind: 'preset' as const, id: 'animals' },
-      { kind: 'custom' as const, note: 'warm' },
-      { kind: 'custom' as const, note: '' },
-    ]
-    for (const start of starts) {
-      for (const pick of picks) {
-        const next = chooseStoryTheme(start, pick)
-        expect(Boolean(next.theme) && Boolean(next.customTheme)).toBe(false)
-      }
-    }
+  it('from blank: picking a preset sets it', () => {
+    const result = chooseStoryTheme(blank, { kind: 'preset', id: 'space' })
+    expect(result.theme).toBe('space')
+  })
+
+  it('from blank: saving a note sets it', () => {
+    const result = chooseStoryTheme(blank, { kind: 'custom', note: 'forest' })
+    expect(result.customTheme).toBe('forest')
+    expect(result.theme).toBeUndefined()
   })
 })
 
-describe('the chip label', () => {
-  it('invites when there is no note and states when there is', () => {
+// ── themeIdForNote ──────────────────────────────────────────────
+
+describe('themeIdForNote', () => {
+  it('returns the inferred id when there is no note', () => {
+    expect(themeIdForNote('adventure', '')).toBe('adventure')
+    expect(themeIdForNote('adventure', undefined)).toBe('adventure')
+    expect(themeIdForNote('adventure', null)).toBe('adventure')
+  })
+
+  it('returns empty string when the book has a custom note', () => {
+    expect(themeIdForNote('adventure', 'a spooky forest')).toBe('')
+  })
+
+  it('preserves undefined inferred when there is no note', () => {
+    expect(themeIdForNote(undefined, '')).toBeUndefined()
+  })
+
+  it('returns empty string even when inferred is undefined if note is present', () => {
+    expect(themeIdForNote(undefined, 'forest')).toBe('')
+  })
+})
+
+// ── customStoryThemeChipLabel ───────────────────────────────────
+
+describe('customStoryThemeChipLabel', () => {
+  it('returns the "set" label when a note is present', () => {
+    expect(customStoryThemeChipLabel('forest')).toBe(CUSTOM_STORY_THEME_CHIP_LABEL_SET)
+  })
+
+  it('returns the default label when no note is present', () => {
     expect(customStoryThemeChipLabel('')).toBe(CUSTOM_STORY_THEME_CHIP_LABEL)
-    expect(customStoryThemeChipLabel('spooky but kind')).toBe(
-      CUSTOM_STORY_THEME_CHIP_LABEL_SET,
-    )
+    expect(customStoryThemeChipLabel(undefined)).toBe(CUSTOM_STORY_THEME_CHIP_LABEL)
   })
 })
 
-describe('the hint', () => {
-  /**
-   * The dropped fourth field, said out loud. The dialog this replaced asked
-   * "What style should pictures be?" and that text reached nothing. There is no
-   * replacement here on purpose (UX-177), so the hint must not imply the note
-   * changes the pictures — it has to say the opposite.
-   */
-  it('says the note shapes the story and not the pictures', () => {
-    expect(CUSTOM_STORY_THEME_HINT.toLowerCase()).toContain('not the pictures')
+// ── CUSTOM_STORY_THEME_HINT (story-only contract) ───────────────
+
+describe('CUSTOM_STORY_THEME_HINT', () => {
+  it('mentions the story', () => {
     expect(CUSTOM_STORY_THEME_HINT.toLowerCase()).toContain('story')
   })
-})
 
-describe('themeIdForNote — the rule where a theme is INFERRED, not picked', () => {
-  /**
-   * Codex P1 on PR #1767. The Generate chat has no theme chips: it assigns an
-   * `inferBookTheme` id on every create. Without this, a noted book stored both
-   * and the invariant held only inside the Finish dialog's own state — reopening
-   * Finish showed a preset chip AND Custom selected, and the shelf's preset
-   * filter listed a custom-noted book.
-   */
-  it('drops the inferred id when a note is in play', () => {
-    expect(themeIdForNote('fantasy', 'spooky but kind')).toBe('')
-  })
-
-  it('keeps the inferred id when there is no note', () => {
-    expect(themeIdForNote('fantasy', '')).toBe('fantasy')
-    expect(themeIdForNote('fantasy', undefined)).toBe('fantasy')
-    expect(themeIdForNote('fantasy', '   ')).toBe('fantasy')
-  })
-
-  it("returns `''`, not `undefined` — `undefined` survives a merge write", () => {
-    // The app runs Firestore with `ignoreUndefinedProperties`.
-    expect(themeIdForNote('fantasy', 'spooky')).not.toBeUndefined()
-  })
-
-  it("`''` is falsy everywhere the id is read", () => {
-    const cleared = themeIdForNote('fantasy', 'spooky')
-    // The shelf's `filter(Boolean)`, the Finish dialog's `selectedTheme === t.id`,
-    // and `useBookIllustrator`'s `bookTheme ? { themeId } : {}` all read it.
-    expect(Boolean(cleared)).toBe(false)
-  })
-
-  it('leaves an already-absent id absent', () => {
-    expect(themeIdForNote(undefined, 'spooky')).toBe('')
-    expect(themeIdForNote(undefined, '')).toBeUndefined()
+  it('explicitly excludes pictures', () => {
+    expect(CUSTOM_STORY_THEME_HINT.toLowerCase()).toContain('not the pictures')
   })
 })

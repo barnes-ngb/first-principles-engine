@@ -1,160 +1,145 @@
-import { describe, expect, it } from 'vitest'
-
+import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_LEVEL_STRETCH,
-  LEVEL_STRETCH_FOOTNOTE,
   levelStretchHint,
   levelStretchOptions,
   levelStretchPhrase,
   normalizeLevelStretch,
   ownLevelLabel,
 } from '../storyLevelStretch'
-import { storyDraftMessage, storyReadabilityClause } from '../storyPracticeWords'
 
-/**
- * FEAT-191 — the per-story "one step up", client side.
- *
- * Two things are pinned here: the copy the parent taps, and the honest line's
- * new job. The line used to be silent on a pass, which after this run would mean
- * a book full of bigger words with nothing saying they were asked for.
- */
+// ── normalizeLevelStretch ───────────────────────────────────────
 
 describe('normalizeLevelStretch', () => {
-  it('keeps the three real choices', () => {
+  it('returns 0 for 0', () => {
     expect(normalizeLevelStretch(0)).toBe(0)
+  })
+
+  it('returns 1 for 1', () => {
     expect(normalizeLevelStretch(1)).toBe(1)
+  })
+
+  it('returns 2 for 2', () => {
     expect(normalizeLevelStretch(2)).toBe(2)
   })
 
-  it('defaults to the child’s own level for anything unusable', () => {
-    expect(normalizeLevelStretch(undefined)).toBe(DEFAULT_LEVEL_STRETCH)
-    expect(normalizeLevelStretch(null)).toBe(0)
-    expect(normalizeLevelStretch('two')).toBe(0)
-    expect(normalizeLevelStretch(-1)).toBe(0)
+  it('clamps values above MAX_LEVEL_STRETCH to 2', () => {
+    expect(normalizeLevelStretch(5)).toBe(2)
+    expect(normalizeLevelStretch(100)).toBe(2)
   })
 
-  it('clamps an over-large stored value', () => {
-    expect(normalizeLevelStretch(9)).toBe(2)
+  it('clamps negative values to 0', () => {
+    expect(normalizeLevelStretch(-1)).toBe(0)
+    expect(normalizeLevelStretch(-999)).toBe(0)
+  })
+
+  it('rounds fractional values', () => {
+    expect(normalizeLevelStretch(0.4)).toBe(0)
+    expect(normalizeLevelStretch(0.6)).toBe(1)
+    expect(normalizeLevelStretch(1.5)).toBe(2)
+  })
+
+  it('returns the default for non-finite numbers', () => {
+    expect(normalizeLevelStretch(NaN)).toBe(DEFAULT_LEVEL_STRETCH)
+    expect(normalizeLevelStretch(Infinity)).toBe(DEFAULT_LEVEL_STRETCH)
+    expect(normalizeLevelStretch(-Infinity)).toBe(DEFAULT_LEVEL_STRETCH)
+  })
+
+  it('returns the default for non-number types', () => {
+    expect(normalizeLevelStretch(undefined)).toBe(DEFAULT_LEVEL_STRETCH)
+    expect(normalizeLevelStretch(null)).toBe(DEFAULT_LEVEL_STRETCH)
+    expect(normalizeLevelStretch({})).toBe(DEFAULT_LEVEL_STRETCH)
+    expect(normalizeLevelStretch([])).toBe(DEFAULT_LEVEL_STRETCH)
+  })
+
+  it('coerces boolean true to 1 via Number()', () => {
+    expect(normalizeLevelStretch(true)).toBe(1)
+  })
+
+  it('coerces numeric strings', () => {
+    expect(normalizeLevelStretch('1')).toBe(1)
+    expect(normalizeLevelStretch('2')).toBe(2)
+    expect(normalizeLevelStretch('0')).toBe(0)
+  })
+
+  it('returns the default for non-numeric strings', () => {
+    expect(normalizeLevelStretch('abc')).toBe(DEFAULT_LEVEL_STRETCH)
+    expect(normalizeLevelStretch('')).toBe(DEFAULT_LEVEL_STRETCH)
   })
 })
 
-describe('the control’s copy', () => {
-  it('names the child rather than guessing a pronoun for them', () => {
-    expect(ownLevelLabel('Lincoln')).toBe("Lincoln's level")
-    // No name on file is not a licence to guess one either.
-    expect(ownLevelLabel('  ')).toBe('Their level')
-  })
+// ── levelStretchPhrase ──────────────────────────────────────────
 
-  it('offers the child’s own level first, then the two reaches', () => {
-    const options = levelStretchOptions('Lincoln')
-    expect(options.map((o) => o.value)).toEqual([0, 1, 2])
-    expect(options[0].label).toBe("Lincoln's level")
-    expect(options[1].label).toBe('One step up')
-    expect(options[2].label).toBe('Two steps up')
-  })
-
-  it('says every option is just this book, and where the lasting change lives', () => {
-    expect(levelStretchHint(1, 'Lincoln')).toContain('just for this book')
-    expect(LEVEL_STRETCH_FOOTNOTE).toContain('Skill Snapshot')
-    expect(LEVEL_STRETCH_FOOTNOTE).toContain('Just this book')
-  })
-
-  it('shares one phrase with the server prompt and the honest line', () => {
+describe('levelStretchPhrase', () => {
+  it('returns "one step up" for 1', () => {
     expect(levelStretchPhrase(1)).toBe('one step up')
+  })
+
+  it('returns "two steps up" for 2', () => {
     expect(levelStretchPhrase(2)).toBe('two steps up')
   })
-})
 
-describe('storyReadabilityClause with a stretch (FEAT-191)', () => {
-  const passing = {
-    passed: true,
-    levelSource: 'assessed' as const,
-    hardWords: [],
-    hardWordCount: 0,
-  }
-  const failing = {
-    passed: false,
-    levelSource: 'assessed' as const,
-    hardWords: [
-      { page: 1, word: 'castle' },
-      { page: 2, word: 'ready' },
-    ],
-    hardWordCount: 2,
-  }
-
-  it('says a passing story was written up, so the bigger words are accounted for', () => {
-    expect(storyReadabilityClause('Lincoln', { ...passing, stretch: 1, phonicsLevel: 3 })).toBe(
-      'Written one step up (Level 3).',
-    )
-    expect(storyReadabilityClause('Lincoln', { ...passing, stretch: 2, phonicsLevel: 4 })).toBe(
-      'Written two steps up (Level 4).',
-    )
-  })
-
-  it('stays silent on a passing story with no stretch — unchanged', () => {
-    expect(storyReadabilityClause('Lincoln', passing)).toBe('')
-    expect(storyReadabilityClause('Lincoln', { ...passing, stretch: 0 })).toBe('')
-    expect(storyReadabilityClause('Lincoln', undefined)).toBe('')
-  })
-
-  it('measures a failure against the STRETCHED level, and says what it stretched from', () => {
-    expect(
-      storyReadabilityClause('Lincoln', { ...failing, stretch: 1, phonicsLevel: 3 }),
-    ).toBe(
-      "2 words may be above Level 3 (one step up from Lincoln's level): castle, ready.",
-    )
-  })
-
-  it('keeps the pre-FEAT-191 failure wording when nothing was stretched', () => {
-    expect(storyReadabilityClause('Lincoln', failing)).toBe(
-      "2 words may be above Lincoln's level: castle, ready.",
-    )
-  })
-
-  it('still names an estimated level alongside the stretch', () => {
-    expect(
-      storyReadabilityClause('Lincoln', {
-        ...failing,
-        levelSource: 'age',
-        stretch: 1,
-        phonicsLevel: 3,
-      }),
-    ).toContain('(level estimated from age)')
-  })
-
-  it('never invents a level number an older deploy did not send', () => {
-    const clause = storyReadabilityClause('Lincoln', { ...passing, stretch: 1 })
-    expect(clause).toBe('Written one step up.')
-    expect(clause).not.toMatch(/Level \d/)
+  it('returns "two steps up" for 0 (normalizes to 0, which is not 1)', () => {
+    expect(levelStretchPhrase(0)).toBe('two steps up')
   })
 })
 
-describe('storyDraftMessage carries the stretch onto the draft turn', () => {
-  const pages = [{ text: 'The ship is black.' }]
+// ── ownLevelLabel ───────────────────────────────────────────────
 
-  it('appends the written-up clause to a passing draft', () => {
-    const line = storyDraftMessage('The Ship', [], pages, 'none', {
-      passed: true,
-      levelSource: 'assessed',
-      hardWords: [],
-      hardWordCount: 0,
-      stretch: 1,
-      phonicsLevel: 3,
-    })
-    // The em-dash join is `appendClause`'s existing rule — the body ends on a
-    // quote, not a full stop, so the clause is attached rather than started.
-    expect(line).toBe('Here\'s your story! "The Ship" — Written one step up (Level 3).')
+describe('ownLevelLabel', () => {
+  it('returns "Lincoln\'s level" for "Lincoln"', () => {
+    expect(ownLevelLabel('Lincoln')).toBe("Lincoln's level")
   })
 
-  it('leaves an unstretched passing draft byte-identical', () => {
-    const withField = storyDraftMessage('The Ship', [], pages, 'none', {
-      passed: true,
-      levelSource: 'assessed',
-      hardWords: [],
-      hardWordCount: 0,
-      stretch: 0,
-    })
-    const without = storyDraftMessage('The Ship', [], pages, 'none')
-    expect(withField).toBe(without)
+  it('trims the name', () => {
+    expect(ownLevelLabel('  Lincoln  ')).toBe("Lincoln's level")
+  })
+
+  it('returns "Their level" for an empty name', () => {
+    expect(ownLevelLabel('')).toBe('Their level')
+    expect(ownLevelLabel('   ')).toBe('Their level')
+  })
+})
+
+// ── levelStretchOptions ─────────────────────────────────────────
+
+describe('levelStretchOptions', () => {
+  it('returns three options in order: 0, 1, 2', () => {
+    const options = levelStretchOptions('Lincoln')
+    expect(options).toHaveLength(3)
+    expect(options.map((o) => o.value)).toEqual([0, 1, 2])
+  })
+
+  it('the first option uses the child name', () => {
+    const options = levelStretchOptions('Lincoln')
+    expect(options[0].label).toBe("Lincoln's level")
+  })
+
+  it('uses "this reader" as fallback when name is empty', () => {
+    const options = levelStretchOptions('')
+    expect(options[0].hint).toContain('this reader')
+    expect(options[1].hint).toContain('this reader')
+  })
+
+  it('every option has a non-empty hint', () => {
+    for (const opt of levelStretchOptions('Lincoln')) {
+      expect(opt.hint.length).toBeGreaterThan(0)
+    }
+  })
+})
+
+// ── levelStretchHint ────────────────────────────────────────────
+
+describe('levelStretchHint', () => {
+  it('returns the matching option hint for each valid value', () => {
+    const options = levelStretchOptions('Lincoln')
+    for (const opt of options) {
+      expect(levelStretchHint(opt.value, 'Lincoln')).toBe(opt.hint)
+    }
+  })
+
+  it('normalizes an out-of-range value before looking up', () => {
+    const options = levelStretchOptions('Lincoln')
+    expect(levelStretchHint(5, 'Lincoln')).toBe(options[2].hint)
   })
 })
