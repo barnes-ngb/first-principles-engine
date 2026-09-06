@@ -12,8 +12,9 @@ import Typography from '@mui/material/Typography'
 
 import type { BookLookupResult, BookProgress, ChapterBook, WorkbookConfig } from '../../core/types'
 import ChapterBookPicker from './ChapterBookPicker'
+import { PLANNER_REQUEST_LABEL, PLANNER_REQUEST_PLACEHOLDER } from './plannerRequest'
 import { generateButtonLabel } from './planningWeekSelection'
-import { weekEnergyLabel } from './weekEnergyLabels'
+import { WEEK_ENERGY_QUESTION, weekEnergyLabel } from './weekEnergyLabels'
 
 interface PlannerCompactSetupProps {
   childName: string
@@ -27,7 +28,6 @@ interface PlannerCompactSetupProps {
   weekStart?: string
   weekEnergy: 'full' | 'lighter' | 'mvd'
   onWeekEnergyChange: (v: 'full' | 'lighter' | 'mvd') => void
-  hoursPerDay: number
   chapterBooks: ChapterBook[]
   selectedBook: ChapterBook | null
   onSelectedBookChange: (book: ChapterBook | null) => void
@@ -55,7 +55,6 @@ export default function PlannerCompactSetup({
   weekStart,
   weekEnergy,
   onWeekEnergyChange,
-  hoursPerDay,
   chapterBooks,
   selectedBook,
   onSelectedBookChange,
@@ -96,7 +95,7 @@ export default function PlannerCompactSetup({
       </Box>
 
       <Box>
-        <Typography variant="subtitle2" gutterBottom>How&apos;s the week looking?</Typography>
+        <Typography variant="subtitle2" gutterBottom>{WEEK_ENERGY_QUESTION}</Typography>
         <ToggleButtonGroup
           value={weekEnergy}
           exclusive
@@ -104,9 +103,9 @@ export default function PlannerCompactSetup({
           size="small"
           fullWidth
         >
-          <ToggleButton value="full">{weekEnergyLabel('full', hoursPerDay)}</ToggleButton>
-          <ToggleButton value="lighter">{weekEnergyLabel('lighter', hoursPerDay)}</ToggleButton>
-          <ToggleButton value="mvd">{weekEnergyLabel('mvd', hoursPerDay)}</ToggleButton>
+          <ToggleButton value="full">{weekEnergyLabel('full')}</ToggleButton>
+          <ToggleButton value="lighter">{weekEnergyLabel('lighter')}</ToggleButton>
+          <ToggleButton value="mvd">{weekEnergyLabel('mvd')}</ToggleButton>
         </ToggleButtonGroup>
       </Box>
 
@@ -170,8 +169,8 @@ export default function PlannerCompactSetup({
 
       <TextField
         size="small"
-        label="Anything special this week?"
-        placeholder="Field trip Tuesday, doctor Thursday..."
+        label={PLANNER_REQUEST_LABEL}
+        placeholder={PLANNER_REQUEST_PLACEHOLDER}
         value={weekNotes}
         onChange={(e) => onWeekNotesChange(e.target.value)}
         fullWidth

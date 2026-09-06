@@ -131,6 +131,34 @@ describe('liveDayEdit — the completed-row rule (FEAT-138)', () => {
   })
 })
 
+/**
+ * UX-230. Apply writes only the rows the parent accepted, but the planner's
+ * post-Apply card still renders every draft row — so an unticked one is looked
+ * up, is legitimately absent from the day, and used to be described with the
+ * sentence written for a row that had been DELETED since. On the screen a parent
+ * opens to confirm her week landed, that says her week lost rows.
+ */
+describe('liveDayEdit — "left out" is not "went missing" (UX-230)', () => {
+  it('tells a parent she left it out, and how to put it back', () => {
+    const reason = liveDayEditLockReason('not-planned')
+    expect(reason).toContain('left this one out')
+    expect(reason).toContain('Redo the plan')
+  })
+
+  it('does not reuse the removed-row wording', () => {
+    expect(liveDayEditLockReason('not-planned')).not.toBe(
+      liveDayEditLockReason('not-found'),
+    )
+    expect(liveDayEditLockReason('not-planned')).not.toContain('any more')
+  })
+
+  it('leaves the genuine removed-row case saying exactly what it said', () => {
+    expect(liveDayEditLockReason('not-found')).toBe(
+      "That item isn't on the day any more — reopen the week to see what's there now.",
+    )
+  })
+})
+
 describe('liveDayEdit — parent capability is enforced at the WRITE', () => {
   // `/planner/chat` sits outside `RequireParent`, so a kid deep-link reaches the
   // page. Withholding the affordance is not the gate — this is.

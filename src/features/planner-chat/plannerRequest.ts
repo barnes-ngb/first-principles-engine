@@ -34,8 +34,29 @@ export interface PlannerRequestMessage {
   typedByParent?: boolean
 }
 
+/**
+ * The label on the field this module collects from — one string, both setup
+ * surfaces (UX-235).
+ *
+ * The wizard called it *"Anything different this week?"* and the compact setup
+ * called it *"Anything special this week?"*, so the single most important control
+ * on the page — the one whose text FEAT-198 fences and sends LAST, with the most
+ * authority of anything in the prompt — had two names depending on nothing the
+ * parent could see. "Different" is the wording kept: a week is shaped by what
+ * departs from the routine, and "special" invites an occasion rather than a
+ * constraint ("we're packing the house" is neither special nor an occasion).
+ *
+ * It lives here rather than next to either component because this module is what
+ * the field is FOR; a copy beside one input is how the two drifted apart.
+ */
+export const PLANNER_REQUEST_LABEL = 'Anything different this week?'
+
+/** The one placeholder under that label. */
+export const PLANNER_REQUEST_PLACEHOLDER =
+  'Field trip Tuesday afternoon, doctor Thursday morning...'
+
 export interface PlannerRequestSource {
-  /** The setup card's "Anything special this week?" field. */
+  /** The setup card's {@link PLANNER_REQUEST_LABEL} field. */
   weekNotes?: string
   /** The conversation so far, oldest first. */
   messages?: readonly PlannerRequestMessage[]

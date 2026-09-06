@@ -8,11 +8,13 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import type { AppBlock, Child, SkillSnapshot } from '../../core/types'
+import { formatPlanningWeekLabel } from './chatPlanner.logic'
 
 interface ContextDrawerProps {
   open: boolean
   onClose: () => void
   child: Child | null
+  /** The planning week's Sunday-start key, as the page resolved it. */
   weekKey: string
   hoursPerDay: number
   appBlocks: AppBlock[]
@@ -42,7 +44,9 @@ export default function ContextDrawer({
     >
       <Stack spacing={2}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6">Context</Typography>
+          {/* UX-242: "Context" is the internal word for this. What the panel
+              actually lists is what the plan is being built from. */}
+          <Typography variant="h6">What Shelly is planning with</Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>
@@ -55,8 +59,11 @@ export default function ContextDrawer({
             Child & Week
           </Typography>
           <Typography variant="body2">{child?.name ?? 'No child selected'}</Typography>
+          {/* UX-242: this said "Week of 2026-09-06" — a raw document key, and
+              the SUNDAY, while every other control on the page names the same
+              week as "Sep 7–11". One formatter, the planner's own. */}
           <Typography variant="body2" color="text.secondary">
-            Week of {weekKey}
+            {formatPlanningWeekLabel(weekKey) || `Week of ${weekKey}`}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {hoursPerDay} hours/day ({Math.round(hoursPerDay * 60)} min)

@@ -76,13 +76,27 @@ export function checklistItemEditLock(
 }
 
 /**
+ * Why a row on a MIRROR of a live day has no edits — the write refusals above,
+ * plus one state that is not a refusal at all (UX-230).
+ *
+ * `'not-planned'` is a row the parent left unticked in the draft. Apply writes
+ * only accepted items (`applyDraftWeek` filters `item.accepted`, and
+ * `applicableDays` skips a day with none), so the planner's post-Apply card —
+ * which still renders every draft row, struck through — looks each one up and
+ * legitimately fails to find it. Nothing went wrong and nothing is missing: it
+ * was never sent. Saying *"isn't on the day any more"* about it told a parent
+ * her week had lost rows on the screen she opened to confirm it had not.
+ */
+export type ItemEditLockKind = LiveDayEditRefusal | 'not-planned'
+
+/**
  * Plain-language reason shown next to a disabled affordance. The rule is that a
  * dropped affordance always SAYS why (FEAT-135's lesson) — a silently inert
  * button beside prose promising the action is a lie. No shame, no blame: the
  * work is done, which is a good thing, and it is simply not ours to move.
  */
 export function liveDayEditLockReason(
-  refusal: LiveDayEditRefusal,
+  refusal: ItemEditLockKind,
   childName?: string,
 ): string {
   const who = childName?.trim() ? childName.trim() : 'They'
@@ -91,6 +105,9 @@ export function liveDayEditLockReason(
   }
   if (refusal === 'not-permitted') {
     return 'Changing the week is something a grown-up does — nothing was changed.'
+  }
+  if (refusal === 'not-planned') {
+    return "You left this one out, so it isn't on the day. Redo the plan to put it back."
   }
   return "That item isn't on the day any more — reopen the week to see what's there now."
 }

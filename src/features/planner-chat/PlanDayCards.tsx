@@ -8,7 +8,16 @@ import PlanPreviewCard from './PlanPreviewCard'
 interface PlanDayCardsProps {
   draft: DraftWeeklyPlan
   hoursPerDay: number
-  masteryReviewLine: string
+  /**
+   * The one-line "what to review" summary, rendered as a callout above the days.
+   *
+   * Optional since UX-244: the planner pins `PlanSummaryPanel` above these cards
+   * in every phase and that panel already carries the same sentence, so the
+   * planner passes nothing and the line appears once per screen. A caller with
+   * no summary panel of its own (the chat's `NextWeekDraftCard`) may still pass
+   * one.
+   */
+  masteryReviewLine?: string
   readAloudBook: string
   /** Sunday-start of the planning week; drives the "Week of …" header and each
    *  day card's concrete date (FEAT-112). */
