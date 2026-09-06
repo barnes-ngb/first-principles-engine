@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { CurriculumSnapshot, WeeklyReview } from '../../core/types'
+import type { CurriculumSnapshot, WeekEvidence, WeeklyReview } from '../../core/types'
 
 // ── Mocks at the boundaries ─────────────────────────────────────────────────
 // The section's only reach is the three range reads behind `useWeekHours`.
@@ -45,8 +45,61 @@ const snapshot = (
   ],
 })
 
+// A review the cron GENERATED. `status` is the marker `reviewWasGenerated`
+// reads — the reflection merge writes no status, so presence of one is what
+// separates "the cron ran" from "a parent answered on Saturday".
 const review = (curriculumPositions?: CurriculumSnapshot): WeeklyReview =>
-  ({ childId: 'c1', weekKey: '2026-08-30', curriculumPositions } as unknown as WeeklyReview)
+  ({
+    childId: 'c1',
+    weekKey: '2026-08-30',
+    status: 'draft',
+    curriculumPositions,
+  }) as unknown as WeeklyReview
+
+/** A week's evidence summary, as the Cloud Function assembles it. */
+const evidenceOf = (
+  created: number,
+  sessions: number,
+  taught: number,
+): WeekEvidence => ({
+  books: {
+    booksCreated: Array.from({ length: created }, (_, i) => ({
+      id: `b${i}`,
+      title: `Book ${i}`,
+      pages: 6,
+      isAiGenerated: false,
+    })),
+    booksCompleted: [],
+    readingSessions: { count: sessions, totalMinutes: 40, booksRead: [] },
+  },
+  teachBacks: {
+    count: taught,
+    bySubject: {},
+    audioCount: taught,
+    textCount: 0,
+    examples: [],
+  },
+})
+
+/** Render with an explicit review document — including `null`, the Saturday case. */
+function renderWithReview(
+  doc: WeeklyReview | null,
+  priors: CurriculumSnapshot[] = [],
+  historyState: { loading?: boolean; failed?: boolean; reviewFailed?: boolean } = {},
+) {
+  return render(
+    <WeekPaceSection
+      familyId="fam-1"
+      childId="c1"
+      weekKey="2026-08-30"
+      review={doc}
+      reviewFailed={historyState.reviewFailed ?? false}
+      history={priors.map((s) => review(s))}
+      historyLoading={historyState.loading ?? false}
+      historyFailed={historyState.failed ?? false}
+    />,
+  )
+}
 
 function renderSection(
   current?: CurriculumSnapshot,
@@ -59,6 +112,7 @@ function renderSection(
       childId="c1"
       weekKey="2026-08-30"
       review={review(current)}
+      reviewFailed={false}
       history={priors.map((s) => review(s))}
       historyLoading={historyState.loading ?? false}
       historyFailed={historyState.failed ?? false}
@@ -199,6 +253,114 @@ describe('the observed-rate line, in each state', () => {
         'Couldn’t read the earlier weeks, so there’s no rate to show yet.',
       ),
     ).toBeInTheDocument()
+  })
+})
+
+// ── The evidence counts (UX-219) ────────────────────────────────────────────
+
+describe('the week’s evidence counts sit under the hours', () => {
+  it('lists what the week produced', () => {
+    renderWithReview({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      evidence: evidenceOf(2, 3, 2),
+    } as unknown as WeeklyReview)
+    expect(
+      screen.getByText('2 books made · 3 reading sessions · 2 teach-backs.'),
+    ).toBeInTheDocument()
+  })
+
+  it('states a genuinely empty week plainly, never hidden and never red', () => {
+    const { container } = renderWithReview({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      evidence: evidenceOf(0, 0, 0),
+    } as unknown as WeeklyReview)
+    expect(
+      screen.getByText('No books or teach-backs logged this week.'),
+    ).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/behind|should|target|goal|%/i)
+  })
+
+  it('says nothing at all when the week has no summary yet', () => {
+    // Absence is not zero. The cron assembles `evidence`; before it runs there
+    // is nothing to report, and "No books this week" would be a claim.
+    const { container } = renderWithReview(null)
+    expect(container.textContent).not.toMatch(/No books or teach-backs/)
+    expect(container.textContent).not.toMatch(/books made|teach-back/)
+  })
+})
+
+// ── Before the Sunday cron has fired (UX-219) ───────────────────────────────
+
+describe('the Saturday state — the week is named before its review exists', () => {
+  it('still states the hours, which are folded live and never came from the doc', () => {
+    renderWithReview(null)
+    expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
+  })
+
+  it('says when the positions land, rather than claiming a first week', () => {
+    const { container } = renderWithReview(null, [snapshot(AUG_17, 10)])
+    expect(
+      screen.getByText(
+        'This week’s workbook positions haven’t been recorded yet — they’re saved Sunday evening.',
+      ),
+    ).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/rate needs two/)
+  })
+
+  it('does not show the pending line once a snapshot exists', () => {
+    const { container } = renderSection(snapshot(SEP_07, 14), [snapshot(AUG_17, 10)])
+    expect(container.textContent).not.toMatch(/haven’t been recorded yet/)
+  })
+
+  it('never promises Sunday to a review that exists without a snapshot', () => {
+    // Codex round 1, P2. `loadCurriculumSnapshot` omits `curriculumPositions`
+    // when the child has no positioned workbook config, and again when the
+    // config read throws — the cron HAS run in both cases and nothing more is
+    // coming, so this promise would be repeated every week and never come true.
+    const { container } = renderWithReview({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      status: 'draft',
+    } as unknown as WeeklyReview)
+    expect(container.textContent).not.toMatch(/saved Sunday evening/)
+    // And it makes no other claim about coverage either.
+    expect(container.textContent).not.toMatch(/rate needs two|lesson/i)
+  })
+
+  it('still promises Sunday after a parent answers on Saturday', () => {
+    // Codex round 3, P2. `writeWeekReflection` CREATES the document when the
+    // answer is saved before the cron runs, so a non-null review stopped
+    // meaning "generated" — and keying on presence would have made the only
+    // explanation of the missing rate vanish the moment the parent used the
+    // page. `status` is the marker, and the reflection merge writes none.
+    const { container } = renderWithReview({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      reflection: { answer: 'about-right', answeredAt: '2026-09-05T18:00:00.000Z' },
+    } as unknown as WeeklyReview)
+    expect(container.textContent).toMatch(/saved Sunday evening/)
+  })
+
+  it('never presents a failed review read as "the cron hasn’t run"', () => {
+    // Codex round 3, P2, the other direction: a dropped listener leaves the
+    // review null with loading finished, which is indistinguishable from the
+    // Saturday case unless the caller says which it was.
+    const { container } = renderWithReview(null, [], { reviewFailed: true })
+    expect(container.textContent).not.toMatch(/saved Sunday evening/)
+    expect(
+      screen.getByText(
+        'Couldn’t read this week’s review, so there’s nothing to say about coverage yet.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('renders nothing for a child profile even with no document', () => {
+    mockUseActiveChild.mockReturnValue({ isChildProfile: true })
+    const { container } = renderWithReview(null)
+    expect(container).toBeEmptyDOMElement()
+    expect(mockUseWeekHours).not.toHaveBeenCalled()
   })
 })
 

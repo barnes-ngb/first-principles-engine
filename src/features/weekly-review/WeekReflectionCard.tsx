@@ -26,7 +26,17 @@ export interface WeekReflectionCardProps {
   familyId: string
   childId: string
   weekKey: string
-  review: WeeklyReview
+  /**
+   * This week's review, or `null` when the Sunday cron has not written one yet
+   * (UX-219 — the Saturday case).
+   *
+   * The question is still askable and still writable then: `writeWeekReflection`
+   * merges, so it creates the document with the answer on it, and the Cloud
+   * Function's carry-forward (UX-212) reads an existing `reflection` inside a
+   * transaction and puts it back. An answer given before the cron runs survives
+   * the cron.
+   */
+  review: WeeklyReview | null
   history: WeeklyReview[]
   onSaved: (snack: { text: string; severity: 'success' | 'error' }) => void
 }
@@ -63,8 +73,8 @@ function WeekReflectionBody({
   onSaved,
 }: WeekReflectionCardProps) {
   const saved = useMemo(
-    () => normalizeWeekReflection(review.reflection),
-    [review.reflection],
+    () => normalizeWeekReflection(review?.reflection),
+    [review?.reflection],
   )
   const [answer, setAnswer] = useState<WeekReflectionAnswer | null>(
     saved?.answer ?? null,
@@ -81,7 +91,7 @@ function WeekReflectionBody({
   // card went on showing the old answer and would have written it back over the
   // newer one. A different document (child switch) re-seeds unconditionally; the
   // same document re-seeds only when the parent has no unsaved edit in progress.
-  const docKey = review.id ?? weekKey
+  const docKey = review?.id ?? weekKey
   const storedKey = `${docKey}|${saved?.answer ?? ''}|${saved?.answeredAt ?? ''}`
   const [seeded, setSeeded] = useState({ docKey, storedKey })
   if (seeded.docKey !== docKey || (seeded.storedKey !== storedKey && !dirty)) {
