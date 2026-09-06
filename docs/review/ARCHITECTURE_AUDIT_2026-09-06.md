@@ -179,6 +179,10 @@ directly from `records.logic.ts` — no new port across the `functions/`↔`src/
 
 ### 1.8 Drift catalog — non-test files with net change >150L since `a78a180`
 
+**Corrected in this round** — the first version of this table (21 entries) was checked against Codex
+round 1's own `git diff --numstat a78a180 5695f2d -- src functions/src` and found to have silently
+dropped 13 files that clear the same >150L threshold. Re-run in full below; this is now the complete set.
+
 **Growth:**
 
 | File | Net | Note |
@@ -193,11 +197,25 @@ directly from `records.logic.ts` — no new port across the `functions/`↔`src/
 | `src/features/books/imageGenerationFailure.ts` | +387 (new) | FEAT-195 retry-card classifier. |
 | `src/features/today/quickLogChips.ts` | +384 (new) | FEAT-199/UX-184 family quick-log chip resolver. |
 | `functions/src/shared/hoursContributions.ts` | +361 (new) | ARCH-47 slice 4. |
+| `src/features/books/printBook.ts` | +264 | FEAT-177/185 image-fit + booklet imposition wiring. |
+| `src/features/planner-chat/planningWeekSelection.ts` | +260 (new) | FEAT-196 This-week/Next-week selector. |
 | `src/features/books/BookEditorPage.tsx` | +253 | See 1.1. |
 | `src/features/planner-chat/pace.logic.ts` | +250 | UX-213 observed-coverage engine. |
 | `src/features/today/lifeDay.ts` | +236 (new) | FEAT-200 Life Day. |
+| `src/features/books/ArtHelpSheet.tsx` | +228 (new) | FEAT-178 — the one presentational help sheet. |
+| `functions/src/ai/imageTasks/enhanceSketch.ts` | +216 | FEAT-193/197 style recipes + custom-note subject clause. |
+| `src/features/weekly-review/WeekReflectionCard.tsx` | +200 (new) | UX-214 "Was that enough this week?" card. |
 | `src/features/workshop/WorkshopPage.tsx` | +193 | See 1.1. |
 | `functions/src/ai/evaluate.ts` | +190 | See 1.1. |
+| `src/features/weekly-review/WeekPaceSection.tsx` | +184 (new) | UX-213 observed-coverage rendering, capability-gated. |
+| `src/features/books/storyGenerationFailure.ts` | +179 (new) | FEAT-195 generation-failure classifier (sibling of `imageGenerationFailure.ts`). |
+| `src/features/books/ImageRetryCard.tsx` | +179 (new) | FEAT-195 the one retry-card presentational component. |
+| `functions/src/ai/storyLevelContext.ts` | +173 (new) | FEAT-176 reading-level block composer. |
+| `src/features/planner-chat/plannerRequest.ts` | +170 (new) | FEAT-198 shared instruction-fencing/accumulate-and-cap builder. |
+| `src/features/books/customStoryTheme.ts` | +170 (new) | FEAT-194 one-or-the-other custom-theme rule. |
+| `src/features/today/DayStatusRow.tsx` | +165 (new) | UX-182 day-type + energy row extraction. |
+| `src/features/books/SketchScanner.tsx` | +161 | FEAT-158/159 sketch-cleanup pipeline wiring. |
+| `functions/src/ai/imageTasks/imageFailure.ts` | +157 (new) | FEAT-195 server-side failure-details/alternatives. |
 
 **Shrinkage (all healthy — Story Guide retirement + ARCH-47 consolidation):**
 
@@ -210,7 +228,9 @@ directly from `records.logic.ts` — no new port across the `functions/`↔`src/
 | `src/features/books/StoryGuideQuestion.tsx` | −273 | **Deleted** — FEAT-187. |
 | `src/features/books/GenerationProgress.tsx` | −167 | **Deleted** — FEAT-187. |
 
-No file crossed from under-1,500L to over-1,500L via this window's growth alone.
+No file crossed from under-1,500L to over-1,500L via this window's growth alone (`ArtHelpSheet.tsx`,
+`planningWeekSelection.ts`, `WeekReflectionCard.tsx`, `WeekPaceSection.tsx` and the other new files above
+are all small new modules, none within range of the threshold).
 
 ### 1.9 ARCH-43/46 (Lincoln/London name-literal census) — this window's diff shows removals only
 
@@ -243,10 +263,17 @@ extended into new surfaces this window without any production regression found.
 
 Root prod audit was **0 vulnerabilities** for at least two consecutive cycles (08-24, 08-30); it is now
 **1 moderate** — `fflate@0.8.0–0.8.2` via `jspdf@4.2.1` (`GHSA-px8p-9vwx-vf98`, malformed-ZIP64 infinite
-loop in `unzipSync`). `jspdf` is a genuine always-loaded production dependency (the print/PDF path —
-`printBook.ts`, compliance pack export), not a dev tool, so this is a real production dependency-tree
-regression, not the usual dev-only noise this ledger has tracked for months. `npm audit fix` (no
-`--force`) reports a fix is available.
+loop in `unzipSync`). **Corrected in this round (Codex round 1 P2):** the affected surface is narrower
+than first reported. `grep -rl "from 'jspdf'"` confirms `jspdf` is imported by exactly two production
+files, both book/sticker PDF export (`src/features/books/printBook.ts`, `printStickerSheet.ts`) —
+**not** the compliance pack, which imports `jszip` (`functions/src/records/generateCompliancePack.ts`,
+`src/features/records/records.logic.ts`), an unrelated package with no `fflate` dependency. `jspdf` is
+still a genuine always-loaded production dependency, so this is a real production dependency-tree
+regression, not the usual dev-only noise this ledger has tracked for months — but the reachability claim
+should be stated modestly: `fflate`'s vulnerable `unzipSync` appears only in `jspdf`'s own source map,
+not confirmed present in its executed runtime path for the PDF-generation calls this codebase actually
+makes, so this is a dependency-tree finding from `npm audit`, not a demonstrated exploitable path through
+the app's own PDF export. `npm audit fix` (no `--force`) reports a fix is available.
 
 Functions prod audit was also **0 vulnerabilities** as of 08-30; it is now **3 moderate** — `qs`/
 `body-parser`/`express`, all transitively pulled in by `firebase-functions@6.6.0` (`GHSA-4mjr-xmp4-gh2g`,
