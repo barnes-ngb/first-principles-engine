@@ -151,6 +151,33 @@ describe('imposeBooklet', () => {
       expect(sheets[0].front[0]).toEqual(back)
     }
   })
+
+  it('reading order is correct for 4, 8, 12, and padded 14-page signatures', () => {
+    for (const count of [4, 8, 12, 14]) {
+      const pages: LogicalPage[] = []
+      for (let i = 0; i < count; i++) pages.push(page(i))
+      const sheets = imposeBooklet(pages)
+      const padded = padToSignature(pages)
+
+      // Extract all pages from the imposed sheets in reading order:
+      // reading a saddle-stitched book means walking the sheets from outermost
+      // to innermost, and within each sheet: front-right, back-left, back-right,
+      // front-left of the NEXT sheet ... all the way to the center.
+      const readOrder: LogicalPage[] = []
+      for (let k = 0; k < sheets.length; k++) {
+        readOrder.push(sheets[k].front[1]) // right side of front (first page of pair)
+        readOrder.push(sheets[k].back[0])  // left side of back
+      }
+      // Then read from center back out
+      for (let k = sheets.length - 1; k >= 0; k--) {
+        readOrder.push(sheets[k].back[1])  // right side of back
+        readOrder.push(sheets[k].front[0]) // left side of front
+      }
+
+      // The reading order should be exactly the padded page sequence
+      expect(readOrder).toEqual(padded)
+    }
+  })
 })
 
 // ── duplexSides ─────────────────────────────────────────────────

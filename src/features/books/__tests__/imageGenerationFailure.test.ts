@@ -10,6 +10,7 @@ import {
   offersAlternatives,
 } from '../imageGenerationFailure'
 import type { ImageErrorShape } from '../imageGenerationFailure'
+import { expectKidLine } from '../../../test/kidReadability'
 
 // ── classifyImageGenerationFailure ──────────────────────────────
 
@@ -251,11 +252,10 @@ describe('imageFailureMessage', () => {
     )
   })
 
-  it('kid messages are short (readability bar)', () => {
+  it('kid messages meet the shared kid-readability bar', () => {
     for (const kind of Object.values(ImageGenerationFailure)) {
       const msg = imageFailureMessage(kind, 'kid')
-      const words = msg.split(/\s+/).length
-      expect(words).toBeLessThanOrEqual(12)
+      expectKidLine(msg, `imageFailureMessage(${kind}, kid)`)
     }
   })
 })
@@ -271,6 +271,14 @@ describe('blockedTips', () => {
         for (const tip of tips) {
           expect(tip.length).toBeGreaterThan(0)
         }
+      }
+    }
+  })
+
+  it('kid tips meet the shared kid-readability bar', () => {
+    for (const door of Object.values(ImageRetryDoor)) {
+      for (const tip of blockedTips(door, 'kid')) {
+        expectKidLine(tip, `blockedTips(${door}, kid)`)
       }
     }
   })
