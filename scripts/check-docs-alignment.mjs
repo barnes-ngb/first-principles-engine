@@ -178,10 +178,15 @@ export function findOpenPrStatusRows(md) {
  * `/\bmerged\b/` alone was wrong for a second reason: it also matches the
  * negation "not merged".
  *
- * So a landed claim must name the landing, not the completion — ONE pattern: a
- * specific PR by number, followed by a merge word or an ISO date.
- * `(PR #1785, 2026-09-06)` and `PR #1785, merged` are the house's flipped-on-
- * merge form, and the first is exactly what the broken UX-218 cell said.
+ * So a landed claim must name the landing, not the completion: a specific PR
+ * **by number**, tied to a merge word or an ISO date. The house writes that
+ * three ways and all three must count (Codex round 3, P2 — the first draft
+ * required a comma and so missed **19** landed cells in the live ledger, which
+ * left the guard silent on most of the rows it exists to protect):
+ *
+ *   `(PR #1785, 2026-09-06)`      ← the broken UX-218 cell
+ *   `(PR #1263 merged 2026-05-30)` ← the commonest form, no comma
+ *   `MERGED 2026-07-27 (PR #1640)` ← merge word first
  *
  * A bare `/\bmerged\b/` was tried and dropped. Sweeping all 134 historical
  * revisions of the ledger found it firing on FEAT-177's legitimately in-flight
@@ -198,7 +203,12 @@ export function findOpenPrStatusRows(md) {
  * revision, not reasoned about**; the test re-runs that sweep.
  */
 const LANDED_STATUS_PATTERNS = [
-  /\bPR\s*#\d+\s*,\s*(?:merged\b|\d{4}-\d{2}-\d{2})/i,
+  // "PR #1785, 2026-09-06" · "PR #1263 merged 2026-05-30" · "PR #1640, merged"
+  /\bPR\s*#\d+\s*[,:]?\s*(?:merged\b|\d{4}-\d{2}-\d{2})/i,
+  // "MERGED 2026-07-27 (PR #1640)" — the merge word first, PR number close by.
+  // Bounded so it cannot reach across a cell into unrelated prose, and it needs
+  // a REAL number: FEAT-177's `**MERGED** (PR #NNNN, …)` template stays quiet.
+  /\bmerged\b[^|]{0,40}?\bPR\s*#\d+/i,
 ]
 
 /**

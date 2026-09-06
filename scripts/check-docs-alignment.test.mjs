@@ -493,32 +493,42 @@ describe('findContradictoryStatusRows', () => {
     const run = (args) =>
       execFileSync('git', args, { cwd: repo, maxBuffer: 1 << 28 }).toString()
 
-    const shallow = run(['rev-parse', '--is-shallow-repository']).trim() === 'true'
-    if (shallow) {
-      expect(shallow).toBe(true) // documented no-op: nothing to sweep
-      return
+    // "Not shallow" is not proof that every historical object is readable
+    // (Codex round 3, P2): a partial or offline clone reports
+    // `--is-shallow-repository false` and still fails the traversal itself. So
+    // the traversal is guarded too — capability-checked, not assumed.
+    let revs
+    try {
+      if (run(['rev-parse', '--is-shallow-repository']).trim() === 'true') return
+      revs = run(['log', '--format=%H', '--', 'docs/review/REVIEW_HOME_BASE.md'])
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+    } catch {
+      return // history unavailable — the fixtures above carry the guarantee
     }
 
-    const revs = run(['log', '--format=%H', '--', 'docs/review/REVIEW_HOME_BASE.md'])
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-
+    // Keep the REVISION alongside the id (Codex round 3, P2). Reducing to a set
+    // of ids alone would let a future pattern change match a *different*,
+    // historically valid UX-218 cell and still read `['UX-218']` — the probe
+    // would pass while silently covering a new false positive.
     const offenders = []
     for (const rev of revs) {
       let md
       try {
         md = run(['show', `${rev}:docs/review/REVIEW_HOME_BASE.md`])
       } catch {
-        continue
+        continue // one unreadable tree is not a finding
       }
       for (const row of findContradictoryStatusRows(md)) {
-        offenders.push(row.id)
+        offenders.push(`${rev.slice(0, 10)}:${row.id}`)
       }
     }
 
-    // Only the known-bad cell, on the one commit that introduced it.
-    expect([...new Set(offenders)]).toEqual(['UX-218'])
+    // Exactly one revision, exactly one row: the commit that introduced the
+    // cell this PR fixes. Any additional match — same row or not — is a false
+    // positive on a row that was correct at the time.
+    expect(offenders).toEqual(['1a7c56858f:UX-218'])
   })
 
   it('holds on the live ledger', () => {
