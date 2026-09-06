@@ -118,12 +118,24 @@ function WeekPaceBody({
       </Stack>
 
       {/*
-        No snapshot for this week — the Saturday case, and every review written
-        before UX-212. Said as a pending fact with a date on it, never as
-        "first week recorded", which the coverage engine would otherwise be
-        asked to guess at.
+        The Saturday case — and ONLY it (Codex round 1, P2).
+
+        This line promises a date, so it may only be shown where that promise is
+        true: the review document does not exist yet, so the Sunday cron has not
+        run for this week and the positions genuinely are still to come.
+
+        It keys on the missing DOCUMENT, not on the missing snapshot, because
+        the two are different facts. `loadCurriculumSnapshot`
+        (`functions/src/ai/evaluate.ts:654-674`) omits `curriculumPositions`
+        when the child has no positioned workbook config at all, and again when
+        the `activityConfigs` read throws — in both cases a review exists, the
+        cron HAS run, and nothing further will arrive on Sunday. Keying on the
+        snapshot would have shown a family with no positioned workbooks a
+        promise that never came true, every week, indefinitely. A review that
+        exists without a usable snapshot says nothing about coverage instead,
+        which is what the engine below already does.
       */}
-      {current === null && (
+      {review === null && (
         <Typography variant="body2" color="text.secondary">
           {POSITIONS_PENDING_LINE}
         </Typography>

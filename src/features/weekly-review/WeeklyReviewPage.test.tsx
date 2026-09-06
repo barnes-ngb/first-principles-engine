@@ -233,6 +233,35 @@ describe('a week with nothing in it is still a week (UX-219)', () => {
     expect(screen.queryByText('Pace Adjustments')).not.toBeInTheDocument()
   })
 
+  it('never tells a parent nothing on the page is AI-written', () => {
+    // Codex round 1, P2. Pace Adjustments IS weekly AI output, and it is the
+    // section a parent might act on — so a blanket "nothing here is written by
+    // AI" would give exactly the wrong provenance for the only thing that has
+    // one.
+    const { container } = render(<WeeklyReviewPage />)
+    expect(container.textContent).not.toMatch(/[Nn]othing here is written by AI/)
+  })
+
+  it('names the pace adjustments as AI-written, where the parent acts on them', () => {
+    currentDoc = {
+      ...withNarrative(),
+      paceAdjustments: [
+        {
+          id: 'a1',
+          area: 'Math',
+          currentPace: '1 lesson/day',
+          suggestedPace: '2 lessons/day',
+          rationale: 'Finishing early most days.',
+          decision: 'pending',
+        },
+      ],
+    } as unknown as WeeklyReview
+    render(<WeeklyReviewPage />)
+    expect(
+      screen.getByText(/Written by the weekly review AI from what was logged/),
+    ).toBeInTheDocument()
+  })
+
   it('shows the adjustments section, with its Apply button, when there are some', () => {
     currentDoc = {
       ...withNarrative(),

@@ -304,6 +304,20 @@ describe('the Saturday state — the week is named before its review exists', ()
     expect(container.textContent).not.toMatch(/haven’t been recorded yet/)
   })
 
+  it('never promises Sunday to a review that exists without a snapshot', () => {
+    // Codex round 1, P2. `loadCurriculumSnapshot` omits `curriculumPositions`
+    // when the child has no positioned workbook config, and again when the
+    // config read throws — the cron HAS run in both cases and nothing more is
+    // coming, so this promise would be repeated every week and never come true.
+    const { container } = renderWithReview({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+    } as unknown as WeeklyReview)
+    expect(container.textContent).not.toMatch(/saved Sunday evening/)
+    // And it makes no other claim about coverage either.
+    expect(container.textContent).not.toMatch(/rate needs two|lesson/i)
+  })
+
   it('renders nothing for a child profile even with no document', () => {
     mockUseActiveChild.mockReturnValue({ isChildProfile: true })
     const { container } = renderWithReview(null)
