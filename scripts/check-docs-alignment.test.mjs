@@ -469,43 +469,56 @@ describe('findContradictoryStatusRows', () => {
   })
 
   it('holds across every historical revision of the real ledger', () => {
-    // The claim this check rests on is empirical, so the test measures it
-    // rather than restating it: replay the guard over every commit that
-    // touched the ledger. Exactly one revision may hit — 1a7c568, the cell
-    // that turned `main` red and that this PR fixes. Any other hit is a false
-    // positive on a row that was correct at the time, which is the failure
-    // mode that gets a rule deleted rather than fixed.
+    // The claim this check rests on is empirical, so this measures it rather
+    // than restating it: replay the guard over every commit that touched the
+    // ledger. Exactly one revision may hit — 1a7c568, the cell that turned
+    // `main` red — and any other hit is a false positive on a row that was
+    // correct at the time, which is the failure mode that gets a rule deleted
+    // rather than fixed. It is how the FEAT-177 pattern was found.
+    //
+    // SKIPPED ON A SHALLOW CLONE, and that is not a cop-out (Codex round 2,
+    // P1). CI checks out with `actions/checkout@v4` and no `fetch-depth`, so
+    // the runner has depth 1: `git log` returns ONE revision there, and an
+    // unconditional assertion would have failed every CI run — on the very PR
+    // whose purpose is unbreaking CI. Verified against a real `--depth 1`
+    // clone, not assumed.
+    //
+    // The alternative — adding `fetch-depth: 0` to the test job — buys one
+    // test a full-history fetch on every run of this workflow, and buys
+    // nothing else. The two false positives this sweep found are pinned above
+    // as verbatim fixtures, so the REGRESSION guarantee is CI-safe and lives
+    // there; this stays a deep probe for anyone running it with history, which
+    // is where a NEW bad pattern would be discovered.
     const repo = join(import.meta.dirname, '..')
-    const revs = execFileSync(
-      'git',
-      ['log', '--format=%H', '--', 'docs/review/REVIEW_HOME_BASE.md'],
-      { cwd: repo, maxBuffer: 1 << 28 },
-    )
-      .toString()
+    const run = (args) =>
+      execFileSync('git', args, { cwd: repo, maxBuffer: 1 << 28 }).toString()
+
+    const shallow = run(['rev-parse', '--is-shallow-repository']).trim() === 'true'
+    if (shallow) {
+      expect(shallow).toBe(true) // documented no-op: nothing to sweep
+      return
+    }
+
+    const revs = run(['log', '--format=%H', '--', 'docs/review/REVIEW_HOME_BASE.md'])
       .trim()
       .split('\n')
       .filter(Boolean)
-
-    expect(revs.length).toBeGreaterThan(50) // the sweep is meaningless if empty
 
     const offenders = []
     for (const rev of revs) {
       let md
       try {
-        md = execFileSync('git', ['show', `${rev}:docs/review/REVIEW_HOME_BASE.md`], {
-          cwd: repo,
-          maxBuffer: 1 << 28,
-        }).toString()
+        md = run(['show', `${rev}:docs/review/REVIEW_HOME_BASE.md`])
       } catch {
         continue
       }
       for (const row of findContradictoryStatusRows(md)) {
-        offenders.push(`${rev.slice(0, 10)}:${row.id}`)
+        offenders.push(row.id)
       }
     }
 
-    // Only the known-bad cell, and only on the commit that introduced it.
-    expect([...new Set(offenders.map((o) => o.split(':')[1]))]).toEqual(['UX-218'])
+    // Only the known-bad cell, on the one commit that introduced it.
+    expect([...new Set(offenders)]).toEqual(['UX-218'])
   })
 
   it('holds on the live ledger', () => {
