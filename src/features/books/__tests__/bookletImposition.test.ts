@@ -11,7 +11,15 @@ const cover: LogicalPage = { type: 'cover' }
 const back: LogicalPage = { type: 'back' }
 const page = (n: number): LogicalPage => ({
   type: 'content',
-  page: { id: `p${n}`, text: `Page ${n}`, images: [] },
+  page: {
+    id: `p${n}`,
+    text: `Page ${n}`,
+    images: [],
+    pageNumber: n,
+    layout: 'image-top' as const,
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+  },
   index: n,
 })
 
