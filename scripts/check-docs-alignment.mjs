@@ -162,6 +162,95 @@ export function findOpenPrStatusRows(md) {
 }
 
 /**
+ * The phrasings a status cell uses to claim its PR AFFIRMATIVELY LANDED.
+ *
+ * NARROW ON PURPOSE, and the narrowness was earned (Codex P1 on PR #1787).
+ * The first draft of this list was `FIXED` / `RESOLVED` / `merged`, which is
+ * wrong: those words describe the WORK being complete, not the PR being in.
+ * A row may legitimately read
+ *
+ *     **FIXED** (FEAT-183, PR open, branch `claude/london-run-a-…`)
+ *
+ * — and two really did (ARCH-42 and UX-152, commit `bfb8991`). Matching on
+ * `FIXED` alone would have made check 11b reject exactly the in-flight rows
+ * check 11 deliberately leaves SOFT, which is the false-positive class
+ * `findOpenPrStatusRows`' docblock warns gets a rule deleted rather than fixed.
+ * `/\bmerged\b/` alone was wrong for a second reason: it also matches the
+ * negation "not merged".
+ *
+ * So a landed claim must name the landing, not the completion: a specific PR
+ * **by number**, tied to a merge word or an ISO date. The house writes that
+ * three ways and all three must count (Codex round 3, P2 — the first draft
+ * required a comma and so missed **19** landed cells in the live ledger, which
+ * left the guard silent on most of the rows it exists to protect):
+ *
+ *   `(PR #1785, 2026-09-06)`      ← the broken UX-218 cell
+ *   `(PR #1263 merged 2026-05-30)` ← the commonest form, no comma
+ *   `MERGED 2026-07-27 (PR #1640)` ← merge word first
+ *
+ * A bare `/\bmerged\b/` was tried and dropped. Sweeping all 134 historical
+ * revisions of the ledger found it firing on FEAT-177's legitimately in-flight
+ * cell (`1a6b1d80`), which reads "BUILT (PR open, 2026-09-03) — do not merge;
+ * cell flips to the house `**MERGED** (PR #NNNN, …)` wording on the final
+ * commit" — prose ABOUT the merged wording, in a row that had not merged. That
+ * is the same class as the `FIXED` mistake and would have reddened a correct
+ * PR. Negation lookbehinds would not have saved it either; the word simply is
+ * not evidence on its own.
+ *
+ * "PR open" carries no number-plus-date, so the ARCH-42 shape is untouched. The
+ * list stays at one pattern until a real episode proves a gap — the same rule
+ * `OPEN_PR_STATUS_PATTERNS` grew under. **Validated against every historical
+ * revision, not reasoned about**; the test re-runs that sweep.
+ */
+const LANDED_STATUS_PATTERNS = [
+  // "PR #1785, 2026-09-06" · "PR #1263 merged 2026-05-30" · "PR #1640, merged"
+  /\bPR\s*#\d+\s*[,:]?\s*(?:merged\b|\d{4}-\d{2}-\d{2})/i,
+  // "MERGED 2026-07-27 (PR #1640)" — the merge word first, PR number close by.
+  // Bounded so it cannot reach across a cell into unrelated prose, and it needs
+  // a REAL number: FEAT-177's `**MERGED** (PR #NNNN, …)` template stays quiet.
+  /\bmerged\b[^|]{0,40}?\bPR\s*#\d+/i,
+]
+
+/**
+ * Ledger rows whose status cell claims BOTH that its PR landed and that it has
+ * not — always a contradiction, on any branch.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS SEPARATE FROM [ledger-status] (2026-09-06).
+ * `[ledger-status]` is HARD on `main` and SOFT elsewhere for a good reason
+ * (see {@link ledgerStatusIsHard}): a run's own in-flight row legitimately
+ * reads "BUILT (PR open) — do not merge", so an always-HARD rule would redden
+ * every feature PR on its own correct row. The cost of that split is that a bad
+ * cell is only *warned* about until the merge commit, and then reddens `main` —
+ * where it blocks everyone, not just its author.
+ *
+ * PR #1785 hit exactly that. Its final pre-merge commit flipped UX-218 to
+ * "**FIXED** (PR #1785, 2026-09-06)" and, in the SAME cell, recorded that the
+ * run had ended under the three-round cap with the summary line
+ * "CODEX ROUND: open — do not merge yet". Both halves were true about the run;
+ * as a status cell the pair is nonsense, and it sailed through four SOFT
+ * pre-merge runs before turning the push to `main` red.
+ *
+ * A cell naming a landed PR while also saying it must not be merged is wrong
+ * wherever it appears and whatever the branch, so this one is unconditionally
+ * HARD — which puts it back on the PR, where the author can see it. It does NOT
+ * widen `OPEN_PR_STATUS_PATTERNS`: the honest in-flight wording is untouched and
+ * stays SOFT off `main`.
+ *
+ * Status-cell-only, for the same reason as `findOpenPrStatusRows`: row bodies
+ * quote these words as prose while narrating history, and matching bodies would
+ * fire on rows that are already correct.
+ *
+ * @returns {{ id: string, status: string, line: number }[]}
+ */
+export function findContradictoryStatusRows(md) {
+  return parseLedgerStatusCells(md).filter(
+    (r) =>
+      LANDED_STATUS_PATTERNS.some((re) => re.test(r.status)) &&
+      OPEN_PR_STATUS_PATTERNS.some((re) => re.test(r.status)),
+  )
+}
+
+/**
  * Is the [ledger-status] rule HARD for this run? HARD only when the checker is
  * running against `main`; SOFT (warn) everywhere else.
  *
@@ -914,6 +1003,34 @@ export function runChecks({ fix = false } = {}) {
         log(`        ${m}`)
         soft.push({ check: 'ledger-status', message: m })
       }
+    }
+  }
+  log('')
+
+  // ── Check 11b: a status cell may not claim a PR both landed and open ──────
+  // Unconditionally HARD, unlike check 11: "FIXED (PR #123)" AND "do not merge"
+  // in one cell is a contradiction on every branch, so there is no in-flight
+  // case to protect and no reason to defer it to the merge commit. See
+  // findContradictoryStatusRows() for the episode that earned it.
+  const contradictoryRows = findContradictoryStatusRows(ledgerMd)
+  if (contradictoryRows.length === 0) {
+    log(
+      paint(
+        GREEN,
+        `PASS  [ledger-status-contradiction] no row claims its PR both landed and open`,
+      ),
+    )
+  } else {
+    log(
+      paint(
+        RED,
+        `FAIL  [ledger-status-contradiction] status cell(s) claiming the PR both landed AND not:`,
+      ),
+    )
+    for (const r of contradictoryRows) {
+      const m = `${r.id} (line ${r.line}) status reads "${r.status}" — a landed row cannot also say "PR open" / "do not merge"; move the round record into the row body`
+      log(`        ${m}`)
+      hard.push({ check: 'ledger-status-contradiction', message: m })
     }
   }
   log('')
