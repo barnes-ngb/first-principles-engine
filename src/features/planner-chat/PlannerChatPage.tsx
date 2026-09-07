@@ -119,6 +119,7 @@ import { applyDraftWeek, WeekApplyError } from './applyWeekPlan'
 import {
   appliedConfirmation,
   applyButtonLabel,
+  liveWeekAppliedNotice,
   resolvePlanningWeek,
   type PlanningWeekChoice,
 } from './planningWeekSelection'
@@ -281,6 +282,13 @@ export default function PlannerChatPage() {
   // to twenty call sites and hoping none was missed.
   const weekRange = planningWeek.range
   const effectiveWeekChoice = planningWeek.choice
+  /**
+   * The Sunday-start of the week containing TODAY, regardless of which week the
+   * page is showing (UX-256). Taken from the selector's own options rather than
+   * recomputed, so it cannot become a second definition of "this week".
+   */
+  const liveWeekStart =
+    planningWeek.options.find((o) => o.choice === 'this')?.range.start ?? weekRange.start
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
@@ -333,6 +341,23 @@ export default function PlannerChatPage() {
   // Prior-plan detection: distinguishes first-visit user (full wizard) from returning user (compact setup)
   const [hasPriorPlan, setHasPriorPlan] = useState<boolean | null>(null)
   const [lastPlanDraft, setLastPlanDraft] = useState<DraftWeeklyPlan | null>(null)
+  /**
+   * UX-256: whether the week CONTAINING today already has an applied plan.
+   *
+   * Read off the prior-plan query below — the same five most-recent conversation
+   * docs, no extra Firestore read — because this only ever decides whether one
+   * orienting sentence renders. A false negative (the live week's doc fell
+   * outside those five) shows nothing, which is the safe direction: the rule is
+   * that the page never says a plan exists when it might not.
+   */
+  const [liveWeekApplied, setLiveWeekApplied] = useState(false)
+  /** The UX-256 sentence, or `null` when any of its three conditions fails. */
+  const liveWeekNotice = liveWeekAppliedNotice({
+    liveWeekStart,
+    resolvedChoice: effectiveWeekChoice,
+    explicitChoice: weekChoice,
+    liveWeekApplied,
+  })
   const [repeatingWeek, setRepeatingWeek] = useState(false)
   // Workbook chips: workbooks the user has toggled OFF for this week.
   const [excludedWorkbookIds, setExcludedWorkbookIds] = useState<Set<string>>(new Set())
@@ -644,10 +669,12 @@ export default function PlannerChatPage() {
     if (!familyId || !activeChildId) {
       setHasPriorPlan(null)
       setLastPlanDraft(null)
+      setLiveWeekApplied(false)
       return
     }
     setHasPriorPlan(null)
     setLastPlanDraft(null)
+    setLiveWeekApplied(false)
     const q = query(
       plannerConversationsCollection(familyId),
       where('childId', '==', activeChildId),
@@ -662,11 +689,20 @@ export default function PlannerChatPage() {
         return !!data.currentDraft && (data.currentDraft.days?.length ?? 0) > 0
       })
       setLastPlanDraft(withDraft ? ((withDraft.data() as PlannerConversation).currentDraft ?? null) : null)
+      // UX-256: read from ALL five docs, not `priorDocs` — the live week is
+      // "prior" only when the page is showing the next one, which is exactly the
+      // case the notice exists for.
+      const liveDoc = snap.docs.find((d) => d.data().weekKey === liveWeekStart)
+      setLiveWeekApplied(
+        (liveDoc?.data() as PlannerConversation | undefined)?.status ===
+          PlannerConversationStatus.Applied,
+      )
     }).catch(() => {
       setHasPriorPlan(false)
       setLastPlanDraft(null)
+      setLiveWeekApplied(false)
     })
-  }, [familyId, activeChildId, weekRange.start])
+  }, [familyId, activeChildId, weekRange.start, liveWeekStart])
 
   // Load existing conversation
   useEffect(() => {
@@ -3116,6 +3152,20 @@ ${dayPrompts}`
                 It's added to your week notes below — review and generate or lock in your plan as usual.
               </Typography>
             </Alert>
+          )}
+
+          {/* UX-256: on Friday and Saturday the default rolls forward, so a
+              parent opening the planner to change something on TODAY lands on
+              next week's empty setup card and has to notice the selector. One
+              sentence naming the live week, and only when all three of its
+              conditions hold — there really is an applied plan for it, the page
+              really is showing the other week, and she has not chosen a week
+              herself. Parent-gated on capability like every other control here;
+              a kid profile never reaches a week selector's default at all. */}
+          {isParent && liveWeekNotice && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {liveWeekNotice}
+            </Typography>
           )}
 
           {/* FEAT-196: which week is being planned, said out loud and picked by

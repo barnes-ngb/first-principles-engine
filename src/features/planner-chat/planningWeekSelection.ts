@@ -193,6 +193,51 @@ export function staleWeekNotice(weekStart: string): string {
 }
 
 /**
+ * The one line naming the live week when the planner opened on the next one
+ * (UX-256).
+ *
+ * FEAT-196 rolls the default forward on Friday and Saturday, correctly: a parent
+ * planning at the end of a week almost always means the week ahead. But a parent
+ * opening the planner on Friday to move something on **today** lands on next
+ * week's empty setup card, and has to notice the selector to get back. The
+ * affordance is right there and everything is behaving as designed; what is
+ * missing is a sentence.
+ *
+ * Three conditions, all required, because each one on its own would let the page
+ * say something untrue:
+ *
+ *  - `liveWeekApplied` — there is an applied plan for the containing week. **A
+ *    sentence about a plan that does not exist is worse than no sentence**, so
+ *    an unplanned or drafted-but-unapplied live week gets nothing.
+ *  - `resolvedChoice === 'next'` — the page is actually showing the other week.
+ *    Pointing at "This week" while This week is already selected is noise.
+ *  - `explicitChoice === null` — the parent has not chosen. Once she taps a
+ *    button she has answered the question, and repeating it is nagging rather
+ *    than orienting.
+ *
+ * Pure and total. The capability gate is the caller's, as everywhere else on this
+ * page: this function knows about weeks, not about who is holding the phone.
+ */
+export function liveWeekAppliedNotice(input: {
+  /** Sunday-start key of the week containing today. */
+  liveWeekStart: string
+  /** The week the page resolved and is showing. */
+  resolvedChoice: PlanningWeekChoice
+  /** What the parent explicitly picked, or `null` while the default is in force. */
+  explicitChoice: PlanningWeekChoice | null
+  /** Whether an APPLIED planner conversation exists for `liveWeekStart`. */
+  liveWeekApplied: boolean
+}): string | null {
+  const { liveWeekStart, resolvedChoice, explicitChoice, liveWeekApplied } = input
+  if (!liveWeekApplied) return null
+  if (explicitChoice !== null) return null
+  if (resolvedChoice !== 'next') return null
+  const dates = planningWeekDates(liveWeekStart)
+  if (!dates) return null
+  return `${dates} is applied and on Today — tap This week to change it.`
+}
+
+/**
  * Just the dates of a planning week — "Sep 7–11".
  *
  * `formatPlanningWeekLabel` minus its "Week of " prefix, taken from that one

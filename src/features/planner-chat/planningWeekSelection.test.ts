@@ -6,6 +6,7 @@ import {
   appliedConfirmation,
   defaultPlanningWeekChoice,
   generateButtonLabel,
+  liveWeekAppliedNotice,
   planningWeekDates,
   planningWeekOptions,
   planningWeekRangeFor,
@@ -249,5 +250,63 @@ describe('generateButtonLabel', () => {
     // And therefore says the same week the Apply button will.
     expect(planningWeekDates(NEXT_WEEK)).not.toBe('')
     expect(applyButtonLabel(NEXT_WEEK)).toContain(planningWeekDates(NEXT_WEEK))
+  })
+})
+
+// ── UX-256: the sentence naming the live week when the planner opened on next ──
+
+describe('liveWeekAppliedNotice (UX-256)', () => {
+  const base = {
+    liveWeekStart: THIS_WEEK,
+    resolvedChoice: 'next' as const,
+    explicitChoice: null,
+    liveWeekApplied: true,
+  }
+
+  it('names the live week and the control that gets back to it', () => {
+    expect(liveWeekAppliedNotice(base)).toBe(
+      `${planningWeekDates(THIS_WEEK)} is applied and on Today — tap This week to change it.`,
+    )
+  })
+
+  it('says nothing about a plan that does not exist', () => {
+    // The whole rail: an unplanned live week, or one drafted but never applied,
+    // must not be described as applied.
+    expect(liveWeekAppliedNotice({ ...base, liveWeekApplied: false })).toBeNull()
+  })
+
+  it('says nothing when the page is already showing the live week', () => {
+    expect(liveWeekAppliedNotice({ ...base, resolvedChoice: 'this' })).toBeNull()
+  })
+
+  it('stops once the parent has picked a week herself', () => {
+    // She answered the question. Repeating it is nagging, not orienting — and
+    // this holds for BOTH explicit answers.
+    expect(liveWeekAppliedNotice({ ...base, explicitChoice: 'next' })).toBeNull()
+    expect(liveWeekAppliedNotice({ ...base, explicitChoice: 'this' })).toBeNull()
+  })
+
+  it('drops the sentence rather than showing an empty range', () => {
+    expect(liveWeekAppliedNotice({ ...base, liveWeekStart: 'not-a-date' })).toBeNull()
+  })
+
+  it('takes its dates from the one formatter, like every other label here', () => {
+    expect(liveWeekAppliedNotice(base)).toContain(planningWeekDates(THIS_WEEK))
+  })
+
+  it('is the case a Friday actually produces', () => {
+    // Fri Jul 17: the default rolls forward (FEAT-196), so the page resolves to
+    // next week while this week is live and applied.
+    const friday = new Date('2026-07-17T09:00:00')
+    const resolved = resolvePlanningWeek(null, friday)
+    expect(resolved.choice).toBe('next')
+    expect(
+      liveWeekAppliedNotice({
+        liveWeekStart: planningWeekRangeFor('this', friday).start,
+        resolvedChoice: resolved.choice,
+        explicitChoice: null,
+        liveWeekApplied: true,
+      }),
+    ).toContain('tap This week')
   })
 })
