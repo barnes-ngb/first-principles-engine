@@ -177,53 +177,76 @@ export function lightDayNames(dayTypes: readonly DayTypeConfig[] | undefined): s
 // ── Enforcement ──────────────────────────────────────────────────────────────
 
 /**
- * One day, reshaped by its type. Pure.
+ * One day, reshaped by its type. Pure, **idempotent and reversible**.
  *
- * A Life day keeps its `day` and `timeBudgetMinutes` and loses every item. It
- * keeps the budget rather than zeroing it because the budget is a property of
- * the week's shape, not a claim about this day, and a parent who switches the
- * day back to Full must get the day they had — this is a **relabel, never a
- * destruction**, on the draft exactly as FEAT-200 made it on the saved day.
+ * ── Why it is not a plain switch (Codex rounds 1 and 2) ──────────────────────
+ *
+ * The transforms are lossy — a Life day loses every item, a Light day's are
+ * replaced — so applying one to an already-transformed day compounds the loss.
+ * Three real defects came out of the naive version, and each is a case here:
+ *
+ *  1. **Life → Full left the day empty** while the chip said Full, and
+ *     `applyWeekPlan`'s `applicableDays` skips an empty day, so a mis-tap
+ *     silently cost the parent a whole day of plan with nothing saying so.
+ *     Fixed by restoring {@link DraftDayPlan.setAsideItems} before re-shaping.
+ *  2. **Re-enforcing at Apply re-templated an edited Light day**, so a task the
+ *     parent removed came back and a video they added vanished — a write that
+ *     disagreed with the card they were looking at. Fixed by the
+ *     `appliedDayType === dayType` short-circuit: a day already in this shape is
+ *     left alone, edits and all.
+ *  3. **A Life day could still be written** if an item was moved onto it after
+ *     shaping (`MoveToDayDialog` offers every weekday). So the `clear` case is
+ *     the one exception to that short-circuit — it re-empties unconditionally,
+ *     because "no plan" is the whole meaning of the type and Apply is about to
+ *     set the day's `planType` to `life`.
+ *
+ * The stash lives on the day itself rather than in page state, so it is
+ * persisted with the conversation and re-keyed with it — a reload, or a switch
+ * of week or child, can neither lose it nor restore another week's items.
+ *
+ * `timeBudgetMinutes` is preserved throughout: the budget is a property of the
+ * week's shape, not a claim about this day, and this is a **relabel, never a
+ * destruction** — on the draft exactly as FEAT-200 made it on the saved day.
  */
 export function applyDayTypeToDay(
   day: DraftDayPlan,
   dayType: DayType,
   appBlocks: AppBlock[],
 ): DraftDayPlan {
-  switch (DAY_TYPE_SHAPE[dayType]) {
-    case 'keep':
-      return day
-    case 'light':
-      return applyLightDayToplan(day, buildLightDayTemplate(appBlocks))
-    case 'clear':
-      return { ...day, items: [] }
-  }
-}
+  const shape = DAY_TYPE_SHAPE[dayType]
+  const current = day.appliedDayType ?? DayType.Normal
 
-/**
- * `draft` with one day's items taken back from `base`. Pure.
- *
- * What makes a pick **reversible** (Codex round 1, P1). The transforms above are
- * lossy — a Life day's items are gone, a Light day's are replaced — so re-shaping
- * an already-shaped draft would leave *Life → Full* showing an EMPTY day under a
- * chip reading Full, and `applicableDays` skips an empty day, so a mis-tap would
- * silently cost the parent a whole day of plan with nothing on screen saying so.
- *
- * Only the named day is restored; every other day keeps whatever the parent has
- * since edited into it. A missing base (a reload, a draft restored from the
- * conversation) leaves the day exactly as it is rather than inventing one.
- */
-export function restoreDayFromBase(
-  draft: DraftWeeklyPlan,
-  base: DraftWeeklyPlan | null | undefined,
-  day: string,
-): DraftWeeklyPlan {
-  if (!base) return draft
-  const original = base.days.find((d) => d.day === day)
-  if (!original) return draft
+  if (current === dayType) {
+    // Already in this shape. Leave the parent's later edits alone — except that
+    // a set-aside day is emptied unconditionally (case 3 above).
+    if (shape === 'clear' && day.items.length > 0) return { ...day, items: [] }
+    return day
+  }
+
+  // Moving to a DIFFERENT shape: always transform the day's ORIGINAL items, not
+  // whatever the previous transform left behind (case 1 above).
+  const originalItems = day.setAsideItems ?? day.items
+  const restored: DraftDayPlan = { ...day, items: originalItems }
+
+  if (shape === 'keep') {
+    const { setAsideItems: _stash, appliedDayType: _applied, ...rest } = restored
+    void _stash
+    void _applied
+    return rest
+  }
+
+  const shaped =
+    shape === 'light'
+      ? applyLightDayToplan(restored, buildLightDayTemplate(appBlocks))
+      : { ...restored, items: [] }
+
   return {
-    ...draft,
-    days: draft.days.map((d) => (d.day === day ? original : d)),
+    ...restored,
+    ...shaped,
+    // `applyLightDayToplan` returns a fresh object with only three fields, so
+    // the stash and the marker are re-attached here rather than assumed through.
+    setAsideItems: originalItems,
+    appliedDayType: dayType,
   }
 }
 
@@ -241,15 +264,18 @@ export function enforceDayTypes(
   dayTypes: readonly DayTypeConfig[] | undefined,
   appBlocks: AppBlock[],
 ): DraftWeeklyPlan {
-  if (!dayTypes || dayTypes.length === 0) return draft
-  if (dayTypes.every((d) => d.dayType === DayType.Normal)) return draft
-
-  return {
-    ...draft,
-    days: draft.days.map((day) =>
-      applyDayTypeToDay(day, resolvePlannerDayType(day.day, dayTypes), appBlocks),
-    ),
-  }
+  const days = draft.days.map((day) =>
+    applyDayTypeToDay(day, resolvePlannerDayType(day.day, dayTypes), appBlocks),
+  )
+  // Identity is preserved by COMPARISON rather than by an early return on
+  // "every day is Full". An all-Full config is exactly the state a day being
+  // taken back OUT of Life passes through, so short-circuiting on it would skip
+  // the restore and leave the day empty — the round-1 defect, reintroduced one
+  // level up. `applyDayTypeToDay` returns its argument unchanged whenever there
+  // is nothing to do, so this compares cheaply and allocates nothing new in the
+  // common case.
+  if (days.every((day, i) => day === draft.days[i])) return draft
+  return { ...draft, days }
 }
 
 // ── What Apply writes to `dailyPlans` ────────────────────────────────────────

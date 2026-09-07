@@ -132,7 +132,6 @@ import {
 import {
   buildDayTypeSection,
   enforceDayTypes,
-  restoreDayFromBase,
   setPlannerDayType,
 } from './plannerDayTypes'
 import { plannerPhaseLine } from './plannerPhaseLine'
@@ -302,18 +301,6 @@ export default function PlannerChatPage() {
    * control. Empty means every day is Full.
    */
   const [dayTypes, setDayTypes] = useState<DayTypeConfig[]>([])
-  /**
-   * The last generated draft **before** any day type was applied to it (UX-261,
-   * Codex round 1 P1).
-   *
-   * The day-type transforms are lossy, so this is what makes a pick reversible:
-   * taking a day back to Full restores its items from here rather than leaving
-   * the emptied day behind a chip that says Full. Page state only — never
-   * persisted and never written; a reload with no base simply falls back to
-   * leaving the day as it is, which is the pre-fix behaviour rather than a new
-   * failure.
-   */
-  const [baseDraft, setBaseDraft] = useState<DraftWeeklyPlan | null>(null)
   const [adjustments, setAdjustments] = useState<AdjustmentIntent[]>([])
   // showPhotos state removed — photo upload now lives in setup phase accordion
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -596,19 +583,14 @@ export default function PlannerChatPage() {
   // "Tuesday and Thursday are packing days" was sent correctly and lost to
   // exactly those capitals, and moving a sentence is not what fixed it.
   //
-  // It also stashes the **unshaped** draft in `baseDraft`. That is what makes a
-  // pick reversible: the transforms are lossy by nature (a Life day's items are
-  // gone, a Light day's are replaced), so re-shaping the already-shaped draft
-  // would mean tapping Life then Full left the day EMPTY while the chip said
-  // Full — and Apply skips an empty day, so a mis-tap would silently cost the
-  // parent a whole day of plan with nothing on screen saying so. Codex round 1
-  // (P1). `handleDayTypeChange` restores the changed day from here instead.
+  // Reversibility is `applyDayTypeToDay`'s job, not this one's: each day carries
+  // its own pre-shape items (`DraftDayPlan.setAsideItems`) INSIDE the draft, so
+  // it is persisted with the conversation and re-keyed with it. An earlier fix
+  // held that in page state and Codex round 2 was right that it could not
+  // survive a reload and could leak another week's items across a re-key.
   const shapeDraft = useCallback(
-    (plan: DraftWeeklyPlan): DraftWeeklyPlan => {
-      const unshaped = ensureEvaluationItems(plan)
-      setBaseDraft(unshaped)
-      return enforceDayTypes(unshaped, dayTypes, filteredAppBlocks)
-    },
+    (plan: DraftWeeklyPlan): DraftWeeklyPlan =>
+      enforceDayTypes(ensureEvaluationItems(plan), dayTypes, filteredAppBlocks),
     [dayTypes, filteredAppBlocks],
   )
 
@@ -1068,17 +1050,10 @@ export default function PlannerChatPage() {
    * handler, so no affordance renders; this is the guard on the write itself.
    *
    * The draft is re-shaped immediately rather than at the next generate, so the
-   * card the parent is looking at matches what Apply would write.
-   *
-   * **The change is reversible** (Codex round 1, P1). The transforms are lossy —
-   * a Life day's items are gone, a Light day's are replaced — so re-shaping the
-   * already-shaped draft would leave *Life → Full* showing an empty day under a
-   * chip reading Full, and `applicableDays` skips an empty day, so a mis-tap
-   * would silently cost a whole day of plan. Instead the CHANGED day is taken
-   * from `baseDraft` (the last unshaped generation) and every other day from the
-   * current draft, so the tap is undoable and edits made to the other days
-   * survive it. Edits made to the changed day itself before setting it aside do
-   * not — that day is being replaced, which is what the parent asked for.
+   * card the parent is looking at matches what Apply would write. **The change
+   * is reversible and survives a reload** — each day carries its own pre-shape
+   * items inside the draft, so `applyDayTypeToDay` restores them; see that
+   * function for the three defects that shape it (Codex rounds 1 and 2).
    *
    * The control is `!applied`-gated in the card: once the week is live, changing
    * the kind of a day is Today's job and has its own control there.
@@ -1088,16 +1063,8 @@ export default function PlannerChatPage() {
       if (!isParent) return
       const next = setPlannerDayType(dayTypes, day, dayType)
       setDayTypes(next)
-      // Restore the changed day from the unshaped base before re-shaping, so a
-      // Full/Light pick gets the day's real items back rather than whatever the
-      // previous transform left. No base (a reload, or a draft restored from the
-      // conversation) → the day stays as it is, the pre-fix behaviour.
       const reshaped = currentDraft
-        ? enforceDayTypes(
-            restoreDayFromBase(currentDraft, baseDraft, day),
-            next,
-            filteredAppBlocks,
-          )
+        ? enforceDayTypes(currentDraft, next, filteredAppBlocks)
         : null
       if (reshaped) {
         setCurrentDraft(reshaped)
@@ -1108,7 +1075,7 @@ export default function PlannerChatPage() {
         ...(reshaped ? { currentDraft: reshaped } : {}),
       })
     },
-    [isParent, dayTypes, currentDraft, baseDraft, filteredAppBlocks, persistConversation],
+    [isParent, dayTypes, currentDraft, filteredAppBlocks, persistConversation],
   )
 
   // Cached base64 images for vision API (cleared after plan generation)
@@ -2979,7 +2946,6 @@ ${dayPrompts}`
     // still never touches an `mvd` the parent chose on Today.
     const clearedDayTypes = dayTypes.map((d) => ({ ...d, dayType: DayType.Normal }))
     setDayTypes(clearedDayTypes)
-    setBaseDraft(null)
 
     if (conversationDocId) {
       const ref = doc(plannerConversationsCollection(familyId), conversationDocId)

@@ -550,6 +550,25 @@ export interface DraftDayPlan {
   day: string
   timeBudgetMinutes: number
   items: DraftPlanItem[]
+  /**
+   * Which Full / Light / Life shape `items` is currently IN (UX-261).
+   *
+   * Absent means Full — every draft written before this field existed, so there
+   * is no migration. It is what makes the shaping **idempotent and reversible**:
+   * re-shaping a day into the type it already holds preserves the parent's later
+   * edits instead of rebuilding it, and moving to a different type restores
+   * {@link setAsideItems} first rather than transforming a transformed day.
+   */
+  appliedDayType?: DayType
+  /**
+   * The day's items as they were BEFORE a non-Full type was applied (UX-261).
+   *
+   * Lives here, inside the draft, rather than in page state, so it is persisted
+   * with the conversation and re-keyed with it: a parent who reloads, or who
+   * switches week or child, gets this day's own original items back and never
+   * another week's (Codex round 2, P1).
+   */
+  setAsideItems?: DraftPlanItem[]
 }
 
 export interface DraftPlanItem {

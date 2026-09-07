@@ -13,7 +13,6 @@ import {
   plannerDayTypeLabel,
   PLANNER_DAY_TYPE_CHOICES,
   resolvePlannerDayType,
-  restoreDayFromBase,
   setPlannerDayType,
 } from './plannerDayTypes'
 
@@ -207,51 +206,103 @@ describe('enforceDayTypes', () => {
   })
 })
 
-// ── Codex round 1, P1: a pick must be reversible ─────────────────────────────
-describe('restoreDayFromBase', () => {
+// ── Codex rounds 1 and 2: a pick must be reversible, and survive a reload ────
+describe('reversibility', () => {
   const base = week([day('Monday', ['Math']), day('Tuesday', ['Math', 'Reading'])])
+  const life = [{ day: 'Tuesday', dayType: DayType.Life }]
+  const full = [{ day: 'Tuesday', dayType: DayType.Normal }]
+  const light = [{ day: 'Tuesday', dayType: DayType.Light }]
 
-  it('makes Life → Full give the day its items back, not leave it empty', () => {
-    // Without this, the chip reads Full over an empty day, and `applicableDays`
-    // skips an empty day — so a mis-tap silently costs a whole day of plan.
-    const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
+  it('Life → Full gives the day its items back, not an empty day under a Full chip', () => {
+    // `applicableDays` skips an empty day, so without this a mis-tap silently
+    // cost the parent a whole day of plan with nothing on screen saying so.
+    const setAside = enforceDayTypes(base, life, appBlocks)
     expect(setAside.days.find((d) => d.day === 'Tuesday')!.items).toEqual([])
 
-    const backToFull = enforceDayTypes(
-      restoreDayFromBase(setAside, base, 'Tuesday'),
-      [{ day: 'Tuesday', dayType: DayType.Normal }],
-      appBlocks,
-    )
-    expect(backToFull.days.find((d) => d.day === 'Tuesday')!.items).toHaveLength(2)
+    const backToFull = enforceDayTypes(setAside, full, appBlocks)
+    const tuesday = backToFull.days.find((d) => d.day === 'Tuesday')!
+    expect(tuesday.items).toHaveLength(2)
+    expect(tuesday.items.map((i) => i.title)).toEqual(['Math', 'Reading'])
   })
 
-  it('makes Life → Light rebuild from the real day, not from an empty one', () => {
-    const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
-    const toLight = enforceDayTypes(
-      restoreDayFromBase(setAside, base, 'Tuesday'),
-      [{ day: 'Tuesday', dayType: DayType.Light }],
-      appBlocks,
-    )
+  it('leaves no stash or marker behind once a day is Full again', () => {
+    const roundTrip = enforceDayTypes(enforceDayTypes(base, life, appBlocks), full, appBlocks)
+    const tuesday = roundTrip.days.find((d) => d.day === 'Tuesday')!
+    expect(tuesday.setAsideItems).toBeUndefined()
+    expect(tuesday.appliedDayType).toBeUndefined()
+  })
+
+  it('Life → Light rebuilds from the real day, not from an empty one', () => {
+    const toLight = enforceDayTypes(enforceDayTypes(base, life, appBlocks), light, appBlocks)
     const titles = toLight.days.find((d) => d.day === 'Tuesday')!.items.map((i) => i.title)
     expect(titles).toContain('Math facts sprint (5 min)')
   })
 
-  it('restores only the named day, so edits to the others survive', () => {
-    const edited = {
-      ...base,
-      days: base.days.map((d) =>
-        d.day === 'Monday' ? { ...d, items: [] } : d,
-      ),
-    } as DraftWeeklyPlan
-    const result = restoreDayFromBase(edited, base, 'Tuesday')
-    expect(result.days.find((d) => d.day === 'Monday')!.items).toEqual([])
-    expect(result.days.find((d) => d.day === 'Tuesday')!.items).toHaveLength(2)
+  it('Light → Full restores the original items, not the template', () => {
+    const backToFull = enforceDayTypes(enforceDayTypes(base, light, appBlocks), full, appBlocks)
+    const titles = backToFull.days.find((d) => d.day === 'Tuesday')!.items.map((i) => i.title)
+    expect(titles).toEqual(['Math', 'Reading'])
   })
 
-  it('leaves the draft alone with no base, or an unknown day', () => {
-    expect(restoreDayFromBase(base, null, 'Tuesday')).toBe(base)
-    expect(restoreDayFromBase(base, undefined, 'Tuesday')).toBe(base)
-    expect(restoreDayFromBase(base, base, 'Saturday')).toBe(base)
+  it('survives a round trip through JSON — the stash rides in the draft', () => {
+    // The whole reason it lives on the day rather than in page state: the draft
+    // is persisted on the conversation, so a reload can still undo a pick.
+    const setAside = enforceDayTypes(base, life, appBlocks)
+    const reloaded = JSON.parse(JSON.stringify(setAside)) as DraftWeeklyPlan
+    const backToFull = enforceDayTypes(reloaded, full, appBlocks)
+    expect(backToFull.days.find((d) => d.day === 'Tuesday')!.items).toHaveLength(2)
+  })
+
+  it('restores only the changed day, so edits to the others survive', () => {
+    const setAside = enforceDayTypes(base, life, appBlocks)
+    const edited: DraftWeeklyPlan = {
+      ...setAside,
+      days: setAside.days.map((d) => (d.day === 'Monday' ? { ...d, items: [] } : d)),
+    }
+    const backToFull = enforceDayTypes(edited, full, appBlocks)
+    expect(backToFull.days.find((d) => d.day === 'Monday')!.items).toEqual([])
+    expect(backToFull.days.find((d) => d.day === 'Tuesday')!.items).toHaveLength(2)
+  })
+})
+
+describe('idempotence, and the one exception to it', () => {
+  const base = week([day('Tuesday', ['Math', 'Reading'])])
+
+  it('preserves edits to a Light day rather than re-templating it', () => {
+    // Apply re-enforces at the write. Without the short-circuit, a template task
+    // the parent removed came back and a video they added vanished — a write
+    // disagreeing with the card they were looking at. Codex round 2 (P1).
+    const lit = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Light }], appBlocks)
+    const edited: DraftWeeklyPlan = {
+      ...lit,
+      days: lit.days.map((d) => ({
+        ...d,
+        items: d.items.filter((i) => i.title !== 'Math facts sprint (5 min)'),
+      })),
+    }
+    const reEnforced = enforceDayTypes(edited, [{ day: 'Tuesday', dayType: DayType.Light }], appBlocks)
+    expect(reEnforced.days[0].items.map((i) => i.title)).not.toContain('Math facts sprint (5 min)')
+    expect(reEnforced).toBe(edited)
+  })
+
+  it('re-empties a set-aside day even when it is already in that shape', () => {
+    // The exception: `MoveToDayDialog` offers every weekday, so an item can be
+    // moved onto a Life day after shaping. "No plan" is the whole meaning of the
+    // type, and Apply is about to set the day's planType to life.
+    const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
+    const smuggled: DraftWeeklyPlan = {
+      ...setAside,
+      days: setAside.days.map((d) => ({ ...d, items: base.days[0].items })),
+    }
+    const reEnforced = enforceDayTypes(smuggled, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
+    expect(reEnforced.days[0].items).toEqual([])
+    // ...and the original stash is still what a Full pick would restore.
+    expect(reEnforced.days[0].setAsideItems).toHaveLength(2)
+  })
+
+  it('is a no-op on an unchanged draft, identity included', () => {
+    const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
+    expect(enforceDayTypes(setAside, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)).toBe(setAside)
   })
 })
 
