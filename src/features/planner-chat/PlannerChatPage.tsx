@@ -119,6 +119,7 @@ import { applyDraftWeek, WeekApplyError } from './applyWeekPlan'
 import {
   appliedConfirmation,
   applyButtonLabel,
+  liveWeekAppliedNotice,
   resolvePlanningWeek,
   type PlanningWeekChoice,
 } from './planningWeekSelection'
@@ -281,6 +282,15 @@ export default function PlannerChatPage() {
   // to twenty call sites and hoping none was missed.
   const weekRange = planningWeek.range
   const effectiveWeekChoice = planningWeek.choice
+  /**
+   * The selector's own option for the week containing TODAY, regardless of which
+   * week the page is showing (UX-256). Taken from the selector's options rather
+   * than recomputed, so it cannot become a second definition of "this week" —
+   * and so the UX-256 notice reads the same `disabled` flag the toggle it names
+   * is rendered with.
+   */
+  const liveWeekOption = planningWeek.options.find((o) => o.choice === 'this')
+  const liveWeekStart = liveWeekOption?.range.start ?? weekRange.start
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
@@ -333,6 +343,23 @@ export default function PlannerChatPage() {
   // Prior-plan detection: distinguishes first-visit user (full wizard) from returning user (compact setup)
   const [hasPriorPlan, setHasPriorPlan] = useState<boolean | null>(null)
   const [lastPlanDraft, setLastPlanDraft] = useState<DraftWeeklyPlan | null>(null)
+  /**
+   * UX-256: whether the week CONTAINING today already has an applied plan.
+   *
+   * Read off the prior-plan query below — the same five most-recent conversation
+   * docs, no extra Firestore read — because this only ever decides whether one
+   * orienting sentence renders. A false negative (the live week's doc fell
+   * outside those five) shows nothing, which is the safe direction: the rule is
+   * that the page never says a plan exists when it might not.
+   */
+  const [liveWeekApplied, setLiveWeekApplied] = useState(false)
+  /** The UX-256 sentence, or `null` when any of its four conditions fails. */
+  const liveWeekNotice = liveWeekAppliedNotice({
+    liveWeek: liveWeekOption,
+    resolvedChoice: effectiveWeekChoice,
+    explicitChoice: weekChoice,
+    liveWeekApplied,
+  })
   const [repeatingWeek, setRepeatingWeek] = useState(false)
   // Workbook chips: workbooks the user has toggled OFF for this week.
   const [excludedWorkbookIds, setExcludedWorkbookIds] = useState<Set<string>>(new Set())
@@ -644,17 +671,31 @@ export default function PlannerChatPage() {
     if (!familyId || !activeChildId) {
       setHasPriorPlan(null)
       setLastPlanDraft(null)
+      setLiveWeekApplied(false)
       return
     }
     setHasPriorPlan(null)
     setLastPlanDraft(null)
+    setLiveWeekApplied(false)
     const q = query(
       plannerConversationsCollection(familyId),
       where('childId', '==', activeChildId),
       orderBy('weekKey', 'desc'),
       fsLimit(5),
     )
+    // Codex P2 on PR #1795: this is a one-shot `getDocs`, not a subscription, so
+    // nothing used to stop a slow answer for the PREVIOUS child from landing
+    // after the effect had already re-run for a new one. Whichever request
+    // resolved last won, and every value below is child-scoped — `hasPriorPlan`
+    // picks the wizard or the compact card, `lastPlanDraft` is what "Repeat Last
+    // Week" would clone, and `liveWeekApplied` (UX-256) is a sentence claiming a
+    // child's current week is applied. Switching from a child with an applied
+    // week to one without could leave that sentence on screen for a week that
+    // was never planned, which is precisely the thing that notice must never
+    // say. The cleanup flag drops an obsolete answer instead of writing it.
+    let cancelled = false
     void getDocs(q).then((snap) => {
+      if (cancelled) return
       const priorDocs = snap.docs.filter((d) => d.data().weekKey !== weekRange.start)
       setHasPriorPlan(priorDocs.length > 0)
       const withDraft = priorDocs.find((d) => {
@@ -662,11 +703,24 @@ export default function PlannerChatPage() {
         return !!data.currentDraft && (data.currentDraft.days?.length ?? 0) > 0
       })
       setLastPlanDraft(withDraft ? ((withDraft.data() as PlannerConversation).currentDraft ?? null) : null)
+      // UX-256: read from ALL five docs, not `priorDocs` — the live week is
+      // "prior" only when the page is showing the next one, which is exactly the
+      // case the notice exists for.
+      const liveDoc = snap.docs.find((d) => d.data().weekKey === liveWeekStart)
+      setLiveWeekApplied(
+        (liveDoc?.data() as PlannerConversation | undefined)?.status ===
+          PlannerConversationStatus.Applied,
+      )
     }).catch(() => {
+      if (cancelled) return
       setHasPriorPlan(false)
       setLastPlanDraft(null)
+      setLiveWeekApplied(false)
     })
-  }, [familyId, activeChildId, weekRange.start])
+    return () => {
+      cancelled = true
+    }
+  }, [familyId, activeChildId, weekRange.start, liveWeekStart])
 
   // Load existing conversation
   useEffect(() => {
@@ -3093,11 +3147,6 @@ ${dayPrompts}`
 
       {activeChildId && (
         <>
-          {/* One-line ambient foundation focus (FEAT-65, §7.3) — sourced from the
-              learner model's synthesis; taps through to the Foundations tab.
-              Renders nothing when the model is empty / no-data. */}
-          <FoundationsFocusLine childId={activeChildId} />
-
           {/* Proposed adjustment handed off from Shelly chat (chunk 2A/2).
               Surfaced for review — it's already folded into the week notes /
               generation context. Shelly still reviews + locks in below; this
@@ -3121,6 +3170,20 @@ ${dayPrompts}`
                 It's added to your week notes below — review and generate or lock in your plan as usual.
               </Typography>
             </Alert>
+          )}
+
+          {/* UX-256: on Friday and Saturday the default rolls forward, so a
+              parent opening the planner to change something on TODAY lands on
+              next week's empty setup card and has to notice the selector. One
+              sentence naming the live week, and only when all three of its
+              conditions hold — there really is an applied plan for it, the page
+              really is showing the other week, and she has not chosen a week
+              herself. Parent-gated on capability like every other control here;
+              a kid profile never reaches a week selector's default at all. */}
+          {isParent && liveWeekNotice && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {liveWeekNotice}
+            </Typography>
           )}
 
           {/* FEAT-196: which week is being planned, said out loud and picked by
@@ -3237,6 +3300,21 @@ ${dayPrompts}`
               canRepeatLastWeek={!!lastPlanDraft}
             />
           )}
+
+          {/* One-line ambient foundation focus (FEAT-65, §7.3) — sourced from the
+              learner model's synthesis; taps through to the Foundations tab.
+              Renders nothing when the model is empty / no-data.
+
+              UX-247: it used to sit directly under the child chips, where its
+              four-to-six lines at 390px pushed the week selector and the whole
+              setup card below the fold — the thing the app wants to say standing
+              in front of the thing the parent came to do. It is neither clamped
+              nor truncated here; it is MOVED, so the full sentence still reads in
+              one piece. Below the setup card it lands above the day cards in
+              review and active, which is where a line about *what the plan should
+              emphasise* is actually useful: context for the plan she is reading,
+              not a gate before the plan she is making. */}
+          <FoundationsFocusLine childId={activeChildId} />
 
           {phase === 'review' && (
             <Box>
@@ -3381,16 +3459,6 @@ ${dayPrompts}`
             </>
           )}
 
-          {/* Global chat drawer — collapsed by default, available across all phases as the power-user escape hatch */}
-          <PlannerChatDrawer
-            messages={messages}
-            inputText={inputText}
-            onInputChange={setInputText}
-            onSend={() => handleSend()}
-            loading={aiLoading}
-            messagesEndRef={chatEndRef}
-          />
-
           {phase === 'review' && currentDraft && (
             <>
               {/* UX-245: this used to carry its own "Want to adjust anything?"
@@ -3444,6 +3512,23 @@ ${dayPrompts}`
               </Dialog>
             </>
           )}
+
+          {/* Global chat drawer — collapsed by default, available across all
+              phases as the power-user escape hatch.
+
+              UX-255: it used to render ABOVE the quick-adjust chips and Print
+              Week Materials, so on the review screen the two ordinary ways to
+              change a plan sat underneath the one labelled *(advanced)*. The
+              advanced thing goes at the bottom — on every phase, which is why it
+              is last in the tree rather than merely below the review block. */}
+          <PlannerChatDrawer
+            messages={messages}
+            inputText={inputText}
+            onInputChange={setInputText}
+            onSend={() => handleSend()}
+            loading={aiLoading}
+            messagesEndRef={chatEndRef}
+          />
         </>
       )}
 

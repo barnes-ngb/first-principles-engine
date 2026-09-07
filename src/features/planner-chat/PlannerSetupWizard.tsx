@@ -21,8 +21,7 @@ import type {
   WorkbookConfig,
 } from '../../core/types'
 import type { ScanResult } from '../../core/types/planning'
-import { ActivityFrequencyLabel } from '../../core/types/enums'
-import type { ActivityFrequency } from '../../core/types/enums'
+import { activitySummaryLine, VIEW_ACTIVITIES_LABEL } from './activitySummary'
 import ChapterBookPicker from './ChapterBookPicker'
 import PhotoLabelForm from './PhotoLabelForm'
 import { PLANNER_REQUEST_LABEL, PLANNER_REQUEST_PLACEHOLDER } from './plannerRequest'
@@ -113,6 +112,7 @@ export default function PlannerSetupWizard({
   onSetupComplete,
   generatingWeek,
 }: PlannerSetupWizardProps) {
+  const activitySummary = activitySummaryLine(activityConfigs ?? [])
   return (
     <Stack spacing={2.5} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
       <Typography variant="h6">Plan {childName}&apos;s Week</Typography>
@@ -152,32 +152,31 @@ export default function PlannerSetupWizard({
         rows={2}
       />
 
-      {/* Activity configs summary */}
-      {activityConfigs && activityConfigs.length > 0 && (
-        <Box sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 1.5 }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              {childName}&apos;s Activities
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {activityConfigs.filter((c) => !c.completed).length} active
-              {activityConfigs.filter((c) => c.completed).length > 0 ? `, ${activityConfigs.filter((c) => c.completed).length} completed` : ''}
-            </Typography>
-          </Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-            {activityConfigs
-              .filter((c) => !c.completed)
-              .slice(0, 8)
-              .map((c) => `${c.name} (${ActivityFrequencyLabel[c.frequency as ActivityFrequency] ?? c.frequency})`)
-              .join(' · ')}
-            {activityConfigs.filter((c) => !c.completed).length > 8 ? ' · ...' : ''}
+      {/* Activity configs summary.
+
+          UX-258: this was a truncated wall — up to eight `name (cadence)` pairs
+          joined by `·` and then a bare `...` — which is ~37 of the words a parent
+          reads before Generate (UX-260) for a list she can neither scan nor
+          change from here. A count and a link beat a truncated list; the names
+          live one tap away on Curriculum, the screen that owns them. */}
+      {activitySummary && (
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          flexWrap="wrap"
+          useFlexGap
+          sx={{ p: 1.5, rowGap: 0.5, bgcolor: 'grey.50', borderRadius: 1.5 }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            {activitySummary}
           </Typography>
           {onViewActivities && (
-            <Button size="small" variant="text" onClick={onViewActivities} sx={{ mt: 0.5, p: 0, minWidth: 0, textTransform: 'none' }}>
-              View/Edit Activities
+            <Button size="small" variant="text" onClick={onViewActivities} sx={{ p: 0, minWidth: 0, textTransform: 'none' }}>
+              {VIEW_ACTIVITIES_LABEL}
             </Button>
           )}
-        </Box>
+        </Stack>
       )}
 
       {/* Mastery context (read-only summary, not raw data) */}
