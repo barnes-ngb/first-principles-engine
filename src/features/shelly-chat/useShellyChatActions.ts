@@ -111,6 +111,7 @@ import {
 } from './dadLabActions'
 import type { ChatWeekDay, DayItemAction } from './dayItemActions'
 import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
+import type { SnapshotAction } from './snapshotActions'
 import type { WatchAction } from './watchActions'
 import { isWatchAction, repeatedVetInNotice, resolveWatchAction } from './watchActions'
 import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
@@ -296,12 +297,6 @@ export interface ShellyChatActionsDeps {
   onDraftNextWeek?: (action: DraftNextWeekAction) => Promise<boolean>
 }
 
-/** The Tier-C Option-2 additive snapshot kinds (6b). */
-type SnapshotAction = Extract<
-  ChatAction,
-  { kind: 'addPrioritySkill' | 'addSupport' | 'addStopRule' | 'markSkillProgress' }
->
-
 /**
  * Route a Tier-C Option-2 additive snapshot action through the central
  * {@link writeSnapshotUpdate} writer (6a). **Additive only** — each kind maps
@@ -339,15 +334,26 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
         at,
       })
       return
-    case 'markSkillProgress':
+    case 'markSkillProgress': {
+      // UX-187 — the card's two sentences must reach the write as two different
+      // writes. `fullyMastered` governs the conceptual-BLOCK branch only, so on
+      // its own it left a "progressing" claim writing `SkillLevel.Secure` /
+      // `MasteryGate.IndependentConsistent` onto any matched priority skill:
+      // the app's top rating, from a card whose own words were "progressing".
+      // `skipPrioritySkillLevels` is the writer's additive opt-in for exactly
+      // this — a progress claim advances a matched block to `RESOLVING` and
+      // moves no level. Mastered is byte-for-byte what it always was.
+      const mastered = action.mastered === true
       await writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [action.skill],
-        fullyMastered: action.mastered === true,
+        fullyMastered: mastered,
+        skipPrioritySkillLevels: !mastered,
         source: 'parent',
         evidence: `parent directive via chat — ${at}`,
         at,
       })
       return
+    }
   }
 }
 

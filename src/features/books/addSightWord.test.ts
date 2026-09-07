@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const getDoc = vi.fn()
 const setDoc = vi.fn()
 const deleteDoc = vi.fn()
-const doc = vi.fn((_collection: unknown, id: string) => ({ __doc: id }))
+const doc = vi.fn((...args: unknown[]) => ({ __doc: args[1] }))
 
 vi.mock('firebase/firestore', () => ({
   getDoc: (...args: unknown[]) => getDoc(...args),

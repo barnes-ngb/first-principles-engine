@@ -909,3 +909,61 @@ describe('ActionConfirmCard — a failed write says so (FEAT-162 / UX-33c)', () 
     expect(screen.getAllByText(confirmFailureNotice())).toHaveLength(1)
   })
 })
+
+// ── markSkillProgress — the card must say what the write does (UX-187) ───────
+//
+// Proved from the card's RENDERED TEXT, not from a prop: the whole defect was
+// that a word appeared on the card and nowhere in the write, so a test that
+// asserts what the component was handed would have passed throughout.
+describe('ActionConfirmCard — markSkillProgress (UX-187)', () => {
+  const progressCard = (mastered?: boolean): PendingAction[] => [
+    {
+      id: 'msg1_0',
+      status: 'pending',
+      action: {
+        kind: 'markSkillProgress',
+        childId: 'lincoln1',
+        skill: 'CVCe long vowels',
+        ...(mastered === undefined ? {} : { mastered }),
+      },
+    },
+  ]
+
+  it('tells her a progressing claim changes no level, and where a level is set', () => {
+    renderCard(progressCard())
+
+    expect(
+      screen.getByText('Mark "CVCe long vowels" as progressing for Lincoln'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /Records the movement without changing Lincoln's level.*Progress → Skill Snapshot/,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('never states the claim itself as mastery', () => {
+    renderCard(progressCard())
+
+    // The footnote quotes the word to draw the contrast ("only sets a level for
+    // 'mastered'"), which is the whole point of it — so the assertion is on the
+    // CLAIM line, which is what she reads as "what am I confirming".
+    expect(
+      screen.queryByText('Mark "CVCe long vowels" as mastered for Lincoln'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/secure/i)).not.toBeInTheDocument()
+  })
+
+  it('says the mastery card records mastery, and that the chat cannot undo it', () => {
+    renderCard(progressCard(true))
+
+    expect(screen.getByText('Mark "CVCe long vowels" as mastered for Lincoln')).toBeInTheDocument()
+    expect(screen.getByText(/cannot lower a level again/)).toBeInTheDocument()
+  })
+
+  it('names the child rather than guessing a pronoun', () => {
+    renderCard(progressCard())
+
+    expect(screen.queryByText(/\b(his|her|their)\b/)).not.toBeInTheDocument()
+  })
+})

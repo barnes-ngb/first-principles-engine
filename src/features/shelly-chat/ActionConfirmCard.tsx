@@ -44,6 +44,12 @@ import {
   isDayItemAction,
   resolveDayItemAction,
 } from './dayItemActions'
+import type { SnapshotAction } from './snapshotActions'
+import {
+  describeSnapshotAction,
+  isSnapshotAction,
+  snapshotActionFootnote,
+} from './snapshotActions'
 import {
   describeDraftNextWeek,
   DRAFT_FOOTNOTE,
@@ -160,39 +166,16 @@ function describeSightWord(
   return `${verb} sight word "${action.word.toLowerCase()}" for ${childName}`
 }
 
-/** The Tier-C Option-2 additive snapshot kinds (6b). */
-type SnapshotAction = Extract<
-  ChatAction,
-  { kind: 'addPrioritySkill' | 'addSupport' | 'addStopRule' | 'markSkillProgress' }
->
-
-const isSnapshotAction = (action: ChatAction): action is SnapshotAction =>
-  action.kind === 'addPrioritySkill' ||
-  action.kind === 'addSupport' ||
-  action.kind === 'addStopRule' ||
-  action.kind === 'markSkillProgress'
-
-/** Plain-language preview for a proposed additive snapshot edit (6b). */
-function describeSnapshot(action: SnapshotAction, childName: string): string {
-  switch (action.kind) {
-    case 'addPrioritySkill':
-      return `Add to ${childName}'s priority skills: "${action.skill}"`
-    case 'addSupport':
-      return `Add to ${childName}'s supports: "${action.support}"`
-    case 'addStopRule':
-      return `Add to ${childName}'s stop rules: "${action.rule}"`
-    case 'markSkillProgress':
-      return action.mastered
-        ? `Mark "${action.skill}" as mastered for ${childName}`
-        : `Mark "${action.skill}" as progressing for ${childName}`
-  }
-}
-
 /**
  * Preview for an additive Skill-Snapshot edit. These write the authoritative
  * "what to teach next" record, so the card is framed as visibly weightier than
  * a sight-word card: a "Updates {child}'s skill snapshot" label sits above the
  * action line so Shelly registers what she's confirming before she taps.
+ *
+ * The footnote (UX-187) is the card catching up with the write: a
+ * `markSkillProgress` card said *progressing* over a writer that recorded full
+ * mastery, so the line under the preview now states what the write does and
+ * names the one screen that can set or lower a level.
  */
 function SnapshotEditPreview({
   action,
@@ -201,6 +184,7 @@ function SnapshotEditPreview({
   action: SnapshotAction
   childName: string
 }) {
+  const footnote = snapshotActionFootnote(action, childName)
   return (
     <Stack spacing={0.25}>
       <Typography
@@ -210,8 +194,13 @@ function SnapshotEditPreview({
         Updates {childName}'s skill snapshot
       </Typography>
       <Typography variant="body2" sx={{ fontWeight: 600 }}>
-        {describeSnapshot(action, childName)}
+        {describeSnapshotAction(action, childName)}
       </Typography>
+      {footnote && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          {footnote}
+        </Typography>
+      )}
     </Stack>
   )
 }

@@ -792,7 +792,36 @@ describe('useShellyChatActions', () => {
     expect(writeSnapshotUpdate).toHaveBeenCalledWith(
       'fam1',
       'lincoln1',
-      expect.objectContaining({ masteredSkills: ['two-digit addition'], fullyMastered: false }),
+      expect.objectContaining({
+        masteredSkills: ['two-digit addition'],
+        fullyMastered: false,
+        // UX-187 — `fullyMastered` alone reached only the conceptual-block
+        // branch, so this same payload used to write `SkillLevel.Secure` onto a
+        // matched priority skill: the app's top rating, from a card whose own
+        // word was "progressing".
+        skipPrioritySkillLevels: true,
+      }),
+    )
+  })
+
+  it('does NOT skip levels when the claim really is mastery (UX-187)', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'CVCe long vowels',
+      mastered: true,
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(writeSnapshotUpdate).toHaveBeenCalledWith(
+      'fam1',
+      'lincoln1',
+      expect.objectContaining({ fullyMastered: true, skipPrioritySkillLevels: false }),
     )
   })
 

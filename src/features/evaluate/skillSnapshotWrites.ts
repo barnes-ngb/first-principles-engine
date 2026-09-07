@@ -47,8 +47,40 @@ export interface SnapshotApplyUpdate {
   /**
    * When true, advance matched blocks straight to `RESOLVED` (the milestone
    * marks the skill mastered). Otherwise advance them to `RESOLVING`.
+   *
+   * **It governs the conceptual-BLOCK branch only** — see
+   * {@link SnapshotApplyUpdate.skipPrioritySkillLevels} for why that mattered
+   * and what a caller does about it.
    */
   fullyMastered?: boolean
+  /**
+   * Treat {@link SnapshotApplyUpdate.masteredSkills} as a **progress** signal
+   * rather than a mastery one: matched conceptual blocks still advance (to
+   * `RESOLVING`, per `fullyMastered`), and matched priority skills keep the
+   * level they have (UX-187).
+   *
+   * **Additive and opt-in. Absent — as it is at every existing call site — this
+   * changes nothing**: the FUNC-02 scan write-through, `commitMasteryRollup`,
+   * the quest session and the certificate paths all behave byte-for-byte as
+   * before, and no stored value moves.
+   *
+   * It exists because `fullyMastered` reached only one of the two branches this
+   * update drives. The priority-skill fold below never consulted it and wrote
+   * `SkillLevel.Secure` / `MasteryGate.IndependentConsistent` — the app's top
+   * rating, the same value a completed guided evaluation writes — for *any*
+   * matched skill. So Ask AI's `markSkillProgress` card reading *"Mark 'CVCe
+   * long vowels' as **progressing** for Lincoln"* recorded full mastery, and
+   * every downstream reader that gates on level (planner priority targeting,
+   * quest targeting, Knowledge Mine access) then treated a forming skill as
+   * finished. The word "progressing" appeared on the card and nowhere in the
+   * write.
+   *
+   * Naming the flag for what it *skips* keeps the additive-only contract
+   * legible: it can only cause **fewer** fields to move, never more, so it can
+   * never downgrade a level and never removes anything. Lowering a level stays
+   * out of scope — that is the future Option 3 override path.
+   */
+  skipPrioritySkillLevels?: boolean
   /** What produced this write (recorded as the block's `lastSource`). */
   source?: ConceptualBlockSource
   /** Short evidence string appended to any block this update touches. */
@@ -205,9 +237,14 @@ export function applyToSnapshot(
   })
 
   // ── Fold mastered signal into priority-skill status (never downgrading) ──
+  // Skipped whole when the caller declared this a PROGRESS signal (UX-187):
+  // this branch has only one destination — `Secure` — so a claim that is not a
+  // mastery claim has nothing truthful to write here, and the blocks above have
+  // already recorded the movement as `RESOLVING`.
   let skillsChanged = false
   let nextSkills = base.prioritySkills.map((skill) => {
     if (mastered.length === 0) return skill
+    if (update.skipPrioritySkillLevels) return skill
     const skillId = generateBlockId(skill.label || String(skill.tag))
     if (!skillId || !masteredIds.has(skillId)) return skill
     const gate = skill.masteryGate ?? MasteryGate.NotYet
