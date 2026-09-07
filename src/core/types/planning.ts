@@ -601,6 +601,16 @@ export interface PlannerConversation {
   messages: ChatMessage[]
   /** Current draft plan (updated with each regeneration) */
   currentDraft?: DraftWeeklyPlan
+  /**
+   * The parent's per-day Full / Light / Life picks for this week (UX-261).
+   *
+   * Additive and optional — absent means every day is Full, which is every week
+   * planned before this field existed, so there is no migration and nothing to
+   * back-fill. Stored alongside the draft rather than inside it because the
+   * picks are **hers, not the model's**: a regenerate replaces `currentDraft`
+   * wholesale and must not replace these.
+   */
+  dayTypes?: DayTypeConfig[]
   /** Context for plan generation */
   availableHoursPerDay: number
   appBlocks: AppBlock[]
