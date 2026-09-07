@@ -2856,3 +2856,74 @@ describe('record writes are parent-only (UX-188)', () => {
     expect(result.current.pending).toHaveLength(7)
   })
 })
+
+// ── The corrected type is what gets written (UX-193) ─────────────────────────
+//
+// The card naming the field is worth nothing if the correction stops at the
+// card. This asserts the whole path: tap a chip, then confirm, and the value
+// that reaches `addActivityConfig` is the parent's, not the model's.
+describe('correcting an addActivity type (UX-193)', () => {
+  const ADD: ChatAction = {
+    kind: 'addActivity',
+    childId: 'lincoln1',
+    name: 'Explode the Code 4',
+    type: 'activity',
+    subjectBucket: SubjectBucket.LanguageArts,
+    defaultMinutes: 15,
+    frequency: 'daily',
+    totalUnits: 60,
+    currentPosition: 1,
+  } as ChatAction
+
+  it('writes the type she picked, not the one the model guessed', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [ADD]))
+
+    act(() => result.current.changeActivityType(ADD, 'workbook'))
+    const corrected = result.current.pending[0].action
+    expect(corrected).not.toBe(ADD)
+
+    await act(async () => {
+      await result.current.applyChatAction(corrected)
+    })
+
+    expect(addActivityConfig).toHaveBeenCalledWith(
+      'fam1',
+      expect.objectContaining({ name: 'Explode the Code 4', type: 'workbook' }),
+    )
+  })
+
+  it('leaves every other field of the proposal exactly as it was', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [ADD]))
+    act(() => result.current.changeActivityType(ADD, 'workbook'))
+
+    const corrected = result.current.pending[0].action as typeof ADD
+    expect({ ...corrected, type: 'activity' }).toEqual(ADD)
+  })
+
+  it('refuses to change a card that is no longer pending', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [ADD]))
+    await act(async () => {
+      await result.current.applyChatAction(ADD)
+    })
+    expect(result.current.pending[0].status).toBe('applied')
+
+    act(() => result.current.changeActivityType(ADD, 'workbook'))
+
+    // The field is written. Swapping the object under the re-entry guard —
+    // which is keyed on the action OBJECT — would let a non-idempotent add be
+    // confirmed a second time.
+    expect(result.current.pending[0].action).toBe(ADD)
+  })
+
+  it('ignores a type change aimed at any other kind', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [MINUTES_ACTION]))
+
+    act(() => result.current.changeActivityType(MINUTES_ACTION, 'workbook'))
+
+    expect(result.current.pending[0].action).toBe(MINUTES_ACTION)
+  })
+})

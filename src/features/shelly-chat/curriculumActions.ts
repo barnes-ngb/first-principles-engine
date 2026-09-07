@@ -20,6 +20,7 @@ import { WORKBOOK_OWNER_REASON } from '../../core/firebase/activityConfigWrites'
 import type { ChatAction } from '../../core/types'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
 import { nameKey } from '../../core/utils/nameKey'
+import { describeActivityType } from './activityTypeChoices'
 import type { ChatActivityConfig } from './useShellyChatActions'
 
 /** The curriculum kinds, narrowed off the `ChatAction` union. */
@@ -352,16 +353,28 @@ export function describeCurriculumAction(
 }
 
 /**
- * The shape line for an `addActivity` card — subject, minutes, frequency.
+ * The shape line for an `addActivity` card — kind, subject, minutes, frequency.
  *
  * An add is the only curriculum action that creates something from nothing, so
  * the card has to show the WHOLE thing being created. The parent cannot check an
  * add against anything already on screen the way she can check a position bump.
+ *
+ * **`type` leads it (UX-193).** It was the one field of the write this line did
+ * not show, and it is the field that decides the most: whether the row is a
+ * workbook, which decides DATA-08 ownership, whether a photo scan can ever match
+ * it, and how the planner treats it. The audit's live case had every visible
+ * field correct and the invisible one wrong. In words — "a workbook" — never the
+ * raw enum.
  */
 export function describeAddActivityShape(
   action: Extract<CurriculumAction, { kind: 'addActivity' }>,
 ): string {
-  const parts = [action.subjectBucket, `${action.defaultMinutes}m`, action.frequency]
+  const parts = [
+    describeActivityType(action.type),
+    action.subjectBucket,
+    `${action.defaultMinutes}m`,
+    action.frequency,
+  ]
   if (action.totalUnits != null) {
     const unit = 'lesson'
     parts.push(

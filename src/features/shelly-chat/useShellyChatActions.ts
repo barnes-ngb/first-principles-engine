@@ -96,6 +96,7 @@ import { updateActivityConfigMinutes } from '../../core/firebase/updateActivityM
 import { updateChildSoftProfile } from '../../core/family/updateChildSoftProfile'
 import type { ChatAction, Child, WatchVideo } from '../../core/types'
 import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
+import { withActivityType } from './activityTypeChoices'
 import { todayKey } from '../../core/utils/dateKey'
 import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import { addSightWord, removeSightWord } from '../books/useSightWordProgress'
@@ -1414,6 +1415,30 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     [performChatAction, rejectReason],
   )
 
+  /**
+   * Correct the `type` the model guessed on a still-pending `addActivity`
+   * (UX-193). Writes nothing — it replaces the PROPOSAL, which is the whole
+   * point: the correction happens before the confirm tap, on the card that made
+   * the claim.
+   *
+   * Guarded on `'pending'` rather than merely on the card existing. A card that
+   * is applying, applied or settled has already had its payload sent to a
+   * writer, and `appliedOrInFlightRef` is keyed on the action OBJECT — swapping
+   * one out from under the guard would let the same card be confirmed twice, on
+   * a kind (`addActivity`) that mints a fresh document per call. That is
+   * precisely the non-idempotence the guard was added for.
+   */
+  const changeActivityType = useCallback((action: ChatAction, type: ActivityType) => {
+    if (action.kind !== 'addActivity') return
+    setPending((prev) =>
+      prev.map((p) => {
+        if (p.action !== action || p.status !== 'pending') return p
+        const next = withActivityType(action, type)
+        return next === action ? p : { ...p, action: next }
+      }),
+    )
+  }, [])
+
   /** Dismiss a proposed action without writing. */
   const dismissAction = useCallback((action: ChatAction) => {
     setPending((prev) =>
@@ -1440,6 +1465,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     clearPending,
     dropPendingForContext,
     applyChatAction,
+    changeActivityType,
     dismissAction,
     confirmAll,
   }

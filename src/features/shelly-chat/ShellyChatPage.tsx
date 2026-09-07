@@ -242,6 +242,7 @@ export default function ShellyChatPage() {
     currentContextScope,
     dropPendingForContext,
     applyChatAction,
+    changeActivityType,
     dismissAction,
     confirmAll,
   } = useShellyChatActions({
@@ -635,6 +636,7 @@ export default function ShellyChatPage() {
           onConfirm={applyChatAction}
           onDismiss={dismissAction}
           onConfirmAll={confirmAll}
+          onChangeActivityType={changeActivityType}
         />
       )}
 

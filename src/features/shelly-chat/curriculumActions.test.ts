@@ -312,19 +312,34 @@ describe('describeCurriculumAction', () => {
 })
 
 describe('describeAddActivityShape', () => {
-  it('shows subject, minutes and frequency', () => {
-    expect(describeAddActivityShape(addActivity())).toBe('Math · 20m · daily')
+  // UX-193 — `type` leads the line now. It was the ONE field of the write this
+  // preview did not show, and the field that decides whether a photo scan can
+  // ever match the row; the audit's live case had every other field correct.
+  it('leads with the kind of thing, in words, then subject, minutes and frequency', () => {
+    expect(describeAddActivityShape(addActivity())).toBe('an app · Math · 20m · daily')
+  })
+
+  it('names every type in a parent’s words, never the raw enum', () => {
+    expect(describeAddActivityShape(addActivity({ type: 'workbook' }))).toContain('a workbook')
+    expect(describeAddActivityShape(addActivity({ type: 'routine' }))).toContain('a routine')
+    expect(describeAddActivityShape(addActivity({ type: 'activity' }))).toContain('an activity')
+    expect(describeAddActivityShape(addActivity({ type: 'evaluation' }))).toContain(
+      'an evaluation',
+    )
+    expect(describeAddActivityShape(addActivity({ type: 'formation' }))).toContain(
+      'a formation block',
+    )
   })
 
   it('adds the position when the parent gave real numbers', () => {
     expect(
       describeAddActivityShape(addActivity({ totalUnits: 140, currentPosition: 98 })),
-    ).toBe('Math · 20m · daily · lesson 98 of 140')
+    ).toBe('an app · Math · 20m · daily · lesson 98 of 140')
     expect(describeAddActivityShape(addActivity({ totalUnits: 140 }))).toBe(
-      'Math · 20m · daily · 140 lessons',
+      'an app · Math · 20m · daily · 140 lessons',
     )
     expect(describeAddActivityShape(addActivity({ currentPosition: 12 }))).toBe(
-      'Math · 20m · daily · starting at lesson 12',
+      'an app · Math · 20m · daily · starting at lesson 12',
     )
   })
 })
