@@ -1,7 +1,13 @@
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
-import type { DraftPlanItem, DraftWeeklyPlan, SkillSnapshot } from '../../core/types'
+import type {
+  DayTypeConfig,
+  DraftPlanItem,
+  DraftWeeklyPlan,
+  SkillSnapshot,
+} from '../../core/types'
+import type { DayType } from '../../core/types/enums'
 import { formatPlanningWeekLabel } from './chatPlanner.logic'
 import PlanPreviewCard from './PlanPreviewCard'
 
@@ -84,6 +90,21 @@ interface PlanDayCardsProps {
   onSwapWatchItem?: (dayIndex: number, itemIndex: number) => void
   /** Per-row lock reason for the post-Apply structural edits (FEAT-138). */
   itemEditLockReason?: (dayIndex: number, itemIndex: number) => string | null
+  /**
+   * The parent's per-day Full / Light / Life picks (UX-261). Absent, or a day
+   * absent from it, reads as Full.
+   */
+  dayTypes?: DayTypeConfig[]
+  /**
+   * Set a day's type. **Deliberately `!applied`-gated by this component**, for
+   * the same reason `onToggleItem` and `onUpdateTime` are: a day type reshapes
+   * the whole day, and post-Apply these cards are a MIRROR of saved documents
+   * with no Apply bar to flush a draft edit — so a tap here would change the
+   * card and not the week. Setting a live day aside is Today's job and has its
+   * own control there (FEAT-200), which is where a parent whose Tuesday turned
+   * into a packing day at 9am already goes.
+   */
+  onDayTypeChange?: (day: string, dayType: DayType) => void
 }
 
 export default function PlanDayCards({
@@ -103,6 +124,8 @@ export default function PlanDayCards({
   onMoveItemToDay,
   onSwapWatchItem,
   itemEditLockReason,
+  dayTypes,
+  onDayTypeChange,
 }: PlanDayCardsProps) {
   const weekLabel = formatPlanningWeekLabel(weekStart)
   return (
@@ -146,6 +169,8 @@ export default function PlanDayCards({
         onMoveItemToDay={onMoveItemToDay}
         onSwapWatchItem={onSwapWatchItem}
         itemEditLockReason={itemEditLockReason}
+        dayTypes={dayTypes}
+        onDayTypeChange={!applied ? onDayTypeChange : undefined}
       />
     </Box>
   )

@@ -52,6 +52,7 @@ import type {
   ChapterQuestionPoolItem,
   ChatMessage,
   DayLog,
+  DayTypeConfig,
   DraftPlanItem,
   DraftWeeklyPlan,
   LessonCard,
@@ -69,6 +70,7 @@ import type { SubjectTimeDefaults } from '../../core/types/planning'
 import {
   AssignmentAction,
   ChatMessageRole,
+  DayType,
   EngineStage,
   EvidenceType,
   PlannerConversationStatus,
@@ -127,6 +129,12 @@ import {
   composePlannerMessage,
   formatShapedByLine,
 } from './plannerRequest'
+import {
+  buildDayTypeSection,
+  enforceDayTypes,
+  restoreAllDayTypes,
+  setPlannerDayType,
+} from './plannerDayTypes'
 import { plannerPhaseLine } from './plannerPhaseLine'
 import { LOCAL_PLANNER_FALLBACK_SNACK, draftTurnText } from './plannerDraftNotice'
 import { describeAdjustment, parseAdjustmentIntent } from './intentParser'
@@ -285,6 +293,15 @@ export default function PlannerChatPage() {
   const [photoLabels, setPhotoLabels] = useState<PhotoLabel[]>([])
   const [uploading, setUploading] = useState(false)
   const [currentDraft, setCurrentDraft] = useState<DraftWeeklyPlan | null>(null)
+  /**
+   * The parent's per-day Full / Light / Life picks (UX-261).
+   *
+   * Held **beside** `currentDraft`, not inside it, and persisted as its own
+   * field on the conversation: a regenerate replaces the draft wholesale, and
+   * these picks are hers — surviving a regenerate is the whole point of the
+   * control. Empty means every day is Full.
+   */
+  const [dayTypes, setDayTypes] = useState<DayTypeConfig[]>([])
   const [adjustments, setAdjustments] = useState<AdjustmentIntent[]>([])
   // showPhotos state removed — photo upload now lives in setup phase accordion
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -552,6 +569,34 @@ export default function PlannerChatPage() {
     [appBlocks, snapshot?.completedPrograms],
   )
 
+  // ── UX-261: the day types, as a control rather than a request ──────────────
+  //
+  // `shapeDraft` wraps `ensureEvaluationItems` and is called at EVERY site that
+  // produces a draft — the AI plan, the truncation-repair fill, the local
+  // fallback, the aggressive recovery parse, both adjustment regenerates and the
+  // repeat-week clone. It replaced `ensureEvaluationItems` by name at all of
+  // them, so a future generation path that forgets this is a path that also
+  // forgot the evaluation items, which is a much louder bug.
+  //
+  // This is the mechanism. `dayTypeSection` below merely tells the model, and it
+  // is composed FIRST so it sits above `buildPlannerPrompt`'s `YOUR #1 JOB` /
+  // `Every day MUST include ALL of these activities` block — the owner's fenced
+  // "Tuesday and Thursday are packing days" was sent correctly and lost to
+  // exactly those capitals, and moving a sentence is not what fixed it.
+  //
+  // Reversibility is `applyDayTypeToDay`'s job, not this one's: each day carries
+  // its own pre-shape items (`DraftDayPlan.setAsideItems`) INSIDE the draft, so
+  // it is persisted with the conversation and re-keyed with it. An earlier fix
+  // held that in page state and Codex round 2 was right that it could not
+  // survive a reload and could leak another week's items across a re-key.
+  const shapeDraft = useCallback(
+    (plan: DraftWeeklyPlan): DraftWeeklyPlan =>
+      enforceDayTypes(ensureEvaluationItems(plan), dayTypes, filteredAppBlocks),
+    [dayTypes, filteredAppBlocks],
+  )
+
+  const dayTypeSection = useMemo(() => buildDayTypeSection(dayTypes), [dayTypes])
+
   // Load per-child subject time defaults
   useEffect(() => {
     if (!familyId || !activeChildId) {
@@ -636,6 +681,7 @@ export default function PlannerChatPage() {
     // already hold their initial values, so this is a no-op there.)
     setMessages([])
     setCurrentDraft(null)
+    setDayTypes([])
     setApplied(false)
     setSetupComplete(false)
     const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
@@ -645,6 +691,10 @@ export default function PlannerChatPage() {
         setMessages(data.messages)
         setHoursPerDay(data.availableHoursPerDay)
         if (data.currentDraft) setCurrentDraft(data.currentDraft)
+        // UX-261: absent on every week planned before this field existed, and on
+        // every week the parent never touched the control on — both read as
+        // "every day Full", which is what `[]` means here.
+        setDayTypes(data.dayTypes ?? [])
         if (data.status === PlannerConversationStatus.Applied) setApplied(true)
         if (data.messages.length > 0) {
           setSetupComplete(true)
@@ -991,6 +1041,44 @@ export default function PlannerChatPage() {
     [familyId, conversationDocId, activeChildId, weekRange.start, hoursPerDay, filteredAppBlocks],
   )
 
+  /**
+   * Set one day's type, re-shape the draft on screen, and persist the pick
+   * (UX-261).
+   *
+   * **Parent capability, checked at the write and not only in the UI** — the
+   * FEAT-133 lesson: `/planner/chat` sits outside `RequireParent`, so a kid
+   * profile can reach this page by URL. `PlanDayCards` also withholds the
+   * handler, so no affordance renders; this is the guard on the write itself.
+   *
+   * The draft is re-shaped immediately rather than at the next generate, so the
+   * card the parent is looking at matches what Apply would write. **The change
+   * is reversible and survives a reload** — each day carries its own pre-shape
+   * items inside the draft, so `applyDayTypeToDay` restores them; see that
+   * function for the three defects that shape it (Codex rounds 1 and 2).
+   *
+   * The control is `!applied`-gated in the card: once the week is live, changing
+   * the kind of a day is Today's job and has its own control there.
+   */
+  const handleDayTypeChange = useCallback(
+    (day: string, dayType: DayType) => {
+      if (!isParent) return
+      const next = setPlannerDayType(dayTypes, day, dayType)
+      setDayTypes(next)
+      const reshaped = currentDraft
+        ? enforceDayTypes(currentDraft, next, filteredAppBlocks)
+        : null
+      if (reshaped) {
+        setCurrentDraft(reshaped)
+        setPlanDirty(true)
+      }
+      void persistConversation({
+        dayTypes: next,
+        ...(reshaped ? { currentDraft: reshaped } : {}),
+      })
+    },
+    [isParent, dayTypes, currentDraft, filteredAppBlocks, persistConversation],
+  )
+
   // Cached base64 images for vision API (cleared after plan generation)
   const photoBase64Cache = useRef<Map<string, { data: string; mediaType: string }>>(new Map())
 
@@ -1244,7 +1332,7 @@ Return as JSON:
       const photoContext = buildPhotoContextSection(photoLabels)
       // FEAT-198: her request goes last, fenced — see `plannerRequest.ts`.
       const fullPrompt = composePlannerMessage(
-        [prompt, masteryPromptContext, photoContext],
+        [dayTypeSection, prompt, masteryPromptContext, photoContext],
         parentRequestSection,
       )
       const aiMessages: AIChatMessage[] = [{ role: 'user', content: fullPrompt }]
@@ -1258,7 +1346,7 @@ Return as JSON:
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       if (rawAiDraft) {
         const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
-        draft = ensureEvaluationItems(fillResult.plan)
+        draft = shapeDraft(fillResult.plan)
         usedAI = true
         if (fillResult.filledDays.length > 0) {
           setSnack({
@@ -1268,12 +1356,12 @@ Return as JSON:
         }
       } else {
         // Fallback to local logic
-        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+        draft = shapeDraft(generateDraftPlanFromInputs(inputs))
         setSnack({ text: 'AI planning unavailable — used local planner.', severity: 'info' })
       }
     } else {
       // Local path (flag off)
-      draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+      draft = shapeDraft(generateDraftPlanFromInputs(inputs))
     }
 
     setCurrentDraft(draft)
@@ -1296,7 +1384,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine])
+  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
@@ -1324,7 +1412,7 @@ Return as JSON:
       // precedence — the assembled prompt is the last thing read, so her
       // accumulated asks are restated, fenced, at the end of it.
       const fullPrompt = composePlannerMessage(
-        [prompt, masteryPromptContext, photoContext],
+        [dayTypeSection, prompt, masteryPromptContext, photoContext],
         parentRequestSection,
       )
       const aiMessages: AIChatMessage[] = [
@@ -1353,7 +1441,7 @@ Return as JSON:
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       if (rawAiDraft) {
         const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
-        draft = ensureEvaluationItems(fillResult.plan)
+        draft = shapeDraft(fillResult.plan)
         usedAI = true
         if (fillResult.filledDays.length > 0) {
           setSnack({
@@ -1362,7 +1450,7 @@ Return as JSON:
           })
         }
       } else {
-        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+        draft = shapeDraft(generateDraftPlanFromInputs(inputs))
         if (!response) {
           // AI call threw — snack already set above
         } else {
@@ -1374,7 +1462,7 @@ Return as JSON:
         }
       }
     } else {
-      draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+      draft = shapeDraft(generateDraftPlanFromInputs(inputs))
     }
 
     setCurrentDraft(draft)
@@ -1396,7 +1484,7 @@ Return as JSON:
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine])
+  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -1477,7 +1565,7 @@ Return as JSON:
 
       // Try to parse as structured DraftWeeklyPlan JSON
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
-      const aiDraft = rawAiDraft ? ensureEvaluationItems(rawAiDraft) : null
+      const aiDraft = rawAiDraft ? shapeDraft(rawAiDraft) : null
       let assistantMsg: ChatMessage
       if (aiDraft) {
         setCurrentDraft(aiDraft)
@@ -1500,7 +1588,7 @@ Return as JSON:
           }
         } catch { /* fall through to local planner */ }
 
-        const recovered = rawRecovered ? ensureEvaluationItems(rawRecovered) : null
+        const recovered = rawRecovered ? shapeDraft(rawRecovered) : null
         if (recovered) {
           setCurrentDraft(recovered)
           assistantMsg = {
@@ -1513,7 +1601,7 @@ Return as JSON:
         } else {
           // Recovery failed — fall back to local planner
           const assignments = photoLabelsToAssignments(photoLabels)
-          const localDraft = ensureEvaluationItems(generateDraftPlanFromInputs({
+          const localDraft = shapeDraft(generateDraftPlanFromInputs({
             snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine,
             subjectTimeDefaults: { ...DEFAULT_SUBJECT_MINUTES, ...subjectTimeDefaults },
           }))
@@ -1568,7 +1656,7 @@ Return as JSON:
       // Apply adjustment and regenerate
       const newAdjustments = [...adjustments, intent]
       const assignments = photoLabelsToAssignments(photoLabels)
-      const draft = ensureEvaluationItems(generateDraftPlanFromInputs({
+      const draft = shapeDraft(generateDraftPlanFromInputs({
         snapshot,
         hoursPerDay,
         appBlocks: filteredAppBlocks,
@@ -1621,7 +1709,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults, shapeDraft])
 
   const buildWeekFocusContext = useCallback(() => {
     const contextParts: string[] = []
@@ -1706,6 +1794,7 @@ Return as JSON:
         // it shaped the theme and nothing else.
         const fullPrompt = composePlannerMessage(
           [
+            dayTypeSection,
             prompt,
             masteryPromptContext,
             `Weekly focus context:\n${buildWeekFocusContext()}`,
@@ -1723,7 +1812,7 @@ Return as JSON:
         const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
         if (rawAiDraft) {
           const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
-          draft = ensureEvaluationItems(fillResult.plan)
+          draft = shapeDraft(fillResult.plan)
           usedAI = true
           if (fillResult.filledDays.length > 0) {
             setSnack({
@@ -1745,12 +1834,12 @@ Return as JSON:
           // this branch IS the AI failing — not a configuration choice. It used
           // to be indistinguishable from the flag-off branch below and said
           // nothing at all (UX-233).
-          draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+          draft = shapeDraft(generateDraftPlanFromInputs(inputs))
           fellBackToLocal = true
           setSnack({ text: LOCAL_PLANNER_FALLBACK_SNACK, severity: 'info' })
         }
       } else {
-        draft = ensureEvaluationItems(generateDraftPlanFromInputs(inputs))
+        draft = shapeDraft(generateDraftPlanFromInputs(inputs))
       }
 
       setCurrentDraft(draft)
@@ -1768,7 +1857,7 @@ Return as JSON:
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, parentRequestSection, shapedByLine])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -1836,7 +1925,16 @@ Generate a plan for Monday through Friday.`.trim()
     if (!lastPlanDraft) return
     setRepeatingWeek(true)
     try {
-      const cloned = ensureEvaluationItems(clonePlanWithAdvancedLessons(lastPlanDraft))
+      // UX-261, Codex round 3 (P2): restore the prior week's stashed days BEFORE
+      // cloning. `clonePlanWithAdvancedLessons` counts and advances lesson
+      // numbers off `day.items`, and a set-aside day's real rows live in
+      // `setAsideItems` — so a visible Monday Lesson 5 beside a set-aside
+      // Tuesday Lesson 6 came back as Lesson 6 on both days, because the clone
+      // could only see one of them. `shapeDraft` then re-applies this week's own
+      // picks to the cloned result.
+      const cloned = shapeDraft(
+        clonePlanWithAdvancedLessons(restoreAllDayTypes(lastPlanDraft)),
+      )
       setCurrentDraft(cloned)
       setSetupComplete(true)
       setForceSetup(false)
@@ -1856,7 +1954,7 @@ Generate a plan for Monday through Friday.`.trim()
     } finally {
       setRepeatingWeek(false)
     }
-  }, [lastPlanDraft, messages, persistConversation])
+  }, [lastPlanDraft, messages, persistConversation, shapeDraft])
 
   const handleEditSetup = useCallback(() => {
     setForceSetup(true)
@@ -2290,6 +2388,20 @@ Generate a plan for Monday through Friday.`.trim()
   const handleApplyPlan = useCallback(async (overrideWeekStart?: string) => {
     if (!activeChildId || !currentDraft) return
 
+    // UX-261, Codex round 3 (P1): shape HERE, and use the same object for the
+    // write, the card and the persist.
+    //
+    // `applyDraftWeek` re-enforces internally as its own rail, but it did so on
+    // a local copy, so a row moved onto a set-aside day was correctly kept out
+    // of the DayLog while the applied card and the next reload still showed it —
+    // a row on screen with no saved counterpart, which the FEAT-138 live-edit
+    // handlers then cannot resolve. The page and the day must not disagree about
+    // what was written, so `appliedDraft` is what everything below uses. Apply's
+    // own re-enforcement stays: it is idempotent, and it is the rail for callers
+    // that are not this page.
+    const appliedDraft = enforceDayTypes(currentDraft, dayTypes, filteredAppBlocks)
+    if (appliedDraft !== currentDraft) setCurrentDraft(appliedDraft)
+
     // FEAT-112 backstop: never silently write a plan to a week that's already
     // passed. The live weekRange memo should already target the upcoming week,
     // but a stale tab (or a focus event that never fired) could still carry a
@@ -2312,7 +2424,10 @@ Generate a plan for Monday through Friday.`.trim()
       // Step 1: Auto-generate lesson cards for non-app-block accepted items
       // Note: category is optional and often unset, so we include items that are
       // either explicitly 'must-do', have no category set, or are mvdEssential.
-      const itemsNeedingCards = currentDraft.days
+      // `appliedDraft`, not `currentDraft`: a lesson card is a paid AI call, and
+      // generating one for an item on a set-aside day would spend the parent's
+      // money on work this apply is about to not write.
+      const itemsNeedingCards = appliedDraft.days
         .flatMap((d) => d.items)
         .filter((item) => item.accepted && !item.isAppBlock && item.category !== 'choose')
         // Deduplicate by title (same activity across days only needs one card)
@@ -2396,7 +2511,7 @@ Generate a plan for Monday through Friday.`.trim()
         familyId,
         childId: activeChildId,
         weekStart: effectiveWeekStart,
-        draft: currentDraft,
+        draft: appliedDraft,
         children,
         activityConfigs,
         lessonCardMap,
@@ -2408,6 +2523,12 @@ Generate a plan for Monday through Friday.`.trim()
         // lane passes the real capability. If the planner is ever route-gated,
         // this is the line that should start reading it.
         canEdit: true,
+        // UX-261: the day types reach Apply because a Life day's other half
+        // lives in `dailyPlans.planType`, a different collection from
+        // everything above. The draft handed in has already been shaped by
+        // `enforceDayTypes` — a Life day carries no items, so Apply skips its
+        // DayLog entirely and writes it no minute.
+        dayTypes,
         // FEAT-196: hand Apply the parent's pick so it re-resolves the week at
         // the write and refuses one that rolled over while the draft sat open.
         // An explicit override IS a named week (the forward-shift's own target),
@@ -2450,7 +2571,14 @@ Generate a plan for Monday through Friday.`.trim()
         {
           status: PlannerConversationStatus.Applied,
           messages: updatedMessages,
-          currentDraft,
+          currentDraft: appliedDraft,
+          // UX-261, Codex round 1 (P2): the picks travel with the week they were
+          // APPLIED to. A forward-shift writes `dailyPlans.planType` at the
+          // shifted dates, so persisting the shifted conversation without them
+          // would leave a target conversation that resolves every day as Full
+          // while stored daily plans still read `life` — the reload disagreeing
+          // with the days.
+          dayTypes,
         },
         { docId: plannerConversationDocId(effectiveWeekStart, activeChildId), weekKey: effectiveWeekStart },
       )
@@ -2484,7 +2612,8 @@ Generate a plan for Monday through Friday.`.trim()
         void generateHelpCardsForPlan({
           familyId,
           childId: activeChildId,
-          days: currentDraft.days,
+          // Same reason as the lesson cards above — a help card is a paid call.
+          days: appliedDraft.days,
           aiChat,
         }).catch((err) => {
           console.warn('[HelpCards] Batch generation failed (non-blocking):', err)
@@ -2611,7 +2740,7 @@ Generate a plan for Monday through Friday.`.trim()
         severity: refusal === 'stale-week' ? 'warning' : 'error',
       })
     }
-  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey])
+  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes, filteredAppBlocks])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -2634,7 +2763,7 @@ Generate a plan for Monday through Friday.`.trim()
     if (intent && currentDraft) {
       const newAdjustments = [...adjustments, intent]
       const assignments = photoLabelsToAssignments(photoLabels)
-      const draft = ensureEvaluationItems(generateDraftPlanFromInputs({
+      const draft = shapeDraft(generateDraftPlanFromInputs({
         snapshot,
         hoursPerDay,
         appBlocks: filteredAppBlocks,
@@ -2668,7 +2797,7 @@ Generate a plan for Monday through Friday.`.trim()
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend])
+  }, [currentDraft, adjustments, photoLabels, snapshot, hoursPerDay, filteredAppBlocks, messages, persistConversation, applied, subjectTimeDefaults, isEnabled, activeChildId, handleSend, shapeDraft])
 
   // Generate activity for a plan item
   const handleGenerateActivity = useCallback(async (item: DraftPlanItem) => {
@@ -2832,6 +2961,20 @@ ${dayPrompts}`
     setForceSetup(false)
     setExcludedWorkbookIds(new Set())
 
+    // UX-261, Codex round 1 (P1): day types are RESET, not dropped.
+    //
+    // Redo clears the applied plan from the days, but `dailyPlans.planType` is a
+    // different collection and this handler never touched it. Simply forgetting
+    // the picks would leave a stored `life` behind with nothing left to correct
+    // it — `writeDayTypePlanTypes` returns early on an empty config, so the next
+    // Apply would write Tuesday a fresh checklist that Today then hides, which
+    // is exactly the state `plannedPlanTypeWrite`'s revert rule exists to
+    // prevent. Carrying the days forward as **Normal** hands that rule the input
+    // it needs: the next Apply takes each stored `life` back to `normal`, and
+    // still never touches an `mvd` the parent chose on Today.
+    const clearedDayTypes = dayTypes.map((d) => ({ ...d, dayType: DayType.Normal }))
+    setDayTypes(clearedDayTypes)
+
     if (conversationDocId) {
       const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
       await setDoc(ref, {
@@ -2842,11 +2985,12 @@ ${dayPrompts}`
         availableHoursPerDay: hoursPerDay,
         appBlocks: filteredAppBlocks,
         assignments: [],
+        ...(clearedDayTypes.length > 0 ? { dayTypes: clearedDayTypes } : {}),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
     }
-  }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, filteredAppBlocks])
+  }, [conversationDocId, familyId, activeChildId, weekRange.start, hoursPerDay, filteredAppBlocks, dayTypes])
 
   // Redo Plan handler: clears applied plan from Today/Week AND resets conversation
   const handleRedoPlan = useCallback(async () => {
@@ -3152,6 +3296,8 @@ ${dayPrompts}`
                 onMoveItemToDay={isParent ? (dayIndex, itemIndex) => setMoveTarget({ dayIndex, itemIndex }) : undefined}
                 onSwapWatchItem={isParent ? (dayIndex, itemIndex) => setSwapTarget({ dayIndex, itemIndex }) : undefined}
                 itemEditLockReason={itemEditLockReason}
+                dayTypes={dayTypes}
+                onDayTypeChange={isParent ? handleDayTypeChange : undefined}
               />
 
               {/* FEAT-111 P3: sticky/floating Apply bar — pinned to the viewport
@@ -3228,6 +3374,8 @@ ${dayPrompts}`
                   onMoveItemToDay={isParent ? (dayIndex, itemIndex) => setMoveTarget({ dayIndex, itemIndex }) : undefined}
                   onSwapWatchItem={isParent ? (dayIndex, itemIndex) => setSwapTarget({ dayIndex, itemIndex }) : undefined}
                   itemEditLockReason={itemEditLockReason}
+                  dayTypes={dayTypes}
+                  onDayTypeChange={isParent ? handleDayTypeChange : undefined}
                 />
               )}
             </>

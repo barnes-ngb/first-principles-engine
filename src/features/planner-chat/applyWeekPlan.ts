@@ -47,17 +47,21 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 import {
+  dailyPlanDocId,
+  dailyPlansCollection,
   daysCollection,
   weeksCollection,
 } from '../../core/firebase/firestore'
 import type {
   ChecklistItem,
+  DailyPlan,
   DayBlock,
   DayLog,
+  DayTypeConfig,
   DraftDayPlan,
   DraftWeeklyPlan,
 } from '../../core/types'
-import { DayBlockType, SubjectBucket } from '../../core/types/enums'
+import { DayBlockType, EnergyLevel, SubjectBucket } from '../../core/types/enums'
 import {
   findWorkbookConfigId,
   type WorkbookConfigLike,
@@ -71,6 +75,11 @@ import {
   WEEK_DAYS,
   type WeekDay,
 } from './chatPlanner.logic'
+import {
+  enforceDayTypes,
+  plannedPlanTypeWrite,
+  resolvePlannerDayType,
+} from './plannerDayTypes'
 import {
   planningWeekStillMatches,
   staleWeekNotice,
@@ -137,6 +146,20 @@ export interface ApplyWeekPlanInput {
    * week directly rather than choosing one.
    */
   weekChoice?: PlanningWeekChoice
+  /**
+   * The parent's per-day Full / Light / Life picks (UX-261).
+   *
+   * Used for **both** halves of a day type, and it is authoritative for both:
+   * the draft is re-shaped here at the write (see `applyDraftWeek`, not left to
+   * the caller having done it), so a Life day carries no items, `applicableDays`
+   * skips it and no DayLog write happens for it; and the other half of a Life
+   * day, which lives in a **different collection** — `dailyPlans.planType` — is
+   * written by {@link writeDayTypePlanTypes}.
+   *
+   * Omitted by every caller that has no such control (the chat's lane), which
+   * reads as "every day Full" and writes nothing to `dailyPlans` at all.
+   */
+  dayTypes?: DayTypeConfig[]
   /** Clock for the {@link weekChoice} re-resolve. Injected only by tests. */
   now?: Date
 }
@@ -146,6 +169,12 @@ export interface ApplyWeekPlanResult {
   daysWritten: string[]
   /** Whether the `WeekPlan` doc was upserted (false only when nothing applied). */
   weekPlanWritten: boolean
+  /**
+   * Date keys whose `dailyPlans.planType` was set (UX-261) — a different
+   * collection from {@link daysWritten}, and a mostly disjoint set: a Life day
+   * appears here and never there.
+   */
+  dayTypesWritten?: string[]
 }
 
 /**
@@ -361,6 +390,80 @@ async function upsertWeekPlan(input: ApplyWeekPlanInput): Promise<void> {
 }
 
 /**
+ * The `dailyPlans.planType` half of a day type (UX-261).
+ *
+ * ── Why this is a separate collection, and a separate function ───────────────
+ *
+ * Everything else Apply writes lands on the `days` DayLog. `planType` does not
+ * live there — it lives on `dailyPlans/{date}_{childId}`, which is what
+ * `TodayPage` reads through `useDailyPlan` and writes through `saveDailyPlan`.
+ * So a Life day set at plan time has to reach the same field a parent's tap on
+ * Today reaches, or the day would not open as a Life Day.
+ *
+ * ── The hours rail ──────────────────────────────────────────────────────────
+ *
+ * **This function writes no minute and cannot.** `dailyPlans` is not read by
+ * `hoursContributions` — the hours fold reads DayLogs, `hours` and
+ * `hoursAdjustments`, and nothing here touches any of the three. The Life Day
+ * *block* that carries `actualMinutes` on Today is written by the parent on the
+ * day, from `lifeDay.withLifeDayMinutes`; `LIFE_DAY_DEFAULT_MINUTES` is that
+ * surface's preselection and is deliberately never materialised at plan time,
+ * because two hours in a compliance record for a day that has not happened is a
+ * number nobody chose. `applyWeekPlan.dayTypes.test.ts` asserts the zero.
+ *
+ * ── What it writes, and what it refuses to ──────────────────────────────────
+ *
+ * Only days the parent actually set a type on (`dayTypes`), and of those only
+ * the ones {@link plannedPlanTypeWrite} returns a value for: a Life day, and a
+ * day being taken BACK out of Life. It never writes `normal` over an `mvd` a
+ * parent chose on Today, and with no `dayTypes` at all it makes no reads and no
+ * writes.
+ *
+ * Merges rather than replaces, and seeds a complete document when none exists —
+ * `TodayPage` reads `dailyPlan.energy` straight into its toggle, so a partial
+ * document written here would surface as an undefined energy on Today.
+ */
+async function writeDayTypePlanTypes(
+  input: ApplyWeekPlanInput,
+): Promise<string[]> {
+  const { familyId, childId, weekStart, dayTypes } = input
+  if (!dayTypes || dayTypes.length === 0) return []
+
+  const written: string[] = []
+  for (const config of dayTypes) {
+    if (!WEEK_DAYS.includes(config.day as WeekDay)) continue
+
+    const dateKey = dateKeyForDayPlan(weekStart, config.day as WeekDay)
+    const ref = doc(dailyPlansCollection(familyId), dailyPlanDocId(dateKey, childId))
+    const snap = await getDoc(ref)
+    const existing = snap.exists() ? snap.data() : undefined
+
+    const planType = plannedPlanTypeWrite(
+      resolvePlannerDayType(config.day, dayTypes),
+      existing?.planType,
+    )
+    if (!planType) continue
+
+    // The `updatedAt` widening mirrors `today/useDailyPlan.ts`'s own write:
+    // the field is on every stored document but not on the `DailyPlan` type, so
+    // the one existing writer states it the same way. Two writers, one shape.
+    const data: Omit<DailyPlan, 'id'> & { updatedAt: string } = {
+      childId,
+      date: dateKey,
+      // The day's own energy survives; a document that does not exist yet is
+      // seeded with the same default `TodayPage` starts from.
+      energy: existing?.energy ?? EnergyLevel.Normal,
+      sessions: existing?.sessions ?? [],
+      planType,
+      updatedAt: new Date().toISOString(),
+    }
+    await setDoc(ref, data, { merge: true })
+    written.push(dateKey)
+  }
+  return written
+}
+
+/**
  * Write a draft weekly plan to its `WeekPlan` doc and its Mon–Fri day logs.
  *
  * **The single Apply.** Every day write routes through `setDayLogGuarded`, so
@@ -408,11 +511,29 @@ export async function applyDraftWeek(
 
   const result: ApplyWeekPlanResult = { daysWritten: [], weekPlanWritten: false }
 
+  // UX-261, Codex round 1 (P1): **re-enforce the day types HERE**, at the write,
+  // rather than trusting that the caller's draft is still shaped.
+  //
+  // The page shapes every generated draft, but a draft can be edited AFTER that
+  // last enforcement and before Apply: `MoveToDayDialog` offers every weekday,
+  // so `handleMoveItemToDay` could append an accepted item onto a set-aside day.
+  // `applicableDays` would then include it and write a checklist to a day whose
+  // `planType` this same call is about to set to `life` — the plan writing work
+  // that Today hides, which is the exact failure `plannedPlanTypeWrite`'s revert
+  // rule exists to prevent from the other direction.
+  //
+  // So the shaping is idempotent and belongs in the one Apply, for the same
+  // reason `weekChoice` is re-resolved here (FEAT-196): a rail every caller must
+  // remember is a rail one caller will forget. Both transforms are idempotent —
+  // clearing an empty day and re-templating a templated day are both no-ops — so
+  // running it a second time over an already-shaped draft changes nothing.
+  const shapedDraft = enforceDayTypes(draft, input.dayTypes, [])
+
   try {
-    await upsertWeekPlan(input)
+    await upsertWeekPlan({ ...input, draft: shapedDraft })
     result.weekPlanWritten = true
 
-    for (const dayPlan of applicableDays(draft)) {
+    for (const dayPlan of applicableDays(shapedDraft)) {
       const dayItems = dayPlan.items.filter((item) => item.accepted)
       const dateKey = dateKeyForDayPlan(weekStart, dayPlan.day as WeekDay)
       const dayLogRef = doc(daysCollection(familyId), dayLogDocId(dateKey, childId))
@@ -446,6 +567,12 @@ export async function applyDraftWeek(
       }
       result.daysWritten.push(dateKey)
     }
+
+    // UX-261: the `dailyPlans.planType` half, after the checklists. A Life day
+    // never reaches the loop above (`enforceDayTypes` emptied it, so
+    // `applicableDays` skips it), which is exactly right — the day keeps
+    // whatever was already on it and gains no planned work.
+    result.dayTypesWritten = await writeDayTypePlanTypes(input)
   } catch (err) {
     throw new WeekApplyError(
       err instanceof Error ? err.message : 'Failed to apply plan.',

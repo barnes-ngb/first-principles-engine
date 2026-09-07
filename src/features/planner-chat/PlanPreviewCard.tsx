@@ -22,8 +22,17 @@ import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 
-import type { DraftPlanItem, DraftWeeklyPlan, SkillSnapshot, SkipAdvisorResult } from '../../core/types'
+import type {
+  DayTypeConfig,
+  DraftPlanItem,
+  DraftWeeklyPlan,
+  SkillSnapshot,
+  SkipAdvisorResult,
+} from '../../core/types'
+import { DayType } from '../../core/types/enums'
 import { dayTotalMinutes, formatDayCardLabel } from './chatPlanner.logic'
+import PlannerDayTypeChip from './PlannerDayTypeChip'
+import { PLANNER_DAY_TYPE_CHOICES, resolvePlannerDayType } from './plannerDayTypes'
 import { batchEvaluateSkip } from './skipAdvisor.logic'
 import SkipAdvisorChip from './SkipAdvisorChip'
 
@@ -73,6 +82,16 @@ interface PlanPreviewCardProps {
    * than rendering a button that fails on tap.
    */
   itemEditLockReason?: (dayIndex: number, itemIndex: number) => string | null
+  /**
+   * The parent's per-day Full / Light / Life picks (UX-261). Absent, or a day
+   * absent from it, reads as Full — the no-migration rule.
+   */
+  dayTypes?: DayTypeConfig[]
+  /**
+   * Set a day's type. **Absent renders no control** — the capability gate's
+   * visible half; the caller withholds it for a kid profile.
+   */
+  onDayTypeChange?: (day: string, dayType: DayType) => void
 }
 
 const TIME_PRESETS = [5, 10, 15, 20, 30, 45, 60]
@@ -132,7 +151,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
   )
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, weekStart, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem, onMoveItemToDay, onSwapWatchItem, itemEditLockReason }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, weekStart, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem, onMoveItemToDay, onSwapWatchItem, itemEditLockReason, dayTypes, onDayTypeChange }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const [removeConfirm, setRemoveConfirm] = useState<{ dayIndex: number; itemIndex: number; title: string } | null>(null)
 
@@ -170,6 +189,12 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
       )}
 
       {plan.days.map((day, dayIndex) => {
+        // UX-261. `dayType` is what the PARENT set; `day.items` is what survived
+        // `enforceDayTypes`. They agree by construction — the enforcement runs on
+        // every generated draft — so this is read purely to decide what the card
+        // SAYS about a day that has deliberately no plan.
+        const dayType = resolvePlannerDayType(day.day, dayTypes)
+        const isSetAside = dayType === DayType.Life
         const total = dayTotalMinutes(day)
         const routineItems = day.items.filter(isRoutineItem)
         const focusItems = day.items.filter(item => !isRoutineItem(item))
@@ -386,26 +411,54 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
 
         return (
           <Box key={day.day} sx={{ mb: 2 }}>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+            {/* UX-261 puts a third control on this row, and UX-182 is the
+                cautionary tale for exactly that: FEAT-200's day-type chip was
+                added to the end of a full non-wrapping row and was sheared off
+                the right edge of the owner's 390px phone, so the feature had no
+                reachable entry point on the only device she uses. This row wraps
+                and gains a row gap, so day name / budget / day type break onto a
+                second line rather than off the screen. */}
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              sx={{ mb: 0.5, flexWrap: 'wrap', rowGap: 0.5 }}
+            >
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                 {weekStart ? formatDayCardLabel(weekStart, day.day) : day.day}
               </Typography>
               {/* UX-71: an empty day rendered a GREEN `0m / 150m` over "No
                   items" — the success colour saying "within budget" about a day
                   that has no plan at all. A zero here is absence, not
-                  achievement, so it gets the neutral chip and says so. */}
-              <Chip
-                label={total > 0 ? `${total}m / ${budgetMinutes}m` : 'Nothing planned yet'}
-                size="small"
-                variant="outlined"
-                color={
-                  total === 0
-                    ? 'default'
-                    : total > budgetMinutes + 15
-                      ? 'error'
-                      : total <= budgetMinutes
-                        ? 'success'
-                        : 'warning'
+                  achievement, so it gets the neutral chip and says so.
+                  UX-261: a set-aside day gets no budget chip at all. Both of
+                  UX-71's strings are wrong for it — `0m / 260m` reads as a
+                  shortfall against a target and "Nothing planned yet" reads as
+                  an omission, when nothing planned is precisely what the parent
+                  chose. The day-type chip beside it already says what this is. */}
+              {!isSetAside && (
+                <Chip
+                  label={total > 0 ? `${total}m / ${budgetMinutes}m` : 'Nothing planned yet'}
+                  size="small"
+                  variant="outlined"
+                  color={
+                    total === 0
+                      ? 'default'
+                      : total > budgetMinutes + 15
+                        ? 'error'
+                        : total <= budgetMinutes
+                          ? 'success'
+                          : 'warning'
+                  }
+                />
+              )}
+              <PlannerDayTypeChip
+                day={day.day}
+                dayType={dayType}
+                onChange={
+                  onDayTypeChange
+                    ? (next) => onDayTypeChange(day.day, next)
+                    : undefined
                 }
               />
             </Stack>
@@ -416,8 +469,16 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
             )}
 
             {day.items.length === 0 ? (
+              // UX-261: "No items" is a true sentence and the wrong one here.
+              // On a day the parent SET ASIDE it reads as a plan that failed to
+              // fill, when it is a plan that was declined — the same no-shame
+              // rule FEAT-200 holds on Today, where nothing on a Life Day may
+              // read as unfinished. A day that is empty for any other reason
+              // keeps the original wording.
               <Typography variant="body2" color="text.secondary" sx={{ pl: 1 }}>
-                No items
+                {isSetAside
+                  ? PLANNER_DAY_TYPE_CHOICES.find((c) => c.value === DayType.Life)?.description
+                  : 'No items'}
               </Typography>
             ) : (() => {
               // Group items by block for structured display
@@ -516,7 +577,12 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
 
             {/* Plan a curated video onto this day (FEAT-104) — picks from the
                 vetted library, never an open search. */}
-            {onAddWatchItem && (
+            {/* UX-261: not on a set-aside day. Pre-Apply the row would be
+                erased by the next `enforceDayTypes`; at Apply the day is
+                skipped entirely, so it would never be written. An affordance
+                whose result is discarded is the "silently inert button" FEAT-138
+                went out of its way to stop rendering. */}
+            {onAddWatchItem && !isSetAside && (
               <Button
                 size="small"
                 startIcon={<OndemandVideoIcon sx={{ fontSize: 16 }} />}
