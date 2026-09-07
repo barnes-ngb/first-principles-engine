@@ -5,6 +5,8 @@ import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import MenuItem from '@mui/material/MenuItem'
+import Select from '@mui/material/Select'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
@@ -12,6 +14,7 @@ import Typography from '@mui/material/Typography'
 import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
 import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
+import { durationOptionsWithValue } from './durationOptions'
 
 interface AddActivityDialogProps {
   open: boolean
@@ -39,8 +42,6 @@ const TYPE_OPTIONS: { value: ActivityType; label: string }[] = [
 const SUBJECT_OPTIONS: { value: SubjectBucket; label: string }[] = Object.values(
   SubjectBucket,
 ).map((value) => ({ value, label: SubjectBucketLabel[value] }))
-
-const MINUTE_OPTIONS = [10, 15, 20, 30, 45] as const
 
 const FREQUENCY_OPTIONS: { value: ActivityFrequency; label: string }[] = [
   { value: 'daily', label: 'Daily' },
@@ -163,17 +164,18 @@ export default function AddActivityDialog({
             <Typography variant="caption" color="text.secondary">
               Minutes per session
             </Typography>
-            <Stack direction="row" spacing={1}>
-              {MINUTE_OPTIONS.map((m) => (
-                <Chip
-                  key={m}
-                  label={`${m}m`}
-                  variant={minutes === m ? 'filled' : 'outlined'}
-                  color={minutes === m ? 'primary' : 'default'}
-                  onClick={() => setMinutes(m)}
-                />
+            <Select
+              value={minutes}
+              size="small"
+              onChange={(e) => setMinutes(Number(e.target.value))}
+              sx={{ maxWidth: 160 }}
+            >
+              {durationOptionsWithValue(minutes).map((m) => (
+                <MenuItem key={m} value={m}>
+                  {m}m
+                </MenuItem>
               ))}
-            </Stack>
+            </Select>
           </Stack>
 
           <Stack spacing={0.5}>

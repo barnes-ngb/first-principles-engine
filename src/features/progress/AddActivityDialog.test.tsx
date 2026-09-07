@@ -52,6 +52,40 @@ describe('AddActivityDialog — subjects (FEAT-199)', () => {
   })
 })
 
+describe('AddActivityDialog — minutes dropdown (UX-267)', () => {
+  it('defaults to 20m and submits it unchanged when the parent never touches it', async () => {
+    const user = userEvent.setup()
+    const onAdd = open()
+    expect(screen.getByText('20m')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Name'), 'GATB Math')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+
+    const payload = onAdd.mock.calls[0][0] as NewActivityConfig
+    expect(payload.defaultMinutes).toBe(20)
+  })
+
+  it('offers the 15-minute steps plus the legacy 10/20 values', async () => {
+    const user = userEvent.setup()
+    open()
+    await user.click(screen.getByText('20m'))
+    for (const label of ['10m', '15m', '20m', '30m', '45m', '60m', '90m']) {
+      expect(screen.getByRole('option', { name: label })).toBeInTheDocument()
+    }
+  })
+
+  it('picking a new duration is what changes defaultMinutes', async () => {
+    const user = userEvent.setup()
+    const onAdd = open()
+    await user.type(screen.getByLabelText('Name'), 'GATB Math')
+    await user.click(screen.getByText('20m'))
+    await user.click(screen.getByRole('option', { name: '30m' }))
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+
+    const payload = onAdd.mock.calls[0][0] as NewActivityConfig
+    expect(payload.defaultMinutes).toBe(30)
+  })
+})
+
 describe('AddActivityDialog — the quick-log flag (FEAT-199)', () => {
   it('omits the flag entirely when the parent leaves it off', async () => {
     const user = userEvent.setup()

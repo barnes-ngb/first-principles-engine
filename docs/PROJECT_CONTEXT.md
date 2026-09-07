@@ -260,7 +260,7 @@ Medieval-fantasy village at an old river crossing, slowly healing through honest
 
 ## Doc Alignment Flags
 - **Terminology:** Canonical is **My Hero / Hero Hub** (`/avatar`), NOT "My Armor." MASTER_OUTLINE v15 reframed it; the original runbook and older CLAUDE.md references to "My Armor"/"Hero Hub" should be reconciled to match the live nav label "My Hero."
-- **London pronoun drift:** Dad Lab Charter (Mar 6) uses she/her; Charter v2 + MASTER_OUTLINE use he/him. **Canonical: he/him** — flag Dad Lab doc for cleanup. (See also `docs/LONDON_GENDER_VERIFY_2026-05.md`.)
+- **London pronoun drift:** Dad Lab Charter (Mar 6) uses she/her; Charter v2 + MASTER_OUTLINE use he/him. **Canonical: he/him** — flag Dad Lab doc for cleanup. (See also `docs/LONDON_GENDER_VERIFY_2026-05.md`.) The Dad Lab Charter lives in Drive, not this repo, so the cleanup is the owner's to make there; this repo has been swept and verified clean of gendered references to either boy twice (May 2026, September 2026 — UX-268), most recently with an added regression test (`src/test/childrenAreBoys.test.ts`) that guards the source tree going forward.
 - **Social Studies compliance gap:** not explicitly in the current plan; cover via read-alouds / Theme Engine / citizenship thread (see Compliance).
 - **Stat drift:** computed commits = 118 on this branch; HEALTH_REPORT (2026-05-29) cites 122 (audit branch off main). MASTER_OUTLINE v15 header still references some v14-era figures; HEALTH_REPORT 2026-05-29 is the freshest numbers source.
 - **Phase 1 docs present:** FINDINGS_PIPELINE.md, GAME_WORLD_ECONOMY.md, HEALTH_REPORT.md, and STONEBRIDGE_BIBLE.md all exist (the runbook marked several "may not exist yet" — they do).
