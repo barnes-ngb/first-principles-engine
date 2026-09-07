@@ -3093,11 +3093,6 @@ ${dayPrompts}`
 
       {activeChildId && (
         <>
-          {/* One-line ambient foundation focus (FEAT-65, §7.3) — sourced from the
-              learner model's synthesis; taps through to the Foundations tab.
-              Renders nothing when the model is empty / no-data. */}
-          <FoundationsFocusLine childId={activeChildId} />
-
           {/* Proposed adjustment handed off from Shelly chat (chunk 2A/2).
               Surfaced for review — it's already folded into the week notes /
               generation context. Shelly still reviews + locks in below; this
@@ -3237,6 +3232,21 @@ ${dayPrompts}`
               canRepeatLastWeek={!!lastPlanDraft}
             />
           )}
+
+          {/* One-line ambient foundation focus (FEAT-65, §7.3) — sourced from the
+              learner model's synthesis; taps through to the Foundations tab.
+              Renders nothing when the model is empty / no-data.
+
+              UX-247: it used to sit directly under the child chips, where its
+              four-to-six lines at 390px pushed the week selector and the whole
+              setup card below the fold — the thing the app wants to say standing
+              in front of the thing the parent came to do. It is neither clamped
+              nor truncated here; it is MOVED, so the full sentence still reads in
+              one piece. Below the setup card it lands above the day cards in
+              review and active, which is where a line about *what the plan should
+              emphasise* is actually useful: context for the plan she is reading,
+              not a gate before the plan she is making. */}
+          <FoundationsFocusLine childId={activeChildId} />
 
           {phase === 'review' && (
             <Box>
