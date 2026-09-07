@@ -2569,7 +2569,22 @@ describe('pending-card lifecycle (UX-33)', () => {
 
     it('carries the account even when every action in the new turn is dropped', () => {
       const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
-      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+      // The standing card has to be a kind a NON-parent can still be offered,
+      // and since UX-188 gated the seven record-write kinds, the handoff is the
+      // one left — deliberately, as the audit's own §6 item 8 records: it writes
+      // a planner inbox rather than a child's record, and it is Part B's to rank.
+      // (This test is about the superseded-turn ACCOUNT, not about who may
+      // confirm what; it used a sight word only because one was to hand.)
+      act(() =>
+        result.current.stagePendingActions('msg1', [
+          {
+            kind: 'proposePlanAdjustment',
+            childId: 'lincoln1',
+            summary: 'Reduce math next week',
+            rationale: 'Frustration is spiking',
+          },
+        ]),
+      )
       expect(result.current.pending).toHaveLength(1)
 
       // A parent-only proposal from a non-parent profile: dropped at the gate.
@@ -2773,5 +2788,71 @@ describe('a late reply cannot land cards in a context it was not asked in', () =
     act(() => result.current.dropPendingForContext('thread-switch'))
     act(() => result.current.stagePendingActions('msg1', [WORD]))
     expect(result.current.pending).toHaveLength(1)
+  })
+})
+
+// ── UX-188 — the seven record-write kinds are parent-only at the write layer ──
+//
+// `/chat` is nav-gated, not route-gated, so this is the layer that has to hold.
+// Asserted through the HOOK rather than the pure resolver, because the defect
+// was never in a resolver — there wasn't one; it was that these kinds fell
+// through the stage filter's default branch and `rejectReason` said nothing
+// about them.
+describe('record writes are parent-only (UX-188)', () => {
+  const KID_ACTIONS: ChatAction[] = [
+    { kind: 'addSightWord', childId: 'lincoln1', word: 'said' },
+    { kind: 'removeSightWord', childId: 'lincoln1', word: 'said' },
+    { kind: 'editProfileField', childId: 'lincoln1', field: 'motivators', value: 'Lego' },
+    { kind: 'addPrioritySkill', childId: 'lincoln1', skill: 'blends' },
+    { kind: 'addSupport', childId: 'lincoln1', support: 'sit beside him' },
+    { kind: 'addStopRule', childId: 'lincoln1', rule: 'stop at ten minutes' },
+    { kind: 'markSkillProgress', childId: 'lincoln1', skill: 'fractions' },
+  ]
+
+  it('offers no card for any of the seven, and says why instead', () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+
+    act(() => result.current.stagePendingActions('msg1', KID_ACTIONS))
+
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed.length).toBeGreaterThan(0)
+    for (const note of result.current.suppressed) {
+      expect(note).toContain('nothing was changed')
+    }
+  })
+
+  it('reaches no writer even if a card is somehow confirmed', async () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+
+    for (const action of KID_ACTIONS) {
+      await act(async () => {
+        await result.current.applyChatAction(action)
+      })
+    }
+
+    expect(addSightWord).not.toHaveBeenCalled()
+    expect(removeSightWord).not.toHaveBeenCalled()
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+  })
+
+  it('refuses the confirm outright, so nothing is stamped applied', async () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+    const action = KID_ACTIONS[6]
+
+    let wrote: boolean | undefined
+    await act(async () => {
+      wrote = await result.current.applyChatAction(action)
+    })
+
+    expect(wrote).toBe(false)
+  })
+
+  it('still offers all seven to a parent', () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: true })
+
+    act(() => result.current.stagePendingActions('msg1', KID_ACTIONS))
+
+    expect(result.current.pending).toHaveLength(7)
   })
 })

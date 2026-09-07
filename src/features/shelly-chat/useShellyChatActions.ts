@@ -23,6 +23,14 @@
 //     central writer (the UI never fabricates evidence).
 //   - Bind to the active child — `action.childId` must resolve to a family
 //     child AND match the active chat context, or the action is rejected.
+//   - Parent-only, at two layers (UX-188). The seven kinds that write a child's
+//     OWN record — both sight-word kinds, `editProfileField`, and all four
+//     snapshot kinds — had no capability check anywhere, while the *lowest*-stakes
+//     kind in the portal was gated three times over. `/chat` is nav-gated, not
+//     route-gated, so a kid reaching it by URL could confirm a `skillSnapshots`
+//     write stamped "parent directive via chat". Gated now at stage time and in
+//     `rejectReason` through the pure `recordWriteAccess.ts`, failing closed, and
+//     refused OUT LOUD rather than dropped.
 //   - `proposePlanAdjustment` is a HANDOFF, not a write (chunk 2A/2): it stages
 //     a brief to the planner's per-child inbox (`stagePlanAdjustment`) and
 //     navigates to Plan My Week. shelly-chat NEVER writes the weekly plan — the
@@ -111,6 +119,7 @@ import {
 } from './dadLabActions'
 import type { ChatWeekDay, DayItemAction } from './dayItemActions'
 import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
+import { isRecordWriteAction, resolveRecordWriteAction } from './recordWriteAccess'
 import type { SnapshotAction } from './snapshotActions'
 import { snapshotNoMatchNotice } from './snapshotActions'
 import type { WatchAction } from './watchActions'
@@ -281,10 +290,16 @@ export interface ShellyChatActionsDeps {
    */
   watchVideos?: WatchVideo[]
   /**
-   * Whether the signed-in profile is a parent. `setActivityMinutes` and the
-   * live-day edits are parent-only, and `/chat` is nav-gated rather than
+   * Whether the signed-in profile is a parent. `/chat` is nav-gated rather than
    * route-gated, so the write layer states the gate itself instead of trusting
    * the route. Defaults to false — fail closed.
+   *
+   * **The name is now narrower than the flag.** It was minted for FEAT-135's
+   * `setActivityMinutes` and grew to cover the live-day, curriculum, watch, Dad
+   * Lab and next-week kinds; UX-188 adds the seven that write a child's own
+   * record. It is simply "is a parent acting" — kept under its original name
+   * because renaming it would churn every call site and every test for no
+   * behavioural gain, and every consumer reads it as the capability.
    */
   canEditActivityConfigs?: boolean
   /** Thread the pending actions came from, so applies can annotate the message. */
@@ -960,6 +975,21 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
           }
           return true
         }
+        // UX-188 — the seven kinds that write a child's OWN record had no
+        // capability gate at any layer, while `setActivityMinutes` below (one
+        // activity's default minutes) had three. `/chat` is nav-gated, not
+        // route-gated, so a kid reaching it by URL could confirm a write to
+        // `skillSnapshots` stamped as a parent directive. Refused here, out
+        // loud, exactly as every other gated kind is.
+        if (isRecordWriteAction(action)) {
+          const resolution = resolveRecordWriteAction(action, parentRef.current)
+          if (!resolution.ok) {
+            console.warn('[shellyChat] dropped record write —', resolution.notice, action)
+            notices.push(resolution.notice)
+            return false
+          }
+          return true
+        }
         if (action.kind !== 'setActivityMinutes') return true
         if (!parentRef.current) {
           console.warn('[shellyChat] dropped setActivityMinutes — parent-only action')
@@ -1065,6 +1095,14 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       }
       if (action.childId !== activeChildId) {
         return 'child mismatch with active context'
+      }
+      // UX-188 backstop: same shape as its siblings below. A card staged while
+      // a parent was signed in must not reach a write on a later tap from a kid
+      // profile — and this is the layer that actually calls the writers, so it
+      // is the one that must not be forgotten.
+      if (isRecordWriteAction(action)) {
+        const resolution = resolveRecordWriteAction(action, parentRef.current)
+        if (!resolution.ok) return resolution.notice
       }
       // FEAT-135 backstop: even if a card were somehow offered, the action must
       // still be parent-initiated AND name a real config the acting child owns
