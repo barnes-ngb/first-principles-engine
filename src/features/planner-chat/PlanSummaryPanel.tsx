@@ -74,7 +74,12 @@ export default function PlanSummaryPanel({
                 return (
                   <Chip
                     key={entry.subject}
-                    label={`${entry.subject}: ${entry.totalBlocks} block${entry.totalBlocks === 1 ? '' : 's'}${detail}`}
+                    // UX-259: `entry.subject` is the grouping key and stays the
+                    // React key; `entry.label` is what a person reads. The chip
+                    // used to print the raw bucket, so `Other` — routinely the
+                    // largest — named nothing, and `LanguageArts` /
+                    // `SocialStudies` reached the screen as identifiers.
+                    label={`${entry.label}: ${entry.totalBlocks} block${entry.totalBlocks === 1 ? '' : 's'}${detail}`}
                     size="small"
                     variant="outlined"
                     color={entry.priorityHits > 0 ? 'success' : 'default'}
