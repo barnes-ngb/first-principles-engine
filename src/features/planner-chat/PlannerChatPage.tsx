@@ -283,12 +283,14 @@ export default function PlannerChatPage() {
   const weekRange = planningWeek.range
   const effectiveWeekChoice = planningWeek.choice
   /**
-   * The Sunday-start of the week containing TODAY, regardless of which week the
-   * page is showing (UX-256). Taken from the selector's own options rather than
-   * recomputed, so it cannot become a second definition of "this week".
+   * The selector's own option for the week containing TODAY, regardless of which
+   * week the page is showing (UX-256). Taken from the selector's options rather
+   * than recomputed, so it cannot become a second definition of "this week" —
+   * and so the UX-256 notice reads the same `disabled` flag the toggle it names
+   * is rendered with.
    */
-  const liveWeekStart =
-    planningWeek.options.find((o) => o.choice === 'this')?.range.start ?? weekRange.start
+  const liveWeekOption = planningWeek.options.find((o) => o.choice === 'this')
+  const liveWeekStart = liveWeekOption?.range.start ?? weekRange.start
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
@@ -351,9 +353,9 @@ export default function PlannerChatPage() {
    * that the page never says a plan exists when it might not.
    */
   const [liveWeekApplied, setLiveWeekApplied] = useState(false)
-  /** The UX-256 sentence, or `null` when any of its three conditions fails. */
+  /** The UX-256 sentence, or `null` when any of its four conditions fails. */
   const liveWeekNotice = liveWeekAppliedNotice({
-    liveWeekStart,
+    liveWeek: liveWeekOption,
     resolvedChoice: effectiveWeekChoice,
     explicitChoice: weekChoice,
     liveWeekApplied,
