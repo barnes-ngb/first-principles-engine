@@ -26,6 +26,8 @@ import {
 import { storage } from '../../core/firebase/storage'
 import type { Child, ChatContext, ChatThread, ShellyChatMessage } from '../../core/types'
 import type { ChatAction } from '../../core/types'
+import { ART_QUOTA_MESSAGE, resolveChatImageGate } from './chatImageAccess'
+import { recordChatArtGeneration } from './useChatArtQuota'
 import { parseChatActions } from './parseChatActions'
 import { parseFriction } from './parseFriction'
 import { logFeatureRequest } from './logFeatureRequest'
@@ -81,6 +83,21 @@ export interface ShellyChatFlowsDeps {
    * here, only the ability to clear a proposal.
    */
   dropPendingForContext: (reason: 'context-switch' | 'thread-switch') => void
+  /**
+   * Whether the signed-in profile is a parent (UX-189). `/chat` is nav-gated,
+   * not route-gated, and the image door is a paid `gpt-image-1.5` call — so the
+   * handler layer states the gate itself instead of trusting either the route
+   * or the button being hidden. Defaults to false — fail closed.
+   */
+  isParent?: boolean
+  /**
+   * The week's art budget for the acting child (UX-189) — the SAME counter the
+   * other five paid surfaces share (`useChatArtQuota`), never a second
+   * allowance. Uncapped and inert for a parent by construction. Optional so the
+   * hook stays testable without mounting the quota subscription; absent means
+   * uncapped, which is the fail-open direction a courtesy cap wants.
+   */
+  artQuota?: { atLimit: boolean; recordGeneration: () => Promise<void> }
 }
 
 /**
@@ -94,7 +111,7 @@ export interface ShellyChatFlowsDeps {
  * keeping its external prop/route contract identical.
  */
 export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlowsDeps) {
-  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, imageFailureRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope } = deps
+  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, imageFailureRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope, isParent = false, artQuota } = deps
 
   const {
     chatContext, setChatContext,
@@ -530,8 +547,36 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
   }, [currentContextScope, input, sending, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, pendingAttachments, chatContext, setActiveThreadId, setFollowUps, setInput, setPendingAttachments, setSending, stagePendingActions])
 
   // ── Image generation (refactored for Prompt 9) ─────────────────
+  //
+  // UX-189 — the gate and the meter live HERE because this is the one funnel.
+  // Every path into a paid call ends up in this function: the refinement flow
+  // (`handleImageIdeaSubmit` → `handleImageRefinementGenerate`), its 5-second
+  // timeout, its two catch branches, `handleJustGenerate`, and the reference
+  // upload (`handleUploadGenerate`, which opens the flow). Gating the button
+  // alone would have left six handlers open, and gating six handlers is six
+  // places for a seventh to be forgotten.
   const handleGenerateImageDirect = useCallback(async (prompt: string) => {
     if (!prompt.trim()) return
+
+    // Two refusals, and neither spends anything. The capability check is the
+    // safety one; the cap is FEAT-175's courtesy counter, uncapped and
+    // unreachable for a parent by construction. Both are refused BEFORE the
+    // paid call and before `recordGeneration`, so a refused generation spends
+    // no quota (FEAT-167) — and both say what to do next rather than stopping
+    // (FEAT-195), which for a child means naming the art doors that are his.
+    const gate = resolveChatImageGate(isParent, artQuota?.atLimit ?? false, ART_QUOTA_MESSAGE)
+    if (!gate.ok) {
+      console.info('[Chat] image generation refused —', gate.reason)
+      const threadId = activeThreadId
+      if (threadId) {
+        await addDoc(shellyChatMessagesCollection(familyId, threadId), {
+          role: 'assistant',
+          content: gate.notice,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {})
+      }
+      return
+    }
 
     setGeneratingImage(true)
 
@@ -577,6 +622,11 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       })
 
       if (result?.url) {
+        // UX-189 — count it, and only now. A refusal, a blocked prompt or a
+        // dead call spends no quota; the picture exists, so the counter moves.
+        // Fire-and-forget by construction (FEAT-167): this returns void, so a
+        // counter write that never settles offline cannot wedge the chat.
+        recordChatArtGeneration(artQuota?.recordGeneration)
         await addDoc(shellyChatMessagesCollection(familyId, threadId), {
           role: 'assistant',
           content: result.revisedPrompt || 'Here\'s your generated image:',
@@ -631,7 +681,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     } finally {
       setGeneratingImage(false)
     }
-  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef, imageFailureRef, setActiveThreadId, setGeneratingImage])
+  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef, imageFailureRef, setActiveThreadId, setGeneratingImage, isParent, artQuota])
 
   // ── Image refinement flow (Prompt 9) ───────────────────────────
 
