@@ -99,12 +99,26 @@ export const getPlanningWeekRange = (now: Date = new Date()): WeekRange => {
  * | Mon Sep 7 – Fri 11 | Aug 30    | Aug 31 – Sep 4       |
  * | Sat Sep 12         | Sep 6     | Sep 7 – Sep 11       |
  *
- * **Still agrees with the Cloud Function on the day that matters.** The
- * scheduled review fires Sunday 19:00 CT, and `lastWeekKey` in
- * `functions/src/ai/evaluate.ts` returns the previous Sunday when called on a
- * Sunday — the same key this returns on a Sunday. So the page reads the document
- * the cron writes, and on Saturday it names the week whose document has not been
- * written yet (which the page says, rather than showing an older week instead).
+ * **It now agrees with the Cloud Function on every day, not just one (UX-263).**
+ * `lastWeekKey` in `functions/src/ai/evaluate.ts` was a table of offsets that
+ * matched this rule on Sunday–Friday and **diverged on Saturday** — harmless
+ * only for as long as nothing called it on a Saturday. UX-263 moved the review
+ * off Sunday 19:00 CT (a document that did not exist during the one morning it
+ * gets read) to **00:15 Sunday CT**, and its first cut moved it to Saturday
+ * evening, where that divergence would have written the wrong week outright.
+ * It was rewritten as this same one-sentence rule, and it stays that way even
+ * though the cron settled back onto a Sunday: **this** rule is read on a
+ * Saturday every single week, so leaving the two neighbours divergent there is
+ * leaving UX-218's bug in place with nothing standing on it. Two definitions
+ * still, one on each side of the project boundary — neither can import the
+ * other — pinned by an agreement test in *both* suites: this file's walks the
+ * CF's rule, `evaluate.test.ts`'s walks this one, and both cover all seven
+ * weekdays.
+ *
+ * So the page reads the document the cron writes on every day of the week, and
+ * **on Saturday** it names a week whose document is not written until that night
+ * — which the page says (`POSITIONS_PENDING_LINE`), rather than showing an older
+ * week instead.
  *
  * Renamed from `lastCompletedWeekKey` deliberately: the semantics changed from
  * "the last whole Sun–Sat week" to "the last completed school week", and a name

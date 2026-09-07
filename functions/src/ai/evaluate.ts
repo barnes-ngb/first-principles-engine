@@ -151,19 +151,49 @@ interface DailyPlanRecord {
 // ── Week helpers ────────────────────────────────────────────────
 
 /**
- * Return the Sunday-of-week date string for the most recent completed week.
- * The school week runs Sunday–Saturday. The scheduled review fires Sunday
- * evening, so lastWeekKey returns the previous Sunday (7 days ago on Sunday,
- * dayOfWeek+7 days ago otherwise).
+ * Return the Sunday-of-week date string for the week the review covers.
+ *
+ * **One rule, not a table of offsets (UX-263):** step back to the Sunday that
+ * starts the Sun–Sat week containing `today`, then — on every day but Saturday —
+ * back one more week, because on those days that week's school body is still
+ * ahead or in progress. Saturday is the only day on which the containing week's
+ * Mon–Fri is entirely behind us.
+ *
+ * | Called on          | Returns   | School week it names |
+ * |--------------------|-----------|----------------------|
+ * | Sat Sep 5          | Aug 30    | Aug 31 – Sep 4       |
+ * | Sun Sep 6          | Aug 30    | Aug 31 – Sep 4       |
+ * | Mon Sep 7 – Fri 11 | Aug 30    | Aug 31 – Sep 4       |
+ * | Sat Sep 12         | Sep 6     | Sep 7 – Sep 11       |
+ *
+ * **This is the same rule as the page's `lastCompletedSchoolWeekKey`**
+ * (`src/core/utils/time.ts`), deliberately and by necessity: the page reads the
+ * document this key names, so if the two disagree on any day the page shows a
+ * document nobody wrote. They are pinned to each other from both sides — see the
+ * agreement tests in `evaluate.test.ts` and `time.test.ts`.
+ *
+ * **Why the Saturday branch exists even though the cron fires on a Sunday
+ * (UX-263).** The old body was `offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7`,
+ * which on a Saturday returned the Sunday **two** weeks back. That was
+ * unobservable only because nothing ever called it on a Saturday — and the first
+ * cut of UX-263 did exactly that, moving the cron to Saturday evening, at which
+ * point it would have written the wrong week's document. (That schedule was then
+ * withdrawn for an unrelated reason — see the note on `weeklyReview` — so this
+ * branch is no longer on the cron's path.)
+ *
+ * It stays, and is pinned, because the **page** reads this rule on a Saturday
+ * every week: `lastCompletedSchoolWeekKey` names the just-finished school week
+ * from Saturday onward, and a `lastWeekKey` that disagreed there would leave the
+ * two neighbouring rules divergent again on exactly the day that has already
+ * produced one bug (UX-218). One rule, agreeing on all seven days, is the fix;
+ * agreeing only on whichever day the schedule currently names is what got us
+ * here.
  */
 export function lastWeekKey(today: Date): string {
   const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, ...
-  // Go back to the start of the PREVIOUS Sunday-based week
-  // If today is Sunday (0), the previous week started 7 days ago
-  // If today is Monday (1), the previous week started 8 days ago
-  const offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7;
-  d.setDate(d.getDate() - offset);
+  const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, … 6=Sat
+  d.setDate(d.getDate() - dayOfWeek); // → the Sunday of the containing week
+  if (dayOfWeek !== 6) d.setDate(d.getDate() - 7);
   return formatDate(d);
 }
 
@@ -1267,10 +1297,41 @@ export async function runWeeklyReviewCycleForChild(
 
 // ── Scheduled Cloud Function ────────────────────────────────────
 
+/**
+ * **Just after midnight, so the review is ready all day Sunday (UX-263).**
+ *
+ * Owner, 2026-09-06 (a Sunday, 8:23am): *"I also think the review should be
+ * ready all day Sunday."* It fired Sunday 19:00 CT, so the week that ended
+ * Saturday did not exist as a document until Sunday **night** — after the one
+ * morning a parent sits down to look at the week and plan the next.
+ *
+ * **Why 00:15 Sunday and not Saturday evening (Codex round 1, P2).** The first
+ * cut of this fix fired at Saturday 21:00, which reads early: a week is
+ * assembled once and **never revisited**, and `assembleWeekContext` takes
+ * `weekKey + 6` as the *inclusive* Saturday end and reads records through
+ * `T23:59:59`. Anything logged in the last three hours of Saturday — hours, day
+ * logs, books, teach-backs, workbook positions — would have been permanently
+ * absent from the narrative, the evidence summary **and** the UX-212 position
+ * snapshot, which is the repo's only record of where a program stood on a date.
+ * On a records surface that is silent data loss, and it would have been
+ * indistinguishable from a quiet week. Firing a quarter-hour into Sunday closes
+ * the whole Saturday window first and still has the document waiting before
+ * anyone is awake on Sunday, which is the thing that was actually asked for.
+ * (00:15, not 00:00, so a late Saturday write and the read are not racing; and
+ * it is safely clear of the 02:00 DST switch, which also lands on a Sunday.)
+ *
+ * The hour is deliberate, so it is asserted rather than left as a literal —
+ * see `evaluate.test.ts`. The **day** is still what moved {@link lastWeekKey}
+ * onto one rule shared with the page; that note stands.
+ */
+export const WEEKLY_REVIEW_SCHEDULE = {
+  schedule: "every sunday 00:15",
+  timeZone: "America/Chicago",
+} as const;
+
 export const weeklyReview = onSchedule(
   {
-    schedule: "every sunday 19:00",
-    timeZone: "America/Chicago",
+    ...WEEKLY_REVIEW_SCHEDULE,
     secrets: [claudeApiKey],
   },
   async () => {

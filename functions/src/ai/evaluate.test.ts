@@ -10,6 +10,7 @@ import {
   summarizeBooksWeek,
   summarizeTeachBacks,
   WEEKLY_REVIEW_ADDENDUM,
+  WEEKLY_REVIEW_SCHEDULE,
 } from "./evaluate.js";
 import type { WeekContext } from "./evaluate.js";
 
@@ -35,11 +36,131 @@ describe("lastWeekKey", () => {
     expect(lastWeekKey(monday)).toBe("2026-02-22");
   });
 
-  it("returns the previous Sunday when called on a Saturday", () => {
-    // Saturday March 7, 2026 — current week started Sunday Mar 1,
-    // so previous week started Sunday Feb 22
+  // ── UX-263 — the Saturday branch, which the PAGE reads every week ─────────
+
+  it("returns the CONTAINING week's Sunday when called on a Saturday", () => {
+    // Saturday March 7, 2026. Mon–Fri Mar 2–6 ended yesterday, so THAT is the
+    // week the review covers, and its key is Sunday Mar 1.
+    //
+    // This is the assertion that flipped. The old body
+    // (`offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7`) returned Feb 22 here —
+    // the Sunday TWO weeks back — which was unobservable while the cron only
+    // ever ran on a Sunday, and would have written the wrong week's document on
+    // the very first Saturday firing.
     const saturday = new Date(2026, 2, 7);
-    expect(lastWeekKey(saturday)).toBe("2026-02-22");
+    expect(lastWeekKey(saturday)).toBe("2026-03-01");
+  });
+
+  it("names a week whose Friday is already past, on every day of the week", () => {
+    // The rule in one property, walked over a year: whatever day the cron (or a
+    // manual run) calls this on, the Friday of the week it names must be behind
+    // us, and it must be the MOST RECENT such week — without that second half,
+    // "always return 1970" would pass.
+    const cursor = new Date(2026, 0, 1);
+    for (let i = 0; i < 365; i++) {
+      const key = lastWeekKey(cursor);
+      const friday = new Date(key + "T00:00:00");
+      friday.setDate(friday.getDate() + 5); // Sunday key + 5 = Friday
+      expect(friday.getTime()).toBeLessThan(cursor.getTime());
+
+      const nextFriday = new Date(friday);
+      nextFriday.setDate(nextFriday.getDate() + 7);
+      expect(nextFriday.getTime()).toBeGreaterThanOrEqual(cursor.getTime());
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  });
+
+  it("agrees with the page's rule on every day of the week", () => {
+    // The other half of UX-218's pin, from this side of the project boundary.
+    // `lastCompletedSchoolWeekKey` (src/core/utils/time.ts) cannot be imported
+    // here — it is the app's module graph, not the functions build — so its rule
+    // is restated: the Sunday of the Sun–Sat week containing `today`, stepped
+    // back one week on any day but Saturday.
+    //
+    // The page reads the document this key names. If the two disagree on ANY
+    // day, the page shows a document nobody wrote — which is what UX-218 was,
+    // and what moving the cron to Saturday would have re-created.
+    const pageRule = (today: Date): string => {
+      const d = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+      );
+      const day = d.getDay();
+      d.setDate(d.getDate() - day);
+      if (day !== 6) d.setDate(d.getDate() - 7);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    };
+
+    const cursor = new Date(2026, 0, 1);
+    for (let i = 0; i < 365; i++) {
+      expect(lastWeekKey(cursor)).toBe(pageRule(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  });
+
+  it("writes the week that just ended when the cron fires", () => {
+    // The schedule is `every sunday 00:15 America/Chicago`. The runtime clock is
+    // UTC, so 00:15 CT is 05:15/06:15 UTC — still Sunday, in either offset — and
+    // `new Date()` inside the CF reads the same day the schedule names. Both the
+    // family-zone and UTC readings are asserted rather than left to coincidence,
+    // because the cron and the runtime do not share a clock (see UX-266).
+    const sundayLocal = new Date(2026, 8, 6); // Sun Sep 6 2026, family zone
+    const sundayUtc = new Date(2026, 8, 6); // what the UTC runtime sees
+    expect(lastWeekKey(sundayLocal)).toBe("2026-08-30");
+    expect(lastWeekKey(sundayUtc)).toBe("2026-08-30");
+
+    // And the Saturday reading — the page's, and the one the withdrawn Saturday
+    // schedule would have used — names that same week.
+    expect(lastWeekKey(new Date(2026, 8, 5))).toBe("2026-08-30");
+  });
+});
+
+// ── The schedule itself (UX-263, Codex round 1 P2) ───────────────────────────
+
+describe("the weeklyReview schedule", () => {
+  // `onSchedule` is stubbed in this suite, so the exported handler carries no
+  // schedule to read back. The options object is exported instead and spread
+  // into the real `onSchedule` call, so this asserts the value the function is
+  // actually deployed with — not a regex over the source, which is both weaker
+  // and (as the first cut of this test found) unportable: the root `vitest run`
+  // executes this file under jsdom, where `import.meta.url` is not a `file:`
+  // URL and `readFileSync` throws at collection time.
+  const schedule: string = WEEKLY_REVIEW_SCHEDULE.schedule;
+
+  it("does not fire before the week it reviews has ended", () => {
+    // The finding this pins: a week is assembled ONCE and never revisited, and
+    // `assembleWeekContext` takes `weekKey + 6` as the INCLUSIVE Saturday end,
+    // reading records through `T23:59:59`. A Saturday-evening firing would have
+    // permanently dropped anything logged in the last hours of Saturday — hours,
+    // day logs, books, teach-backs, and the UX-212 position snapshot, which is
+    // the repo's only record of where a program stood on a date — and the result
+    // would have been indistinguishable from a quiet week.
+    //
+    // So the schedule must land AFTER Saturday closes. Sunday is the only such
+    // day that still has the document waiting before anyone is awake on Sunday,
+    // which is what UX-263 was asked for.
+    expect(schedule).toMatch(/^every sunday /);
+    expect(schedule).not.toMatch(/saturday/i);
+  });
+
+  it("fires early enough to be ready all day Sunday", () => {
+    // The other half of the owner's ask. A time later in the day would put us
+    // back where UX-263 started — a review that does not exist during the one
+    // morning it gets read.
+    const hour = Number(/every sunday (\d{2}):/.exec(schedule)?.[1]);
+    expect(Number.isFinite(hour)).toBe(true);
+    expect(hour).toBeLessThan(6);
+  });
+
+  it("still runs in the family's zone", () => {
+    // The schedule is evaluated in this zone, not the runtime's — which is UTC,
+    // and is a different clock from the one the cron fires on (UX-266).
+    expect(WEEKLY_REVIEW_SCHEDULE.timeZone).toBe("America/Chicago");
   });
 });
 

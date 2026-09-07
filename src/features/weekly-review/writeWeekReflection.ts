@@ -24,7 +24,7 @@ import type { WeekReflection } from '../../core/types'
  * ── Why `childId` and `weekKey` ride along (UX-219) ─────────────────────────
  *
  * Since the page names a school week the moment its Friday is over, a parent can
- * answer on **Saturday**, before the Sunday cron has written anything. This
+ * answer on **Saturday**, before that evening's cron has written anything. This
  * merge then *creates* the document rather than adding to one. A document
  * carrying only `reflection` would have no `childId` and no `weekKey`, and both
  * are queried: the monthly generator reads `where("childId", "==", …)` and

@@ -550,6 +550,25 @@ export interface DraftDayPlan {
   day: string
   timeBudgetMinutes: number
   items: DraftPlanItem[]
+  /**
+   * Which Full / Light / Life shape `items` is currently IN (UX-261).
+   *
+   * Absent means Full — every draft written before this field existed, so there
+   * is no migration. It is what makes the shaping **idempotent and reversible**:
+   * re-shaping a day into the type it already holds preserves the parent's later
+   * edits instead of rebuilding it, and moving to a different type restores
+   * {@link setAsideItems} first rather than transforming a transformed day.
+   */
+  appliedDayType?: DayType
+  /**
+   * The day's items as they were BEFORE a non-Full type was applied (UX-261).
+   *
+   * Lives here, inside the draft, rather than in page state, so it is persisted
+   * with the conversation and re-keyed with it: a parent who reloads, or who
+   * switches week or child, gets this day's own original items back and never
+   * another week's (Codex round 2, P1).
+   */
+  setAsideItems?: DraftPlanItem[]
 }
 
 export interface DraftPlanItem {
@@ -601,6 +620,16 @@ export interface PlannerConversation {
   messages: ChatMessage[]
   /** Current draft plan (updated with each regeneration) */
   currentDraft?: DraftWeeklyPlan
+  /**
+   * The parent's per-day Full / Light / Life picks for this week (UX-261).
+   *
+   * Additive and optional — absent means every day is Full, which is every week
+   * planned before this field existed, so there is no migration and nothing to
+   * back-fill. Stored alongside the draft rather than inside it because the
+   * picks are **hers, not the model's**: a regenerate replaces `currentDraft`
+   * wholesale and must not replace these.
+   */
+  dayTypes?: DayTypeConfig[]
   /** Context for plan generation */
   availableHoursPerDay: number
   appBlocks: AppBlock[]

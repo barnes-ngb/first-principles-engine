@@ -291,7 +291,7 @@ describe('the week’s evidence counts sit under the hours', () => {
   })
 })
 
-// ── Before the Sunday cron has fired (UX-219) ───────────────────────────────
+// ── Before the overnight cron has fired (UX-219 / UX-263) ──────────────────
 
 describe('the Saturday state — the week is named before its review exists', () => {
   it('still states the hours, which are folded live and never came from the doc', () => {
@@ -303,7 +303,7 @@ describe('the Saturday state — the week is named before its review exists', ()
     const { container } = renderWithReview(null, [snapshot(AUG_17, 10)])
     expect(
       screen.getByText(
-        'This week’s workbook positions haven’t been recorded yet — they’re saved Sunday evening.',
+        'This week’s workbook positions haven’t been recorded yet — they’re saved overnight, once Saturday is over.',
       ),
     ).toBeInTheDocument()
     expect(container.textContent).not.toMatch(/rate needs two/)
@@ -314,7 +314,7 @@ describe('the Saturday state — the week is named before its review exists', ()
     expect(container.textContent).not.toMatch(/haven’t been recorded yet/)
   })
 
-  it('never promises Sunday to a review that exists without a snapshot', () => {
+  it('never promises the overnight save to a review that exists without a snapshot', () => {
     // Codex round 1, P2. `loadCurriculumSnapshot` omits `curriculumPositions`
     // when the child has no positioned workbook config, and again when the
     // config read throws — the cron HAS run in both cases and nothing more is
@@ -324,12 +324,12 @@ describe('the Saturday state — the week is named before its review exists', ()
       weekKey: '2026-08-30',
       status: 'draft',
     } as unknown as WeeklyReview)
-    expect(container.textContent).not.toMatch(/saved Sunday evening/)
+    expect(container.textContent).not.toMatch(/saved overnight, once Saturday is over/)
     // And it makes no other claim about coverage either.
     expect(container.textContent).not.toMatch(/rate needs two|lesson/i)
   })
 
-  it('still promises Sunday after a parent answers on Saturday', () => {
+  it('still promises the overnight save after a parent answers on Saturday', () => {
     // Codex round 3, P2. `writeWeekReflection` CREATES the document when the
     // answer is saved before the cron runs, so a non-null review stopped
     // meaning "generated" — and keying on presence would have made the only
@@ -340,7 +340,7 @@ describe('the Saturday state — the week is named before its review exists', ()
       weekKey: '2026-08-30',
       reflection: { answer: 'about-right', answeredAt: '2026-09-05T18:00:00.000Z' },
     } as unknown as WeeklyReview)
-    expect(container.textContent).toMatch(/saved Sunday evening/)
+    expect(container.textContent).toMatch(/saved overnight, once Saturday is over/)
   })
 
   it('never presents a failed review read as "the cron hasn’t run"', () => {
@@ -348,7 +348,7 @@ describe('the Saturday state — the week is named before its review exists', ()
     // review null with loading finished, which is indistinguishable from the
     // Saturday case unless the caller says which it was.
     const { container } = renderWithReview(null, [], { reviewFailed: true })
-    expect(container.textContent).not.toMatch(/saved Sunday evening/)
+    expect(container.textContent).not.toMatch(/saved overnight, once Saturday is over/)
     expect(
       screen.getByText(
         'Couldn’t read this week’s review, so there’s nothing to say about coverage yet.',

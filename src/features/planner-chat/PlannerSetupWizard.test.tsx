@@ -31,7 +31,6 @@ function renderWizard(over: Partial<React.ComponentProps<typeof PlannerSetupWiza
       weekStart={planningWeekRangeFor('this', WED).start}
       weekEnergy="full"
       onWeekEnergyChange={vi.fn()}
-      hoursPerDay={4}
       chapterBooks={[]}
       selectedBook={null}
       onSelectedBookChange={vi.fn()}

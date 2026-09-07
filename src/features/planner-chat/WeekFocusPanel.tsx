@@ -9,6 +9,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
 import type { WeekPlan } from '../../core/types'
+import { weekFocusPanelHasContent } from './weekFocusContent'
 
 interface WeekFocusPanelProps {
   weekPlan: WeekPlan
@@ -16,6 +17,12 @@ interface WeekFocusPanelProps {
 }
 
 export default function WeekFocusPanel({ weekPlan, onUpdateField }: WeekFocusPanelProps) {
+  // UX-234: nothing to show → nothing rendered. Not an empty state, not a
+  // placeholder — a week's theme is optional and its absence is not a gap to
+  // apologise for. The rule lives in `weekFocusContent.ts` so it is testable
+  // without mounting the card.
+  if (!weekFocusPanelHasContent(weekPlan)) return null
+
   return (
     <Box
       sx={{

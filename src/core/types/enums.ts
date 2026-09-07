@@ -281,10 +281,25 @@ export const PlanTypeLabel: Record<PlanType, string> = {
   [PlanType.Life]: 'Life Day',
 }
 
+/**
+ * The type of a day **in a planned week** (the planner's per-day control,
+ * UX-261). Distinct axis from `PlanType`, which is the kind of day recorded on
+ * Today: `Light` is not `Mvd`.
+ *
+ * `Life` is the bridge between the two — a planner `Life` day is what Apply
+ * writes to `dailyPlans.planType` as `PlanType.Life`, so it opens on Today as
+ * the FEAT-200 Life Day.
+ *
+ * `Appointment` is handled but never offered: it has no production consumer
+ * (only the unmounted `appointmentResilience.logic` — UX-262). See
+ * `planner-chat/plannerDayTypes.ts` › `DAY_TYPE_SHAPE`, which is exhaustive over
+ * this union so a new member fails to compile until it is given a shape.
+ */
 export const DayType = {
   Normal: 'normal',
   Light: 'light',
   Appointment: 'appointment',
+  Life: 'life',
 } as const
 export type DayType = (typeof DayType)[keyof typeof DayType]
 

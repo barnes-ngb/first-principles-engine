@@ -2,6 +2,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import PlannerCompactSetup from './PlannerCompactSetup'
+import { PLANNER_REQUEST_LABEL } from './plannerRequest'
 import type { ChapterBook, WorkbookConfig } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 
@@ -53,7 +54,6 @@ function defaultProps(overrides: Partial<React.ComponentProps<typeof PlannerComp
     weekRangeLabel: '2026-05-18 → 2026-05-22',
     weekEnergy: 'full' as const,
     onWeekEnergyChange: vi.fn(),
-    hoursPerDay: 2.5,
     chapterBooks: [NARNIA],
     selectedBook: NARNIA,
     onSelectedBookChange: vi.fn(),
@@ -144,7 +144,10 @@ describe('PlannerCompactSetup — interactions', () => {
   it('calls onWeekNotesChange when notes field is edited', () => {
     const onWeekNotesChange = vi.fn()
     render(<PlannerCompactSetup {...defaultProps({ onWeekNotesChange })} />)
-    const input = screen.getByLabelText(/anything special/i)
+    // UX-235: the field is named by `plannerRequest.PLANNER_REQUEST_LABEL` now,
+    // the same string the wizard uses — it used to read "Anything special…"
+    // here and "Anything different…" one screen away.
+    const input = screen.getByLabelText(PLANNER_REQUEST_LABEL)
     fireEvent.change(input, { target: { value: 'Field trip Tuesday' } })
     expect(onWeekNotesChange).toHaveBeenCalledWith('Field trip Tuesday')
   })

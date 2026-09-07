@@ -1,18 +1,18 @@
-# Code Health Report — 2026-08-24
+# Code Health Report — 2026-09-07
 
 ## Metrics
 
-| Metric | Value | Change from last report (2026-08-17) |
+| Metric | Value | Change from last report (2026-08-24) |
 |--------|-------|--------------------------------------|
-| **Total lines** | **275,572** | +5,484 |
-| **Commits** | **3,103** | +56 |
-| **Test files** | **405** | +11 |
-| **Tests passing** | **6,125** (root) + **1,014** (functions/ own suite) | +220 root, +38 functions |
-| **Firestore collections** | **48** | +0 |
+| **Total lines** | **317,104** | +41,532 |
+| **Commits** | **3,403** | +300 |
+| **Test files** | **537** | +132 |
+| **Tests passing** | **7,788** (root, 1 failing) + **1,371** (functions/ own suite) | +1,663 root, +357 functions |
+| **Firestore collections** | **47** | −1 (`bookThemesCollection` retired, FEAT-194) |
 | **Cloud Functions** | **29** | +0 |
 | **Chat task types** | **21** | +0 |
 | **Routes** | **36** | +0 |
-| **Bundle size** | **4,352.08 kB / 1,297.20 kB gzip** | +14.42 kB / +5.05 kB gzip |
+| **Bundle size** | **4,428.50 kB / 1,326.22 kB gzip** | +76.42 kB / +29.02 kB gzip |
 
 ---
 
@@ -20,15 +20,32 @@
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| **Build** | ✅ PASS | `tsc -b && vite build` clean (~25s). Fresh sandbox — `npm ci` at root and in `functions/` required (not a repo issue). |
-| **Lint** | ⚠️ 3 WARNINGS | 0 errors; same 3 `react-hooks/exhaustive-deps` warnings as every prior cycle (`EvaluateChatPage.tsx:293`, `useQuestSession.ts:814`, `useQuestSession.ts:2083`, all involving `sessionTimer`). Not mechanically fixable without reviewing timer semantics. |
-| **Tests (root)** | ✅ PASS | 6,125 passing, 0 skipped, 0 failing (405 test files, `src/` + `functions/src/` combined via root `vitest.config.ts`) |
-| **Tests (functions/)** | ✅ PASS | 1,014 passing, 0 failing (39 test files) — functions' own `vitest.config.ts` (real deps, no Anthropic/OpenAI/firebase-admin stubs) |
+| **Build** | ✅ PASS | `tsc -b && vite build` clean (~24s). Fresh sandbox — `npm ci` at root and in `functions/` required (not a repo issue). |
+| **Lint** | ⚠️ 3 WARNINGS | 0 errors; same 3 `react-hooks/exhaustive-deps` warnings as every prior cycle (`EvaluateChatPage.tsx:295`, `useQuestSession.ts:814`, `useQuestSession.ts:2083`, all involving `sessionTimer`). Not mechanically fixable without reviewing timer semantics. |
+| **Tests (root)** | ❌ **1 FAILING** | 7,788 passing, 1 failing, 0 skipped (537 test files, `src/` + `functions/src/` combined via root `vitest.config.ts`). See **CRITICAL finding** below — a test-infrastructure gap exposed only by a full-history clone. `ci.yml` (PR checks, push to `main`) checks out shallow and is unaffected, **but `deploy.yml` checks out with `fetch-depth: 0` and runs this suite — a push to `deploy` will hit this failure and block the Firebase deployment.** |
+| **Tests (functions/)** | ✅ PASS | 1,371 passing, 0 failing (61 test files) — functions' own `vitest.config.ts` (real deps, no Anthropic/OpenAI/firebase-admin stubs) |
 | **TypeScript** | ✅ PASS | `npm run build` (`tsc -b`) + a standalone `npx tsc --noEmit -p tsconfig.app.json` (Phase 3g orphaned-import check) both clean; `functions`' `tsc --noEmit` also clean — no orphaned imports |
-| **npm audit (prod, root)** | ✅ **0 vulnerabilities** | Clean, same as last cycle |
-| **npm audit (prod, functions)** | ✅ **0 vulnerabilities** | Clean — was 10 (9 moderate, 1 high) as of the last report; now clean in production. The 9 remaining full-audit findings (below) are dev-dependency-only |
-| **npm audit (full, root)** | ⚠️ 9 vulnerabilities (1 low, 8 moderate), dev-only | `uuid`/`gaxios`/`google-gax`/`@google-cloud/*`/`firebase-admin` transitive chain, likely from a dev tool. Not in the production dependency tree — `npm audit --production` reports 0. Fix requires `--force` (breaking). Low priority per policy. |
-| **npm audit (full, functions)** | ⚠️ 2 moderate, dev-only | `ts-deepmerge` via `firebase-functions-test`. Not in production tree. Fix requires `--force` (breaking, downgrades `firebase-functions-test`). Low priority per policy. |
+| **`npm run docs:check`** | ✅ PASS | All HARD checks pass (ledger IDs, index resolution, ledger anchors, collection-count spans, evidence kinds, day-write routing, ledger-status, ledger-status-contradiction). 10 SOFT warnings — see **docs:check findings** below. `--fix` made no changes (nothing to auto-fix). |
+| **npm audit (prod, root)** | ⚠️ **1 moderate** | `fflate` (ReDoS-adjacent infinite-loop on malformed ZIP64) — was 0 last cycle. Fix available via `npm audit fix` (non-breaking); not applied per policy (Rule 8: moderate-only → note, don't fix). |
+| **npm audit (prod, functions)** | ⚠️ **3 moderate** | `qs`/`body-parser`/`express` transitive chain — was 0 last cycle. Fix available via `npm audit fix` (non-breaking); not applied per policy (moderate-only). |
+| **npm audit (full, root)** | ⚠️ 12 vulnerabilities (1 low, 10 moderate, 1 high) | The 1 high is dev-dependency-only (not in `--production` tree). Fix requires `--force` (breaking) for the dev-only remainder. Low priority per policy. |
+| **npm audit (full, functions)** | ⚠️ 7 vulnerabilities (6 moderate, 1 high) | Same pattern — high is dev-only (`firebase-functions-test` → `ts-deepmerge`/related). Fix requires `--force` (breaking). Low priority per policy. |
+
+---
+
+## CRITICAL finding: a pre-existing test-suite gap, exposed by this cycle's full clone
+
+`scripts/check-docs-alignment.test.mjs` → `findContradictoryStatusRows > holds across every historical revision of the real ledger` **fails** with 66 "offenders" instead of the expected 1.
+
+**What happened:** this session started from a **shallow clone** (`git rev-parse --is-shallow-repository` → `true`, `git rev-list --count HEAD` → 225 instead of the true ~3,403). Accurate commit-count stats require full history, so this cycle ran `git fetch --unshallow` (as the 2026-08-24 report's own notes said prior cycles had done: *"budget went to unshallowing git history"*). That test is **explicitly self-guarded to skip on a shallow clone** (`if (run(['rev-parse','--is-shallow-repository']).trim() === 'true') return`) — its own comment states *"SKIPPED ON A SHALLOW CLONE, and that is not a cop-out… CI checks out with `actions/checkout@v4` and no `fetch-depth`, so the runner has depth 1… an unconditional assertion would have failed every CI run."*
+
+**Correction (caught by this PR's own Codex review round):** that self-guard comment is true of `ci.yml` (the workflow that runs on PR checks and on push to `main` — plain `actions/checkout@v4`, no `fetch-depth`, so depth 1, the assertion self-skips, **unaffected**) but **not** of `.github/workflows/deploy.yml`, which checks out with **`fetch-depth: 0` (full history)** at lines 23–25 and runs `npx vitest run` (the root suite, including this test) at lines 59–60. **A push to the `deploy` branch — the full-deploy trigger (hosting, functions, Firestore rules/indexes, Storage) — will hit the real 66-vs-1 assertion failure and stop the workflow before Firebase deployment runs.** This is a live deploy-blocker, not a CI-invisible curiosity. It does not block *this* PR (which targets `main`, checked by shallow `ci.yml`), but it will block the *next* `deploy`-branch push, from anyone, until resolved.
+
+**Why it fails:** the test replays `findContradictoryStatusRows` (a regex heuristic checking a ledger status cell for both a LANDED pattern and an OPEN-PR pattern) over every historical revision of `docs/review/REVIEW_HOME_BASE.md` and asserts exactly one true positive (`1a7c56858f:UX-218`). With full history now present, it finds 66 matches, all tagged `FEAT-112`, across dozens of distinct historical revisions. Inspecting one (revision `48f211a23e`): the FEAT-112 row's status cell reads `**MERGED (PR #1607, 2026-07-20). AMENDMENT PR open — do not merge**` — a legitimate, self-consistent narrative (the original work merged; a *later* amendment PR was separately open) that both the `LANDED_STATUS_PATTERNS` and `OPEN_PR_STATUS_PATTERNS` regexes fire on. This is exactly the false-positive failure mode the test's own docstring warns about: *"a false positive on a row that was correct at the time… the failure mode that gets a rule deleted rather than fixed."*
+
+**Not a regression from anything in this run** — the ledger content is untouched by this session, and the "holds on the live ledger" sibling test (same file) **passes**. This is a latent gap in the checker's pattern-matching precision, and — per the correction above — it is **not** invisible to every workflow: it is invisible to `ci.yml` (shallow) but real and blocking on `deploy.yml` (full history). Per this audit's failure-mode policy this is **not fixed** by this run (a HEALTH_REPORT/CLAUDE.md-doc-only audit doesn't touch `scripts/`), but given it will stop the next production deploy, this needs a human decision **before the next push to `deploy`**, not at leisure: (1) tighten `LANDED_STATUS_PATTERNS`/`OPEN_PR_STATUS_PATTERNS` (or the test's expected-offenders list) to account for the "amendment PR, original already merged" narrative shape and re-verify against full history, or (2) as a faster stopgap, make the test's shallow-clone guard unconditional (skip regardless of clone depth) if replaying full ledger history isn't meant to be a deploy-blocking check at all — but that trades away a real regression detector, so option (1) is preferred.
+
+This branch is left **unshallowed** so the finding is reproducible from the pushed state; a normal CI checkout (shallow) is unaffected.
 
 ---
 
@@ -38,15 +55,17 @@
 
 | Claim | Doc value (before fix) | Computed | Status |
 |-------|------------------------|----------|--------|
-| TypeScript lines | 270,926 | 275,572 | DRIFT +1.7% — **AUTO-FIXED** |
-| Commits | 3,047 | 3,103 | DRIFT +1.8% — **AUTO-FIXED** |
-| Test files | 397 | 405 | DRIFT +2.0% — **AUTO-FIXED** |
-| Firestore collections | 48 | 48 | ✅ OK |
-| Cloud Functions | 29 | 29 | ✅ OK (naive single-line grep on `functions/src/index.ts` undercounts to 22 because 2 of the 11 `export {...}` blocks span multiple lines; hand-walking every block confirms 29, matching the doc) |
+| TypeScript lines | 281,460 | 317,104 | DRIFT +12.7% — **AUTO-FIXED** |
+| Commits | 3,129 | 3,403 | DRIFT +8.8% — **AUTO-FIXED** |
+| Test files | 421 | 537 | DRIFT +27.6% — **AUTO-FIXED** |
+| Firestore collections | 48 | 47 | ERROR — **AUTO-FIXED** (real code change: `bookThemesCollection` was removed under FEAT-194/UX-160; CLAUDE.md's narrative prose already describes the retirement correctly, no edit needed there) |
+| Cloud Functions | 29 | 29 | ✅ OK (naive single-line grep on `functions/src/index.ts` undercounts to 22 because 2 of the 11 `export {...}` blocks span multiple lines; hand-walking every block confirms 29, matching the doc — same caveat as every prior cycle) |
 | Chat task types | 21 | 21 | ✅ OK |
 | Routes | 36 | 36 | ✅ OK |
 
-All drift this cycle is small (<2%) and consistent with a normal week of feature work — no anomalies.
+This cycle's drift is larger than usual (12.7% on lines, 27.6% on test files) — consistent with the heavy feature velocity visible in the commit log (FEAT-176 through FEAT-205, the book-generation/reading-level arc, and the Sep 7 "Plan My Week walked top to bottom" 14-fix batch) over roughly two weeks since the last report. No anomalies beyond volume.
+
+`npm run docs:check` independently confirms the collection count (`Derived Firestore collection count (firestore.ts): 47`, `PASS [collection-count] all spans == 47`) — the generated `<!-- gen:collection-count -->47<!-- /gen -->` span in `DOCUMENT_INDEX.md`'s `FIRESTORE_AUDIT.md` row was already correct; only `MASTER_OUTLINE.md`'s hand-set figure was stale.
 
 ### Missing File References
 
@@ -59,15 +78,17 @@ Same four expected carry-overs as every prior cycle, all correctly marked as rem
 | `QuickCaptureSection.tsx` / `QuickCaptureSection.test.tsx` | Referenced only in MASTER_OUTLINE's historical UX P1.04/P2.06 changelog entries, which explicitly say the file was removed by a later change |
 | `CreativeTimeLog.tsx` | Same UX P2.06 changelog entry, same reason |
 
-No new missing-reference findings this cycle.
+One new-looking hit, **not a real gap**: `AGENTS.md`. `DOCUMENT_INDEX.md`'s own row for `review/AI_DEVELOPMENT_REVIEW_20260905.md` already documents that this file was never pushed to any branch (checked by home-base) — the review's "Documentation changes" table described corrections that never landed, and the doc index carries a note to that effect. No fix needed.
 
-### Navigation
+### Navigation — MISMATCH FOUND AND FIXED
 
-Code (`AppShell.tsx`) and docs (`MASTER_OUTLINE.md` §Navigation) match exactly for both Parent (12 items, in order) and Kid (9 items, in order).
+`docs/MASTER_OUTLINE.md`'s Kid Nav line still listed **My Stuff** between My Hero and Barnes Bros. `src/app/AppShell.tsx`'s `kidNavItems` array does **not** contain it — a code comment at that exact spot explains why: *"FEAT-186 (London audit #9, owner decision): no `My Stuff` entry for a kid… Kid Today's own '📸 My Stuff' card is a different destination and stays."* This is a genuine, code-confirmed nav mismatch (not the "intentionally different" case Phase 6 warns about — the removal was a deliberate, already-shipped decision the doc simply never caught up to), so it was **auto-fixed** per the companion prompt's Rule 4: removed `My Stuff` from the Kid Nav line in `MASTER_OUTLINE.md`. Parent Nav (12 items) already matched exactly; Kid Nav now reads 8 items matching code order exactly.
+
+(The other `My Stuff` mention in `MASTER_OUTLINE.md`, in the UX P2.08 changelog entry, refers to `KidCaptureForm`'s in-page "My Stuff" capture card — a different feature, explicitly named as untouched by FEAT-186. Left alone, correctly.)
 
 ### Collection Coverage
 
-All 48 collection helpers in `firestore.ts` are documented in `CLAUDE.md`'s Firestore Collections table (including path-name vs. helper-name aliases: `catalogOrdersCollection` → `orders`, `errorLogsCollection` → `errorLog`, `shellyChatMessagesCollection` → the documented `shellyChatThreads/{threadId}/messages` subcollection). No CLAUDE.md edit needed.
+All 47 collection helpers in `firestore.ts` are documented in `CLAUDE.md`'s Firestore Collections table (including path-name vs. helper-name aliases: `catalogOrdersCollection` → `orders`, `errorLogsCollection` → `errorLog`, `shellyChatMessagesCollection` → the documented `shellyChatThreads/{threadId}/messages` subcollection). No CLAUDE.md edit needed.
 
 ### Task Type Coverage
 
@@ -75,112 +96,97 @@ All 21 `CHAT_TASKS` registry entries are referenced in `docs/SYSTEM_PROMPTS.md`,
 
 ### Unindexed Docs
 
-None — every top-level file in `docs/*.md` (except `DOCUMENT_INDEX.md` itself) appears in `DOCUMENT_INDEX.md`. (73 top-level docs, 127 total including subdirectories `archive/`, `design-pass-v1/`, `foundations/`, `investigations/`, `review/`, `review/prompts/` — subdirectory indexing is out of this check's scope, same as every prior cycle.)
+None — every top-level file in `docs/*.md` (except `DOCUMENT_INDEX.md` itself) appears in `DOCUMENT_INDEX.md`.
 
 ### Stale Docs (Phase 3h)
 
-> **Methodology correction (this cycle):** the previous version of this report extracted "CURRENT" docs with a single-line grep for any backtick-quoted `.md` filename on a line containing "CURRENT" — which false-positived on filenames merely *mentioned* in a CURRENT row's notes column (e.g. `DESIGN_SKIP_SYSTEM_2026-04-09.md`, actually marked **HISTORICAL** on its own row, was pulled in because the CURRENT row for its successor doc mentions it in prose) and missed non-`.md` entries like the `design-pass-v1/` and `review/prompts/` directory rows. Caught by an automated PR review comment on this cycle's own report; recomputed below by parsing each table row's own status column instead of grepping loose text. The 62/54 figures in the version pushed earlier this cycle were wrong — corrected to 59/51 here.
+Using the corrected per-row-status-column parse (the 2026-08-24 report's methodology fix — grepping loose text for "CURRENT" false-positives on filenames merely *mentioned* in a CURRENT row's prose): **64 unique docs are marked `**CURRENT**`** in `DOCUMENT_INDEX.md` (deduped by filename; +5 vs. last cycle's 59, consistent with two weeks of new audits/design docs landing). **43 have not been touched in over 30 days; 21 have.**
 
-59 unique docs are marked `**CURRENT**` in `DOCUMENT_INDEX.md` (some appear in more than one index table; deduped by filename). **51 have not been touched in over 30 days; 8 have.**
+**Oldest 15 of the 43 stale:**
 
-**Not stale (≤30 days):**
+| Doc | Age |
+|---|---|
+| `ENGINE_V2.md` | 187d |
+| `KNOWLEDGE_MINE_BRIEF.md` | 168d |
+| `WEEKLY_CONUNDRUM_ARC.md` | 162d |
+| `STONEBRIDGE_BIBLE.md` | 152d |
+| `HERO_HUB_ANIMATION_TUNING.md` | 152d |
+| `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | 152d |
+| `first-principles-system-review.md` | 152d |
+| `SCRIPT_CONVENTIONS.md` | 148d |
+| `investigations/backend-reliability-assessment.md` | 147d |
+| `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md` | 139d |
+| `EVALUATION_METHODOLOGY_2026-04.md` | 113d |
+| `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | 113d |
+| `PROFILE_LIMITS_AUDIT.md` | 104d |
+| `design-pass-v1/` | 103d |
+| `DESIGN_MONTHLY_REVIEW_BOOK.md` | 103d |
 
-| Doc | Last touched | Age |
-|---|---|---|
-| `HEALTH_REPORT.md` | 2026-08-24 (this cycle's earlier commit) | 0d |
-| `MASTER_OUTLINE.md` | 2026-08-24 (this cycle's earlier commit) | 0d |
-| `review/UX_AUDIT_2026-08.md` | 2026-08-24 | 0d |
-| `DOCUMENT_INDEX.md` | 2026-08-23 | 1d |
-| `review/ARCHITECTURE_AUDIT_2026-08-23.md` | 2026-08-23 | 1d |
-| `review/DECISION_FUNC-01_source_of_truth.md` | 2026-08-22 | 2d |
-| `review/SCAN_CURRICULUM_DIAGNOSIS.md` | 2026-08-11 | 13d |
-| `PROCESS_OVERVIEW.md` | 2026-07-26 | 29d |
-
-**Stale (>30 days), oldest 15 of 51:**
-
-| Doc | Last touched | Age |
-|---|---|---|
-| `ENGINE_V2.md` | 2026-03-03 | 174d |
-| `KNOWLEDGE_MINE_BRIEF.md` | 2026-03-22 | 155d |
-| `barnes-story-game-workshop-design.md` | 2026-03-23 | 154d |
-| `WEEKLY_CONUNDRUM_ARC.md` | 2026-03-28 | 149d |
-| `first-principles-system-review.md` | 2026-04-07 | 139d |
-| `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | 2026-04-07 | 139d |
-| `STONEBRIDGE_BIBLE.md` | 2026-04-07 | 139d |
-| `HERO_HUB_ANIMATION_TUNING.md` | 2026-04-07 | 139d |
-| `SCRIPT_CONVENTIONS.md` | 2026-04-11 | 135d |
-| `investigations/backend-reliability-assessment.md` | 2026-04-12 | 134d |
-| `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md` | 2026-04-21 | 125d |
-| `EVALUATION_METHODOLOGY_2026-04.md` | 2026-05-16 | 100d |
-| `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | 2026-05-17 | 99d |
-| `PROFILE_LIMITS_AUDIT.md` | 2026-05-25 | 91d |
-| `design-pass-v1/` | 2026-05-26 | 90d |
-
-Note: `DESIGN_SKIP_SYSTEM_2026-04-09.md` is correctly excluded — its own row is marked **HISTORICAL**, not CURRENT (it's superseded by the V2 doc above, which is CURRENT). The `PROMPT_ARCH_AUDIT.md` / `PROMPT_AUTO_ARCH_FIX.md` / `PROMPT_BACKUP_CHECK.md` / `PROMPT_FIX.md` files are also correctly excluded as individual rows — they're named only inside the single CURRENT row for `review/prompts/` (age 90d, folded into the remainder below), not individually tracked.
-
-Remaining 36 cluster in the late-May through mid-July range (90d–31d old): `design-pass-v1/copy-pass-audit.md`, `DESIGN_MONTHLY_REVIEW_BOOK.md`, `SHELLY_PORTAL_CONTEXT.md`, `ARCH-10_rules_hardening_plan.md`, `review/INTEGRATION_MAP.md`, `WRITING_SPELLING_DESIGN.md`, `SHELLY_PORTAL_FEEDBACK_LOOP.md`, `review/PER_CHILD_DELINEATION_AUDIT.md`, `GAME_WORLD_ECONOMY.md`, `ECONOMY_AUDIT_PART1/2.md`, `review/LONDON_EVAL_READINESS.md`, `review/DATA_COMPONENT_TRACE.md`, `review/UI_CONSISTENCY_AUDIT.md`, `review/UI_BATCH2_HEX_RECONCILIATION.md`, `COMPLIANCE_YEAR_END_CLOSEOUT.md`, `review/prompts/`, `review/LEARNING_MAP_DIAGNOSIS.md`, `review/ALIGNMENT_AUDIT_2026-06-20.md`, `STICKER_CHARACTER_STUDIO.md`, `LONDON_BACKLOG.md`, `GARDEN_DEFENSE_QUEST_PLAN.md`, `BUSINESS_TAB_DESIGN.md`, `SEED_VAULT_V1_RUNBOOK.md`, `review/STATE_COMPLIANCE_DESIGN.md`, `review/HOURS_UNDERCOUNT_DIAGNOSIS.md`, `FINDINGS_PIPELINE.md`, `barnes-shelly-chat-portal-design.md`, `08_RUNBOOK.md`, `OPS_WINDOW.md`, `DOCS_ALIGNMENT.md`, `review/LOOP_CLOSING_REVIEW_2026-07-15.md`, `review/CHARTER_ALIGNMENT_SWEEP_2026-07-16.md`, `SYSTEM_PROMPTS.md`, `PROJECT_CONTEXT.md`, `RUNBOOK_FIRESTORE_PITR.md`.
-
-**This is not necessarily a problem** — several are deliberately stable reference documents (`STONEBRIDGE_BIBLE.md`, `ENGINE_V2.md`, `ECONOMY_AUDIT_PART1/2.md`) or point-in-time audits correctly marked `CURRENT` for their findings rather than `HISTORICAL`. Same pattern and same doc set as last cycle — no new drift here, flagged for a human spot-check as before.
+Same pattern as every prior cycle — several are deliberately stable reference documents (`STONEBRIDGE_BIBLE.md`, `ENGINE_V2.md`) or point-in-time audits correctly marked `CURRENT` for their findings rather than `HISTORICAL`. Not auto-fixed (requires reading each doc to assess, per policy). Flagged for a human spot-check if those surfaces are still active.
 
 ---
 
 ## Largest Files (over 1,000 lines)
 
-| Lines | File | Change from last report |
-|-------|------|--------------------------|
-| 3,295 | `src/features/planner-chat/PlannerChatPage.tsx` | +3 |
-| 2,764 | `src/features/records/records.logic.test.ts` | +0 (test file) |
-| 2,641 | `functions/src/ai/chat.ts` | +0 |
-| 2,417 | `src/features/shelly-chat/useShellyChatActions.logic.test.ts` | **+206** (test file) |
-| 2,266 | `functions/src/ai/tasks/shellyChat.test.ts` | **+194** (test file) |
+| Lines | File | Change from last report (2026-08-24) |
+|-------|------|--------------------------------------|
+| 3,465 | `src/features/planner-chat/PlannerChatPage.tsx` | +170 |
+| 3,051 | `functions/src/ai/chat.ts` | **+410** |
+| 2,942 | `src/features/records/records.logic.test.ts` | +178 (test file) |
+| 2,670 | `src/features/shelly-chat/useShellyChatActions.logic.test.ts` | +253 (test file) |
+| 2,414 | `src/features/books/BookEditorPage.tsx` | **+301** |
+| 2,299 | `src/features/planner-chat/chatPlanner.logic.test.ts` | +133 (test file) |
+| 2,266 | `functions/src/ai/tasks/shellyChat.test.ts` | +0 |
 | 2,218 | `src/features/quest/useQuestSession.ts` | +0 |
-| 2,166 | `src/features/planner-chat/chatPlanner.logic.test.ts` | **+270** (test file) |
-| 2,113 | `src/features/books/BookEditorPage.tsx` | +0 |
-| 1,938 | `functions/src/ai/tasks/shellyChat.ts` | **+219** (production — see Decomposition Candidates) |
+| 1,949 | `functions/src/ai/tasks/shellyChat.ts` | +11 — still just under 2,000 (see Decomposition Candidates) |
 | 1,876 | `src/features/avatar/MyAvatarPage.tsx` | +0 |
-| 1,712 | `src/features/records/dataReviewExport.logic.ts` | -1 |
-| 1,623 | `src/features/workshop/WorkshopPage.tsx` | +0 |
-| 1,617 | `functions/src/ai/contextSlices.ts` | +0 |
+| 1,816 | `src/features/workshop/WorkshopPage.tsx` | **+193** |
+| 1,712 | `src/features/records/dataReviewExport.logic.ts` | +0 |
+| 1,655 | `src/features/planner-chat/chatPlanner.logic.ts` | +111 |
+| 1,627 | `functions/src/ai/contextSlices.ts` | +10 |
 | 1,606 | `src/features/avatar/VoxelCharacter.tsx` | +0 |
-| 1,592 | `src/features/today/TodayChecklist.tsx` | +1 |
-| 1,544 | `src/features/planner-chat/chatPlanner.logic.ts` | +0 |
+| 1,605 | `src/features/today/TodayChecklist.tsx` | +13 |
 | 1,492 | `functions/src/ai/tasks/monthlyReview.ts` | +0 |
 | 1,464 | `src/features/records/RecordsPage.tsx` | +0 |
-| 1,365 | `src/features/today/TodayPage.tsx` | +0 |
-| 1,295 | `src/features/dad-lab/LabReportForm.tsx` | +152 |
-| 1,287 | `src/features/shelly-chat/parseChatActions.test.ts` | **+230** (test file) |
-| 1,242 | `src/features/shelly-chat/useShellyChatActions.ts` | +130 |
-| 1,233 | `src/features/evaluate/EvaluateChatPage.tsx` | +0 |
-| 1,207 | `src/features/records/records.logic.ts` | +0 |
-| 1,181 | `src/features/today/KidTodayView.tsx` | +25 |
+| 1,389 | `src/features/books/useBookGenerateChat.ts` | new to >1,000 table |
+| 1,387 | `src/features/today/TodayPage.tsx` | +22 |
+| 1,360 | `src/features/shelly-chat/useShellyChatActions.ts` | +118 |
+| 1,307 | `src/features/shelly-chat/parseChatActions.test.ts` | +20 (test file) |
+| 1,302 | `functions/src/ai/tasks/monthlyReviewData.test.ts` | new to >1,000 table |
+| 1,302 | `functions/src/ai/evaluate.ts` | +190 |
+| 1,295 | `src/features/dad-lab/LabReportForm.tsx` | +0 |
+| 1,266 | `src/features/books/printBook.ts` | new to >1,000 table |
+| 1,251 | `functions/src/ai/tasks/monthlyReviewData.ts` | +129 |
+| 1,242 | `src/features/evaluate/EvaluateChatPage.tsx` | +9 |
+| 1,198 | `src/features/today/KidTodayView.tsx` | +17 |
+| 1,196 | `src/features/shelly-chat/useShellyChatFlows.ts` | +62 |
+| 1,180 | `src/features/books/BookshelfPage.tsx` | +84 |
+| 1,153 | `src/core/types/planning.ts` | +78 |
 | 1,150 | `functions/src/ai/tasks/monthlyReview.test.ts` | +0 |
-| 1,134 | `src/features/shelly-chat/useShellyChatFlows.ts` | +0 |
-| 1,122 | `functions/src/ai/tasks/monthlyReviewData.ts` | +0 |
-| 1,114 | `src/features/dad-lab/DadLabPage.tsx` | +36 |
-| 1,112 | `functions/src/ai/evaluate.ts` | +0 |
+| 1,139 | `src/features/settings/DevAdminTab.tsx` | +93 |
+| 1,138 | `functions/src/ai/chat.test.ts` | +37 |
+| 1,120 | `src/features/progress/CurriculumTab.tsx` | new to >1,000 table |
+| 1,114 | `src/features/dad-lab/DadLabPage.tsx` | +0 |
 | 1,104 | `src/features/settings/AvatarAdminTab.tsx` | +0 |
-| 1,101 | `functions/src/ai/chat.test.ts` | +0 (test file) |
-| 1,096 | `src/features/books/BookshelfPage.tsx` | +0 |
-| 1,075 | `src/core/types/planning.ts` | +0 |
-| 1,067 | `src/features/quest/ReadingQuest.tsx` | +1 |
-| 1,067 | `functions/src/ai/contextSlices.test.ts` | **NEW to >1,000 table** (test file) |
-| 1,046 | `src/features/settings/DevAdminTab.tsx` | +0 |
-| 1,002 | `src/features/books/printBook.ts` | +0 |
+| 1,102 | `src/features/records/records.logic.ts` | +0 |
+| 1,080 | `src/features/settings/StickerLibraryTab.tsx` | new to >1,000 table |
+
+(Table truncated at ~1,080L for length; 130 files total exceed 500 lines, up from the prior cycle.)
 
 ---
 
 ## Decomposition Candidates
 
-No production file crossed 2,000 lines for the first time this cycle. The four known >2,000-line production files are unchanged in status:
+Two production files crossed size milestones worth flagging this cycle:
 
 | File | Lines | Status |
 |------|-------|--------|
-| `PlannerChatPage.tsx` | 3,295 | KNOWN, flat this cycle (+3). `CLAUDE.md`'s tech-debt note already reads 3,295L — accurate, no drift. |
-| `chat.ts` (CF) | 2,641 | KNOWN — `buildQuestPrompt` alone 400+ lines. No growth. `CLAUDE.md` note says 2,548L — now stale by 93 lines. |
-| `useQuestSession.ts` | 2,218 | KNOWN — quest/comprehension/fluency/encoding all in one hook. No growth. `CLAUDE.md` note says 2,161L — now stale by 57 lines. |
-| `BookEditorPage.tsx` | 2,113 | KNOWN — handlers interleaved but clear section boundaries. No growth. `CLAUDE.md` note says 2,103L — now stale by 10 lines. |
+| `chat.ts` (CF) | 3,051 | KNOWN, but **+410 lines this cycle** — the fastest-growing large file. `buildQuestPrompt` was already 400+ lines at the last measurement; this needs a fresh look. `CLAUDE.md`'s tech-debt note still reads 2,641L — now **410 lines stale**. |
+| `BookEditorPage.tsx` | 2,414 | KNOWN, **+301 lines this cycle** — consistent with the FEAT-187/193/195/197 book-generation feature arc landing in this window. `CLAUDE.md`'s note reads 2,113L — now **301 lines stale**. |
+| `PlannerChatPage.tsx` | 3,465 | KNOWN, +170 this cycle. `CLAUDE.md`'s note reads 3,295L — now **170 lines stale**. |
+| `useQuestSession.ts` | 2,218 | KNOWN, flat. `CLAUDE.md`'s note reads 2,218L — accurate, no drift. |
 
-**Watch-list update:** `functions/src/ai/tasks/shellyChat.ts`, flagged last cycle at 1,719L as "the closest unlisted file to the 2,000-line threshold," grew **+219 lines to 1,938L** this cycle — now within 62 lines of the auto-flag threshold. Its paired test file `shellyChat.test.ts` also grew +194L (2,072→2,266), and the client-side sibling `useShellyChatActions.ts` grew +130L (1,112→1,242). The shelly-chat surface is still the fastest-growing area in the codebase (see Test Coverage by Feature: shelly-chat 23→25 test files). **Recommend adding `shellyChat.ts` to `CLAUDE.md`'s Known Technical Debt list next cycle if it crosses 2,000L**, since it will then be the fifth production file over that line and is not currently named there.
+**`functions/src/ai/tasks/shellyChat.ts` (1,949L)** is still the closest unlisted file to the 2,000-line threshold (flagged at 1,938L last cycle, then 1,719L the cycle before that) — grew only +11 lines this cycle, essentially flat, but has not shrunk. **`functions/src/ai/evaluate.ts` grew +190 lines** (1,112→1,302) — worth watching if that pace continues.
 
 ---
 
@@ -188,22 +194,39 @@ No production file crossed 2,000 lines for the first time this cycle. The four k
 
 ### Auto-Fixed
 
-- **`docs/MASTER_OUTLINE.md` stats block:** TypeScript lines 270,926→275,572; Commits 3,047→3,103; Test files 397→405. Firestore collections, Cloud Functions, Chat task types, and Routes were already correct.
-- Ran `npm run lint -- --fix` (implicitly verified via `npm run lint`): no auto-fixable issues found; the 3 pre-existing `react-hooks/exhaustive-deps` warnings require dependency-array judgment calls and were left as-is.
+- **`docs/MASTER_OUTLINE.md` stats block:** TypeScript lines 281,460→317,104; Commits 3,129→3,403; Test files 421→537; Firestore collections 48→47.
+- **`docs/MASTER_OUTLINE.md` Kid Navigation line:** removed the stale `My Stuff` entry (FEAT-186 removed it from `AppShell.tsx`'s `kidNavItems`; the doc line hadn't caught up). See Navigation section above.
+- Ran `npm run lint` (0 auto-fixable issues found — same 3 pre-existing `react-hooks/exhaustive-deps` warnings, dependency-array judgment calls, left as-is) and `npm run docs:check -- --fix` (made no changes — nothing to auto-fix, all HARD checks already passing).
 
 ### Auto-Fixed (by companion)
 
-Companion pass found nothing further to fix this cycle: Phase 3 turned up zero gaps against companion Rules 1–5 (no undocumented task types, no undocumented Cloud Functions, no missing collections, no nav mismatch, no unindexed docs — all were already clean before the companion ran). The remaining findings below are all in categories the companion explicitly does not auto-fix (stale doc status, dead exports, bundle size, `CLAUDE.md` prose, breaking dependency upgrades).
+Companion pass found nothing further in Rules 1, 2, 3, or 5 (no undocumented task types, no undocumented Cloud Functions, no missing collections, no unindexed docs). **Rule 4 (nav mismatch) found and fixed one real gap** — see Navigation section above; this is the first cycle Rule 4 has had anything to do.
 
 ### Needs Human Attention
 
-- **`CLAUDE.md`'s size notes for `chat.ts`, `useQuestSession.ts`, and `BookEditorPage.tsx` are stale** (93L, 57L, and 10L behind, respectively — see Decomposition Candidates table). Not auto-fixed — `CLAUDE.md` prose is excluded from this audit's write scope by policy.
-- **`functions/src/ai/tasks/shellyChat.ts` (1,938L, +219 this cycle) is approaching the 2,000-line decomposition threshold** and is not yet named in `CLAUDE.md`'s Known Technical Debt list. Recommend adding it next cycle if it crosses 2,000L, or proactively now given its growth rate.
-- **Dead-export scan skipped this cycle**, same as last — budget went to unshallowing git history, installing dependencies from scratch in a fresh sandbox, and the full build/lint/6,125+1,014-test double run (root + functions). Recommend a real dead-code tool (`ts-prune` or `knip`) over the grep heuristic used in older cycles, whenever it's picked back up.
-- **Dev-dependency-only npm audit findings remain** (9 on root, 2 in functions — see Build Status table). Both require `--force`/breaking upgrades and are outside the production dependency tree. Low priority per policy, unchanged assessment from prior cycles.
-- **Bundle size 4,352.08 kB (1,297.20 kB gzip), +14.42 kB / +5.05 kB gzip since last report:** modest growth, consistent with the +5,484 line-count delta. Heaviest single chunk is still the main `index-*.js` bundle (Three.js avatar, jsPDF print, curriculum map data, shelly-chat/chat surface). Route-level `React.lazy` splitting would reduce initial load. Not fixed — architectural decision, same recommendation as every prior cycle.
-- **Lint warnings (3, unchanged):** `react-hooks/exhaustive-deps` in `EvaluateChatPage.tsx:293`, `useQuestSession.ts:814`, `useQuestSession.ts:2083` — all involve `sessionTimer`. Not auto-fixable without reviewing timer semantics.
-- **51 of 59 unique `CURRENT`-marked docs are >30 days untouched** (see the Stale Docs methodology-correction note above — this cycle's figures aren't reliably comparable to the last report's 48/56, since it's unverified whether that count had the same extraction bug this cycle's did). Most look like legitimately-stable reference/design docs. Recommend a human skim pass on the oldest cluster (`ENGINE_V2.md` at 174d, `KNOWLEDGE_MINE_BRIEF.md` at 155d) if those surfaces are still active.
+- **NEW this cycle, and will block the next deploy — a latent test-suite gap, not an app regression, but not CI-invisible either.** See the **CRITICAL finding** section above in full: `check-docs-alignment.test.mjs`'s historical-ledger-replay test fails against a full git history (66 false positives on old `FEAT-112` rows). `ci.yml` (PR checks, push to `main`) checks out shallow and self-skips the assertion — unaffected. **`deploy.yml` checks out with `fetch-depth: 0` and runs the full suite — the next push to `deploy` will hit this failure and the Firebase deploy will not run.** This surfaced only because this cycle unshallowed the repo for accurate commit-count stats; a human needs to narrow the `LANDED_STATUS_PATTERNS`/`OPEN_PR_STATUS_PATTERNS` regexes (or the test's expected-offenders list) to handle the "amendment PR, original already merged" narrative shape **before the next `deploy`-branch push**, not at leisure.
+- **`npm audit --production` regressed from 0→1 (root) and 0→3 (functions) moderate-severity findings** this cycle (`fflate` on root; `qs`/`body-parser`/`express` chain on functions). All moderate, all have non-breaking `npm audit fix` available. Per policy (Rule 8: moderate-only → note, don't fix), left for a human to apply `npm audit fix` at their discretion — non-breaking, should be safe, but is a dependency-tree change outside this audit's mechanical-fix scope.
+- **`CLAUDE.md`'s size notes for `chat.ts`, `BookEditorPage.tsx`, and `PlannerChatPage.tsx` are now stale by 410L, 301L, and 170L respectively** — see Decomposition Candidates. Not auto-fixed — `CLAUDE.md` prose is excluded from this audit's write scope by policy.
+- **`functions/src/ai/chat.ts` grew +410 lines this cycle (2,641→3,051L)**, the single largest jump of any tracked file. Worth a decomposition look given it was already flagged as a known-debt file at a much smaller size.
+- **`src/features/shelly-chat/ShellyChatPage.tsx` is 846 lines**, but `CLAUDE.md`'s Known Technical Debt section describes it as "ARCH-09 FIXED (1,632→647L)… Stable." — it has grown +199 lines (+31%) since that figure was written and is no longer flat. Not auto-fixed (CLAUDE.md prose out of scope), flagged for a human to decide whether "Stable" still applies.
+- **Dead-export scan skipped this cycle**, same as every prior cycle — budget went to the full unshallow + fresh-sandbox install + the double build/lint/test run (root 7,789 tests + functions 1,371 tests). Recommend a real dead-code tool (`ts-prune` or `knip`) over the grep heuristic whenever this is picked back up.
+- **Dev-dependency-only npm audit findings remain** (1 high + 9 moderate on root full audit beyond production, 1 high + 6 moderate on functions) — see Build Status table. Require `--force`/breaking upgrades, outside the production dependency tree. Low priority per policy, unchanged assessment from prior cycles.
+- **Bundle size 4,428.50 kB (1,326.22 kB gzip), +76.42 kB / +29.02 kB gzip since last report:** growth roughly tracks the +41,532 line-count delta. Main chunk (Three.js avatar, jsPDF print, curriculum map data, shelly-chat/chat surface) is still unsplit. Route-level `React.lazy` splitting would reduce initial load. Not fixed — architectural decision, same recommendation as every prior cycle.
+- **Lint warnings (3, unchanged):** `react-hooks/exhaustive-deps` in `EvaluateChatPage.tsx:295`, `useQuestSession.ts:814`, `useQuestSession.ts:2083` — all involve `sessionTimer`. Not auto-fixable without reviewing timer semantics.
+- **43 of 64 unique `CURRENT`-marked docs are >30 days untouched** (up from 51/59 last cycle in absolute count, roughly flat in proportion — 67% vs. 86% last cycle, actually improved as a share, likely from the batch of new CURRENT audits landing recently). Most look like legitimately-stable reference/design docs. Recommend a human skim pass on the oldest cluster (`ENGINE_V2.md` at 187d, `KNOWLEDGE_MINE_BRIEF.md` at 168d) if those surfaces are still active.
+
+---
+
+## docs:check findings (SOFT warnings, informational)
+
+`npm run docs:check` (the repo's own DOC-08/DOC-09 alignment tool) surfaced 10 SOFT warnings that don't fail the build but are worth a human's attention:
+
+- **2 new raw Firestore refs outside the allowlist:** `src/features/progress/ArmorTab.tsx` (raw `xpLedger` collection ref) and `src/features/settings/DevAdminTab.tsx` (raw `days` collection ref). SOFT, not HARD — flagged for review, not auto-fixed (code change, outside this audit's scope).
+- **7 files with `httpsCallable` missing a timeout/AbortController or `finally` in reach** (SOFT — "flips HARD after one clean month"): `AvatarPhotoUpload.tsx`, `generateFace.ts`, `DiagnosticPanel.tsx`/`GenerateNowDialog.tsx`/`MonthlyReviewReader.tsx` (monthly-review), `FoundationsDiagPanel.tsx`, `AvatarAdminTab.tsx`.
+- **1 file with an image file-input and no visible downscale/compress call:** `src/features/records/PortfolioPage.tsx`.
+- **98 swallowed `catch()` blocks across 54 files** (report-only census, not a failure) — heaviest in `PlannerChatPage.tsx`, `RecordsPage.tsx`, `useShellyChatFlows.ts` (5 each).
+
+None of these are new-this-cycle regressions per se (the census is cumulative), but they're surfaced because `docs:check` ran clean on all HARD checks and these are its only open SOFT items. Not fixed — code changes, outside this audit's read-only/doc-only scope.
 
 ---
 
@@ -219,24 +242,24 @@ All 21 task types verified to reference `buildContextForTask`, `CHARTER_PREAMBLE
 
 | Tests (test files) | Feature | Change from last report |
 |-------|---------|--------------------------|
-| 48 | today | +2 |
-| 35 | books | +0 |
-| 25 | shelly-chat | +2 |
+| 86 | books | **+51** |
+| 64 | today | **+16** |
+| 27 | shelly-chat | +2 |
+| 27 | planner-chat | +6 |
 | 23 | business | +0 |
-| 21 | planner-chat | +0 |
 | 20 | watch | +0 |
+| 18 | avatar | +1 |
+| 17 | settings | +4 |
 | 17 | quest | +0 |
-| 17 | avatar | +0 |
-| 15 | dad-lab | +4 |
-| 13 | settings | +0 |
+| 16 | dad-lab | +1 |
+| 13 | progress | +7 |
+| 11 | weekly-review | +10 |
 | 9 | records | +0 |
 | 9 | evaluate | +0 |
-| 7 | foundations-review | +1 |
-| 6 | progress | +1 |
+| 7 | foundations-review | +0 |
+| 6 | workshop | +4 |
 | 6 | monthly-review | +0 |
 | 3 | evaluation | +0 |
-| 2 | workshop | +0 |
-| 1 | weekly-review | +0 |
 | 1 | engine | +0 |
 | 0 | ui-preview *(dev-only gallery — ok)* | +0 |
 | 0 | planner | +0 |
@@ -244,12 +267,12 @@ All 21 task types verified to reference `buildContextForTask`, `CHARTER_PREAMBLE
 | 0 | login | +0 |
 | 0 | auth | +0 |
 
-Same 0-test feature set as every prior cycle (`planner`, `not-found`, `login`, `auth`; `ui-preview` intentionally untested, dev-only). Smaller, broader growth this cycle than last (which was dominated by a +12 shelly-chat jump) — `today` (+2), `shelly-chat` (+2), `dad-lab` (+4), `foundations-review` (+1), `progress` (+1).
+Same 0-test feature set as every prior cycle (`planner`, `not-found`, `login`, `auth`; `ui-preview` intentionally untested, dev-only). The books surface's growth (+51) and today's (+16) dominate this cycle, consistent with the heavy book-generation/reading-level feature arc (FEAT-176 through FEAT-197) and the "Plan My Week walked top to bottom" 14-fix batch (FEAT-205) both landing in this window.
 
 ---
 
 ## Dependency Notes
 
-- **Root (prod):** **0 vulnerabilities** — same as last cycle. Full audit (including dev deps) shows 9 (1 low, 8 moderate) in a `uuid`/`gaxios`/`google-gax` transitive chain; fix needs `--force` (breaking). Left for human review.
-- **Functions (prod):** **0 vulnerabilities** — improved from last cycle's 10 (9 moderate, 1 high); the earlier `sharp` and `firebase-admin`/`uuid` findings no longer appear in the production audit (dependency versions have moved since). Full audit shows 2 moderate (dev-only, `ts-deepmerge` via `firebase-functions-test`); fix needs `--force` (breaking). Left for human review.
-- **Outdated majors available (informational only, not acted on):** `@mui/material`/`@mui/icons-material` 7.x→9.x, `eslint` 9.x→10.x, `firebase-admin` 13.x→14.x, `jsdom` 27.x→30.x, `@types/three` 0.128→0.185. No action taken — major-version bumps are a human decision per policy.
+- **Root (prod):** 1 moderate (`fflate`) — regressed from 0 last cycle. Non-breaking fix available (`npm audit fix`), not applied per policy. Full audit (including dev deps): 12 (1 low, 10 moderate, 1 high) — the high is dev-only; the remainder needs `--force` (breaking). Left for human review.
+- **Functions (prod):** 3 moderate (`qs`/`body-parser`/`express` chain) — regressed from 0 last cycle. Non-breaking fix available, not applied per policy. Full audit: 7 (6 moderate, 1 high, dev-only for the high); fix needs `--force` (breaking) for the remainder. Left for human review.
+- **Outdated majors available (informational only, not acted on):** `@mui/material`/`@mui/icons-material` 7.x→9.x, `eslint` 9.x→10.x, `firebase-admin` 13.x→14.x, `jsdom` 27.x→30.x, `@types/three` 0.128→0.185, `typescript` 5.9→7.0, `vite` 7.3→8.2, `vitest` 3.2→5.0, `three` 0.128→0.185. No action taken — major-version bumps are a human decision per policy.
