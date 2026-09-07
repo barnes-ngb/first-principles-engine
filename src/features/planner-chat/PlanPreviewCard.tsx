@@ -226,8 +226,12 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
           const lockReason = itemEditLockReason?.(dayIndex, itemIndex) ?? null
           const locked = lockReason !== null
           const canSwapWatch = onSwapWatchItem && item.itemType === 'watch'
+          // UX-251: a one-item day has no reorder to offer, so it must not count
+          // toward "this row has actions" either — otherwise a caller passing
+          // only `onMoveItem` would render an empty actions box.
+          const canReorder = !!onMoveItem && totalItems > 1
           const showActions =
-            !!onMoveItem || !!onRemoveItem || !!onMoveItemToDay || !!canSwapWatch
+            canReorder || !!onRemoveItem || !!onMoveItemToDay || !!canSwapWatch
 
           return (
             <Box key={item.id}>
@@ -354,7 +358,7 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
 
                         Nothing is rendered for a one-item day, where both
                         directions are dead ends. */}
-                    {onMoveItem && totalItems > 1 && (
+                    {canReorder && (
                       <IconButton
                         size="small"
                         onClick={(e) =>
