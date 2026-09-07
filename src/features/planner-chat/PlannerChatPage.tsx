@@ -3391,16 +3391,6 @@ ${dayPrompts}`
             </>
           )}
 
-          {/* Global chat drawer — collapsed by default, available across all phases as the power-user escape hatch */}
-          <PlannerChatDrawer
-            messages={messages}
-            inputText={inputText}
-            onInputChange={setInputText}
-            onSend={() => handleSend()}
-            loading={aiLoading}
-            messagesEndRef={chatEndRef}
-          />
-
           {phase === 'review' && currentDraft && (
             <>
               {/* UX-245: this used to carry its own "Want to adjust anything?"
@@ -3454,6 +3444,23 @@ ${dayPrompts}`
               </Dialog>
             </>
           )}
+
+          {/* Global chat drawer — collapsed by default, available across all
+              phases as the power-user escape hatch.
+
+              UX-255: it used to render ABOVE the quick-adjust chips and Print
+              Week Materials, so on the review screen the two ordinary ways to
+              change a plan sat underneath the one labelled *(advanced)*. The
+              advanced thing goes at the bottom — on every phase, which is why it
+              is last in the tree rather than merely below the review block. */}
+          <PlannerChatDrawer
+            messages={messages}
+            inputText={inputText}
+            onInputChange={setInputText}
+            onSend={() => handleSend()}
+            loading={aiLoading}
+            messagesEndRef={chatEndRef}
+          />
         </>
       )}
 
