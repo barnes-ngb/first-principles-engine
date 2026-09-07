@@ -230,6 +230,18 @@ rail, UX-183's dated Generate/Apply buttons, `applyWeekPlan.ts`, `liveDayEdit`'s
 The line held: nothing in this PR edits `PlannerChatPage`'s phase logic, `applyWeekPlan.ts`,
 `liveDayEdit.ts`'s write paths, or any minute computation.
 
+> **2026-09-07 — the layout half of Batch B has since been built (FEAT-208).**
+> `UX-247` · `UX-251` · `UX-255` · `UX-256` · `UX-257` · `UX-258` · `UX-259` · `UX-260` are
+> **FIXED**; see their ledger rows. The property that run holds: at 390×844 the week selector and
+> the setup card's first control are both on the first screen (measured 445 → 273px and
+> 790 → 618px), and the setup screen carries **94 words before Generate, down from 157**. The
+> banner was **moved**, not clamped. Still open, and still an owner decision: `UX-248` / `UX-252` /
+> `UX-253` (the budget — one piece of work with UX-206 / UX-208 / UX-209), `UX-249` (consolidating
+> the two setup components), `UX-250` (the read-aloud picker's write asymmetry) and `UX-254` (a real
+> stepper, only if the one-line version proves too quiet). The table below is FEAT-205's proposal as
+> filed; where FEAT-208 chose differently — UX-259's "split it" turned out to have nothing to split —
+> the ledger row says so.
+
 | Id | Band | Proposed shape |
 |---|---|---|
 | **UX-247** | 2 | Collapse `FoundationsFocusLine` to one clamped line with a *why* expander, **or** move it below the setup card. Placement decision + a component change. |

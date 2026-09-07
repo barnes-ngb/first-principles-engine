@@ -161,14 +161,21 @@ describe('PlanDayCards — what stays locked on a live week (FEAT-138)', () => {
     expect(onUpdateTime).not.toHaveBeenCalled()
   })
 
-  it('the within-day reorder arrows are still gated off once applied', () => {
+  // UX-251 moved the within-day reorder from two bare arrows to one row
+  // overflow. The FEAT-138 property is unchanged and still asserted — offered
+  // before Apply, gated off after — so these two are retargeted at the new
+  // control rather than deleted.
+  const reorderControls = () => screen.queryAllByRole('button', { name: /reorder this item/i })
+
+  it('the within-day reorder is still gated off once applied', () => {
     const onMoveItem = vi.fn()
     renderApplied({ onMoveItem })
+    expect(reorderControls()).toHaveLength(0)
     expect(screen.queryAllByRole('button', { name: /move up/i })).toHaveLength(0)
     expect(screen.queryAllByRole('button', { name: /move down/i })).toHaveLength(0)
   })
 
-  it('offers the reorder arrows before Apply, where the draft IS the plan', () => {
+  it('offers the reorder before Apply, where the draft IS the plan', () => {
     render(
       <PlanDayCards
         draft={PLAN}
@@ -182,6 +189,6 @@ describe('PlanDayCards — what stays locked on a live week (FEAT-138)', () => {
         onRemoveItem={() => {}}
       />,
     )
-    expect(screen.queryAllByRole('button', { name: /move up/i })).toHaveLength(2)
+    expect(reorderControls()).toHaveLength(2)
   })
 })
