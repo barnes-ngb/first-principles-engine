@@ -681,7 +681,19 @@ export default function PlannerChatPage() {
       orderBy('weekKey', 'desc'),
       fsLimit(5),
     )
+    // Codex P2 on PR #1795: this is a one-shot `getDocs`, not a subscription, so
+    // nothing used to stop a slow answer for the PREVIOUS child from landing
+    // after the effect had already re-run for a new one. Whichever request
+    // resolved last won, and every value below is child-scoped — `hasPriorPlan`
+    // picks the wizard or the compact card, `lastPlanDraft` is what "Repeat Last
+    // Week" would clone, and `liveWeekApplied` (UX-256) is a sentence claiming a
+    // child's current week is applied. Switching from a child with an applied
+    // week to one without could leave that sentence on screen for a week that
+    // was never planned, which is precisely the thing that notice must never
+    // say. The cleanup flag drops an obsolete answer instead of writing it.
+    let cancelled = false
     void getDocs(q).then((snap) => {
+      if (cancelled) return
       const priorDocs = snap.docs.filter((d) => d.data().weekKey !== weekRange.start)
       setHasPriorPlan(priorDocs.length > 0)
       const withDraft = priorDocs.find((d) => {
@@ -698,10 +710,14 @@ export default function PlannerChatPage() {
           PlannerConversationStatus.Applied,
       )
     }).catch(() => {
+      if (cancelled) return
       setHasPriorPlan(false)
       setLastPlanDraft(null)
       setLiveWeekApplied(false)
     })
+    return () => {
+      cancelled = true
+    }
   }, [familyId, activeChildId, weekRange.start, liveWeekStart])
 
   // Load existing conversation
