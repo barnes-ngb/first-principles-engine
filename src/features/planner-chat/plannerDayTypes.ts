@@ -201,6 +201,33 @@ export function applyDayTypeToDay(
 }
 
 /**
+ * `draft` with one day's items taken back from `base`. Pure.
+ *
+ * What makes a pick **reversible** (Codex round 1, P1). The transforms above are
+ * lossy — a Life day's items are gone, a Light day's are replaced — so re-shaping
+ * an already-shaped draft would leave *Life → Full* showing an EMPTY day under a
+ * chip reading Full, and `applicableDays` skips an empty day, so a mis-tap would
+ * silently cost the parent a whole day of plan with nothing on screen saying so.
+ *
+ * Only the named day is restored; every other day keeps whatever the parent has
+ * since edited into it. A missing base (a reload, a draft restored from the
+ * conversation) leaves the day exactly as it is rather than inventing one.
+ */
+export function restoreDayFromBase(
+  draft: DraftWeeklyPlan,
+  base: DraftWeeklyPlan | null | undefined,
+  day: string,
+): DraftWeeklyPlan {
+  if (!base) return draft
+  const original = base.days.find((d) => d.day === day)
+  if (!original) return draft
+  return {
+    ...draft,
+    days: draft.days.map((d) => (d.day === day ? original : d)),
+  }
+}
+
+/**
  * The draft with every day forced to its type. **This is the control.**
  *
  * Called after parsing on every path that produces a fresh draft — the AI plan,

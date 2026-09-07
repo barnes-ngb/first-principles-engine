@@ -298,6 +298,56 @@ describe('a week with nothing set aside', () => {
   })
 })
 
+// ── Codex round 1, P1: Apply re-shapes rather than trusting the caller ───────
+describe('Apply re-enforces the day types at the write', () => {
+  const packing = [{ day: 'Tuesday', dayType: DayType.Life }]
+
+  it('skips a set-aside day even when the caller hands it an UNSHAPED draft', async () => {
+    // The page shapes every generated draft, but a draft can be edited after
+    // that: `MoveToDayDialog` offers every weekday, so an accepted item can be
+    // appended onto a set-aside day between the last enforcement and Apply.
+    // Without re-shaping here, `applicableDays` would write that day a checklist
+    // while this same call sets its `planType` to `life` — the plan writing work
+    // Today then hides.
+    const result = await applyDraftWeek(
+      baseInput({ draft: fullWeek(), dayTypes: packing }),
+    )
+    expect(result.daysWritten).not.toContain(TUESDAY)
+    expect(countedMinutes(writtenDayLogs())).toBe(0)
+  })
+
+  it('is idempotent — an already-shaped draft applies identically', async () => {
+    const shaped = enforceDayTypes(fullWeek(), packing, [])
+    const fromShaped = await applyDraftWeek(baseInput({ draft: shaped, dayTypes: packing }))
+
+    vi.clearAllMocks()
+    getDocMock.mockResolvedValue({ exists: () => false, data: () => undefined })
+    setDayLogGuardedMock.mockResolvedValue(undefined)
+
+    const fromRaw = await applyDraftWeek(baseInput({ draft: fullWeek(), dayTypes: packing }))
+    expect(fromRaw.daysWritten).toEqual(fromShaped.daysWritten)
+  })
+
+  it('keeps a set-aside day out of the week\'s goals', async () => {
+    await applyDraftWeek(baseInput({ draft: fullWeek(), dayTypes: packing }))
+    const [, weekDoc] = setDocMock.mock.calls.find(
+      ([ref]) => (ref as { kind?: string }).kind === 'weeks',
+    )!
+    const goals = (weekDoc as { childGoals: { goals: string[] }[] }).childGoals[0].goals
+    // Five days of two items would be 10; Tuesday's two are gone.
+    expect(goals).toHaveLength(8)
+  })
+
+  it('re-templates a light day the caller did not shape', async () => {
+    const lightWed = [{ day: 'Wednesday', dayType: DayType.Light }]
+    await applyDraftWeek(baseInput({ draft: fullWeek(), dayTypes: lightWed }))
+    const wednesday = writtenDayLogs().find((l) => l.date === '2026-08-19')!
+    const labels = (wednesday.checklist ?? []).map((i) => i.label)
+    expect(labels.some((l) => l.startsWith('Math facts sprint (5 min)'))).toBe(true)
+    expect(labels.some((l) => l.startsWith('GATB Math'))).toBe(false)
+  })
+})
+
 describe('a light day', () => {
   it('applies the shared template as the day\'s checklist', async () => {
     const lightWed = [{ day: 'Wednesday', dayType: DayType.Light }]

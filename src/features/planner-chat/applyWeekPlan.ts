@@ -76,6 +76,7 @@ import {
   type WeekDay,
 } from './chatPlanner.logic'
 import {
+  enforceDayTypes,
   plannedPlanTypeWrite,
   resolvePlannerDayType,
 } from './plannerDayTypes'
@@ -148,11 +149,12 @@ export interface ApplyWeekPlanInput {
   /**
    * The parent's per-day Full / Light / Life picks (UX-261).
    *
-   * By the time a draft reaches here the picks have ALREADY shaped it —
-   * `enforceDayTypes` emptied every Life day at parse time, so `applicableDays`
-   * skips those days and no DayLog write happens for them. What this field adds
-   * is the other half of a Life day, which lives in a **different collection**:
-   * `dailyPlans.planType`. See {@link writeDayTypePlanTypes}.
+   * Used for **both** halves of a day type, and it is authoritative for both:
+   * the draft is re-shaped here at the write (see `applyDraftWeek`, not left to
+   * the caller having done it), so a Life day carries no items, `applicableDays`
+   * skips it and no DayLog write happens for it; and the other half of a Life
+   * day, which lives in a **different collection** — `dailyPlans.planType` — is
+   * written by {@link writeDayTypePlanTypes}.
    *
    * Omitted by every caller that has no such control (the chat's lane), which
    * reads as "every day Full" and writes nothing to `dailyPlans` at all.
@@ -509,11 +511,29 @@ export async function applyDraftWeek(
 
   const result: ApplyWeekPlanResult = { daysWritten: [], weekPlanWritten: false }
 
+  // UX-261, Codex round 1 (P1): **re-enforce the day types HERE**, at the write,
+  // rather than trusting that the caller's draft is still shaped.
+  //
+  // The page shapes every generated draft, but a draft can be edited AFTER that
+  // last enforcement and before Apply: `MoveToDayDialog` offers every weekday,
+  // so `handleMoveItemToDay` could append an accepted item onto a set-aside day.
+  // `applicableDays` would then include it and write a checklist to a day whose
+  // `planType` this same call is about to set to `life` — the plan writing work
+  // that Today hides, which is the exact failure `plannedPlanTypeWrite`'s revert
+  // rule exists to prevent from the other direction.
+  //
+  // So the shaping is idempotent and belongs in the one Apply, for the same
+  // reason `weekChoice` is re-resolved here (FEAT-196): a rail every caller must
+  // remember is a rail one caller will forget. Both transforms are idempotent —
+  // clearing an empty day and re-templating a templated day are both no-ops — so
+  // running it a second time over an already-shaped draft changes nothing.
+  const shapedDraft = enforceDayTypes(draft, input.dayTypes, [])
+
   try {
-    await upsertWeekPlan(input)
+    await upsertWeekPlan({ ...input, draft: shapedDraft })
     result.weekPlanWritten = true
 
-    for (const dayPlan of applicableDays(draft)) {
+    for (const dayPlan of applicableDays(shapedDraft)) {
       const dayItems = dayPlan.items.filter((item) => item.accepted)
       const dateKey = dateKeyForDayPlan(weekStart, dayPlan.day as WeekDay)
       const dayLogRef = doc(daysCollection(familyId), dayLogDocId(dateKey, childId))

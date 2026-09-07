@@ -13,6 +13,7 @@ import {
   plannerDayTypeLabel,
   PLANNER_DAY_TYPE_CHOICES,
   resolvePlannerDayType,
+  restoreDayFromBase,
   setPlannerDayType,
 } from './plannerDayTypes'
 
@@ -203,6 +204,54 @@ describe('enforceDayTypes', () => {
     const original = week([day('Tuesday', ['Math'])])
     enforceDayTypes(original, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
     expect(original.days[0].items).toHaveLength(1)
+  })
+})
+
+// ── Codex round 1, P1: a pick must be reversible ─────────────────────────────
+describe('restoreDayFromBase', () => {
+  const base = week([day('Monday', ['Math']), day('Tuesday', ['Math', 'Reading'])])
+
+  it('makes Life → Full give the day its items back, not leave it empty', () => {
+    // Without this, the chip reads Full over an empty day, and `applicableDays`
+    // skips an empty day — so a mis-tap silently costs a whole day of plan.
+    const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
+    expect(setAside.days.find((d) => d.day === 'Tuesday')!.items).toEqual([])
+
+    const backToFull = enforceDayTypes(
+      restoreDayFromBase(setAside, base, 'Tuesday'),
+      [{ day: 'Tuesday', dayType: DayType.Normal }],
+      appBlocks,
+    )
+    expect(backToFull.days.find((d) => d.day === 'Tuesday')!.items).toHaveLength(2)
+  })
+
+  it('makes Life → Light rebuild from the real day, not from an empty one', () => {
+    const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
+    const toLight = enforceDayTypes(
+      restoreDayFromBase(setAside, base, 'Tuesday'),
+      [{ day: 'Tuesday', dayType: DayType.Light }],
+      appBlocks,
+    )
+    const titles = toLight.days.find((d) => d.day === 'Tuesday')!.items.map((i) => i.title)
+    expect(titles).toContain('Math facts sprint (5 min)')
+  })
+
+  it('restores only the named day, so edits to the others survive', () => {
+    const edited = {
+      ...base,
+      days: base.days.map((d) =>
+        d.day === 'Monday' ? { ...d, items: [] } : d,
+      ),
+    } as DraftWeeklyPlan
+    const result = restoreDayFromBase(edited, base, 'Tuesday')
+    expect(result.days.find((d) => d.day === 'Monday')!.items).toEqual([])
+    expect(result.days.find((d) => d.day === 'Tuesday')!.items).toHaveLength(2)
+  })
+
+  it('leaves the draft alone with no base, or an unknown day', () => {
+    expect(restoreDayFromBase(base, null, 'Tuesday')).toBe(base)
+    expect(restoreDayFromBase(base, undefined, 'Tuesday')).toBe(base)
+    expect(restoreDayFromBase(base, base, 'Saturday')).toBe(base)
   })
 })
 
