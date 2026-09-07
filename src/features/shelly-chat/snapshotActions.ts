@@ -73,20 +73,28 @@ export function snapshotActionFootnote(action: SnapshotAction, childName: string
  * nothing matched; the chat discarded that return value, so the card fell
  * through to `status: 'applied'` and showed a green tick over no write at all.
  *
- * Two ways to get here, and the sentence has to be true of both. The match is
- * exact slug equality — `generateBlockId` lowercases, trims and collapses
- * non-alphanumerics, nothing more — so *"th sound"* misses a skill labelled
- * *"th digraph"*; and against a child who has **no snapshot yet**,
- * `markSkillProgress` can never match anything, so London plus *"he's got all
- * his letter sounds now"* wrote nothing every time.
+ * **`changed: false` does not mean "nothing matched" (Codex P2, round 1).** For
+ * `markSkillProgress` it has two quite different causes, and the sentence has to
+ * be true of both:
  *
- * **Not an error, and not a retry.** Nothing went wrong and nothing failed —
- * the words simply named nothing on the record, and confirming the identical
- * card again would match nothing again. So the sentence states what happened,
- * and gives her the one thing that would work: the skill named the way the
- * Skill Snapshot spells it. The three `add*` kinds share the swallow but not the
- * harm — a deduped add is a no-op because the state is already what was asked
- * for — so each gets its own true sentence rather than one generic one.
+ *  - **Nothing matched.** The match is exact slug equality — `generateBlockId`
+ *    lowercases, trims and collapses non-alphanumerics, nothing more — so *"th
+ *    sound"* misses a skill labelled *"th digraph"*; and against a child with no
+ *    snapshot yet, nothing can ever match.
+ *  - **It matched and there was nothing to do.** A priority skill already at
+ *    `Secure` / `IndependentConsistent`, a block already at or past the
+ *    requested status, or a `DEFER` block all return early without mutating.
+ *
+ * The first draft of this asserted the first cause, so a parent whose record
+ * ALREADY said what she asked was told her words matched nothing and invited to
+ * rename and retry — a retry that cannot help, over a misreport of the child's
+ * record. The writer does not distinguish the two and it is not this run's to
+ * change (its one edit was an additive input field, and that went to the owner
+ * first), so the wording carries both and asserts neither.
+ *
+ * **Not an error.** Nothing went wrong and nothing failed. The three `add*`
+ * kinds share the swallow but not the ambiguity — for them `changed: false` has
+ * exactly one cause, the dedup, so each keeps its own definite sentence.
  */
 export function snapshotNoMatchNotice(action: SnapshotAction, childName: string): string {
   switch (action.kind) {
@@ -97,6 +105,6 @@ export function snapshotNoMatchNotice(action: SnapshotAction, childName: string)
     case 'addStopRule':
       return `"${action.rule}" is already one of ${childName}'s stop rules, so nothing was changed.`
     case 'markSkillProgress':
-      return `Nothing on ${childName}'s Skill Snapshot matched "${action.skill}", so nothing was changed. Tell me the skill the way it appears on Progress → Skill Snapshot and I'll propose it again.`
+      return `Nothing changed on ${childName}'s Skill Snapshot — either it already says this, or nothing on it matched "${action.skill}". If it should have matched, name the skill the way Progress → Skill Snapshot does and I'll propose it again.`
   }
 }

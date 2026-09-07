@@ -843,8 +843,15 @@ describe('useShellyChatActions', () => {
     const card = result.current.pending[0]
     expect(card.status).toBe('no-change')
     expect(card.status).not.toBe('applied')
-    expect(card.notice).toContain('Nothing on Lincoln\'s Skill Snapshot matched "th sound"')
+    // Codex P2, round 1: `changed: false` has two causes — nothing matched, OR
+    // it matched and the record already said it (a skill already at Secure, a
+    // block already at the requested status, a DEFER block). The writer does not
+    // distinguish them, so the sentence must assert neither.
+    expect(card.notice).toContain('Nothing changed on Lincoln\'s Skill Snapshot')
+    expect(card.notice).toContain('either it already says this')
+    expect(card.notice).toContain('nothing on it matched "th sound"')
     expect(card.notice).toContain('Progress → Skill Snapshot')
+    expect(card.notice).not.toMatch(/^Nothing on Lincoln's Skill Snapshot matched/)
     // Not a failure: the card must not carry an error or offer a retry.
     expect(card.error).toBeUndefined()
   })

@@ -12,7 +12,9 @@ import {
   activityTypeChoices,
   describeActivityType,
   sectionTitleForType,
+  tracksPosition,
   withActivityType,
+  WORKBOOK_WITHOUT_POSITION_NOTE,
   type AddActivityAction,
 } from './activityTypeChoices'
 import { CURRICULUM_SECTION_TITLE, SECTION_FOR_TYPE } from '../progress/curriculumGrouping'
@@ -57,6 +59,47 @@ describe('every ActivityType has words a parent recognises', () => {
   it('is the workbook option that mentions the photo scan', () => {
     expect(ACTIVITY_TYPE_WORDS[ActivityType.Workbook].note).toMatch(/photo/i)
     expect(ACTIVITY_TYPE_WORDS[ActivityType.Workbook].note).toMatch(/lesson number/i)
+  })
+})
+
+// ── The workbook note may not promise a scan the write can't deliver ─────────
+//
+// Codex P2, round 1. `applyCurriculumAction` derives `scannable` from
+// `totalUnits`/`currentPosition` alone, and `findWorkbookConfigId` filters
+// `scannable !== false` — so picking Workbook on a proposal with neither field
+// writes a workbook a page photo can never match. The picker's whole
+// justification is that a card must not claim what the write does not do.
+describe('the workbook note follows what the write will actually produce', () => {
+  it('promises the photo scan only when the proposal carries a lesson number', () => {
+    const positioned = activityTypeChoices(add({ totalUnits: 60, currentPosition: 1 }))
+    const workbook = positioned.find((c) => c.type === ActivityType.Workbook)
+    expect(workbook?.note).toMatch(/photo of a page can find it/)
+  })
+
+  it('says plainly that a scan cannot find it when there is no lesson number', () => {
+    const bare = activityTypeChoices(add())
+    const workbook = bare.find((c) => c.type === ActivityType.Workbook)
+    expect(workbook?.note).toBe(WORKBOOK_WITHOUT_POSITION_NOTE)
+    expect(workbook?.note).toMatch(/cannot find it/)
+    expect(workbook?.note).toMatch(/Progress → Curriculum/)
+  })
+
+  it('is still offerable — the fix is honesty, not a refusal', () => {
+    const workbook = activityTypeChoices(add()).find((c) => c.type === ActivityType.Workbook)
+    expect(workbook?.disabledReason).toBeUndefined()
+  })
+
+  it('changes no other type’s note', () => {
+    const bare = activityTypeChoices(add())
+    for (const choice of bare.filter((c) => c.type !== ActivityType.Workbook)) {
+      expect(choice.note, choice.type).toBe(ACTIVITY_TYPE_WORDS[choice.type].note)
+    }
+  })
+
+  it('tracksPosition reads either field, matching the write’s own derivation', () => {
+    expect(tracksPosition(add())).toBe(false)
+    expect(tracksPosition(add({ totalUnits: 60 }))).toBe(true)
+    expect(tracksPosition(add({ currentPosition: 1 }))).toBe(true)
   })
 })
 

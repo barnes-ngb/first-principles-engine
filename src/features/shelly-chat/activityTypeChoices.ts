@@ -112,6 +112,34 @@ export interface ActivityTypeChoice {
 }
 
 /**
+ * Whether this proposal carries what makes a workbook findable by a photo.
+ *
+ * `applyCurriculumAction` derives `scannable` from exactly these two fields, and
+ * `findWorkbookConfigId` filters `c.type === 'workbook' && c.scannable !== false`
+ * — so a workbook added with neither a `totalUnits` nor a `currentPosition` is
+ * written `scannable: false` and a page photo can never match it.
+ */
+export function tracksPosition(action: AddActivityAction): boolean {
+  return action.totalUnits != null || action.currentPosition != null
+}
+
+/**
+ * The workbook note for a proposal that carries no lesson number (Codex P2,
+ * round 1).
+ *
+ * The picker's whole justification is that the card must not claim something the
+ * write does not do — so it may not itself promise a photo scan that the derived
+ * `scannable: false` rules out. Picking Workbook here is still the right answer
+ * (it fixes DATA-08 ownership and the planner's workbook filter); what it cannot
+ * do yet is scanning, and saying so beats discovering it with a photo that never
+ * matches. Deliberately NOT fixed by making the picker force `scannable: true`:
+ * a workbook with no position has nothing for a scan to advance, and widening
+ * what the control writes is not this control's job.
+ */
+export const WORKBOOK_WITHOUT_POSITION_NOTE =
+  'A workbook — but with no lesson number on it yet, a photo of a page cannot find it. Add one at Progress → Curriculum.'
+
+/**
  * The choices offered on the card, in the order a parent thinks about them —
  * the two that carry a lesson number and the daily shape first, the catch-alls
  * after, and the auto-managed one last.
@@ -133,10 +161,17 @@ export function activityTypeChoices(action: AddActivityAction): ActivityTypeChoi
     ActivityType.App,
     ActivityType.Evaluation,
   ]
+  const positioned = tracksPosition(action)
   return order.map((type) => ({
     type,
     label: ACTIVITY_TYPE_WORDS[type].label,
-    note: ACTIVITY_TYPE_WORDS[type].note,
+    // The one note that depends on the proposal rather than only on the type:
+    // the workbook line promises a photo scan, and the write cannot keep that
+    // promise without a lesson number. See WORKBOOK_WITHOUT_POSITION_NOTE.
+    note:
+      type === ActivityType.Workbook && !positioned
+        ? WORKBOOK_WITHOUT_POSITION_NOTE
+        : ACTIVITY_TYPE_WORDS[type].note,
     ...(shared && type === ActivityType.Workbook
       ? { disabledReason: WORKBOOK_OWNER_REASON }
       : {}),

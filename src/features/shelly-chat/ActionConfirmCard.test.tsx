@@ -982,7 +982,7 @@ describe('ActionConfirmCard — no-change (UX-190)', () => {
   ]
 
   const NOTICE =
-    'Nothing on Lincoln\'s Skill Snapshot matched "th sound", so nothing was changed.'
+    'Nothing changed on Lincoln\'s Skill Snapshot — either it already says this, or nothing on it matched "th sound".'
 
   it('shows the reason instead of the green tick', () => {
     renderCard(settled(NOTICE))
@@ -1054,6 +1054,18 @@ describe('ActionConfirmCard — addActivity type control (UX-193)', () => {
   it('says what the current choice means and where the row will land', () => {
     renderAdd(addWith())
     expect(screen.getByText(/Lands under Apps & Other Activities\./)).toBeInTheDocument()
+  })
+
+  // Codex P2, round 1 — the card may not promise a scan the write cannot do.
+  it('does not promise a photo scan for a workbook with no lesson number', () => {
+    renderAdd(addWith({ type: 'workbook' }))
+    expect(screen.getByText(/no lesson number on it yet, a photo of a page cannot find it/))
+      .toBeInTheDocument()
+  })
+
+  it('does promise it once the proposal carries one', () => {
+    renderAdd(addWith({ type: 'workbook', totalUnits: 60, currentPosition: 1 }))
+    expect(screen.getByText(/photo of a page can find it/)).toBeInTheDocument()
   })
 
   it('hands the correction back with the action and the new type', () => {
