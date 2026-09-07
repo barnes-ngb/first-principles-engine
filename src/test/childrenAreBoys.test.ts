@@ -44,14 +44,16 @@ const ALLOWED_LINE_SUBSTRINGS = [
   // child's tab ("send her to Lincoln's or London's tab") — the child's name
   // is a possessive on "tab", not the referent of "her".
   'send her to',
+  // stonebridgeBible.ts's NPC bio header (Sister Anya, Elder Ironroot, ...) —
+  // canonically female characters, so "How she helps Lincoln" refers to the
+  // NPC, not to Lincoln. Matched by this exact recurring phrase rather than
+  // exempting the whole file, so a stray future "Lincoln ... she ..." line
+  // elsewhere in that prompt source still trips the guard.
+  'How she helps',
 ]
 
 /** Files allowed to use "she/her" for a non-Lincoln/London female character. */
 const ALLOWED_FILES = [
-  // Stonebridge Banner Rally NPCs (Sister Anya, Elder Ironroot, ...) are
-  // canonically female, and their bios read "How she helps Lincoln" — the
-  // pronoun refers to the NPC, not to Lincoln.
-  'functions/src/ai/stonebridgeBible.ts',
   // This file's own header documents the patterns it allows, by example —
   // that is metadata about the guard, not a surface using the pronoun.
   'src/test/childrenAreBoys.test.ts',

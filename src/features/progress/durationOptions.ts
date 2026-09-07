@@ -5,10 +5,12 @@
  * `[10, 15, 20, 30, 45]` array — two copies of one list is the defect under
  * Shelly's request for "15 min interval[s]", not a coincidence to preserve.
  *
- * The steps are 15-minute from 15 up to 90 (home-base's proposal), plus 10
- * and 20 kept reachable because real configs already use them (Prayer is
- * 10m, TGTB LA is 20m) — a control that cannot express a value the data
- * already holds is a trap.
+ * The set is home-base's proposal — 15 · 30 · 45 · 60 · 90, plus 10 and 20
+ * kept reachable because real configs already use them (Prayer is 10m, TGTB
+ * LA is 20m) — a control that cannot express a value the data already holds
+ * is a trap. It is 15-minute-stepped only up to 45; 60 and 90 are round
+ * breakpoints for a longer block (an hour, an hour and a half) rather than
+ * every multiple of 15, so 75 is deliberately not in the list.
  */
 export const CURRICULUM_DURATION_OPTIONS = [10, 15, 20, 30, 45, 60, 90] as const
 
