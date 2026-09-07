@@ -585,8 +585,25 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                         {/* UX-239: it is Monday's focus, or Thursday's \u2014 the
                             day is named in the header two lines up. Every day
                             card in a five-day plan said "Today's", including on
-                            a plan for a week that has not started. */}
-                        Focus{focusItems.length >= 3 ? ' \u00b7 Choose 2' : ''}
+                            a plan for a week that has not started.
+
+                            UX-257: the "\u00b7 Choose 2" suffix is gone. The only
+                            2 in the codebase is `KidTodayView`'s local
+                            `const maxChoices = 2`, which limits KID Today's
+                            *Choose* section \u2014 the items with
+                            `category: 'choose'`. This section is a different,
+                            larger set (`!isRoutineItem`: everything that is
+                            neither must-do nor mvdEssential, so `choose`,
+                            `routine` and untyped items alike), on a PARENT
+                            surface that has no such limit: Apply writes every
+                            accepted row to the day and parent Today shows all of
+                            them. It was not the wrong number \u2014 it was a kid
+                            surface's rule applied to a superset of the rows it
+                            governs, on a screen where it does not hold. Making
+                            "choose 2 of 7" true means the day becoming a real
+                            menu, with something saying what happens to the other
+                            five: UX-206 / UX-208 / UX-209, owner-led. */}
+                        Focus
                       </Typography>
                       <Stack spacing={0.25}>
                         {focusItems.map(item => renderItem(item, false))}
