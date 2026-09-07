@@ -57,7 +57,7 @@ the only other `onSchedule` reference is a test stub at
 
 | CF | File | Cadence | Options |
 |---|---|---|---|
-| `weeklyReview` | `functions/src/ai/evaluate.ts:1015` | `"every sunday 19:00"` (Sun 7pm CT) | `timeZone: "America/Chicago"`, `secrets: [claudeApiKey]` |
+| `weeklyReview` | `functions/src/ai/evaluate.ts` | `"every saturday 21:00"` (Sat 9pm CT — UX-263 moved it off Sun 7pm so the finished week is ready all day Sunday) | `timeZone: "America/Chicago"`, `secrets: [claudeApiKey]` |
 | `generateMonthlyReview` | `functions/src/ai/monthlyReview.ts:96` | `"0 8 1 * *"` (8am, 1st of month) | `timeZone: "America/Chicago"`, `memory: "1GiB"`, `timeoutSeconds: 540`, `secrets: [claudeApiKey]` |
 
 Both are declared with `onSchedule` from `firebase-functions/v2/scheduler` and

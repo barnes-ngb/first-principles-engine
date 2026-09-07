@@ -60,11 +60,17 @@ export const HISTORY_UNAVAILABLE_LINE =
 /**
  * What is said when the week's review has not been written yet (UX-219).
  *
- * The page now names the school week the moment its Friday is over (UX-218), so
- * on Saturday it names a week the Sunday cron has not written a document for.
- * The positions for that week genuinely do not exist yet — `currentPosition` is
- * a single mutable field with no history (UX-212), so nothing can be
- * reconstructed after the fact and nothing may be estimated.
+ * The page names the school week the moment its Friday is over (UX-218), so on
+ * Saturday — until the cron fires that evening — it names a week no document has
+ * been written for. The positions for that week genuinely do not exist yet:
+ * `currentPosition` is a single mutable field with no history (UX-212), so
+ * nothing can be reconstructed after the fact and nothing may be estimated.
+ *
+ * **The date in this sentence follows the cron (UX-263).** It read *"Sunday
+ * evening"* while the review fired Sunday 19:00 CT. The cron now fires Saturday
+ * 21:00 CT so the week is ready all day Sunday, which shrinks the window this
+ * line is shown in to Saturday-before-9pm — and makes *"Saturday evening"* the
+ * only true reading of it. The guard below is unchanged; only the promise moved.
  *
  * Same rule as the two lines above: say what is not known and when it will be,
  * rather than falling through to *"First week recorded"* — which is a claim, and
@@ -89,7 +95,7 @@ export const HISTORY_UNAVAILABLE_LINE =
  * `reviewWasGenerated` below — and a failed read gets its own line.
  */
 export const POSITIONS_PENDING_LINE =
-  'This week’s workbook positions haven’t been recorded yet — they’re saved Sunday evening.'
+  'This week’s workbook positions haven’t been recorded yet — they’re saved Saturday evening.'
 
 /**
  * What is said when the week's review document could not be read at all.
@@ -104,7 +110,7 @@ export const REVIEW_UNAVAILABLE_LINE =
   'Couldn’t read this week’s review, so there’s nothing to say about coverage yet.'
 
 /**
- * Did the Sunday cron actually generate this week's review?
+ * Did the weekly cron actually generate this week's review?
  *
  * **Not the same question as "does the document exist"** (Codex round 3, P2),
  * and this PR is what made them come apart: `writeWeekReflection` creates the

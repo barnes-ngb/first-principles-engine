@@ -221,18 +221,46 @@ describe('lastCompletedSchoolWeekKey', () => {
   })
 
   it('agrees with the Cloud Function on the day the cron fires', () => {
-    // `lastWeekKey` in functions/src/ai/evaluate.ts: on a Sunday it goes back
-    // exactly 7 days. The scheduled review only ever runs on a Sunday, so the
-    // page must return that same key or it reads a document nobody wrote.
-    for (const sunday of [
-      new Date(2026, 8, 6),
-      new Date(2026, 8, 13),
-      new Date(2026, 0, 4),
+    // UX-263: the cron moved to `every saturday 21:00 America/Chicago`, so the
+    // review is ready all day Sunday. The day it fires is therefore SATURDAY,
+    // and on a Saturday `lastWeekKey` (functions/src/ai/evaluate.ts) returns the
+    // Sunday of the week containing it. The page must return that same key or it
+    // reads a document nobody wrote — which is exactly what UX-218 was.
+    //
+    // The runtime clock is UTC, so 21:00 CT is already Sunday there; the CF's
+    // own suite asserts both readings land on the same week. Here we pin the day
+    // the schedule names.
+    for (const saturday of [
+      new Date(2026, 8, 5),
+      new Date(2026, 8, 12),
+      new Date(2026, 0, 3),
     ]) {
-      const cronKey = new Date(sunday)
-      cronKey.setDate(cronKey.getDate() - 7)
+      const cronKey = new Date(saturday)
+      cronKey.setDate(cronKey.getDate() - cronKey.getDay()) // → containing Sunday
       const expected = `${cronKey.getFullYear()}-${String(cronKey.getMonth() + 1).padStart(2, '0')}-${String(cronKey.getDate()).padStart(2, '0')}`
-      expect(lastCompletedSchoolWeekKey(sunday)).toBe(expected)
+      expect(lastCompletedSchoolWeekKey(saturday)).toBe(expected)
+    }
+  })
+
+  it('agrees with the Cloud Function on every OTHER day too', () => {
+    // The stronger form, and the one that would have caught UX-263 before the
+    // cron moved: the two rules are now identical, so they must agree on all
+    // seven weekdays — not only on whichever day the schedule happens to name.
+    // `lastWeekKey` cannot be imported here (it is the functions build, and it
+    // pulls in firebase-admin), so its rule is restated; `evaluate.test.ts`
+    // holds the mirror of this test and restates THIS rule.
+    const cfRule = (today: Date): string => {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+      const day = d.getDay()
+      d.setDate(d.getDate() - day)
+      if (day !== 6) d.setDate(d.getDate() - 7)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+
+    const cursor = new Date(2026, 0, 1)
+    for (let i = 0; i < 365; i++) {
+      expect(lastCompletedSchoolWeekKey(cursor)).toBe(cfRule(cursor))
+      cursor.setDate(cursor.getDate() + 1)
     }
   })
 

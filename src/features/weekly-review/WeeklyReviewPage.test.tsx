@@ -50,7 +50,7 @@ vi.mock('./useWeeklyReviewHistory', () => ({
 }))
 
 // One document, delivered synchronously. `null` is the Saturday case: the
-// Sunday cron has not written anything for the week the page names.
+// Saturday-evening cron has not written anything for the week the page names.
 let currentDoc: WeeklyReview | null = null
 /** When true the listener errors instead of delivering — the dropped-read case. */
 let listenerFails = false
@@ -251,7 +251,7 @@ describe('a week with nothing in it is still a week (UX-219)', () => {
         'Couldn’t read this week’s review, so there’s nothing to say about coverage yet.',
       ),
     ).toBeInTheDocument()
-    expect(screen.queryByText(/saved Sunday evening/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/saved Saturday evening/)).not.toBeInTheDocument()
   })
 
   it('shows no adjustments section when the review has none', () => {

@@ -77,7 +77,7 @@ describe('zero is stated plainly, and absence is not zero', () => {
   })
 
   it('says NOTHING when there is no summary to read', () => {
-    // The Saturday case: the Sunday cron has not assembled the week yet, so a
+    // The Saturday case: the cron has not assembled the week yet, so a
     // zero here would be a records claim made on no records — the same rule
     // `weekHours.ts` holds for a failed hours read.
     expect(weekEvidenceCountsLine(undefined)).toBeNull()

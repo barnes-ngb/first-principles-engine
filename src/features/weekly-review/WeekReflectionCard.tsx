@@ -27,8 +27,8 @@ export interface WeekReflectionCardProps {
   childId: string
   weekKey: string
   /**
-   * This week's review, or `null` when the Sunday cron has not written one yet
-   * (UX-219 — the Saturday case).
+   * This week's review, or `null` when the cron has not written one yet
+   * (UX-219 — the Saturday-before-9pm case).
    *
    * The question is still askable and still writable then: `writeWeekReflection`
    * merges, so it creates the document with the answer on it, and the Cloud

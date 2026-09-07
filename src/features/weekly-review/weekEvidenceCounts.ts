@@ -26,7 +26,7 @@ import type { WeekEvidence } from '../../core/types'
  * review document. There is no photo or lab count in that shape, so there is no
  * photo or lab count in this line.
  *
- * **2. A missing summary is not a zero.** `undefined` — a week the Sunday cron
+ * **2. A missing summary is not a zero.** `undefined` — a week the cron
  * has not reached yet, or a review generated before `evidence` existed — returns
  * `null` and the caller says nothing. Only a summary that is actually present
  * may report a zero, and then it reports it plainly: *"No books or teach-backs
