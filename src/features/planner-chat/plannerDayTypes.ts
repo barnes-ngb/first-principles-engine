@@ -278,6 +278,23 @@ export function enforceDayTypes(
   return { ...draft, days }
 }
 
+/**
+ * The draft with every day put back the way it was generated — stashes restored,
+ * markers dropped. Pure.
+ *
+ * For the callers that must reason about a week's REAL rows rather than its
+ * currently-displayed ones (Codex round 3, P2). `clonePlanWithAdvancedLessons`
+ * is the case that found it: repeating a week counts and advances lesson numbers
+ * off `day.items`, so a set-aside Tuesday whose Lesson 6 lives in
+ * `setAsideItems` was invisible to the count and both days came back as Lesson 6.
+ * Restoring first means the repeat sees the week that was actually planned.
+ */
+export function restoreAllDayTypes(draft: DraftWeeklyPlan): DraftWeeklyPlan {
+  const days = draft.days.map((day) => applyDayTypeToDay(day, DayType.Normal, []))
+  if (days.every((day, i) => day === draft.days[i])) return draft
+  return { ...draft, days }
+}
+
 // ── What Apply writes to `dailyPlans` ────────────────────────────────────────
 
 /**

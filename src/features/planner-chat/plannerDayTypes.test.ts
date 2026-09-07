@@ -13,6 +13,7 @@ import {
   plannerDayTypeLabel,
   PLANNER_DAY_TYPE_CHOICES,
   resolvePlannerDayType,
+  restoreAllDayTypes,
   setPlannerDayType,
 } from './plannerDayTypes'
 
@@ -303,6 +304,45 @@ describe('idempotence, and the one exception to it', () => {
   it('is a no-op on an unchanged draft, identity included', () => {
     const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
     expect(enforceDayTypes(setAside, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)).toBe(setAside)
+  })
+})
+
+// ── Codex round 3, P2: a repeat must see the week that was actually planned ──
+describe('restoreAllDayTypes', () => {
+  const base = week([day('Monday', ['Lesson 5']), day('Tuesday', ['Lesson 6'])])
+
+  it('gives every stashed day its real rows back', () => {
+    // `clonePlanWithAdvancedLessons` counts and advances off `day.items`, so a
+    // set-aside Tuesday whose Lesson 6 sat in `setAsideItems` was invisible to
+    // the count and both days came back as Lesson 6.
+    const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
+    expect(setAside.days.find((d) => d.day === 'Tuesday')!.items).toEqual([])
+
+    const restored = restoreAllDayTypes(setAside)
+    expect(restored.days.map((d) => d.items.map((i) => i.title))).toEqual([
+      ['Lesson 5'],
+      ['Lesson 6'],
+    ])
+  })
+
+  it('restores a Light day to its real rows, not the template', () => {
+    const lit = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Light }], appBlocks)
+    const restored = restoreAllDayTypes(lit)
+    expect(restored.days.find((d) => d.day === 'Tuesday')!.items.map((i) => i.title)).toEqual([
+      'Lesson 6',
+    ])
+  })
+
+  it('leaves no stash or marker behind', () => {
+    const setAside = enforceDayTypes(base, [{ day: 'Tuesday', dayType: DayType.Life }], appBlocks)
+    for (const d of restoreAllDayTypes(setAside).days) {
+      expect(d.setAsideItems).toBeUndefined()
+      expect(d.appliedDayType).toBeUndefined()
+    }
+  })
+
+  it('is a no-op on a draft that was never shaped, identity included', () => {
+    expect(restoreAllDayTypes(base)).toBe(base)
   })
 })
 

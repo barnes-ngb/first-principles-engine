@@ -132,6 +132,7 @@ import {
 import {
   buildDayTypeSection,
   enforceDayTypes,
+  restoreAllDayTypes,
   setPlannerDayType,
 } from './plannerDayTypes'
 import { plannerPhaseLine } from './plannerPhaseLine'
@@ -1924,7 +1925,16 @@ Generate a plan for Monday through Friday.`.trim()
     if (!lastPlanDraft) return
     setRepeatingWeek(true)
     try {
-      const cloned = shapeDraft(clonePlanWithAdvancedLessons(lastPlanDraft))
+      // UX-261, Codex round 3 (P2): restore the prior week's stashed days BEFORE
+      // cloning. `clonePlanWithAdvancedLessons` counts and advances lesson
+      // numbers off `day.items`, and a set-aside day's real rows live in
+      // `setAsideItems` — so a visible Monday Lesson 5 beside a set-aside
+      // Tuesday Lesson 6 came back as Lesson 6 on both days, because the clone
+      // could only see one of them. `shapeDraft` then re-applies this week's own
+      // picks to the cloned result.
+      const cloned = shapeDraft(
+        clonePlanWithAdvancedLessons(restoreAllDayTypes(lastPlanDraft)),
+      )
       setCurrentDraft(cloned)
       setSetupComplete(true)
       setForceSetup(false)
@@ -2378,6 +2388,20 @@ Generate a plan for Monday through Friday.`.trim()
   const handleApplyPlan = useCallback(async (overrideWeekStart?: string) => {
     if (!activeChildId || !currentDraft) return
 
+    // UX-261, Codex round 3 (P1): shape HERE, and use the same object for the
+    // write, the card and the persist.
+    //
+    // `applyDraftWeek` re-enforces internally as its own rail, but it did so on
+    // a local copy, so a row moved onto a set-aside day was correctly kept out
+    // of the DayLog while the applied card and the next reload still showed it —
+    // a row on screen with no saved counterpart, which the FEAT-138 live-edit
+    // handlers then cannot resolve. The page and the day must not disagree about
+    // what was written, so `appliedDraft` is what everything below uses. Apply's
+    // own re-enforcement stays: it is idempotent, and it is the rail for callers
+    // that are not this page.
+    const appliedDraft = enforceDayTypes(currentDraft, dayTypes, filteredAppBlocks)
+    if (appliedDraft !== currentDraft) setCurrentDraft(appliedDraft)
+
     // FEAT-112 backstop: never silently write a plan to a week that's already
     // passed. The live weekRange memo should already target the upcoming week,
     // but a stale tab (or a focus event that never fired) could still carry a
@@ -2400,7 +2424,10 @@ Generate a plan for Monday through Friday.`.trim()
       // Step 1: Auto-generate lesson cards for non-app-block accepted items
       // Note: category is optional and often unset, so we include items that are
       // either explicitly 'must-do', have no category set, or are mvdEssential.
-      const itemsNeedingCards = currentDraft.days
+      // `appliedDraft`, not `currentDraft`: a lesson card is a paid AI call, and
+      // generating one for an item on a set-aside day would spend the parent's
+      // money on work this apply is about to not write.
+      const itemsNeedingCards = appliedDraft.days
         .flatMap((d) => d.items)
         .filter((item) => item.accepted && !item.isAppBlock && item.category !== 'choose')
         // Deduplicate by title (same activity across days only needs one card)
@@ -2484,7 +2511,7 @@ Generate a plan for Monday through Friday.`.trim()
         familyId,
         childId: activeChildId,
         weekStart: effectiveWeekStart,
-        draft: currentDraft,
+        draft: appliedDraft,
         children,
         activityConfigs,
         lessonCardMap,
@@ -2544,7 +2571,7 @@ Generate a plan for Monday through Friday.`.trim()
         {
           status: PlannerConversationStatus.Applied,
           messages: updatedMessages,
-          currentDraft,
+          currentDraft: appliedDraft,
           // UX-261, Codex round 1 (P2): the picks travel with the week they were
           // APPLIED to. A forward-shift writes `dailyPlans.planType` at the
           // shifted dates, so persisting the shifted conversation without them
@@ -2585,7 +2612,8 @@ Generate a plan for Monday through Friday.`.trim()
         void generateHelpCardsForPlan({
           familyId,
           childId: activeChildId,
-          days: currentDraft.days,
+          // Same reason as the lesson cards above — a help card is a paid call.
+          days: appliedDraft.days,
           aiChat,
         }).catch((err) => {
           console.warn('[HelpCards] Batch generation failed (non-blocking):', err)
@@ -2712,7 +2740,7 @@ Generate a plan for Monday through Friday.`.trim()
         severity: refusal === 'stale-week' ? 'warning' : 'error',
       })
     }
-  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes])
+  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes, filteredAppBlocks])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
