@@ -74,6 +74,7 @@ export default function EditRoutinesDialog({ open, routines, onSave, onClose }: 
                 size="small"
                 onChange={(e) => updateItem(i, 'defaultMinutes', Number(e.target.value))}
                 sx={{ minWidth: 84 }}
+                aria-label={`Minutes for ${item.name || 'this activity'}`}
               >
                 {durationOptionsWithValue(item.defaultMinutes).map((m) => (
                   <MenuItem key={m} value={m}>

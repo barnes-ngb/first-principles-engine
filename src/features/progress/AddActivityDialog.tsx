@@ -169,6 +169,7 @@ export default function AddActivityDialog({
               size="small"
               onChange={(e) => setMinutes(Number(e.target.value))}
               sx={{ maxWidth: 160 }}
+              aria-label="Minutes per session"
             >
               {durationOptionsWithValue(minutes).map((m) => (
                 <MenuItem key={m} value={m}>
