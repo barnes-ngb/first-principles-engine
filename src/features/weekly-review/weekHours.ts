@@ -66,11 +66,18 @@ export const HISTORY_UNAVAILABLE_LINE =
  * `currentPosition` is a single mutable field with no history (UX-212), so
  * nothing can be reconstructed after the fact and nothing may be estimated.
  *
- * **The date in this sentence follows the cron (UX-263).** It read *"Sunday
- * evening"* while the review fired Sunday 19:00 CT. The cron now fires Saturday
- * 21:00 CT so the week is ready all day Sunday, which shrinks the window this
- * line is shown in to Saturday-before-9pm — and makes *"Saturday evening"* the
- * only true reading of it. The guard below is unchanged; only the promise moved.
+ * **The date in this sentence follows the cron, and it moved twice (UX-263).**
+ * It read *"Sunday evening"* while the review fired Sunday 19:00 CT. The first
+ * cut of UX-263 moved the cron to Saturday 21:00 and this line to *"Saturday
+ * evening"*; that schedule was withdrawn on review because it would have read
+ * the week three hours before Saturday ended, permanently dropping late-Saturday
+ * evidence. The cron now fires **00:15 Sunday**, so the week is ready before
+ * anyone is awake on Sunday and no evidence is lost.
+ *
+ * Which leaves this line true for the whole of Saturday, and needing to promise
+ * *overnight* rather than an evening — it is read on a Saturday afternoon, when
+ * "tonight" is the honest answer and a clock time would be noise. The guard
+ * below is unchanged; only the promise moved.
  *
  * Same rule as the two lines above: say what is not known and when it will be,
  * rather than falling through to *"First week recorded"* — which is a claim, and
@@ -95,7 +102,7 @@ export const HISTORY_UNAVAILABLE_LINE =
  * `reviewWasGenerated` below — and a failed read gets its own line.
  */
 export const POSITIONS_PENDING_LINE =
-  'This week’s workbook positions haven’t been recorded yet — they’re saved Saturday evening.'
+  'This week’s workbook positions haven’t been recorded yet — they’re saved overnight, once Saturday is over.'
 
 /**
  * What is said when the week's review document could not be read at all.

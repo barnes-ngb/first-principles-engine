@@ -221,25 +221,34 @@ describe('lastCompletedSchoolWeekKey', () => {
   })
 
   it('agrees with the Cloud Function on the day the cron fires', () => {
-    // UX-263: the cron moved to `every saturday 21:00 America/Chicago`, so the
-    // review is ready all day Sunday. The day it fires is therefore SATURDAY,
-    // and on a Saturday `lastWeekKey` (functions/src/ai/evaluate.ts) returns the
-    // Sunday of the week containing it. The page must return that same key or it
-    // reads a document nobody wrote — which is exactly what UX-218 was.
-    //
-    // The runtime clock is UTC, so 21:00 CT is already Sunday there; the CF's
-    // own suite asserts both readings land on the same week. Here we pin the day
-    // the schedule names.
-    for (const saturday of [
-      new Date(2026, 8, 5),
-      new Date(2026, 8, 12),
-      new Date(2026, 0, 3),
+    // UX-263: the cron is `every sunday 00:15 America/Chicago` — moved off
+    // Sunday 19:00 so the finished week is ready all day Sunday, and kept past
+    // midnight rather than Saturday evening so the whole of Saturday is counted.
+    // So the day it fires is SUNDAY, and on a Sunday `lastWeekKey`
+    // (functions/src/ai/evaluate.ts) goes back to the previous Sunday. The page
+    // must return that same key or it reads a document nobody wrote — which is
+    // exactly what UX-218 was.
+    for (const sunday of [
+      new Date(2026, 8, 6),
+      new Date(2026, 8, 13),
+      new Date(2026, 0, 4),
     ]) {
-      const cronKey = new Date(saturday)
-      cronKey.setDate(cronKey.getDate() - cronKey.getDay()) // → containing Sunday
+      const cronKey = new Date(sunday)
+      cronKey.setDate(cronKey.getDate() - 7)
       const expected = `${cronKey.getFullYear()}-${String(cronKey.getMonth() + 1).padStart(2, '0')}-${String(cronKey.getDate()).padStart(2, '0')}`
-      expect(lastCompletedSchoolWeekKey(saturday)).toBe(expected)
+      expect(lastCompletedSchoolWeekKey(sunday)).toBe(expected)
     }
+  })
+
+  it('names that same week on the Saturday before the cron runs', () => {
+    // The page reads this rule on a Saturday every week, hours before the
+    // overnight cron writes anything — so Saturday must already name the week
+    // that document will be keyed to, or the page spends all of Saturday
+    // pointing at one week and all of Sunday at another.
+    const saturday = new Date(2026, 8, 5) // Sat Sep 5 2026
+    const sunday = new Date(2026, 8, 6) // the cron's own day, hours later
+    expect(lastCompletedSchoolWeekKey(saturday)).toBe('2026-08-30')
+    expect(lastCompletedSchoolWeekKey(sunday)).toBe('2026-08-30')
   })
 
   it('agrees with the Cloud Function on every OTHER day too', () => {

@@ -31,7 +31,7 @@ export interface WeekPaceSectionProps {
    *
    * **Nullable since UX-219.** The page names the school week as soon as its
    * Friday is over, so on a Saturday there is no document until the cron fires
-   * that evening (21:00 CT — UX-263). The hours are read live and still true, so
+   * overnight (00:15 Sunday CT — UX-263). The hours are read live and still true, so
    * the section renders — it simply has no snapshot to build a rate from, and
    * says so.
    */
