@@ -112,6 +112,7 @@ import {
 import type { ChatWeekDay, DayItemAction } from './dayItemActions'
 import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
 import type { SnapshotAction } from './snapshotActions'
+import { snapshotNoMatchNotice } from './snapshotActions'
 import type { WatchAction } from './watchActions'
 import { isWatchAction, repeatedVetInNotice, resolveWatchAction } from './watchActions'
 import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
@@ -145,13 +146,26 @@ import type { ConceptArc } from '../../core/types'
  * auto-id per call, so two taps create two active curriculum entries and BOTH
  * land in future plans.
  */
-export type ActionStatus = 'pending' | 'applying' | 'applied' | 'dismissed'
+/**
+ * `'no-change'` is a SETTLED outcome, not a failure (UX-190). The confirmed
+ * write reached the writer, the writer read the record, and the record already
+ * said what was asked — or, for `markSkillProgress`, named nothing the words
+ * matched. Distinct from `'applied'` because nothing was written, and distinct
+ * from a reverted `'pending'` because there is nothing to retry: confirming the
+ * identical card again would match the identical nothing.
+ */
+export type ActionStatus = 'pending' | 'applying' | 'applied' | 'no-change' | 'dismissed'
 
 export interface PendingAction {
   /** Stable key for list rendering + per-card status. */
   id: string
   action: ChatAction
   status: ActionStatus
+  /**
+   * The sentence a `'no-change'` card shows in place of "Done ✓" (UX-190).
+   * Plain, not an error: nothing went wrong, the write simply had nothing to do.
+   */
+  notice?: string
   /**
    * UX-33(c). Set when a confirmed write REJECTED. The card reverts to
    * `'pending'` so a retry is possible — it always did — but the rejection was
@@ -310,30 +324,30 @@ export interface ShellyChatActionsDeps {
  * when `mastered` is true — carrying a matching parent-directive evidence note
  * and `source: 'parent'`. Re-applying a duplicate add is a no-op via 6a's dedup.
  */
-async function applySnapshotAction(familyId: string, action: SnapshotAction): Promise<void> {
+async function applySnapshotAction(
+  familyId: string,
+  action: SnapshotAction,
+): Promise<{ changed: boolean }> {
   const at = todayKey()
   switch (action.kind) {
     case 'addPrioritySkill':
-      await writeSnapshotUpdate(familyId, action.childId, {
+      return writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [],
         addPrioritySkills: [action.skill],
         at,
       })
-      return
     case 'addSupport':
-      await writeSnapshotUpdate(familyId, action.childId, {
+      return writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [],
         addSupports: [action.support],
         at,
       })
-      return
     case 'addStopRule':
-      await writeSnapshotUpdate(familyId, action.childId, {
+      return writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [],
         addStopRules: [action.rule],
         at,
       })
-      return
     case 'markSkillProgress': {
       // UX-187 — the card's two sentences must reach the write as two different
       // writes. `fullyMastered` governs the conceptual-BLOCK branch only, so on
@@ -344,7 +358,7 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
       // this — a progress claim advances a matched block to `RESOLVING` and
       // moves no level. Mastered is byte-for-byte what it always was.
       const mastered = action.mastered === true
-      await writeSnapshotUpdate(familyId, action.childId, {
+      return writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [action.skill],
         fullyMastered: mastered,
         skipPrioritySkillLevels: !mastered,
@@ -352,7 +366,6 @@ async function applySnapshotAction(familyId: string, action: SnapshotAction): Pr
         evidence: `parent directive via chat — ${at}`,
         at,
       })
-      return
     }
   }
 }
@@ -1203,7 +1216,36 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         // Tier C Option 2 (6b) — additive snapshot edits routed through the
         // central writer. Additive-only fields; the writer auto-stamps each new
         // entry as a parent directive and dedups, so a duplicate add is a no-op.
-        await applySnapshotAction(familyId, action)
+        //
+        // UX-190 — the writer's `{ changed }` used to be discarded here, so a
+        // write that matched NOTHING fell through to "Done ✓". The match is
+        // exact slug equality, and a child with no snapshot yet can never match
+        // at all, so the two sentences most likely to produce this — a
+        // paraphrased skill, and London — both stamped a green tick over no
+        // write. Settled as `'no-change'` with a plain sentence instead:
+        // returning `true` keeps the card out of the retry path (nothing
+        // failed, and re-confirming would match the same nothing), and the early
+        // return skips both the "applied" stamp and the audit annotation, since
+        // there is no write to record.
+        const { changed } = await applySnapshotAction(familyId, action)
+        if (!changed) {
+          console.info('[shellyChat] snapshot action matched nothing — nothing written', action)
+          setPending((prev) =>
+            prev.map((p) =>
+              p.action === action
+                ? {
+                    ...p,
+                    status: 'no-change',
+                    notice: snapshotNoMatchNotice(
+                      action,
+                      childNameRef.current ?? 'this child',
+                    ),
+                  }
+                : p,
+            ),
+          )
+          return true
+        }
       }
 
       setPending((prev) =>

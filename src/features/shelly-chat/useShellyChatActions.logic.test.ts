@@ -825,6 +825,84 @@ describe('useShellyChatActions', () => {
     )
   })
 
+  // ── UX-190 — a write that matched nothing must not stamp "Done ✓" ────────
+  it('settles a snapshot write that matched nothing as no-change, with a reason', async () => {
+    writeSnapshotUpdate.mockResolvedValue({ changed: false })
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'th sound',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    const card = result.current.pending[0]
+    expect(card.status).toBe('no-change')
+    expect(card.status).not.toBe('applied')
+    expect(card.notice).toContain('Nothing on Lincoln\'s Skill Snapshot matched "th sound"')
+    expect(card.notice).toContain('Progress → Skill Snapshot')
+    // Not a failure: the card must not carry an error or offer a retry.
+    expect(card.error).toBeUndefined()
+  })
+
+  it('records no applied-action audit for a write that never happened', async () => {
+    writeSnapshotUpdate.mockResolvedValue({ changed: false })
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'th sound',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('tells her an add was already there rather than claiming it landed', async () => {
+    writeSnapshotUpdate.mockResolvedValue({ changed: false })
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'addPrioritySkill',
+      childId: 'lincoln1',
+      skill: 'blends',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(result.current.pending[0].status).toBe('no-change')
+    expect(result.current.pending[0].notice).toContain(
+      '"blends" is already on Lincoln\'s priority skills',
+    )
+  })
+
+  it('still stamps applied when the write really did change something', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'th digraph',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(result.current.pending[0].status).toBe('applied')
+    expect(result.current.pending[0].notice).toBeUndefined()
+  })
+
   it('rejects a snapshot action for a child other than the active context', async () => {
     const { result } = setup('lincoln1')
     const action: ChatAction = {

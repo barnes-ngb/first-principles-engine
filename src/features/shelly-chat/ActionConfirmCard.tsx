@@ -948,6 +948,27 @@ export default function ActionConfirmCard({
                   </Typography>
                 </Box>
               )}
+              {/* UX-190 — the confirmed write reached the writer and the writer
+                  had nothing to do: the record already said what was asked, or
+                  the words matched nothing on it. Deliberately NOT a green tick
+                  (nothing was written) and NOT an error (nothing failed) — an
+                  info mark and the writer's own reason, in the card's place. */}
+              {item.status === 'no-change' && (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 0.5,
+                    color: 'text.secondary',
+                    maxWidth: 220,
+                  }}
+                >
+                  <InfoOutlinedIcon fontSize="small" />
+                  <Typography variant="caption">
+                    {item.notice ?? 'Nothing to change'}
+                  </Typography>
+                </Box>
+              )}
               {item.status === 'dismissed' && (
                 <Typography variant="caption" color="text.secondary">
                   Dismissed

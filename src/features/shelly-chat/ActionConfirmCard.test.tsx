@@ -967,3 +967,38 @@ describe('ActionConfirmCard — markSkillProgress (UX-187)', () => {
     expect(screen.queryByText(/\b(his|her|their)\b/)).not.toBeInTheDocument()
   })
 })
+
+// ── A write that matched nothing must not stamp "Done ✓" (UX-190) ────────────
+describe('ActionConfirmCard — no-change (UX-190)', () => {
+  const settled = (notice: string): PendingAction[] => [
+    {
+      id: 'msg1_0',
+      status: 'no-change',
+      notice,
+      action: { kind: 'markSkillProgress', childId: 'lincoln1', skill: 'th sound' },
+    },
+  ]
+
+  const NOTICE =
+    'Nothing on Lincoln\'s Skill Snapshot matched "th sound", so nothing was changed.'
+
+  it('shows the reason instead of the green tick', () => {
+    renderCard(settled(NOTICE))
+
+    expect(screen.getByText(NOTICE)).toBeInTheDocument()
+    expect(screen.queryByText('Done')).not.toBeInTheDocument()
+  })
+
+  it('offers no retry, because confirming again would match the same nothing', () => {
+    renderCard(settled(NOTICE))
+
+    expect(screen.queryByRole('button', { name: /confirm/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /dismiss/i })).not.toBeInTheDocument()
+  })
+
+  it('still renders the card it settled, so she can see what she tapped', () => {
+    renderCard(settled(NOTICE))
+
+    expect(screen.getByText('Mark "th sound" as progressing for Lincoln')).toBeInTheDocument()
+  })
+})
