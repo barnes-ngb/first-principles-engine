@@ -1059,8 +1059,33 @@ describe('ActionConfirmCard — addActivity type control (UX-193)', () => {
   // Codex P2, round 1 — the card may not promise a scan the write cannot do.
   it('does not promise a photo scan for a workbook with no lesson number', () => {
     renderAdd(addWith({ type: 'workbook' }))
-    expect(screen.getByText(/no lesson number on it yet, a photo of a page cannot find it/))
+    expect(screen.getByText(/no lesson number, a photo of a page cannot find it/))
       .toBeInTheDocument()
+  })
+
+  // Codex P2, round 2 — the route it names has to be one that exists.
+  it('sends her to the chat, not to a Curriculum control that does not exist', () => {
+    renderAdd(addWith({ type: 'workbook' }))
+    expect(screen.getByText(/Tell me the lesson number/)).toBeInTheDocument()
+  })
+
+  // Codex P2, round 2 — a hand-made evaluation is UX-204's shape: planned every
+  // day, and no menu at Progress → Curriculum to finish or remove it.
+  it('will not let her pick Evaluation, and says why', () => {
+    const onChange = renderAdd(addWith())
+
+    const chip = screen.getByText('Evaluation').closest('.MuiChip-root')
+    expect(chip).toHaveClass('Mui-disabled')
+
+    screen.getByText('Evaluation').click()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('explains the fate of a proposal that ARRIVED as an evaluation', () => {
+    // The picker refusing to offer it says nothing about a card the model
+    // already proposed as one, so the reason takes the note's place.
+    renderAdd(addWith({ type: 'evaluation' }))
+    expect(screen.getByText(/planned every day and has no ⋮ menu/)).toBeInTheDocument()
   })
 
   it('does promise it once the proposal carries one', () => {

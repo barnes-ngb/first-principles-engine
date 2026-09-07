@@ -135,9 +135,42 @@ export function tracksPosition(action: AddActivityAction): boolean {
  * matches. Deliberately NOT fixed by making the picker force `scannable: true`:
  * a workbook with no position has nothing for a scan to advance, and widening
  * what the control writes is not this control's job.
+ *
+ * **The way out is the chat, not a screen (Codex P2, round 2).** The first
+ * version of this line sent her to Progress → Curriculum, where no
+ * position-edit control exists: the row's ⋮ menu offers complete / quick-log /
+ * assign-to-a-child / delete, the scan button is hidden while `scannable` is
+ * false, `AddActivityDialog` creates a *separate* config, and the chat's own
+ * `setActivityPosition` is refused by `resolveCurriculumAction` for a config
+ * with both position fields absent. So it named a fix that could not be
+ * performed — the navigation-honesty failure this whole card exists to end,
+ * committed by the fix for it. What *does* work is saying the number here, so
+ * the next proposal carries it; the wording is `positionPastEndNotice`'s, which
+ * already says exactly this for the same reason.
  */
 export const WORKBOOK_WITHOUT_POSITION_NOTE =
-  'A workbook — but with no lesson number on it yet, a photo of a page cannot find it. Add one at Progress → Curriculum.'
+  "A workbook — but with no lesson number, a photo of a page cannot find it. Tell me the lesson number and I'll propose it again with one."
+
+/**
+ * Why Evaluation is never a choice this picker offers (Codex P2, round 2).
+ *
+ * An evaluation config created by hand is **UX-204's shape, reopened**: Progress
+ * → Curriculum renders the Evaluations section as bare `ListItem`s with no ⋮
+ * menu at all — no mark-complete, no delete — while
+ * `activityConfigsToRoutineText` filters on `completed` only and so plans every
+ * incomplete config regardless of type. That is a row that plans every day and
+ * that nobody can fix, which is precisely what this run is closing rather than
+ * reopening.
+ *
+ * So the chip is disabled and says why. Note this bounds the CONTROL, not the
+ * model: `addActivity` has always been able to carry `type: 'evaluation'`, and
+ * refusing that outright would be a new refusal on a path this run was not asked
+ * to change. What the card can do is stop endorsing it and, when a proposal
+ * arrives as one, show this sentence in the note's place so the row's fate is
+ * legible before she taps.
+ */
+export const EVALUATION_NOT_OFFERED_REASON =
+  'Evaluations are managed by the app. One added by hand is planned every day and has no ⋮ menu at Progress → Curriculum, so it cannot be finished or removed.'
 
 /**
  * The choices offered on the card, in the order a parent thinks about them —
@@ -174,7 +207,9 @@ export function activityTypeChoices(action: AddActivityAction): ActivityTypeChoi
         : ACTIVITY_TYPE_WORDS[type].note,
     ...(shared && type === ActivityType.Workbook
       ? { disabledReason: WORKBOOK_OWNER_REASON }
-      : {}),
+      : type === ActivityType.Evaluation
+        ? { disabledReason: EVALUATION_NOT_OFFERED_REASON }
+        : {}),
   }))
 }
 

@@ -14,11 +14,13 @@ import {
   sectionTitleForType,
   tracksPosition,
   withActivityType,
+  EVALUATION_NOT_OFFERED_REASON,
   WORKBOOK_WITHOUT_POSITION_NOTE,
   type AddActivityAction,
 } from './activityTypeChoices'
 import { CURRICULUM_SECTION_TITLE, SECTION_FOR_TYPE } from '../progress/curriculumGrouping'
 import { ActivityType } from '../../core/types/enums'
+import { WORKBOOK_OWNER_REASON as WORKBOOK_OWNER_REASON_TEXT } from '../../core/firebase/activityConfigWrites'
 
 const add = (overrides: Partial<AddActivityAction> = {}): AddActivityAction =>
   ({
@@ -81,7 +83,18 @@ describe('the workbook note follows what the write will actually produce', () =>
     const workbook = bare.find((c) => c.type === ActivityType.Workbook)
     expect(workbook?.note).toBe(WORKBOOK_WITHOUT_POSITION_NOTE)
     expect(workbook?.note).toMatch(/cannot find it/)
-    expect(workbook?.note).toMatch(/Progress → Curriculum/)
+  })
+
+  // Codex P2, round 2: the first version of this line sent her to Progress →
+  // Curriculum, where no position-edit control exists — the row's menu is
+  // complete / quick-log / assign / delete, the scan button is hidden while
+  // `scannable` is false, the Add dialog makes a SEPARATE config, and the chat's
+  // `setActivityPosition` is refused for a config with no position fields. It
+  // named a fix that could not be performed.
+  it('points at the one route that actually works — saying the number here', () => {
+    const workbook = activityTypeChoices(add()).find((c) => c.type === ActivityType.Workbook)
+    expect(workbook?.note).toMatch(/Tell me the lesson number/)
+    expect(workbook?.note).not.toMatch(/Progress → Curriculum/)
   })
 
   it('is still offerable — the fix is honesty, not a refusal', () => {
@@ -113,16 +126,54 @@ describe('activityTypeChoices', () => {
   it('refuses workbook on a SHARED add, with the DATA-08 rule’s own words', () => {
     const choices = activityTypeChoices(add({ shared: true }))
     const workbook = choices.find((c) => c.type === ActivityType.Workbook)
-    expect(workbook?.disabledReason).toBeTruthy()
-    // Every other option stays available — a shared routine is fine.
-    for (const other of choices.filter((c) => c.type !== ActivityType.Workbook)) {
+    expect(workbook?.disabledReason).toBe(WORKBOOK_OWNER_REASON_TEXT)
+    // A shared routine is fine — only workbook carries the DATA-08 rule.
+    for (const other of choices.filter(
+      (c) => c.type !== ActivityType.Workbook && c.type !== ActivityType.Evaluation,
+    )) {
       expect(other.disabledReason, other.type).toBeUndefined()
     }
   })
 
   it('offers workbook freely on an unshared add', () => {
+    const workbook = activityTypeChoices(add()).find((c) => c.type === ActivityType.Workbook)
+    expect(workbook?.disabledReason).toBeUndefined()
+  })
+
+  // Codex P2, round 2 — UX-204's shape, and this run is closing it, not
+  // reopening it. Progress → Curriculum renders evaluations as bare list items
+  // with no menu, while `activityConfigsToRoutineText` plans every incomplete
+  // config regardless of type: a hand-made evaluation plans every day and can
+  // never be finished or removed.
+  it('never offers Evaluation, and says why', () => {
+    const evaluation = activityTypeChoices(add()).find(
+      (c) => c.type === ActivityType.Evaluation,
+    )
+    expect(evaluation?.disabledReason).toBe(EVALUATION_NOT_OFFERED_REASON)
+    expect(evaluation?.disabledReason).toMatch(/planned every day/)
+    expect(evaluation?.disabledReason).toMatch(/cannot be finished or removed/)
+  })
+
+  it('still refuses Evaluation on a shared add, where workbook is refused too', () => {
+    const choices = activityTypeChoices(add({ shared: true }))
+    expect(choices.find((c) => c.type === ActivityType.Workbook)?.disabledReason).toBe(
+      WORKBOOK_OWNER_REASON_TEXT,
+    )
+    expect(choices.find((c) => c.type === ActivityType.Evaluation)?.disabledReason).toBe(
+      EVALUATION_NOT_OFFERED_REASON,
+    )
+  })
+
+  it('leaves the four everyday kinds freely pickable', () => {
     const choices = activityTypeChoices(add())
-    expect(choices.every((c) => c.disabledReason === undefined)).toBe(true)
+    for (const type of [
+      ActivityType.Routine,
+      ActivityType.Formation,
+      ActivityType.Activity,
+      ActivityType.App,
+    ]) {
+      expect(choices.find((c) => c.type === type)?.disabledReason, type).toBeUndefined()
+    }
   })
 })
 

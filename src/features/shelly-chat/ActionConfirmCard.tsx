@@ -406,9 +406,20 @@ function ActivityTypePicker({
           />
         ))}
       </Box>
+      {/* A disabled choice's REASON replaces its note when it is the one
+          selected (Codex P2, round 2). The model can propose `type:
+          'evaluation'` on its own, and the picker refusing to offer it says
+          nothing about a card that already arrived as one — so when it has, the
+          sentence explaining why nobody should pick it is the sentence she
+          needs, in the place the note would have been. */}
       {selected && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
-          {selected.note} Lands under {sectionTitleForType(action.type)}.
+        <Typography
+          variant="caption"
+          color={selected.disabledReason ? 'warning.main' : 'text.secondary'}
+          sx={{ display: 'block', mt: 0.25 }}
+        >
+          {selected.disabledReason ?? selected.note} Lands under{' '}
+          {sectionTitleForType(action.type)}.
         </Typography>
       )}
       {/* The DATA-08 rule, in the layer that can speak it. A shared workbook is
