@@ -8,6 +8,7 @@ import CircleIcon from '@mui/icons-material/Circle'
 import CloseIcon from '@mui/icons-material/Close'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -17,6 +18,8 @@ import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
+import Menu from '@mui/material/Menu'
+import MenuItem from '@mui/material/MenuItem'
 import Popover from '@mui/material/Popover'
 import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
@@ -154,6 +157,13 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
 export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, weekStart, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem, onMoveItemToDay, onSwapWatchItem, itemEditLockReason, dayTypes, onDayTypeChange }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const [removeConfirm, setRemoveConfirm] = useState<{ dayIndex: number; itemIndex: number; title: string } | null>(null)
+  /** UX-251: which row's reorder overflow is open. One menu for the whole card. */
+  const [reorderMenu, setReorderMenu] = useState<{
+    anchorEl: HTMLElement
+    dayIndex: number
+    itemIndex: number
+    totalItems: number
+  } | null>(null)
 
   // Skip-advisor recommendations across all items. Render-time so chips
   // stay fresh as the user edits the plan.
@@ -326,27 +336,40 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
                 )}
                 {showActions && (
                   <Box sx={{ display: 'flex', gap: 0, ml: 0.5, opacity: 0.6 }}>
-                    {onMoveItem && (
-                      <>
-                        <IconButton
-                          size="small"
-                          onClick={() => onMoveItem(dayIndex, itemIndex, -1)}
-                          disabled={itemIndex === 0}
-                          sx={{ p: 0.25 }}
-                          aria-label="Move up"
-                        >
-                          <KeyboardArrowUpIcon sx={{ fontSize: 16 }} />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          onClick={() => onMoveItem(dayIndex, itemIndex, 1)}
-                          disabled={itemIndex === totalItems - 1}
-                          sx={{ p: 0.25 }}
-                          aria-label="Move down"
-                        >
-                          <KeyboardArrowDownIcon sx={{ fontSize: 16 }} />
-                        </IconButton>
-                      </>
+                    {/* UX-251: the within-day reorder used to be two bare 16px
+                        arrows at `p: 0.25`, first in a row that can also carry a
+                        change-video button, a move-to-another-day button and a
+                        remove button — five icons beside a title, an App chip, a
+                        skip chip and the editable minutes, on a 390px phone,
+                        repeated across ~15 rows a day and five days.
+
+                        It is the least-used of them (the model orders the day;
+                        the parent's real edits are remove and move-to-another-
+                        day) and the hardest to hit, so it goes behind one
+                        overflow: the row loses a target, and reordering gains
+                        full-width labelled menu rows instead of two adjacent
+                        arrows a thumb cannot separate. The capability is
+                        unchanged — same `onMoveItem`, same draft edit, same
+                        `!applied` gate one level up in `PlanDayCards`.
+
+                        Nothing is rendered for a one-item day, where both
+                        directions are dead ends. */}
+                    {onMoveItem && totalItems > 1 && (
+                      <IconButton
+                        size="small"
+                        onClick={(e) =>
+                          setReorderMenu({
+                            anchorEl: e.currentTarget,
+                            dayIndex,
+                            itemIndex,
+                            totalItems,
+                          })
+                        }
+                        sx={{ p: 0.25 }}
+                        aria-label="Reorder this item"
+                      >
+                        <MoreVertIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
                     )}
                     {canSwapWatch && (
                       <Tooltip title={lockReason ?? 'Change video'} arrow>
@@ -595,6 +618,38 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
           </Box>
         )
       })}
+
+      {/* UX-251: the row's reorder overflow. One menu for every row on the card,
+          anchored to whichever ⋮ was tapped — a Menu per row would be ~75 mounted
+          popovers on a five-day plan. */}
+      <Menu
+        anchorEl={reorderMenu?.anchorEl ?? null}
+        open={!!reorderMenu}
+        onClose={() => setReorderMenu(null)}
+      >
+        <MenuItem
+          disabled={reorderMenu?.itemIndex === 0}
+          onClick={() => {
+            if (reorderMenu) onMoveItem?.(reorderMenu.dayIndex, reorderMenu.itemIndex, -1)
+            setReorderMenu(null)
+          }}
+        >
+          <KeyboardArrowUpIcon fontSize="small" sx={{ mr: 1 }} />
+          Move up
+        </MenuItem>
+        <MenuItem
+          disabled={
+            reorderMenu ? reorderMenu.itemIndex === reorderMenu.totalItems - 1 : true
+          }
+          onClick={() => {
+            if (reorderMenu) onMoveItem?.(reorderMenu.dayIndex, reorderMenu.itemIndex, 1)
+            setReorderMenu(null)
+          }}
+        >
+          <KeyboardArrowDownIcon fontSize="small" sx={{ mr: 1 }} />
+          Move down
+        </MenuItem>
+      </Menu>
 
       {/* Remove item confirmation dialog */}
       <Dialog open={!!removeConfirm} onClose={() => setRemoveConfirm(null)}>
