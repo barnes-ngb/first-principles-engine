@@ -151,19 +151,38 @@ interface DailyPlanRecord {
 // ── Week helpers ────────────────────────────────────────────────
 
 /**
- * Return the Sunday-of-week date string for the most recent completed week.
- * The school week runs Sunday–Saturday. The scheduled review fires Sunday
- * evening, so lastWeekKey returns the previous Sunday (7 days ago on Sunday,
- * dayOfWeek+7 days ago otherwise).
+ * Return the Sunday-of-week date string for the week the review covers.
+ *
+ * **One rule, not a table of offsets (UX-263):** step back to the Sunday that
+ * starts the Sun–Sat week containing `today`, then — on every day but Saturday —
+ * back one more week, because on those days that week's school body is still
+ * ahead or in progress. Saturday is the only day on which the containing week's
+ * Mon–Fri is entirely behind us.
+ *
+ * | Called on          | Returns   | School week it names |
+ * |--------------------|-----------|----------------------|
+ * | Sat Sep 5          | Aug 30    | Aug 31 – Sep 4       |
+ * | Sun Sep 6          | Aug 30    | Aug 31 – Sep 4       |
+ * | Mon Sep 7 – Fri 11 | Aug 30    | Aug 31 – Sep 4       |
+ * | Sat Sep 12         | Sep 6     | Sep 7 – Sep 11       |
+ *
+ * **This is the same rule as the page's `lastCompletedSchoolWeekKey`**
+ * (`src/core/utils/time.ts`), deliberately and by necessity: the page reads the
+ * document this key names, so if the two disagree on any day the page shows a
+ * document nobody wrote. They are pinned to each other from both sides — see the
+ * agreement tests in `evaluate.test.ts` and `time.test.ts`.
+ *
+ * **The Saturday branch is what moving the cron required (UX-263).** The old
+ * body was `offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7`, which on a Saturday
+ * returned the Sunday **two** weeks back — correct while the cron only ever ran
+ * on a Sunday, and silently the wrong document the moment it moved to Saturday
+ * evening so the review would be ready all day Sunday.
  */
 export function lastWeekKey(today: Date): string {
   const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, ...
-  // Go back to the start of the PREVIOUS Sunday-based week
-  // If today is Sunday (0), the previous week started 7 days ago
-  // If today is Monday (1), the previous week started 8 days ago
-  const offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7;
-  d.setDate(d.getDate() - offset);
+  const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, … 6=Sat
+  d.setDate(d.getDate() - dayOfWeek); // → the Sunday of the containing week
+  if (dayOfWeek !== 6) d.setDate(d.getDate() - 7);
   return formatDate(d);
 }
 
@@ -1267,9 +1286,24 @@ export async function runWeeklyReviewCycleForChild(
 
 // ── Scheduled Cloud Function ────────────────────────────────────
 
+/**
+ * **Saturday evening, so the review is ready all day Sunday (UX-263).**
+ *
+ * Owner, 2026-09-06 (a Sunday, 8:23am): *"I also think the review should be
+ * ready all day Sunday."* It fired Sunday 19:00 CT, so the week that ended
+ * Saturday did not exist as a document until Sunday **night** — after the one
+ * morning a parent sits down to look at the week and plan the next.
+ *
+ * The Sun–Sat week is over by Saturday 21:00 and nothing logged on Sunday
+ * belongs to it: Sunday *starts* the next week, so Money Sunday lands in the
+ * following review, which is correct.
+ *
+ * Moving the day moved {@link lastWeekKey} with it — see the note there. The
+ * page's rule needed no change; its Saturday copy did.
+ */
 export const weeklyReview = onSchedule(
   {
-    schedule: "every sunday 19:00",
+    schedule: "every saturday 21:00",
     timeZone: "America/Chicago",
     secrets: [claudeApiKey],
   },

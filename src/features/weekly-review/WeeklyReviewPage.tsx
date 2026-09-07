@@ -162,9 +162,9 @@ function WeeklyReviewBody() {
   } = useWeeklyReviewHistory(familyId, activeChildId, weekKey)
 
   // Load weekly review for active child (real-time). A missing document is a
-  // normal state now, not an empty state: on Saturday the Sunday cron has not
-  // fired for the week the page names, and everything except the adjustments
-  // still renders.
+  // normal state now, not an empty state: on Saturday, until the cron fires that
+  // evening (21:00 CT — UX-263), no document exists for the week the page names,
+  // and everything except the adjustments still renders.
   useEffect(() => {
     if (!activeChildId) return
 

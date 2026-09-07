@@ -35,11 +35,83 @@ describe("lastWeekKey", () => {
     expect(lastWeekKey(monday)).toBe("2026-02-22");
   });
 
-  it("returns the previous Sunday when called on a Saturday", () => {
-    // Saturday March 7, 2026 — current week started Sunday Mar 1,
-    // so previous week started Sunday Feb 22
+  // ── UX-263 — the branch the Saturday cron made load-bearing ───────────────
+
+  it("returns the CONTAINING week's Sunday when called on a Saturday", () => {
+    // Saturday March 7, 2026. Mon–Fri Mar 2–6 ended yesterday, so THAT is the
+    // week the review covers, and its key is Sunday Mar 1.
+    //
+    // This is the assertion that flipped. The old body
+    // (`offset = dayOfWeek === 0 ? 7 : dayOfWeek + 7`) returned Feb 22 here —
+    // the Sunday TWO weeks back — which was unobservable while the cron only
+    // ever ran on a Sunday, and would have written the wrong week's document on
+    // the very first Saturday firing.
     const saturday = new Date(2026, 2, 7);
-    expect(lastWeekKey(saturday)).toBe("2026-02-22");
+    expect(lastWeekKey(saturday)).toBe("2026-03-01");
+  });
+
+  it("names a week whose Friday is already past, on every day of the week", () => {
+    // The rule in one property, walked over a year: whatever day the cron (or a
+    // manual run) calls this on, the Friday of the week it names must be behind
+    // us, and it must be the MOST RECENT such week — without that second half,
+    // "always return 1970" would pass.
+    const cursor = new Date(2026, 0, 1);
+    for (let i = 0; i < 365; i++) {
+      const key = lastWeekKey(cursor);
+      const friday = new Date(key + "T00:00:00");
+      friday.setDate(friday.getDate() + 5); // Sunday key + 5 = Friday
+      expect(friday.getTime()).toBeLessThan(cursor.getTime());
+
+      const nextFriday = new Date(friday);
+      nextFriday.setDate(nextFriday.getDate() + 7);
+      expect(nextFriday.getTime()).toBeGreaterThanOrEqual(cursor.getTime());
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  });
+
+  it("agrees with the page's rule on every day of the week", () => {
+    // The other half of UX-218's pin, from this side of the project boundary.
+    // `lastCompletedSchoolWeekKey` (src/core/utils/time.ts) cannot be imported
+    // here — it is the app's module graph, not the functions build — so its rule
+    // is restated: the Sunday of the Sun–Sat week containing `today`, stepped
+    // back one week on any day but Saturday.
+    //
+    // The page reads the document this key names. If the two disagree on ANY
+    // day, the page shows a document nobody wrote — which is what UX-218 was,
+    // and what moving the cron to Saturday would have re-created.
+    const pageRule = (today: Date): string => {
+      const d = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+      );
+      const day = d.getDay();
+      d.setDate(d.getDate() - day);
+      if (day !== 6) d.setDate(d.getDate() - 7);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    };
+
+    const cursor = new Date(2026, 0, 1);
+    for (let i = 0; i < 365; i++) {
+      expect(lastWeekKey(cursor)).toBe(pageRule(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  });
+
+  it("writes the week that just ended when the Saturday cron fires", () => {
+    // The schedule is `every saturday 21:00 America/Chicago`. The runtime clock
+    // is UTC, so 21:00 CT is already Sunday 02:00/03:00 UTC and `new Date()`
+    // inside the CF reads SUNDAY — one day past the day the cron nominally
+    // fires. Both readings must name the same week or the review lands on the
+    // wrong document, so both are asserted here rather than left to coincidence.
+    const saturdayLocal = new Date(2026, 8, 5); // Sat Sep 5 2026, family zone
+    const sundayUtc = new Date(2026, 8, 6); // what the UTC runtime sees
+    expect(lastWeekKey(saturdayLocal)).toBe("2026-08-30");
+    expect(lastWeekKey(sundayUtc)).toBe("2026-08-30");
   });
 });
 

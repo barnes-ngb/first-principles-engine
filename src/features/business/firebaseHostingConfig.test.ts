@@ -29,23 +29,37 @@ const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), 'utf8')
 // ever frame the nocookie YouTube embed. It is `frame-src`-only (no `default-src`)
 // so scripts/fonts/Firebase/connect stay unrestricted; the shop hosting target is
 // untouched (its own entry, no CSP). This snapshot is updated to match.
+//
+// UX-264: the two header rules SWAPPED ORDER and the broad one gained
+// `Cache-Control: no-cache`. Also deliberate, and the order is the fix rather
+// than a side effect of it — with no Cache-Control on anything but `/assets/**`,
+// the app shell fell to Hosting's default and a deploy stayed invisible on a
+// phone for up to an hour. Firebase applies every matching `headers` entry and,
+// for the same key, the LAST-listed one wins, so `**` must come first to carry
+// `no-cache` and `/assets/**` must come last to win `immutable` back for the
+// hashed files. The shop target is again untouched. Why it is not keyed on
+// `/index.html` (headers match the pre-rewrite request path, so it would miss
+// every deep link in this SPA), and the ordering itself, are asserted in
+// `src/test/hostingCacheHeaders.invariant.test.ts`; this snapshot only records
+// that the change was made on purpose.
 const PREVIOUS_APP_CONFIG = {
   public: 'dist',
   ignore: ['firebase.json', '**/.*', '**/node_modules/**'],
   rewrites: [{ source: '**', destination: '/index.html' }],
   headers: [
     {
-      source: '/assets/**',
-      headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
-    },
-    {
       source: '**',
       headers: [
+        { key: 'Cache-Control', value: 'no-cache' },
         {
           key: 'Content-Security-Policy',
           value: "frame-src 'self' https://www.youtube-nocookie.com",
         },
       ],
+    },
+    {
+      source: '/assets/**',
+      headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
     },
   ],
 }

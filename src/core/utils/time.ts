@@ -99,12 +99,21 @@ export const getPlanningWeekRange = (now: Date = new Date()): WeekRange => {
  * | Mon Sep 7 – Fri 11 | Aug 30    | Aug 31 – Sep 4       |
  * | Sat Sep 12         | Sep 6     | Sep 7 – Sep 11       |
  *
- * **Still agrees with the Cloud Function on the day that matters.** The
- * scheduled review fires Sunday 19:00 CT, and `lastWeekKey` in
- * `functions/src/ai/evaluate.ts` returns the previous Sunday when called on a
- * Sunday — the same key this returns on a Sunday. So the page reads the document
- * the cron writes, and on Saturday it names the week whose document has not been
- * written yet (which the page says, rather than showing an older week instead).
+ * **It now agrees with the Cloud Function on every day, not just one (UX-263).**
+ * `lastWeekKey` in `functions/src/ai/evaluate.ts` was a table of offsets that
+ * matched this rule on Sunday–Friday and diverged on Saturday, which was
+ * harmless only while the cron could not run on a Saturday. Moving the review to
+ * **Saturday 21:00 CT** — so it is ready all day Sunday, which is when a parent
+ * looks — made that Saturday branch load-bearing, and it was rewritten as this
+ * same one-sentence rule. Two definitions still, one on each side of the project
+ * boundary, pinned to each other by an agreement test in *both* suites: this
+ * file's walks the CF's rule, `evaluate.test.ts`'s walks this one, and both cover
+ * all seven weekdays.
+ *
+ * So the page reads the document the cron writes on every day of the week, and
+ * on Saturday **before 21:00** it names a week whose document has not been
+ * written yet — which the page says (`POSITIONS_PENDING_LINE`), rather than
+ * showing an older week instead.
  *
  * Renamed from `lastCompletedWeekKey` deliberately: the semantics changed from
  * "the last whole Sun–Sat week" to "the last completed school week", and a name
