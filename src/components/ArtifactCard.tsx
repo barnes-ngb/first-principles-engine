@@ -71,11 +71,13 @@ export default function ArtifactCard({ artifact }: ArtifactCardProps) {
             only for Photo and Audio. `rel="noreferrer"` because the destination
             is arbitrary and parent-supplied.
 
-            NOTE (Codex round 3): this component is currently imported nowhere,
-            so this case reaches no user today. It is kept because it is the
-            correct behaviour for the card and the place a reader looks for it;
-            the mounted surfaces still need their own Video handling, which is
-            outstanding rather than done.
+            NOTE (Codex round 3): this component is imported nowhere, so this
+            case reaches no user. It is kept because it is correct behaviour for
+            the card and the place a reader looks for it — but it is NOT what
+            makes a captured link openable. That is `PortfolioPage`'s own link
+            row and the portfolio markdown's Links section (UX-285); if this
+            component is ever mounted, check those first rather than assuming
+            this is the live path.
           */}
           {artifact.type === EvidenceType.Video && artifact.uri && (
             <Link

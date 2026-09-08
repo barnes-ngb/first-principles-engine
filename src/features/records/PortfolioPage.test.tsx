@@ -183,3 +183,86 @@ describe('PortfolioPage — whole-family artifacts in the month grid', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(1)
   })
 })
+
+// ── UX-285: a captured link is openable, not a clipped string ────────────────
+//
+// A strand session's "the video we watched" (UX-283) stores an EXTERNAL address
+// in `uri` and a copy in `content`. The card drew media for Photo and Audio
+// only, so the address reached the screen through `content` alone — one
+// truncated, no-wrap, unselectable line, and nothing to tap.
+describe('a video artifact records a link the parent can open', () => {
+  const LINK = 'https://example.test/watch?v=abc'
+  const videoArtifact = artifact({
+    id: 'egypt-video',
+    childId: 'lincoln',
+    title: 'Ancient Egypt',
+    type: EvidenceType.Video,
+    uri: LINK,
+    content: LINK,
+  })
+
+  beforeEach(() => {
+    artifactsRef.current = [videoArtifact]
+  })
+
+  it('renders it as a real link to the address', async () => {
+    renderFor('lincoln')
+    await waitFor(() => expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0))
+
+    const link = screen.getByRole('link', { name: /open link/i })
+    expect(link).toHaveAttribute('href', LINK)
+  })
+
+  it('opens it away from the app, without handing over the referrer', async () => {
+    renderFor('lincoln')
+    await waitFor(() => expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0))
+
+    const link = screen.getByRole('link', { name: /open link/i })
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'))
+  })
+
+  it('does not also print the same address as a clipped line', async () => {
+    renderFor('lincoln')
+    await waitFor(() => expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0))
+
+    // `content` holds a copy of the URL; showing it beside the link is noise,
+    // not a second fact.
+    expect(screen.queryByText(LINK)).toBeNull()
+  })
+
+  it('still shows a real note beside the link', async () => {
+    artifactsRef.current = [
+      artifact({
+        id: 'egypt-video-2',
+        childId: 'lincoln',
+        title: 'Ancient Egypt',
+        type: EvidenceType.Video,
+        uri: LINK,
+        content: 'we watched this after lunch',
+      }),
+    ]
+    renderFor('lincoln')
+    await waitFor(() => expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0))
+
+    expect(screen.getByText('we watched this after lunch')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /open link/i })).toBeInTheDocument()
+  })
+
+  it('renders no link for a video artifact carrying no address', async () => {
+    artifactsRef.current = [
+      artifact({
+        id: 'egypt-video-3',
+        childId: 'lincoln',
+        title: 'Ancient Egypt',
+        type: EvidenceType.Video,
+        uri: undefined,
+        content: undefined,
+      }),
+    ]
+    renderFor('lincoln')
+    await waitFor(() => expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0))
+
+    expect(screen.queryByRole('link', { name: /open link/i })).toBeNull()
+  })
+})
