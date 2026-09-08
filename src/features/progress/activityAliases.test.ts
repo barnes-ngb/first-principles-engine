@@ -8,6 +8,7 @@ import { findDuplicateActivities } from '../shelly-chat/curriculumActions'
 import { isWorkbookMatch } from '../../core/hooks/useScanToActivityConfig'
 import { activityMatchNames, activityNames } from '../../core/utils/activityNames'
 import { normalizeCurriculumKey } from '../../core/firebase/firestore'
+import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import { resolveQuickLogChips } from '../today/quickLogChips'
 
 const COVER = 'The Good and the Beautiful Math'
@@ -111,6 +112,37 @@ describe('activityMatchNames is the ONE list every lookup compares against', () 
 
   it('drops a curriculum that keys the same as a name already in the list', () => {
     expect(activityMatchNames({ name: 'Math K', curriculum: 'math-k' })).toEqual(['Math K'])
+  })
+})
+
+describe('a plan item locks in to the renamed row (UX-280)', () => {
+  it('matches a draft item still carrying the OLD title', () => {
+    // Codex round 3, P2. A draft generated before a rename — or a legacy
+    // unstamped item — still carries the old title, so matching only
+    // `name ?? curriculum` left `workbookConfigId` unstamped and dropped the
+    // item off the FEAT-62 deterministic scan path. The old title was preserved
+    // precisely to keep that working.
+    const renamed = config({
+      id: 'cfg-phonics',
+      name: 'Phonics',
+      aliases: ['Explode the Code'],
+      subjectBucket: SubjectBucket.Reading,
+      type: ActivityType.Workbook,
+    })
+    const item = { label: 'Explode the Code', subjectBucket: SubjectBucket.Reading }
+    expect(findWorkbookConfigId(item, [renamed])).toBe('cfg-phonics')
+  })
+
+  it('still refuses to lock a genuinely different book in', () => {
+    const renamed = config({
+      id: 'cfg-phonics',
+      name: 'Phonics',
+      aliases: ['Explode the Code'],
+      subjectBucket: SubjectBucket.Reading,
+      type: ActivityType.Workbook,
+    })
+    const item = { label: 'Mathseeds', subjectBucket: SubjectBucket.Math }
+    expect(findWorkbookConfigId(item, [renamed])).toBeUndefined()
   })
 })
 

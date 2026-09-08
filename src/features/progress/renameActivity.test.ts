@@ -111,6 +111,49 @@ describe('planRename', () => {
     expect(planRename(config(), 'Math K', undefined, siblings).duplicateNotice).toContain('You already have')
   })
 
+  it('notices a collision an ADDED alternate would create, with no rename', () => {
+    // Codex round 3, P2. This is the collision that costs something: both rows
+    // then match the same scanned page and the lookup's `.find(...)` updates
+    // whichever comes back first — a position written to the wrong workbook,
+    // which is what the alternates exist to prevent. It was un-warned twice
+    // over: the notice was suppressed unless the display name changed, and it
+    // compared only that name.
+    const sibling = {
+      id: 'cfg-other',
+      name: 'Mathseeds',
+      childId: 'lincoln',
+      defaultMinutes: 20,
+      frequency: 'daily' as const,
+    }
+    const plan = planRename(config({ name: 'Math K' }), 'Math K', ['Mathseeds'], [sibling])
+    expect(plan.name).toBe('Math K')
+    expect(plan.duplicateNotice).toContain('You already have "Mathseeds"')
+  })
+
+  it("sees a sibling's publisher slot too, because the scan lookup does", () => {
+    const sibling = {
+      id: 'cfg-other',
+      name: 'Reading',
+      curriculum: 'Mathseeds',
+      childId: 'lincoln',
+      defaultMinutes: 20,
+      frequency: 'daily' as const,
+    }
+    expect(
+      planRename(config({ name: 'Math K' }), 'Math K', ['Mathseeds'], [sibling]).duplicateNotice,
+    ).toContain('You already have')
+  })
+
+  it('can be told NOT to carry the old name', () => {
+    // Carrying is a default, not a rule: a parent correcting a typo in a name
+    // nobody ever scanned should not be made to keep the typo. The dialog's
+    // delete control on that chip is what sets this.
+    const plan = planRename(config(), 'Math K', undefined, [], { carryOldName: false })
+    expect(plan.name).toBe('Math K')
+    expect(plan.carriesOldName).toBe(false)
+    expect(plan.aliases).toEqual([])
+  })
+
   it('never notices itself, or a completed sibling', () => {
     const self = { id: 'cfg-math', name: 'Math K', childId: 'lincoln', defaultMinutes: 30, frequency: 'daily' as const }
     const done = { id: 'cfg-old', name: 'Math K', completed: true, childId: 'lincoln', defaultMinutes: 30, frequency: 'daily' as const }

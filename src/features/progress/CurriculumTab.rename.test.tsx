@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -170,6 +170,33 @@ describe('CurriculumTab — rename (UX-279)', () => {
     await openOverflowMenu(user)
     await user.click(await screen.findByText('Rename'))
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  it('the carried old name can be removed before saving', async () => {
+    // Codex round 3, P2. The carry is computed by `planRename`, not held in the
+    // dialog's alias state, so filtering that state could never remove it — the
+    // chip rendered a delete control that did nothing. Carrying is a default,
+    // not a rule: a parent correcting a typo in a name nobody ever scanned
+    // should not be made to keep the typo.
+    const user = userEvent.setup()
+    render(<CurriculumTab />)
+    await openOverflowMenu(user)
+    await user.click(await screen.findByText('Rename'))
+    const field = await screen.findByLabelText('Name')
+    await user.clear(field)
+    await user.type(field, 'Math K')
+
+    // The carried chip is offered… (scoped to the dialog — the row behind it
+    // still shows the old name until the save lands)
+    const dialog = within(screen.getByRole('dialog'))
+    const chip = (await dialog.findByText(COVER_NAME)).closest('.MuiChip-root')
+    await user.click(chip!.querySelector('.MuiChip-deleteIcon')!)
+    // …and removing it actually removes it.
+    await waitFor(() => expect(dialog.queryByText(COVER_NAME)).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(mockUpdateConfig).toHaveBeenCalled())
+    expect(mockUpdateConfig).toHaveBeenCalledWith('cfg-1', { name: 'Math K', aliases: [] })
   })
 
   it('stays open and says what is still true when the write fails', async () => {

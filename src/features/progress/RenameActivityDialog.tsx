@@ -72,18 +72,31 @@ function RenameActivityDialogBody({
   const [name, setName] = useState(config.name)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
-  /** The alternates as edited here — the carried old name is added at save. */
   const [aliases, setAliases] = useState<string[]>(() => config.aliases ?? [])
   const [draftAlias, setDraftAlias] = useState('')
+  /**
+   * She removed the carried old name (Codex round 3, P2).
+   *
+   * The carry is computed by `planRename`, not held in `aliases`, so filtering
+   * that state could never remove it — the chip rendered a delete control that
+   * did nothing. Carrying is a default, not a rule: it is what she almost always
+   * wants and it is what keeps a scan of the cover working, but a parent
+   * correcting a typo in a name nobody ever scanned should not be made to keep
+   * the typo. Tracked as its own flag rather than by mutating the list, because
+   * the carry re-derives from the name on every keystroke.
+   */
+  const [dropCarried, setDropCarried] = useState(false)
 
   const plan = useMemo(
-    () => planRename(config, name, aliases, siblings),
-    [config, aliases, name, siblings],
+    () => planRename(config, name, aliases, siblings, { carryOldName: !dropCarried }),
+    [config, aliases, dropCarried, name, siblings],
   )
 
   const canSave = plan.name != null && plan.refusal === ''
   /** What the alternates will be after this save — what the list must show. */
   const resolvedAliases = plan.aliases ?? normalizeAliases(aliases, name)
+  /** The one chip in that list that lives on the carry flag, not in `aliases`. */
+  const carriedName = plan.carriesOldName ? config.name.trim() : ''
   const atCap = resolvedAliases.length >= MAX_ACTIVITY_ALIASES
 
   const addAlias = () => {
@@ -142,7 +155,11 @@ function RenameActivityDialogBody({
                     key={alias}
                     label={alias}
                     size="small"
-                    onDelete={() => setAliases(aliases.filter((a) => a !== alias))}
+                    onDelete={() =>
+                      alias === carriedName
+                        ? setDropCarried(true)
+                        : setAliases(aliases.filter((a) => a !== alias))
+                    }
                   />
                 ))}
               </Stack>

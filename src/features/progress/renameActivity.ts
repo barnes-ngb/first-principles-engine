@@ -87,6 +87,7 @@ export function planRename(
    */
   nextAliases?: readonly string[],
   siblings: readonly ChatActivityConfig[] = [],
+  options: { carryOldName?: boolean } = {},
 ): RenameActivityPlan {
   if (config.completed) return { ...NOTHING, refusal: COMPLETED_NAME_REFUSAL }
 
@@ -103,7 +104,10 @@ export function planRename(
   // storing the old spelling would spend a capped slot on a name that already
   // matches.
   const carriesOldName =
-    nameChanged && Boolean(nameKey(previous)) && nameKey(previous) !== nameKey(trimmed)
+    options.carryOldName !== false &&
+    nameChanged &&
+    Boolean(nameKey(previous)) &&
+    nameKey(previous) !== nameKey(trimmed)
   const stored = config.aliases ?? []
   const edited = nextAliases ?? stored
   const aliases = normalizeAliases(
@@ -122,7 +126,7 @@ export function planRename(
     name: trimmed,
     aliases,
     refusal: '',
-    duplicateNotice: nameChanged ? renameDuplicateNotice(config.id, trimmed, siblings) : '',
+    duplicateNotice: renameDuplicateNotice(config.id, [trimmed, ...aliases], siblings),
     carriesOldName,
   }
 }
@@ -133,21 +137,32 @@ function sameNames(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * The "you already have …" line for a rename onto a name another live row
- * already answers to — by its own name OR by one of its alternates, because a
- * second row matching the scanned cover is the collision that matters here.
+ * The "you already have …" line for a save that would make this row answer to a
+ * name another live row already answers to.
+ *
+ * **Every name on both sides** (Codex round 3, P2). It first compared only the
+ * changed display name against siblings' names, which left the collision that
+ * actually costs something un-warned: an alternate she adds — without touching
+ * the display name, so the notice was suppressed entirely — that equals another
+ * workbook's title. Both rows then match the same scanned page, and the scan
+ * lookup's `.find(...)` updates whichever document comes back first. A position
+ * written to the wrong workbook is precisely what the alternates were added to
+ * prevent, so the warning has to see what the LOOKUP sees.
  *
  * Completed programs are excluded, as they are for an add: a finished program
  * is history and reusing its name is a legitimate thing to do. The row being
- * renamed is excluded too — it always matches itself.
+ * saved is excluded too — it always matches itself.
  */
 export function renameDuplicateNotice(
   configId: string,
-  nextName: string,
+  nextNames: readonly string[],
   siblings: readonly ChatActivityConfig[],
 ): string {
   const matches = siblings.filter(
-    (c) => c.id !== configId && !c.completed && matchesActivityName(c, nextName),
+    (c) =>
+      c.id !== configId &&
+      !c.completed &&
+      nextNames.some((candidate) => matchesActivityName(c, candidate)),
   )
   return duplicateActivityNotice(matches)
 }

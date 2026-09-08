@@ -212,6 +212,8 @@ export interface ChatActivityConfig {
    * narrowing of whatever Firestore stored, not a promise about it.
    */
   aliases?: string[]
+  /** UX-280 — the publisher-name slot, which the scan lookup also compares. */
+  curriculum?: string
   /**
    * UX-205 — how often this activity runs, for the duplicate notice's shape
    * line ("10m · daily"). Optional because this interface is a structural

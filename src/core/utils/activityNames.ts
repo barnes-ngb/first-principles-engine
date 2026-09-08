@@ -115,7 +115,11 @@ export function matchesActivityName(
 ): boolean {
   const key = nameKey(candidate)
   if (!key) return false
-  return activityNames(config).some((name) => nameKey(name) === key)
+  // The LOOKUP list, not the display one (Codex round 3, P2): a duplicate
+  // warning has to see what the scan matcher sees, and that includes the
+  // publisher slot. A row whose `curriculum` equals the candidate would match
+  // the same scanned page, which is the collision worth naming.
+  return activityMatchNames(config).some((name) => nameKey(name) === key)
 }
 
 /**
