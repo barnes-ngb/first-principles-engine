@@ -137,6 +137,23 @@ export const STRAND_SESSION_GONE_MESSAGE =
  */
 export class StrandSessionPartiallySaved extends StrandSessionFailure {}
 
+/**
+ * Was this delete rejected because there was nothing there?
+ *
+ * A storage path is registered BEFORE its upload is awaited (so an upload that
+ * lands its bytes and then fails to return a URL is still cleaned up), which
+ * means a rollback can legitimately ask Storage to delete an object that was
+ * never created — the upload failed at `uploadBytes` itself. Storage answers
+ * `storage/object-not-found`, and counting that as a failed cleanup told the
+ * parent evidence may remain when nothing does, sending her to look for a file
+ * that does not exist (Codex). Nothing there IS cleaned up. Every other
+ * rejection still counts.
+ */
+const isAlreadyGone = (reason: unknown): boolean =>
+  typeof reason === 'object' &&
+  reason !== null &&
+  (reason as { code?: unknown }).code === 'storage/object-not-found'
+
 /** What a caller renders for a failure whose evidence WAS cleaned up. */
 export const STRAND_SESSION_FAILED_CLEAN =
   'That session was not recorded. Nothing was saved — try again.'
@@ -209,13 +226,20 @@ export async function logStrandSession(
    * is a different sentence to the parent — never a blind "try again".
    */
   const rollback = async (): Promise<boolean> => {
-    const results = await Promise.allSettled([
-      ...artifactIds.map((id) =>
+    const docDeletes = await Promise.allSettled(
+      artifactIds.map((id) =>
         deleteDoc(doc(artifactsCollection(args.familyId), id)),
       ),
-      ...storagePaths.map((path) => deleteObject(storageRef(storage, path))),
-    ])
-    return results.every((r) => r.status === 'fulfilled')
+    )
+    const objectDeletes = await Promise.allSettled(
+      storagePaths.map((path) => deleteObject(storageRef(storage, path))),
+    )
+    return (
+      docDeletes.every((r) => r.status === 'fulfilled') &&
+      objectDeletes.every(
+        (r) => r.status === 'fulfilled' || isAlreadyGone(r.reason),
+      )
+    )
   }
 
   try {

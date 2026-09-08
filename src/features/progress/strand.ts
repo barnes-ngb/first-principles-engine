@@ -58,8 +58,16 @@ import { nameKey } from '../../core/utils/nameKey'
  */
 export const STRAND_UNIT_LABEL = 'session'
 
-/** Is this row a strand? The one place the type is compared. */
-export function isStrand(config: Pick<ActivityConfig, 'type'>): boolean {
+/**
+ * Is this row a strand? The one place the type is compared.
+ *
+ * Takes an OPTIONAL type, like {@link StrandLike}, because the callers that
+ * most need this guard hold narrowed views of a config — the chat's
+ * `ChatActivityConfig` among them — and an absent type is simply not a strand.
+ * Demanding the full shape pushed those call sites toward comparing the literal
+ * themselves, which is how a rail acquires a second definition.
+ */
+export function isStrand(config: { type?: string }): boolean {
   return config.type === ActivityType.Strand
 }
 

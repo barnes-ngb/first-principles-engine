@@ -292,6 +292,25 @@ export function mediaEntryName(
   }
 }
 
+/** Hosts whose links cannot survive as evidence in an offline archive. */
+const REMOTE_STORAGE_HOSTS = [
+  "firebasestorage.googleapis.com",
+  "storage.googleapis.com",
+];
+
+/**
+ * Does this URL name Storage at all, parseable or not?
+ *
+ * Declared above {@link isExternalLink} because that classification depends on
+ * it: a Storage URL is never external, however malformed.
+ */
+const isRemoteStorageUrl = (url: string): boolean => {
+  const ref = parseStorageObjectRef(url);
+  if (ref) return true;
+  const lower = url.toLowerCase();
+  return REMOTE_STORAGE_HOSTS.some((h) => lower.includes(h));
+};
+
 /**
  * Is this entry an external reference rather than a file that failed to resolve?
  *
@@ -309,6 +328,14 @@ export function mediaEntryName(
  */
 export function isExternalLink(url: string, type?: string): boolean {
   if (!isLinkEvidenceType(type)) return false;
+  // A MALFORMED Storage URL is not an external link, and calling one that would
+  // break the whole export (Codex): `parseStorageObjectRef` declines
+  // `https://firebasestorage.googleapis.com/bad-path`, so on `http(s)` alone it
+  // would be classed external, survive `rewritePortfolioMedia` untouched, and
+  // then be caught by `findRemainingRemoteUrls` — which aborts the archive
+  // rather than shipping a live Storage link. It stays `unreadable-url`, which
+  // is reported in the manifest and rewritten to a marker, exactly as before.
+  if (isRemoteStorageUrl(url)) return false;
   try {
     const { protocol } = new URL(url.trim());
     return protocol === "http:" || protocol === "https:";
@@ -422,19 +449,6 @@ export function checkSizeAllowance(
 
 /** Any markdown link or image: `[text](target)` / `![text](target)`. */
 const MARKDOWN_LINK = /(!?)\[([^\]\n]*)\]\(([^)\s]+)\)/g;
-
-/** Hosts whose links cannot survive as evidence in an offline archive. */
-const REMOTE_STORAGE_HOSTS = [
-  "firebasestorage.googleapis.com",
-  "storage.googleapis.com",
-];
-
-const isRemoteStorageUrl = (url: string): boolean => {
-  const ref = parseStorageObjectRef(url);
-  if (ref) return true;
-  const lower = url.toLowerCase();
-  return REMOTE_STORAGE_HOSTS.some((h) => lower.includes(h));
-};
 
 /**
  * Rewrite the portfolio markdown so it reads offline.

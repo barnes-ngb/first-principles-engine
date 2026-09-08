@@ -182,6 +182,33 @@ describe("planPackMedia", () => {
     }
   });
 
+  it("keeps a MALFORMED Storage URL unreadable, not external", () => {
+    // Classing it external would leave it intact through the rewrite, and
+    // `findRemainingRemoteUrls` then ABORTS the whole archive rather than ship
+    // a live Storage link — so this misclassification broke the export outright
+    // rather than mislabelling one row.
+    const entries = planPackMedia(
+      [
+        {
+          id: "v",
+          type: "Video",
+          urls: ["https://firebasestorage.googleapis.com/bad-path"],
+        },
+      ],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBe(PackSkipReason.UnreadableUrl);
+  });
+
+  it("does not let a malformed Storage URL survive the rewrite", () => {
+    const url = "https://firebasestorage.googleapis.com/bad-path";
+    const entries = planPackMedia([{ id: "v", type: "Video", urls: [url] }], FAMILY);
+    const { markdown } = rewritePortfolioMedia(`- [Egypt](${url})`, entries);
+
+    expect(markdown).toContain("evidence unavailable");
+    expect(findRemainingRemoteUrls(markdown)).toEqual([]);
+  });
+
   it("never treats a Storage URL as external", () => {
     const entries = planPackMedia(
       [{ id: "v", type: "Video", urls: [downloadUrl(PHOTO_PATH)] }],

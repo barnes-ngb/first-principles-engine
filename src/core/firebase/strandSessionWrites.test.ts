@@ -480,3 +480,61 @@ describe('the rollback covers an upload that half-succeeded', () => {
     expect(deleteObjectMock).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('a missing storage object is cleaned up, not a failure', () => {
+  it('does not warn about retained evidence when the object never existed', async () => {
+    // The path is registered BEFORE the upload is awaited, so an upload that
+    // fails at `uploadBytes` leaves a registered path with no object. Storage
+    // answers `storage/object-not-found`, and counting that as a failed cleanup
+    // sent the parent looking for a file that does not exist (Codex).
+    uploadMock.mockImplementation(async () => {
+      throw new Error('upload failed')
+    })
+    deleteObjectMock.mockImplementation(async () => {
+      const err = new Error('not found') as Error & { code?: string }
+      err.code = 'storage/object-not-found'
+      throw err
+    })
+
+    await expect(
+      logStrandSession(
+        args({ evidence: { photos: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } }),
+      ),
+    ).rejects.toThrow('upload failed')
+  })
+
+  it('still reports a genuine storage delete failure', async () => {
+    uploadMock.mockImplementation(async () => ({
+      downloadUrl: 'https://example/f.jpg',
+      storagePath: 'families/fam/artifacts/a/0.jpg',
+    }))
+    updateConfigThrows = new Error('offline')
+    deleteObjectMock.mockImplementation(async () => {
+      const err = new Error('denied') as Error & { code?: string }
+      err.code = 'storage/unauthorized'
+      throw err
+    })
+
+    await expect(
+      logStrandSession(
+        args({ evidence: { photos: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } }),
+      ),
+    ).rejects.toBeInstanceOf(StrandSessionPartiallySaved)
+  })
+
+  it('still reports a failed DOCUMENT delete, whatever storage said', async () => {
+    deleteDocMock.mockImplementation(async () => {
+      throw new Error('offline')
+    })
+    deleteObjectMock.mockImplementation(async () => {
+      const err = new Error('not found') as Error & { code?: string }
+      err.code = 'storage/object-not-found'
+      throw err
+    })
+    updateConfigThrows = new Error('offline')
+
+    await expect(logStrandSession(args())).rejects.toBeInstanceOf(
+      StrandSessionPartiallySaved,
+    )
+  })
+})

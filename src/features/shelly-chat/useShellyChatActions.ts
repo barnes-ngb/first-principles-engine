@@ -144,6 +144,7 @@ import { createPlannedLab } from '../dad-lab/plannedLab'
 import { addWatchVideo } from '../watch/useWatchLibrary'
 import { writeWatchItemToDay } from '../watch/writeWatchItemToDay'
 import {
+  isStrand,
   unitLabelForNewActivity,
   withoutStrandPositionFields,
 } from '../progress/strand'
@@ -641,11 +642,19 @@ async function applyCurriculumAction(
     return
   }
 
+  const positionTarget = configs.find((c) => c.id === action.activityConfigId)
+  // Guarded again at the write (Codex), as every rail on this lane is: a
+  // strand's count is moved only by `logStrandSession`, only ever by an atomic
+  // `increment(1)`, and never down. `setActivityConfigPosition` writes an
+  // ABSOLUTE value, so reaching it with a strand would undo that rail whatever
+  // the card said. The offer gate refuses first and names the verb that works.
+  if (positionTarget && isStrand(positionTarget)) return
+
   await setActivityConfigPosition(
     familyId,
     action.activityConfigId,
     action.position,
-    configs.find((c) => c.id === action.activityConfigId),
+    positionTarget,
   )
 }
 
