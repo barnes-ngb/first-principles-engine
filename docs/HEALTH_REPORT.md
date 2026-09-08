@@ -7,7 +7,7 @@
 | **Total lines** | **317,104** | +41,532 |
 | **Commits** | **3,403** | +300 |
 | **Test files** | **537** | +132 |
-| **Tests passing** | **7,788** (root, 1 failing) + **1,371** (functions/ own suite) | +1,663 root, +357 functions |
+| **Tests passing** | **7,788** (root, 1 failing — *the failure was fixed 2026-09-08 by UX-272; root now reads 8,013 passing / 0 failing / 1 skipped*) + **1,371** (functions/ own suite) | +1,663 root, +357 functions |
 | **Firestore collections** | **47** | −1 (`bookThemesCollection` retired, FEAT-194) |
 | **Cloud Functions** | **29** | +0 |
 | **Chat task types** | **21** | +0 |
@@ -22,7 +22,7 @@
 |-------|--------|-------|
 | **Build** | ✅ PASS | `tsc -b && vite build` clean (~24s). Fresh sandbox — `npm ci` at root and in `functions/` required (not a repo issue). |
 | **Lint** | ⚠️ 3 WARNINGS | 0 errors; same 3 `react-hooks/exhaustive-deps` warnings as every prior cycle (`EvaluateChatPage.tsx:295`, `useQuestSession.ts:814`, `useQuestSession.ts:2083`, all involving `sessionTimer`). Not mechanically fixable without reviewing timer semantics. |
-| **Tests (root)** | ❌ **1 FAILING** — **resolved 2026-09-08 (UX-272)** | 7,788 passing, 1 failing, 0 skipped (537 test files, `src/` + `functions/src/` combined via root `vitest.config.ts`). See **CRITICAL finding** below — a test-infrastructure gap exposed only by a full-history clone. `ci.yml` (PR checks, push to `main`) checks out shallow and is unaffected, **but `deploy.yml` checks out with `fetch-depth: 0` and runs this suite — a push to `deploy` will hit this failure and block the Firebase deployment.** |
+| **Tests (root)** | ✅ **PASS** (current, 2026-09-08) | **8,013 passing, 0 failing, 1 skipped** (552 test files, `src/` + `functions/src/` combined via root `vitest.config.ts`). The one skip is the opt-in `docs:ledger-sweep` probe, which by design does not run in `npx vitest run`. **`deploy.yml` is unblocked.** ⟨*Obsolete snapshot, this report's audit date 2026-09-07:* ❌ 1 FAILING — 7,788 passing, 1 failing, 0 skipped (537 files); `ci.yml` checks out shallow and was unaffected, but `deploy.yml` checks out with `fetch-depth: 0` and ran this suite, so a push to `deploy` hit the failure and blocked the Firebase deployment. Resolved by **UX-272** — see the **CRITICAL finding** below.⟩ |
 | **Tests (functions/)** | ✅ PASS | 1,371 passing, 0 failing (61 test files) — functions' own `vitest.config.ts` (real deps, no Anthropic/OpenAI/firebase-admin stubs) |
 | **TypeScript** | ✅ PASS | `npm run build` (`tsc -b`) + a standalone `npx tsc --noEmit -p tsconfig.app.json` (Phase 3g orphaned-import check) both clean; `functions`' `tsc --noEmit` also clean — no orphaned imports |
 | **`npm run docs:check`** | ✅ PASS | All HARD checks pass (ledger IDs, index resolution, ledger anchors, collection-count spans, evidence kinds, day-write routing, ledger-status, ledger-status-contradiction). 10 SOFT warnings — see **docs:check findings** below. `--fix` made no changes (nothing to auto-fix). |
