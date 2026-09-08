@@ -255,6 +255,37 @@ describe('useScan — UX-278: an unreadable format is refused, not relabelled', 
     expect(report.message).toContain('sent=image/jpeg')
   })
 
+  it('reports an unparseable analysis, which throws nothing (Codex round 2, P2)', async () => {
+    // The AI answers with prose. `scan` saves and RETURNS a record whose
+    // `results` is null, so nothing escapes the try — the certificate door
+    // rendered nothing at all and Diagnostics never heard about it.
+    const jpg = new File(['jpg'], 'page.jpg', { type: 'image/jpeg' })
+    compressIfNeededMock.mockResolvedValue(jpg)
+    chatMock.mockResolvedValue({
+      message: "I'm sorry, I can't help with Lincoln's worksheet about the fire.",
+    })
+    const { result } = renderHook(() => useScan(ScanDoor.Certificate))
+
+    await act(async () => {
+      await result.current.scan(jpg, 'fam', 'child-1')
+    })
+
+    // The parent gets a sentence instead of a blank panel.
+    expect(result.current.error).toContain("couldn't read")
+    expect(result.current.lastError()).toBe(result.current.error)
+
+    expect(reportErrorMock).toHaveBeenCalledTimes(1)
+    const report = reportErrorMock.mock.calls[0][0]
+    expect(report.source).toBe('handled')
+    expect(report.section).toBe('scan-certificate')
+    expect(report.message).toContain('was not JSON')
+    // The model's own text is unbounded and may echo the child's page: it stays
+    // on the scan record and reaches neither the log nor the screen.
+    expect(report.message).not.toContain('Lincoln')
+    expect(report.message).not.toContain('fire')
+    expect(result.current.error).not.toContain('fire')
+  })
+
   it('reports nothing when the scan succeeds', async () => {
     const jpg = new File(['jpg'], 'page.jpg', { type: 'image/jpeg' })
     compressIfNeededMock.mockResolvedValue(jpg)

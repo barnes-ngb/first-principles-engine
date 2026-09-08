@@ -358,6 +358,23 @@ export default function CurriculumTab() {
    * photos are two taps to re-pick, a wrong record is not.
    */
   const [stagedChildId, setStagedChildId] = useState<string | null>(null)
+  /**
+   * The active child as it is NOW, readable from inside an in-flight batch. A
+   * running `handleScanPages` holds the child it started with in its closure —
+   * correct for its own writes — but its `finally` restores the failed pages
+   * long after a switch may have happened, and the switch effect cannot see a
+   * batch that has not finished (Codex round 2, P1).
+   */
+  const activeChildIdRef = useRef(activeChildId)
+  useEffect(() => {
+    activeChildIdRef.current = activeChildId
+  }, [activeChildId])
+  /**
+   * Set when the switch effect drops a batch. A flag rather than an endpoint
+   * comparison, because switching away and back again during a scan also leaves
+   * the staged pages cleared and their object URLs revoked.
+   */
+  const batchInvalidatedRef = useRef(false)
 
   // Revoke any pending object URLs on unmount.
   const stagedRef = useRef(stagedPages)
@@ -375,6 +392,7 @@ export default function CurriculumTab() {
   // selector drops it rather than carrying it across — see `stagedChildId`.
   useEffect(() => {
     if (!stagedChildId || stagedChildId === activeChildId) return
+    batchInvalidatedRef.current = true
     stagedPages.forEach((p) => URL.revokeObjectURL(p.url))
     if (stagedPages.length > 0) {
       setScanSnack({
@@ -418,6 +436,7 @@ export default function CurriculumTab() {
     // whose name was not on the screen when the photos were taken.
     if (stagedChildId && stagedChildId !== activeChildId) return
     const pages = stagedPages
+    batchInvalidatedRef.current = false
     setBatchProcessing(true)
     setFailedPageCount(0)
     // UX-275: which pages to KEEP staged. `null` means "we don't know" — keep
@@ -452,11 +471,27 @@ export default function CurriculumTab() {
       setScanSnack({ message: `Scan failed — ${msg}`, failed: true })
       setFailedPageCount(pages.length)
     } finally {
-      const kept = (i: number) => keep === null || keep.has(i)
-      pages.forEach((p, i) => {
-        if (!kept(i)) URL.revokeObjectURL(p.url)
-      })
-      setStagedPages(pages.filter((_, i) => kept(i)))
+      if (batchInvalidatedRef.current || activeChildIdRef.current !== activeChildId) {
+        // The child changed WHILE this batch was running. Restoring the failed
+        // pages now would hand them to the new child with no owner recorded —
+        // the switch effect has already run and cleared `stagedChildId`, so the
+        // retry guard would wave them through. Discard the completion instead:
+        // nothing written this run is affected (every write used the child this
+        // batch started with, from the closure), and re-picking is two taps.
+        pages.forEach((p) => URL.revokeObjectURL(p.url))
+        setStagedPages([])
+        setStagedChildId(null)
+        setFailedPageCount(0)
+      } else {
+        const kept = (i: number) => keep === null || keep.has(i)
+        pages.forEach((p, i) => {
+          if (!kept(i)) URL.revokeObjectURL(p.url)
+        })
+        const remaining = pages.filter((_, i) => kept(i))
+        setStagedPages(remaining)
+        // Re-stamp the owner: the batch outlived it only if pages did.
+        setStagedChildId(remaining.length > 0 ? activeChildId : null)
+      }
       setBatchProcessing(false)
       // Discard the last single-page record left in useScan state.
       clearScan()

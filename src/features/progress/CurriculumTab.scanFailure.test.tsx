@@ -226,6 +226,38 @@ describe('CurriculumTab — a failed batch keeps its reason and its photos (UX-2
     expect(syncMock).not.toHaveBeenCalled()
   })
 
+  it('discards a batch whose child changed mid-scan (Codex round 2, P1)', async () => {
+    const user = userEvent.setup()
+    // Hold the first page's scan open so the switch lands mid-batch.
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let switched = false
+    scanMock.mockImplementation(async () => {
+      if (!switched) {
+        switched = true
+        activeChildId = 'london'
+        view.rerender(<CurriculumTab />)
+        await held
+      }
+      return null // every page fails, so all would be retained
+    })
+
+    const view = render(<CurriculumTab />)
+    await user.click(screen.getByText('STAGE_TWO'))
+    await user.click(await screen.findByRole('button', { name: /Scan 2 pages/i }))
+    release()
+
+    // The completion is discarded: no photos, no retry, nothing left to write
+    // to the child who is now on screen.
+    await waitFor(() => expect(screen.queryByAltText('Page 1')).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /Retry failed pages/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Scan \d+ pages?/i })).not.toBeInTheDocument()
+    // The writes this batch DID make used the child it started with.
+    expect(scanMock.mock.calls.every((c) => c[2] === 'lincoln')).toBe(true)
+  })
+
   it('clears every photo when they all landed', async () => {
     const user = userEvent.setup()
     scanMock.mockResolvedValue(worksheetRecord())

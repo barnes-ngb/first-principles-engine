@@ -57,6 +57,15 @@ export interface UseScanResult {
   clearScan: () => void
 }
 
+/**
+ * What a parent reads when the analysis came back unparseable. Deliberately the
+ * app's OWN sentence: the model's raw text is unbounded and may echo the child's
+ * page, so it stays on the scan record and reaches neither the screen nor the
+ * error log.
+ */
+const ANALYSIS_UNREADABLE =
+  "The analysis came back in a form the app couldn't read. Nothing was added to the curriculum — try that page again."
+
 /** Convert a File to a base64-encoded string (data portion only). */
 async function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -157,6 +166,22 @@ export function useScan(door: ScanDoor = ScanDoor.Unknown): UseScanResult {
       // how far it got. No bytes, no file name, no path.
       const shape: ScanFailureShape = { inputType: file.type, sizeBytes: file.size }
 
+      /**
+       * The one path from a caught scan failure to the error log. Every message
+       * that reaches it is either the app's own sentence or an exception's, and
+       * `reportError` scrubs it again — the model's own text is never passed in.
+       */
+      const report = (name: string, message: string, stack: string | null): void => {
+        void reportError({
+          name,
+          message: `${scanFailureNote(door, shape)} ${message}`,
+          stack,
+          route: typeof window !== 'undefined' ? window.location.pathname : null,
+          section: door,
+          source: ErrorSource.Handled,
+        })
+      }
+
       try {
         // 1. Compress large images to stay within CF payload limits (~10MB)
         const compressed = await compressIfNeeded(file, 1_000_000, {
@@ -255,6 +280,21 @@ export function useScan(door: ScanDoor = ScanDoor.Unknown): UseScanResult {
         record.id = docRef.id
 
         setScanResult(record)
+
+        // A scan whose analysis could not be parsed is a FAILURE that throws
+        // nothing: the record is saved and returned with `results: null`, so it
+        // reached neither the error state nor the sink — the certificate door
+        // rendered nothing at all and Diagnostics never heard about it. That is
+        // "spinner then nothing" arriving by a second route (Codex round 2, P2).
+        // The model's own text is NOT what we report or show: it is unbounded
+        // free text that may echo the child's page. The record keeps it (that is
+        // the family's own scan document); the log and the screen get the app's
+        // own sentence.
+        if (!results) {
+          errorRef.current = ANALYSIS_UNREADABLE
+          setError(ANALYSIS_UNREADABLE)
+          report('ScanAnalysisUnreadable', 'analysis response was not JSON', null)
+        }
         return record
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -264,14 +304,11 @@ export function useScan(door: ScanDoor = ScanDoor.Unknown): UseScanResult {
         // uncaught errors only, which is why there was nothing to grab. Send it
         // through the SAME scrubbing path as everything else, carrying the
         // picture's shape and never the picture.
-        void reportError({
-          name: err instanceof Error ? err.name : 'Error',
-          message: `${scanFailureNote(door, shape)} ${msg}`,
-          stack: err instanceof Error ? (err.stack ?? null) : null,
-          route: typeof window !== 'undefined' ? window.location.pathname : null,
-          section: door,
-          source: ErrorSource.Handled,
-        })
+        report(
+          err instanceof Error ? err.name : 'Error',
+          msg,
+          err instanceof Error ? (err.stack ?? null) : null,
+        )
         return null
       } finally {
         setScanning(false)
