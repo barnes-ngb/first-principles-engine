@@ -112,11 +112,20 @@ describe('planScannedNameUpgrade', () => {
     })
   })
 
-  it('treats an empty or absent alternates list as "nobody has curated this"', () => {
-    expect(planScannedNameUpgrade({ name: 'Math', aliases: [] }, COVER).name).toBe(COVER)
-    // A stored alternate that keys the same as the name is not a curation — it
-    // adds no name the config did not already answer to.
-    expect(planScannedNameUpgrade({ name: 'Math', aliases: ['math!'] }, COVER).name).toBe(COVER)
+  it('upgrades a row no parent has ever named — the field is ABSENT there', () => {
+    expect(planScannedNameUpgrade({ name: 'Math' }, COVER).name).toBe(COVER)
+  })
+
+  it('an EMPTY alternates list is still a parent having named this row', () => {
+    // Codex round 2, P2. Two real saves write `[]`: a re-spelling rename, where
+    // the old name keys the same and buys no slot, and a parent removing the
+    // alternates she no longer wanted. Requiring a non-empty list let the next
+    // longer scanned cover overwrite the label she had just chosen. Nothing but
+    // the rename dialog writes this field, so its presence is the marker.
+    expect(planScannedNameUpgrade({ name: 'Math K', aliases: [] }, COVER)).toEqual({
+      name: null,
+      curriculum: COVER,
+    })
   })
 
   it('keeps the 100-character ceiling on a scanned name', () => {

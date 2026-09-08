@@ -13,7 +13,7 @@ import {
   canOverwriteWorkingLevel,
 } from '../../features/quest/workingLevels'
 import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
-import { activityNames } from '../utils/activityNames'
+import { activityMatchNames } from '../utils/activityNames'
 
 /**
  * Why a sync registered nothing. FEAT-136: `action: 'none'` had three distinct
@@ -95,7 +95,7 @@ export function useScanToActivityConfig() {
           // moved the cover's title into the alternates, and the cover is still
           // what a photo of it says — so matching only `name` here is exactly
           // the break the alternates exist to prevent.
-          return [...activityNames(config), config.curriculum ?? ''].some((candidate) =>
+          return activityMatchNames(config).some((candidate) =>
             isWorkbookMatch(candidate, curriculumName, config.subjectBucket, subject),
           )
         })
@@ -304,11 +304,16 @@ export function normalizeForMatch(name: string): string {
  * It stops being sound the moment a parent can rename. She shortens "Simply
  * Good and Beautiful Math K — Course Book" to "Math K", scans the same cover,
  * and the long name is written straight back over her label: **the rename would
- * not survive its first scan.** So the NAME half is skipped for a config that
- * carries alternates. Alternates are only ever written by a parent — a rename
- * carries the old name in, and the row's editor adds the rest — so a non-empty
- * list is her having decided what this is called, and the app does not overrule
- * that with what is printed on the book.
+ * not survive its first scan.** So the NAME half is skipped once a parent has
+ * named this row.
+ *
+ * **The marker is the PRESENCE of the `aliases` field, an empty one included**
+ * (Codex round 2, P2). Nothing but the rename dialog ever writes it, so the
+ * field existing at all means she has been in there and decided. Requiring a
+ * non-empty list missed two real cases that both write `[]`: a re-spelling
+ * rename, where the old name keys the same and buys no slot, and a parent who
+ * removed the alternates she no longer wanted. In both the next longer scanned
+ * cover would have overwritten the label she had just chosen.
  *
  * `curriculum` still upgrades either way. That field is the publisher-name slot:
  * it is matched against (`isWorkbookMatch` is called on it as well as on the
@@ -326,7 +331,7 @@ export function planScannedNameUpgrade(
   const existingName = existing.name ?? ''
   const isMoreSpecific = scannedName.length > existingName.length && scannedName.length < 100
   if (!isMoreSpecific) return { name: null, curriculum: null }
-  const parentNamedIt = activityNames(existing).length > 1
+  const parentNamedIt = Array.isArray(existing.aliases)
   return { name: parentNamedIt ? null : scannedName, curriculum: scannedName }
 }
 

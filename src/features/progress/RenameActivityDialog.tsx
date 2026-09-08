@@ -93,7 +93,12 @@ function RenameActivityDialogBody({
   }
 
   return (
-    <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
+    // Codex round 2, P2: `saving` disabled the buttons but not MUI's own close
+    // routes. A backdrop click or Escape unmounted the dialog with the write
+    // still in flight, so a rejection landed on nothing — the failure notice
+    // and her retained typing were never seen. Every close path waits now, not
+    // only the Save button's.
+    <Dialog open onClose={saving ? undefined : onClose} maxWidth="xs" fullWidth>
       {/* The menu item says "Rename" because that is the primary action and a
           phone menu has no room for the rest — but adding an alternate without
           renaming is first-class, so the title covers both once it is open. */}

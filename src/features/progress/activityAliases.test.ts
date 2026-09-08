@@ -6,7 +6,8 @@ import { bridgeNameForActivity, workbookBridgeForSource } from '../../core/found
 import { activityConfigsToRoutineText } from '../planner-chat/chatPlanner.logic'
 import { findDuplicateActivities } from '../shelly-chat/curriculumActions'
 import { isWorkbookMatch } from '../../core/hooks/useScanToActivityConfig'
-import { activityNames } from '../../core/utils/activityNames'
+import { activityMatchNames, activityNames } from '../../core/utils/activityNames'
+import { normalizeCurriculumKey } from '../../core/firebase/firestore'
 import { resolveQuickLogChips } from '../today/quickLogChips'
 
 const COVER = 'The Good and the Beautiful Math'
@@ -75,6 +76,41 @@ describe("the card's own scan guard sees alternates (UX-280)", () => {
     const renamed = config({ name: 'Phonics', aliases: ['Explode the Code Book 3'] })
     const cardNames = [renamed.curriculum ?? '', ...activityNames(renamed)].filter(Boolean)
     expect(cardNames.some((n) => isWorkbookMatch(n, 'Mathseeds'))).toBe(false)
+  })
+})
+
+describe('a certificate scan finds the renamed row (UX-280)', () => {
+  it('matches through an alternate, so no SECOND config is created', () => {
+    // Codex round 2, P2. Both certificate paths matched
+    // `normalizeCurriculumKey(name ?? curriculum)`. A manually added workbook
+    // has no `curriculum`, so after a rename the certificate's own title
+    // survives only as an alternate — and a miss here does not merely fail to
+    // update, it falls through to `applyUpdate`'s create branch and writes a
+    // duplicate for the same book.
+    const renamed = config({ name: 'Math K', aliases: [COVER], curriculum: undefined })
+    const scannedKey = normalizeCurriculumKey(COVER)
+    const found = activityMatchNames(renamed).some(
+      (n) => normalizeCurriculumKey(n) === scannedKey,
+    )
+    expect(found).toBe(true)
+    // The comparison itself is untouched — still the exact normalized key.
+    expect(
+      activityMatchNames(renamed).some(
+        (n) => normalizeCurriculumKey(n) === normalizeCurriculumKey('Mathseeds'),
+      ),
+    ).toBe(false)
+  })
+})
+
+describe('activityMatchNames is the ONE list every lookup compares against', () => {
+  it('carries the name, the alternates and the publisher slot, deduped', () => {
+    expect(
+      activityMatchNames({ name: 'Math K', aliases: [COVER, 'math k'], curriculum: 'GATB Math' }),
+    ).toEqual(['Math K', COVER, 'GATB Math'])
+  })
+
+  it('drops a curriculum that keys the same as a name already in the list', () => {
+    expect(activityMatchNames({ name: 'Math K', curriculum: 'math-k' })).toEqual(['Math K'])
   })
 })
 

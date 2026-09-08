@@ -186,6 +186,25 @@ describe('CurriculumTab — rename (UX-279)', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Math K')
   })
 
+  it('Escape does not close the dialog over a write still in flight', async () => {
+    // Codex round 2, P2. `saving` disabled the buttons but not MUI's own close
+    // routes, so a backdrop click or Escape unmounted the dialog mid-write and
+    // the rejection landed on nothing.
+    let rejectWrite: (err: Error) => void = () => {}
+    mockUpdateConfig.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectWrite = reject }),
+    )
+    const user = userEvent.setup()
+    render(<CurriculumTab />)
+    await renameTo(user, 'Math K')
+
+    await user.keyboard('{Escape}')
+    expect(screen.getByLabelText('Name')).toBeInTheDocument()
+
+    rejectWrite(new Error('offline'))
+    expect(await screen.findByText(/still called what it was/i)).toBeInTheDocument()
+  })
+
   it('is parent-only, on capability', async () => {
     mockIsChildProfile.mockReturnValue(true)
     const user = userEvent.setup()

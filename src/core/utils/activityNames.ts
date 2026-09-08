@@ -59,6 +59,13 @@ export const MAX_ACTIVITY_ALIASES = 6
 export interface NamedActivity {
   name?: string | null
   aliases?: string[] | null
+  /**
+   * The publisher-name slot that predates alternates — `isWorkbookMatch` was
+   * already called on it as well as on `name`, and `resolveSeedDefaults`
+   * already matched across both. It is a name this row answers to, so every
+   * lookup that asks *is this the same program?* should see it too.
+   */
+  curriculum?: string | null
 }
 
 /** A trimmed string, or '' for anything that is not a usable name. */
@@ -142,4 +149,30 @@ export function normalizeAliases(
     out.push(alias)
   }
   return out.length > cap ? out.slice(out.length - cap) : out
+}
+
+/**
+ * Every name a LOOKUP should compare against: the row's own, its alternates,
+ * and the publisher slot — deduped by `nameKey`, blanks dropped.
+ *
+ * Distinct from {@link activityNames}, which is what a PERSON reads (and whose
+ * tail is what the row renders beneath itself). `curriculum` is never shown as
+ * a label, so it belongs in one and not the other.
+ *
+ * There are five of these lookups — the untargeted scan match, the Curriculum
+ * card's own scan guard, both certificate paths, and the workbook bridge — and
+ * before this they each hand-rolled their own two- or one-name list. That is
+ * how the card guard came to disagree with the lookup two lines above it
+ * (Codex round 1) and how the certificate paths came to disagree with both
+ * (round 2). One definition, so the next lookup cannot start a sixth.
+ */
+export function activityMatchNames(
+  config: NamedActivity | null | undefined,
+): string[] {
+  if (!config) return []
+  const out = activityNames(config)
+  const extra = typeof config.curriculum === 'string' ? config.curriculum.trim() : ''
+  const key = nameKey(extra)
+  if (key && !out.some((name) => nameKey(name) === key)) out.push(extra)
+  return out
 }
