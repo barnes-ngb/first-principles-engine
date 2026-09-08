@@ -15,6 +15,7 @@ import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
 import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
 import { durationOptionsWithValue } from './durationOptions'
+import { unitLabelForNewActivity } from './strand'
 
 interface AddActivityDialogProps {
   open: boolean
@@ -98,7 +99,12 @@ export default function AddActivityDialog({
       ...(quickLog ? { quickLog: true } : {}),
       ...(scannable && totalUnits ? { totalUnits: Number(totalUnits) } : {}),
       ...(scannable && currentPosition ? { currentPosition: Number(currentPosition) } : {}),
-      ...(scannable ? { unitLabel: 'lesson' } : {}),
+      // UX-281: one definition of the new row's unit label, so this door and
+      // the chat's addActivity card cannot disagree — a strand needs
+      // 'session', and it is not scannable.
+      ...(unitLabelForNewActivity(type, scannable)
+        ? { unitLabel: unitLabelForNewActivity(type, scannable) }
+        : {}),
     })
     reset()
     onClose()

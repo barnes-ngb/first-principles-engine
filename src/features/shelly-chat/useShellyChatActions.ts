@@ -143,6 +143,7 @@ import { createArc } from '../dad-lab/useConceptArcs'
 import { createPlannedLab } from '../dad-lab/plannedLab'
 import { addWatchVideo } from '../watch/useWatchLibrary'
 import { writeWatchItemToDay } from '../watch/writeWatchItemToDay'
+import { unitLabelForNewActivity } from '../progress/strand'
 import { ArcOrigin } from '../../core/types/enums'
 import type { ConceptArc } from '../../core/types'
 
@@ -615,7 +616,13 @@ async function applyCurriculumAction(
       // Curriculum's own add stamps a unit label whenever the activity tracks a
       // position, and the scan matcher keys on `scannable` — so an activity
       // added here is scannable on exactly the same terms as one added there.
-      ...(scannable ? { unitLabel: 'lesson' } : {}),
+      // UX-281: the shared rule, so this door and Curriculum's AddActivityDialog
+      // cannot disagree. A strand is not scannable but still needs a unit
+      // label — without one the parent's coverage line reads "lesson 14" about
+      // a subject that has no lessons.
+      ...(unitLabelForNewActivity(action.type, scannable)
+        ? { unitLabel: unitLabelForNewActivity(action.type, scannable) }
+        : {}),
     })
     return
   }

@@ -12,7 +12,10 @@ import {
   readRecentTopics,
   strandProgressLabel,
   strandRowSummary,
+  findStrandConfigId,
   strandSessionCount,
+  unitLabelForNewActivity,
+  strandSessionStandingLine,
   STRAND_UNIT_LABEL,
   topicSuggestions,
 } from './strand'
@@ -143,10 +146,88 @@ describe('topics', () => {
   })
 })
 
+describe('the standing line the capture dialog shows', () => {
+  it('does not read "No sessions yet so far" on the first session', () => {
+    // The obvious composition of `strandProgressLabel` reads exactly that, on
+    // the one session where the sentence matters most.
+    expect(strandSessionStandingLine(strand())).toBe('This will be the first session.')
+  })
+
+  it('names the count, with no total, once there is one', () => {
+    expect(strandSessionStandingLine(strand({ currentPosition: 14 }))).toBe(
+      '14 sessions so far. This will be one more.',
+    )
+  })
+})
+
 describe('the unit label', () => {
   it('is "session" — the word the parent-only coverage line reads', () => {
     // `computeObservedCoverage` resolves `unitLabel || 'lesson'`, so a strand
     // that stored nothing would be described as covering "lessons".
     expect(STRAND_UNIT_LABEL).toBe('session')
+  })
+
+  // Both creation doors wrote `scannable ? 'lesson' : undefined`. A strand is
+  // not scannable, so it would have been created with NO label and the
+  // parent's coverage line would have read "History — lesson 14" about a
+  // subject with no lessons. The lie would have come from the code that
+  // CREATES a strand, not the code that reads one.
+  it('stamps "session" on a new strand, which is never scannable', () => {
+    expect(unitLabelForNewActivity(ActivityType.Strand, false)).toBe('session')
+    expect(unitLabelForNewActivity(ActivityType.Strand, true)).toBe('session')
+  })
+
+  it('leaves every other type exactly as both doors had it', () => {
+    expect(unitLabelForNewActivity(ActivityType.Workbook, true)).toBe('lesson')
+    expect(unitLabelForNewActivity(ActivityType.Workbook, false)).toBeUndefined()
+    expect(unitLabelForNewActivity(ActivityType.Routine, false)).toBeUndefined()
+  })
+})
+
+// ── Finding the strand a planned day row belongs to (UX-283) ─────────────────
+describe('findStrandConfigId', () => {
+  const history = strand({ id: 's1', name: 'History' })
+  const nature = strand({ id: 's2', name: 'Nature Study' })
+  const workbook = strand({ id: 'w1', name: 'Math', type: ActivityType.Workbook })
+
+  it('matches a planned row to its strand', () => {
+    expect(findStrandConfigId({ label: 'History' }, [history, nature])).toBe('s1')
+  })
+
+  it('matches through nameKey, so punctuation and case do not break it', () => {
+    expect(findStrandConfigId({ label: 'history' }, [history])).toBe('s1')
+    expect(findStrandConfigId({ label: 'History!' }, [history])).toBe('s1')
+  })
+
+  it('keeps matching after a rename, via the alternates (UX-280)', () => {
+    // Without reading aliases, renaming a strand would silently switch off its
+    // capture door with no error and no log line.
+    const renamed = strand({ id: 's1', name: 'History', aliases: ['World History'] })
+    expect(findStrandConfigId({ label: 'World History' }, [renamed])).toBe('s1')
+  })
+
+  it('never matches a row that is not a strand', () => {
+    expect(findStrandConfigId({ label: 'Math' }, [workbook])).toBeUndefined()
+  })
+
+  it('skips a finished strand — its record is closed', () => {
+    expect(
+      findStrandConfigId({ label: 'History' }, [strand({ id: 's1', completed: true })]),
+    ).toBeUndefined()
+  })
+
+  it('is exact — a different name is a different row (UX-207)', () => {
+    expect(findStrandConfigId({ label: 'History of Rome' }, [history])).toBeUndefined()
+  })
+
+  it('says nothing for an empty or missing label', () => {
+    expect(findStrandConfigId({ label: '' }, [history])).toBeUndefined()
+    expect(findStrandConfigId({}, [history])).toBeUndefined()
+  })
+
+  it('ignores a config with no type at all', () => {
+    expect(
+      findStrandConfigId({ label: 'History' }, [{ id: 'x', name: 'History' }]),
+    ).toBeUndefined()
   })
 })

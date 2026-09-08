@@ -63,6 +63,12 @@ import {
   STRANDS_DESCRIPTION,
 } from './curriculumGrouping'
 import { mostRecentTopic, strandRowSummary } from './strand'
+import StrandSessionDialog from './StrandSessionDialog'
+import type { StrandSessionEvidence } from './strandSession'
+import {
+  logStrandSession,
+  StrandSessionRefused,
+} from '../../core/firebase/strandSessionWrites'
 import { failedPageIndexes, processScanBatch } from './multiPageScan'
 import {
   buildDeleteActivityPrompt,
@@ -120,6 +126,46 @@ export default function CurriculumTab() {
     )
     return unsub
   }, [familyId, activeChildId])
+
+  // ── Strand session capture (UX-283) ──────────────────────────────────────
+  // The row's own door onto recording a session. Parent-gated on capability at
+  // the control AND again at the write, because this tab renders for a kid
+  // profile today and a session moves a curriculum row's count.
+  const [sessionTarget, setSessionTarget] = useState<ActivityConfig | null>(null)
+  const [sessionSaving, setSessionSaving] = useState(false)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+
+  const handleLogSession = useCallback(
+    async (topic: string, evidence: StrandSessionEvidence) => {
+      if (!familyId || !activeChildId || !sessionTarget) return
+      if (isChildProfile) return
+      setSessionSaving(true)
+      setSessionError(null)
+      try {
+        await logStrandSession({
+          familyId,
+          config: sessionTarget,
+          childId: activeChildId,
+          topic,
+          evidence,
+        })
+        setSessionTarget(null)
+      } catch (err) {
+        // The refusal sentences are the writer's, so the parent reads one
+        // wording of the rule. Anything else says what did NOT happen rather
+        // than implying the session was recorded (the `deleteFailureNotice`
+        // doctrine): the dialog stays open with her capture intact.
+        setSessionError(
+          err instanceof StrandSessionRefused
+            ? err.message
+            : 'That session was not recorded. Nothing was saved — try again.',
+        )
+      } finally {
+        setSessionSaving(false)
+      }
+    },
+    [familyId, activeChildId, sessionTarget, isChildProfile],
+  )
 
   // Group configs by type — a PARTITION, not a set of filters (UX-204). Four
   // independent filters over a six-member enum left `activity` and `app` configs
@@ -855,6 +901,18 @@ export default function CurriculumTab() {
                             </Typography>
                           )}
                           <ActivityAliases config={config} />
+                          {!isChildProfile && (
+                            <Button
+                              size="small"
+                              sx={{ mt: 0.5, ml: -1 }}
+                              onClick={() => {
+                                setSessionError(null)
+                                setSessionTarget(config)
+                              }}
+                            >
+                              Record a session
+                            </Button>
+                          )}
                         </>
                       }
                       secondaryTypographyProps={{ component: 'div' }}
@@ -1193,6 +1251,22 @@ export default function CurriculumTab() {
         onSave={handleRename}
         onClose={() => setRenaming(null)}
       />
+
+      {sessionTarget && (
+        <StrandSessionDialog
+          open
+          config={sessionTarget}
+          isChildProfile={isChildProfile}
+          voiceProfile={{ id: activeChildId ?? '' }}
+          saving={sessionSaving}
+          error={sessionError}
+          onClose={() => {
+            setSessionTarget(null)
+            setSessionError(null)
+          }}
+          onSave={(topic, evidence) => void handleLogSession(topic, evidence)}
+        />
+      )}
 
       <AddActivityDialog
         open={addDialogOpen}

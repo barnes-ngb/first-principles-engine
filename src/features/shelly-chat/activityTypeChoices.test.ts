@@ -123,6 +123,24 @@ describe('activityTypeChoices', () => {
     expect(choices[0].type).toBe(ActivityType.Workbook)
   })
 
+  // ── The third rail (UX-281) ────────────────────────────────────────────────
+  //
+  // The card order used to be a hand-written array, and adding the seventh
+  // ActivityType walked straight past it while both `Record` rails failed to
+  // compile. It is a rank now, so the enum and the card cannot drift.
+  it('offers a strand — the type is pickable, not only storable', () => {
+    const choices = activityTypeChoices(add())
+    const strand = choices.find((c) => c.type === ActivityType.Strand)
+    expect(strand).toBeDefined()
+    expect(strand?.label).toBe('Strand')
+    expect(strand?.disabledReason).toBeUndefined()
+  })
+
+  it('keeps the auto-managed type last whatever else is added', () => {
+    const choices = activityTypeChoices(add())
+    expect(choices[choices.length - 1].type).toBe(ActivityType.Evaluation)
+  })
+
   it('refuses workbook on a SHARED add, with the DATA-08 rule’s own words', () => {
     const choices = activityTypeChoices(add({ shared: true }))
     const workbook = choices.find((c) => c.type === ActivityType.Workbook)

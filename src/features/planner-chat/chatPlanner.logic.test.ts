@@ -1596,6 +1596,47 @@ describe('activityConfigsToRoutineText', () => {
     expect(lines[1]).toBe('Math workbook — 25 min — Math')
   })
 
+  // ── A strand in the plan (UX-281/282) ──────────────────────────────────────
+  //
+  // A strand is planned like any other config — its NAME and cadence reach the
+  // model — and its topics never do. `recentTopics` is a suggestion cache for
+  // the parent's own capture form; handing the planner a list of subjects the
+  // family has covered would invite it to plan them again, and the prompt tells
+  // it to copy these names EXACTLY (which is also why aliases are withheld,
+  // UX-280).
+  it('plans a strand by name, and never sends its topics', () => {
+    const text = activityConfigsToRoutineText([
+      makeConfig({
+        id: 's1',
+        name: 'History',
+        type: 'strand' as ActivityConfig['type'],
+        subjectBucket: SubjectBucket.SocialStudies,
+        defaultMinutes: 30,
+        currentPosition: 14,
+        recentTopics: ['Ancient Egypt', 'The Pilgrims'],
+      }),
+    ])
+    expect(text).toBe('History — 30 min — SocialStudies')
+    expect(text).not.toContain('Ancient Egypt')
+    expect(text).not.toContain('Pilgrims')
+  })
+
+  it('tells the model no position for a strand, because there is no total', () => {
+    // The position clause requires BOTH currentPosition and totalUnits, so a
+    // strand is never described as "at session 14 of undefined".
+    const text = activityConfigsToRoutineText([
+      makeConfig({
+        id: 's1',
+        name: 'History',
+        type: 'strand' as ActivityConfig['type'],
+        currentPosition: 14,
+        unitLabel: 'session',
+      }),
+    ])
+    expect(text).not.toMatch(/\(at /)
+    expect(text).not.toContain('undefined')
+  })
+
   it('filters out completed configs', () => {
     const configs = [
       makeConfig({ id: 'c1', name: 'Done Program', completed: true, sortOrder: 1 }),

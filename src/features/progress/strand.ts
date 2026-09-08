@@ -44,6 +44,7 @@
 
 import type { ActivityConfig } from '../../core/types'
 import { ActivityType } from '../../core/types/enums'
+import { activityMatchNames } from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 
 /**
@@ -91,6 +92,30 @@ export function strandProgressLabel(
   const count = strandSessionCount(config)
   if (count === 0) return 'No sessions yet'
   return `${count} ${STRAND_UNIT_LABEL}${count === 1 ? '' : 's'}`
+}
+
+/**
+ * The `unitLabel` a NEWLY created config should carry, by type.
+ *
+ * It exists because both creation doors — Curriculum's `AddActivityDialog` and
+ * the chat's `addActivity` confirm card — independently wrote
+ * `...(scannable ? { unitLabel: 'lesson' } : {})`. A strand is not scannable,
+ * so it would have been created with **no** unit label, and
+ * `computeObservedCoverage` resolves `unitLabel || 'lesson'` — the parent's
+ * coverage line would then have read *"History — lesson 14. 4 lessons in 3
+ * weeks."* about a subject that has no lessons. That is precisely the class of
+ * lie a strand must not produce, and it would have been produced by the code
+ * that creates one rather than by the code that reads it.
+ *
+ * One definition, so the two doors cannot disagree. Returns `undefined` where
+ * no label is meaningful, which is what both doors wrote before.
+ */
+export function unitLabelForNewActivity(
+  type: ActivityType,
+  scannable: boolean,
+): string | undefined {
+  if (type === ActivityType.Strand) return STRAND_UNIT_LABEL
+  return scannable ? 'lesson' : undefined
 }
 
 // ── Topics ──────────────────────────────────────────────────────────────────
@@ -213,4 +238,80 @@ export function mostRecentTopic(
   config: Pick<ActivityConfig, 'recentTopics'>,
 ): string | null {
   return readRecentTopics(config)[0] ?? null
+}
+
+/**
+ * The line the capture dialog shows above the form: where this strand stands,
+ * and what this session will do to it.
+ *
+ * Its own function because the obvious composition — `${strandProgressLabel()}
+ * so far.` — reads "No sessions yet so far." on the first session, which is
+ * the one session where the sentence matters most.
+ *
+ * Never a total, never a target, and never a comparison with another strand.
+ */
+export function strandSessionStandingLine(
+  config: Pick<ActivityConfig, 'currentPosition'>,
+): string {
+  const count = strandSessionCount(config)
+  if (count === 0) return 'This will be the first session.'
+  return `${strandProgressLabel(config)} so far. This will be one more.`
+}
+
+// ── Finding the strand a planned day item belongs to (UX-283) ───────────────
+
+/**
+ * The shape this matcher needs, structurally — an `ActivityConfig` satisfies it.
+ *
+ * Deliberately loose, mirroring `WorkbookConfigLike`: `TodayChecklist` holds a
+ * narrowed view of the family's configs, and a matcher that demanded the full
+ * document would force that prop to widen for a button.
+ */
+export interface StrandLike {
+  id: string
+  /** Optional, matching `WorkbookConfigLike`: an absent type is never a strand. */
+  type?: string
+  name?: string
+  aliases?: string[]
+  curriculum?: string
+  completed?: boolean
+}
+
+/**
+ * The id of the strand config a checklist item was planned from, or `undefined`.
+ *
+ * A `ChecklistItem` carries no `activityConfigId` — the join it does carry,
+ * `workbookConfigId`, is stamped only for workbook-type configs — so a planned
+ * strand item is resolved the way the rest of the app resolves a row from a
+ * label: through `activityMatchNames`, every name the row answers to, including
+ * the alternates a rename left behind (UX-280). Matching only `name` would
+ * silently stop offering the capture door the first time she renamed the strand.
+ *
+ * Returns an **id**, exactly as `findWorkbookConfigId` does, so the caller that
+ * holds the real configs resolves the document — a checklist renderer should
+ * not be handed one to pass along.
+ *
+ * Deliberately **exact**, through `nameKey` (UX-205), and deliberately NOT
+ * `isSameWorkbook`: that matcher carries workbook-shaped subject and level
+ * heuristics with no meaning for a subject that has no levels. A miss costs the
+ * day-surface button, and the Curriculum row's own is one screen away; a loose
+ * match would file an afternoon of history under the wrong strand.
+ *
+ * A completed strand is skipped — a finished program's record is closed — and
+ * the first match wins, since two strands answering to one name is the
+ * duplicate case Curriculum's own notice (FEAT-209 / UX-205) exists to surface.
+ */
+export function findStrandConfigId(
+  item: { label?: string },
+  configs: StrandLike[],
+): string | undefined {
+  const label = nameKey(item.label ?? '')
+  if (!label) return undefined
+  const match = configs.find(
+    (config) =>
+      config.type === ActivityType.Strand &&
+      !config.completed &&
+      activityMatchNames(config).some((name) => nameKey(name) === label),
+  )
+  return match?.id
 }
