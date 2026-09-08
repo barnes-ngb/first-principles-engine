@@ -3,7 +3,9 @@ import { addDoc, serverTimestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 
 import { useAI, TaskType } from '../ai/useAI'
-import { compressIfNeeded } from '../utils/compressImage'
+import { compressIfNeeded, compressImage } from '../utils/compressImage'
+import { isScanMediaType, unsupportedFormatMessage } from '../utils/scanImageFormat'
+import type { ScanMediaType } from '../utils/scanImageFormat'
 import { scansCollection } from '../firebase/firestore'
 import { storage } from '../firebase/storage'
 import { deriveScanContentNote } from '../utils/contentNote'
@@ -56,12 +58,48 @@ async function fileToBase64(file: File): Promise<string> {
   })
 }
 
-/** Infer media type from a File. */
-function inferMediaType(file: File): 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' {
-  if (file.type === 'image/png') return 'image/png'
-  if (file.type === 'image/gif') return 'image/gif'
-  if (file.type === 'image/webp') return 'image/webp'
-  return 'image/jpeg'
+/**
+ * Resolve the bytes we will actually send, and the type we will declare for
+ * them (UX-278).
+ *
+ * The old `inferMediaType` guessed `image/jpeg` for anything it did not
+ * recognise, so an unreadable format was relabelled and sent. Now: a supported
+ * type passes straight through; an unsupported one gets ONE honest conversion
+ * attempt — the canvas re-encodes it to JPEG, which is how a small AVIF, or a
+ * file the picker handed over with no type at all, still works — and if the
+ * browser cannot decode it either (HEIC in Chrome), it is refused BY NAME
+ * before any upload or paid API call.
+ *
+ * `compressImage` resolves with the ORIGINAL blob when the decode fails, so the
+ * "still unsupported" branch is a real answer, not a swallowed error.
+ */
+async function resolveScanUpload(
+  file: File,
+  compressed: Blob,
+): Promise<{ uploadFile: File; mediaType: ScanMediaType; converted: boolean }> {
+  // UX-277: `compressImage` renders to a canvas and re-encodes — the bytes that
+  // come back are JPEG whatever went in. Read the type off the RETURNED blob,
+  // never off the input file. (When nothing was compressed, `compressIfNeeded`
+  // returns the original File, so that branch already carries the right type.)
+  const asFile = (blob: Blob, type: string): File =>
+    blob instanceof File && blob.type === type ? blob : new File([blob], file.name, { type })
+
+  const initialType = compressed.type || file.type
+  if (isScanMediaType(initialType)) {
+    return { uploadFile: asFile(compressed, initialType), mediaType: initialType, converted: false }
+  }
+
+  const reencoded = await compressImage(compressed, {
+    maxWidth: 2048,
+    maxHeight: 2048,
+    quality: 0.85,
+  })
+  const reencodedType = reencoded.type
+  if (isScanMediaType(reencodedType)) {
+    return { uploadFile: asFile(reencoded, reencodedType), mediaType: reencodedType, converted: true }
+  }
+
+  throw new Error(unsupportedFormatMessage(initialType, file.name))
 }
 
 export function useScan(): UseScanResult {
@@ -88,15 +126,10 @@ export function useScan(): UseScanResult {
           maxHeight: 2048,
           quality: 0.85,
         })
-        // UX-277: `compressImage` renders to a canvas and re-encodes — the bytes
-        // that come back are JPEG whatever went in. Label the blob as what it
-        // IS: read the type off the RETURNED blob, never off the input file.
-        // (When nothing was compressed, `compressIfNeeded` returns the original
-        // File, so that branch already carries the right type.)
-        const uploadFile =
-          compressed instanceof File
-            ? compressed
-            : new File([compressed], file.name, { type: compressed.type || file.type })
+        // 1b. Resolve the bytes we will send and the type we will declare for
+        //     them — converting an unsupported format where we can, refusing it
+        //     by name where we can't (UX-277 / UX-278). Before any upload.
+        const { uploadFile, mediaType } = await resolveScanUpload(file, compressed)
 
         // 2. Upload the exact bytes we are about to analyse
         const ts = new Date().toISOString().replace(/[:.]/g, '-')
@@ -108,7 +141,6 @@ export function useScan(): UseScanResult {
 
         // 3. Convert compressed image to base64 for the vision API
         const imageBase64 = await fileToBase64(uploadFile)
-        const mediaType = inferMediaType(uploadFile)
 
         // 4. Call the scan Cloud Function
         let response

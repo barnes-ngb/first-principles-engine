@@ -126,3 +126,73 @@ describe('useScan — UX-277: the compressed image is labelled as what it now is
     expect(result.current.error).toBeNull()
   })
 })
+
+describe('useScan — UX-278: an unreadable format is refused, not relabelled', () => {
+  it('refuses a HEIC by name, before any upload or AI call', async () => {
+    const heic = new File(['heic'], 'IMG_0042.heic', { type: 'image/heic' })
+    compressIfNeededMock.mockResolvedValue(heic) // under the threshold
+    // The browser can't decode it: compressImage resolves the ORIGINAL blob.
+    compressImageMock.mockResolvedValue(heic)
+    const { result } = renderHook(() => useScan())
+
+    let record: unknown
+    await act(async () => {
+      record = await result.current.scan(heic, 'fam', 'child-1')
+    })
+
+    expect(record).toBeNull()
+    expect(result.current.error).toContain('HEIC')
+    expect(result.current.error).toContain('JPEG')
+    expect(uploadedBlobs).toHaveLength(0)
+    expect(chatMock).not.toHaveBeenCalled()
+    expect(result.current.scanning).toBe(false)
+  })
+
+  it('converts a format the browser CAN decode rather than refusing it', async () => {
+    // A small AVIF: under the compression threshold, so it used to be sent raw
+    // and declared JPEG. Chrome decodes AVIF, so one re-encode makes it real.
+    const avif = new File(['avif'], 'saved.avif', { type: 'image/avif' })
+    compressIfNeededMock.mockResolvedValue(avif)
+    compressImageMock.mockResolvedValue(new Blob(['jpeg-bytes'], { type: 'image/jpeg' }))
+    const { result } = renderHook(() => useScan())
+
+    await act(async () => {
+      await result.current.scan(avif, 'fam', 'child-1')
+    })
+
+    expect(result.current.error).toBeNull()
+    expect(declaredMediaType()).toBe('image/jpeg')
+    expect(uploadedBlobs[0]?.type).toBe('image/jpeg')
+  })
+
+  it('a file the picker handed over with no type is converted, not guessed at', async () => {
+    const untyped = new File(['bytes'], 'page.jpg', { type: '' })
+    compressIfNeededMock.mockResolvedValue(untyped)
+    compressImageMock.mockResolvedValue(new Blob(['jpeg-bytes'], { type: 'image/jpeg' }))
+    const { result } = renderHook(() => useScan())
+
+    await act(async () => {
+      await result.current.scan(untyped, 'fam', 'child-1')
+    })
+
+    expect(declaredMediaType()).toBe('image/jpeg')
+    expect(result.current.error).toBeNull()
+  })
+
+  it('renders a reason when the image cannot be decoded at all', async () => {
+    // compressImage rejects (no canvas context / toBlob null) — the failure the
+    // owner saw as "spinner, then nothing".
+    const png = new File(['png'], 'page.png', { type: 'image/png' })
+    compressIfNeededMock.mockRejectedValue(new Error('Canvas toBlob returned null'))
+    const { result } = renderHook(() => useScan())
+
+    let record: unknown
+    await act(async () => {
+      record = await result.current.scan(png, 'fam', 'child-1')
+    })
+
+    expect(record).toBeNull()
+    expect(result.current.error).toBe('Canvas toBlob returned null')
+    expect(result.current.scanning).toBe(false)
+  })
+})
