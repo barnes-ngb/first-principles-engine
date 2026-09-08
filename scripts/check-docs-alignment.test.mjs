@@ -545,11 +545,13 @@ describe('findContradictoryStatusRows', () => {
         .filter(Boolean)
 
       const byId = new Map()
+      let read = 0
       let unreadable = 0
       for (const rev of revs) {
         let md
         try {
           md = run(['show', `${rev}:docs/review/REVIEW_HOME_BASE.md`])
+          read += 1
         } catch {
           unreadable += 1
           continue
@@ -561,8 +563,8 @@ describe('findContradictoryStatusRows', () => {
       }
 
       const report = [
-        `swept ${revs.length} ledger revision(s)` +
-          (unreadable ? ` (${unreadable} unreadable tree(s) skipped)` : ''),
+        `swept ${read} of ${revs.length} ledger revision(s)` +
+          (unreadable ? ` (${unreadable} unreadable, skipped)` : ''),
       ]
       for (const [id, hits] of byId) {
         report.push(`\n${id} — ${hits.length} hit(s), newest ${hits[0].rev}`)
@@ -572,8 +574,18 @@ describe('findContradictoryStatusRows', () => {
       }
       console.log(report.join('\n')) // the probe's entire product is this report
 
-      // A sweep that read one revision measured nothing.
-      expect(revs.length).toBeGreaterThan(1)
+      // Count DOCUMENTS READ, never revisions listed (Codex round 1, P2). A
+      // blobless or offline partial clone reports `--is-shallow-repository
+      // false` and lets `git log` enumerate hundreds of revisions while every
+      // `git show` fails for want of the blob — so asserting on `revs.length`
+      // would pass green having measured nothing, which is the exact
+      // false-clean outcome this probe exists to refuse.
+      expect(
+        read,
+        `sweep read ${read} of ${revs.length} ledger revision(s) — the history is ` +
+          'enumerable but its blobs are not readable (blobless or partial clone); ' +
+          'nothing was measured',
+      ).toBeGreaterThan(1)
     },
     // One `git show` per ledger revision — ~10s at 591 revisions and growing
     // with the ledger, so the default 5s would fail on the traversal's own
