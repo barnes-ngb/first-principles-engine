@@ -88,17 +88,22 @@ export function useScan(): UseScanResult {
           maxHeight: 2048,
           quality: 0.85,
         })
+        // UX-277: `compressImage` renders to a canvas and re-encodes — the bytes
+        // that come back are JPEG whatever went in. Label the blob as what it
+        // IS: read the type off the RETURNED blob, never off the input file.
+        // (When nothing was compressed, `compressIfNeeded` returns the original
+        // File, so that branch already carries the right type.)
         const uploadFile =
           compressed instanceof File
             ? compressed
-            : new File([compressed], file.name, { type: file.type })
+            : new File([compressed], file.name, { type: compressed.type || file.type })
 
-        // 2. Upload compressed image to Firebase Storage
+        // 2. Upload the exact bytes we are about to analyse
         const ts = new Date().toISOString().replace(/[:.]/g, '-')
         const ext = file.name.split('.').pop() ?? 'jpg'
         const storagePath = `families/${familyId}/scans/${ts}.${ext}`
         const storageRef = ref(storage, storagePath)
-        await uploadBytes(storageRef, compressed)
+        await uploadBytes(storageRef, uploadFile)
         const imageUrl = await getDownloadURL(storageRef)
 
         // 3. Convert compressed image to base64 for the vision API
