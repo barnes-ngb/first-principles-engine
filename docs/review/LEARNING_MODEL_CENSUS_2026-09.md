@@ -33,12 +33,14 @@ description of the current state is not *"the model is thin"* — it is *"there 
 all, and four surfaces behave as though the parent simply hasn't tried hard enough."*
 
 **Where evidence does have a path, the paths are narrow, and the two most important ones are dark.**
-Of thirteen family-facing capture surfaces, **three** reach concept states with their content (scans
-and manual workbook positions; guided evaluations; the Foundations Review Chat), **two** reach the
-model with a *question* but never a state (the Today struggle signals; Knowledge Mine, which can only
-answer questions already queued), and **eight** reach it not at all — teach-backs, book reads, chapter
-responses, Dad Lab reports and concept arcs, artifact photos/audio/notes, quick-log and Life Day
-chips, strand sessions, the weekly reflection. Worse, the one path with real daily volume is broken
+Of the nineteen family-facing capture surfaces §4 walks, **five rows — three distinct mechanisms —**
+carry their content into concept states (workbook scans and manual positions; guided evaluations; the
+Review Chat and the tab override that shares its writer), **three** reach the model in a degraded way
+(the Today struggle signals write a *question* and never a state; Knowledge Mine can only answer
+concepts already queued; sight words land once, at seed time), and **eleven reach it not at all** —
+teach-backs, book reads, chapter responses, Dad Lab reports and concept arcs, artifact
+photos/audio/notes, quick-log chips, Life Day chips, strand sessions, the weekly reflection,
+`businessLog`, and every non-struggle day-log completion. Worse, the one path with real daily volume is broken
 where it matters most: **the two workbooks every family is seeded with — "Good and the Beautiful
 Reading" and "Good and the Beautiful Math" — match no bridge at all**, so scanning a page of the
 family's core math book advances `activityConfigs` and reaches the learner model with nothing. A
@@ -259,10 +261,11 @@ does not, every row is *No* (UX-286).
 | **`businessLog`** | sales / earnings events | `businessLog` | **No** — explicitly "never a learner-model input" | Leave it |
 | **Day-log completions (non-struggle)** | every item ticked off, every day | `days` | **No** — only a *struggle* signal has a path | The largest untapped volume in the app |
 
-**Three yes · two partial · thirteen no.** The three that work are all *parent-initiated, low
-frequency* (a scan, an eval, a chat). Everything the family does **daily** — ticking items off,
-reading books, teaching each other, capturing photos, logging extras — reaches the model with
-nothing. Filed as **UX-292**.
+**Nineteen rows: five yes · three degraded · eleven no.** The five "yes" rows are three distinct
+mechanisms — a scan or a typed position, a guided eval, and the Review Chat's writer (which the tab
+override shares) — and all three are *parent-initiated and low-frequency*. Everything the family does
+**daily** — ticking items off, reading books, teaching each other, capturing photos, logging extras —
+reaches the model with nothing. Filed as **UX-292**.
 
 The precise shape of "partly" matters and is the whole finding for two rows:
 
