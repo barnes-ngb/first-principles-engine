@@ -55,7 +55,11 @@ import {
 
 import type { ActivityConfig, Artifact } from '../types'
 import { EvidenceType } from '../types/enums'
-import { mergeRecentTopic, readRecentTopics } from '../../features/progress/strand'
+import {
+  isStrand,
+  mergeRecentTopic,
+  readRecentTopics,
+} from '../../features/progress/strand'
 import {
   buildStrandArtifact,
   planStrandSession,
@@ -124,6 +128,17 @@ export class StrandSessionGone extends StrandSessionFailure {}
 /** What a caller renders when the strand vanished under the session. */
 export const STRAND_SESSION_GONE_MESSAGE =
   'That activity was removed while this was open, so the session was not recorded.'
+
+/**
+ * ...and when it was FINISHED under the session.
+ *
+ * Its own sentence rather than the removed one: a retired program still exists
+ * and its record is intact, so *"was removed"* would be false, and the parent's
+ * next move is different — un-finishing is not something this app does, so the
+ * honest thing is to name what happened rather than suggest a retry.
+ */
+export const STRAND_SESSION_FINISHED_MESSAGE =
+  'That activity was marked finished while this was open, so the session was not recorded. A finished program keeps the record it ended with.'
 
 /**
  * Thrown when a session FAILED partway and its evidence could not be cleaned up
@@ -361,14 +376,27 @@ export async function logStrandSession(
       // here reported a session that never happened; the attempt is failed and
       // rolled back instead.
       if (!snap.exists()) throw new StrandSessionGone(STRAND_SESSION_GONE_MESSAGE)
+      // Re-checked against the LIVE document, not the caller's `args.config`
+      // (Codex): the dialog may have been open for minutes while another tab
+      // finished the program or changed its type. `planStrandSession` validated
+      // a snapshot taken when it opened, and committing on that would add a
+      // session to a record already closed — and leave the evidence attached to
+      // it. Both throw, so the attempt rolls back like any other failure.
+      const stored = snap.data() as Partial<ActivityConfig> | undefined
+      if (stored?.completed === true) {
+        throw new StrandSessionGone(STRAND_SESSION_FINISHED_MESSAGE)
+      }
+      if (!isStrand({ type: stored?.type })) {
+        throw new StrandSessionGone(STRAND_SESSION_GONE_MESSAGE)
+      }
       // The stored document is unvalidated Firestore data; `readRecentTopics`
       // does the structural narrowing, so the cast only gets it through the door.
-      const stored = readRecentTopics(
-        (snap.data() ?? {}) as Pick<ActivityConfig, 'recentTopics'>,
+      const storedTopics = readRecentTopics(
+        (stored ?? {}) as Pick<ActivityConfig, 'recentTopics'>,
       )
       tx.update(configRef, {
         currentPosition: increment(1),
-        recentTopics: mergeRecentTopic(stored, topic),
+        recentTopics: mergeRecentTopic(storedTopics, topic),
         updatedAt: new Date().toISOString(),
       })
     })

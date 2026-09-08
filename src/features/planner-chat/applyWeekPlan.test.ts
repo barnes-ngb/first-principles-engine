@@ -176,6 +176,36 @@ describe('buildApplyChecklist', () => {
   // intended is a separate question from whether the extraction changed it — it
   // did not, and a run that "fixed" it here would have silently altered which
   // items survive a Minimum Viable Day.
+  // ── UX-283: the strand join is STAMPED, from the raw title ────────────────
+  //
+  // The label is `${title} (${estimatedMinutes}m)`, so resolving a strand from
+  // a stored row means undoing a rendering — ambiguous by construction, and
+  // `findStrandConfigId` refuses rather than guesses. Stamping at apply time,
+  // while the config identity is still known, is what keeps the Today button
+  // working; it is the same reason `workbookConfigId` is stamped here.
+  it('stamps the strand a row was planned from', () => {
+    const historyStrand = {
+      id: 'cfg-history',
+      name: 'GATB Math',
+      type: 'strand' as const,
+    }
+    const [row] = buildApplyChecklist([item()], [historyStrand], new Map())
+    expect(row.strandConfigId).toBe('cfg-history')
+    // Stamped from the RAW title — the label it carries has the suffix.
+    expect(row.label).toBe('GATB Math (30m)')
+  })
+
+  it('stamps nothing when no strand answers to the title', () => {
+    const [row] = buildApplyChecklist([item()], [], new Map())
+    expect(row).not.toHaveProperty('strandConfigId')
+  })
+
+  it('stamps nothing for a workbook of the same name', () => {
+    const workbook = { id: 'cfg-wb', name: 'GATB Math', type: 'workbook' as const }
+    const [row] = buildApplyChecklist([item()], [workbook], new Map())
+    expect(row).not.toHaveProperty('strandConfigId')
+  })
+
   it('defaults an untagged item to category must-do but NOT to the MVD floor', () => {
     const [row] = buildApplyChecklist([item()], [], new Map())
     expect(row.category).toBe('must-do')

@@ -361,6 +361,24 @@ export interface ChecklistItem {
    */
   workbookConfigId?: string
   /**
+   * The strand config this row was planned from (UX-283).
+   *
+   * The **stable** join, stamped at apply time when the config identity is
+   * still known — the FEAT-62 pattern `workbookConfigId` already follows, and
+   * for the same reason. A stored label is `${title} (${estimatedMinutes}m)`,
+   * so resolving a row by name means undoing a rendering, and that is
+   * ambiguous by construction: a strand genuinely named *"History (30m)"* and
+   * one named *"History"* planned at 30m can produce labels that read alike.
+   * A name match cannot tell them apart, and picking one would record an
+   * afternoon against the wrong count.
+   *
+   * Additive and optional: absent on every row that exists today and on any row
+   * added by hand, so readers fall back to `findStrandConfigId` — which refuses
+   * an ambiguous name rather than guessing. Named for the strand rather than
+   * generically, so it reads as the sibling of `workbookConfigId` it is.
+   */
+  strandConfigId?: string
+  /**
    * Set after a routed workbook capture registers the page to the curriculum
    * (FEAT-62). Drives the quiet "registered to {name} · Lesson {n}" confirmation
    * line on Today so a parent can see it counted without visiting Progress.

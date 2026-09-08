@@ -10,7 +10,7 @@ const incrementMock = vi.fn((n: number) => ({ __increment: n }))
 
 const deleteDocMock = vi.fn<(ref: unknown) => Promise<void>>(async () => undefined)
 /** The config document as the transaction sees it. */
-let storedConfig: Record<string, unknown> | null = { recentTopics: [] }
+let storedConfig: Record<string, unknown> | null = { recentTopics: [], type: 'strand' }
 /** Set to make the final config update fail. */
 let updateConfigThrows: Error | null = null
 
@@ -71,6 +71,7 @@ import { ActivityFrequency, ActivityType, SubjectBucket } from '../types/enums'
 import {
   logStrandSession,
   STRAND_SESSION_FAILED_PARTIAL,
+  STRAND_SESSION_FINISHED_MESSAGE,
   StrandSessionGone,
   StrandSessionPartiallySaved,
   StrandSessionRefused,
@@ -126,7 +127,9 @@ beforeEach(() => {
     downloadUrl: 'https://example/f.jpg',
     storagePath: 'p',
   }))
-  storedConfig = { recentTopics: [] }
+  // The live document a transaction reads. Carries `type` because the write
+  // re-checks it there rather than trusting the caller's snapshot.
+  storedConfig = { recentTopics: [], type: 'strand' }
   let n = 0
   addDocMock.mockImplementation(async () => ({ id: `artifact-${++n}` }))
 })
@@ -256,7 +259,7 @@ describe('the topic reaches the artifact, not only the cache', () => {
     // The list is read from the STORED document, not from the caller's config
     // (Codex round 1) — a dialog held open while another device logged would
     // otherwise write back its own stale array.
-    storedConfig = { recentTopics: ['The Pilgrims', 'Ancient Egypt'] }
+    storedConfig = { recentTopics: ['The Pilgrims', 'Ancient Egypt'], type: 'strand' }
     await logStrandSession(args())
     expect(configUpdate()?.recentTopics).toEqual(['Ancient Egypt', 'The Pilgrims'])
   })
@@ -332,7 +335,7 @@ describe('a failed attempt rolls back, so a retry cannot duplicate evidence', ()
 describe('the topic merge reads the CURRENT stored value', () => {
   it('merges against Firestore, not against the caller stale config', async () => {
     // Another device recorded "The Pilgrims" since this dialog opened.
-    storedConfig = { recentTopics: ['The Pilgrims'] }
+    storedConfig = { recentTopics: ['The Pilgrims'], type: 'strand' }
     await logStrandSession(
       args({ topic: 'Ancient Egypt', config: strand({ recentTopics: [] }) }),
     )
@@ -536,5 +539,41 @@ describe('a missing storage object is cleaned up, not a failure', () => {
     await expect(logStrandSession(args())).rejects.toBeInstanceOf(
       StrandSessionPartiallySaved,
     )
+  })
+})
+
+// ── The live document decides, not the dialog's snapshot (Codex) ─────────────
+//
+// A capture dialog can be open for minutes. `planStrandSession` validated the
+// config as it stood when it opened, so committing on that alone could add a
+// session to a program another tab has since finished — and leave the evidence
+// attached to a closed record.
+describe('the strand is re-checked inside the transaction', () => {
+  it('refuses when the program was finished while the dialog was open', async () => {
+    storedConfig = { recentTopics: [], completed: true, type: 'strand' }
+    await expect(logStrandSession(args())).rejects.toBeInstanceOf(StrandSessionGone)
+    expect(incrementMock).not.toHaveBeenCalled()
+    expect(deleteDocMock).toHaveBeenCalledTimes(addDocMock.mock.calls.length)
+  })
+
+  it('says it was finished, which is not the same as removed', async () => {
+    // A retired program still exists and its record is intact, so "was removed"
+    // would be false — and un-finishing is not something this app does, so the
+    // sentence names what happened rather than suggesting a retry.
+    storedConfig = { recentTopics: [], completed: true, type: 'strand' }
+    await expect(logStrandSession(args())).rejects.toThrow(STRAND_SESSION_FINISHED_MESSAGE)
+    expect(STRAND_SESSION_FINISHED_MESSAGE).not.toMatch(/removed/i)
+  })
+
+  it('refuses when the row is no longer a strand', async () => {
+    storedConfig = { recentTopics: [], type: 'workbook' }
+    await expect(logStrandSession(args())).rejects.toBeInstanceOf(StrandSessionGone)
+    expect(incrementMock).not.toHaveBeenCalled()
+  })
+
+  it('commits normally for a live strand', async () => {
+    storedConfig = { recentTopics: [], type: 'strand' }
+    await logStrandSession(args())
+    expect(incrementMock).toHaveBeenCalledWith(1)
   })
 })

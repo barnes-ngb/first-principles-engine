@@ -336,21 +336,48 @@ export interface StrandLike {
  * duplicate case Curriculum's own notice (FEAT-209 / UX-205) exists to surface.
  */
 export function findStrandConfigId(
-  item: { label?: string },
+  item: { label?: string; strandConfigId?: string },
   configs: StrandLike[],
 ): string | undefined {
+  // The STAMPED join wins outright when the row carries one (UX-283): it was
+  // written at apply time from the raw title, so it needs no un-rendering and
+  // survives a rename. Only a row that predates the stamp, or one added by
+  // hand, falls through to matching on the label.
+  if (item.strandConfigId) {
+    const stamped = configs.find(
+      (c) => c.id === item.strandConfigId && c.type === ActivityType.Strand && !c.completed,
+    )
+    if (stamped) return stamped.id
+  }
+
   const candidates = itemLabelCandidates(item.label)
   if (candidates.length === 0) return undefined
-  const match = configs.find(
-    (config) =>
-      config.type === ActivityType.Strand &&
-      !config.completed &&
-      activityMatchNames(config).some((name) => {
-        const key = nameKey(name)
-        return key !== '' && candidates.includes(key)
-      }),
+
+  const live = configs.filter(
+    (config) => config.type === ActivityType.Strand && !config.completed,
   )
-  return match?.id
+
+  // Every live strand any reading of this label could name.
+  //
+  // **A single distinct answer, or none** (Codex). The label is a rendering —
+  // `${title} (${estimatedMinutes}m)` — so reading it back has two candidates,
+  // and preferring one is still a guess: a family with a strand named
+  // "History (30m)" AND one named "History" planned at 30m produces a row that
+  // truly reads as both. Recording an afternoon against the wrong count is not
+  // recoverable, because the increment that moves a count is the one thing that
+  // never goes back. So an ambiguous label offers no button at all; the
+  // Curriculum row's own is one screen away, and that is where a duplicate gets
+  // resolved (FEAT-209 / UX-205). An APPLIED row carries `strandConfigId` and
+  // never reaches here.
+  const ids = new Set<string>()
+  for (const config of live) {
+    const answers = activityMatchNames(config).some((name) => {
+      const key = nameKey(name)
+      return key !== '' && candidates.includes(key)
+    })
+    if (answers) ids.add(config.id)
+  }
+  return ids.size === 1 ? [...ids][0] : undefined
 }
 
 /**

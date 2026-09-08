@@ -66,6 +66,7 @@ import {
   findWorkbookConfigId,
   type WorkbookConfigLike,
 } from '../../core/utils/workbookMatching'
+import { findStrandConfigId } from '../progress/strand'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
 import { dayLogDocId } from '../today/daylog.model'
 import { setDayLogGuarded } from '../today/dayWriteGuard'
@@ -244,8 +245,15 @@ export function buildApplyChecklist(
       { label: item.title, subjectBucket: item.subjectBucket },
       activityConfigs,
     )
+    // UX-283: stamped from the RAW title, before the duration is rendered into
+    // the label below — the same reason `findWorkbookConfigId` is called here
+    // rather than later off the stored row. Resolving a strand by name after
+    // the fact means undoing that rendering, which is ambiguous by
+    // construction.
+    const strandConfigId = findStrandConfigId({ label: item.title }, activityConfigs)
     return {
       label: `${item.title} (${item.estimatedMinutes}m)`,
+      ...(strandConfigId ? { strandConfigId } : {}),
       completed: false,
       skillTags: item.skillTags,
       ladderRef: item.ladderRef,

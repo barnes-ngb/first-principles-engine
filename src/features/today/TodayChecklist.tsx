@@ -1291,6 +1291,9 @@ export default function TodayChecklist({
                 */}
                 {(() => {
                   if (!onStrandSessionOpen) return null
+                  // `item` carries the stamped `strandConfigId` when the plan
+                  // wrote one, and `findStrandConfigId` prefers it — the same
+                  // `stamp ?? resolve by name` shape the workbook join uses.
                   const strandId = findStrandConfigId(item, configs ?? [])
                   if (!strandId) return null
                   return (

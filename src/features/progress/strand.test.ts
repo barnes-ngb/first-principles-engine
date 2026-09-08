@@ -231,15 +231,58 @@ describe('findStrandConfigId', () => {
     expect(findStrandConfigId({ label: 'History' }, [history])).toBe('s1')
   })
 
-  it('prefers the whole label, so a strand named that way still matches itself', () => {
+  it('matches a strand genuinely named with a duration, when it is the only reading', () => {
     const oddlyNamed = strand({ id: 's9', name: 'History (30m)' })
-    expect(findStrandConfigId({ label: 'History (30m)' }, [oddlyNamed, history])).toBe('s9')
+    expect(findStrandConfigId({ label: 'History (30m)' }, [oddlyNamed])).toBe('s9')
   })
 
   it('does not strip anything that is not the duration suffix', () => {
     // "(Ancient)" is part of a name, not a rendered minute count.
     expect(findStrandConfigId({ label: 'History (Ancient)' }, [history])).toBeUndefined()
     expect(findStrandConfigId({ label: 'History (30 minutes)' }, [history])).toBeUndefined()
+  })
+
+  // ── The stamped join, and refusing an ambiguous name (Codex) ─────────────
+  it('prefers the stamped id over any name matching', () => {
+    const other = strand({ id: 's2', name: 'History' })
+    expect(
+      findStrandConfigId({ label: 'History (30m)', strandConfigId: 's2' }, [history, other]),
+    ).toBe('s2')
+  })
+
+  it('falls back to the name when the stamped id names nothing live', () => {
+    // A row stamped against a strand since deleted, or since finished.
+    expect(
+      findStrandConfigId({ label: 'History (30m)', strandConfigId: 'gone' }, [history]),
+    ).toBe('s1')
+  })
+
+  it('ignores a stamp pointing at a finished strand', () => {
+    const done = strand({ id: 's3', name: 'Rome', completed: true })
+    expect(
+      findStrandConfigId({ label: 'Rome (30m)', strandConfigId: 's3' }, [done]),
+    ).toBeUndefined()
+  })
+
+  it('refuses an ambiguous label rather than recording the wrong afternoon', () => {
+    // One strand genuinely named "History (30m)", another named "History": the
+    // rendered label reads as both, and the count an increment moves cannot be
+    // taken back. The row offers no button; Curriculum's own is one screen away.
+    const oddlyNamed = strand({ id: 's9', name: 'History (30m)' })
+    const plain = strand({ id: 's1', name: 'History' })
+    expect(findStrandConfigId({ label: 'History (30m)' }, [plain, oddlyNamed])).toBeUndefined()
+    // Order must not decide it either.
+    expect(findStrandConfigId({ label: 'History (30m)' }, [oddlyNamed, plain])).toBeUndefined()
+    // ...and the stamp resolves exactly that case.
+    expect(
+      findStrandConfigId({ label: 'History (30m)', strandConfigId: 's1' }, [plain, oddlyNamed]),
+    ).toBe('s1')
+  })
+
+  it('refuses two strands answering to the same bare name', () => {
+    const a = strand({ id: 'a', name: 'History' })
+    const b = strand({ id: 'b', name: 'History' })
+    expect(findStrandConfigId({ label: 'History' }, [a, b])).toBeUndefined()
   })
 
   it('is exact — a different name is a different row (UX-207)', () => {
