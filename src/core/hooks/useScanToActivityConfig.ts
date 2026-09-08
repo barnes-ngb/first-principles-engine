@@ -13,6 +13,7 @@ import {
   canOverwriteWorkingLevel,
 } from '../../features/quest/workingLevels'
 import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
+import { activityMatchNames } from '../utils/activityNames'
 
 /**
  * Why a sync registered nothing. FEAT-136: `action: 'none'` had three distinct
@@ -90,9 +91,12 @@ export function useScanToActivityConfig() {
         )
         const match = configsSnap.docs.find((d) => {
           const config = d.data()
-          return (
-            isWorkbookMatch(config.name ?? '', curriculumName, config.subjectBucket, subject) ||
-            isWorkbookMatch(config.curriculum ?? '', curriculumName, config.subjectBucket, subject)
+          // UX-280: the name, every alternate, and the publisher slot. A rename
+          // moved the cover's title into the alternates, and the cover is still
+          // what a photo of it says — so matching only `name` here is exactly
+          // the break the alternates exist to prevent.
+          return activityMatchNames(config).some((candidate) =>
+            isWorkbookMatch(candidate, curriculumName, config.subjectBucket, subject),
           )
         })
         if (match) {
@@ -110,14 +114,11 @@ export function useScanToActivityConfig() {
             updates.currentPosition = lessonNumber
           }
         }
-        // If scan name is more specific (longer), upgrade the name.
         // Skip when we're targeting a specific config — preserve the user's chosen name.
         if (!options.targetConfigId) {
-          const existingName = existingData.name ?? ''
-          if (curriculumName.length > existingName.length && curriculumName.length < 100) {
-            updates.name = curriculumName
-            updates.curriculum = curriculumName
-          }
+          const upgrade = planScannedNameUpgrade(existingData, curriculumName)
+          if (upgrade.name != null) updates.name = upgrade.name
+          if (upgrade.curriculum != null) updates.curriculum = upgrade.curriculum
         }
         // Use scan's estimated minutes if current is suspiciously low (5m default)
         const existingMinutes = existingData.defaultMinutes ?? 0
@@ -291,6 +292,47 @@ export function normalizeForMatch(name: string): string {
       .replace(/\s+mental\s+minute/i, '')
       .replace(/\s*\(.*?\)/g, ''),
   ).replace(/-/g, '')
+}
+
+/**
+ * What a scan may rewrite on the config it matched (UX-279).
+ *
+ * The original rule was "if the scanned name is more specific (longer), upgrade
+ * the name" — sound while a config's name was only ever whatever was typed
+ * once, because a photo of the cover is usually the better string.
+ *
+ * It stops being sound the moment a parent can rename. She shortens "Simply
+ * Good and Beautiful Math K — Course Book" to "Math K", scans the same cover,
+ * and the long name is written straight back over her label: **the rename would
+ * not survive its first scan.** So the NAME half is skipped once a parent has
+ * named this row.
+ *
+ * **The marker is the PRESENCE of the `aliases` field, an empty one included**
+ * (Codex round 2, P2). Nothing but the rename dialog ever writes it, so the
+ * field existing at all means she has been in there and decided. Requiring a
+ * non-empty list missed two real cases that both write `[]`: a re-spelling
+ * rename, where the old name keys the same and buys no slot, and a parent who
+ * removed the alternates she no longer wanted. In both the next longer scanned
+ * cover would have overwritten the label she had just chosen.
+ *
+ * `curriculum` still upgrades either way. That field is the publisher-name slot:
+ * it is matched against (`isWorkbookMatch` is called on it as well as on the
+ * name) and rendered as a row's label nowhere, so the scan's extra specificity
+ * lands where it helps without landing where it overrules her.
+ *
+ * Pure, and exported for the same reason `isWorkbookMatch` is: the decision is
+ * the part worth pinning, and it should be assertable without a Firestore mock.
+ * `null` means "leave this field alone".
+ */
+export function planScannedNameUpgrade(
+  existing: Pick<ActivityConfig, 'name'> & { aliases?: string[] },
+  scannedName: string,
+): { name: string | null; curriculum: string | null } {
+  const existingName = existing.name ?? ''
+  const isMoreSpecific = scannedName.length > existingName.length && scannedName.length < 100
+  if (!isMoreSpecific) return { name: null, curriculum: null }
+  const parentNamedIt = Array.isArray(existing.aliases)
+  return { name: parentNamedIt ? null : scannedName, curriculum: scannedName }
 }
 
 export function isWorkbookMatch(
