@@ -19,9 +19,10 @@
 //   multiplication/division → math.operations.{arrays, multFacts, division}
 //
 // **This test documents the CURRENT behaviour, deliberately.** It is not an
-// endorsement. When UX-288 is fixed, the two `expect(...).toHaveLength(0)`
-// assertions below should be INVERTED to assert the concepts that are now
-// reached — a failure here after such a fix means the fix worked.
+// endorsement. When UX-288 is fixed, the `expect(reads).toHaveLength(0)` case and
+// the two math entries in the dropped-set assertion should be INVERTED to assert
+// the concepts that are now reached — a failure here after such a fix means the
+// fix worked. The 23 writing/speech drops are NOT a defect and should stay.
 //
 // Read-only: this file adds no behaviour and touches no other test.
 
@@ -30,6 +31,7 @@ import { describe, expect, it } from 'vitest'
 import { FOUNDATION_NODE_MAP } from './index'
 import { computeEvalRead } from './evalModelSync'
 import { mapFindingToNode } from '../curriculum/mapFindingToNode'
+import { CURRICULUM_NODE_MAP } from '../curriculum/curriculumMap'
 import type { EvaluationFinding } from '../types/evaluation'
 
 function finding(skill: string): EvaluationFinding {
@@ -91,43 +93,50 @@ describe('UX-288 — the eval → learner-model bridge drops the four core math 
     }
   })
 
-  // The census's first probe list was hand-built and missed two targets; Codex
-  // round 1 found one (`speech.connected`) and recomputing from the closed set —
-  // every FINDING_PREFIX_MAP value plus every keyword-fallback return — found the
-  // other. Pinned here so the "8 dropped" figure in the census is checkable rather
-  // than asserted, and so a future run cannot re-derive a shorter list by probing.
-  it('drops exactly eight targets, and the other six are declared scope boundaries', () => {
-    const CLOSED_TARGET_SET = [
-      'math.algebra.patterns', 'math.data.graphs', 'math.decimals',
-      'math.fractions.concepts', 'math.geometry.area', 'math.geometry.shapes',
-      'math.measurement.length', 'math.measurement.time', 'math.number.counting',
-      'math.number.placeValue', 'math.operations.addSub', 'math.operations.multDiv',
-      'math.operations.multiDigit', 'math.problemSolving',
-      'reading.comprehension.explicit', 'reading.comprehension.inference',
-      'reading.comprehension.mainIdea', 'reading.decoding.multisyllable',
-      'reading.fluency.accuracy', 'reading.phonics.blends', 'reading.phonics.cvc',
-      'reading.phonics.digraphs', 'reading.phonics.letterSounds',
-      'reading.phonics.longVowels', 'reading.phonics.rControlled',
-      'reading.phonics.sightWords', 'reading.vocabulary.contextClues',
-      'reading.vocabulary.everyday', 'reading.vocabulary.wordParts',
-      'speech.connected', 'speech.sequencing', 'speech.sounds.late',
-      'writing.composition.paragraph', 'writing.composition.sentence',
-      'writing.mechanics.spelling',
-    ]
-    const dropped = CLOSED_TARGET_SET.filter((id) => !FOUNDATION_NODE_MAP[id])
-    expect(dropped.sort()).toEqual([
+  // The census's first probe list was hand-built and missed targets; Codex round 1
+  // found `speech.connected`, and round 2 found the deeper problem — a hand-copied
+  // list is not a closed set at all. `mapFindingToNode` step 1 returns its INPUT
+  // verbatim whenever that input is already a `CURRICULUM_NODE_MAP` id, so the
+  // emittable set is the whole curriculum map (59 ids), which strictly contains the
+  // prefix-table and keyword-fallback targets. This derives it from the map itself,
+  // so the test cannot stay green while the list drifts — which is exactly how the
+  // census got it wrong twice.
+  it('emits only curriculumMap ids, and 25 of the 59 are not foundations concepts', () => {
+    const emittable = Object.keys(CURRICULUM_NODE_MAP)
+    expect(emittable.length).toBe(59)
+
+    // Step 1 really is a verbatim passthrough for every one of them.
+    for (const id of emittable) expect(mapFindingToNode(id)).toBe(id)
+
+    const dropped = emittable.filter((id) => !FOUNDATION_NODE_MAP[id])
+    expect(dropped).toHaveLength(25)
+
+    // Only the two math ones are the defect. The other 23 are the declared domain
+    // boundary: `FoundationDomain` is reading + math, so curriculumMap's whole
+    // writing and speech halves have nowhere to land by design.
+    expect(dropped.filter((id) => id.startsWith('math.')).sort()).toEqual([
       'math.operations.addSub',
       'math.operations.multDiv',
-      'speech.connected',
-      'speech.sequencing',
-      'speech.sounds.late',
-      'writing.composition.paragraph',
-      'writing.composition.sentence',
-      'writing.mechanics.spelling',
     ])
-    // Six of the eight are the declared domain boundary (`FoundationDomain` is
-    // reading + math). Only the two math ones are the defect.
-    expect(dropped.filter((id) => id.startsWith('math.'))).toHaveLength(2)
+    expect(dropped.filter((id) => id.startsWith('writing.'))).toHaveLength(13)
+    expect(dropped.filter((id) => id.startsWith('speech.'))).toHaveLength(10)
+    // Nothing else — no reading node is dropped.
+    expect(dropped.filter((id) => id.startsWith('reading.'))).toEqual([])
+  })
+
+  it('the prefix table and keyword fallbacks stay within that set', () => {
+    // A sample across both halves of the function: the prefix map (step 2/3) and
+    // the keyword fallback (step 4). Every answer must be a curriculumMap id, or
+    // the closed-set claim above is false.
+    for (const tag of [
+      'phonics.cvc', 'reading.fluency', 'math.addition', 'math.multiplication',
+      'math.wordproblems', 'speech.connectedSpeech', 'writing.spelling',
+      'writing.paragraph', 'some.unknown.tag.about.longvowels', 'a.tag.about.fractions',
+    ]) {
+      const node = mapFindingToNode(tag)
+      if (node === null) continue
+      expect(CURRICULUM_NODE_MAP[node], `${tag} → ${node} should be a curriculumMap id`).toBeDefined()
+    }
   })
 
   it('speech.connectedSpeech is one of them — an input the eval prompt asks for', () => {
