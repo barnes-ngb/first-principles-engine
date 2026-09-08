@@ -8,16 +8,38 @@ const updateDocMock = vi.fn<(ref: unknown, data: unknown) => Promise<void>>(
 )
 const incrementMock = vi.fn((n: number) => ({ __increment: n }))
 
+const deleteDocMock = vi.fn<(ref: unknown) => Promise<void>>(async () => undefined)
+/** The config document as the transaction sees it. */
+let storedConfig: Record<string, unknown> | null = { recentTopics: [] }
+
 vi.mock('firebase/firestore', () => ({
   addDoc: (col: unknown, data: unknown) => addDocMock(col, data),
   updateDoc: (ref: unknown, data: unknown) => updateDocMock(ref, data),
+  deleteDoc: (ref: unknown) => deleteDocMock(ref),
   doc: (_col: unknown, id: string) => ({ __doc: id }),
   increment: (n: number) => incrementMock(n),
+  runTransaction: async (
+    _db: unknown,
+    fn: (tx: {
+      get: (ref: unknown) => Promise<{ exists: () => boolean; data: () => unknown }>
+      update: (ref: unknown, data: unknown) => void
+    }) => Promise<void>,
+  ) =>
+    fn({
+      get: async () => ({
+        exists: () => storedConfig !== null,
+        data: () => storedConfig,
+      }),
+      update: (ref: unknown, data: unknown) => {
+        void updateDocMock(ref, data)
+      },
+    }),
 }))
 
 vi.mock('./firestore', () => ({
   artifactsCollection: () => ({ __col: 'artifacts' }),
   activityConfigsCollection: () => ({ __col: 'activityConfigs' }),
+  db: { __db: true },
 }))
 
 const uploadMock = vi.fn<
@@ -34,7 +56,12 @@ vi.mock('./upload', () => ({
 
 import type { ActivityConfig } from '../types'
 import { ActivityFrequency, ActivityType, SubjectBucket } from '../types/enums'
-import { logStrandSession, StrandSessionRefused } from './strandSessionWrites'
+import {
+  logStrandSession,
+  STRAND_SESSION_FAILED_PARTIAL,
+  StrandSessionPartiallySaved,
+  StrandSessionRefused,
+} from './strandSessionWrites'
 
 function strand(overrides: Partial<ActivityConfig> = {}): ActivityConfig {
   return {
@@ -77,7 +104,15 @@ beforeEach(() => {
   updateDocMock.mockClear()
   incrementMock.mockClear()
   uploadMock.mockClear()
-  addDocMock.mockImplementation(async () => ({ id: 'artifact-1' }))
+  deleteDocMock.mockClear()
+  deleteDocMock.mockImplementation(async () => undefined)
+  uploadMock.mockImplementation(async () => ({
+    downloadUrl: 'https://example/f.jpg',
+    storagePath: 'p',
+  }))
+  storedConfig = { recentTopics: [] }
+  let n = 0
+  addDocMock.mockImplementation(async () => ({ id: `artifact-${++n}` }))
 })
 
 // ── The invariant this feature is built on (UX-282) ──────────────────────────
@@ -202,9 +237,11 @@ describe('the topic reaches the artifact, not only the cache', () => {
   })
 
   it('moves a returning topic to the front of the suggestion cache', async () => {
-    await logStrandSession(
-      args({ config: strand({ recentTopics: ['The Pilgrims', 'Ancient Egypt'] }) }),
-    )
+    // The list is read from the STORED document, not from the caller's config
+    // (Codex round 1) — a dialog held open while another device logged would
+    // otherwise write back its own stale array.
+    storedConfig = { recentTopics: ['The Pilgrims', 'Ancient Egypt'] }
+    await logStrandSession(args())
     expect(configUpdate()?.recentTopics).toEqual(['Ancient Egypt', 'The Pilgrims'])
   })
 })
@@ -225,5 +262,87 @@ describe('what a session deliberately does not write', () => {
       expect(payload).not.toHaveProperty('actualMinutes')
       expect(payload).not.toHaveProperty('estimatedMinutes')
     }
+  })
+})
+
+// ── Codex round 1 ────────────────────────────────────────────────────────────
+
+describe('a failed attempt rolls back, so a retry cannot duplicate evidence', () => {
+  it('deletes the artifacts it created when a later step fails', () => {
+    // Without this, a failed upload left real artifact documents behind while
+    // the caller said "Nothing was saved" and offered a retry.
+    uploadMock.mockImplementation(async () => {
+      throw new Error('upload failed')
+    })
+    return logStrandSession(
+      args({
+        evidence: {
+          note: 'n',
+          photos: [new File(['x'], 'e.jpg', { type: 'image/jpeg' })],
+        },
+      }),
+    ).catch(() => {
+      // Both artifacts created before the failure are removed.
+      expect(deleteDocMock).toHaveBeenCalledTimes(addDocMock.mock.calls.length)
+      expect(incrementMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('says evidence was left behind when the rollback itself fails', async () => {
+    uploadMock.mockImplementation(async () => {
+      throw new Error('upload failed')
+    })
+    deleteDocMock.mockImplementation(async () => {
+      throw new Error('offline')
+    })
+    await expect(
+      logStrandSession(
+        args({ evidence: { photos: [new File(['x'], 'e.jpg', { type: 'image/jpeg' })] } }),
+      ),
+    ).rejects.toBeInstanceOf(StrandSessionPartiallySaved)
+    // Never invites a blind retry.
+    expect(STRAND_SESSION_FAILED_PARTIAL).not.toMatch(/Nothing was saved/)
+  })
+
+  it('deletes nothing when the very first write fails', async () => {
+    addDocMock.mockImplementation(async () => {
+      throw new Error('offline')
+    })
+    await expect(logStrandSession(args())).rejects.toThrow('offline')
+    expect(deleteDocMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('the topic merge reads the CURRENT stored value', () => {
+  it('merges against Firestore, not against the caller stale config', async () => {
+    // Another device recorded "The Pilgrims" since this dialog opened.
+    storedConfig = { recentTopics: ['The Pilgrims'] }
+    await logStrandSession(
+      args({ topic: 'Ancient Egypt', config: strand({ recentTopics: [] }) }),
+    )
+    expect(configUpdate()?.recentTopics).toEqual(['Ancient Egypt', 'The Pilgrims'])
+  })
+
+  it('still moves the count by an atomic increment inside the transaction', async () => {
+    await logStrandSession(args())
+    expect(incrementMock).toHaveBeenCalledWith(1)
+    expect(typeof configUpdate()?.currentPosition).not.toBe('number')
+  })
+
+  it('leaves a missing config alone rather than creating one', async () => {
+    storedConfig = null
+    await logStrandSession(args())
+    expect(configUpdate()).toBeUndefined()
+  })
+})
+
+describe('a captured link is readable, not only stored', () => {
+  it('writes the URL to content as well as uri', async () => {
+    await logStrandSession(args({ evidence: { videoUrl: ' https://example/watch ' } }))
+    const [, artifact] = addDocMock.mock.calls[0]
+    expect(artifact).toMatchObject({
+      uri: 'https://example/watch',
+      content: 'https://example/watch',
+    })
   })
 })

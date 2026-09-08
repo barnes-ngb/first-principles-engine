@@ -143,7 +143,10 @@ import { createArc } from '../dad-lab/useConceptArcs'
 import { createPlannedLab } from '../dad-lab/plannedLab'
 import { addWatchVideo } from '../watch/useWatchLibrary'
 import { writeWatchItemToDay } from '../watch/writeWatchItemToDay'
-import { unitLabelForNewActivity } from '../progress/strand'
+import {
+  unitLabelForNewActivity,
+  withoutStrandPositionFields,
+} from '../progress/strand'
 import { ArcOrigin } from '../../core/types/enums'
 import type { ConceptArc } from '../../core/types'
 
@@ -601,7 +604,13 @@ async function applyCurriculumAction(
   configs: ChatActivityConfig[],
 ): Promise<void> {
   if (action.kind === 'addActivity') {
-    const scannable = action.totalUnits != null || action.currentPosition != null
+    // Defence in depth (Codex round 1): the confirm card already strips these
+    // when a proposal is retyped as a strand, but `scannable` is DERIVED from
+    // their presence, so a stray pair arriving by any other route would create
+    // a scannable strand starting at an unrelated lesson count. A strand has no
+    // total, and the writer refuses to give it one.
+    const add = withoutStrandPositionFields(action)
+    const scannable = add.totalUnits != null || add.currentPosition != null
     await addActivityConfig(familyId, {
       name: action.name,
       type: action.type,
@@ -611,8 +620,8 @@ async function applyCurriculumAction(
       childId: action.shared ? 'both' : action.childId,
       sortOrder: nextActivitySortOrder(configs),
       scannable,
-      ...(action.totalUnits != null ? { totalUnits: action.totalUnits } : {}),
-      ...(action.currentPosition != null ? { currentPosition: action.currentPosition } : {}),
+      ...(add.totalUnits != null ? { totalUnits: add.totalUnits } : {}),
+      ...(add.currentPosition != null ? { currentPosition: add.currentPosition } : {}),
       // Curriculum's own add stamps a unit label whenever the activity tracks a
       // position, and the scan matcher keys on `scannable` — so an activity
       // added here is scannable on exactly the same terms as one added there.
@@ -620,8 +629,8 @@ async function applyCurriculumAction(
       // cannot disagree. A strand is not scannable but still needs a unit
       // label — without one the parent's coverage line reads "lesson 14" about
       // a subject that has no lessons.
-      ...(unitLabelForNewActivity(action.type, scannable)
-        ? { unitLabel: unitLabelForNewActivity(action.type, scannable) }
+      ...(unitLabelForNewActivity(add.type, scannable)
+        ? { unitLabel: unitLabelForNewActivity(add.type, scannable) }
         : {}),
     })
     return

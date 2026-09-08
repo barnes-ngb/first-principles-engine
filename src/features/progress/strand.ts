@@ -118,6 +118,32 @@ export function unitLabelForNewActivity(
   return scannable ? 'lesson' : undefined
 }
 
+/**
+ * A strand never carries workbook position fields — strip them (Codex round 1).
+ *
+ * `withActivityType` corrects the model's guess by spreading the proposal and
+ * replacing `type`, so a workbook-shaped `addActivity` ("he's on lesson 1 of
+ * 60") retyped as a strand kept `totalUnits: 60` and `currentPosition: 1`. The
+ * writer then derived `scannable: true` from their presence and wrote both, and
+ * the weekly snapshot would have reported *"session 1 of 60"* — the no-total
+ * model contradicted by the door that creates a strand, which is the same class
+ * of defect as the missing unit label and arrives by the same route.
+ *
+ * One rule, applied at BOTH the correction and the write: a strand has no end,
+ * so it has no total and no position handed to it from outside. Its count is
+ * only ever moved by `logStrandSession`.
+ */
+export function withoutStrandPositionFields<
+  T extends { type: ActivityType; totalUnits?: number; currentPosition?: number },
+>(value: T): T {
+  if (value.type !== ActivityType.Strand) return value
+  if (value.totalUnits == null && value.currentPosition == null) return value
+  const next = { ...value }
+  delete next.totalUnits
+  delete next.currentPosition
+  return next
+}
+
 // ── Topics ──────────────────────────────────────────────────────────────────
 
 /**

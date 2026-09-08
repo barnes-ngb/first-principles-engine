@@ -136,6 +136,30 @@ describe('activityTypeChoices', () => {
     expect(strand?.disabledReason).toBeUndefined()
   })
 
+  // ── Codex round 1: a strand never inherits a workbook's position ──────────
+  it('drops totalUnits and currentPosition when retyped as a strand', () => {
+    // "add Explode the Code 4, he's on lesson 1 of 60" retyped as a strand kept
+    // both fields, the write derived `scannable: true` from their presence, and
+    // the weekly snapshot would have reported "session 1 of 60" — the no-total
+    // model contradicted by the door that creates a strand.
+    const corrected = withActivityType(
+      add({ type: ActivityType.Workbook, totalUnits: 60, currentPosition: 1 }),
+      ActivityType.Strand,
+    )
+    expect(corrected.type).toBe(ActivityType.Strand)
+    expect(corrected).not.toHaveProperty('totalUnits')
+    expect(corrected).not.toHaveProperty('currentPosition')
+  })
+
+  it('keeps the position fields when retyped as anything else', () => {
+    const corrected = withActivityType(
+      add({ type: ActivityType.Workbook, totalUnits: 60, currentPosition: 1 }),
+      ActivityType.Routine,
+    )
+    expect(corrected.totalUnits).toBe(60)
+    expect(corrected.currentPosition).toBe(1)
+  })
+
   it('keeps the auto-managed type last whatever else is added', () => {
     const choices = activityTypeChoices(add())
     expect(choices[choices.length - 1].type).toBe(ActivityType.Evaluation)

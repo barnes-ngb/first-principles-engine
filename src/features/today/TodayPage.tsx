@@ -35,6 +35,8 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import {
   logStrandSession,
+  STRAND_SESSION_FAILED_CLEAN,
+  StrandSessionPartiallySaved,
   StrandSessionRefused,
 } from '../../core/firebase/strandSessionWrites'
 import StrandSessionDialog from '../progress/StrandSessionDialog'
@@ -988,9 +990,14 @@ export default function TodayPage() {
         // Says what did NOT happen rather than implying it was recorded, and
         // leaves the dialog open with her capture intact.
         setStrandSessionError(
-          err instanceof StrandSessionRefused
+          // Both of ours carry the parent-facing sentence already: a refusal
+          // states the rule, and a failure states which of the two truths
+          // applies — cleaned up, or evidence left behind that a blind retry
+          // would duplicate (Codex round 1).
+          err instanceof StrandSessionRefused ||
+          err instanceof StrandSessionPartiallySaved
             ? err.message
-            : 'That session was not recorded. Nothing was saved — try again.',
+            : STRAND_SESSION_FAILED_CLEAN,
         )
       } finally {
         setStrandSessionSaving(false)

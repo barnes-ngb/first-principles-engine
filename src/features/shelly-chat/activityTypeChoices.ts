@@ -35,6 +35,7 @@ import {
   CURRICULUM_SECTION_TITLE,
   SECTION_FOR_TYPE,
 } from '../progress/curriculumGrouping'
+import { withoutStrandPositionFields } from '../progress/strand'
 
 /** The `addActivity` kind, narrowed off the union. */
 export type AddActivityAction = Extract<ChatAction, { kind: 'addActivity' }>
@@ -260,5 +261,10 @@ export function withActivityType(
   type: ActivityType,
 ): AddActivityAction {
   if (action.type === type) return action
-  return { ...action, type }
+  // A strand has no total and no position handed to it from outside (Codex
+  // round 1): a workbook-shaped proposal retyped as a strand would otherwise
+  // keep `totalUnits`/`currentPosition`, and the write derives `scannable` from
+  // their presence — the row would start at an unrelated lesson count and the
+  // weekly snapshot would report "session 1 of 60".
+  return withoutStrandPositionFields({ ...action, type })
 }

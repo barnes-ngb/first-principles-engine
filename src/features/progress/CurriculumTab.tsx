@@ -67,6 +67,8 @@ import StrandSessionDialog from './StrandSessionDialog'
 import type { StrandSessionEvidence } from './strandSession'
 import {
   logStrandSession,
+  STRAND_SESSION_FAILED_CLEAN,
+  StrandSessionPartiallySaved,
   StrandSessionRefused,
 } from '../../core/firebase/strandSessionWrites'
 import { failedPageIndexes, processScanBatch } from './multiPageScan'
@@ -156,9 +158,14 @@ export default function CurriculumTab() {
         // than implying the session was recorded (the `deleteFailureNotice`
         // doctrine): the dialog stays open with her capture intact.
         setSessionError(
-          err instanceof StrandSessionRefused
+          // Both of ours carry the parent-facing sentence already: a refusal
+          // states the rule, and a failure states which of the two truths
+          // applies — cleaned up, or evidence left behind that a blind retry
+          // would duplicate (Codex round 1).
+          err instanceof StrandSessionRefused ||
+          err instanceof StrandSessionPartiallySaved
             ? err.message
-            : 'That session was not recorded. Nothing was saved — try again.',
+            : STRAND_SESSION_FAILED_CLEAN,
         )
       } finally {
         setSessionSaving(false)
