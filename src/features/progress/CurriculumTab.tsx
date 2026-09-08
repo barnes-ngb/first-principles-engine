@@ -51,6 +51,7 @@ import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
 import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
+import RenameActivityDialog from './RenameActivityDialog'
 import EditRoutinesDialog from './EditRoutinesDialog'
 import {
   CURRICULUM_SECTION_TITLE,
@@ -74,6 +75,7 @@ export default function CurriculumTab() {
     setActiveChildId,
     isLoading: isLoadingChildren,
     addChild,
+    isChildProfile,
   } = useActiveChild()
   const {
     configs,
@@ -174,6 +176,9 @@ export default function CurriculumTab() {
   // Reassign-owner dialog (DATA-08): move a workbook to its real child owner.
   const [reassign, setReassign] = useState<ActivityConfig | null>(null)
 
+  /** UX-279: rename dialog. Parent-only, on capability — see `handleRename`. */
+  const [renaming, setRenaming] = useState<ActivityConfig | null>(null)
+
   // Edit routines dialog
   const [editRoutinesOpen, setEditRoutinesOpen] = useState(false)
 
@@ -270,6 +275,27 @@ export default function CurriculumTab() {
         ? `"${config.name}" added to the kids' quick log`
         : `"${config.name}" removed from the kids' quick log`,
     )
+  }
+
+  /**
+   * Write a rename (UX-279).
+   *
+   * Writes `name` and the alternates, and **nothing else** — no day log, no
+   * applied week, no artifact title, no recorded minute. A logged label is
+   * evidence of the day it was logged on; renaming the program does not change
+   * what happened.
+   *
+   * Parent-gated at the write as well as at the menu. The tab renders for a kid
+   * profile today, so a control that only hid itself would be a control a kid
+   * could still reach through a stale dialog — the same two-layer rule the
+   * planner's curriculum follow-up uses (UX-232).
+   */
+  const handleRename = async (configId: string, name: string, aliases: string[]) => {
+    if (isChildProfile) return
+    const config = configs.find((c) => c.id === configId)
+    if (!config || config.completed) return
+    await updateConfig(configId, { name, aliases })
+    setSnack(`Renamed to "${name}"`)
   }
 
   const handleReassign = async (config: ActivityConfig, childId: string) => {
@@ -897,6 +923,21 @@ export default function CurriculumTab() {
 
       {/* Three-dot context menu */}
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
+        {/* UX-279: the publisher's name on the cover and what the family calls
+            it are different strings, and until now the row had one slot for
+            both. Parent-only on capability, never on a name. A finished program
+            never reaches here — the Completed section has no menu. */}
+        {!isChildProfile && (
+          <MenuItem
+            onClick={() => {
+              if (menuConfig) setRenaming(menuConfig)
+              closeMenu()
+            }}
+          >
+            <EditIcon fontSize="small" sx={{ mr: 1 }} />
+            Rename
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             if (menuConfig) {
@@ -1054,6 +1095,13 @@ export default function CurriculumTab() {
       />
 
       {/* Add Activity dialog */}
+      <RenameActivityDialog
+        config={renaming}
+        siblings={configs}
+        onSave={(id, name, aliases) => void handleRename(id, name, aliases)}
+        onClose={() => setRenaming(null)}
+      />
+
       <AddActivityDialog
         open={addDialogOpen}
         childId={activeChildId}

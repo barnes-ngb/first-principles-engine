@@ -1131,6 +1131,24 @@ export interface ActivityConfig {
   id: string
   /** Activity display name (e.g., "Good and the Beautiful Reading") */
   name: string
+  /**
+   * Other names this activity answers to (UX-280).
+   *
+   * A curriculum row's `name` is both the label a parent reads and the key a
+   * scanned page is matched against, and those want different strings: the
+   * cover says "Simply Good and Beautiful Math K — Course Book", she calls it
+   * "Math K". Renaming (UX-279) keeps the old name here automatically, so the
+   * label can be hers while the join key stays the publisher's.
+   *
+   * Additive and optional — absent on every config that exists today, and no
+   * migration. Normalized by `core/utils/activityNames`, which owns the cap
+   * (`MAX_ACTIVITY_ALIASES`) and the de-duplication rule. Read by the matchers
+   * that ask *is this the same program?* (the scan matcher, the duplicate
+   * notice, the workbook bridge) and deliberately NOT sent to the planner,
+   * which is told to copy these names verbatim and would treat a synonym as
+   * licence to invent a third.
+   */
+  aliases?: string[]
   /** Activity category */
   type: ActivityType
   /** Subject for color-coding and grouping */

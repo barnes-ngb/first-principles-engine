@@ -206,6 +206,13 @@ export interface ChatActivityConfig {
   /** FEAT-143 — `'workbook'` carries the DATA-08 owner rule. */
   type?: ActivityType
   /**
+   * UX-280 — the other names this activity answers to, so a duplicate check
+   * catches a row whose alternate matches rather than only its label. Optional
+   * for the same reason every field here is: this interface is a structural
+   * narrowing of whatever Firestore stored, not a promise about it.
+   */
+  aliases?: string[]
+  /**
    * UX-205 — how often this activity runs, for the duplicate notice's shape
    * line ("10m · daily"). Optional because this interface is a structural
    * narrowing of whatever Firestore stored, not a promise about it.

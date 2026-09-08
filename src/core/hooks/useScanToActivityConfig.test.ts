@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isWorkbookMatch, normalizeForMatch } from './useScanToActivityConfig'
+import { isWorkbookMatch, normalizeForMatch, planScannedNameUpgrade } from './useScanToActivityConfig'
 
 describe('normalizeForMatch', () => {
   it('strips "Mental Minute" suffix so the base curriculum name compares cleanly', () => {
@@ -78,5 +78,52 @@ describe('isWorkbookMatch', () => {
     expect(
       isWorkbookMatch('The Good and the Beautiful Math (Unit 2)', 'Good and the Beautiful Math'),
     ).toBe(true)
+  })
+})
+
+// ── planScannedNameUpgrade (UX-279) ─────────────────────────────────────────
+//
+// The rule that would have made a rename not survive its first scan.
+
+describe('planScannedNameUpgrade', () => {
+  const COVER = 'Simply Good and Beautiful Math K — Course Book'
+
+  it('still upgrades a name nobody has curated — the original rule, intact', () => {
+    expect(planScannedNameUpgrade({ name: 'Math' }, COVER)).toEqual({
+      name: COVER,
+      curriculum: COVER,
+    })
+  })
+
+  it('never shortens a name — a less specific scan changes nothing', () => {
+    expect(planScannedNameUpgrade({ name: COVER }, 'Math')).toEqual({
+      name: null,
+      curriculum: null,
+    })
+  })
+
+  it('leaves a RENAMED config\'s name alone, and still upgrades its curriculum', () => {
+    // She renamed the cover name to "Math K", so the old name is an alternate.
+    // Without this, the next photo of that cover writes the long name straight
+    // back over her label and the rename is gone.
+    expect(planScannedNameUpgrade({ name: 'Math K', aliases: [COVER] }, COVER)).toEqual({
+      name: null,
+      curriculum: COVER,
+    })
+  })
+
+  it('treats an empty or absent alternates list as "nobody has curated this"', () => {
+    expect(planScannedNameUpgrade({ name: 'Math', aliases: [] }, COVER).name).toBe(COVER)
+    // A stored alternate that keys the same as the name is not a curation — it
+    // adds no name the config did not already answer to.
+    expect(planScannedNameUpgrade({ name: 'Math', aliases: ['math!'] }, COVER).name).toBe(COVER)
+  })
+
+  it('keeps the 100-character ceiling on a scanned name', () => {
+    const runaway = 'x'.repeat(120)
+    expect(planScannedNameUpgrade({ name: 'Math' }, runaway)).toEqual({
+      name: null,
+      curriculum: null,
+    })
   })
 })
