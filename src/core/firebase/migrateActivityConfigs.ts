@@ -361,26 +361,59 @@ async function seedActivityConfigs(familyId: string, childId: string): Promise<n
  * the seeded default is a generic starting frame. Dropping the real row in
  * favour of a default would lose the lesson they are up to.
  *
- * Matched on `nameKey` across both the name and the curriculum provider on each
- * side, so *"Good and the Beautiful Math"* and a workbook whose provider is
- * *"GATB Math"* both resolve — and, being the shared exact rule, a program that
- * merely reads similarly does not.
+ * A default is claimed by either of two rules:
+ *
+ *  1. **An exact `nameKey` match**, across both the name and the curriculum
+ *     provider on each side. Catches *"Good and the Beautiful Math"* against a
+ *     workbook whose provider is *"GATB Math"*, and — being the shared exact
+ *     rule — nothing that merely reads similarly.
+ *  2. **Same subject, for a workbook default** — a `type: 'workbook'` seed is
+ *     claimed by any converted workbook in its `subjectBucket`.
+ *
+ * Rule 2 exists because rule 1 is not enough, which Codex round 2 was right
+ * about even though the remedy it proposed does not exist. A real legacy shape
+ * (`functions/src/ai/workbookActivityConfigBackfill.test.ts`) is
+ * `name: "GATB Reading Level 1"` with `provider: "gatb"`, and neither key equals
+ * `goodandthebeautifulreading` or `gatbreading` — so the generic Reading default
+ * survived and the family got two rows planning the same curriculum. The review
+ * suggested normalising "known curriculum variants" through the repo's existing
+ * workbook matcher, but there is no GATB alias table anywhere, and
+ * `isSameWorkbook` was measured against that exact pair and returns **false**
+ * (`"gatb reading leve"` vs `"good and the beautiful reading"` share one word
+ * and neither contains the other). An alias list would also be a guess that
+ * needs maintaining for every curriculum a family might own.
+ *
+ * Subject is the stronger and more honest signal, because it matches the seed's
+ * actual purpose: these three defaults exist to give a family a core reading, a
+ * core math and a language-arts workbook. A family that already has a real
+ * workbook in that subject does not need a generic one — whatever it is called,
+ * and even when it is not GATB at all. Seeding one anyway plans 30m a day of a
+ * curriculum they do not own, which is the same failure as the duplicate.
+ *
+ * It is deliberately limited to workbook seeds: applying it to Prayer, Booster
+ * cards or Knowledge Mine would let one workbook suppress an unrelated routine
+ * that happens to share a subject bucket. Those keep rule 1 alone.
  */
 function resolveSeedDefaults(
   converted: readonly ActivityConfig[],
   childId: string,
   now: string,
 ): ActivityConfig[] {
-  const claimed = new Set<string>()
+  const claimedNames = new Set<string>()
+  const claimedWorkbookSubjects = new Set<string>()
   for (const c of converted) {
-    if (nameKey(c.name)) claimed.add(nameKey(c.name))
-    if (nameKey(c.curriculum)) claimed.add(nameKey(c.curriculum))
+    if (nameKey(c.name)) claimedNames.add(nameKey(c.name))
+    if (nameKey(c.curriculum)) claimedNames.add(nameKey(c.curriculum))
+    // An 'app' conversion (Reading Eggs, typing) is not a workbook and must not
+    // suppress the subject's core workbook default.
+    if (c.type === 'workbook' && c.subjectBucket) claimedWorkbookSubjects.add(c.subjectBucket)
   }
 
   const out: ActivityConfig[] = []
   for (const config of DEFAULT_ACTIVITY_CONFIG_SEED) {
-    if (claimed.has(nameKey(config.name))) continue
-    if (config.curriculum && claimed.has(nameKey(config.curriculum))) continue
+    if (claimedNames.has(nameKey(config.name))) continue
+    if (config.curriculum && claimedNames.has(nameKey(config.curriculum))) continue
+    if (config.type === 'workbook' && claimedWorkbookSubjects.has(config.subjectBucket)) continue
 
     const owner = seedConfigOwner(config.name, childId)
     const id = seedConfigDocId(config.name, owner)

@@ -296,6 +296,92 @@ describe('ensureDefaultActivityConfigs — the race (UX-231)', () => {
     expect(names).toContain('Good and the Beautiful Math')
   })
 
+  it('claims the core default from a GATB VARIANT name, not just the exact one', async () => {
+    // Codex round 2, P1 — the real legacy shape from
+    // `functions/src/ai/workbookActivityConfigBackfill.test.ts`: a name of
+    // "GATB Reading Level 1" with provider "gatb". Neither key equals
+    // `goodandthebeautifulreading` nor `gatbreading`, so exact matching alone
+    // left the generic Reading default in place beside the family's real book.
+    workbookDocs = [
+      {
+        id: 'legacy1',
+        data: () => ({
+          name: 'GATB Reading Level 1',
+          curriculum: { provider: 'gatb' },
+          subjectBucket: 'Reading',
+          currentPosition: 12,
+          childId: 'lincoln',
+        }),
+      },
+    ]
+
+    await ensureDefaultActivityConfigs('fam', 'lincoln')
+
+    const names = writtenDocs().map((d) => d.name)
+    expect(names).not.toContain('Good and the Beautiful Reading')
+    expect(names).toContain('GATB Reading Level 1')
+    // Math is a different subject and nothing claimed it.
+    expect(names).toContain('Good and the Beautiful Math')
+  })
+
+  it('suppresses a core workbook default for ANY workbook in that subject', async () => {
+    // The subject rule is not a GATB alias list — it is the seed's actual
+    // purpose. A family already using Explode the Code does not need a generic
+    // GATB Reading planning 30m a day of a curriculum they do not own.
+    workbookDocs = [
+      {
+        id: 'etc',
+        data: () => ({ name: 'Explode the Code', subjectBucket: 'Reading', childId: 'lincoln' }),
+      },
+    ]
+
+    await ensureDefaultActivityConfigs('fam', 'lincoln')
+
+    const names = writtenDocs().map((d) => d.name)
+    expect(names).not.toContain('Good and the Beautiful Reading')
+    expect(names).toContain('Explode the Code')
+    expect(names).toContain('Good and the Beautiful Math')
+  })
+
+  it('does NOT let a workbook suppress a non-workbook routine in the same subject', () => {
+    // The subject rule is limited to workbook seeds on purpose. Booster cards,
+    // Sight word games, Memory card, Knowledge Mine and Fluency Practice are all
+    // Reading and none of them is a workbook — a family's reading book must not
+    // delete their whole reading routine.
+    const readingRoutines = DEFAULT_ACTIVITY_CONFIG_SEED.filter(
+      (c) => c.subjectBucket === 'Reading' && c.type !== 'workbook',
+    )
+    expect(readingRoutines.length).toBeGreaterThan(0)
+    return (async () => {
+      workbookDocs = [
+        {
+          id: 'r1',
+          data: () => ({ name: 'Some Reading Book', subjectBucket: 'Reading', childId: 'lincoln' }),
+        },
+      ]
+      await ensureDefaultActivityConfigs('fam', 'lincoln')
+      const names = writtenDocs().map((d) => d.name)
+      for (const routine of readingRoutines) expect(names).toContain(routine.name)
+    })()
+  })
+
+  it('an APP conversion does not claim the subject’s core workbook', async () => {
+    // Reading Eggs is converted as `type: 'app'`, not a workbook — it is not the
+    // child's reading book and must not stand in for one.
+    workbookDocs = [
+      {
+        id: 'eggs',
+        data: () => ({ name: 'Reading Eggs app', subjectBucket: 'Reading', childId: 'lincoln' }),
+      },
+    ]
+
+    await ensureDefaultActivityConfigs('fam', 'lincoln')
+
+    const written = writtenDocs()
+    expect(written.find((d) => d.name === 'Reading Eggs app')).toMatchObject({ type: 'app' })
+    expect(written.map((d) => d.name)).toContain('Good and the Beautiful Reading')
+  })
+
   it('matches a legacy workbook on its curriculum provider, not only its name', async () => {
     workbookDocs = [
       {
@@ -328,7 +414,9 @@ describe('ensureDefaultActivityConfigs — the race (UX-231)', () => {
 
     const written = await ensureDefaultActivityConfigs('fam', 'lincoln')
 
-    expect(written).toBe(DEFAULT_ACTIVITY_CONFIG_SEED.length + 1)
+    // Nine defaults, not ten: this fixture is a Reading workbook, so it claims
+    // the generic Reading default (Codex round 2) — plus itself.
+    expect(written).toBe(DEFAULT_ACTIVITY_CONFIG_SEED.length - 1 + 1)
     expect(writtenIds()).toContain('wb-wbdoc1')
     // DATA-08: a workbook is per-child and never inherits a 'both' tag.
     const converted = writtenDocs().find((d) => d.id === 'wb-wbdoc1')
