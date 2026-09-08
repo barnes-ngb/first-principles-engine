@@ -103,10 +103,11 @@ import {
   findRemovedItemConfig,
   REMOVED_ITEM_DELETE_LABEL,
   REMOVED_ITEM_KEEP_LABEL,
-  removedItemFollowUpBody,
+  removedItemFollowUpParagraphs,
   removedItemFollowUpTitle,
 } from './removedItemFollowUp'
 import type { RemovedItemFollowUp } from './removedItemFollowUp'
+import { deleteFailureNotice } from '../progress/removeActivityCopy'
 import { useAppliedWeekDays } from './useAppliedWeekDays'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -2314,10 +2315,9 @@ Generate a plan for Monday through Friday.`.trim()
       console.error('[Planner] Failed to remove the activity from Curriculum', err)
       // The draft edit already stands; only the curriculum delete failed, and
       // saying so is the difference between "it's gone" and "it will be back".
-      setSnack({
-        text: `Couldn't remove ${followUp.configName} from Curriculum. It's still there.`,
-        severity: 'error',
-      })
+      // `deleteFailureNotice` is UX-83's shape and Curriculum's own words — one
+      // delete, one failure sentence.
+      setSnack({ text: deleteFailureNotice(followUp.configName), severity: 'error' })
     }
   }, [removedItemFollowUp, isParent, deleteConfig])
 
@@ -3722,9 +3722,17 @@ ${dayPrompts}`
           {removedItemFollowUp ? removedItemFollowUpTitle(removedItemFollowUp) : ''}
         </DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            {removedItemFollowUp ? removedItemFollowUpBody(removedItemFollowUp) : ''}
-          </DialogContentText>
+          {/* One spaced paragraph per sentence, as Curriculum's own delete
+              dialog renders this same warning — a five-sentence block on a
+              phone is a wall, and this is the screen where the words have to
+              be read before an irreversible tap. */}
+          {(removedItemFollowUp ? removedItemFollowUpParagraphs(removedItemFollowUp) : []).map(
+            (line, i) => (
+              <DialogContentText key={line} sx={i === 0 ? undefined : { mt: 1.5 }}>
+                {line}
+              </DialogContentText>
+            ),
+          )}
         </DialogContent>
         <DialogActions>
           {/* Declining leaves the draft edit exactly as it is today. */}

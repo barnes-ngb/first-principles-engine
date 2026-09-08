@@ -4,8 +4,8 @@ import {
   getDoc,
   limit,
   query,
+  runTransaction,
   where,
-  writeBatch,
 } from 'firebase/firestore'
 
 import { nameKey } from '../utils/nameKey'
@@ -36,13 +36,19 @@ import { activityConfigsCollection, db, skillSnapshotsCollection, workbookConfig
 //
 //  1. **A deterministic document id per seeded entry** — `seedConfigDocId`
 //     below. This is the actual rail: a second concurrent writer addresses the
-//     same document and OVERWRITES rather than appends, so doubling is
-//     impossible rather than unlikely, and it holds across tabs and devices
-//     where an in-process guard cannot reach.
-//  2. **A module-level in-flight promise** — concurrent callers await the same
-//     seed instead of each running their own. This is a saver, not the rail: it
-//     collapses four reads and four batch writes on first load into one.
-//  3. **One entry point.** There is a single exported seeder now, so no call
+//     same document rather than appending a new one, so doubling is impossible
+//     rather than unlikely, and it holds across tabs and devices where an
+//     in-process guard cannot reach.
+//  2. **A create, not an overwrite** — the write runs in a transaction that
+//     skips any document that already exists (Codex round 1, P2). The id alone
+//     turns an append into an overwrite, which kills the duplicate but would
+//     still let a stale runner restore default fields over an edit the parent
+//     made in the seconds after a faster tab seeded. A stale runner now writes
+//     nothing at all.
+//  3. **A module-level in-flight promise** — concurrent callers await the same
+//     seed instead of each running their own. This is a saver, not a rail: it
+//     collapses four reads and four writes on first load into one.
+//  4. **One entry point.** There is a single exported seeder now, so no call
 //     site can run two lists in sequence again.
 //
 // **The id rail is deliberately only half a rail, and that is stated rather
@@ -303,30 +309,84 @@ async function seedActivityConfigs(familyId: string, childId: string): Promise<n
   console.log('[ActivityConfigs] No configs found — seeding defaults')
 
   const now = new Date().toISOString()
-  const batch = writeBatch(db)
-  let written = 0
+  const converted = await loadLegacyWorkbookConfigs(familyId, childId, now)
+  const pending = [...resolveSeedDefaults(converted, childId, now), ...converted]
 
-  for (const config of DEFAULT_ACTIVITY_CONFIG_SEED) {
-    const owner = seedConfigOwner(config.name, childId)
-    const id = seedConfigDocId(config.name, owner)
-    batch.set(doc(activityConfigsCollection(familyId), id), {
-      ...config,
-      id,
-      childId: owner,
-      createdAt: now,
-      updatedAt: now,
+  // A CREATE, not a blind overwrite (Codex round 1, P2).
+  //
+  // The deterministic id already made a second concurrent seeder overwrite
+  // rather than append, which is what kills the duplicate. But an overwrite is
+  // not nothing: if tab A commits, the parent opens Curriculum and edits a
+  // seeded row, and tab B — which read the collection as empty BEFORE A
+  // committed — then commits, a plain `set` restores every default field and
+  // silently eats that edit. So each document is written only if it does not
+  // already exist, checked inside a transaction so the check and the write are
+  // one unit. A stale runner now writes nothing instead of writing the past.
+  //
+  // The web SDK has no `create`, and a transaction cannot run a collection
+  // query — which is why the empty-slate guard above stays a query outside it
+  // and this is a per-document existence check within.
+  const written = await runTransaction(db, async (tx) => {
+    const refs = pending.map((config) => doc(activityConfigsCollection(familyId), config.id))
+    // Every read before any write — a Firestore transaction requires it.
+    const snaps = await Promise.all(refs.map((ref) => tx.get(ref)))
+
+    let count = 0
+    snaps.forEach((snap, i) => {
+      if (snap.exists()) return
+      tx.set(refs[i], pending[i])
+      count++
     })
-    written++
-  }
+    return count
+  })
 
-  for (const converted of await loadLegacyWorkbookConfigs(familyId, childId, now)) {
-    batch.set(doc(activityConfigsCollection(familyId), converted.id), converted)
-    written++
-  }
-
-  await batch.commit()
   console.log(`[ActivityConfigs] Seeded ${written} activity configs for child ${childId}`)
   return written
+}
+
+/**
+ * The seeded defaults that are not already covered by a converted legacy
+ * workbook (Codex round 1, P1).
+ *
+ * The retired inline `defaults` list carried no GATB entries, so a legacy
+ * family whose `workbookConfigs` held *Good and the Beautiful Reading* got it
+ * exactly once — from the conversion. The reconciled list seeds GATB Reading
+ * and Math as defaults, so without this the same family would get the generic
+ * default AND their real workbook row: two active configs for one curriculum,
+ * planning the same work twice. That is precisely the duplicate class this run
+ * exists to remove, reintroduced by the reconciliation itself.
+ *
+ * **The converted row wins**, because it is the one carrying the family's
+ * actual progress — `currentPosition`, `totalUnits`, `curriculumMeta` — while
+ * the seeded default is a generic starting frame. Dropping the real row in
+ * favour of a default would lose the lesson they are up to.
+ *
+ * Matched on `nameKey` across both the name and the curriculum provider on each
+ * side, so *"Good and the Beautiful Math"* and a workbook whose provider is
+ * *"GATB Math"* both resolve — and, being the shared exact rule, a program that
+ * merely reads similarly does not.
+ */
+function resolveSeedDefaults(
+  converted: readonly ActivityConfig[],
+  childId: string,
+  now: string,
+): ActivityConfig[] {
+  const claimed = new Set<string>()
+  for (const c of converted) {
+    if (nameKey(c.name)) claimed.add(nameKey(c.name))
+    if (nameKey(c.curriculum)) claimed.add(nameKey(c.curriculum))
+  }
+
+  const out: ActivityConfig[] = []
+  for (const config of DEFAULT_ACTIVITY_CONFIG_SEED) {
+    if (claimed.has(nameKey(config.name))) continue
+    if (config.curriculum && claimed.has(nameKey(config.curriculum))) continue
+
+    const owner = seedConfigOwner(config.name, childId)
+    const id = seedConfigDocId(config.name, owner)
+    out.push({ ...config, id, childId: owner, createdAt: now, updatedAt: now } as ActivityConfig)
+  }
+  return out
 }
 
 /**

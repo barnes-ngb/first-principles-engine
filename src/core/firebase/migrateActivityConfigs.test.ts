@@ -15,6 +15,13 @@ let getDocsResult: { empty: boolean; docs: unknown[] } = { empty: true, docs: []
 let workbookDocs: { id: string; data: () => unknown }[] = []
 let getDocsCalls = 0
 
+/**
+ * The documents Firestore is holding, by id. A `set` inside the transaction
+ * lands here, so a SECOND run reads back what the first one wrote — which is
+ * what makes the create-not-overwrite property testable at all.
+ */
+const store = new Map<string, Record<string, unknown>>()
+
 vi.mock('firebase/firestore', () => ({
   doc: (collection: unknown, id?: string) => ({ __collection: collection, id }),
   getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
@@ -27,10 +34,22 @@ vi.mock('firebase/firestore', () => ({
   limit: () => ({ __limit: true }),
   query: (collection: { __kind?: string }) => ({ __kind: collection?.__kind }),
   where: () => ({ __where: true }),
-  writeBatch: () => {
+  runTransaction: async (_db: unknown, fn: (tx: unknown) => Promise<number>) => {
+    // A batch stand-in per transaction, so the existing assertions over
+    // `batches` keep reading "what this run wrote".
     const b = { set: vi.fn(), commit: vi.fn(async () => undefined) }
     batches.push(b)
-    return b
+    const tx = {
+      get: async (ref: { id: string }) => ({
+        exists: () => store.has(ref.id),
+        data: () => store.get(ref.id),
+      }),
+      set: (ref: { id: string }, data: Record<string, unknown>) => {
+        b.set(ref, data)
+        store.set(ref.id, data)
+      },
+    }
+    return fn(tx)
   },
 }))
 
@@ -65,6 +84,7 @@ beforeEach(() => {
   workbookDocs = []
   getDocsCalls = 0
   getDocsResult = { empty: true, docs: [] }
+  store.clear()
   __resetActivityConfigSeedState()
   vi.clearAllMocks()
 })
@@ -195,21 +215,37 @@ describe('ensureDefaultActivityConfigs — the race (UX-231)', () => {
     expect(writtenIds()).toHaveLength(DEFAULT_ACTIVITY_CONFIG_SEED.length)
   })
 
-  it('and if two runners DO both write, the ids collide instead of appending', async () => {
+  it('and if two runners DO both pass the empty check, the second writes nothing', async () => {
     // The in-flight map cannot reach a second browser tab or a second device,
     // so the rail has to hold without it. Force two independent runs by
-    // clearing the map between them — both see an empty collection, both write.
+    // clearing the map between them — both see an empty collection, both reach
+    // the write.
+    const first = await ensureDefaultActivityConfigs('fam', 'lincoln')
+    __resetActivityConfigSeedState()
+    const second = await ensureDefaultActivityConfigs('fam', 'lincoln')
+
+    expect(batches).toHaveLength(2)
+    expect(first).toBe(DEFAULT_ACTIVITY_CONFIG_SEED.length)
+    // Ten documents exist and the stale runner adds none. The deterministic id
+    // is what stops it appending; the transactional existence check is what
+    // stops it OVERWRITING (Codex round 1, P2).
+    expect(second).toBe(0)
+    expect(new Set(writtenIds()).size).toBe(DEFAULT_ACTIVITY_CONFIG_SEED.length)
+  })
+
+  it('a stale runner cannot restore defaults over an edit made since', async () => {
+    // The exact sequence Codex named: tab A seeds; the parent opens Curriculum
+    // and changes a seeded row; tab B — which read the collection as empty
+    // BEFORE A committed — finally commits. A blind `set` would silently put
+    // the default minutes back.
     await ensureDefaultActivityConfigs('fam', 'lincoln')
+    const editedId = seedConfigDocId('Memory card', 'lincoln')
+    store.set(editedId, { ...store.get(editedId), defaultMinutes: 45, name: 'Memory card' })
+
     __resetActivityConfigSeedState()
     await ensureDefaultActivityConfigs('fam', 'lincoln')
 
-    expect(batches).toHaveLength(2)
-    const ids = writtenIds()
-    expect(ids).toHaveLength(DEFAULT_ACTIVITY_CONFIG_SEED.length * 2)
-    // Twenty writes, ten documents: the second run OVERWRITES the first rather
-    // than appending a near-identical row. This is what makes doubling
-    // impossible rather than unlikely.
-    expect(new Set(ids).size).toBe(DEFAULT_ACTIVITY_CONFIG_SEED.length)
+    expect(store.get(editedId)).toMatchObject({ defaultMinutes: 45 })
   })
 
   it('keeps different children apart under the same family', async () => {
@@ -222,6 +258,64 @@ describe('ensureDefaultActivityConfigs — the race (UX-231)', () => {
     // Prayer + Handwriting are shared, so they collide by design; the other
     // eight are per-child and must not.
     expect(ids.size).toBe(DEFAULT_ACTIVITY_CONFIG_SEED.length + 8)
+  })
+
+  it('does NOT seed a generic default a legacy workbook already covers', async () => {
+    // Codex round 1, P1 — a duplicate this run's own reconciliation introduced.
+    // The retired inline list had no GATB entries, so a legacy family whose
+    // `workbookConfigs` held Good and the Beautiful Reading got it exactly once,
+    // from the conversion. The unified list seeds it as a default too, so
+    // without this the family gets the generic default AND their real workbook:
+    // two active configs for one curriculum, planning the same work twice.
+    workbookDocs = [
+      {
+        id: 'wb-gatb-r',
+        data: () => ({
+          name: 'Good and the Beautiful Reading',
+          subjectBucket: 'Reading',
+          currentPosition: 34,
+          totalUnits: 120,
+          childId: 'lincoln',
+        }),
+      },
+    ]
+
+    await ensureDefaultActivityConfigs('fam', 'lincoln')
+
+    const names = writtenDocs().map((d) => d.name)
+    expect(names.filter((n) => n === 'Good and the Beautiful Reading')).toHaveLength(1)
+    // And it is the CONVERTED row that survives — the one carrying the place
+    // the child is actually up to. Keeping the generic default instead would
+    // lose lesson 34.
+    expect(writtenDocs().find((d) => d.name === 'Good and the Beautiful Reading')).toMatchObject({
+      id: 'wb-wb-gatb-r',
+      currentPosition: 34,
+      totalUnits: 120,
+    })
+    // The default that nothing covered is untouched.
+    expect(names).toContain('Good and the Beautiful Math')
+  })
+
+  it('matches a legacy workbook on its curriculum provider, not only its name', async () => {
+    workbookDocs = [
+      {
+        id: 'm1',
+        data: () => ({
+          name: 'Math book',
+          curriculum: { provider: 'GATB Math' },
+          subjectBucket: 'Math',
+          childId: 'lincoln',
+        }),
+      },
+    ]
+
+    await ensureDefaultActivityConfigs('fam', 'lincoln')
+
+    const names = writtenDocs().map((d) => d.name)
+    expect(names).not.toContain('Good and the Beautiful Math')
+    expect(names).toContain('Math book')
+    // Reading is unclaimed, so its default still seeds.
+    expect(names).toContain('Good and the Beautiful Reading')
   })
 
   it('converts legacy workbookConfigs under stable ids, alongside the defaults', async () => {

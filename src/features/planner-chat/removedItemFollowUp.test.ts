@@ -7,6 +7,10 @@ import {
   removedItemFollowUpBody,
   removedItemFollowUpTitle,
 } from './removedItemFollowUp'
+import {
+  buildDeleteActivityPrompt,
+  DELETE_ACTIVITY_MENU_LABEL,
+} from '../progress/removeActivityCopy'
 
 import type { ActivityConfig } from '../../core/types'
 
@@ -38,6 +42,13 @@ describe('findRemovedItemConfig (UX-232)', () => {
       cadence: '2x/week',
       minutes: 15,
       shared: false,
+      activity: {
+        name: 'Sight word games',
+        currentPosition: undefined,
+        totalUnits: undefined,
+        unitLabel: undefined,
+        completed: false,
+      },
     })
   })
 
@@ -141,9 +152,55 @@ describe('the copy', () => {
 
   it('offers a decline that reads as keeping, not cancelling', () => {
     expect(REMOVED_ITEM_KEEP_LABEL).toBe('Keep it in Curriculum')
-    expect(REMOVED_ITEM_DELETE_LABEL).toBe('Remove from Curriculum')
     // Neither button says "Apply" — this is not part of Apply.
     expect(REMOVED_ITEM_KEEP_LABEL).not.toMatch(/apply/i)
     expect(REMOVED_ITEM_DELETE_LABEL).not.toMatch(/apply/i)
+  })
+
+  it('confirms with Curriculum’s OWN label, not a gentler word for the same write', () => {
+    // Codex round 1, P1. `deleteConfig` is a `deleteDoc` with no undo, and
+    // FEAT-162 renamed Curriculum's menu entry off "Remove" for exactly that
+    // reason. Two routes to one irreversible write must not sit at two levels
+    // of honesty.
+    expect(REMOVED_ITEM_DELETE_LABEL).toBe(DELETE_ACTIVITY_MENU_LABEL)
+    expect(REMOVED_ITEM_DELETE_LABEL).toBe('Delete permanently')
+  })
+
+  it('carries the permanent-deletion warning, and names the position at stake', () => {
+    // The first cut described minutes and cadence and stopped, so "Remove from
+    // Curriculum" read as "stop planning this" while it destroyed a workbook's
+    // saved place. The warning is not rewritten here — it is the one
+    // `buildDeleteActivityPrompt` already produces for this same delete.
+    const workbook = findRemovedItemConfig({ title: 'GATB Math' }, [
+      config({
+        name: 'GATB Math',
+        type: 'workbook',
+        currentPosition: 34,
+        totalUnits: 120,
+        unitLabel: 'lesson',
+      }),
+    ])!
+    const body = removedItemFollowUpBody(workbook)
+    const prompt = buildDeleteActivityPrompt(workbook.activity)
+
+    expect(body).toContain(prompt.whatGoes)
+    expect(body).toContain(prompt.whatStays)
+    expect(body).toContain('lesson 34 of 120')
+    expect(body).toContain("There's no undo")
+    // And the honest other half — a delete does not rewrite logged days.
+    expect(body).toContain('keep their rows, minutes and photos')
+    // Plus the gentler path, since this program isn't finished.
+    expect(body).toContain('Mark as complete')
+  })
+
+  it('drops the gentler path once the program is finished', () => {
+    // A completed program can't be "marked complete" as a way out. It is also
+    // never offered (see the finder), so this only pins the composition.
+    const done = buildDeleteActivityPrompt({ name: 'Explode the Code', completed: true })
+    expect(done.gentlerPath).toBeUndefined()
+  })
+
+  it('says no undo even for a row with no saved position', () => {
+    expect(removedItemFollowUpBody(followUp)).toContain("There's no undo")
   })
 })

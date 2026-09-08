@@ -24,8 +24,13 @@
 
 import { ActivityFrequencyLabel } from '../../core/types/enums'
 import { nameKey } from '../../core/utils/nameKey'
+import {
+  buildDeleteActivityPrompt,
+  DELETE_ACTIVITY_MENU_LABEL,
+} from '../progress/removeActivityCopy'
 
 import type { ActivityConfig, DraftPlanItem } from '../../core/types'
+import type { RemovableActivity } from '../progress/removeActivityCopy'
 
 /** The live curriculum row a removed draft row named, and the copy for the offer. */
 export interface RemovedItemFollowUp {
@@ -44,6 +49,11 @@ export interface RemovedItemFollowUp {
    * has to say it.
    */
   shared: boolean
+  /**
+   * The config, as `removeActivityCopy` reads it — so this offer speaks the
+   * SAME permanent-deletion warning Curriculum's own delete does.
+   */
+  activity: RemovableActivity
 }
 
 /**
@@ -82,6 +92,13 @@ export function findRemovedItemConfig(
     cadence: ActivityFrequencyLabel[config.frequency],
     minutes: config.defaultMinutes,
     shared: config.childId === 'both',
+    activity: {
+      name: config.name,
+      currentPosition: config.currentPosition,
+      totalUnits: config.totalUnits,
+      unitLabel: config.unitLabel,
+      completed: config.completed,
+    },
   }
 }
 
@@ -98,12 +115,23 @@ export function removedItemFollowUpTitle(followUp: RemovedItemFollowUp): string 
  * regenerate. The second says what the curriculum row is, in its own numbers, so
  * "is this the one I mean" is answerable without leaving the page.
  *
- * A shared row gets a third. The parent is standing on ONE child's planner, and
- * a `childId: 'both'` config plans for the sibling too — so a delete confirmed
- * here silently changes a plan the parent isn't looking at. The scope of a
- * destructive act belongs in the sentence that asks for it.
+ * A shared row gets a sentence of its own. The parent is standing on ONE
+ * child's planner, and a `childId: 'both'` config plans for the sibling too — so
+ * a delete confirmed here silently changes a plan the parent isn't looking at.
+ * The scope of a destructive act belongs in the sentence that asks for it.
+ *
+ * **And then it says the same thing Curriculum's own delete says** (Codex round
+ * 1, P1). `deleteConfig` is a `deleteDoc` with no undo, and FEAT-162 / UX-48
+ * already wrote the warning for it — *"and the place you're up to — lesson 34
+ * of 120. There's no undo"*, what survives, and the gentler "Mark as complete"
+ * path. The first cut of this offer described the row's minutes and cadence and
+ * stopped, so *"Remove from Curriculum"* read as *stop planning this*, and a
+ * parent could lose a workbook's saved position without being told it was at
+ * stake. There is one delete and there is one warning for it: this composes
+ * `buildDeleteActivityPrompt` rather than writing a second, softer one.
  */
-export function removedItemFollowUpBody(followUp: RemovedItemFollowUp): string {
+export function removedItemFollowUpParagraphs(followUp: RemovedItemFollowUp): string[] {
+  const prompt = buildDeleteActivityPrompt(followUp.activity)
   const lines = [
     `Taking it off this week's plan doesn't change Curriculum, so the next plan will include it again.`,
     `Curriculum has ${followUp.configName} at ${followUp.minutes} minutes, ${followUp.cadence}.`,
@@ -111,11 +139,31 @@ export function removedItemFollowUpBody(followUp: RemovedItemFollowUp): string {
   if (followUp.shared) {
     lines.push(`It's shared with your other child, so removing it takes it off their plans too.`)
   }
-  return lines.join(' ')
+  lines.push(prompt.whatGoes, prompt.whatStays)
+  if (prompt.gentlerPath) lines.push(prompt.gentlerPath)
+  return lines
+}
+
+/**
+ * The same body as one string — for tests and for any caller that wants it
+ * flat. The dialog renders {@link removedItemFollowUpParagraphs} instead, one
+ * spaced `DialogContentText` per line, exactly as Curriculum's own delete
+ * dialog renders this warning: five sentences in a single block on a phone is
+ * a wall, and this is the screen where the words have to actually be read.
+ */
+export function removedItemFollowUpBody(followUp: RemovedItemFollowUp): string {
+  return removedItemFollowUpParagraphs(followUp).join(' ')
 }
 
 /** The button that declines. Declining leaves the draft edit exactly as it is. */
 export const REMOVED_ITEM_KEEP_LABEL = 'Keep it in Curriculum'
 
-/** The button that confirms the second, separate act. */
-export const REMOVED_ITEM_DELETE_LABEL = 'Remove from Curriculum'
+/**
+ * The button that confirms the second, separate act.
+ *
+ * The SAME label Curriculum's overflow menu uses, for the same reason it was
+ * renamed there: *"Remove"* undersold a `deleteDoc` with no undo. A gentler word
+ * on this door would put the app's two routes to one irreversible write at two
+ * different levels of honesty.
+ */
+export const REMOVED_ITEM_DELETE_LABEL = DELETE_ACTIVITY_MENU_LABEL
