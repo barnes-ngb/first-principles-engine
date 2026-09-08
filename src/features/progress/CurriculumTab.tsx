@@ -44,6 +44,7 @@ import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
 import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
 import { useScan } from '../../core/hooks/useScan'
+import { ScanDoor } from '../../core/hooks/scanFailureNote'
 import { isWorkbookMatch, useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import type { ActivityConfig, CertificateScanResult, ScanRecord, ScanResult } from '../../core/types'
 import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
@@ -180,7 +181,9 @@ export default function CurriculumTab() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   // Scan state
-  const { scan, scanning, lastError: lastScanError, clearScan } = useScan()
+  const { scan, scanning, lastError: lastScanError, clearScan } = useScan(
+    ScanDoor.Curriculum,
+  )
   const { syncScanToConfig } = useScanToActivityConfig()
   const {
     buildPreview: buildCertPreview,

@@ -4,6 +4,7 @@ import { addDoc, doc, getDoc, updateDoc } from 'firebase/firestore'
 import { artifactsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useScan } from '../../core/hooks/useScan'
+import { ScanDoor } from '../../core/hooks/scanFailureNote'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
@@ -135,7 +136,7 @@ export function useUnifiedCapture({
   onArtifactCreated,
   configs = [],
 }: UseUnifiedCaptureOptions): UseUnifiedCaptureResult {
-  const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan()
+  const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan(ScanDoor.Capture)
   const { syncScanToConfig } = useScanToActivityConfig()
   const [scanItemIndex, setScanItemIndex] = useState<number | null>(null)
   // The one gate on the lane: capability of the ACTOR, never a name. A kid

@@ -19,6 +19,16 @@ export const ErrorSource = {
   UnhandledRejection: 'unhandledrejection',
   ReactErrorBoundary: 'react-error-boundary',
   ReactSectionBoundary: 'react-section-boundary',
+  /**
+   * A failure the app CAUGHT and turned into a message on screen (UX-276).
+   *
+   * The other four sources are all uncaught — the global handlers and the two
+   * React boundaries — so a `try/catch` that ends in `setError()` reached no
+   * sink at all, which is why there was nothing to grab when the scan door
+   * started failing. Its own value, never one of the other four: an error the
+   * app handled is not an error that escaped it.
+   */
+  Handled: 'handled',
 } as const
 export type ErrorSource = (typeof ErrorSource)[keyof typeof ErrorSource]
 

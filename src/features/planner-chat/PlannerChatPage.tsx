@@ -157,6 +157,7 @@ import FoundationsFocusLine from './FoundationsFocusLine'
 import LessonCardPreview from './LessonCardPreview'
 import PlanSummaryPanel from './PlanSummaryPanel'
 import { useScan } from '../../core/hooks/useScan'
+import { ScanDoor } from '../../core/hooks/scanFailureNote'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
 import ChapterBookPicker from './ChapterBookPicker'
@@ -395,7 +396,7 @@ export default function PlannerChatPage() {
     scanning: scanLoading,
     error: scanError,
     clearScan,
-  } = useScan()
+  } = useScan(ScanDoor.Planner)
 
   // Setup wizard state
   const [setupComplete, setSetupComplete] = useState(false)

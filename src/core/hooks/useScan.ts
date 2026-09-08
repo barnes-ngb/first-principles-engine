@@ -8,6 +8,9 @@ import { isScanMediaType, unsupportedFormatMessage } from '../utils/scanImageFor
 import type { ScanMediaType } from '../utils/scanImageFormat'
 import { scansCollection } from '../firebase/firestore'
 import { storage } from '../firebase/storage'
+import { ErrorSource, reportError } from '../observability'
+import { ScanDoor, scanFailureNote } from './scanFailureNote'
+import type { ScanFailureShape } from './scanFailureNote'
 import { deriveScanContentNote } from '../utils/contentNote'
 import type { CaptureContext } from '../utils/contentNote'
 import type { ScanRecord, ScanResult } from '../types'
@@ -113,7 +116,11 @@ async function resolveScanUpload(
   throw new Error(unsupportedFormatMessage(initialType, file.name))
 }
 
-export function useScan(): UseScanResult {
+/**
+ * @param door which scan surface this hook instance belongs to. Used only to
+ *   label a reported failure in Diagnostics (UX-276); it changes no behaviour.
+ */
+export function useScan(door: ScanDoor = ScanDoor.Unknown): UseScanResult {
   const { chat } = useAI()
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -132,6 +139,11 @@ export function useScan(): UseScanResult {
       setScanResult(null)
       errorRef.current = null
 
+      // UX-276: what a reported failure will carry about the picture — its
+      // shape only. Filled in as we learn it, so a failure at any step reports
+      // how far it got. No bytes, no file name, no path.
+      const shape: ScanFailureShape = { inputType: file.type, sizeBytes: file.size }
+
       try {
         // 1. Compress large images to stay within CF payload limits (~10MB)
         const compressed = await compressIfNeeded(file, 1_000_000, {
@@ -142,7 +154,9 @@ export function useScan(): UseScanResult {
         // 1b. Resolve the bytes we will send and the type we will declare for
         //     them — converting an unsupported format where we can, refusing it
         //     by name where we can't (UX-277 / UX-278). Before any upload.
-        const { uploadFile, mediaType } = await resolveScanUpload(file, compressed)
+        const { uploadFile, mediaType, converted } = await resolveScanUpload(file, compressed)
+        shape.converted = converted
+        shape.sentType = mediaType
 
         // 2. Upload the exact bytes we are about to analyse
         const ts = new Date().toISOString().replace(/[:.]/g, '-')
@@ -233,12 +247,24 @@ export function useScan(): UseScanResult {
         const msg = err instanceof Error ? err.message : String(err)
         errorRef.current = msg
         setError(msg)
+        // UX-276: a caught failure reached no sink — the reporter was wired to
+        // uncaught errors only, which is why there was nothing to grab. Send it
+        // through the SAME scrubbing path as everything else, carrying the
+        // picture's shape and never the picture.
+        void reportError({
+          name: err instanceof Error ? err.name : 'Error',
+          message: `${scanFailureNote(door, shape)} ${msg}`,
+          stack: err instanceof Error ? (err.stack ?? null) : null,
+          route: typeof window !== 'undefined' ? window.location.pathname : null,
+          section: door,
+          source: ErrorSource.Handled,
+        })
         return null
       } finally {
         setScanning(false)
       }
     },
-    [chat],
+    [chat, door],
   )
 
   const recordAction = useCallback(

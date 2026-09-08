@@ -25,6 +25,8 @@ export interface ErrorLog {
     | 'unhandledrejection'
     | 'react-error-boundary'
     | 'react-section-boundary'
+    /** Caught by the app and shown to the user — never escaped (UX-276). */
+    | 'handled'
   /** Anonymized (hashed) user id — never the raw uid. */
   anonUserId: string | null
   /** Anonymized (hashed) active child id — never the raw child id. */

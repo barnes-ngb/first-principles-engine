@@ -2,6 +2,7 @@ import { renderHook, act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useScan } from './useScan'
+import { ScanDoor } from './scanFailureNote'
 
 /**
  * UX-277 / UX-278 — the format a scan DECLARES must be the format it SENDS.
@@ -49,6 +50,21 @@ vi.mock('../ai/useAI', async (importOriginal) => {
   return { ...actual, useAI: () => ({ chat: chatMock }) }
 })
 
+interface ReportedError {
+  name: string
+  message: string
+  section: string
+  source: string
+}
+const reportErrorMock = vi.fn((input: ReportedError) => {
+  void input
+  return Promise.resolve(true)
+})
+vi.mock('../observability', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../observability')>()
+  return { ...actual, reportError: (input: ReportedError) => reportErrorMock(input) }
+})
+
 const okResults = {
   pageType: 'worksheet',
   subject: 'math',
@@ -73,6 +89,7 @@ function declaredMediaType(): string | undefined {
 
 beforeEach(() => {
   uploadedBlobs.length = 0
+  reportErrorMock.mockClear()
   chatMock.mockReset()
   chatMock.mockResolvedValue({ message: JSON.stringify(okResults) })
   compressIfNeededMock.mockReset()
@@ -177,6 +194,41 @@ describe('useScan — UX-278: an unreadable format is refused, not relabelled', 
 
     expect(declaredMediaType()).toBe('image/jpeg')
     expect(result.current.error).toBeNull()
+  })
+
+  it('reports a caught failure to the error log, with the picture\'s shape only', async () => {
+    const heic = new File(['heic'], 'lincoln-math-page.heic', { type: 'image/heic' })
+    compressIfNeededMock.mockResolvedValue(heic)
+    compressImageMock.mockResolvedValue(heic)
+    const { result } = renderHook(() => useScan(ScanDoor.Curriculum))
+
+    await act(async () => {
+      await result.current.scan(heic, 'fam', 'child-1')
+    })
+
+    expect(reportErrorMock).toHaveBeenCalledTimes(1)
+    const report = reportErrorMock.mock.calls[0][0]
+    expect(report.source).toBe('handled')
+    expect(report.section).toBe('scan-curriculum')
+    expect(report.message).toContain('door=scan-curriculum')
+    expect(report.message).toContain('in=image/heic')
+    expect(report.message).toContain('converted=no')
+    // Never the picture, its name, its path, or the family id.
+    expect(report.message).not.toContain('lincoln')
+    expect(report.message).not.toContain('families/')
+    expect(report.message).not.toContain('base64')
+  })
+
+  it('reports nothing when the scan succeeds', async () => {
+    const jpg = new File(['jpg'], 'page.jpg', { type: 'image/jpeg' })
+    compressIfNeededMock.mockResolvedValue(jpg)
+    const { result } = renderHook(() => useScan(ScanDoor.Certificate))
+
+    await act(async () => {
+      await result.current.scan(jpg, 'fam', 'child-1')
+    })
+
+    expect(reportErrorMock).not.toHaveBeenCalled()
   })
 
   it('renders a reason when the image cannot be decoded at all', async () => {

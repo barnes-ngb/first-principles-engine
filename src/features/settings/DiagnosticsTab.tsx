@@ -40,6 +40,7 @@ const sourceColor: Record<
   unhandledrejection: 'warning',
   'react-error-boundary': 'error',
   'react-section-boundary': 'warning',
+  handled: 'info',
 }
 
 export default function DiagnosticsTab() {
