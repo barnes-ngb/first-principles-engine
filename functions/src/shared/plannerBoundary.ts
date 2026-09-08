@@ -49,7 +49,9 @@ export interface PlannerBoundaryJob {
    */
   readonly covers: string;
   /**
-   * Where the client sends her. A bare path from `src/app/router.tsx`.
+   * Where the client sends her. A path from `src/app/router.tsx`, optionally
+   * carrying a query string (`/progress?tab=curriculum`); the path portion is
+   * asserted against the app's own route table.
    *
    * `/chat` (Ask AI) wherever Ask AI can actually make the change behind a
    * confirm card; the owning screen wherever it cannot. Owner decision,
@@ -64,33 +66,66 @@ export interface PlannerBoundaryJob {
 /**
  * The jobs the planner chat refuses, and where each goes.
  *
- * Kept deliberately short. This list is read aloud to the model on every
- * planner call, and a model choosing from six named jobs is far more reliable
- * than one choosing from twenty — and an unreliable choice here is a wrong
- * link, which the addendum rates worse than a general one. Anything not on the
- * list falls back to Ask AI rather than being guessed at.
+ * ## The split is the capability boundary, not the topic
+ *
+ * The first cut of this table had one `curriculum`, one `videos` and one
+ * `dad-lab` row, each pointing at Ask AI — and each of those three bundled
+ * operations Ask AI **cannot** perform. `NAVIGATION_HONESTY_RULE` says so in
+ * its own words: *"You also cannot RETIRE a video, un-retire one, edit one, or
+ * delete one from here"*, *"You cannot START, COMPLETE, edit, or archive a Dad
+ * Lab lab or arc"*, and its curriculum powers are add / default-minutes /
+ * mark-finished / set-position — **not** rename, and explicitly never delete.
+ * So a parent asking to retire a video would have tapped a button into a second
+ * refusal, which is the failure this whole feature exists to prevent, one screen
+ * further along (Codex P1, PR #1803).
+ *
+ * So each topic is split where Ask AI's capability ends. Ask AI is named only
+ * where it can finish the job; everything else names the screen that can. Nine
+ * rows rather than six is a real cost — a model picks reliably from a short list
+ * — but `covers` names the actual operations on both halves of each pair, a miss
+ * between two halves of one topic is one extra hop rather than a lie, and an id
+ * the table does not carry falls back to the general link rather than guessing.
  */
 export const PLANNER_BOUNDARY_JOBS: readonly PlannerBoundaryJob[] = [
   {
     id: "curriculum",
     covers:
-      "the family's activities themselves — adding one, renaming one, changing how many minutes one takes by default, marking one finished, or setting where a child is up to in it",
+      "ADDING an activity, changing how many minutes one takes by default, marking one finished, or setting where a child is up to in it",
     route: "/chat",
     linkLabel: "Open Ask AI",
+  },
+  {
+    id: "curriculum-manage",
+    covers:
+      "RENAMING or DELETING an activity, or un-finishing one — Ask AI cannot do these, they live on the Curriculum tab",
+    route: "/progress?tab=curriculum",
+    linkLabel: "Open Curriculum",
   },
   {
     id: "videos",
-    covers:
-      "the curated video library — adding a video, retiring one, or putting a retired one back",
+    covers: "ADDING a video you found to the curated library",
     route: "/chat",
     linkLabel: "Open Ask AI",
   },
   {
-    id: "dad-lab",
+    id: "videos-manage",
     covers:
-      "Dad Lab — concept arcs and labs: creating, starting, completing, marking a step done, or archiving one",
+      "RETIRING a video, putting a retired one back, or editing or deleting one — these live in Watch Library and nowhere else",
+    route: "/watch",
+    linkLabel: "Open Watch Library",
+  },
+  {
+    id: "dad-lab",
+    covers: "CREATING a Dad Lab concept arc, or planning a lab into the backlog",
     route: "/chat",
     linkLabel: "Open Ask AI",
+  },
+  {
+    id: "dad-lab-manage",
+    covers:
+      "STARTING a lab, COMPLETING one (which is when its hours are credited), marking an arc step done, or archiving an arc — these live on the Dad Lab page and nowhere else",
+    route: "/dad-lab",
+    linkLabel: "Open Dad Lab",
   },
   {
     id: "records",
@@ -143,6 +178,18 @@ export function plannerBoundaryRoutes(): string[] {
   return [...new Set(routes)];
 }
 
+/**
+ * The path a route lands on, without its query string.
+ *
+ * The router table keys on paths, so `/progress?tab=curriculum` is checked as
+ * `/progress`. The tab slug is pinned separately, against the app's own
+ * `PROGRESS_TABS`, so it cannot become a second copy of that name.
+ */
+export function plannerBoundaryRoutePath(route: string): string {
+  const cut = route.indexOf("?");
+  return cut === -1 ? route : route.slice(0, cut);
+}
+
 /** Look a job up by the token the model wrote. Case- and space-insensitive. */
 export function plannerBoundaryJobById(
   id: string | null | undefined,
@@ -182,8 +229,13 @@ export const PLANNER_BOUNDARY_MARKER_UNPLACED = "[[BOUNDARY]]";
  * marker can honestly be read as one: `[[BOUNDARY` in the middle of a sentence
  * is far likelier to be prose about the feature than a signal, and stripping it
  * there would eat a parent's own words.
+ *
+ * The optional trailing `]` is the case this docstring claimed and the first
+ * cut of the pattern missed: `[[BOUNDARY:records]` is a marker exactly one
+ * closing bracket short, `MARKER_RE` needs two, and `[^\]]*` could not reach
+ * past the one that is there — so the raw marker rendered (Codex P2, PR #1803).
  */
-const TRUNCATED_MARKER_RE = /\[\[\s*BOUNDARY\b[^\]]*$/i;
+const TRUNCATED_MARKER_RE = /\[\[\s*BOUNDARY\b[^\]]*\]?$/i;
 
 /** What the planner chat learned from one assistant reply. */
 export interface PlannerBoundaryParse {

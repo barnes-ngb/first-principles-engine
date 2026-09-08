@@ -110,6 +110,28 @@ export function buildInstructionSection(instructions: string): string {
  * Returns `[]` when she typed nothing — the callers then send no section at
  * all rather than an empty fence.
  */
+/**
+ * Clear the "forward this as my request" flag on one turn (UX-269).
+ *
+ * A DECLINED ask is not a description of the week. `collectPlannerRequestAsks`
+ * gathers **every** `typedByParent` turn into the section every Generate Plan
+ * call appends as the authoritative request, so a turn the planner refused — a
+ * curriculum edit, "log two hours" — would be re-sent on every regenerate for
+ * the life of the conversation, each one drawing another refusal where a plan
+ * was asked for (Codex P1, PR #1803).
+ *
+ * It clears the flag and nothing else: the turn stays in the transcript exactly
+ * as she typed it, in place, and still reads back to her. Only its claim on the
+ * next prompt is dropped. Generic over the caller's message type so the page can
+ * hand it real `ChatMessage`s without a cast.
+ */
+export function withDeclinedAskCleared<T extends PlannerRequestMessage & { id: string }>(
+  messages: readonly T[],
+  declinedId: string,
+): T[] {
+  return messages.map((m) => (m.id === declinedId ? { ...m, typedByParent: false } : m))
+}
+
 export function collectPlannerRequestAsks(source: PlannerRequestSource): string[] {
   const raw: string[] = [
     ...(source.weekNotes ? [source.weekNotes] : []),

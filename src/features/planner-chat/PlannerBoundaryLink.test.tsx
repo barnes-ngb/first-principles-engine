@@ -55,6 +55,28 @@ describe('PlannerBoundaryLink', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/chat')
   })
 
+  it('sends a job Ask AI cannot finish to the screen that can (Codex P1)', () => {
+    mockNavigate.mockClear()
+    render(
+      <MemoryRouter>
+        <PlannerBoundaryLink jobId="videos-manage" />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Open Watch Library/ }))
+    expect(mockNavigate).toHaveBeenCalledWith('/watch')
+  })
+
+  it('lands a rename or delete on the Curriculum tab, not on Progress index 0', () => {
+    mockNavigate.mockClear()
+    render(
+      <MemoryRouter>
+        <PlannerBoundaryLink jobId="curriculum-manage" />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Open Curriculum/ }))
+    expect(mockNavigate).toHaveBeenCalledWith('/progress?tab=curriculum')
+  })
+
   it('falls back to the one general link rather than guessing a destination', () => {
     mockNavigate.mockClear()
     render(

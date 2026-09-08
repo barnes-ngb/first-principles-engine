@@ -19,6 +19,7 @@ import {
   collectPlannerRequestAsks,
   composePlannerMessage,
   formatShapedByLine,
+  withDeclinedAskCleared,
 } from './plannerRequest'
 
 const typed = (text: string) => ({ role: 'user', text, typedByParent: true })
@@ -167,5 +168,48 @@ describe('formatShapedByLine — names what was sent, claims nothing', () => {
     const line = formatShapedByLine(['z'.repeat(200)])
     expect(line).toContain('…')
     expect(line?.length).toBeLessThan(120)
+  })
+})
+
+// ── A declined ask does not poison the next generate (UX-269, Codex P1) ───────
+
+describe('withDeclinedAskCleared', () => {
+  const turn = (id: string, text: string) => ({
+    id,
+    role: 'user',
+    text,
+    typedByParent: true,
+  })
+
+  it('drops a refused ask from the request section, and keeps every other one', () => {
+    const messages = [
+      turn('a', 'less math this week'),
+      turn('b', 'log two hours for yesterday'),
+      turn('c', 'add a nature walk Thursday'),
+    ]
+    // Before: the refused ask is forwarded as authoritative on every regenerate.
+    expect(collectPlannerRequestAsks({ messages })).toEqual([
+      'less math this week',
+      'log two hours for yesterday',
+      'add a nature walk Thursday',
+    ])
+    const after = withDeclinedAskCleared(messages, 'b')
+    expect(collectPlannerRequestAsks({ messages: after })).toEqual([
+      'less math this week',
+      'add a nature walk Thursday',
+    ])
+  })
+
+  it('leaves the turn in the transcript, in place, with her words intact', () => {
+    const messages = [turn('a', 'first'), turn('b', 'log two hours'), turn('c', 'third')]
+    const after = withDeclinedAskCleared(messages, 'b')
+    expect(after.map((m) => m.id)).toEqual(['a', 'b', 'c'])
+    expect(after[1].text).toBe('log two hours')
+    expect(after[1].typedByParent).toBe(false)
+  })
+
+  it('changes nothing when the id is not in the list', () => {
+    const messages = [turn('a', 'first')]
+    expect(withDeclinedAskCleared(messages, 'nope')).toEqual(messages)
   })
 })

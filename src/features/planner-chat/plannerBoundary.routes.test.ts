@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest'
 
 import { routes } from '../../app/router'
+import { PROGRESS_TABS, progressPath } from '../../features/progress/progressNav'
 import {
   PLANNER_BOUNDARY_FALLBACK,
   PLANNER_BOUNDARY_JOBS,
+  plannerBoundaryJobById,
+  plannerBoundaryRoutePath,
   plannerBoundaryRoutes,
 } from '../../../functions/src/shared/plannerBoundary'
 
@@ -41,7 +44,7 @@ describe('every planner-chat boundary destination is a real route', () => {
 
   for (const route of plannerBoundaryRoutes()) {
     it(`${route} appears in the app's route table`, () => {
-      expect(declared.has(route)).toBe(true)
+      expect(declared.has(plannerBoundaryRoutePath(route))).toBe(true)
     })
   }
 
@@ -51,7 +54,17 @@ describe('every planner-chat boundary destination is a real route', () => {
 
   it('covers every job in the table', () => {
     for (const job of PLANNER_BOUNDARY_JOBS) {
-      expect(declared.has(job.route)).toBe(true)
+      expect(declared.has(plannerBoundaryRoutePath(job.route))).toBe(true)
     }
+  })
+
+  it('lands on the Curriculum TAB, spelled by the app that resolves it', () => {
+    // The shared table cannot import from `src/` (that directory's rule 1), so
+    // its `?tab=curriculum` is a literal. This pins it to `PROGRESS_TABS` — the
+    // one place that slug is defined — so a renamed tab fails here rather than
+    // silently landing a refusal on Foundations.
+    expect(plannerBoundaryJobById('curriculum-manage')?.route).toBe(
+      progressPath(PROGRESS_TABS.Curriculum),
+    )
   })
 })

@@ -58,6 +58,14 @@ describe("buildPlannerBoundarySection", () => {
   });
 
   it("stays short — it competes with eleven other sections and a strict-JSON instruction", () => {
-    expect(section.split("\n").length).toBeLessThanOrEqual(24);
+    // The guard measures the PROSE, not the section: the job list grows with
+    // the table (and grew by three when Codex's P1 split the three topics at
+    // Ask AI's capability boundary), and a cap that has to be raised every time
+    // a job is added stops meaning anything. What must not creep is the rule
+    // written around the list.
+    const lines = section.split("\n");
+    const jobLines = lines.filter((l) => /^- [a-z-]+ — /.test(l));
+    expect(jobLines).toHaveLength(PLANNER_BOUNDARY_JOBS.length);
+    expect(lines.length - jobLines.length).toBeLessThanOrEqual(20);
   });
 });

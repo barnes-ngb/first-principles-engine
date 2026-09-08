@@ -4,6 +4,7 @@ import {
   PLANNER_BOUNDARY_JOBS,
   parsePlannerBoundary,
   plannerBoundaryJobById,
+  plannerBoundaryRoutePath,
   plannerBoundaryRoutes,
   stripPlannerBoundaryMarkers,
 } from "./plannerBoundary.js";
@@ -21,11 +22,41 @@ describe("the job table", () => {
     }
   });
 
-  it("routes to a bare path — never a query string the router table cannot be checked against", () => {
+  it("lands on a checkable path — a query string is allowed, a fragment is not", () => {
     for (const route of plannerBoundaryRoutes()) {
-      expect(route).not.toContain("?");
       expect(route).not.toContain("#");
+      const path = plannerBoundaryRoutePath(route);
+      expect(path).toMatch(/^\/[a-z-]*$/);
+      expect(path).not.toContain("?");
     }
+  });
+
+  it("names Ask AI only where Ask AI can finish the job (Codex P1)", () => {
+    // `NAVIGATION_HONESTY_RULE` says outright that retiring a video, running a
+    // lab, and renaming or deleting an activity are NOT things Ask AI can do.
+    // A button into a second refusal is the failure this feature prevents,
+    // one screen further along — so those halves name their own screen.
+    const routeFor = (id: string) =>
+      PLANNER_BOUNDARY_JOBS.find((j) => j.id === id)?.route;
+    expect(routeFor("curriculum")).toBe("/chat");
+    expect(routeFor("videos")).toBe("/chat");
+    expect(routeFor("dad-lab")).toBe("/chat");
+    expect(routeFor("curriculum-manage")).toBe("/progress?tab=curriculum");
+    expect(routeFor("videos-manage")).toBe("/watch");
+    expect(routeFor("dad-lab-manage")).toBe("/dad-lab");
+  });
+
+  it("says which operations each half of a split topic covers", () => {
+    // The model picks by reading `covers`, so the two halves of one topic must
+    // name their operations rather than differ only by id.
+    const coversFor = (id: string) =>
+      PLANNER_BOUNDARY_JOBS.find((j) => j.id === id)?.covers ?? "";
+    expect(coversFor("curriculum")).toMatch(/ADDING/);
+    expect(coversFor("curriculum-manage")).toMatch(/RENAMING|DELETING/);
+    expect(coversFor("videos")).toMatch(/ADDING/);
+    expect(coversFor("videos-manage")).toMatch(/RETIRING/);
+    expect(coversFor("dad-lab")).toMatch(/CREATING/);
+    expect(coversFor("dad-lab-manage")).toMatch(/STARTING|COMPLETING/);
   });
 
   it("resolves a job id case- and space-insensitively, and nothing else", () => {
@@ -98,6 +129,21 @@ describe("parsePlannerBoundary — nothing raw ever reaches a rendered sentence"
     const parsed = parsePlannerBoundary("Sorry, not from here.\n\n[[BOUNDARY:curric");
     expect(parsed.text).toBe("Sorry, not from here.");
     // Unreadable, so it is the general link — never a guessed destination.
+    expect(parsed.destination).toEqual(PLANNER_BOUNDARY_FALLBACK);
+  });
+
+  it("strips a marker exactly one closing bracket short (Codex P2)", () => {
+    // `MARKER_RE` needs two brackets; the terminal matcher has to reach past
+    // the one that IS there, or the raw marker renders.
+    const parsed = parsePlannerBoundary("Sorry, not from here.\n\n[[BOUNDARY:records]");
+    expect(parsed.text).toBe("Sorry, not from here.");
+    expect(parsed.text).not.toContain("[[");
+    expect(parsed.destination).toEqual(PLANNER_BOUNDARY_FALLBACK);
+  });
+
+  it("strips the bare form one bracket short too", () => {
+    const parsed = parsePlannerBoundary("Nope.\n[[BOUNDARY]")
+    expect(parsed.text).toBe("Nope.");
     expect(parsed.destination).toEqual(PLANNER_BOUNDARY_FALLBACK);
   });
 

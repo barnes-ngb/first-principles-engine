@@ -140,6 +140,7 @@ import {
   collectPlannerRequestAsks,
   composePlannerMessage,
   formatShapedByLine,
+  withDeclinedAskCleared,
 } from './plannerRequest'
 import {
   buildDayTypeSection,
@@ -1634,6 +1635,9 @@ Return as JSON:
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       const aiDraft = rawAiDraft ? shapeDraft(rawAiDraft) : null
       let assistantMsg: ChatMessage
+      // UX-269: set when the reply turns out to be a refusal, so the ask that
+      // drew it can be un-flagged below.
+      let declinedAsk = false
       if (aiDraft) {
         setCurrentDraft(aiDraft)
         assistantMsg = {
@@ -1689,6 +1693,7 @@ Return as JSON:
         // it; the id (not a route) is what is stored, so a screen that moves
         // fixes every stored conversation at once.
         const boundary = parsePlannerBoundary(response.message)
+        declinedAsk = boundary.destination !== null
         assistantMsg = {
           id: generateItemId(),
           role: ChatMessageRole.Assistant,
@@ -1712,7 +1717,17 @@ Return as JSON:
         }
       }
 
-      const final = [...updatedWithUser, assistantMsg]
+      // A DECLINED ask is not a description of the week (UX-269, Codex P1).
+      // FEAT-198 forwards every `typedByParent` turn into the request section of
+      // the NEXT generate, so leaving the flag on "log two hours" would re-send
+      // a job the planner cannot do on every regenerate for the life of this
+      // conversation — each one drawing another refusal where a plan was asked
+      // for. The turn stays in the transcript exactly as she typed it; only its
+      // "forward this as my request" flag is cleared.
+      const turns = declinedAsk
+        ? withDeclinedAskCleared(updatedWithUser, userMsg.id)
+        : updatedWithUser
+      const final = [...turns, assistantMsg]
       setMessages(final)
       const persistStatus = applied ? { status: PlannerConversationStatus.Applied } : {}
       void persistConversation({ messages: final, currentDraft: aiDraft ?? currentDraft ?? undefined, ...persistStatus })
