@@ -68,9 +68,14 @@ export default function ArtifactCard({ artifact }: ArtifactCardProps) {
             A Video artifact's `uri` is an EXTERNAL link, not a Storage download
             URL — nothing is uploaded for it — so it is rendered as a link
             rather than as media (Codex round 1). Before this, `uri` was drawn
-            only for Photo and Audio, so a captured link could not be opened or
-            even read. `rel="noreferrer"` because the destination is arbitrary
-            and parent-supplied.
+            only for Photo and Audio. `rel="noreferrer"` because the destination
+            is arbitrary and parent-supplied.
+
+            NOTE (Codex round 3): this component is currently imported nowhere,
+            so this case reaches no user today. It is kept because it is the
+            correct behaviour for the card and the place a reader looks for it;
+            the mounted surfaces still need their own Video handling, which is
+            outstanding rather than done.
           */}
           {artifact.type === EvidenceType.Video && artifact.uri && (
             <Link

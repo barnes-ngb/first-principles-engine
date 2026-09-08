@@ -60,6 +60,8 @@ const uploadMock = vi.fn<
 >(async () => ({ downloadUrl: 'https://example/f.jpg', storagePath: 'p' }))
 vi.mock('./upload', () => ({
   generateFilename: (ext: string) => `f.${ext}`,
+  artifactStoragePath: (familyId: string, artifactId: string, filename: string) =>
+    `families/${familyId}/artifacts/${artifactId}/${filename}`,
   uploadArtifactFile: (f: string, a: string, file: unknown, name: string) =>
     uploadMock(f, a, file, name),
 }))
@@ -397,7 +399,10 @@ describe('the rollback covers the WHOLE attempt (Codex round 2)', () => {
         }),
       ),
     ).rejects.toThrow('upload failed')
-    expect(deleteObjectMock).toHaveBeenCalledTimes(1)
+    // TWO, not one: the first photo's object, and the second's — whose path is
+    // now registered BEFORE the await (Codex round 3), so an upload that lands
+    // its bytes and then fails is cleaned up rather than orphaned.
+    expect(deleteObjectMock).toHaveBeenCalledTimes(2)
   })
 
   it('reports the partial truth when a storage delete also fails', async () => {
@@ -436,5 +441,42 @@ describe('the caller gets the artifacts back (Codex round 2)', () => {
     )
     expect(result.artifacts[0].uri).toBe('https://youtube.com/watch?v=abc')
     expect(result.artifacts[0].content).toBe('https://youtube.com/watch?v=abc')
+  })
+})
+
+// ── Codex round 3 ────────────────────────────────────────────────────────────
+
+describe('the returned artifacts carry what the renderer needs', () => {
+  it('includes uri and mediaUrls on a photo, not just the pre-upload copy', async () => {
+    // `record` copies before the follow-up write adds them, and TodayPage
+    // prepends these objects straight into `todayArtifacts` — whose renderer
+    // and the checklist's photo resolver both key on those fields.
+    const result = await logStrandSession(
+      args({ evidence: { photos: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } }),
+    )
+    expect(result.artifacts[0].uri).toBe('https://example/f.jpg')
+    expect(result.artifacts[0].mediaUrls).toEqual(['https://example/f.jpg'])
+  })
+
+  it('includes them on audio too', async () => {
+    const result = await logStrandSession(args({ evidence: { audio: new Blob(['a']) } }))
+    expect(result.artifacts[0].uri).toBe('https://example/f.jpg')
+  })
+})
+
+describe('the rollback covers an upload that half-succeeded', () => {
+  it('deletes the object when the download-URL step is what failed', async () => {
+    // `uploadArtifactFile` uploads and THEN fetches the URL. Registering the
+    // path only on success left an object behind with nothing to clean up,
+    // while the caller still said "Nothing was saved".
+    uploadMock.mockImplementation(async () => {
+      throw new Error('getDownloadURL failed')
+    })
+    await expect(
+      logStrandSession(
+        args({ evidence: { photos: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } }),
+      ),
+    ).rejects.toThrow('getDownloadURL failed')
+    expect(deleteObjectMock).toHaveBeenCalledTimes(1)
   })
 })

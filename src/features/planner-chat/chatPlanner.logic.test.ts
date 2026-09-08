@@ -1598,12 +1598,22 @@ describe('activityConfigsToRoutineText', () => {
 
   // ── A strand in the plan (UX-281/282) ──────────────────────────────────────
   //
-  // A strand is planned like any other config — its NAME and cadence reach the
-  // model — and its topics never do. `recentTopics` is a suggestion cache for
-  // the parent's own capture form; handing the planner a list of subjects the
-  // family has covered would invite it to plan them again, and the prompt tells
-  // it to copy these names EXACTLY (which is also why aliases are withheld,
-  // UX-280).
+  // A strand is serialized like any other config — its NAME, minutes and
+  // subject — and its topics never are. `recentTopics` is a suggestion cache
+  // for the parent's own capture form; handing the planner a list of subjects
+  // the family has covered would invite it to plan them again, and the prompt
+  // tells it to copy these names EXACTLY (which is also why aliases are
+  // withheld, UX-280).
+  //
+  // **Cadence is NOT in this line, and that is pre-existing** (Codex round 3
+  // named it, correctly, against an earlier comment here that overclaimed).
+  // `activityConfigsToRoutineText` has never serialized `frequency` for ANY
+  // type, and `buildPlannerPrompt` asks for every serialized activity on every
+  // day — so a 2x/week strand is planned five times exactly as a 3x/week
+  // workbook already is. Carrying cadence into day construction is UX-206 /
+  // UX-208 / UX-209, the owner-led day-as-a-menu work, of which CLAUDE.md says
+  // half is worse than neither half. A strand inherits the gap; it does not
+  // widen it, and this test asserts only what the line actually contains.
   it('plans a strand by name, and never sends its topics', () => {
     const text = activityConfigsToRoutineText([
       makeConfig({

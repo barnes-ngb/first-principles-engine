@@ -65,7 +65,7 @@ import { deleteObject, ref as storageRef } from 'firebase/storage'
 
 import { activityConfigsCollection, artifactsCollection, db } from './firestore'
 import { storage } from './storage'
-import { generateFilename, uploadArtifactFile } from './upload'
+import { artifactStoragePath, generateFilename, uploadArtifactFile } from './upload'
 
 export interface LogStrandSessionArgs {
   familyId: string
@@ -187,6 +187,24 @@ export async function logStrandSession(
   }
 
   /**
+   * Patch the returned copy with the media fields the follow-up write adds
+   * (Codex round 3).
+   *
+   * `record` copies the artifact BEFORE `uri`/`mediaUrls` exist, and
+   * `TodayPage` prepends these objects straight into `todayArtifacts`, whose
+   * renderer and the checklist's photo resolver both key on those fields. An
+   * unpatched copy meant the photo just captured stayed invisible until a
+   * reload fetched the Firestore version — the very gap returning the artifacts
+   * was meant to close.
+   */
+  const attachMedia = (id: string, urls: string[]) => {
+    const stored = artifacts.find((a) => a.id === id)
+    if (!stored || urls.length === 0) return
+    stored.uri = urls[0]
+    stored.mediaUrls = urls
+  }
+
+  /**
    * Undo the attempt, best effort. Returns false when anything survived, which
    * is a different sentence to the parent — never a blind "try again".
    */
@@ -218,19 +236,24 @@ export async function logStrandSession(
           const ext = file.name.split('.').pop() ?? 'jpg'
           // Index-prefixed so filenames stay distinct within the same millisecond.
           const filename = `${i}-${generateFilename(ext)}`
+          // Registered BEFORE the await (Codex round 3): `uploadArtifactFile`
+          // uploads and then fetches the download URL, so a failure in the
+          // second step leaves an object at this exact path with nothing handed
+          // back to clean up.
+          storagePaths.push(artifactStoragePath(args.familyId, ref.id, filename))
           const uploaded = await uploadArtifactFile(
             args.familyId,
             ref.id,
             file,
             filename,
           )
-          storagePaths.push(uploaded.storagePath)
           urls.push(uploaded.downloadUrl)
         }
         await updateDoc(doc(artifactsCollection(args.familyId), ref.id), {
           uri: urls[0],
           mediaUrls: urls,
         })
+        attachMedia(ref.id, urls)
         continue
       }
 
@@ -241,17 +264,18 @@ export async function logStrandSession(
         const ref = await addDoc(artifactsCollection(args.familyId), artifact)
         record(ref.id, artifact)
         const filename = generateFilename('webm')
+        storagePaths.push(artifactStoragePath(args.familyId, ref.id, filename))
         const uploaded = await uploadArtifactFile(
           args.familyId,
           ref.id,
           blob,
           filename,
         )
-        storagePaths.push(uploaded.storagePath)
         await updateDoc(doc(artifactsCollection(args.familyId), ref.id), {
           uri: uploaded.downloadUrl,
           mediaUrls: [uploaded.downloadUrl],
         })
+        attachMedia(ref.id, [uploaded.downloadUrl])
         continue
       }
 
@@ -268,10 +292,17 @@ export async function logStrandSession(
 
       // Video — a link to what they watched, already normalized to an http(s)
       // URL by `planStrandSession` (a bare "youtube.com/…" would otherwise
-      // reach an href as an app-relative path). Written to `uri` AND `content`:
-      // `ArtifactCard` and the portfolio render `uri` only for Photo and Audio,
-      // so `content` is what makes the link legible everywhere, and the card's
-      // own Video case makes it openable.
+      // reach an href as an app-relative path).
+      //
+      // Written to `uri` AND `content`. `content` is the load-bearing half: the
+      // mounted renderers draw `uri` only for Photo and Audio, so `content` is
+      // what makes the link READABLE in the Portfolio at all. It is not yet
+      // CLICKABLE anywhere mounted — `ArtifactCard` gained a Video case but a
+      // repo-wide search finds no import of that component (Codex round 3), so
+      // that case renders to nobody today. Stated rather than implied, and
+      // outstanding on the PR: the link is stored durably and can be read and
+      // copied; a clickable renderer in the mounted surfaces plus the archive's
+      // handling of a non-Storage URI is its own change.
       const link = sessionLink ?? ''
       const artifact = buildStrandArtifact({
         ...base,
