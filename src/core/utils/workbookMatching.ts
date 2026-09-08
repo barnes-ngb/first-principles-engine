@@ -1,4 +1,5 @@
 import type { SubjectBucket } from '../types/enums'
+import { activityMatchNames } from './activityNames'
 
 /**
  * Minimal shape for anything that can be compared as a "workbook-like" item.
@@ -86,6 +87,8 @@ export function isSameWorkbook(a: WorkbookLike, b: WorkbookLike): boolean {
 export interface WorkbookConfigLike {
   id: string
   name?: string
+  /** UX-280 — the other names this row answers to; each is tried in turn. */
+  aliases?: string[]
   curriculum?: string
   subjectBucket?: SubjectBucket
   type?: string
@@ -110,11 +113,15 @@ export function findWorkbookConfigId(
   const candidates = configs.filter(
     (c) => c.type === 'workbook' && c.scannable !== false,
   )
+  // UX-280 (Codex round 3): every name the row answers to, not one. A draft
+  // generated before a rename — or a legacy unstamped item — still carries the
+  // OLD title, so matching only `name ?? curriculum` leaves `workbookConfigId`
+  // unstamped and drops the item off the deterministic scan path. The old title
+  // was preserved precisely to keep that working.
   const match = candidates.find((c) =>
-    isSameWorkbook(item, {
-      label: c.name ?? c.curriculum ?? '',
-      subjectBucket: c.subjectBucket,
-    }),
+    activityMatchNames(c).some((label) =>
+      isSameWorkbook(item, { label, subjectBucket: c.subjectBucket }),
+    ),
   )
   return match?.id
 }

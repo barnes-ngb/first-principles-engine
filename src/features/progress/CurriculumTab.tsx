@@ -49,8 +49,11 @@ import { isWorkbookMatch, useScanToActivityConfig } from '../../core/hooks/useSc
 import type { ActivityConfig, CertificateScanResult, ScanRecord, ScanResult } from '../../core/types'
 import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
+import { activityNames } from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
+import RenameActivityDialog from './RenameActivityDialog'
+import { ALIAS_SECTION_LABEL } from './renameActivity'
 import EditRoutinesDialog from './EditRoutinesDialog'
 import {
   CURRICULUM_SECTION_TITLE,
@@ -74,6 +77,7 @@ export default function CurriculumTab() {
     setActiveChildId,
     isLoading: isLoadingChildren,
     addChild,
+    isChildProfile,
   } = useActiveChild()
   const {
     configs,
@@ -129,19 +133,18 @@ export default function CurriculumTab() {
     (config: ActivityConfig): ScanRecord[] => {
       // UX-205: the one shared name-comparison rule, not a fourth copy of it.
       const norm = nameKey
-      const configName = norm(config.name)
-      const configCurriculum = norm(config.curriculum)
+      // UX-280: every name this row answers to, plus the publisher slot. A card
+      // whose name she shortened would otherwise show none of its own scans —
+      // they were detected under the cover's title, which is now an alternate.
+      const configKeys = [...activityNames(config), config.curriculum ?? '']
+        .map(norm)
+        .filter(Boolean)
       return recentScans.filter((s) => {
         if (!s.results || s.results.pageType === 'certificate') return false
         const scanSubject = norm(s.results.subject)
         const detected = s.results.curriculumDetected
         const scanCurr = norm(detected?.name)
-        return (
-          (configName && scanSubject.includes(configName)) ||
-          (configName && scanCurr.includes(configName)) ||
-          (configCurriculum && scanCurr.includes(configCurriculum)) ||
-          (configCurriculum && scanSubject.includes(configCurriculum))
-        )
+        return configKeys.some((key) => scanSubject.includes(key) || scanCurr.includes(key))
       })
     },
     [recentScans],
@@ -173,6 +176,9 @@ export default function CurriculumTab() {
 
   // Reassign-owner dialog (DATA-08): move a workbook to its real child owner.
   const [reassign, setReassign] = useState<ActivityConfig | null>(null)
+
+  /** UX-279: rename dialog. Parent-only, on capability — see `handleRename`. */
+  const [renaming, setRenaming] = useState<ActivityConfig | null>(null)
 
   // Edit routines dialog
   const [editRoutinesOpen, setEditRoutinesOpen] = useState(false)
@@ -270,6 +276,30 @@ export default function CurriculumTab() {
         ? `"${config.name}" added to the kids' quick log`
         : `"${config.name}" removed from the kids' quick log`,
     )
+  }
+
+  /**
+   * Write a rename (UX-279).
+   *
+   * Writes `name` and the alternates, and **nothing else** — no day log, no
+   * applied week, no artifact title, no recorded minute. A logged label is
+   * evidence of the day it was logged on; renaming the program does not change
+   * what happened.
+   *
+   * Parent-gated at the write as well as at the menu. The tab renders for a kid
+   * profile today, so a control that only hid itself would be a control a kid
+   * could still reach through a stale dialog — the same two-layer rule the
+   * planner's curriculum follow-up uses (UX-232).
+   */
+  const handleRename = async (configId: string, name: string, aliases: string[]) => {
+    if (isChildProfile) return
+    const config = configs.find((c) => c.id === configId)
+    if (!config || config.completed) return
+    // Deliberately UNCAUGHT: the dialog awaits this and keeps itself open on a
+    // rejection, so swallowing the error here would close it over a write that
+    // never landed (Codex round 1, P2).
+    await updateConfig(configId, { name, aliases })
+    setSnack(`Renamed to "${name}"`)
   }
 
   const handleReassign = async (config: ActivityConfig, childId: string) => {
@@ -560,12 +590,21 @@ export default function CurriculumTab() {
         }
 
         const results = record.results
-        const cardName = config.curriculum || config.name
+        // UX-280 (Codex round 1, P2): every name this row answers to, not one.
+        // The untargeted lookup gained the alias ladder and this guard did not,
+        // so scanning the OLD cover from a renamed card raised a false
+        // "that doesn't look like this workbook" prompt — on the exact path the
+        // alternates exist to keep working.
+        const cardNames = [config.curriculum ?? '', ...activityNames(config)].filter(Boolean)
         const detectedName = isCertificateScan(results)
           ? results.curriculumName
           : results.curriculumDetected?.name || results.subject
 
-        if (detectedName && cardName && !isWorkbookMatch(cardName, detectedName)) {
+        if (
+          detectedName &&
+          cardNames.length > 0 &&
+          !cardNames.some((cardName) => isWorkbookMatch(cardName, detectedName))
+        ) {
           setMismatchPrompt({ result: results, config, detectedName })
           return
         }
@@ -710,7 +749,13 @@ export default function CurriculumTab() {
                 >
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
@@ -746,7 +791,13 @@ export default function CurriculumTab() {
                 >
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
@@ -762,7 +813,13 @@ export default function CurriculumTab() {
                 <ListItem key={config.id}>
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
@@ -897,6 +954,21 @@ export default function CurriculumTab() {
 
       {/* Three-dot context menu */}
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
+        {/* UX-279: the publisher's name on the cover and what the family calls
+            it are different strings, and until now the row had one slot for
+            both. Parent-only on capability, never on a name. A finished program
+            never reaches here — the Completed section has no menu. */}
+        {!isChildProfile && (
+          <MenuItem
+            onClick={() => {
+              if (menuConfig) setRenaming(menuConfig)
+              closeMenu()
+            }}
+          >
+            <EditIcon fontSize="small" sx={{ mr: 1 }} />
+            Rename
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             if (menuConfig) {
@@ -1054,6 +1126,13 @@ export default function CurriculumTab() {
       />
 
       {/* Add Activity dialog */}
+      <RenameActivityDialog
+        config={renaming}
+        siblings={configs}
+        onSave={handleRename}
+        onClose={() => setRenaming(null)}
+      />
+
       <AddActivityDialog
         open={addDialogOpen}
         childId={activeChildId}
@@ -1182,6 +1261,23 @@ interface WorkbookCardProps {
   scanning: boolean
 }
 
+/**
+ * The row's other names, small, beneath it (UX-280) — the owner's "tags of
+ * alternate names beneath the curriculum".
+ *
+ * Quiet on purpose: these are a matching aid, not a second title. A row with
+ * none renders nothing extra, which is every row that exists today.
+ */
+function ActivityAliases({ config }: { config: ActivityConfig }) {
+  const aliases = activityNames(config).slice(1)
+  if (aliases.length === 0) return null
+  return (
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+      {ALIAS_SECTION_LABEL}: {aliases.join(' · ')}
+    </Typography>
+  )
+}
+
 function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCapture, scanning }: WorkbookCardProps) {
   const progress =
     config.currentPosition && config.totalUnits
@@ -1200,6 +1296,7 @@ function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCaptu
             {config.subjectBucket} · {ActivityFrequencyLabel[config.frequency] ?? config.frequency}{' '}
             · {config.defaultMinutes}m
           </Typography>
+          <ActivityAliases config={config} />
         </Box>
         <IconButton size="small" onClick={(e) => onOpenMenu(e, config)}>
           <MoreVertIcon fontSize="small" />
