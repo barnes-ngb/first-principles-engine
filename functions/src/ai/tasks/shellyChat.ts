@@ -294,45 +294,14 @@ export function chatChecklistItemKey(item: ChatWeekChecklistRow): string {
 
 const WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
-/**
- * The family's timezone when they haven't set one — the same zone every
- * scheduled function in this repo already runs on (`evaluate`, `monthlyReview`,
- * `fileFeatureRequests`, `sweepCompliancePacks`). `Family.timeZone` overrides it.
- */
-export const DEFAULT_FAMILY_TIME_ZONE = "America/Chicago";
-
-/**
- * `now` as the CIVIL date (`YYYY-MM-DD`) in a given zone (Codex P2, PR #1667).
- *
- * Day documents are keyed by the **client's local** date (`{date}_{childId}`,
- * built from a browser `Date`). A Cloud Function runs in the runtime's zone —
- * UTC by default — so on a Sunday evening in the US, `new Date()` on the server
- * is already Monday, and deriving the week from it selects the week the family
- * has not started yet. The THIS WEEK section would then read five documents that
- * are not the family's week at all, and every action emitted from it would be
- * refused by the client gate as out-of-week. Sunday evening is exactly when a
- * homeschool parent plans, so this is the wrong hour to be an hour off.
- *
- * `en-CA` because its short date format IS `YYYY-MM-DD`. An unknown zone makes
- * `Intl` throw; we fall back to the runtime's own civil date rather than take
- * the whole chat down over a bad profile field.
- */
-export function civilDateInZone(now: Date, timeZone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(now);
-  } catch {
-    console.warn(`[shellyChat] unknown timeZone ${timeZone} — falling back to runtime local`);
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  }
-}
+// `DEFAULT_FAMILY_TIME_ZONE` and `civilDateInZone` were defined here — this is
+// where the runtime-zone class was first fixed (Codex P2, PR #1667). They now
+// live in `../familyClock.js` so `evaluate.ts` can apply the same rule to the
+// weekly review's week key (UX-266) without a cycle: `shellyChat.ts` imports
+// `summarizeTeachBacks` from `evaluate.ts`, so evaluate cannot import from here.
+// Re-exported so every caller and test of this module is unaffected.
+import { DEFAULT_FAMILY_TIME_ZONE, civilDateInZone } from "../familyClock.js";
+export { DEFAULT_FAMILY_TIME_ZONE, civilDateInZone };
 
 /**
  * The Mon–Fri date keys of the family's current week, with their weekday names

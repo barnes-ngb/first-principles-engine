@@ -10,6 +10,7 @@ import { sanitizeAndParseJson } from "../shared/sanitizeJson.js";
 import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
 import { synthesizeIfStale } from "./learnerSynthesis.js";
+import { civilDateObjectInZone } from "./familyClock.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -188,6 +189,16 @@ interface DailyPlanRecord {
  * produced one bug (UX-218). One rule, agreeing on all seven days, is the fix;
  * agreeing only on whichever day the schedule currently names is what got us
  * here.
+ *
+ * **This reads its argument's LOCAL fields, and that makes the caller
+ * responsible for the zone (UX-266).** Reading local getters is deliberate — it
+ * is the page's arithmetic, written the same way — but a Cloud Function's
+ * `new Date()` is UTC, a different clock from the one the schedule fires on. So
+ * `weeklyReview` hands in `civilDateObjectInZone(new Date(), …)` rather than the
+ * raw instant. On the current schedule both readings name the same week, which
+ * is a coincidence of the hour and not a property of this rule: the answer
+ * changes at the Fri→Sat boundary, and a Friday-evening firing is UTC Saturday.
+ * Correct by cancellation is not correct.
  */
 export function lastWeekKey(today: Date): string {
   const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -1336,7 +1347,21 @@ export const weeklyReview = onSchedule(
   },
   async () => {
     const db = getFirestore();
-    const weekKey = lastWeekKey(new Date());
+    // The family's civil date, not the runtime's (UX-266).
+    //
+    // The schedule fires on `America/Chicago`; the runtime executes in UTC. So
+    // `new Date()` here is a different clock from the one the cron was set by,
+    // and `lastWeekKey` reads its LOCAL fields. On the current schedule the two
+    // readings agree on every firing — 00:15 CT is 05:15/06:15 UTC, still the
+    // same Sunday — but that is a coincidence of the hour, not a property of the
+    // code: `lastWeekKey` changes answer at the Fri→Sat boundary, so any move to
+    // a Friday evening (which is UTC Saturday) would have this write the week
+    // that has not ended yet, silently. Resolving the civil date in the family's
+    // zone first makes the key independent of the hour the schedule names.
+    //
+    // This changes no document on the current schedule — asserted in
+    // `evaluate.test.ts` across every firing of a year, not reasoned about.
+    const weekKey = lastWeekKey(civilDateObjectInZone(new Date(), WEEKLY_REVIEW_SCHEDULE.timeZone));
     const apiKey = claudeApiKey.value();
 
     // Get all families

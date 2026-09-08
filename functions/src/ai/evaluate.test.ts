@@ -120,6 +120,110 @@ describe("lastWeekKey", () => {
   });
 });
 
+// ── The zone the key is resolved in (UX-266) ─────────────────────────────────
+//
+// `weeklyReview` used to call `lastWeekKey(new Date())`. The schedule fires on
+// `America/Chicago`; the runtime executes in UTC; `lastWeekKey` reads its
+// argument's LOCAL fields. The key was therefore right only for the hours where
+// the two clocks happen to name the same week — a coincidence with a deploy date
+// on it, not a property of the code.
+//
+// This is a records-write path, so the first thing asserted is that the fix
+// moves NO document on the current schedule, swept across every firing of a
+// year rather than argued from one example.
+
+describe("the week key is resolved in the family's zone, not the runtime's", () => {
+  const TZ = WEEKLY_REVIEW_SCHEDULE.timeZone;
+
+  function civilDate(instant: Date, timeZone: string): string {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(instant);
+  }
+
+  /** `lastWeekKey` as the OLD code read it: the runtime's own (UTC) civil day. */
+  function runtimeReading(instant: Date): string {
+    const [y, m, d] = civilDate(instant, "UTC").split("-").map(Number);
+    return lastWeekKey(new Date(y, m - 1, d));
+  }
+
+  /** `lastWeekKey` as the NEW code reads it: the family's civil day. */
+  function zonedReading(instant: Date): string {
+    const [y, m, d] = civilDate(instant, TZ).split("-").map(Number);
+    return lastWeekKey(new Date(y, m - 1, d));
+  }
+
+  /** The real instant a `weekday hh:mm` schedule fires on, in the family zone. */
+  function firings(weekday: number, hh: string, mm: string): Date[] {
+    const out: Date[] = [];
+    for (let i = 0; i < 366; i++) {
+      const day = new Date(2026, 0, 1 + i);
+      if (day.getFullYear() > 2026) break;
+      if (day.getDay() !== weekday) continue;
+      const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+      // CDT is -05:00, CST is -06:00; take whichever actually reads back as the
+      // wall-clock time we asked for in the family's zone.
+      for (const offset of ["-05:00", "-06:00"]) {
+        const instant = new Date(`${date}T${hh}:${mm}:00${offset}`);
+        const wall = new Intl.DateTimeFormat("en-GB", {
+          timeZone: TZ,
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(instant);
+        if (civilDate(instant, TZ) === date && wall === `${hh}:${mm}`) {
+          out.push(instant);
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  it("writes the SAME document as before on every firing of the current schedule", () => {
+    const [, weekday, hh, mm] =
+      /every (\w+) (\d{2}):(\d{2})/.exec(WEEKLY_REVIEW_SCHEDULE.schedule) ?? [];
+    expect(weekday).toBe("sunday");
+
+    const instants = firings(0, hh, mm);
+    expect(instants.length).toBe(52);
+
+    // Not "a same-shaped key" — the same key, firing by firing. If this ever
+    // fails, the change is moving a real Saturday firing's document and must
+    // stop rather than ship.
+    for (const instant of instants) {
+      expect(zonedReading(instant)).toBe(runtimeReading(instant));
+    }
+  });
+
+  it("stays correct if the hour moves — which is the whole point", () => {
+    // The Fri→Sat boundary is the one place `lastWeekKey` changes answer, so a
+    // Friday-evening schedule is UTC Saturday and the old reading named the week
+    // that had not ended. The zoned reading is unmoved.
+    const fridayEvening = firings(5, "19", "00");
+    expect(fridayEvening.length).toBe(52);
+
+    const diverged = fridayEvening.filter((i) => runtimeReading(i) !== zonedReading(i));
+    // Every single one: the old code was wrong on all 52.
+    expect(diverged.length).toBe(52);
+
+    // And the zoned reading agrees with what a person standing in Missouri would
+    // say the last finished week was.
+    const friSep11 = fridayEvening.find((i) => civilDate(i, TZ) === "2026-09-11")!;
+    expect(zonedReading(friSep11)).toBe("2026-08-30");
+    expect(runtimeReading(friSep11)).toBe("2026-09-06"); // the week still running
+  });
+
+  it("agrees with the schedule's own zone rather than a second copy of it", () => {
+    // If someone changes `WEEKLY_REVIEW_SCHEDULE.timeZone`, the handler follows —
+    // it passes that field, not a hardcoded zone string.
+    expect(TZ).toBe("America/Chicago");
+  });
+});
+
 // ── The schedule itself (UX-263, Codex round 1 P2) ───────────────────────────
 
 describe("the weeklyReview schedule", () => {
