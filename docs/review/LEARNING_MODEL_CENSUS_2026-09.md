@@ -51,9 +51,12 @@ multiplication, division — map through `mapFindingToNode` onto `math.operation
 graph**, so they are silently dropped before any write.
 
 **Recall exists and is better than expected — but it starts when the model does.** `changeFeed` is an
-uncapped, append-only log of every state transition with `from`, `to`, `cause` and `at`; every
-concept's `evidence[]` is append-only too. That is real history, and unlike FEAT-203's
-`currentPosition` it is not overwritten in place. Two caveats: a **re-seed drops every `eval` and
+uncapped, append-only log of every state transition with `from`, `to`, `cause` and `at`, and every
+writer appends to it. Concept `evidence[]` is append-only at five of the six writers — the exception
+is the workbook position sync, which is **latest-per-source for its own `positionSync` refs**, so a
+superseded position's `unit` and `via` are gone even though the transition itself survives in
+`changeFeed`. That is still real history, and unlike FEAT-203's `currentPosition` the *record of
+change* is not overwritten in place. Two caveats: a **re-seed drops every `eval` and
 `quest` evidence trail** (`mergeSeededModel` preserves only `attestation` and `curriculumPosition`
 entries), and the clock only starts at the first seed. So the patterns the owner wants **can** be
 computed forward, cannot be computed backwards, and the date they start from is the date somebody
@@ -186,12 +189,12 @@ memory. The seventh — the only one that creates it — is behind a URL flag.**
 | `mathseedsBridge` | Mathseeds lesson bands | 5 | 5 | **25** math | ✅ band-ceiling | same |
 | `tgtbLa1Bridge` | TGTB Language Arts Level 1 | 3 | 3 | **12** reading | ✅ band-ceiling | same |
 | `tagConceptBridge` | 22 catalog `skillTag`s → concepts | 22 keys | n/a | **9** (13 keys map to `[]`) | n/a | `dailySignalTargeting` (FEAT-69) |
-| `mapFindingToNode` | AI finding tags → `curriculumMap` ids | 33 distinct targets probed | n/a | **27** in-graph, **6 dropped** | n/a | `seedLearnerModel`, `evalModelSync` |
+| `mapFindingToNode` | AI finding tags → `curriculumMap` ids | **35** distinct targets (the closed set: every `FINDING_PREFIX_MAP` value plus every keyword-fallback return, read from source) | n/a | **27** in-graph, **8 dropped** | n/a | `seedLearnerModel`, `evalModelSync` |
 
 **Every bridge in the repo is called by something.** There is no unmounted-bridge instance of the
 pace-gauge pattern here — the unshipped thing is *data* (`TGTB_MATH_BRIDGE_V0.md`), not wiring.
 
-**The 6 dropped `mapFindingToNode` targets** (**UX-288**):
+**The 8 dropped `mapFindingToNode` targets** (**UX-288**):
 
 | Target the finding bridge emits | Reached from | In the foundations graph? |
 |---|---|---|
@@ -199,36 +202,49 @@ pace-gauge pattern here — the unshipped thing is *data* (`TGTB_MATH_BRIDGE_V0.
 | `math.operations.multDiv` | `math.multiplication`, `math.division`, `multipl`/`divis`/`times`/`tables` | ❌ |
 | `writing.mechanics.spelling` | any tag containing `spelling` | ❌ (`reading.encoding.spellCvc` exists and is not reached) |
 | `writing.composition.sentence` | any tag containing `sentence` | ❌ |
+| `writing.composition.paragraph` | any tag containing `paragraph` | ❌ |
 | `speech.sounds.late` | every `speech.articulation.*` | ❌ (no speech domain — by design) |
 | `speech.sequencing` | `speech.metathesis` | ❌ (by design) |
+| `speech.connected` | `speech.connectedSpeech`, `intelligib` | ❌ (by design; pinned by `mapFindingToNode.test.ts:108`) |
 
-The two speech ones are correct: `FoundationDomain` is reading + math. The two writing ones are the
-open curation question `tagConceptBridge` already names. **The two math ones are a straightforward
-defect** — the concepts exist under different ids (`math.operations.addWithin20` /
+The three speech ones are correct: `FoundationDomain` is reading + math. The three writing ones are
+the open curation question `tagConceptBridge` already names. **The two math ones are a
+straightforward defect** — the concepts exist under different ids (`math.operations.addWithin20` /
 `subWithin20` / `twoDigit`; `arrays` / `multFacts` / `division`), and the bridge points at a
 `curriculumMap` id instead.
 
 ### 3.3 What can reach a concept at all
 
-Unioning every bridge's reach: **41 of 60 concepts** are reachable by at least one bridge.
-**19 are reachable by none** (**UX-295**) — only a parent attestation, or an eval finding that
-happens to map, can ever move them:
+**Two numbers, because the automatic paths and the parent-initiated eval are different questions.**
+
+| Union | Concepts reached | Unreachable |
+|---|---|---|
+| **Deterministic paths only** — the 3 workbook bridges + `tagConceptBridge` (what a scan, a typed position or a struggle chip can move, with no adult sitting down to assess) | **41 / 60** | **19** |
+| **Including `mapFindingToNode`** — i.e. adding what a guided evaluation's findings can land on | **48 / 60** | **12** |
+
+(The tag bridge adds nothing to the workbook union: all 9 of its concepts are already covered by a
+workbook bridge. The deterministic total is 41 either way.)
+
+**12 concepts are reachable by nothing at all** — no bridge, no eval finding. Only a parent
+attestation on the Foundations tab or in the Review Chat can ever move them:
 
 ```
-reading.print.concepts            reading.comprehension.sequence
-reading.fluency.accuracy          reading.comprehension.character
-reading.fluency.expression        reading.comprehension.mainIdea
-reading.vocabulary.everyday       reading.comprehension.inference
-reading.vocabulary.wordParts      reading.comprehension.causeEffect
-reading.vocabulary.contextClues   reading.comprehension.compareTheme
-reading.independent.choice        reading.comprehension.analysis
-reading.critical.evaluate
-math.operations.factFamilies      math.fractions.compare
-math.fractions.operations         math.decimals
+reading.print.concepts            reading.comprehension.character
+reading.fluency.expression        reading.comprehension.causeEffect
+reading.comprehension.sequence    reading.comprehension.compareTheme
+reading.comprehension.analysis    reading.critical.evaluate
+reading.independent.choice        math.operations.factFamilies
+math.fractions.compare            math.fractions.operations
 ```
 
-That is the entire comprehension strand and the entire vocabulary strand — i.e. **everything about
-whether Lincoln understands what he reads is invisible to every automatic path.**
+**A further 7 are reachable only through a guided evaluation** — no automatic signal touches them:
+`reading.fluency.accuracy`, all three vocabulary nodes (`everyday`, `wordParts`, `contextClues`),
+`reading.comprehension.mainIdea`, `reading.comprehension.inference`, and `math.decimals`.
+
+So of the reading strands the owner most cares about for a 10-year-old: **comprehension has 7 nodes,
+and no automatic path touches any of them.** Two are eval-reachable; the other five need a parent to
+say so by hand. Vocabulary is the same shape — three nodes, eval-only. Chapter responses and book
+reads (UX-292) are the obvious evidence source and are unwired.
 
 ---
 
@@ -295,9 +311,18 @@ feed forward rather than emptying it.
 positive finding in this run.**
 
 - `ConceptStateEntry.state` **is** overwritten in place (the current value only).
-- But `ConceptStateEntry.evidence[]` is **append-only** at every writer — `[...(prev?.evidence ?? []),
-  evidence]` — and each ref carries `observedAt`, its `kind`, its `sourceId`, and (since FEAT-66) the
-  `readState` the ref itself asserted.
+- `ConceptStateEntry.evidence[]` is **append-only at five of the six writers** —
+  `[...(prev?.evidence ?? []), evidence]` — and each ref carries `observedAt`, its `kind`, its
+  `sourceId`, and (since FEAT-66) the `readState` the ref itself asserted.
+- **The exception is the workbook position sync.** `applyBridgeCoverageToModel` filters out its OWN
+  prior `curriculumPosition` ref for the same source before appending the replacement — deliberately,
+  so a re-sync updates rather than accumulates, and deliberately narrow, so a Review-Chat *witness*
+  carrying the same canonical `source` (but no `positionSync` flag) is preserved. The consequence for
+  recall: **workbook evidence is latest-per-source, not a trail.** A superseded position's `unit` and
+  `via` cannot be recovered from `evidence[]`. What does survive is the transition — this writer
+  `push`es its `changeFeed` line unconditionally, with no filter — so *"when did Fast Phonics move
+  this concept, and from what to what"* is answerable; *"what unit label did the March sync carry"*
+  is not.
 - And `changeFeed` independently records every transition with both endpoints and a cause.
 
 So *"what did the model think about `reading.phonics.digraphs` in July, and what changed it"* is
@@ -307,9 +332,9 @@ past the first seed** — and for a family that has never opened `?diag=1`, that
 **Two things erode it:**
 1. **A re-seed drops `eval` and `quest` evidence** (**UX-290**). `mergeSeededModel` preserves an
    existing entry only when it carries an `attestation` or `curriculumPosition` ref; everything else
-   is replaced by the fresh seed, which for the 19 evidence-only nodes means `state: 'not-yet',
-   evidence: []`. A Knowledge Mine result and a guided eval's read are both erasable by a button
-   press. No test covers this.
+   is replaced by the fresh seed, which for the **22** nodes the seeder has no driver for means
+   `state: 'not-yet', evidence: []`. A Knowledge Mine result and a guided eval's read are both
+   erasable by a button press. No test covers this.
 2. **Whole-array read-modify-write** (**UX-297**). Six fire-and-forget writers each `getDoc`, mutate a
    whole array, and `setDoc(..., {merge:true})` it back. Two writes in the same second lose one, and
    the arrays grow without bound inside a document with a 1 MB ceiling.
@@ -362,8 +387,8 @@ the model nowhere.** `mapFindingToNode` maps them to `math.operations.addSub` an
 `computeEvalRead`'s `!FOUNDATION_NODE_MAP[conceptId]` filter drops them before any write. The
 concepts exist under different ids (`addWithin20`, `subWithin20`, `twoDigit`, `arrays`, `multFacts`,
 `division`). For a 10-year-old working at ~3rd-grade math these are the most likely findings an eval
-produces. 6 of 33 distinct bridge targets fall outside the graph; 2 are this defect, 2 are the
-declared writing scope boundary, 2 are the declared speech boundary.
+produces. **8 of the bridge's 35 distinct targets fall outside the graph**: 2 are this defect, 3 are
+the declared `writing.*` scope boundary, 3 are the declared speech boundary.
 *Files: `mapFindingToNode.ts:54-57,141-142`, `evalModelSync.ts:114`. Characterization test added:
 `src/core/foundations/evalBridgeCoverage.test.ts`.*
 
@@ -381,7 +406,9 @@ paragraph and has been awaiting owner curation for six weeks. *Files:
 **UX-290 · A re-seed destroys every `eval` and `quest` evidence trail.** `mergeSeededModel` preserves
 an existing concept entry only when its evidence contains an `attestation` or a `curriculumPosition`.
 A concept whose evidence is a guided eval's read or a Knowledge Mine result is replaced wholesale by
-the fresh seed — which, for the 19 evidence-only nodes, is `{state:'not-yet', evidence:[]}`. Since
+the fresh seed — which, for the **22** nodes the seeder has no driver for (every fluency, vocabulary
+and comprehension node, plus math Data and Patterns/Problem-Solving), is `{state:'not-yet',
+evidence:[]}`. Verified by seeding at maximum working levels and reading back what still lands empty. Since
 the seeder is also the only bootstrap, "seed again" is a natural parent action. No test covers eval
 or quest preservation; the only merge test covers `attestation`.
 *Files: `seedLearnerModel.ts:371-398`, `seedLearnerModel.test.ts:229-262`.*
@@ -409,15 +436,22 @@ model path only by `seedLearnerModel`, which folds it to a single share on
 **UX-294 · 13 of 22 catalog skill tags map to nothing, so the non-workbook struggle path reaches 9 of
 60 concepts.** All 7 `writing.*` and all 5 `regulation.*` map to `[]` by declared design;
 `reading.fluency.short` is an open curation question the table names. Not a defect — a bound. It means
-a struggle on any item that is not a bridged workbook and not one of six tags queues nothing.
+a struggle on any item that is not a bridged workbook and not one of the **nine** mapped tags (four
+reading, five math) queues nothing.
 *Files: `tagConceptBridge.ts:58-94`.*
 
-**UX-295 · 19 of 60 concepts are reachable by no bridge at all** — the whole comprehension strand
-(7 nodes), the whole vocabulary strand (3), two fluency nodes, print concepts, independent reading,
-critical evaluation, `math.operations.factFamilies`, `math.fractions.compare`,
-`math.fractions.operations`, `math.decimals`. Only a parent attestation, or an eval finding that
-happens to map, can ever move them. Everything about whether Lincoln *understands* what he reads is
-invisible to every automatic path. *Computed in §3.3.*
+**UX-295 · 12 of 60 concepts are reachable by nothing at all, and 19 by no automatic path.** The
+deterministic union (3 workbook bridges + `tagConceptBridge`) reaches **41 / 60**; adding what a
+guided evaluation's findings can land on takes it to **48 / 60**. So **12 concepts can be moved only
+by a parent attestation** — `reading.print.concepts`, `fluency.expression`, five of the seven
+comprehension nodes (`sequence`, `character`, `causeEffect`, `compareTheme`, `analysis`),
+`critical.evaluate`, `independent.choice`, `math.operations.factFamilies`, and both
+`math.fractions.{compare, operations}` — and **a further 7 only by a guided eval**
+(`fluency.accuracy`, all three vocabulary nodes, `comprehension.{mainIdea, inference}`,
+`math.decimals`). The shape that matters: **the comprehension strand has 7 nodes and no automatic
+signal touches any of them**; vocabulary is 3 nodes, eval-only. Chapter responses and book reads
+(UX-292) are the obvious evidence source and are unwired. **Do not fix by adding nodes** — the graph
+is not short of nodes; these nodes are short of feeds. *Computed in §3.3.*
 
 **UX-296 · The concept graph has two definitions and nothing enforces they agree.**
 `functions/src/ai/data/foundationsGraphSummary.ts` is a hand-committed, machine-generated mirror of
@@ -482,8 +516,9 @@ without it every other number in this document is describing a document that doe
 
 **On the owner's second question — "a robust method for recalling moving forward".** It is already
 built and it is better than the pace-gauge precedent feared: `changeFeed` is uncapped and
-append-only, evidence trails are append-only, and every transition records both endpoints, a cause
-and a timestamp. The work is not to build recall; it is to **start the clock** (item 1) and **stop
+append-only at every writer, evidence trails are append-only at five of the six (the workbook sync
+being latest-per-source for its own refs), and every transition records both endpoints, a cause and a
+timestamp. The work is not to build recall; it is to **start the clock** (item 1) and **stop
 the one thing that erases it** (item 4). As with FEAT-203's coverage rate, the patterns cannot be
 recovered backwards — they begin the day the model does.
 

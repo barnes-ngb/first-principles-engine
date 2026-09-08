@@ -91,6 +91,51 @@ describe('UX-288 — the eval → learner-model bridge drops the four core math 
     }
   })
 
+  // The census's first probe list was hand-built and missed two targets; Codex
+  // round 1 found one (`speech.connected`) and recomputing from the closed set —
+  // every FINDING_PREFIX_MAP value plus every keyword-fallback return — found the
+  // other. Pinned here so the "8 dropped" figure in the census is checkable rather
+  // than asserted, and so a future run cannot re-derive a shorter list by probing.
+  it('drops exactly eight targets, and the other six are declared scope boundaries', () => {
+    const CLOSED_TARGET_SET = [
+      'math.algebra.patterns', 'math.data.graphs', 'math.decimals',
+      'math.fractions.concepts', 'math.geometry.area', 'math.geometry.shapes',
+      'math.measurement.length', 'math.measurement.time', 'math.number.counting',
+      'math.number.placeValue', 'math.operations.addSub', 'math.operations.multDiv',
+      'math.operations.multiDigit', 'math.problemSolving',
+      'reading.comprehension.explicit', 'reading.comprehension.inference',
+      'reading.comprehension.mainIdea', 'reading.decoding.multisyllable',
+      'reading.fluency.accuracy', 'reading.phonics.blends', 'reading.phonics.cvc',
+      'reading.phonics.digraphs', 'reading.phonics.letterSounds',
+      'reading.phonics.longVowels', 'reading.phonics.rControlled',
+      'reading.phonics.sightWords', 'reading.vocabulary.contextClues',
+      'reading.vocabulary.everyday', 'reading.vocabulary.wordParts',
+      'speech.connected', 'speech.sequencing', 'speech.sounds.late',
+      'writing.composition.paragraph', 'writing.composition.sentence',
+      'writing.mechanics.spelling',
+    ]
+    const dropped = CLOSED_TARGET_SET.filter((id) => !FOUNDATION_NODE_MAP[id])
+    expect(dropped.sort()).toEqual([
+      'math.operations.addSub',
+      'math.operations.multDiv',
+      'speech.connected',
+      'speech.sequencing',
+      'speech.sounds.late',
+      'writing.composition.paragraph',
+      'writing.composition.sentence',
+      'writing.mechanics.spelling',
+    ])
+    // Six of the eight are the declared domain boundary (`FoundationDomain` is
+    // reading + math). Only the two math ones are the defect.
+    expect(dropped.filter((id) => id.startsWith('math.'))).toHaveLength(2)
+  })
+
+  it('speech.connectedSpeech is one of them — an input the eval prompt asks for', () => {
+    expect(mapFindingToNode('speech.connectedSpeech')).toBe('speech.connected')
+    expect(FOUNDATION_NODE_MAP['speech.connected']).toBeUndefined()
+    expect(computeEvalRead([finding('speech.connectedSpeech')])).toHaveLength(0)
+  })
+
   it('a reading finding on the same shape DOES land — the drop is math-specific', () => {
     const reads = computeEvalRead([finding('phonics.cvc')])
     expect(reads).toHaveLength(1)
