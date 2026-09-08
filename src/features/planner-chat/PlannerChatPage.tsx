@@ -99,6 +99,14 @@ import {
   swapWatchVideoOnLiveDay,
 } from '../today/liveDayEdit'
 import MoveToDayDialog from '../today/MoveToDayDialog'
+import {
+  findRemovedItemConfig,
+  REMOVED_ITEM_DELETE_LABEL,
+  REMOVED_ITEM_KEEP_LABEL,
+  removedItemFollowUpBody,
+  removedItemFollowUpTitle,
+} from './removedItemFollowUp'
+import type { RemovedItemFollowUp } from './removedItemFollowUp'
 import { useAppliedWeekDays } from './useAppliedWeekDays'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -339,6 +347,8 @@ export default function PlannerChatPage() {
   }, [weekPlan, currentDraft, applied, forceSetup])
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
+  /** UX-232: the curriculum row a just-removed draft row named, while the offer is open. */
+  const [removedItemFollowUp, setRemovedItemFollowUp] = useState<RemovedItemFollowUp | null>(null)
 
   // Prior-plan detection: distinguishes first-visit user (full wizard) from returning user (compact setup)
   const [hasPriorPlan, setHasPriorPlan] = useState<boolean | null>(null)
@@ -411,7 +421,7 @@ export default function PlannerChatPage() {
   const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
   // Activity configs → routine text (replaces old free-text dailyRoutine)
-  const { configs: activityConfigs } = useActivityConfigs(activeChildId ?? '')
+  const { configs: activityConfigs, deleteConfig } = useActivityConfigs(activeChildId ?? '')
   const dailyRoutine = useMemo(
     () => activityConfigsToRoutineText(activityConfigs),
     [activityConfigs],
@@ -2259,6 +2269,8 @@ Generate a plan for Monday through Friday.`.trim()
       return
     }
 
+    const removed = currentDraft.days[dayIndex]?.items[itemIndex]
+
     const updated: DraftWeeklyPlan = {
       ...currentDraft,
       days: currentDraft.days.map((day, i) => {
@@ -2269,7 +2281,45 @@ Generate a plan for Monday through Friday.`.trim()
     }
     setCurrentDraft(updated)
     setPlanDirty(true)
-  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation])
+
+    // UX-232: the ✕ edited a copy, and never said so. The draft is regenerated
+    // from Curriculum, so a row taken off this week comes back on the next
+    // Redo — which is exactly what the owner hit. Offer the second step when the
+    // removed row names a live curriculum row exactly. Parent-only, and its own
+    // confirmed act: this only OPENS a dialog, and the delete happens on that
+    // dialog's button. Nothing about the draft edit above depends on the answer.
+    if (isParent) {
+      const followUp = findRemovedItemConfig(removed, activityConfigs)
+      if (followUp) setRemovedItemFollowUp(followUp)
+    }
+  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation, activityConfigs])
+
+  /**
+   * Delete the curriculum row a removed draft row named (UX-232).
+   *
+   * The second, separate act. Routed through the hook's own `deleteConfig` — the
+   * same write Progress → Curriculum performs — and deliberately NOT bundled
+   * into Apply: a week write and a curriculum delete are different decisions and
+   * a parent may want either without the other. Parent-gated at the write as
+   * well as in the UI, on capability and never on a name.
+   */
+  const handleConfirmRemoveFromCurriculum = useCallback(async () => {
+    const followUp = removedItemFollowUp
+    setRemovedItemFollowUp(null)
+    if (!followUp || !isParent) return
+    try {
+      await deleteConfig(followUp.configId)
+      setSnack({ text: `Removed ${followUp.configName} from Curriculum.`, severity: 'success' })
+    } catch (err) {
+      console.error('[Planner] Failed to remove the activity from Curriculum', err)
+      // The draft edit already stands; only the curriculum delete failed, and
+      // saying so is the difference between "it's gone" and "it will be back".
+      setSnack({
+        text: `Couldn't remove ${followUp.configName} from Curriculum. It's still there.`,
+        severity: 'error',
+      })
+    }
+  }, [removedItemFollowUp, isParent, deleteConfig])
 
   /**
    * Move a row to another day of the week — the edit this run exists for
@@ -3661,6 +3711,29 @@ ${dayPrompts}`
         onAddVideo={isParent ? async (video) => { await addWatchVideo(video) } : undefined}
         onManageLibrary={isParent ? () => navigate('/watch') : undefined}
       />
+
+      {/* UX-232: the ✕ edits the draft, and the draft is regenerated from
+          Curriculum — so a row taken off this week comes back on the next Redo.
+          Say so, and offer the second step, as its own confirmed act. Rendered
+          at the top level rather than inside a phase block because the ✕ is
+          offered on more than one phase. */}
+      <Dialog open={removedItemFollowUp !== null} onClose={() => setRemovedItemFollowUp(null)}>
+        <DialogTitle>
+          {removedItemFollowUp ? removedItemFollowUpTitle(removedItemFollowUp) : ''}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {removedItemFollowUp ? removedItemFollowUpBody(removedItemFollowUp) : ''}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          {/* Declining leaves the draft edit exactly as it is today. */}
+          <Button onClick={() => setRemovedItemFollowUp(null)}>{REMOVED_ITEM_KEEP_LABEL}</Button>
+          <Button onClick={handleConfirmRemoveFromCurriculum} color="error" variant="contained">
+            {REMOVED_ITEM_DELETE_LABEL}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* FEAT-138: "it's happening Thursday now". */}
       <MoveToDayDialog
