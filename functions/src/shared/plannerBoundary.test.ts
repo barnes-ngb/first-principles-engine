@@ -53,10 +53,25 @@ describe("the job table", () => {
       PLANNER_BOUNDARY_JOBS.find((j) => j.id === id)?.covers ?? "";
     expect(coversFor("curriculum")).toMatch(/ADDING/);
     expect(coversFor("curriculum-manage")).toMatch(/RENAMING|DELETING/);
+    // Codex round 2, P1: "ADDING an activity" alone read as a refusal of the
+    // planner's OWN job — the free-form drawer advertises "add a science
+    // project on Thursday". PERMANENT is what separates the two.
+    expect(coversFor("curriculum")).toMatch(/PERMANENT/);
     expect(coversFor("videos")).toMatch(/ADDING/);
     expect(coversFor("videos-manage")).toMatch(/RETIRING/);
     expect(coversFor("dad-lab")).toMatch(/CREATING/);
     expect(coversFor("dad-lab-manage")).toMatch(/STARTING|COMPLETING/);
+  });
+
+  it("offers no destination for un-finishing an activity — there is none (Codex round 2, P1)", () => {
+    // `activityConfigWrites.ts`: "There is no un-complete affordance anywhere
+    // in the app… nothing writes `completed: false` onto an existing doc."
+    // Routing it to Curriculum would be a button into a screen that renders the
+    // Completed list without controls. The prompt handles it as "not in the app"
+    // with NO marker at all.
+    for (const job of PLANNER_BOUNDARY_JOBS) {
+      expect(job.covers).not.toMatch(/un-finish|uncomplete|un-complete|undo.*finish/i);
+    }
   });
 
   it("resolves a job id case- and space-insensitively, and nothing else", () => {

@@ -18,6 +18,24 @@ import {
  */
 export const BOUNDARY_BARE_REFUSAL_TEXT = "I can't do that from here."
 
+/**
+ * The line added to a generated plan when the reply that came back was a
+ * refusal rather than a week.
+ *
+ * The boundary rule is installed on every `TaskType.Plan` call, so a job the
+ * planner cannot do — typed into the setup card's notes field rather than into
+ * the chat — can draw a refusal where a plan was asked for. The generate paths
+ * read any unparseable reply as a broken plan and fall back to the local
+ * planner, so without this she got a plan, a generic snackbar and no idea which
+ * part of what she wrote went nowhere (Codex round 2, P2).
+ *
+ * The prompt now tells the model to plan the week regardless and leave that
+ * part alone, which should stop this arising at all. This is the belt: a
+ * refusal that gets through still ends in a button rather than in silence.
+ */
+export const BOUNDARY_DURING_GENERATE_TEXT =
+  "One thing in your notes isn't something I can change from here — the plan below is built from your routine. The button says where that one lives."
+
 interface PlannerBoundaryLinkProps {
   /**
    * The job the assistant turn declined, as the model named it. Resolved here

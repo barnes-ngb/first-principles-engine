@@ -5,7 +5,10 @@ import { createRef } from 'react'
 
 import type { ChatMessage } from '../../core/types'
 import { ChatMessageRole } from '../../core/types/enums'
-import PlannerBoundaryLink, { BOUNDARY_BARE_REFUSAL_TEXT } from './PlannerBoundaryLink'
+import PlannerBoundaryLink, {
+  BOUNDARY_BARE_REFUSAL_TEXT,
+  BOUNDARY_DURING_GENERATE_TEXT,
+} from './PlannerBoundaryLink'
 import PlannerChatMessages from './PlannerChatMessages'
 
 const mockNavigate = vi.fn()
@@ -150,5 +153,27 @@ describe('the bare-refusal fallback', () => {
   it('names no screen of its own — the button is the only destination', () => {
     expect(BOUNDARY_BARE_REFUSAL_TEXT).not.toMatch(/screen|tab|settings|menu|page/i)
     expect(BOUNDARY_BARE_REFUSAL_TEXT.trim().length).toBeGreaterThan(0)
+  })
+})
+
+describe('a refusal that arrives where a plan was asked for (Codex round 2, P2)', () => {
+  it('still ends in a button, on a turn that also carries the plan', () => {
+    // The generate paths read an unparseable reply as a BROKEN PLAN and fall
+    // back to the local planner. A refusal drawn by something typed into the
+    // setup card's notes looks identical to them, so without this she got a
+    // plan, a generic snackbar, and no idea which part went nowhere.
+    renderTurns([
+      assistantTurn({
+        text: `Here's your draft plan.\n\n${BOUNDARY_DURING_GENERATE_TEXT}`,
+        boundaryJobId: 'records',
+        draftPlan: undefined,
+      }),
+    ])
+    expect(screen.getByText(/Here's your draft plan/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Open Records/ })).toBeInTheDocument()
+  })
+
+  it('names no screen of its own either', () => {
+    expect(BOUNDARY_DURING_GENERATE_TEXT).not.toMatch(/\bAsk AI\b|Records|Settings|Curriculum|Watch Library/)
   })
 })

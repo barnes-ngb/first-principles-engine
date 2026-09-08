@@ -17,6 +17,9 @@ import {
  */
 describe("buildPlannerBoundarySection", () => {
   const section = buildPlannerBoundarySection();
+  // Phrases wrap across the prompt's hand-wrapped lines, so assert against a
+  // whitespace-collapsed copy: a rule that re-wraps is not a rule that changed.
+  const flat = section.replace(/\s+/g, " ");
 
   it("names every job id the client can resolve", () => {
     for (const job of PLANNER_BOUNDARY_JOBS) {
@@ -40,21 +43,42 @@ describe("buildPlannerBoundarySection", () => {
   });
 
   it("forbids inventing a screen, a URL or a path", () => {
-    expect(section).toMatch(/NEVER name a screen, tab, setting or menu of your own/);
-    expect(section).toMatch(/Do NOT write a URL or a path/);
+    expect(flat).toMatch(/NEVER name a screen, tab, setting or menu of your own/);
+    expect(flat).toMatch(/never write a URL or a path/i);
   });
 
   it("forbids claiming the change was made, or that it is coming", () => {
-    expect(section).toMatch(/NEVER say you have made one of those changes/);
-    expect(section).toMatch(/NEVER say one is coming/);
+    expect(flat).toMatch(/NEVER say you have made one of those changes/);
+    expect(flat).toMatch(/NEVER say one is coming/);
   });
 
   it("requires the offer to follow the refusal", () => {
-    expect(section).toMatch(/what you CAN do for the week instead/);
+    expect(flat).toMatch(/what you CAN do for the week instead/);
   });
 
   it("keeps the marker out of a plan response", () => {
-    expect(section).toMatch(/NEVER anywhere inside a JSON plan response/);
+    expect(flat).toMatch(/NEVER inside a JSON plan response/);
+  });
+
+  it("protects the planner's OWN job from the boundary (Codex round 2, P1)", () => {
+    // The free-form drawer's placeholder advertises "add a science project on
+    // Thursday". Without this carve-out, "ADDING an activity" on the job list
+    // could make the model refuse the one thing this chat is for.
+    expect(flat).toMatch(/item on a DAY of this week's draft is YOUR OWN job/);
+    expect(flat).toMatch(/never refuse it and never emit a marker for it/i);
+  });
+
+  it("never lets a generate request come back as a refusal (Codex round 2, P2)", () => {
+    // The rule rides every `TaskType.Plan` call, generation included, so a job
+    // typed into the setup card's notes could otherwise draw a refusal where a
+    // week was asked for — which the generate paths read as a broken plan.
+    expect(flat).toMatch(/GENERATE or ADJUST the week is never one of those jobs/);
+    expect(flat).toMatch(/Always return the plan/);
+  });
+
+  it("sends nobody anywhere to un-finish an activity (Codex round 2, P1)", () => {
+    expect(flat).toMatch(/Un-finishing an activity is not in this app at all/);
+    expect(flat).toMatch(/emit NO marker: there is nowhere to send her/);
   });
 
   it("stays short — it competes with eleven other sections and a strict-JSON instruction", () => {
@@ -66,6 +90,6 @@ describe("buildPlannerBoundarySection", () => {
     const lines = section.split("\n");
     const jobLines = lines.filter((l) => /^- [a-z-]+ — /.test(l));
     expect(jobLines).toHaveLength(PLANNER_BOUNDARY_JOBS.length);
-    expect(lines.length - jobLines.length).toBeLessThanOrEqual(20);
+    expect(lines.length - jobLines.length).toBeLessThanOrEqual(21);
   });
 });

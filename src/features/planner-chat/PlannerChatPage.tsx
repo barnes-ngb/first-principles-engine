@@ -126,7 +126,7 @@ import {
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { applyDraftWeek, WeekApplyError } from './applyWeekPlan'
 import { parsePlannerBoundary } from '../../../functions/src/shared/plannerBoundary'
-import { BOUNDARY_BARE_REFUSAL_TEXT } from './PlannerBoundaryLink'
+import { BOUNDARY_BARE_REFUSAL_TEXT, BOUNDARY_DURING_GENERATE_TEXT } from './PlannerBoundaryLink'
 import {
   appliedConfirmation,
   applyButtonLabel,
@@ -1393,6 +1393,8 @@ Return as JSON:
     const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
+    // UX-269: set when the AI answered with a refusal instead of a week.
+    let declinedDuringGenerate: string | undefined
 
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       // AI path: send context to Cloud Function
@@ -1425,6 +1427,12 @@ Return as JSON:
       } else {
         // Fallback to local logic
         draft = shapeDraft(generateDraftPlanFromInputs(inputs))
+        // UX-269 (Codex round 2, P2): an unparseable reply may be a REFUSAL, not
+        // a broken plan — the boundary rule rides every `TaskType.Plan` call, so
+        // a job the planner can't do, typed into the notes field rather than the
+        // chat, can come back here. Without this she gets a local plan, a
+        // generic snackbar and no idea which part of what she wrote went nowhere.
+        declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
         setSnack({ text: 'AI planning unavailable — used local planner.', severity: 'info' })
       }
     } else {
@@ -1439,8 +1447,9 @@ Return as JSON:
     const assistantMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.Assistant,
-      text: `Here's your draft plan${aiLabel} based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}`,
+      text: `Here's your draft plan${aiLabel} based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}${declinedDuringGenerate ? `\n\n${BOUNDARY_DURING_GENERATE_TEXT}` : ''}`,
       draftPlan: draft,
+      ...(declinedDuringGenerate ? { boundaryJobId: declinedDuringGenerate } : {}),
       createdAt: new Date().toISOString(),
     }
 
@@ -1472,6 +1481,8 @@ Return as JSON:
     const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
+    // UX-269: set when the AI answered with a refusal instead of a week.
+    let declinedDuringGenerate: string | undefined
 
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const prompt = buildPlannerPrompt(inputs)
@@ -1523,6 +1534,9 @@ Return as JSON:
           // AI call threw — snack already set above
         } else {
           console.warn('[handleGeneratePlan] AI response unparseable:', response.message.substring(0, 500))
+          // UX-269 (Codex round 2, P2): it may be a REFUSAL rather than a broken
+          // plan — see the note on the same branch in the photo path.
+          declinedDuringGenerate = parsePlannerBoundary(response.message).destination?.id
           setSnack({
             text: 'AI plan could not be read — using your routine as the base. You can try "Generate Plan" again or adjust the plan below.',
             severity: 'info',
@@ -1539,8 +1553,9 @@ Return as JSON:
     const assistantMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.Assistant,
-      text: `Here's your draft plan${aiLabel}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot. ` : ''}You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}`,
+      text: `Here's your draft plan${aiLabel}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot. ` : ''}You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}${declinedDuringGenerate ? `\n\n${BOUNDARY_DURING_GENERATE_TEXT}` : ''}`,
       draftPlan: draft,
+      ...(declinedDuringGenerate ? { boundaryJobId: declinedDuringGenerate } : {}),
       createdAt: new Date().toISOString(),
     }
 
@@ -1880,6 +1895,8 @@ Return as JSON:
       const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
       let draft: DraftWeeklyPlan
       let usedAI = false
+      // UX-269: set when the AI answered with a refusal instead of a week.
+      let declinedDuringGenerate: string | undefined
       // UX-233: distinguishes "the flag is off, this is the local planner as
       // designed" from "the AI planner was asked and did not answer". Only the
       // second is worth telling the parent about, and only the second was silent.
@@ -1938,6 +1955,9 @@ Return as JSON:
           // nothing at all (UX-233).
           draft = shapeDraft(generateDraftPlanFromInputs(inputs))
           fellBackToLocal = true
+          // UX-269 (Codex round 2, P2): it may be a REFUSAL rather than a
+          // broken plan — see the note on the same branch in the photo path.
+          declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
           setSnack({ text: LOCAL_PLANNER_FALLBACK_SNACK, severity: 'info' })
         }
       } else {
@@ -1949,8 +1969,9 @@ Return as JSON:
       const assistantMsg: ChatMessage = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
-        text: draftTurnText({ usedAI, fellBackToLocal, shapedByLine }),
+        text: `${draftTurnText({ usedAI, fellBackToLocal, shapedByLine })}${declinedDuringGenerate ? `\n\n${BOUNDARY_DURING_GENERATE_TEXT}` : ''}`,
         draftPlan: draft,
+        ...(declinedDuringGenerate ? { boundaryJobId: declinedDuringGenerate } : {}),
         createdAt: new Date().toISOString(),
       }
       const updatedMessages = [...messages, userMsg, assistantMsg]

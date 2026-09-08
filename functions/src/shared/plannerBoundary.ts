@@ -89,15 +89,24 @@ export interface PlannerBoundaryJob {
 export const PLANNER_BOUNDARY_JOBS: readonly PlannerBoundaryJob[] = [
   {
     id: "curriculum",
+    // "ADDING an activity" alone read as a refusal of the planner's own job:
+    // the free-form drawer's placeholder literally advertises "add a science
+    // project on Thursday", which is a DAY edit, not a curriculum one (Codex
+    // round 2, P1). The word PERMANENT is what separates them.
     covers:
-      "ADDING an activity, changing how many minutes one takes by default, marking one finished, or setting where a child is up to in it",
+      "ADDING a PERMANENT activity to the family's curriculum — one that then appears every week — or changing how many minutes an existing one takes by default, marking one finished, or setting where a child is up to in it",
     route: "/chat",
     linkLabel: "Open Ask AI",
   },
   {
     id: "curriculum-manage",
+    // Un-finishing was listed here in the first cut and is a dead end:
+    // `activityConfigWrites.ts` says outright that nothing in the app writes
+    // `completed: false`, and the Completed list renders without controls. It
+    // is handled by the prompt as "not in the app", with no marker at all
+    // (Codex round 2, P1).
     covers:
-      "RENAMING or DELETING an activity, or un-finishing one — Ask AI cannot do these, they live on the Curriculum tab",
+      "RENAMING or DELETING an activity — Ask AI can do neither; both live on the Curriculum tab",
     route: "/progress?tab=curriculum",
     linkLabel: "Open Curriculum",
   },
