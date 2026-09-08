@@ -1,9 +1,7 @@
 import { useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
-import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Chip from '@mui/material/Chip'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -16,6 +14,7 @@ import TextField from '@mui/material/TextField'
 
 import type { ActivityConfig } from '../../core/types'
 import type { ActivityFrequency } from '../../core/types/enums'
+import { durationOptionsWithValue } from './durationOptions'
 
 interface EditRoutinesDialogProps {
   open: boolean
@@ -23,8 +22,6 @@ interface EditRoutinesDialogProps {
   onSave: (updated: ActivityConfig[]) => void
   onClose: () => void
 }
-
-const TIME_OPTIONS = [10, 15, 20, 30, 45] as const
 
 export default function EditRoutinesDialog({ open, routines, onSave, onClose }: EditRoutinesDialogProps) {
   const [items, setItems] = useState<ActivityConfig[]>(() => routines.map((r) => ({ ...r })))
@@ -72,18 +69,19 @@ export default function EditRoutinesDialog({ open, routines, onSave, onClose }: 
                 placeholder="Activity name"
                 sx={{ flex: 1 }}
               />
-              <Box sx={{ display: 'flex', gap: 0.5 }}>
-                {TIME_OPTIONS.map((m) => (
-                  <Chip
-                    key={m}
-                    label={`${m}m`}
-                    size="small"
-                    variant={item.defaultMinutes === m ? 'filled' : 'outlined'}
-                    color={item.defaultMinutes === m ? 'primary' : 'default'}
-                    onClick={() => updateItem(i, 'defaultMinutes', m)}
-                  />
+              <Select
+                value={item.defaultMinutes}
+                size="small"
+                onChange={(e) => updateItem(i, 'defaultMinutes', Number(e.target.value))}
+                sx={{ minWidth: 84 }}
+                aria-label={`Minutes for ${item.name || 'this activity'}`}
+              >
+                {durationOptionsWithValue(item.defaultMinutes).map((m) => (
+                  <MenuItem key={m} value={m}>
+                    {m}m
+                  </MenuItem>
                 ))}
-              </Box>
+              </Select>
               <Select
                 value={item.frequency}
                 size="small"

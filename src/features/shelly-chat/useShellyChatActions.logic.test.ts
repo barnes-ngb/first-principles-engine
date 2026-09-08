@@ -792,8 +792,122 @@ describe('useShellyChatActions', () => {
     expect(writeSnapshotUpdate).toHaveBeenCalledWith(
       'fam1',
       'lincoln1',
-      expect.objectContaining({ masteredSkills: ['two-digit addition'], fullyMastered: false }),
+      expect.objectContaining({
+        masteredSkills: ['two-digit addition'],
+        fullyMastered: false,
+        // UX-187 — `fullyMastered` alone reached only the conceptual-block
+        // branch, so this same payload used to write `SkillLevel.Secure` onto a
+        // matched priority skill: the app's top rating, from a card whose own
+        // word was "progressing".
+        skipPrioritySkillLevels: true,
+      }),
     )
+  })
+
+  it('does NOT skip levels when the claim really is mastery (UX-187)', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'CVCe long vowels',
+      mastered: true,
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(writeSnapshotUpdate).toHaveBeenCalledWith(
+      'fam1',
+      'lincoln1',
+      expect.objectContaining({ fullyMastered: true, skipPrioritySkillLevels: false }),
+    )
+  })
+
+  // ── UX-190 — a write that matched nothing must not stamp "Done ✓" ────────
+  it('settles a snapshot write that matched nothing as no-change, with a reason', async () => {
+    writeSnapshotUpdate.mockResolvedValue({ changed: false })
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'th sound',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    const card = result.current.pending[0]
+    expect(card.status).toBe('no-change')
+    expect(card.status).not.toBe('applied')
+    // Codex P2, round 1: `changed: false` has two causes — nothing matched, OR
+    // it matched and the record already said it (a skill already at Secure, a
+    // block already at the requested status, a DEFER block). The writer does not
+    // distinguish them, so the sentence must assert neither.
+    expect(card.notice).toContain('Nothing changed on Lincoln\'s Skill Snapshot')
+    expect(card.notice).toContain('either it already says this')
+    expect(card.notice).toContain('nothing on it matched "th sound"')
+    expect(card.notice).toContain('Progress → Skill Snapshot')
+    expect(card.notice).not.toMatch(/^Nothing on Lincoln's Skill Snapshot matched/)
+    // Not a failure: the card must not carry an error or offer a retry.
+    expect(card.error).toBeUndefined()
+  })
+
+  it('records no applied-action audit for a write that never happened', async () => {
+    writeSnapshotUpdate.mockResolvedValue({ changed: false })
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'th sound',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('tells her an add was already there rather than claiming it landed', async () => {
+    writeSnapshotUpdate.mockResolvedValue({ changed: false })
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'addPrioritySkill',
+      childId: 'lincoln1',
+      skill: 'blends',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(result.current.pending[0].status).toBe('no-change')
+    expect(result.current.pending[0].notice).toContain(
+      '"blends" is already on Lincoln\'s priority skills',
+    )
+  })
+
+  it('still stamps applied when the write really did change something', async () => {
+    const { result } = setup()
+    const action: ChatAction = {
+      kind: 'markSkillProgress',
+      childId: 'lincoln1',
+      skill: 'th digraph',
+    }
+
+    act(() => result.current.stagePendingActions('msg1', [action]))
+    await act(async () => {
+      await result.current.applyChatAction(action)
+    })
+
+    expect(result.current.pending[0].status).toBe('applied')
+    expect(result.current.pending[0].notice).toBeUndefined()
   })
 
   it('rejects a snapshot action for a child other than the active context', async () => {
@@ -2462,7 +2576,22 @@ describe('pending-card lifecycle (UX-33)', () => {
 
     it('carries the account even when every action in the new turn is dropped', () => {
       const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
-      act(() => result.current.stagePendingActions('msg1', [WORD_A]))
+      // The standing card has to be a kind a NON-parent can still be offered,
+      // and since UX-188 gated the seven record-write kinds, the handoff is the
+      // one left — deliberately, as the audit's own §6 item 8 records: it writes
+      // a planner inbox rather than a child's record, and it is Part B's to rank.
+      // (This test is about the superseded-turn ACCOUNT, not about who may
+      // confirm what; it used a sight word only because one was to hand.)
+      act(() =>
+        result.current.stagePendingActions('msg1', [
+          {
+            kind: 'proposePlanAdjustment',
+            childId: 'lincoln1',
+            summary: 'Reduce math next week',
+            rationale: 'Frustration is spiking',
+          },
+        ]),
+      )
       expect(result.current.pending).toHaveLength(1)
 
       // A parent-only proposal from a non-parent profile: dropped at the gate.
@@ -2666,5 +2795,142 @@ describe('a late reply cannot land cards in a context it was not asked in', () =
     act(() => result.current.dropPendingForContext('thread-switch'))
     act(() => result.current.stagePendingActions('msg1', [WORD]))
     expect(result.current.pending).toHaveLength(1)
+  })
+})
+
+// ── UX-188 — the seven record-write kinds are parent-only at the write layer ──
+//
+// `/chat` is nav-gated, not route-gated, so this is the layer that has to hold.
+// Asserted through the HOOK rather than the pure resolver, because the defect
+// was never in a resolver — there wasn't one; it was that these kinds fell
+// through the stage filter's default branch and `rejectReason` said nothing
+// about them.
+describe('record writes are parent-only (UX-188)', () => {
+  const KID_ACTIONS: ChatAction[] = [
+    { kind: 'addSightWord', childId: 'lincoln1', word: 'said' },
+    { kind: 'removeSightWord', childId: 'lincoln1', word: 'said' },
+    { kind: 'editProfileField', childId: 'lincoln1', field: 'motivators', value: 'Lego' },
+    { kind: 'addPrioritySkill', childId: 'lincoln1', skill: 'blends' },
+    { kind: 'addSupport', childId: 'lincoln1', support: 'sit beside him' },
+    { kind: 'addStopRule', childId: 'lincoln1', rule: 'stop at ten minutes' },
+    { kind: 'markSkillProgress', childId: 'lincoln1', skill: 'fractions' },
+  ]
+
+  it('offers no card for any of the seven, and says why instead', () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+
+    act(() => result.current.stagePendingActions('msg1', KID_ACTIONS))
+
+    expect(result.current.pending).toHaveLength(0)
+    expect(result.current.suppressed.length).toBeGreaterThan(0)
+    for (const note of result.current.suppressed) {
+      expect(note).toContain('nothing was changed')
+    }
+  })
+
+  it('reaches no writer even if a card is somehow confirmed', async () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+
+    for (const action of KID_ACTIONS) {
+      await act(async () => {
+        await result.current.applyChatAction(action)
+      })
+    }
+
+    expect(addSightWord).not.toHaveBeenCalled()
+    expect(removeSightWord).not.toHaveBeenCalled()
+    expect(updateChildSoftProfile).not.toHaveBeenCalled()
+    expect(writeSnapshotUpdate).not.toHaveBeenCalled()
+  })
+
+  it('refuses the confirm outright, so nothing is stamped applied', async () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: false })
+    const action = KID_ACTIONS[6]
+
+    let wrote: boolean | undefined
+    await act(async () => {
+      wrote = await result.current.applyChatAction(action)
+    })
+
+    expect(wrote).toBe(false)
+  })
+
+  it('still offers all seven to a parent', () => {
+    const { result } = setup('lincoln1', 'thread1', { canEditActivityConfigs: true })
+
+    act(() => result.current.stagePendingActions('msg1', KID_ACTIONS))
+
+    expect(result.current.pending).toHaveLength(7)
+  })
+})
+
+// ── The corrected type is what gets written (UX-193) ─────────────────────────
+//
+// The card naming the field is worth nothing if the correction stops at the
+// card. This asserts the whole path: tap a chip, then confirm, and the value
+// that reaches `addActivityConfig` is the parent's, not the model's.
+describe('correcting an addActivity type (UX-193)', () => {
+  const ADD: ChatAction = {
+    kind: 'addActivity',
+    childId: 'lincoln1',
+    name: 'Explode the Code 4',
+    type: 'activity',
+    subjectBucket: SubjectBucket.LanguageArts,
+    defaultMinutes: 15,
+    frequency: 'daily',
+    totalUnits: 60,
+    currentPosition: 1,
+  } as ChatAction
+
+  it('writes the type she picked, not the one the model guessed', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [ADD]))
+
+    act(() => result.current.changeActivityType(ADD, 'workbook'))
+    const corrected = result.current.pending[0].action
+    expect(corrected).not.toBe(ADD)
+
+    await act(async () => {
+      await result.current.applyChatAction(corrected)
+    })
+
+    expect(addActivityConfig).toHaveBeenCalledWith(
+      'fam1',
+      expect.objectContaining({ name: 'Explode the Code 4', type: 'workbook' }),
+    )
+  })
+
+  it('leaves every other field of the proposal exactly as it was', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [ADD]))
+    act(() => result.current.changeActivityType(ADD, 'workbook'))
+
+    const corrected = result.current.pending[0].action as typeof ADD
+    expect({ ...corrected, type: 'activity' }).toEqual(ADD)
+  })
+
+  it('refuses to change a card that is no longer pending', async () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [ADD]))
+    await act(async () => {
+      await result.current.applyChatAction(ADD)
+    })
+    expect(result.current.pending[0].status).toBe('applied')
+
+    act(() => result.current.changeActivityType(ADD, 'workbook'))
+
+    // The field is written. Swapping the object under the re-entry guard —
+    // which is keyed on the action OBJECT — would let a non-idempotent add be
+    // confirmed a second time.
+    expect(result.current.pending[0].action).toBe(ADD)
+  })
+
+  it('ignores a type change aimed at any other kind', () => {
+    const { result } = setup()
+    act(() => result.current.stagePendingActions('msg1', [MINUTES_ACTION]))
+
+    act(() => result.current.changeActivityType(MINUTES_ACTION, 'workbook'))
+
+    expect(result.current.pending[0].action).toBe(MINUTES_ACTION)
   })
 })

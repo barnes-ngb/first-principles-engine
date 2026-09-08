@@ -45,6 +45,7 @@ import { UserProfile } from '../../core/types/enums'
 import ActionConfirmCard from './ActionConfirmCard'
 import NextWeekDraftCard from './NextWeekDraftCard'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
+import { useChatArtQuota } from './useChatArtQuota'
 import { useChatConceptArcs } from './useChatConceptArcs'
 import { useChatPlannerDefaults } from './useChatPlannerDefaults'
 import { useNextWeekDraft } from './useNextWeekDraft'
@@ -154,6 +155,11 @@ export default function ShellyChatPage() {
   // stated here at the component as well as in the write layer: `/chat` is
   // nav-gated, not route-gated, so neither layer assumes the other.
   const isParent = useProfile().profile === UserProfile.Parents
+  // UX-189 — the acting child's weekly art budget, on FEAT-175's ONE counter.
+  // Inert for a parent (uncapped, no subscription, `recordGeneration` a no-op),
+  // so this costs a parent nothing and exists so the chat's paid image door is
+  // finally inside the accounting rather than beside it.
+  const chatArtQuota = useChatArtQuota()
   const activityConfigs = useChatActivityConfigs(
     familyId,
     isParent ? contextChildId : '',
@@ -236,6 +242,7 @@ export default function ShellyChatPage() {
     currentContextScope,
     dropPendingForContext,
     applyChatAction,
+    changeActivityType,
     dismissAction,
     confirmAll,
   } = useShellyChatActions({
@@ -287,6 +294,13 @@ export default function ShellyChatPage() {
     stagePendingActions,
     dropPendingForContext,
     currentContextScope,
+    // UX-189 — the image door was the one thing on this page `isParent` was not
+    // threaded into, on a route that is nav-gated only. The quota is FEAT-175's
+    // shared counter, not a second one; it is inert for a parent by
+    // construction, and is here so the chat stops being the one paid generator
+    // outside the accounting.
+    isParent,
+    artQuota: chatArtQuota,
   })
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
@@ -622,6 +636,7 @@ export default function ShellyChatPage() {
           onConfirm={applyChatAction}
           onDismiss={dismissAction}
           onConfirmAll={confirmAll}
+          onChangeActivityType={changeActivityType}
         />
       )}
 
@@ -713,14 +728,20 @@ export default function ShellyChatPage() {
           >
             <AddPhotoAlternateIcon />
           </IconButton>
-          <IconButton
-            onClick={handleImageFlowOpen}
-            disabled={isBusy}
-            size="small"
-            aria-label="Generate image"
-          >
-            <ImageIcon />
-          </IconButton>
+          {/* UX-189 — a paid generator on a route that is nav-gated, not
+              route-gated. Hidden here so a kid is never offered it, and refused
+              again in `handleGenerateImageDirect`, which is the funnel every
+              path runs through: this is the gate, that is the backstop. */}
+          {isParent && (
+            <IconButton
+              onClick={handleImageFlowOpen}
+              disabled={isBusy}
+              size="small"
+              aria-label="Generate image"
+            >
+              <ImageIcon />
+            </IconButton>
+          )}
           <TextField
             fullWidth
             multiline
@@ -791,20 +812,27 @@ export default function ShellyChatPage() {
                     </Typography>
                   </Box>
                 </Button>
-                <Button
-                  fullWidth
-                  variant="outlined"
-                  startIcon={<AutoFixHighIcon />}
-                  onClick={handleUploadGenerate}
-                  sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
-                >
-                  <Box sx={{ textAlign: 'left' }}>
-                    <Typography variant="body2" fontWeight="medium">Use as reference for image creation</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Generate a new image inspired by this one
-                    </Typography>
-                  </Box>
-                </Button>
+                {/* UX-189 — the second way into the same paid generator: this
+                    opens the refinement flow, which ends in
+                    `handleGenerateImageDirect`. Hidden for the same reason the
+                    image button is; attaching an image for the chat to LOOK at
+                    (above) is not a paid generation and stays open. */}
+                {isParent && (
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    startIcon={<AutoFixHighIcon />}
+                    onClick={handleUploadGenerate}
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}
+                  >
+                    <Box sx={{ textAlign: 'left' }}>
+                      <Typography variant="body2" fontWeight="medium">Use as reference for image creation</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Generate a new image inspired by this one
+                      </Typography>
+                    </Box>
+                  </Button>
+                )}
               </>
             )}
             <Button

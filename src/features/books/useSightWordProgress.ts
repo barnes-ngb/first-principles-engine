@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { deleteDoc, doc, getDocs, query, setDoc } from 'firebase/firestore'
+import { deleteDoc, doc, getDoc, getDocs, query, setDoc } from 'firebase/firestore'
 
 import {
   sightWordProgressCollection,
@@ -20,9 +20,35 @@ import { recordEncounter } from './sightWordMastery'
 /**
  * Seed a brand-new sight-word progress doc for {@link word} under {@link childId}.
  *
- * Idempotent: writes with `{ merge: true }` against the deterministic
- * `{childId}_{word}` doc id, so re-adding a word that already exists is a
- * no-op-ish merge rather than a progress reset.
+ * **An add never touches a word that is already there (UX-186).** It used to,
+ * and its own docblock said the opposite — *"a no-op-ish merge rather than a
+ * progress reset"*. The seed below carries **every one of the nine fields**
+ * `SightWordProgress` declares, and Firestore's `merge` operates per FIELD:
+ * fields present in the payload are overwritten and only absent ones survive.
+ * A payload that sets all nine preserves nothing, so `{ merge: true }` bought
+ * exactly nothing and the comment claiming otherwise is how it survived review.
+ *
+ * The cost was real, and on the app's only door for this. Ask AI is the sole
+ * place a word can be added or removed (`SightWordDashboard` can confirm
+ * mastery, not add), so *"He knows 'said' now"* — the most plausible sentence a
+ * parent says — proposed an add for a word the reader had already carried to
+ * `masteryLevel: 'mastered'` with thirty encounters, and confirming reset it to
+ * `new` / `0` / `shellyConfirmed: false` and re-dated `firstSeen` to today. The
+ * dashboard then showed a mastered word as new and the Generate Chat's practice
+ * channel (FEAT-169/172) handed it back as a word to practise.
+ *
+ * So the existence check is explicit rather than delegated to a merge that
+ * cannot express it: an existing document is left **byte-for-byte alone** —
+ * not re-stamped with `lastSeen`, because a parent saying "add this" is not the
+ * child having read it, and this writer must not manufacture an encounter.
+ *
+ * **The reader's two writers are untouched.** `recordInteraction` and
+ * `confirmMastery` still `setDoc` the whole accumulated record; this is the
+ * two-doors-to-one-collection case FEAT-188 named, and the fix is for the doors
+ * to stop disagreeing — the reader accumulates, the add no longer resets.
+ *
+ * A concurrent pair of adds can both see the word absent and both write the
+ * seed; that is harmless, because the seed they write is identical.
  */
 export async function addSightWord(
   familyId: string,
@@ -31,6 +57,15 @@ export async function addSightWord(
 ): Promise<void> {
   const lowerWord = word.trim().toLowerCase()
   if (!familyId || !childId || !lowerWord) return
+  const docRef = doc(
+    sightWordProgressCollection(familyId),
+    sightWordProgressDocId(childId, lowerWord),
+  )
+  const existing = await getDoc(docRef)
+  // Already tracked: the word is on the list, which is what an add asks for.
+  // Nothing to write, and nothing that may be overwritten.
+  if (existing.exists()) return
+
   const now = new Date().toISOString()
   const seed: SightWordProgress = {
     word: lowerWord,
@@ -43,11 +78,7 @@ export async function addSightWord(
     lastSeen: now,
     lastLevelChange: now,
   }
-  const docRef = doc(
-    sightWordProgressCollection(familyId),
-    sightWordProgressDocId(childId, lowerWord),
-  )
-  await setDoc(docRef, seed, { merge: true })
+  await setDoc(docRef, seed)
 }
 
 /**

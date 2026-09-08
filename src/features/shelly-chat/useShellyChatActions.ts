@@ -23,6 +23,14 @@
 //     central writer (the UI never fabricates evidence).
 //   - Bind to the active child — `action.childId` must resolve to a family
 //     child AND match the active chat context, or the action is rejected.
+//   - Parent-only, at two layers (UX-188). The seven kinds that write a child's
+//     OWN record — both sight-word kinds, `editProfileField`, and all four
+//     snapshot kinds — had no capability check anywhere, while the *lowest*-stakes
+//     kind in the portal was gated three times over. `/chat` is nav-gated, not
+//     route-gated, so a kid reaching it by URL could confirm a `skillSnapshots`
+//     write stamped "parent directive via chat". Gated now at stage time and in
+//     `rejectReason` through the pure `recordWriteAccess.ts`, failing closed, and
+//     refused OUT LOUD rather than dropped.
 //   - `proposePlanAdjustment` is a HANDOFF, not a write (chunk 2A/2): it stages
 //     a brief to the planner's per-child inbox (`stagePlanAdjustment`) and
 //     navigates to Plan My Week. shelly-chat NEVER writes the weekly plan — the
@@ -88,6 +96,7 @@ import { updateActivityConfigMinutes } from '../../core/firebase/updateActivityM
 import { updateChildSoftProfile } from '../../core/family/updateChildSoftProfile'
 import type { ChatAction, Child, WatchVideo } from '../../core/types'
 import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
+import { withActivityType } from './activityTypeChoices'
 import { todayKey } from '../../core/utils/dateKey'
 import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import { addSightWord, removeSightWord } from '../books/useSightWordProgress'
@@ -111,6 +120,9 @@ import {
 } from './dadLabActions'
 import type { ChatWeekDay, DayItemAction } from './dayItemActions'
 import { isDayItemAction, resolveDayItemAction } from './dayItemActions'
+import { isRecordWriteAction, resolveRecordWriteAction } from './recordWriteAccess'
+import type { SnapshotAction } from './snapshotActions'
+import { snapshotNoMatchNotice } from './snapshotActions'
 import type { WatchAction } from './watchActions'
 import { isWatchAction, repeatedVetInNotice, resolveWatchAction } from './watchActions'
 import { currentWeekDayKeys, plannableWatchDayKeys } from './useChatWeekDays'
@@ -144,13 +156,26 @@ import type { ConceptArc } from '../../core/types'
  * auto-id per call, so two taps create two active curriculum entries and BOTH
  * land in future plans.
  */
-export type ActionStatus = 'pending' | 'applying' | 'applied' | 'dismissed'
+/**
+ * `'no-change'` is a SETTLED outcome, not a failure (UX-190). The confirmed
+ * write reached the writer, the writer read the record, and the record already
+ * said what was asked — or, for `markSkillProgress`, named nothing the words
+ * matched. Distinct from `'applied'` because nothing was written, and distinct
+ * from a reverted `'pending'` because there is nothing to retry: confirming the
+ * identical card again would match the identical nothing.
+ */
+export type ActionStatus = 'pending' | 'applying' | 'applied' | 'no-change' | 'dismissed'
 
 export interface PendingAction {
   /** Stable key for list rendering + per-card status. */
   id: string
   action: ChatAction
   status: ActionStatus
+  /**
+   * The sentence a `'no-change'` card shows in place of "Done ✓" (UX-190).
+   * Plain, not an error: nothing went wrong, the write simply had nothing to do.
+   */
+  notice?: string
   /**
    * UX-33(c). Set when a confirmed write REJECTED. The card reverts to
    * `'pending'` so a retry is possible — it always did — but the rejection was
@@ -266,10 +291,16 @@ export interface ShellyChatActionsDeps {
    */
   watchVideos?: WatchVideo[]
   /**
-   * Whether the signed-in profile is a parent. `setActivityMinutes` and the
-   * live-day edits are parent-only, and `/chat` is nav-gated rather than
+   * Whether the signed-in profile is a parent. `/chat` is nav-gated rather than
    * route-gated, so the write layer states the gate itself instead of trusting
    * the route. Defaults to false — fail closed.
+   *
+   * **The name is now narrower than the flag.** It was minted for FEAT-135's
+   * `setActivityMinutes` and grew to cover the live-day, curriculum, watch, Dad
+   * Lab and next-week kinds; UX-188 adds the seven that write a child's own
+   * record. It is simply "is a parent acting" — kept under its original name
+   * because renaming it would churn every call site and every test for no
+   * behavioural gain, and every consumer reads it as the capability.
    */
   canEditActivityConfigs?: boolean
   /** Thread the pending actions came from, so applies can annotate the message. */
@@ -296,12 +327,6 @@ export interface ShellyChatActionsDeps {
   onDraftNextWeek?: (action: DraftNextWeekAction) => Promise<boolean>
 }
 
-/** The Tier-C Option-2 additive snapshot kinds (6b). */
-type SnapshotAction = Extract<
-  ChatAction,
-  { kind: 'addPrioritySkill' | 'addSupport' | 'addStopRule' | 'markSkillProgress' }
->
-
 /**
  * Route a Tier-C Option-2 additive snapshot action through the central
  * {@link writeSnapshotUpdate} writer (6a). **Additive only** — each kind maps
@@ -315,39 +340,49 @@ type SnapshotAction = Extract<
  * when `mastered` is true — carrying a matching parent-directive evidence note
  * and `source: 'parent'`. Re-applying a duplicate add is a no-op via 6a's dedup.
  */
-async function applySnapshotAction(familyId: string, action: SnapshotAction): Promise<void> {
+async function applySnapshotAction(
+  familyId: string,
+  action: SnapshotAction,
+): Promise<{ changed: boolean }> {
   const at = todayKey()
   switch (action.kind) {
     case 'addPrioritySkill':
-      await writeSnapshotUpdate(familyId, action.childId, {
+      return writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [],
         addPrioritySkills: [action.skill],
         at,
       })
-      return
     case 'addSupport':
-      await writeSnapshotUpdate(familyId, action.childId, {
+      return writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [],
         addSupports: [action.support],
         at,
       })
-      return
     case 'addStopRule':
-      await writeSnapshotUpdate(familyId, action.childId, {
+      return writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [],
         addStopRules: [action.rule],
         at,
       })
-      return
-    case 'markSkillProgress':
-      await writeSnapshotUpdate(familyId, action.childId, {
+    case 'markSkillProgress': {
+      // UX-187 — the card's two sentences must reach the write as two different
+      // writes. `fullyMastered` governs the conceptual-BLOCK branch only, so on
+      // its own it left a "progressing" claim writing `SkillLevel.Secure` /
+      // `MasteryGate.IndependentConsistent` onto any matched priority skill:
+      // the app's top rating, from a card whose own words were "progressing".
+      // `skipPrioritySkillLevels` is the writer's additive opt-in for exactly
+      // this — a progress claim advances a matched block to `RESOLVING` and
+      // moves no level. Mastered is byte-for-byte what it always was.
+      const mastered = action.mastered === true
+      return writeSnapshotUpdate(familyId, action.childId, {
         masteredSkills: [action.skill],
-        fullyMastered: action.mastered === true,
+        fullyMastered: mastered,
+        skipPrioritySkillLevels: !mastered,
         source: 'parent',
         evidence: `parent directive via chat — ${at}`,
         at,
       })
-      return
+    }
   }
 }
 
@@ -941,6 +976,21 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
           }
           return true
         }
+        // UX-188 — the seven kinds that write a child's OWN record had no
+        // capability gate at any layer, while `setActivityMinutes` below (one
+        // activity's default minutes) had three. `/chat` is nav-gated, not
+        // route-gated, so a kid reaching it by URL could confirm a write to
+        // `skillSnapshots` stamped as a parent directive. Refused here, out
+        // loud, exactly as every other gated kind is.
+        if (isRecordWriteAction(action)) {
+          const resolution = resolveRecordWriteAction(action, parentRef.current)
+          if (!resolution.ok) {
+            console.warn('[shellyChat] dropped record write —', resolution.notice, action)
+            notices.push(resolution.notice)
+            return false
+          }
+          return true
+        }
         if (action.kind !== 'setActivityMinutes') return true
         if (!parentRef.current) {
           console.warn('[shellyChat] dropped setActivityMinutes — parent-only action')
@@ -1046,6 +1096,14 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
       }
       if (action.childId !== activeChildId) {
         return 'child mismatch with active context'
+      }
+      // UX-188 backstop: same shape as its siblings below. A card staged while
+      // a parent was signed in must not reach a write on a later tap from a kid
+      // profile — and this is the layer that actually calls the writers, so it
+      // is the one that must not be forgotten.
+      if (isRecordWriteAction(action)) {
+        const resolution = resolveRecordWriteAction(action, parentRef.current)
+        if (!resolution.ok) return resolution.notice
       }
       // FEAT-135 backstop: even if a card were somehow offered, the action must
       // still be parent-initiated AND name a real config the acting child owns
@@ -1197,7 +1255,36 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
         // Tier C Option 2 (6b) — additive snapshot edits routed through the
         // central writer. Additive-only fields; the writer auto-stamps each new
         // entry as a parent directive and dedups, so a duplicate add is a no-op.
-        await applySnapshotAction(familyId, action)
+        //
+        // UX-190 — the writer's `{ changed }` used to be discarded here, so a
+        // write that matched NOTHING fell through to "Done ✓". The match is
+        // exact slug equality, and a child with no snapshot yet can never match
+        // at all, so the two sentences most likely to produce this — a
+        // paraphrased skill, and London — both stamped a green tick over no
+        // write. Settled as `'no-change'` with a plain sentence instead:
+        // returning `true` keeps the card out of the retry path (nothing
+        // failed, and re-confirming would match the same nothing), and the early
+        // return skips both the "applied" stamp and the audit annotation, since
+        // there is no write to record.
+        const { changed } = await applySnapshotAction(familyId, action)
+        if (!changed) {
+          console.info('[shellyChat] snapshot action matched nothing — nothing written', action)
+          setPending((prev) =>
+            prev.map((p) =>
+              p.action === action
+                ? {
+                    ...p,
+                    status: 'no-change',
+                    notice: snapshotNoMatchNotice(
+                      action,
+                      childNameRef.current ?? 'this child',
+                    ),
+                  }
+                : p,
+            ),
+          )
+          return true
+        }
       }
 
       setPending((prev) =>
@@ -1328,6 +1415,30 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     [performChatAction, rejectReason],
   )
 
+  /**
+   * Correct the `type` the model guessed on a still-pending `addActivity`
+   * (UX-193). Writes nothing — it replaces the PROPOSAL, which is the whole
+   * point: the correction happens before the confirm tap, on the card that made
+   * the claim.
+   *
+   * Guarded on `'pending'` rather than merely on the card existing. A card that
+   * is applying, applied or settled has already had its payload sent to a
+   * writer, and `appliedOrInFlightRef` is keyed on the action OBJECT — swapping
+   * one out from under the guard would let the same card be confirmed twice, on
+   * a kind (`addActivity`) that mints a fresh document per call. That is
+   * precisely the non-idempotence the guard was added for.
+   */
+  const changeActivityType = useCallback((action: ChatAction, type: ActivityType) => {
+    if (action.kind !== 'addActivity') return
+    setPending((prev) =>
+      prev.map((p) => {
+        if (p.action !== action || p.status !== 'pending') return p
+        const next = withActivityType(action, type)
+        return next === action ? p : { ...p, action: next }
+      }),
+    )
+  }, [])
+
   /** Dismiss a proposed action without writing. */
   const dismissAction = useCallback((action: ChatAction) => {
     setPending((prev) =>
@@ -1354,6 +1465,7 @@ export function useShellyChatActions(deps: ShellyChatActionsDeps) {
     clearPending,
     dropPendingForContext,
     applyChatAction,
+    changeActivityType,
     dismissAction,
     confirmAll,
   }
