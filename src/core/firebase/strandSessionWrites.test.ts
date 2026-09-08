@@ -10,7 +10,7 @@ const incrementMock = vi.fn((n: number) => ({ __increment: n }))
 
 const deleteDocMock = vi.fn<(ref: unknown) => Promise<void>>(async () => undefined)
 /** The config document as the transaction sees it. */
-let storedConfig: Record<string, unknown> | null = { recentTopics: [], type: 'strand' }
+let storedConfig: Record<string, unknown> | null = { recentTopics: [], type: 'strand', childId: 'c1' }
 /** Set to make the final config update fail. */
 let updateConfigThrows: Error | null = null
 
@@ -72,6 +72,8 @@ import {
   logStrandSession,
   STRAND_SESSION_FAILED_PARTIAL,
   STRAND_SESSION_FINISHED_MESSAGE,
+  STRAND_SESSION_REASSIGNED_MESSAGE,
+  audioExtension,
   StrandSessionGone,
   StrandSessionPartiallySaved,
   StrandSessionRefused,
@@ -129,7 +131,7 @@ beforeEach(() => {
   }))
   // The live document a transaction reads. Carries `type` because the write
   // re-checks it there rather than trusting the caller's snapshot.
-  storedConfig = { recentTopics: [], type: 'strand' }
+  storedConfig = { recentTopics: [], type: 'strand', childId: 'c1' }
   let n = 0
   addDocMock.mockImplementation(async () => ({ id: `artifact-${++n}` }))
 })
@@ -259,7 +261,7 @@ describe('the topic reaches the artifact, not only the cache', () => {
     // The list is read from the STORED document, not from the caller's config
     // (Codex round 1) — a dialog held open while another device logged would
     // otherwise write back its own stale array.
-    storedConfig = { recentTopics: ['The Pilgrims', 'Ancient Egypt'], type: 'strand' }
+    storedConfig = { recentTopics: ['The Pilgrims', 'Ancient Egypt'], type: 'strand', childId: 'c1' }
     await logStrandSession(args())
     expect(configUpdate()?.recentTopics).toEqual(['Ancient Egypt', 'The Pilgrims'])
   })
@@ -335,7 +337,7 @@ describe('a failed attempt rolls back, so a retry cannot duplicate evidence', ()
 describe('the topic merge reads the CURRENT stored value', () => {
   it('merges against Firestore, not against the caller stale config', async () => {
     // Another device recorded "The Pilgrims" since this dialog opened.
-    storedConfig = { recentTopics: ['The Pilgrims'], type: 'strand' }
+    storedConfig = { recentTopics: ['The Pilgrims'], type: 'strand', childId: 'c1' }
     await logStrandSession(
       args({ topic: 'Ancient Egypt', config: strand({ recentTopics: [] }) }),
     )
@@ -550,7 +552,7 @@ describe('a missing storage object is cleaned up, not a failure', () => {
 // attached to a closed record.
 describe('the strand is re-checked inside the transaction', () => {
   it('refuses when the program was finished while the dialog was open', async () => {
-    storedConfig = { recentTopics: [], completed: true, type: 'strand' }
+    storedConfig = { recentTopics: [], completed: true, type: 'strand', childId: 'c1' }
     await expect(logStrandSession(args())).rejects.toBeInstanceOf(StrandSessionGone)
     expect(incrementMock).not.toHaveBeenCalled()
     expect(deleteDocMock).toHaveBeenCalledTimes(addDocMock.mock.calls.length)
@@ -560,19 +562,19 @@ describe('the strand is re-checked inside the transaction', () => {
     // A retired program still exists and its record is intact, so "was removed"
     // would be false — and un-finishing is not something this app does, so the
     // sentence names what happened rather than suggesting a retry.
-    storedConfig = { recentTopics: [], completed: true, type: 'strand' }
+    storedConfig = { recentTopics: [], completed: true, type: 'strand', childId: 'c1' }
     await expect(logStrandSession(args())).rejects.toThrow(STRAND_SESSION_FINISHED_MESSAGE)
     expect(STRAND_SESSION_FINISHED_MESSAGE).not.toMatch(/removed/i)
   })
 
   it('refuses when the row is no longer a strand', async () => {
-    storedConfig = { recentTopics: [], type: 'workbook' }
+    storedConfig = { recentTopics: [], type: 'workbook', childId: 'c1' }
     await expect(logStrandSession(args())).rejects.toBeInstanceOf(StrandSessionGone)
     expect(incrementMock).not.toHaveBeenCalled()
   })
 
   it('commits normally for a live strand', async () => {
-    storedConfig = { recentTopics: [], type: 'strand' }
+    storedConfig = { recentTopics: [], type: 'strand', childId: 'c1' }
     await logStrandSession(args())
     expect(incrementMock).toHaveBeenCalledWith(1)
   })
@@ -637,5 +639,91 @@ describe('rollback removes the file before the record that points at it', () => 
 
     await expect(logStrandSession(photoArgs())).rejects.toThrow('upload failed')
     expect(deleteDocMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the strand must still belong to this child', () => {
+  it('refuses when it was reassigned while the dialog was open', async () => {
+    // The artifacts were written with THIS child's id; committing anyway would
+    // leave the evidence on one child's record while the count moved on
+    // another's (Codex).
+    storedConfig = { recentTopics: [], type: 'strand', childId: 'other-kid' }
+    await expect(logStrandSession(args())).rejects.toThrow(
+      STRAND_SESSION_REASSIGNED_MESSAGE,
+    )
+    expect(incrementMock).not.toHaveBeenCalled()
+    expect(deleteDocMock).toHaveBeenCalledTimes(addDocMock.mock.calls.length)
+  })
+
+  it("accepts a shared strand, which 'both' legitimately owns", async () => {
+    storedConfig = { recentTopics: [], type: 'strand', childId: 'both' }
+    await logStrandSession(args())
+    expect(incrementMock).toHaveBeenCalledWith(1)
+  })
+})
+
+describe('a retained artifact still points at its file', () => {
+  it('writes the media it managed to upload onto a document it keeps', async () => {
+    // The media fields are written once, after the whole batch — so a doc kept
+    // because its object could not be deleted carried no `uri`, and the
+    // retained private photo stayed unreachable from the gallery the message
+    // sends her to (Codex).
+    let calls = 0
+    uploadMock.mockImplementation(async () => {
+      calls += 1
+      if (calls > 1) throw new Error('upload failed')
+      return {
+        downloadUrl: 'https://example/first.jpg',
+        storagePath: 'families/fam/artifacts/a/0.jpg',
+      }
+    })
+    deleteObjectMock.mockImplementation(async () => {
+      const err = new Error('denied') as Error & { code?: string }
+      err.code = 'storage/unauthorized'
+      throw err
+    })
+
+    await expect(
+      logStrandSession(
+        args({
+          evidence: {
+            photos: [
+              new File(['x'], 'a.jpg', { type: 'image/jpeg' }),
+              new File(['y'], 'b.jpg', { type: 'image/jpeg' }),
+            ],
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(StrandSessionPartiallySaved)
+
+    const patched = updateDocMock.mock.calls.find(
+      (call) =>
+        typeof call[1] === 'object' && call[1] !== null && 'uri' in (call[1] as object),
+    )?.[1] as Record<string, unknown> | undefined
+    expect(patched?.uri).toBe('https://example/first.jpg')
+    expect(deleteDocMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('audioExtension', () => {
+  it('keeps the recorder default for a plain blob', () => {
+    expect(audioExtension(new Blob(['a']))).toBe('webm')
+  })
+
+  it("uses an uploaded file's real extension", () => {
+    // The archive names its exported media from the object path, so storing an
+    // mp3 as `.webm` hands an auditor a file players reject (Codex).
+    expect(audioExtension(new File(['a'], 'answer.mp3', { type: 'audio/mpeg' }))).toBe('mp3')
+    expect(audioExtension(new File(['a'], 'answer.m4a', { type: 'audio/mp4' }))).toBe('m4a')
+  })
+
+  it('falls back to the MIME subtype when the name carries none', () => {
+    expect(audioExtension(new File(['a'], 'recording', { type: 'audio/mpeg' }))).toBe('mp3')
+    expect(audioExtension(new File(['a'], 'recording', { type: 'audio/wav' }))).toBe('wav')
+  })
+
+  it('refuses anything that could not be a safe path segment', () => {
+    expect(audioExtension(new File(['a'], 'x.../../../etc', { type: '' }))).toBe('webm')
+    expect(audioExtension(new File(['a'], 'x.averylongextension', { type: '' }))).toBe('webm')
   })
 })

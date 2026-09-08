@@ -206,6 +206,29 @@ describe('buildApplyChecklist', () => {
     expect(row).not.toHaveProperty('strandConfigId')
   })
 
+  it('declines the stamp when a workbook answers to the same title', () => {
+    // The draft item carries no source config, so a workbook row would get both
+    // joins — offering "Record a session" on a workbook and moving an unrelated
+    // strand's count, which no increment can take back (Codex).
+    const strandRow = { id: 'cfg-strand', name: 'GATB Math', type: 'strand' as const }
+    const workbook = { id: 'cfg-wb', name: 'GATB Math', type: 'workbook' as const }
+    const [row] = buildApplyChecklist([item()], [strandRow, workbook], new Map())
+    expect(row).not.toHaveProperty('strandConfigId')
+  })
+
+  it('still stamps when the colliding row is a FINISHED workbook', () => {
+    // A finished program plans nothing and cannot be what this item came from.
+    const strandRow = { id: 'cfg-strand', name: 'GATB Math', type: 'strand' as const }
+    const done = {
+      id: 'cfg-wb',
+      name: 'GATB Math',
+      type: 'workbook' as const,
+      completed: true,
+    }
+    const [row] = buildApplyChecklist([item()], [strandRow, done], new Map())
+    expect(row.strandConfigId).toBe('cfg-strand')
+  })
+
   it('defaults an untagged item to category must-do but NOT to the MVD floor', () => {
     const [row] = buildApplyChecklist([item()], [], new Map())
     expect(row.category).toBe('must-do')

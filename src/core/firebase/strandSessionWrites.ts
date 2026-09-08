@@ -137,6 +137,10 @@ export const STRAND_SESSION_GONE_MESSAGE =
  * next move is different — un-finishing is not something this app does, so the
  * honest thing is to name what happened rather than suggest a retry.
  */
+/** ...and when it was moved to another child under the session. */
+export const STRAND_SESSION_REASSIGNED_MESSAGE =
+  'That activity now belongs to a different child, so the session was not recorded. Open it from that child and record it there.'
+
 export const STRAND_SESSION_FINISHED_MESSAGE =
   'That activity was marked finished while this was open, so the session was not recorded. A finished program keeps the record it ended with.'
 
@@ -168,6 +172,30 @@ const isAlreadyGone = (reason: unknown): boolean =>
   typeof reason === 'object' &&
   reason !== null &&
   (reason as { code?: unknown }).code === 'storage/object-not-found'
+
+/**
+ * The file extension an audio capture should be stored under.
+ *
+ * `webm` is the recorder's own output and stays the default; an uploaded
+ * `File` carries a real name and MIME type, and either is a better answer than
+ * assuming the recorder made it. The name is preferred because a browser's
+ * `type` for a picked file is occasionally empty; a MIME subtype is the
+ * fallback, and only a short alphanumeric one is trusted so a odd value cannot
+ * become part of a storage path.
+ */
+export function audioExtension(blob: Blob): string {
+  const name = (blob as File).name
+  if (typeof name === 'string') {
+    const ext = name.split('.').pop()
+    if (ext && ext !== name && /^[a-zA-Z0-9]{1,5}$/.test(ext)) return ext.toLowerCase()
+  }
+  const subtype = (blob.type || '').split('/')[1]?.split(';')[0]
+  if (subtype && /^[a-zA-Z0-9]{1,5}$/.test(subtype)) {
+    // `audio/mpeg` is an mp3 to everything a person opens it with.
+    return subtype.toLowerCase() === 'mpeg' ? 'mp3' : subtype.toLowerCase()
+  }
+  return 'webm'
+}
 
 /** What a caller renders for a failure whose evidence WAS cleaned up. */
 export const STRAND_SESSION_FAILED_CLEAN =
@@ -226,6 +254,23 @@ export async function logStrandSession(
     else storagePathsByArtifact.set(artifactId, [path])
   }
 
+  /**
+   * Download URLs that landed, per artifact (Codex).
+   *
+   * The media fields are written once, after a whole photo batch — so if the
+   * second upload fails and the first object then cannot be deleted, the
+   * document the rollback deliberately KEEPS carries no `uri` and no
+   * `mediaUrls`, and the retained private photo is still unreachable from the
+   * gallery the failure message sends her to. Keeping the record is only worth
+   * anything if the record points at the file.
+   */
+  const urlsByArtifact = new Map<string, string[]>()
+  const recordUrl = (artifactId: string, url: string) => {
+    const urls = urlsByArtifact.get(artifactId)
+    if (urls) urls.push(url)
+    else urlsByArtifact.set(artifactId, [url])
+  }
+
   const record = (id: string, artifact: Omit<Artifact, 'id'>) => {
     artifactIds.push(id)
     artifacts.push({ ...artifact, id })
@@ -272,6 +317,20 @@ export async function logStrandSession(
       )
       if (!objectsGone) {
         clean = false
+        // The document stays, so give it whatever media references landed —
+        // otherwise the artifact she is told to look for has no file attached
+        // and the surviving object is as hidden as if the record had gone.
+        const urls = urlsByArtifact.get(id) ?? []
+        if (urls.length > 0) {
+          try {
+            await updateDoc(doc(artifactsCollection(args.familyId), id), {
+              uri: urls[0],
+              mediaUrls: urls,
+            })
+          } catch {
+            // Best effort: the record still exists, which is the main thing.
+          }
+        }
         continue
       }
       try {
@@ -313,6 +372,7 @@ export async function logStrandSession(
             filename,
           )
           urls.push(uploaded.downloadUrl)
+          recordUrl(ref.id, uploaded.downloadUrl)
         }
         await updateDoc(doc(artifactsCollection(args.familyId), ref.id), {
           uri: urls[0],
@@ -328,7 +388,11 @@ export async function logStrandSession(
         const artifact = buildStrandArtifact({ ...base, type })
         const ref = await addDoc(artifactsCollection(args.familyId), artifact)
         record(ref.id, artifact)
-        const filename = generateFilename('webm')
+        // The recorder produces a webm Blob, but the dialog also accepts an
+        // UPLOADED audio File — mp3, m4a — and the compliance archive names its
+        // exported media from this object path, so storing an mp3 as `.webm`
+        // hands an auditor a file local players reject or misread (Codex).
+        const filename = generateFilename(audioExtension(blob))
         recordPath(ref.id, artifactStoragePath(args.familyId, ref.id, filename))
         const uploaded = await uploadArtifactFile(
           args.familyId,
@@ -336,6 +400,7 @@ export async function logStrandSession(
           blob,
           filename,
         )
+        recordUrl(ref.id, uploaded.downloadUrl)
         await updateDoc(doc(artifactsCollection(args.familyId), ref.id), {
           uri: uploaded.downloadUrl,
           mediaUrls: [uploaded.downloadUrl],
@@ -414,6 +479,15 @@ export async function logStrandSession(
       }
       if (!isStrand({ type: stored?.type })) {
         throw new StrandSessionGone(STRAND_SESSION_GONE_MESSAGE)
+      }
+      // ...and it must still belong to the child this session was captured for
+      // (Codex). The artifacts were written with `args.childId`; a strand
+      // reassigned mid-dialog would leave that evidence joined to one child's
+      // record while the count moved on another's. `'both'` is a legitimate
+      // shared owner and satisfies it.
+      const owner = stored?.childId
+      if (owner !== args.childId && owner !== 'both') {
+        throw new StrandSessionGone(STRAND_SESSION_REASSIGNED_MESSAGE)
       }
       // The stored document is unvalidated Firestore data; `readRecentTopics`
       // does the structural narrowing, so the cast only gets it through the door.
