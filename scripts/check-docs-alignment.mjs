@@ -200,7 +200,12 @@ export function findOpenPrStatusRows(md) {
  * "PR open" carries no number-plus-date, so the ARCH-42 shape is untouched. The
  * list stays at one pattern until a real episode proves a gap — the same rule
  * `OPEN_PR_STATUS_PATTERNS` grew under. **Validated against every historical
- * revision, not reasoned about**; the test re-runs that sweep.
+ * revision, not reasoned about.** That sweep is no longer part of the suite: it
+ * asserted a frozen offender list over immutable history, which could only ever
+ * accumulate exceptions, and it reddened every `deploy` push (UX-272). It lives
+ * on as an opt-in probe — `npm run docs:ledger-sweep` — which is what to run
+ * after editing these patterns; the two false positives it found are pinned as
+ * verbatim fixtures in `check-docs-alignment.test.mjs`.
  */
 const LANDED_STATUS_PATTERNS = [
   // "PR #1785, 2026-09-06" · "PR #1263 merged 2026-05-30" · "PR #1640, merged"
