@@ -339,13 +339,45 @@ export function findStrandConfigId(
   item: { label?: string },
   configs: StrandLike[],
 ): string | undefined {
-  const label = nameKey(item.label ?? '')
-  if (!label) return undefined
+  const candidates = itemLabelCandidates(item.label)
+  if (candidates.length === 0) return undefined
   const match = configs.find(
     (config) =>
       config.type === ActivityType.Strand &&
       !config.completed &&
-      activityMatchNames(config).some((name) => nameKey(name) === label),
+      activityMatchNames(config).some((name) => {
+        const key = nameKey(name)
+        return key !== '' && candidates.includes(key)
+      }),
   )
   return match?.id
+}
+
+/**
+ * The planner's rendered duration suffix — `History (30m)`.
+ *
+ * `buildApplyChecklist` stores `` `${item.title} (${item.estimatedMinutes}m)` ``,
+ * so a stored label is never the bare name a config answers to. Matching the
+ * label as-is meant `nameKey('History (30m)')` → `history30m` against `history`,
+ * and the Today button this feature advertises rendered for **no ordinary
+ * applied plan at all** (Codex) — the run's own tests used a duration-free
+ * label and so never saw it. `findWorkbookConfigId` avoids this by being called
+ * at apply time with `item.title`, before the suffix exists; this matcher runs
+ * later, off the stored row, and has to undo it.
+ */
+const DURATION_SUFFIX = /\s*\(\d+m\)\s*$/
+
+/**
+ * Comparison keys to try for a stored checklist label, most exact first.
+ *
+ * The whole label is tried BEFORE the stripped one, so a strand a family
+ * genuinely named *"History (30m)"* still matches itself rather than being
+ * shortened out from under them. Empty keys are dropped so a label of only
+ * punctuation cannot match a config whose name normalises to nothing.
+ */
+function itemLabelCandidates(label: string | undefined): string[] {
+  const raw = (label ?? '').trim()
+  if (!raw) return []
+  const keys = [nameKey(raw), nameKey(raw.replace(DURATION_SUFFIX, ''))]
+  return [...new Set(keys.filter(Boolean))]
 }

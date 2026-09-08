@@ -216,6 +216,32 @@ describe('findStrandConfigId', () => {
     ).toBeUndefined()
   })
 
+  // The bug this feature shipped with, until Codex found it: `buildApplyChecklist`
+  // stores `${title} (${estimatedMinutes}m)`, so an ordinary applied plan's row
+  // reads "History (30m)" and `nameKey` gave `history30m` against `history` —
+  // the Today button rendered for NO real plan. The run's own tests used a
+  // duration-free label and never saw it.
+  it('matches a real applied row, which carries the rendered duration', () => {
+    expect(findStrandConfigId({ label: 'History (30m)' }, [history])).toBe('s1')
+    expect(findStrandConfigId({ label: 'History (5m)' }, [history])).toBe('s1')
+    expect(findStrandConfigId({ label: 'History (120m)' }, [history])).toBe('s1')
+  })
+
+  it('still matches a bare label, which a manually added row carries', () => {
+    expect(findStrandConfigId({ label: 'History' }, [history])).toBe('s1')
+  })
+
+  it('prefers the whole label, so a strand named that way still matches itself', () => {
+    const oddlyNamed = strand({ id: 's9', name: 'History (30m)' })
+    expect(findStrandConfigId({ label: 'History (30m)' }, [oddlyNamed, history])).toBe('s9')
+  })
+
+  it('does not strip anything that is not the duration suffix', () => {
+    // "(Ancient)" is part of a name, not a rendered minute count.
+    expect(findStrandConfigId({ label: 'History (Ancient)' }, [history])).toBeUndefined()
+    expect(findStrandConfigId({ label: 'History (30 minutes)' }, [history])).toBeUndefined()
+  })
+
   it('is exact — a different name is a different row (UX-207)', () => {
     expect(findStrandConfigId({ label: 'History of Rome' }, [history])).toBeUndefined()
   })
