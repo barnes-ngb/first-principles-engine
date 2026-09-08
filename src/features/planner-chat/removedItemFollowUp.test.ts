@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -114,6 +116,52 @@ describe('findRemovedItemConfig (UX-232)', () => {
       findRemovedItemConfig({ title: 'Handwriting' }, [config({ name: 'Handwriting', frequency: '3x' })])
         ?.cadence,
     ).toBe('3x/week')
+  })
+})
+
+describe('both removal paths offer it (Codex round 3, P1)', () => {
+  // The offer began life inline at the end of `handleRemoveItem`'s pre-Apply
+  // branch. The applied branch returns before reaching it, so a ✕ after Apply
+  // changed the saved day, left Curriculum untouched and said nothing — and the
+  // next Redo brought the row back, which is the exact behaviour UX-232 exists
+  // to stop. Both branches now route through one `offerCurriculumFollowUp`.
+  //
+  // The wiring is asserted at the source, because mounting PlannerChatPage to
+  // test it would need the whole planner: Firestore, the AI hook, the profile
+  // context and an applied week. A source scan is the honest instrument for
+  // "did this call site get made", and it fails loudly if either goes missing.
+  // `import.meta.dirname` + `join`, as `plannerPlanType.invariant.test.ts` does:
+  // this file runs under jsdom in the root suite, where `import.meta.url` is not
+  // a `file:` URL and `new URL(...)` would throw at collection time.
+  const source = readFileSync(join(import.meta.dirname, 'PlannerChatPage.tsx'), 'utf8')
+
+  it('has exactly one place that raises the offer', () => {
+    // One definition, so a third removal path cannot quietly get its own copy
+    // with different rules.
+    expect(source.match(/const offerCurriculumFollowUp = useCallback/g)).toHaveLength(1)
+    expect(source.match(/setRemovedItemFollowUp\(followUp\)/g)).toHaveLength(1)
+  })
+
+  it('calls it from the applied branch AND the draft branch', () => {
+    expect(source.match(/offerCurriculumFollowUp\(removed\)/g)).toHaveLength(2)
+  })
+
+  it('reads the removed row before either branch edits its copy', () => {
+    // The applied branch writes the saved day first and mirrors the draft after,
+    // so a read taken at offer time would find nothing.
+    const readAt = source.indexOf('const removed = currentDraft.days[dayIndex]?.items[itemIndex]')
+    const firstOffer = source.indexOf('offerCurriculumFollowUp(removed)')
+    expect(readAt).toBeGreaterThan(-1)
+    expect(readAt).toBeLessThan(firstOffer)
+  })
+
+  it('offers only after a successful live removal, not on a refusal', () => {
+    // Nothing about a curriculum row is worth raising when the removal the
+    // parent asked for did not land.
+    const guard = source.indexOf("if (!outcome || outcome.status !== 'done')")
+    const appliedOffer = source.indexOf('offerCurriculumFollowUp(removed)')
+    expect(guard).toBeGreaterThan(-1)
+    expect(guard).toBeLessThan(appliedOffer)
   })
 })
 

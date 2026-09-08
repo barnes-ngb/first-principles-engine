@@ -2226,8 +2226,39 @@ Generate a plan for Monday through Friday.`.trim()
     [applied, isParent, appliedWeekDaysLoaded, resolveLiveRow, currentDraft, activeChild?.name],
   )
 
+  /**
+   * Offer to remove the curriculum row a just-removed plan row named (UX-232).
+   *
+   * The ✕ edits a copy — a draft pre-Apply, a saved day after it — and the next
+   * plan is regenerated from Curriculum either way, so a row taken off this week
+   * comes back on the next Redo. That is exactly what the owner hit, and nothing
+   * on screen said it.
+   *
+   * **Both removal paths call this** (Codex round 3). It began life inline at
+   * the end of the pre-Apply branch, which the applied branch returns before
+   * reaching — so a ✕ after Apply changed the day, left Curriculum untouched and
+   * offered nothing, which is the same silent copy the feature exists to fix.
+   *
+   * It only OPENS a dialog. The delete happens on that dialog's button, so no
+   * removal here can reach a curriculum write on its own. Parent-only, and again
+   * at the write itself.
+   */
+  const offerCurriculumFollowUp = useCallback(
+    (removed: DraftPlanItem | undefined) => {
+      if (!isParent) return
+      const followUp = findRemovedItemConfig(removed, activityConfigs)
+      if (followUp) setRemovedItemFollowUp(followUp)
+    },
+    [isParent, activityConfigs],
+  )
+
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
     if (!currentDraft) return
+
+    // Read before either branch edits its copy — the applied branch resolves and
+    // writes the saved day first, and this row is gone from the draft by the
+    // time the offer is made.
+    const removed = currentDraft.days[dayIndex]?.items[itemIndex]
 
     // Post-Apply: the removal has to land in the saved day. Do that FIRST and
     // only mirror the card on success, so the parent is never shown a week the
@@ -2266,11 +2297,17 @@ Generate a plan for Monday through Friday.`.trim()
         setCurrentDraft(mirrored)
         void persistConversation({ currentDraft: mirrored })
         setSnack({ text: `Removed from ${row.dayLabel}.`, severity: 'success' })
+        // The live week needs the offer just as much as the draft does (Codex
+        // round 3). This branch returns below, so without the call here a ✕
+        // after Apply took the row off the day, left Curriculum untouched, and
+        // said nothing — and the next Redo brought it back, which is the exact
+        // behaviour UX-232 exists to stop. Offered only after the day write
+        // actually succeeded: nothing about a curriculum row is worth raising
+        // when the removal the parent asked for did not land.
+        offerCurriculumFollowUp(removed)
       })()
       return
     }
-
-    const removed = currentDraft.days[dayIndex]?.items[itemIndex]
 
     const updated: DraftWeeklyPlan = {
       ...currentDraft,
@@ -2282,18 +2319,8 @@ Generate a plan for Monday through Friday.`.trim()
     }
     setCurrentDraft(updated)
     setPlanDirty(true)
-
-    // UX-232: the ✕ edited a copy, and never said so. The draft is regenerated
-    // from Curriculum, so a row taken off this week comes back on the next
-    // Redo — which is exactly what the owner hit. Offer the second step when the
-    // removed row names a live curriculum row exactly. Parent-only, and its own
-    // confirmed act: this only OPENS a dialog, and the delete happens on that
-    // dialog's button. Nothing about the draft edit above depends on the answer.
-    if (isParent) {
-      const followUp = findRemovedItemConfig(removed, activityConfigs)
-      if (followUp) setRemovedItemFollowUp(followUp)
-    }
-  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation, activityConfigs])
+    offerCurriculumFollowUp(removed)
+  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation, offerCurriculumFollowUp])
 
   /**
    * Delete the curriculum row a removed draft row named (UX-232).
