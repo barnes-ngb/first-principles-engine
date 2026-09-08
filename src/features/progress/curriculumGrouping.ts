@@ -29,6 +29,7 @@ export const CurriculumSection = {
   Routines: 'routines',
   Other: 'other',
   Evaluations: 'evaluations',
+  Strands: 'strands',
 } as const
 export type CurriculumSection = (typeof CurriculumSection)[keyof typeof CurriculumSection]
 
@@ -48,6 +49,20 @@ export const SECTION_FOR_TYPE: Record<ActivityType, CurriculumSection> = {
   [ActivityType.Activity]: CurriculumSection.Other,
   [ActivityType.App]: CurriculumSection.Other,
   [ActivityType.Evaluation]: CurriculumSection.Evaluations,
+  // A strand gets its OWN section rather than a place in an existing one
+  // (UX-281). Not because it is special, but because its row is a different
+  // row: it shows a count with no total and the topic it last covered, and no
+  // other section's row shows either. Folding it into `Workbooks` would put a
+  // thing with no lessons, no total and no page to scan under a heading reading
+  // "Active Workbooks", beside cards that render a position-of-total progress
+  // bar it can never fill — the row would have to say "of what?" and the
+  // heading would already have answered wrongly. Folding it into `Other` would
+  // bury the count under a heading whose own description says these rows are
+  // things "planned every school day and counted in the day budget", which is a
+  // sentence about routines, not about a subject the family returns to. A
+  // section is one heading; a heading that is wrong for a row hides it exactly
+  // as badly as no section at all, which is the whole of UX-204's lesson.
+  [ActivityType.Strand]: CurriculumSection.Strands,
 }
 
 /**
@@ -59,6 +74,7 @@ export const CURRICULUM_SECTION_TITLE: Record<CurriculumSection, string> = {
   [CurriculumSection.Routines]: 'Routine Activities',
   [CurriculumSection.Other]: 'Apps & Other Activities',
   [CurriculumSection.Evaluations]: 'Evaluations (auto-managed)',
+  [CurriculumSection.Strands]: 'Strands',
 }
 
 /**
@@ -71,6 +87,17 @@ export const CURRICULUM_SECTION_TITLE: Record<CurriculumSection, string> = {
  */
 export const OTHER_ACTIVITIES_DESCRIPTION =
   'Apps and one-off activities — including anything added from Ask AI. These are planned every school day and counted in the day budget, the same as a routine.'
+
+/**
+ * The line under the Strands heading.
+ *
+ * It says the two things a parent cannot infer from a count: that the number
+ * only goes up, and that there is deliberately no end to reach. A reader who
+ * expects the workbook shape will otherwise look for the total and read its
+ * absence as missing data rather than as the point.
+ */
+export const STRANDS_DESCRIPTION =
+  'Subjects you keep coming back to — history, nature study, anything without a set order. Each session records a topic and whatever you captured. The count only goes up; there is no total to finish.'
 
 /**
  * Where an unrecognised stored `type` goes.
@@ -90,6 +117,7 @@ export interface GroupedCurriculum {
   routines: ActivityConfig[]
   other: ActivityConfig[]
   evaluations: ActivityConfig[]
+  strands: ActivityConfig[]
   completed: ActivityConfig[]
 }
 
@@ -107,6 +135,7 @@ export function groupCurriculumConfigs(configs: ActivityConfig[]): GroupedCurric
     routines: [],
     other: [],
     evaluations: [],
+    strands: [],
     completed: [],
   }
   for (const config of configs) {

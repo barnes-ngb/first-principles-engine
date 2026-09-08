@@ -113,3 +113,35 @@ describe('AddActivityDialog — the quick-log flag (FEAT-199)', () => {
     expect(payload.quickLog).toBe(true)
   })
 })
+
+// ── Codex round 1: a parent can create a strand from Curriculum (UX-281) ─────
+//
+// UX-281 prepared the unit label for a strand created through this dialog and
+// never added Strand to its `TYPE_OPTIONS`, so the branch was unreachable and
+// the only way to make one was the chat's type-correction chip. That hand-kept
+// list is a FOURTH place a new `ActivityType` can be orphaned, after the two
+// `Record` rails that caught it and the card order that did not.
+describe('AddActivityDialog — strands (UX-281)', () => {
+  it('offers the Strand type', () => {
+    open()
+    expect(screen.getByText('Strand')).toBeInTheDocument()
+  })
+
+  it('creates a strand with the session unit label and no total', async () => {
+    const user = userEvent.setup()
+    const onAdd = open()
+
+    await user.type(screen.getByLabelText(/name/i), 'History')
+    await user.click(screen.getByText('Strand'))
+    await user.click(screen.getByRole('button', { name: /^add$/i }))
+
+    expect(onAdd).toHaveBeenCalledTimes(1)
+    const created = onAdd.mock.calls[0][0] as NewActivityConfig
+    expect(created.type).toBe('strand')
+    // Without this the parent-only coverage line reads "lesson 14" about a
+    // subject that has no lessons.
+    expect(created.unitLabel).toBe('session')
+    expect(created.totalUnits).toBeUndefined()
+    expect(created.currentPosition).toBeUndefined()
+  })
+})

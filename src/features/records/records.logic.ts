@@ -1,3 +1,4 @@
+import { isLinkEvidenceType } from '../../../functions/src/shared/linkEvidence'
 import JSZip from 'jszip'
 
 import type {
@@ -633,6 +634,32 @@ export const emitsPortfolioMediaUrl = (artifact: Artifact): boolean => {
   return (type === 'Photo' || type === 'photo') && Boolean(artifact.uri)
 }
 
+/**
+ * True when the export will write this artifact's URL as a **link** rather than
+ * as embedded media (UX-285).
+ *
+ * A `Video` artifact — a strand session's *"the video we watched"* (UX-283) —
+ * carries an **external** address in `uri`. Nothing is uploaded for it, so it
+ * is not media the archive can embed, and until now it was not written at all:
+ * `emitsPortfolioMediaUrl` is Photo-only, so the portfolio recorded that a
+ * Video artifact existed, with its title and date, and **no address anywhere**.
+ * A record of evidence that omits where the evidence is is not a record of it.
+ *
+ * Which types count is the SHARED `isLinkEvidenceType` (ARCH-47), because the
+ * compliance archive's manifest describes a skipped URL as *"an external link,
+ * recorded in the portfolio"* — if that rule and this one drift, the archive
+ * tells an auditor the portfolio holds a link it does not hold.
+ *
+ * Deliberately a **second predicate** rather than a widening of
+ * `emitsPortfolioMediaUrl`. That one answers *"was this already rendered as
+ * media above?"* and FEAT-121's Dad Lab section builds its skip list from it;
+ * a Codex P1 on PR #1627 was exactly the failure of letting those two questions
+ * share an answer. Embedding and linking are different renderings, so they get
+ * different predicates.
+ */
+export const emitsPortfolioLink = (artifact: Artifact): boolean =>
+  isLinkEvidenceType(artifact.type as string) && Boolean(artifact.uri)
+
 export const generatePortfolioMarkdown = (
   artifacts: Artifact[],
   children: Array<{ id: string; name: string }>,
@@ -700,6 +727,24 @@ export const generatePortfolioMarkdown = (
         lines.push(`![${art.title}](${art.uri})`)
         lines.push('')
       }
+    }
+
+    // ...and the links, as links (UX-285). Its own section and its own markdown
+    // form — `[title](url)`, never `![title](url)` — because an external video
+    // address is not an image and rendering it as one produces a broken image
+    // in every reader. The heading says what these are, since an archive that
+    // reads offline cannot show them and a reader needs to know that is the
+    // nature of the entry rather than a fault in the file.
+    const links = sorted.filter(emitsPortfolioLink)
+    if (links.length > 0) {
+      lines.push('### Links')
+      lines.push('')
+      lines.push('_Recorded references. These point outside the archive and need a connection to open._')
+      lines.push('')
+      for (const art of links) {
+        lines.push(`- [${art.title}](${art.uri})`)
+      }
+      lines.push('')
     }
   }
 

@@ -41,13 +41,31 @@ export interface UploadResult {
  * Returns the download URL and the storage path.
  * Non-retryable errors (permissions, bad arguments) are thrown immediately.
  */
+/**
+ * Where an artifact's file lands. Deterministic, and exported so a caller can
+ * know the path BEFORE the upload resolves (Codex round 3).
+ *
+ * `uploadArtifactFile` does `uploadBytes` and then `getDownloadURL`: if the
+ * bytes land and the URL lookup then fails, an object exists at this path while
+ * the caller holds nothing to clean up. A rollback that can only register paths
+ * it was handed back would leave that object behind and still report a clean
+ * failure.
+ */
+export function artifactStoragePath(
+  familyId: string,
+  artifactId: string,
+  filename: string,
+): string {
+  return `families/${familyId}/artifacts/${artifactId}/${filename}`
+}
+
 export async function uploadArtifactFile(
   familyId: string,
   artifactId: string,
   file: Blob | File,
   filename: string,
 ): Promise<UploadResult> {
-  const storagePath = `families/${familyId}/artifacts/${artifactId}/${filename}`
+  const storagePath = artifactStoragePath(familyId, artifactId, filename)
   const storageRef = ref(storage, storagePath)
 
   let lastError: unknown

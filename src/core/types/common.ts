@@ -71,6 +71,32 @@ export interface Artifact {
    * and never backfilled: absent stays absent.
    */
   contentNote?: string
+  /**
+   * Links this artifact to the `activityConfigs` row it was captured under
+   * (UX-282).
+   *
+   * Written by strand session capture, which is the first surface where a piece
+   * of evidence belongs to a *curriculum row* rather than to a day, a lab or a
+   * book — a strand's whole record is its sessions, and without this join the
+   * artifact and the count it produced could not be put back together.
+   *
+   * Additive and **optional**: absent on every artifact that exists today, and
+   * on every artifact captured anywhere else. Every reader must treat it as
+   * absent-able rather than assuming it, exactly as `watchVideoId` is treated.
+   */
+  activityConfigId?: string
+  /**
+   * What this session was about — "Ancient Egypt", "The Pilgrims" (UX-282).
+   *
+   * **The durable record of a topic.** `ActivityConfig.recentTopics` is a capped
+   * suggestion cache derived from these; this is the one that is never trimmed,
+   * which is why a strand session requires evidence to capture.
+   *
+   * Stored as the parent typed it (whitespace-normalized, never re-cased):
+   * grouping compares through `nameKey`, so two spellings of one topic match
+   * without the app overwriting her words. Additive and optional.
+   */
+  topic?: string
 }
 
 // ── Lincoln's Ladders (card-based) ──────────────────────────────

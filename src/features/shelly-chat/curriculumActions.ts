@@ -16,6 +16,7 @@
 // Pure by design, so "a hallucinated id never reaches a write" is testable
 // without Firestore.
 
+import { isStrand } from '../progress/strand'
 import { WORKBOOK_OWNER_REASON } from '../../core/firebase/activityConfigWrites'
 import type { ChatAction } from '../../core/types'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
@@ -174,6 +175,21 @@ export function alreadyCompleteNotice(name: string): string {
   return `"${name}" is already marked finished, so nothing was changed. It stays in the Completed list on Progress → Curriculum.`
 }
 
+/**
+ * The refusal for a STRAND, whose count is not a position to be set (UX-282).
+ *
+ * A strand's `currentPosition` is a tally of sessions that happened, moved only
+ * by `logStrandSession` and only ever by an atomic `increment(1)`. The generic
+ * position action writes an ABSOLUTE value, so once a strand had logged its
+ * first session it satisfied the "tracks a position" gate below and a confirmed
+ * card could set the count to any number — lowering it, or raising it with no
+ * topic and no evidence, which is the one thing the feature's rails forbid
+ * (Codex). Refused with the verb that does move it.
+ */
+export function strandPositionNotice(name: string): string {
+  return `"${name}" counts sessions, not lesson numbers, and the count only goes up as sessions are recorded. To add one, tap Record a session on "${name}" at Progress → Curriculum.`
+}
+
 /** The refusal for a config that has no position to set. */
 export function noPositionNotice(name: string): string {
   return `"${name}" doesn't track a lesson or page number, so there's no position to set. You can add one at Progress → Curriculum.`
@@ -282,6 +298,11 @@ export function resolveCurriculumAction(
     // Only offered for configs that track position at all. A routine has no
     // lesson number, so "he's on lesson 107" against one is a mismatch worth
     // naming rather than a write worth inventing a field for.
+    // A strand's count is not a position (UX-282). Checked BEFORE the
+    // tracks-a-position gate, which a strand passes the moment it has a session.
+    if (isStrand(config)) {
+      return { ok: false, notice: strandPositionNotice(config.name) }
+    }
     if (config.currentPosition == null && config.totalUnits == null) {
       return { ok: false, notice: noPositionNotice(config.name) }
     }

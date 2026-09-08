@@ -60,7 +60,17 @@ import {
   CurriculumSection,
   groupCurriculumConfigs,
   OTHER_ACTIVITIES_DESCRIPTION,
+  STRANDS_DESCRIPTION,
 } from './curriculumGrouping'
+import { mostRecentTopic, strandRowSummary } from './strand'
+import StrandSessionDialog from './StrandSessionDialog'
+import type { StrandSessionEvidence } from './strandSession'
+import {
+  logStrandSession,
+  STRAND_SESSION_FAILED_CLEAN,
+  StrandSessionFailure,
+  StrandSessionRefused,
+} from '../../core/firebase/strandSessionWrites'
 import { failedPageIndexes, processScanBatch } from './multiPageScan'
 import {
   buildDeleteActivityPrompt,
@@ -119,11 +129,60 @@ export default function CurriculumTab() {
     return unsub
   }, [familyId, activeChildId])
 
+  // ── Strand session capture (UX-283) ──────────────────────────────────────
+  // The row's own door onto recording a session. Parent-gated on capability at
+  // the control AND again at the write, because this tab renders for a kid
+  // profile today and a session moves a curriculum row's count.
+  const [sessionTarget, setSessionTarget] = useState<ActivityConfig | null>(null)
+  const [sessionSaving, setSessionSaving] = useState(false)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+
+  const handleLogSession = useCallback(
+    async (topic: string, evidence: StrandSessionEvidence) => {
+      if (!familyId || !activeChildId || !sessionTarget) return
+      if (isChildProfile) return
+      setSessionSaving(true)
+      setSessionError(null)
+      try {
+        await logStrandSession({
+          familyId,
+          config: sessionTarget,
+          childId: activeChildId,
+          topic,
+          evidence,
+        })
+        setSessionTarget(null)
+      } catch (err) {
+        // The refusal sentences are the writer's, so the parent reads one
+        // wording of the rule. Anything else says what did NOT happen rather
+        // than implying the session was recorded (the `deleteFailureNotice`
+        // doctrine): the dialog stays open with her capture intact.
+        setSessionError(
+          // Both of ours carry the parent-facing sentence already: a refusal
+          // states the rule, and a failure states which of the two truths
+          // applies — cleaned up, or evidence left behind that a blind retry
+          // would duplicate (Codex round 1).
+          // One base for every failure that carries its own sentence (Codex
+          // round 2), rather than a growing `instanceof` list here: a refusal
+          // states the rule; a failure states which truth applies — cleaned up,
+          // evidence left behind that a blind retry would duplicate, or the
+          // strand removed while the dialog was open.
+          err instanceof StrandSessionRefused || err instanceof StrandSessionFailure
+            ? err.message
+            : STRAND_SESSION_FAILED_CLEAN,
+        )
+      } finally {
+        setSessionSaving(false)
+      }
+    },
+    [familyId, activeChildId, sessionTarget, isChildProfile],
+  )
+
   // Group configs by type — a PARTITION, not a set of filters (UX-204). Four
   // independent filters over a six-member enum left `activity` and `app` configs
   // rendered nowhere while they went on planning every day; `groupCurriculumConfigs`
   // places every type by a `Record<ActivityType, …>` a new member cannot escape.
-  const { workbooks, routines, other, evaluations, completed } = useMemo(
+  const { workbooks, routines, other, evaluations, strands, completed } = useMemo(
     () => groupCurriculumConfigs(configs),
     [configs],
   )
@@ -805,6 +864,77 @@ export default function CurriculumTab() {
           </SectionCard>
         )}
 
+        {/*
+          Strands (UX-281) — curriculum with no lessons, that still keeps count.
+
+          Its own section, because its row is a different row: a count with no
+          total and the topic it last covered. Rendered with the SAME `ListItem`
+          + `openMenu` shape as Routine Activities, so rename / mark-complete /
+          quick-log / delete come with it rather than growing a second, weaker
+          menu — the UX-204 rule that a new section inherits the existing ⋮
+          rather than reinventing part of it.
+
+          There is no progress bar and no total, deliberately. A strand has no
+          end, so a bar would either be empty forever or imply one.
+        */}
+        {strands.length > 0 && (
+          <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Strands]}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              {STRANDS_DESCRIPTION}
+            </Typography>
+            <List dense disablePadding>
+              {strands.map((config) => {
+                const topic = mostRecentTopic(config)
+                return (
+                  <ListItem
+                    key={config.id}
+                    secondaryAction={
+                      <IconButton size="small" onClick={(e) => openMenu(e, config)}>
+                        <MoreVertIcon fontSize="small" />
+                      </IconButton>
+                    }
+                  >
+                    <ListItemText
+                      primary={config.name}
+                      secondary={
+                        <>
+                          {strandRowSummary(
+                            config,
+                            ActivityFrequencyLabel[config.frequency] ?? config.frequency,
+                          )}
+                          {topic && (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: 'block' }}
+                            >
+                              {`Last topic: ${topic}`}
+                            </Typography>
+                          )}
+                          <ActivityAliases config={config} />
+                          {!isChildProfile && (
+                            <Button
+                              size="small"
+                              sx={{ mt: 0.5, ml: -1 }}
+                              onClick={() => {
+                                setSessionError(null)
+                                setSessionTarget(config)
+                              }}
+                            >
+                              Record a session
+                            </Button>
+                          )}
+                        </>
+                      }
+                      secondaryTypographyProps={{ component: 'div' }}
+                    />
+                  </ListItem>
+                )
+              })}
+            </List>
+          </SectionCard>
+        )}
+
         {/* Evaluations (auto-managed) */}
         {evaluations.length > 0 && (
           <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Evaluations]}>
@@ -1132,6 +1262,22 @@ export default function CurriculumTab() {
         onSave={handleRename}
         onClose={() => setRenaming(null)}
       />
+
+      {sessionTarget && (
+        <StrandSessionDialog
+          open
+          config={sessionTarget}
+          isChildProfile={isChildProfile}
+          voiceProfile={{ id: activeChildId ?? '' }}
+          saving={sessionSaving}
+          error={sessionError}
+          onClose={() => {
+            setSessionTarget(null)
+            setSessionError(null)
+          }}
+          onSave={(topic, evidence) => void handleLogSession(topic, evidence)}
+        />
+      )}
 
       <AddActivityDialog
         open={addDialogOpen}

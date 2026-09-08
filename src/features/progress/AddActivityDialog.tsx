@@ -15,6 +15,7 @@ import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
 import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
 import { durationOptionsWithValue } from './durationOptions'
+import { unitLabelForNewActivity } from './strand'
 
 interface AddActivityDialogProps {
   open: boolean
@@ -24,9 +25,26 @@ interface AddActivityDialogProps {
   onClose: () => void
 }
 
+/**
+ * The types this dialog offers.
+ *
+ * A deliberately CURATED subset, not a derived list: `formation` and
+ * `evaluation` are not things a parent adds by hand here (an evaluation added
+ * by hand is UX-204's shape reopened — see `EVALUATION_NOT_OFFERED_REASON`),
+ * and `activity` is covered by App for this door's purposes. So it is spelled
+ * out rather than read off the enum.
+ *
+ * `strand` was added in Codex round 1: UX-281 prepared the unit label for a
+ * strand created here and never added it to this list, so the branch was
+ * unreachable and a parent could not create a strand from Progress → Curriculum
+ * at all — she would have had to find the chat's type-correction chip. That is
+ * a FOURTH place a new `ActivityType` can be orphaned, after the two `Record`
+ * rails that caught it and the card order that did not.
+ */
 const TYPE_OPTIONS: { value: ActivityType; label: string }[] = [
   { value: 'workbook', label: 'Workbook' },
   { value: 'routine', label: 'Routine' },
+  { value: 'strand', label: 'Strand' },
   { value: 'app', label: 'App' },
 ]
 
@@ -98,7 +116,12 @@ export default function AddActivityDialog({
       ...(quickLog ? { quickLog: true } : {}),
       ...(scannable && totalUnits ? { totalUnits: Number(totalUnits) } : {}),
       ...(scannable && currentPosition ? { currentPosition: Number(currentPosition) } : {}),
-      ...(scannable ? { unitLabel: 'lesson' } : {}),
+      // UX-281: one definition of the new row's unit label, so this door and
+      // the chat's addActivity card cannot disagree — a strand needs
+      // 'session', and it is not scannable.
+      ...(unitLabelForNewActivity(type, scannable)
+        ? { unitLabel: unitLabelForNewActivity(type, scannable) }
+        : {}),
     })
     reset()
     onClose()

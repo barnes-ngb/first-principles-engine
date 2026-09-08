@@ -25,6 +25,7 @@ import {
   computeSubjectDistribution,
   dayLogMinuteContributions,
   deriveChildIdFromDocId,
+  emitsPortfolioLink,
   emitsPortfolioMediaUrl,
   entryMinutes,
   generateComplianceReportHtml,
@@ -1577,6 +1578,90 @@ describe('generatePortfolioMarkdown', () => {
     expect(md).toContain('Butterfly Observation')
     expect(md).toContain('Wonder')
     expect(md).toContain('Science')
+  })
+})
+
+// ─── UX-285: a captured link is written into the record ──────────────────────
+//
+// A strand session's "the video we watched" (UX-283) carries an EXTERNAL
+// address in `uri`. `emitsPortfolioMediaUrl` is Photo-only, so the portfolio
+// recorded that a Video artifact existed — title, date, type — and its address
+// nowhere at all. A record of evidence that omits where the evidence is is not
+// a record of it.
+
+describe('the portfolio writes a captured link', () => {
+  const children = [{ id: 'lincoln', name: 'Lincoln' }]
+  const videoArtifact = (overrides: Partial<Artifact> = {}): Artifact => ({
+    id: 'vid-1',
+    childId: 'lincoln',
+    title: 'Ancient Egypt',
+    type: EvidenceType.Video,
+    createdAt: '2026-09-07T15:00:00',
+    uri: 'https://example.test/watch?v=abc',
+    tags: {
+      engineStage: EngineStage.Build,
+      domain: '',
+      subjectBucket: SubjectBucket.SocialStudies,
+      location: 'Home',
+    },
+    ...overrides,
+  })
+
+  it('emits the address in a Links section', () => {
+    const md = generatePortfolioMarkdown(
+      [videoArtifact()],
+      children,
+      '2026-09-01',
+      '2026-09-30',
+    )
+    expect(md).toContain('### Links')
+    expect(md).toContain('[Ancient Egypt](https://example.test/watch?v=abc)')
+  })
+
+  it('links it, never embeds it — an address is not an image', () => {
+    // `![…](url)` renders as a broken image in every reader.
+    const md = generatePortfolioMarkdown(
+      [videoArtifact()],
+      children,
+      '2026-09-01',
+      '2026-09-30',
+    )
+    expect(md).not.toContain('![Ancient Egypt]')
+    expect(md).not.toContain('### Photos')
+  })
+
+  it('says these point outside the archive, which reads offline', () => {
+    const md = generatePortfolioMarkdown(
+      [videoArtifact()],
+      children,
+      '2026-09-01',
+      '2026-09-30',
+    )
+    expect(md).toContain('point outside the archive')
+  })
+
+  it('writes no Links section when there is nothing to link', () => {
+    const md = generatePortfolioMarkdown(
+      [videoArtifact({ type: EvidenceType.Note, uri: undefined })],
+      children,
+      '2026-09-01',
+      '2026-09-30',
+    )
+    expect(md).not.toContain('### Links')
+  })
+
+  // The two predicates answer DIFFERENT questions, and a Codex P1 on PR #1627
+  // was the cost of letting them share an answer: FEAT-121's Dad Lab skip list
+  // is built from `emitsPortfolioMediaUrl` ("was this already rendered as media
+  // above?"), so widening it to cover links would have silently changed what
+  // that section suppresses.
+  it('keeps the embed predicate Photo-only', () => {
+    expect(emitsPortfolioMediaUrl(videoArtifact())).toBe(false)
+    expect(emitsPortfolioLink(videoArtifact())).toBe(true)
+  })
+
+  it('links nothing without an address', () => {
+    expect(emitsPortfolioLink(videoArtifact({ uri: undefined }))).toBe(false)
   })
 })
 

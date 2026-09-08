@@ -33,6 +33,14 @@ import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
+import {
+  logStrandSession,
+  STRAND_SESSION_FAILED_CLEAN,
+  StrandSessionFailure,
+  StrandSessionRefused,
+} from '../../core/firebase/strandSessionWrites'
+import StrandSessionDialog from '../progress/StrandSessionDialog'
+import type { StrandSessionEvidence } from '../progress/strandSession'
 import { useScrollToHash } from '../../core/hooks/useScrollToHash'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
@@ -181,6 +189,9 @@ export default function TodayPage() {
   // resolve their workbook by name/subject match for routed capture + backfill.
   const { configs: activityConfigs } = useActivityConfigs(selectedChildId)
 
+  const [strandSessionId, setStrandSessionId] = useState<string | null>(null)
+  const [strandSessionSaving, setStrandSessionSaving] = useState(false)
+  const [strandSessionError, setStrandSessionError] = useState<string | null>(null)
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
@@ -948,6 +959,63 @@ export default function TodayPage() {
     [setSnackMessage],
   )
 
+  // ── Strand session capture from the day (UX-283) ─────────────────────────
+  // The day-surface sibling of the Curriculum row's button. This page owns the
+  // dialog and the write because a session moves a curriculum row's count, and
+  // that belongs beside the other config writes rather than in a checklist
+  // renderer. Parent-only twice over: kids return `KidTodayView` above this,
+  // and the handler is only ever passed from here.
+  const strandSessionConfig = useMemo(
+    () => activityConfigs.find((c) => c.id === strandSessionId) ?? null,
+    [activityConfigs, strandSessionId],
+  )
+
+  const handleLogStrandSession = useCallback(
+    async (topic: string, evidence: StrandSessionEvidence) => {
+      if (!familyId || !selectedChildId || !strandSessionConfig) return
+      setStrandSessionSaving(true)
+      setStrandSessionError(null)
+      try {
+        const { artifacts } = await logStrandSession({
+          familyId,
+          config: strandSessionConfig,
+          childId: selectedChildId,
+          topic,
+          evidence,
+          dayLogId: today,
+        })
+        // Today's evidence list is filled by a one-shot `getDocs` that reruns
+        // only on a family / child / date change, so a new artifact is invisible
+        // until reload unless the writer adds it — which is what every other
+        // capture path on this page already does (Codex round 2). It also feeds
+        // the checklist's photo resolution.
+        setTodayArtifacts((prev) => [...artifacts, ...prev])
+        setStrandSessionId(null)
+        setSnackMessage({ text: 'Session recorded.', severity: 'success' })
+      } catch (err) {
+        // Says what did NOT happen rather than implying it was recorded, and
+        // leaves the dialog open with her capture intact.
+        setStrandSessionError(
+          // Both of ours carry the parent-facing sentence already: a refusal
+          // states the rule, and a failure states which of the two truths
+          // applies — cleaned up, or evidence left behind that a blind retry
+          // would duplicate (Codex round 1).
+          // One base for every failure that carries its own sentence (Codex
+          // round 2), rather than a growing `instanceof` list here: a refusal
+          // states the rule; a failure states which truth applies — cleaned up,
+          // evidence left behind that a blind retry would duplicate, or the
+          // strand removed while the dialog was open.
+          err instanceof StrandSessionRefused || err instanceof StrandSessionFailure
+            ? err.message
+            : STRAND_SESSION_FAILED_CLEAN,
+        )
+      } finally {
+        setStrandSessionSaving(false)
+      }
+    },
+    [familyId, selectedChildId, strandSessionConfig, today, setSnackMessage],
+  )
+
   // Kid profile early return — render dedicated kid view
   if (isKidProfile && dayLog && activeChild) {
     const weekRange = getWeekRange(parseDateYmd(today) ?? new Date(), 1)
@@ -1173,6 +1241,10 @@ export default function TodayPage() {
           }}
           onWatchOpen={watch.openWatch}
           onAddWatchItem={() => setWatchPickerOpen(true)}
+          onStrandSessionOpen={(configId) => {
+            setStrandSessionError(null)
+            setStrandSessionId(configId)
+          }}
           onMoveItemToDay={canEditLiveDay ? (index) => setMoveTargetIndex(index) : undefined}
           onSwapWatchItem={canEditLiveDay ? (index) => setSwapTargetIndex(index) : undefined}
           onUnifiedCapture={handleUnifiedCapture}
@@ -1310,6 +1382,26 @@ export default function TodayPage() {
         onAddVideo={async (video) => { await addWatchVideo(video) }}
         onManageLibrary={() => navigate('/watch')}
       />
+
+      {/* UX-283 — record a strand session from the day it was planned for. The
+          same dialog the Curriculum row opens, so there is one capture surface
+          and one write. `isChildProfile` is false by construction here: a kid
+          profile returned `KidTodayView` long before this line. */}
+      {strandSessionConfig && (
+        <StrandSessionDialog
+          open
+          config={strandSessionConfig}
+          isChildProfile={false}
+          voiceProfile={{ id: selectedChildId ?? '' }}
+          saving={strandSessionSaving}
+          error={strandSessionError}
+          onClose={() => {
+            setStrandSessionId(null)
+            setStrandSessionError(null)
+          }}
+          onSave={(topic, evidence) => void handleLogStrandSession(topic, evidence)}
+        />
+      )}
 
       {/* FEAT-138 — change which video a row on the LIVE day points at. Same
           picker as the add path, so the retired-video filter (FEAT-129) holds

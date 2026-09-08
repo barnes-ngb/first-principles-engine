@@ -123,6 +123,48 @@ describe('activityTypeChoices', () => {
     expect(choices[0].type).toBe(ActivityType.Workbook)
   })
 
+  // ── The third rail (UX-281) ────────────────────────────────────────────────
+  //
+  // The card order used to be a hand-written array, and adding the seventh
+  // ActivityType walked straight past it while both `Record` rails failed to
+  // compile. It is a rank now, so the enum and the card cannot drift.
+  it('offers a strand — the type is pickable, not only storable', () => {
+    const choices = activityTypeChoices(add())
+    const strand = choices.find((c) => c.type === ActivityType.Strand)
+    expect(strand).toBeDefined()
+    expect(strand?.label).toBe('Strand')
+    expect(strand?.disabledReason).toBeUndefined()
+  })
+
+  // ── Codex round 1: a strand never inherits a workbook's position ──────────
+  it('drops totalUnits and currentPosition when retyped as a strand', () => {
+    // "add Explode the Code 4, he's on lesson 1 of 60" retyped as a strand kept
+    // both fields, the write derived `scannable: true` from their presence, and
+    // the weekly snapshot would have reported "session 1 of 60" — the no-total
+    // model contradicted by the door that creates a strand.
+    const corrected = withActivityType(
+      add({ type: ActivityType.Workbook, totalUnits: 60, currentPosition: 1 }),
+      ActivityType.Strand,
+    )
+    expect(corrected.type).toBe(ActivityType.Strand)
+    expect(corrected).not.toHaveProperty('totalUnits')
+    expect(corrected).not.toHaveProperty('currentPosition')
+  })
+
+  it('keeps the position fields when retyped as anything else', () => {
+    const corrected = withActivityType(
+      add({ type: ActivityType.Workbook, totalUnits: 60, currentPosition: 1 }),
+      ActivityType.Routine,
+    )
+    expect(corrected.totalUnits).toBe(60)
+    expect(corrected.currentPosition).toBe(1)
+  })
+
+  it('keeps the auto-managed type last whatever else is added', () => {
+    const choices = activityTypeChoices(add())
+    expect(choices[choices.length - 1].type).toBe(ActivityType.Evaluation)
+  })
+
   it('refuses workbook on a SHARED add, with the DATA-08 rule’s own words', () => {
     const choices = activityTypeChoices(add({ shared: true }))
     const workbook = choices.find((c) => c.type === ActivityType.Workbook)
