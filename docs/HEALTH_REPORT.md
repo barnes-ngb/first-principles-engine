@@ -22,7 +22,7 @@
 |-------|--------|-------|
 | **Build** | ✅ PASS | `tsc -b && vite build` clean (~24s). Fresh sandbox — `npm ci` at root and in `functions/` required (not a repo issue). |
 | **Lint** | ⚠️ 3 WARNINGS | 0 errors; same 3 `react-hooks/exhaustive-deps` warnings as every prior cycle (`EvaluateChatPage.tsx:295`, `useQuestSession.ts:814`, `useQuestSession.ts:2083`, all involving `sessionTimer`). Not mechanically fixable without reviewing timer semantics. |
-| **Tests (root)** | ❌ **1 FAILING** | 7,788 passing, 1 failing, 0 skipped (537 test files, `src/` + `functions/src/` combined via root `vitest.config.ts`). See **CRITICAL finding** below — a test-infrastructure gap exposed only by a full-history clone. `ci.yml` (PR checks, push to `main`) checks out shallow and is unaffected, **but `deploy.yml` checks out with `fetch-depth: 0` and runs this suite — a push to `deploy` will hit this failure and block the Firebase deployment.** |
+| **Tests (root)** | ❌ **1 FAILING** — **resolved 2026-09-08 (UX-272)** | 7,788 passing, 1 failing, 0 skipped (537 test files, `src/` + `functions/src/` combined via root `vitest.config.ts`). See **CRITICAL finding** below — a test-infrastructure gap exposed only by a full-history clone. `ci.yml` (PR checks, push to `main`) checks out shallow and is unaffected, **but `deploy.yml` checks out with `fetch-depth: 0` and runs this suite — a push to `deploy` will hit this failure and block the Firebase deployment.** |
 | **Tests (functions/)** | ✅ PASS | 1,371 passing, 0 failing (61 test files) — functions' own `vitest.config.ts` (real deps, no Anthropic/OpenAI/firebase-admin stubs) |
 | **TypeScript** | ✅ PASS | `npm run build` (`tsc -b`) + a standalone `npx tsc --noEmit -p tsconfig.app.json` (Phase 3g orphaned-import check) both clean; `functions`' `tsc --noEmit` also clean — no orphaned imports |
 | **`npm run docs:check`** | ✅ PASS | All HARD checks pass (ledger IDs, index resolution, ledger anchors, collection-count spans, evidence kinds, day-write routing, ledger-status, ledger-status-contradiction). 10 SOFT warnings — see **docs:check findings** below. `--fix` made no changes (nothing to auto-fix). |
@@ -33,7 +33,30 @@
 
 ---
 
-## CRITICAL finding: a pre-existing test-suite gap, exposed by this cycle's full clone
+## CRITICAL finding — **RESOLVED 2026-09-08 (UX-272)**
+
+> **Resolution.** The historical-sweep test is **removed**; the sweep survives as an **opt-in probe**
+> (`npm run docs:ledger-sweep`, gated on `LEDGER_HISTORY_SWEEP`) and no longer runs in `npx vitest run`,
+> so `deploy.yml` is unblocked. Owner decision, 2026-09-07: *"Guard the live ledger. Drop the walk over
+> history."* — history is immutable, so a row that read ambiguously in July cannot be fixed now and the
+> assertion could only ever accumulate exceptions. `findContradictoryStatusRows` and both pattern lists
+> are **untouched**, the `holds on the live ledger` sibling remains the guard, and the two false
+> positives the sweep originally found (`FEAT-177`, `ARCH-42`) stay pinned as verbatim fixtures.
+>
+> **Two corrections to the diagnosis below, both measured on a full clone (591 ledger revisions):**
+>
+> 1. The offenders are **not** "all tagged `FEAT-112`". There are **67 hits across 5 rows**: `FEAT-112`
+>    ×57 (the amendment-PR narrative described below), `FEAT-152`/`FEAT-153`/`FEAT-154` ×9 (the house-rule
+>    shape *"SHIPPED — PR #NNNN, date; awaiting human review + merge"*, which the guard fires on **by
+>    design** — see the `FEAT-99` fixture), and `UX-218` ×1, the true positive.
+> 2. The expected list was **never verifiable in the first place**, independently of any workflow. Its
+>    docstring records a sweep of *"134 historical revisions"*; a full clone at that same commit had
+>    **578**, and every offender sits at position **198+** in the newest-first list. The verification saw
+>    a shorter, cleaner history than the assertion would later meet — a sweep's result depends on how
+>    deep the clone happens to be.
+>
+> Neither the house rule (a run flips its own ledger cell before it finishes — DOC-19) nor any historical
+> ledger row was changed. See ledger row **UX-272**.
 
 `scripts/check-docs-alignment.test.mjs` → `findContradictoryStatusRows > holds across every historical revision of the real ledger` **fails** with 66 "offenders" instead of the expected 1.
 
@@ -204,7 +227,8 @@ Companion pass found nothing further in Rules 1, 2, 3, or 5 (no undocumented tas
 
 ### Needs Human Attention
 
-- **NEW this cycle, and will block the next deploy — a latent test-suite gap, not an app regression, but not CI-invisible either.** See the **CRITICAL finding** section above in full: `check-docs-alignment.test.mjs`'s historical-ledger-replay test fails against a full git history (66 false positives on old `FEAT-112` rows). `ci.yml` (PR checks, push to `main`) checks out shallow and self-skips the assertion — unaffected. **`deploy.yml` checks out with `fetch-depth: 0` and runs the full suite — the next push to `deploy` will hit this failure and the Firebase deploy will not run.** This surfaced only because this cycle unshallowed the repo for accurate commit-count stats; a human needs to narrow the `LANDED_STATUS_PATTERNS`/`OPEN_PR_STATUS_PATTERNS` regexes (or the test's expected-offenders list) to handle the "amendment PR, original already merged" narrative shape **before the next `deploy`-branch push**, not at leisure.
+- ~~**NEW this cycle, and will block the next deploy — a latent test-suite gap, not an app regression, but not CI-invisible either.**~~ **DONE — UX-272, 2026-09-08.** The historical-ledger-replay test is removed and the sweep is now the opt-in `npm run docs:ledger-sweep` probe, so `npx vitest run` is green and `deploy.yml` is unblocked. Neither regex was narrowed: the offenders are not a pattern gap (57 of them are one `FEAT-112` cell counted once per revision it survived in, and 9 more are the house-rule *"awaiting human review + merge"* shape the guard catches **deliberately**), and history cannot be edited to satisfy an assertion. See the **CRITICAL finding** section above for the corrected numbers and the two reasons the sweep could not hold.
+- **Any other history-sensitive test has the same blind spot.** `ci.yml` runs the suite on a shallow clone and `deploy.yml` on a full one, so **the two workflows do not run the same tests** — a test that reads git history is measured by only one of them. Noted, not swept for, by UX-272.
 - **`npm audit --production` regressed from 0→1 (root) and 0→3 (functions) moderate-severity findings** this cycle (`fflate` on root; `qs`/`body-parser`/`express` chain on functions). All moderate, all have non-breaking `npm audit fix` available. Per policy (Rule 8: moderate-only → note, don't fix), left for a human to apply `npm audit fix` at their discretion — non-breaking, should be safe, but is a dependency-tree change outside this audit's mechanical-fix scope.
 - **`CLAUDE.md`'s size notes for `chat.ts`, `BookEditorPage.tsx`, and `PlannerChatPage.tsx` are now stale by 410L, 301L, and 170L respectively** — see Decomposition Candidates. Not auto-fixed — `CLAUDE.md` prose is excluded from this audit's write scope by policy.
 - **`functions/src/ai/chat.ts` grew +410 lines this cycle (2,641→3,051L)**, the single largest jump of any tracked file. Worth a decomposition look given it was already flagged as a known-debt file at a much smaller size.

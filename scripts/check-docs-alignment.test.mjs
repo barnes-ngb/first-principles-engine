@@ -468,68 +468,118 @@ describe('findContradictoryStatusRows', () => {
     expect(findContradictoryStatusRows(md)).toEqual([])
   })
 
-  it('holds across every historical revision of the real ledger', () => {
-    // The claim this check rests on is empirical, so this measures it rather
-    // than restating it: replay the guard over every commit that touched the
-    // ledger. Exactly one revision may hit — 1a7c568, the cell that turned
-    // `main` red — and any other hit is a false positive on a row that was
-    // correct at the time, which is the failure mode that gets a rule deleted
-    // rather than fixed. It is how the FEAT-177 pattern was found.
-    //
-    // SKIPPED ON A SHALLOW CLONE, and that is not a cop-out (Codex round 2,
-    // P1). CI checks out with `actions/checkout@v4` and no `fetch-depth`, so
-    // the runner has depth 1: `git log` returns ONE revision there, and an
-    // unconditional assertion would have failed every CI run — on the very PR
-    // whose purpose is unbreaking CI. Verified against a real `--depth 1`
-    // clone, not assumed.
-    //
-    // The alternative — adding `fetch-depth: 0` to the test job — buys one
-    // test a full-history fetch on every run of this workflow, and buys
-    // nothing else. The two false positives this sweep found are pinned above
-    // as verbatim fixtures, so the REGRESSION guarantee is CI-safe and lives
-    // there; this stays a deep probe for anyone running it with history, which
-    // is where a NEW bad pattern would be discovered.
-    const repo = join(import.meta.dirname, '..')
-    const run = (args) =>
-      execFileSync('git', args, { cwd: repo, maxBuffer: 1 << 28 }).toString()
+  // ── The history sweep is a PROBE, not a test (UX-272) ─────────────────────
+  //
+  // It used to be an unconditional `it()` asserting that exactly one historical
+  // revision hit the guard. That assertion was wrong twice over, and it turned
+  // every push to `deploy` red.
+  //
+  //  1. It self-skipped on a shallow clone and its comment named "CI" as the
+  //     justification. True of `ci.yml` (three checkouts, no `fetch-depth`) —
+  //     and FALSE of `.github/workflows/deploy.yml:25`, which sets
+  //     `fetch-depth: 0` so the "functions changed" diff is reliable. The one
+  //     workflow the skip was never measured against is the one that hands the
+  //     sweep full history, so it ran there and failed there. Name the
+  //     workflow, not the concept: this repo has two that run the suite.
+  //
+  //  2. Its expected list depended on how deep the clone happened to be. Its
+  //     docstring recorded a sweep of "134 historical revisions"; a full clone
+  //     at that same commit had 578, and EVERY offender below sits at position
+  //     198+ in the newest-first revision list. The verification saw a shorter,
+  //     cleaner history than the assertion would later meet.
+  //
+  // The deeper reason it is gone: history is immutable. A row that read
+  // ambiguously in July cannot be fixed now, so the assertion could only ever
+  // grow exceptions, and every exception makes the guard mean less. The check
+  // with teeth is `holds on the live ledger`, below — and it passes.
+  //
+  // WHAT A FULL-HISTORY SWEEP FINDS TODAY (measured 2026-09-08, 591 ledger
+  // revisions, 67 hits across 5 rows). Recognise these before diagnosing them:
+  //
+  //  · FEAT-112 — 57 hits, ONE cell text seen once per revision it survived in:
+  //      "**MERGED (PR #1607, 2026-07-20). AMENDMENT PR open — do not merge**"
+  //    A self-consistent narrative: the original work merged, and a *later*
+  //    amendment PR was separately open. It matches a LANDED pattern and an
+  //    OPEN-PR pattern because both halves are true of different things. This
+  //    is the docstring's own named failure mode — "a false positive on a row
+  //    that was correct at the time" — landing on the guard that named it.
+  //
+  //  · FEAT-152 / FEAT-153 / FEAT-154 — 9 hits, the house-rule shape:
+  //      "**SHIPPED — PR #NNNN, <date>; awaiting human review + merge**"
+  //    A run flipping its own cell on the final pre-merge commit. The guard
+  //    fires on this BY DESIGN (see the FEAT-99 fixture above), so these are
+  //    true positives against an immutable record — which is precisely why the
+  //    house rule is not what changes here.
+  //
+  //  · UX-218 — 1 hit, `1a7c56858f`: the cell that actually turned `main` red.
+  //
+  // Kept as an opt-in probe because it still earns its keep for one person: the
+  // one editing LANDED_STATUS_PATTERNS / OPEN_PR_STATUS_PATTERNS, who wants to
+  // see what a new regex sweeps up. It lives here rather than in a standalone
+  // script so it sits beside the fixtures and the function it probes — a second
+  // file would be a second copy of the traversal to keep in step.
+  //
+  //   npm run docs:ledger-sweep     (sets LEDGER_HISTORY_SWEEP; needs full history)
+  //
+  // It REPORTS and asserts nothing about the historical set. Freezing that set
+  // is the bug this replaced.
+  it.skipIf(!process.env.LEDGER_HISTORY_SWEEP)(
+    'PROBE (opt-in): reports every historical revision the guard fires on',
+    () => {
+      const repo = join(import.meta.dirname, '..')
+      const run = (args) =>
+        execFileSync('git', args, { cwd: repo, maxBuffer: 1 << 28 }).toString()
 
-    // "Not shallow" is not proof that every historical object is readable
-    // (Codex round 3, P2): a partial or offline clone reports
-    // `--is-shallow-repository false` and still fails the traversal itself. So
-    // the traversal is guarded too — capability-checked, not assumed.
-    let revs
-    try {
-      if (run(['rev-parse', '--is-shallow-repository']).trim() === 'true') return
-      revs = run(['log', '--format=%H', '--', 'docs/review/REVIEW_HOME_BASE.md'])
+      // Opting in and silently measuring nothing is the one outcome worth
+      // failing on: a shallow or partial clone reads as a clean sweep. "Not
+      // shallow" is not proof the objects are readable, so the traversal is
+      // capability-checked rather than assumed.
+      expect(
+        run(['rev-parse', '--is-shallow-repository']).trim(),
+        'LEDGER_HISTORY_SWEEP needs full history — run `git fetch --unshallow` first',
+      ).toBe('false')
+
+      const revs = run(['log', '--format=%H', '--', 'docs/review/REVIEW_HOME_BASE.md'])
         .trim()
         .split('\n')
         .filter(Boolean)
-    } catch {
-      return // history unavailable — the fixtures above carry the guarantee
-    }
 
-    // Keep the REVISION alongside the id (Codex round 3, P2). Reducing to a set
-    // of ids alone would let a future pattern change match a *different*,
-    // historically valid UX-218 cell and still read `['UX-218']` — the probe
-    // would pass while silently covering a new false positive.
-    const offenders = []
-    for (const rev of revs) {
-      let md
-      try {
-        md = run(['show', `${rev}:docs/review/REVIEW_HOME_BASE.md`])
-      } catch {
-        continue // one unreadable tree is not a finding
+      const byId = new Map()
+      let unreadable = 0
+      for (const rev of revs) {
+        let md
+        try {
+          md = run(['show', `${rev}:docs/review/REVIEW_HOME_BASE.md`])
+        } catch {
+          unreadable += 1
+          continue
+        }
+        for (const row of findContradictoryStatusRows(md)) {
+          if (!byId.has(row.id)) byId.set(row.id, [])
+          byId.get(row.id).push({ rev: rev.slice(0, 10), status: row.status })
+        }
       }
-      for (const row of findContradictoryStatusRows(md)) {
-        offenders.push(`${rev.slice(0, 10)}:${row.id}`)
-      }
-    }
 
-    // Exactly one revision, exactly one row: the commit that introduced the
-    // cell this PR fixes. Any additional match — same row or not — is a false
-    // positive on a row that was correct at the time.
-    expect(offenders).toEqual(['1a7c56858f:UX-218'])
-  })
+      const report = [
+        `swept ${revs.length} ledger revision(s)` +
+          (unreadable ? ` (${unreadable} unreadable tree(s) skipped)` : ''),
+      ]
+      for (const [id, hits] of byId) {
+        report.push(`\n${id} — ${hits.length} hit(s), newest ${hits[0].rev}`)
+        for (const status of new Set(hits.map((h) => h.status))) {
+          report.push(`  ${status}`)
+        }
+      }
+      console.log(report.join('\n')) // the probe's entire product is this report
+
+      // A sweep that read one revision measured nothing.
+      expect(revs.length).toBeGreaterThan(1)
+    },
+    // One `git show` per ledger revision — ~10s at 591 revisions and growing
+    // with the ledger, so the default 5s would fail on the traversal's own
+    // length rather than on anything it found.
+    120_000,
+  )
 
   it('holds on the live ledger', () => {
     const md = readFileSync(
