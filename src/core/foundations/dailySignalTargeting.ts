@@ -35,6 +35,7 @@ import {
   bridgeCoveredConcepts,
   parseNativePositionFromUnit,
   resolveSyncNativePosition,
+  bridgeNameForActivity,
   workbookBridgeForSource,
 } from './workbookBridge'
 import { conceptsForTags } from './tagConceptBridge'
@@ -59,6 +60,8 @@ export type StuckSignalItem = Pick<ChecklistItem, 'workbookConfigId' | 'skillTag
 export interface StuckSignalConfig {
   id: string
   name?: string | null
+  /** UX-280 — the other names this row answers to; the bridge tries each. */
+  aliases?: string[] | null
   curriculum?: string | null
   currentPosition?: number | null
 }
@@ -114,8 +117,10 @@ function resolveWorkbookConcepts(
 
   // Resolve a bridge by the workbook's free-text name (tolerant FEAT-61 normalizer).
   // Unmapped source ⇒ [] (the curation gate — coverage lights up as bridges land).
-  const name = activityConfig.name ?? activityConfig.curriculum
-  const bridge = workbookBridgeForSource(name ?? undefined)
+  // UX-280: try every name the row answers to, so a rename does not silently
+  // switch this resolver off — the publisher's name is now an alternate.
+  const name = bridgeNameForActivity(activityConfig)
+  const bridge = workbookBridgeForSource(name)
   if (!bridge) return []
 
   // No tracked position ⇒ nothing to address.

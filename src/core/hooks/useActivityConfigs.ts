@@ -116,6 +116,7 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
         {
           childId: updates.childId ?? existing?.childId,
           name: updates.name ?? existing?.name,
+          aliases: updates.aliases ?? existing?.aliases,
           curriculum: updates.curriculum ?? existing?.curriculum,
         },
         position,

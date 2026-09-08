@@ -23,7 +23,11 @@
 import { duplicateActivityNotice } from '../shelly-chat/curriculumActions'
 import type { ChatActivityConfig } from '../shelly-chat/useShellyChatActions'
 import type { ActivityConfig } from '../../core/types/planning'
-import { MAX_ACTIVITY_ALIASES, matchesActivityName, normalizeAliases } from '../../core/utils/activityNames'
+import {
+  MAX_ACTIVITY_ALIASES,
+  matchesActivityName,
+  normalizeAliases,
+} from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 
 /** What a rename would write, or why it would write nothing. */
@@ -76,6 +80,12 @@ export const COMPLETED_NAME_REFUSAL =
 export function planRename(
   config: Pick<ActivityConfig, 'id' | 'name' | 'completed'> & { aliases?: string[] },
   nextName: string,
+  /**
+   * The alternates as edited, when a caller is editing them — the STORED list
+   * stays on `config`, so this function can tell a change from a no-change.
+   * Omitted means "leave them as they are".
+   */
+  nextAliases?: readonly string[],
   siblings: readonly ChatActivityConfig[] = [],
 ): RenameActivityPlan {
   if (config.completed) return { ...NOTHING, refusal: COMPLETED_NAME_REFUSAL }
@@ -86,26 +96,40 @@ export function planRename(
   const previous = (config.name ?? '').trim()
   // Byte-identical is not a rename. A change of spacing, case or punctuation IS
   // one — she typed it — even though `nameKey` cannot tell the two apart.
-  if (trimmed === previous) return NOTHING
+  const nameChanged = trimmed !== previous
 
   // The old name is worth keeping only when it is a DIFFERENT key. Re-spelling
   // "math k" as "Math K" leaves every matcher answering exactly as before, so
   // storing the old spelling would spend a capped slot on a name that already
   // matches.
-  const carriesOldName = Boolean(nameKey(previous)) && nameKey(previous) !== nameKey(trimmed)
+  const carriesOldName =
+    nameChanged && Boolean(nameKey(previous)) && nameKey(previous) !== nameKey(trimmed)
+  const stored = config.aliases ?? []
+  const edited = nextAliases ?? stored
   const aliases = normalizeAliases(
-    carriesOldName ? [...(config.aliases ?? []), previous] : (config.aliases ?? []),
+    carriesOldName ? [...edited, previous] : edited,
     trimmed,
     MAX_ACTIVITY_ALIASES,
   )
+
+  // This plans the whole save, not only the rename. Adding an alternate without
+  // touching the name is a first-class thing to want — the cover's full title
+  // is the commonest one — so a save with an unchanged name and a changed list
+  // is writable, and a save that changes neither writes nothing.
+  if (!nameChanged && sameNames(aliases, stored)) return NOTHING
 
   return {
     name: trimmed,
     aliases,
     refusal: '',
-    duplicateNotice: renameDuplicateNotice(config.id, trimmed, siblings),
+    duplicateNotice: nameChanged ? renameDuplicateNotice(config.id, trimmed, siblings) : '',
     carriesOldName,
   }
+}
+
+/** Two alternate-name lists, compared as they are stored: order and text. */
+function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, i) => value === b[i])
 }
 
 /**
@@ -126,4 +150,24 @@ export function renameDuplicateNotice(
     (c) => c.id !== configId && !c.completed && matchesActivityName(c, nextName),
   )
   return duplicateActivityNotice(matches)
+}
+
+// ── The alternates, in words (UX-280) ────────────────────────────────────────
+
+/** The owner asked for "tags of alternate names beneath the curriculum". */
+export const ALIAS_SECTION_LABEL = 'Also known as'
+
+/**
+ * What the field is FOR, said in terms of the thing it actually protects.
+ *
+ * "Alias" is a developer's word for it. What a parent needs to know is that
+ * this is where the long name on the cover goes, and that putting it here is
+ * what lets a photo of that cover still find this row.
+ */
+export const ALIAS_FIELD_HELP =
+  "What else this is called — the full title on the cover, say. A scan of the book will match any of these."
+
+/** The line at the cap, naming the number rather than just refusing. */
+export function aliasCapNotice(cap: number = MAX_ACTIVITY_ALIASES): string {
+  return `That's ${cap} names, which is the most one activity can have. Remove one to add another.`
 }

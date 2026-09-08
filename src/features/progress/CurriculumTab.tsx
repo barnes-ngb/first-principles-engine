@@ -49,9 +49,11 @@ import { isWorkbookMatch, useScanToActivityConfig } from '../../core/hooks/useSc
 import type { ActivityConfig, CertificateScanResult, ScanRecord, ScanResult } from '../../core/types'
 import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
+import { activityNames } from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
 import RenameActivityDialog from './RenameActivityDialog'
+import { ALIAS_SECTION_LABEL } from './renameActivity'
 import EditRoutinesDialog from './EditRoutinesDialog'
 import {
   CURRICULUM_SECTION_TITLE,
@@ -131,19 +133,18 @@ export default function CurriculumTab() {
     (config: ActivityConfig): ScanRecord[] => {
       // UX-205: the one shared name-comparison rule, not a fourth copy of it.
       const norm = nameKey
-      const configName = norm(config.name)
-      const configCurriculum = norm(config.curriculum)
+      // UX-280: every name this row answers to, plus the publisher slot. A card
+      // whose name she shortened would otherwise show none of its own scans —
+      // they were detected under the cover's title, which is now an alternate.
+      const configKeys = [...activityNames(config), config.curriculum ?? '']
+        .map(norm)
+        .filter(Boolean)
       return recentScans.filter((s) => {
         if (!s.results || s.results.pageType === 'certificate') return false
         const scanSubject = norm(s.results.subject)
         const detected = s.results.curriculumDetected
         const scanCurr = norm(detected?.name)
-        return (
-          (configName && scanSubject.includes(configName)) ||
-          (configName && scanCurr.includes(configName)) ||
-          (configCurriculum && scanCurr.includes(configCurriculum)) ||
-          (configCurriculum && scanSubject.includes(configCurriculum))
-        )
+        return configKeys.some((key) => scanSubject.includes(key) || scanCurr.includes(key))
       })
     },
     [recentScans],
@@ -736,7 +737,13 @@ export default function CurriculumTab() {
                 >
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
@@ -772,7 +779,13 @@ export default function CurriculumTab() {
                 >
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
@@ -788,7 +801,13 @@ export default function CurriculumTab() {
                 <ListItem key={config.id}>
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
@@ -1230,6 +1249,23 @@ interface WorkbookCardProps {
   scanning: boolean
 }
 
+/**
+ * The row's other names, small, beneath it (UX-280) — the owner's "tags of
+ * alternate names beneath the curriculum".
+ *
+ * Quiet on purpose: these are a matching aid, not a second title. A row with
+ * none renders nothing extra, which is every row that exists today.
+ */
+function ActivityAliases({ config }: { config: ActivityConfig }) {
+  const aliases = activityNames(config).slice(1)
+  if (aliases.length === 0) return null
+  return (
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+      {ALIAS_SECTION_LABEL}: {aliases.join(' · ')}
+    </Typography>
+  )
+}
+
 function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCapture, scanning }: WorkbookCardProps) {
   const progress =
     config.currentPosition && config.totalUnits
@@ -1248,6 +1284,7 @@ function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCaptu
             {config.subjectBucket} · {ActivityFrequencyLabel[config.frequency] ?? config.frequency}{' '}
             · {config.defaultMinutes}m
           </Typography>
+          <ActivityAliases config={config} />
         </Box>
         <IconButton size="small" onClick={(e) => onOpenMenu(e, config)}>
           <MoreVertIcon fontSize="small" />

@@ -145,6 +145,33 @@ describe('CurriculumTab — rename (UX-279)', () => {
     expect(Object.keys(updates).sort()).toEqual(['aliases', 'name'])
   })
 
+  it('adds an alternate WITHOUT a rename — the commonest thing she will do', async () => {
+    // The cover's full title belongs on a row she never renames. If reaching
+    // Save required changing the name, that would be impossible.
+    const user = userEvent.setup()
+    render(<CurriculumTab />)
+    await openOverflowMenu(user)
+    await user.click(await screen.findByText('Rename'))
+
+    await user.type(await screen.findByLabelText('Add another name'), 'SGAB Math K')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(mockUpdateConfig).toHaveBeenCalledTimes(1))
+    expect(mockUpdateConfig).toHaveBeenCalledWith('cfg-1', {
+      name: COVER_NAME, // unchanged
+      aliases: ['SGAB Math K'],
+    })
+  })
+
+  it('a save that changes neither the name nor the alternates writes nothing', async () => {
+    const user = userEvent.setup()
+    render(<CurriculumTab />)
+    await openOverflowMenu(user)
+    await user.click(await screen.findByText('Rename'))
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
   it('is parent-only, on capability', async () => {
     mockIsChildProfile.mockReturnValue(true)
     const user = userEvent.setup()

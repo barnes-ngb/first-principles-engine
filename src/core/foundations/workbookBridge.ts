@@ -33,6 +33,7 @@ import type {
   LearnerModel,
   OpenQuestion,
 } from '../types/learnerModel'
+import { activityNames, type NamedActivity } from '../utils/activityNames'
 
 /**
  * Local flat node lookup, built from the domain graphs directly (NOT the `./index`
@@ -477,4 +478,36 @@ export function applyBridgeCoverageToModel(
     model: { ...model, conceptStates, openQuestions, changeFeed, updatedAt: nowIso },
     changedConceptIds,
   }
+}
+
+/**
+ * Which of an activity's names to hand the bridge (UX-280).
+ *
+ * The bridge matches a config against a curated table of published curricula,
+ * so what it wants is the PUBLISHER's name — and after a rename that name has
+ * moved into the alternates. `syncActivityPositionToModel` and the FEAT-68/69
+ * daily-signal resolver both used to take `name ?? curriculum` and stop there,
+ * so renaming "The Good and the Beautiful Math" to "Math" would silently switch
+ * off the position→learner-model sync and the stuck-signal→concept mapping. No
+ * error, no log line: the bridge would simply report no bridge, forever.
+ *
+ * Tries each name the row answers to, in order, and returns the first that
+ * resolves a bridge unambiguously. When none does, returns what the callers
+ * passed before — so a config with no alternates, and a config whose names
+ * match nothing, both behave exactly as they did, `ambiguous` reporting
+ * included.
+ *
+ * **It widens WHICH names are tried, never HOW they are matched.**
+ * `matchWorkbookBridge` is untouched: no alias participates that would not have
+ * matched had it been typed into the name field.
+ */
+export function bridgeNameForActivity(
+  config: (NamedActivity & { curriculum?: string | null }) | null | undefined,
+): string | undefined {
+  if (!config) return undefined
+  const fallback = config.name ?? config.curriculum ?? undefined
+  for (const candidate of [...activityNames(config), config.curriculum ?? '']) {
+    if (candidate && workbookBridgeForSource(candidate)) return candidate
+  }
+  return fallback ?? undefined
 }

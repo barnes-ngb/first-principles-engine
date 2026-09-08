@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest'
 import type { ActivityConfig } from '../../core/types/planning'
 import { COMPLETED_NAME_REFUSAL, EMPTY_NAME_REFUSAL, planRename } from './renameActivity'
 
+/** The publisher's name on the cover. */
+const COVER_NAME = 'Simply Good and Beautiful Math K — Course Book'
+
 const config = (over: Partial<ActivityConfig> = {}): ActivityConfig =>
   ({
     id: 'cfg-math',
-    name: 'Simply Good and Beautiful Math K — Course Book',
+    name: COVER_NAME,
     type: 'workbook',
     subjectBucket: 'Math',
     defaultMinutes: 30,
@@ -24,20 +27,41 @@ describe('planRename', () => {
   it("keeps the old name as an alternate, so the cover still finds it", () => {
     const plan = planRename(config(), 'Math K')
     expect(plan.name).toBe('Math K')
-    expect(plan.aliases).toEqual(['Simply Good and Beautiful Math K — Course Book'])
+    expect(plan.aliases).toEqual([COVER_NAME])
     expect(plan.carriesOldName).toBe(true)
     expect(plan.refusal).toBe('')
   })
 
   it('appends the old name to alternates it already had', () => {
     const plan = planRename(config({ aliases: ['SGAB Math'] }), 'Math K')
-    expect(plan.aliases).toEqual(['SGAB Math', 'Simply Good and Beautiful Math K — Course Book'])
+    expect(plan.aliases).toEqual(['SGAB Math', COVER_NAME])
   })
 
-  it('writes nothing when the name is unchanged', () => {
-    const plan = planRename(config({ name: 'Math K' }), 'Math K')
+  it('writes nothing when neither the name nor the alternates changed', () => {
+    const plan = planRename(config({ name: 'Math K', aliases: [COVER_NAME] }), 'Math K')
     expect(plan.name).toBeNull()
     expect(plan.aliases).toBeNull()
+  })
+
+  it('saves an added alternate on its own, with the name left as it was', () => {
+    // The commonest thing she will do is put the cover's full title on a row
+    // she never renames. Requiring a rename to reach the save would make that
+    // impossible.
+    const plan = planRename(config({ name: 'Math K', aliases: [COVER_NAME] }), 'Math K', [
+      COVER_NAME,
+      'SGAB Math',
+    ])
+    expect(plan.name).toBe('Math K')
+    expect(plan.aliases).toEqual([COVER_NAME, 'SGAB Math'])
+    expect(plan.carriesOldName).toBe(false)
+    // Nothing was renamed, so there is nothing to warn about renaming ONTO.
+    expect(plan.duplicateNotice).toBe('')
+  })
+
+  it('saves a REMOVED alternate too', () => {
+    const plan = planRename(config({ name: 'Math K', aliases: [COVER_NAME] }), 'Math K', [])
+    expect(plan.name).toBe('Math K')
+    expect(plan.aliases).toEqual([])
   })
 
   it('re-spelling is a real rename but spends no alternate slot', () => {
@@ -67,7 +91,7 @@ describe('planRename', () => {
     const siblings = [
       { id: 'cfg-other', name: 'Math K', childId: 'lincoln', defaultMinutes: 20, frequency: 'daily' as const },
     ]
-    const plan = planRename(config(), 'Math K', siblings)
+    const plan = planRename(config(), 'Math K', undefined, siblings)
     expect(plan.duplicateNotice).toContain('You already have "Math K"')
     expect(plan.duplicateNotice).toContain('20m')
     expect(plan.name).toBe('Math K') // a notice, never a block
@@ -84,12 +108,12 @@ describe('planRename', () => {
         frequency: 'daily' as const,
       },
     ]
-    expect(planRename(config(), 'Math K', siblings).duplicateNotice).toContain('You already have')
+    expect(planRename(config(), 'Math K', undefined, siblings).duplicateNotice).toContain('You already have')
   })
 
   it('never notices itself, or a completed sibling', () => {
     const self = { id: 'cfg-math', name: 'Math K', childId: 'lincoln', defaultMinutes: 30, frequency: 'daily' as const }
     const done = { id: 'cfg-old', name: 'Math K', completed: true, childId: 'lincoln', defaultMinutes: 30, frequency: 'daily' as const }
-    expect(planRename(config(), 'Math K', [self, done]).duplicateNotice).toBe('')
+    expect(planRename(config(), 'Math K', undefined, [self, done]).duplicateNotice).toBe('')
   })
 })

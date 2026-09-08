@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -11,6 +13,8 @@ import Typography from '@mui/material/Typography'
 
 import type { ChatActivityConfig } from '../shelly-chat/useShellyChatActions'
 import type { ActivityConfig } from '../../core/types/planning'
+import { MAX_ACTIVITY_ALIASES, normalizeAliases } from '../../core/utils/activityNames'
+import { ALIAS_FIELD_HELP, ALIAS_SECTION_LABEL, aliasCapNotice } from './renameActivity'
 import { planRename } from './renameActivity'
 
 interface RenameActivityDialogProps {
@@ -60,14 +64,32 @@ function RenameActivityDialogBody({
   onClose,
 }: RenameActivityDialogProps & { config: ActivityConfig }) {
   const [name, setName] = useState(config.name)
+  /** The alternates as edited here — the carried old name is added at save. */
+  const [aliases, setAliases] = useState<string[]>(() => config.aliases ?? [])
+  const [draftAlias, setDraftAlias] = useState('')
 
-  const plan = useMemo(() => planRename(config, name, siblings), [config, name, siblings])
+  const plan = useMemo(
+    () => planRename(config, name, aliases, siblings),
+    [config, aliases, name, siblings],
+  )
 
   const canSave = plan.name != null && plan.refusal === ''
+  /** What the alternates will be after this save — what the list must show. */
+  const resolvedAliases = plan.aliases ?? normalizeAliases(aliases, name)
+  const atCap = resolvedAliases.length >= MAX_ACTIVITY_ALIASES
+
+  const addAlias = () => {
+    const next = normalizeAliases([...aliases, draftAlias], name)
+    setAliases(next)
+    setDraftAlias('')
+  }
 
   return (
     <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Rename this activity</DialogTitle>
+      {/* The menu item says "Rename" because that is the primary action and a
+          phone menu has no room for the rest — but adding an alternate without
+          renaming is first-class, so the title covers both once it is open. */}
+      <DialogTitle>Names for this activity</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <TextField
@@ -90,6 +112,50 @@ function RenameActivityDialogBody({
               photo of the cover still finds it.
             </Alert>
           ) : null}
+
+          {/* UX-280: "tags of alternate names beneath the curriculum" — the
+              owner's own words. These are what a scan is matched against, so
+              the cover's full title can live here while the row reads "Math K". */}
+          <Box>
+            <Typography variant="subtitle2" gutterBottom>
+              {ALIAS_SECTION_LABEL}
+            </Typography>
+            {resolvedAliases.length > 0 ? (
+              <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
+                {resolvedAliases.map((alias) => (
+                  <Chip
+                    key={alias}
+                    label={alias}
+                    size="small"
+                    onDelete={() => setAliases(aliases.filter((a) => a !== alias))}
+                  />
+                ))}
+              </Stack>
+            ) : null}
+            <Stack direction="row" spacing={1} alignItems="flex-start">
+              <TextField
+                label="Add another name"
+                size="small"
+                fullWidth
+                value={draftAlias}
+                disabled={atCap}
+                onChange={(e) => setDraftAlias(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  addAlias()
+                }}
+                helperText={atCap ? aliasCapNotice() : ALIAS_FIELD_HELP}
+              />
+              <Button
+                onClick={addAlias}
+                disabled={atCap || draftAlias.trim() === ''}
+                sx={{ mt: 0.5 }}
+              >
+                Add
+              </Button>
+            </Stack>
+          </Box>
 
           <Typography variant="caption" color="text.secondary">
             Renaming changes what this is called from now on. Days you have already logged keep the

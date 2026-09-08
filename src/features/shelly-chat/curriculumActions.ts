@@ -19,6 +19,7 @@
 import { WORKBOOK_OWNER_REASON } from '../../core/firebase/activityConfigWrites'
 import type { ChatAction } from '../../core/types'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
+import { matchesActivityName } from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 import { describeActivityType } from './activityTypeChoices'
 import type { ChatActivityConfig } from './useShellyChatActions'
@@ -92,7 +93,11 @@ export const CURRICULUM_NOTICES = {
  * "Sight word games", a second "Dad's Lab: micro:bit" — each one raising the day
  * budget by its own minutes, so the app never saw the number as wrong.
  *
- * **Exact-key match only.** {@link nameKey} drops punctuation and case, so
+ * **Exact-key match, across every name the row answers to.** Since UX-280 a
+ * config can carry alternates, and {@link matchesActivityName} checks the name
+ * and each of those — so an add naming the cover matches a row she renamed away
+ * from it. The comparison itself is unchanged: exact on `nameKey`, one name at
+ * a time. {@link nameKey} drops punctuation and case, so
  * "Booster cards" matches "booster cards!" — but "The Good and the Beautiful
  * Math" does NOT match "Good and the Beautiful Math", because those differ by a
  * real word. A looser near-match would catch that pair and would also catch
@@ -127,7 +132,11 @@ export function findDuplicateActivities(
   return configs.filter(
     (c) =>
       !c.completed &&
-      nameKey(c.name) === key &&
+      // UX-280: a row also counts when the add matches one of its ALTERNATES —
+      // adding "Simply Good and Beautiful Math K" beside a row she renamed to
+      // "Math K" is the duplicate this notice exists to name. Still exact on
+      // `nameKey`, alias by alias: alternates widen what is compared, never how.
+      matchesActivityName(c, action.name) &&
       (audience === 'both' || c.childId === 'both' || c.childId === audience),
   )
 }

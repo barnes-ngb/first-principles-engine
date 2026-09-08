@@ -91,9 +91,12 @@ export function useScanToActivityConfig() {
         )
         const match = configsSnap.docs.find((d) => {
           const config = d.data()
-          return (
-            isWorkbookMatch(config.name ?? '', curriculumName, config.subjectBucket, subject) ||
-            isWorkbookMatch(config.curriculum ?? '', curriculumName, config.subjectBucket, subject)
+          // UX-280: the name, every alternate, and the publisher slot. A rename
+          // moved the cover's title into the alternates, and the cover is still
+          // what a photo of it says — so matching only `name` here is exactly
+          // the break the alternates exist to prevent.
+          return [...activityNames(config), config.curriculum ?? ''].some((candidate) =>
+            isWorkbookMatch(candidate, curriculumName, config.subjectBucket, subject),
           )
         })
         if (match) {

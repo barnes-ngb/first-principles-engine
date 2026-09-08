@@ -22,6 +22,7 @@
 
 import { doc, updateDoc, writeBatch } from 'firebase/firestore'
 
+import { bridgeNameForActivity } from '../foundations/workbookBridge'
 import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
 import type { ActivityFrequency, ActivityType, SubjectBucket } from '../types/enums'
 import { activityConfigsCollection, db } from './firestore'
@@ -141,6 +142,8 @@ export async function completeActivityConfig(
  */
 export interface PositionSyncTarget {
   name?: string
+  /** UX-280 — the other names this row answers to; the bridge tries each. */
+  aliases?: string[]
   curriculum?: string
   childId?: string
 }
@@ -160,7 +163,10 @@ export function syncActivityPositionToModel(
   if (!familyId || !target) return
   const { childId } = target
   if (!childId || childId === 'both') return
-  const workbookName = target.name ?? target.curriculum
+  // UX-280: the bridge wants the PUBLISHER's name, and a rename moved that into
+  // the alternates — so try every name this row answers to, and fall back to
+  // what this line used to pick when none of them resolves a bridge.
+  const workbookName = bridgeNameForActivity(target)
   if (!workbookName) return
   void syncWorkbookPositionToModel(
     familyId,
