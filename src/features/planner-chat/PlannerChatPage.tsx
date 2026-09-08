@@ -1413,6 +1413,13 @@ Return as JSON:
         messages: aiMessages,
       })
 
+      // UX-269: read the boundary BEFORE deciding whether the plan parsed. A
+      // declined ask can arrive either way — as prose the plan parser rejects
+      // (Codex round 2, P2) or, now that the prompt tells the model to plan the
+      // week anyway, as a perfectly good plan with a marker after it, which
+      // `extractJsonObject` ignores wholesale (Codex round 3, P2). Parsing only
+      // in the failure branch dropped the second case without a trace.
+      declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       if (rawAiDraft) {
         const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
@@ -1427,12 +1434,6 @@ Return as JSON:
       } else {
         // Fallback to local logic
         draft = shapeDraft(generateDraftPlanFromInputs(inputs))
-        // UX-269 (Codex round 2, P2): an unparseable reply may be a REFUSAL, not
-        // a broken plan — the boundary rule rides every `TaskType.Plan` call, so
-        // a job the planner can't do, typed into the notes field rather than the
-        // chat, can come back here. Without this she gets a local plan, a
-        // generic snackbar and no idea which part of what she wrote went nowhere.
-        declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
         setSnack({ text: 'AI planning unavailable — used local planner.', severity: 'info' })
       }
     } else {
@@ -1517,6 +1518,8 @@ Return as JSON:
         })
       }
 
+      // UX-269: before the branch — see the note in the photo path.
+      declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       if (rawAiDraft) {
         const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
@@ -1534,9 +1537,6 @@ Return as JSON:
           // AI call threw — snack already set above
         } else {
           console.warn('[handleGeneratePlan] AI response unparseable:', response.message.substring(0, 500))
-          // UX-269 (Codex round 2, P2): it may be a REFUSAL rather than a broken
-          // plan — see the note on the same branch in the photo path.
-          declinedDuringGenerate = parsePlannerBoundary(response.message).destination?.id
           setSnack({
             text: 'AI plan could not be read — using your routine as the base. You can try "Generate Plan" again or adjust the plan below.',
             severity: 'info',
@@ -1928,6 +1928,8 @@ Return as JSON:
           taskType: TaskType.Plan,
           messages: [{ role: 'user', content: fullPrompt }],
         })
+        // UX-269: before the branch — see the note in the photo path.
+        declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
         const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
         if (rawAiDraft) {
           const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
@@ -1955,9 +1957,6 @@ Return as JSON:
           // nothing at all (UX-233).
           draft = shapeDraft(generateDraftPlanFromInputs(inputs))
           fellBackToLocal = true
-          // UX-269 (Codex round 2, P2): it may be a REFUSAL rather than a
-          // broken plan — see the note on the same branch in the photo path.
-          declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
           setSnack({ text: LOCAL_PLANNER_FALLBACK_SNACK, severity: 'info' })
         }
       } else {

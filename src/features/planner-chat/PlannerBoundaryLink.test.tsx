@@ -176,4 +176,12 @@ describe('a refusal that arrives where a plan was asked for (Codex round 2, P2)'
   it('names no screen of its own either', () => {
     expect(BOUNDARY_DURING_GENERATE_TEXT).not.toMatch(/\bAsk AI\b|Records|Settings|Curriculum|Watch Library/)
   })
+
+  it('says nothing about where the plan came from (Codex round 3, P2)', () => {
+    // The same line is now shown when the AI plan LANDED and the model simply
+    // marked the one ask it could not do — `extractJsonObject` takes the braces
+    // and ignores a trailing marker, so that reply parses fine. A line claiming
+    // the plan was "built from your routine" would be false in that case.
+    expect(BOUNDARY_DURING_GENERATE_TEXT).not.toMatch(/routine|local|instead|couldn't|could not/i)
+  })
 })

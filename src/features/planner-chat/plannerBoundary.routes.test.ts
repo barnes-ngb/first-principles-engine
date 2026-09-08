@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { routes } from '../../app/router'
+import { parseAIResponse } from './chatPlanner.logic'
 import { PROGRESS_TABS, progressPath } from '../../features/progress/progressNav'
 import {
   PLANNER_BOUNDARY_FALLBACK,
@@ -8,6 +9,7 @@ import {
   plannerBoundaryJobById,
   plannerBoundaryRoutePath,
   plannerBoundaryRoutes,
+  parsePlannerBoundary,
 } from '../../../functions/src/shared/plannerBoundary'
 
 /**
@@ -66,5 +68,33 @@ describe('every planner-chat boundary destination is a real route', () => {
     expect(plannerBoundaryJobById('curriculum-manage')?.route).toBe(
       progressPath(PROGRESS_TABS.Curriculum),
     )
+  })
+})
+
+/**
+ * A plan and a refusal can arrive in the SAME reply (Codex round 3, P2).
+ *
+ * `parseAIResponse` extracts the object between the braces and ignores whatever
+ * follows, so `{...plan...}\n[[BOUNDARY:records]]` parses as a perfectly good
+ * plan. Reading the boundary only when the plan FAILED to parse dropped the
+ * declined ask without a trace — which is exactly the silence this feature
+ * exists to replace. The two reads are independent, and this pins that.
+ */
+describe('a plan and a declined ask in one reply', () => {
+  const planJson = JSON.stringify({
+    days: [{ day: 'Monday', items: [{ title: 'Math', subjectBucket: 'Math', estimatedMinutes: 30 }] }],
+    skipSuggestions: [],
+    minimumWin: 'one page',
+  })
+
+  it('yields BOTH a usable plan and a destination', () => {
+    const message = `${planJson}\n\n[[BOUNDARY:records]]`
+    expect(parseAIResponse({ message } as never, [])?.days).toHaveLength(1)
+    expect(parsePlannerBoundary(message).destination?.id).toBe('records')
+  })
+
+  it('still yields a plan and no destination when nothing was declined', () => {
+    expect(parseAIResponse({ message: planJson } as never, [])?.days).toHaveLength(1)
+    expect(parsePlannerBoundary(planJson).destination).toBeNull()
   })
 })

@@ -24,17 +24,21 @@ export const BOUNDARY_BARE_REFUSAL_TEXT = "I can't do that from here."
  *
  * The boundary rule is installed on every `TaskType.Plan` call, so a job the
  * planner cannot do — typed into the setup card's notes field rather than into
- * the chat — can draw a refusal where a plan was asked for. The generate paths
- * read any unparseable reply as a broken plan and fall back to the local
- * planner, so without this she got a plan, a generic snackbar and no idea which
- * part of what she wrote went nowhere (Codex round 2, P2).
+ * the chat — can be declined in a reply that was asked for a week.
  *
- * The prompt now tells the model to plan the week regardless and leave that
- * part alone, which should stop this arising at all. This is the belt: a
- * refusal that gets through still ends in a button rather than in silence.
+ * Two shapes, and the second is the common one now that the prompt tells the
+ * model to plan the week anyway. The reply is unparseable, and the generate
+ * paths read it as a broken plan and fall back to the local planner (Codex
+ * round 2, P2). Or the reply is a perfectly good plan with a marker after it —
+ * `extractJsonObject` takes the braces and ignores the rest, so the plan lands
+ * and the declined ask would vanish without a trace (Codex round 3, P2).
+ *
+ * So the parse runs BEFORE the success/failure branch in all three paths, and
+ * this line is worded to be true of both: it says nothing about where the plan
+ * came from.
  */
 export const BOUNDARY_DURING_GENERATE_TEXT =
-  "One thing in your notes isn't something I can change from here — the plan below is built from your routine. The button says where that one lives."
+  "One thing in your notes isn't something I can change from here. The plan is below; the button says where that one lives."
 
 interface PlannerBoundaryLinkProps {
   /**
