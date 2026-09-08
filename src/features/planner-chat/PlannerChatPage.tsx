@@ -99,6 +99,15 @@ import {
   swapWatchVideoOnLiveDay,
 } from '../today/liveDayEdit'
 import MoveToDayDialog from '../today/MoveToDayDialog'
+import {
+  findRemovedItemConfig,
+  REMOVED_ITEM_DELETE_LABEL,
+  REMOVED_ITEM_KEEP_LABEL,
+  removedItemFollowUpParagraphs,
+  removedItemFollowUpTitle,
+} from './removedItemFollowUp'
+import type { RemovedItemFollowUp } from './removedItemFollowUp'
+import { deleteFailureNotice } from '../progress/removeActivityCopy'
 import { useAppliedWeekDays } from './useAppliedWeekDays'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -339,6 +348,8 @@ export default function PlannerChatPage() {
   }, [weekPlan, currentDraft, applied, forceSetup])
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
+  /** UX-232: the curriculum row a just-removed draft row named, while the offer is open. */
+  const [removedItemFollowUp, setRemovedItemFollowUp] = useState<RemovedItemFollowUp | null>(null)
 
   // Prior-plan detection: distinguishes first-visit user (full wizard) from returning user (compact setup)
   const [hasPriorPlan, setHasPriorPlan] = useState<boolean | null>(null)
@@ -411,7 +422,7 @@ export default function PlannerChatPage() {
   const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
   // Activity configs → routine text (replaces old free-text dailyRoutine)
-  const { configs: activityConfigs } = useActivityConfigs(activeChildId ?? '')
+  const { configs: activityConfigs, deleteConfig } = useActivityConfigs(activeChildId ?? '')
   const dailyRoutine = useMemo(
     () => activityConfigsToRoutineText(activityConfigs),
     [activityConfigs],
@@ -2215,8 +2226,39 @@ Generate a plan for Monday through Friday.`.trim()
     [applied, isParent, appliedWeekDaysLoaded, resolveLiveRow, currentDraft, activeChild?.name],
   )
 
+  /**
+   * Offer to remove the curriculum row a just-removed plan row named (UX-232).
+   *
+   * The ✕ edits a copy — a draft pre-Apply, a saved day after it — and the next
+   * plan is regenerated from Curriculum either way, so a row taken off this week
+   * comes back on the next Redo. That is exactly what the owner hit, and nothing
+   * on screen said it.
+   *
+   * **Both removal paths call this** (Codex round 3). It began life inline at
+   * the end of the pre-Apply branch, which the applied branch returns before
+   * reaching — so a ✕ after Apply changed the day, left Curriculum untouched and
+   * offered nothing, which is the same silent copy the feature exists to fix.
+   *
+   * It only OPENS a dialog. The delete happens on that dialog's button, so no
+   * removal here can reach a curriculum write on its own. Parent-only, and again
+   * at the write itself.
+   */
+  const offerCurriculumFollowUp = useCallback(
+    (removed: DraftPlanItem | undefined) => {
+      if (!isParent) return
+      const followUp = findRemovedItemConfig(removed, activityConfigs)
+      if (followUp) setRemovedItemFollowUp(followUp)
+    },
+    [isParent, activityConfigs],
+  )
+
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
     if (!currentDraft) return
+
+    // Read before either branch edits its copy — the applied branch resolves and
+    // writes the saved day first, and this row is gone from the draft by the
+    // time the offer is made.
+    const removed = currentDraft.days[dayIndex]?.items[itemIndex]
 
     // Post-Apply: the removal has to land in the saved day. Do that FIRST and
     // only mirror the card on success, so the parent is never shown a week the
@@ -2255,6 +2297,14 @@ Generate a plan for Monday through Friday.`.trim()
         setCurrentDraft(mirrored)
         void persistConversation({ currentDraft: mirrored })
         setSnack({ text: `Removed from ${row.dayLabel}.`, severity: 'success' })
+        // The live week needs the offer just as much as the draft does (Codex
+        // round 3). This branch returns below, so without the call here a ✕
+        // after Apply took the row off the day, left Curriculum untouched, and
+        // said nothing — and the next Redo brought it back, which is the exact
+        // behaviour UX-232 exists to stop. Offered only after the day write
+        // actually succeeded: nothing about a curriculum row is worth raising
+        // when the removal the parent asked for did not land.
+        offerCurriculumFollowUp(removed)
       })()
       return
     }
@@ -2269,7 +2319,34 @@ Generate a plan for Monday through Friday.`.trim()
     }
     setCurrentDraft(updated)
     setPlanDirty(true)
-  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation])
+    offerCurriculumFollowUp(removed)
+  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation, offerCurriculumFollowUp])
+
+  /**
+   * Delete the curriculum row a removed draft row named (UX-232).
+   *
+   * The second, separate act. Routed through the hook's own `deleteConfig` — the
+   * same write Progress → Curriculum performs — and deliberately NOT bundled
+   * into Apply: a week write and a curriculum delete are different decisions and
+   * a parent may want either without the other. Parent-gated at the write as
+   * well as in the UI, on capability and never on a name.
+   */
+  const handleConfirmRemoveFromCurriculum = useCallback(async () => {
+    const followUp = removedItemFollowUp
+    setRemovedItemFollowUp(null)
+    if (!followUp || !isParent) return
+    try {
+      await deleteConfig(followUp.configId)
+      setSnack({ text: `Removed ${followUp.configName} from Curriculum.`, severity: 'success' })
+    } catch (err) {
+      console.error('[Planner] Failed to remove the activity from Curriculum', err)
+      // The draft edit already stands; only the curriculum delete failed, and
+      // saying so is the difference between "it's gone" and "it will be back".
+      // `deleteFailureNotice` is UX-83's shape and Curriculum's own words — one
+      // delete, one failure sentence.
+      setSnack({ text: deleteFailureNotice(followUp.configName), severity: 'error' })
+    }
+  }, [removedItemFollowUp, isParent, deleteConfig])
 
   /**
    * Move a row to another day of the week — the edit this run exists for
@@ -3661,6 +3738,37 @@ ${dayPrompts}`
         onAddVideo={isParent ? async (video) => { await addWatchVideo(video) } : undefined}
         onManageLibrary={isParent ? () => navigate('/watch') : undefined}
       />
+
+      {/* UX-232: the ✕ edits the draft, and the draft is regenerated from
+          Curriculum — so a row taken off this week comes back on the next Redo.
+          Say so, and offer the second step, as its own confirmed act. Rendered
+          at the top level rather than inside a phase block because the ✕ is
+          offered on more than one phase. */}
+      <Dialog open={removedItemFollowUp !== null} onClose={() => setRemovedItemFollowUp(null)}>
+        <DialogTitle>
+          {removedItemFollowUp ? removedItemFollowUpTitle(removedItemFollowUp) : ''}
+        </DialogTitle>
+        <DialogContent>
+          {/* One spaced paragraph per sentence, as Curriculum's own delete
+              dialog renders this same warning — a five-sentence block on a
+              phone is a wall, and this is the screen where the words have to
+              be read before an irreversible tap. */}
+          {(removedItemFollowUp ? removedItemFollowUpParagraphs(removedItemFollowUp) : []).map(
+            (line, i) => (
+              <DialogContentText key={line} sx={i === 0 ? undefined : { mt: 1.5 }}>
+                {line}
+              </DialogContentText>
+            ),
+          )}
+        </DialogContent>
+        <DialogActions>
+          {/* Declining leaves the draft edit exactly as it is today. */}
+          <Button onClick={() => setRemovedItemFollowUp(null)}>{REMOVED_ITEM_KEEP_LABEL}</Button>
+          <Button onClick={handleConfirmRemoveFromCurriculum} color="error" variant="contained">
+            {REMOVED_ITEM_DELETE_LABEL}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* FEAT-138: "it's happening Thursday now". */}
       <MoveToDayDialog

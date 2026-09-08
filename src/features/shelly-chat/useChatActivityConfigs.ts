@@ -4,10 +4,9 @@
 // a proposed `setActivityMinutes` id to a REAL config before a confirm card is
 // offered, and to render that card by NAME with a true old → new diff.
 //
-// Deliberately NOT `useActivityConfigs`: that hook runs the migration +
-// default-seeding side effects (`migrateToActivityConfigs` /
-// `ensureDefaultActivityConfigs`) and exposes a full writer surface. Opening a
-// chat tab should not migrate anything or create configs, and the portal's only
+// Deliberately NOT `useActivityConfigs`: that hook runs the default-seeding
+// side effect (`ensureDefaultActivityConfigs`) and exposes a full writer
+// surface. Opening a chat tab should not seed anything or create configs, and the portal's only
 // activity write goes through the narrow `updateActivityConfigMinutes` helper.
 // So this is a plain read: subscribe, sort, hand back.
 //
