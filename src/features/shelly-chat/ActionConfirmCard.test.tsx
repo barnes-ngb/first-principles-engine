@@ -417,7 +417,7 @@ describe('ActionConfirmCard — addActivity (FEAT-143)', () => {
   it('shows the full shape being created', () => {
     renderCard(curriculumPending(ADD), CURRICULUM_CONFIGS)
     expect(screen.getByText('Add "Khan Academy math" to Lincoln\'s curriculum')).toBeInTheDocument()
-    expect(screen.getByText('Math · 20m · daily')).toBeInTheDocument()
+    expect(screen.getByText('an app · Math · 20m · daily')).toBeInTheDocument()
   })
 
   it('names only the acting child for an unshared add', () => {
@@ -443,7 +443,9 @@ describe('ActionConfirmCard — addActivity (FEAT-143)', () => {
       curriculumPending({ ...ADD, type: 'workbook', totalUnits: 140, currentPosition: 98 }),
       CURRICULUM_CONFIGS,
     )
-    expect(screen.getByText('Math · 20m · daily · lesson 98 of 140')).toBeInTheDocument()
+    expect(
+      screen.getByText('a workbook · Math · 20m · daily · lesson 98 of 140'),
+    ).toBeInTheDocument()
   })
 
   // ── UX-205 ────────────────────────────────────────────────────────────────
@@ -907,5 +909,241 @@ describe('ActionConfirmCard — a failed write says so (FEAT-162 / UX-33c)', () 
       },
     ])
     expect(screen.getAllByText(confirmFailureNotice())).toHaveLength(1)
+  })
+})
+
+// ── markSkillProgress — the card must say what the write does (UX-187) ───────
+//
+// Proved from the card's RENDERED TEXT, not from a prop: the whole defect was
+// that a word appeared on the card and nowhere in the write, so a test that
+// asserts what the component was handed would have passed throughout.
+describe('ActionConfirmCard — markSkillProgress (UX-187)', () => {
+  const progressCard = (mastered?: boolean): PendingAction[] => [
+    {
+      id: 'msg1_0',
+      status: 'pending',
+      action: {
+        kind: 'markSkillProgress',
+        childId: 'lincoln1',
+        skill: 'CVCe long vowels',
+        ...(mastered === undefined ? {} : { mastered }),
+      },
+    },
+  ]
+
+  it('tells her a progressing claim changes no level, and where a level is set', () => {
+    renderCard(progressCard())
+
+    expect(
+      screen.getByText('Mark "CVCe long vowels" as progressing for Lincoln'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /Records the movement without changing Lincoln's level.*Progress → Skill Snapshot/,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('never states the claim itself as mastery', () => {
+    renderCard(progressCard())
+
+    // The footnote quotes the word to draw the contrast ("only sets a level for
+    // 'mastered'"), which is the whole point of it — so the assertion is on the
+    // CLAIM line, which is what she reads as "what am I confirming".
+    expect(
+      screen.queryByText('Mark "CVCe long vowels" as mastered for Lincoln'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/secure/i)).not.toBeInTheDocument()
+  })
+
+  it('says the mastery card records mastery, and that the chat cannot undo it', () => {
+    renderCard(progressCard(true))
+
+    expect(screen.getByText('Mark "CVCe long vowels" as mastered for Lincoln')).toBeInTheDocument()
+    expect(screen.getByText(/cannot lower a level again/)).toBeInTheDocument()
+  })
+
+  it('names the child rather than guessing a pronoun', () => {
+    renderCard(progressCard())
+
+    expect(screen.queryByText(/\b(his|her|their)\b/)).not.toBeInTheDocument()
+  })
+})
+
+// ── A write that matched nothing must not stamp "Done ✓" (UX-190) ────────────
+describe('ActionConfirmCard — no-change (UX-190)', () => {
+  const settled = (notice: string): PendingAction[] => [
+    {
+      id: 'msg1_0',
+      status: 'no-change',
+      notice,
+      action: { kind: 'markSkillProgress', childId: 'lincoln1', skill: 'th sound' },
+    },
+  ]
+
+  const NOTICE =
+    'Nothing changed on Lincoln\'s Skill Snapshot — either it already says this, or nothing on it matched "th sound".'
+
+  it('shows the reason instead of the green tick', () => {
+    renderCard(settled(NOTICE))
+
+    expect(screen.getByText(NOTICE)).toBeInTheDocument()
+    expect(screen.queryByText('Done')).not.toBeInTheDocument()
+  })
+
+  it('offers no retry, because confirming again would match the same nothing', () => {
+    renderCard(settled(NOTICE))
+
+    expect(screen.queryByRole('button', { name: /confirm/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /dismiss/i })).not.toBeInTheDocument()
+  })
+
+  it('still renders the card it settled, so she can see what she tapped', () => {
+    renderCard(settled(NOTICE))
+
+    expect(screen.getByText('Mark "th sound" as progressing for Lincoln')).toBeInTheDocument()
+  })
+})
+
+// ── The type control on an addActivity card (UX-193) ─────────────────────────
+//
+// The half that matters is that the field is NAMED — a parent cannot confirm a
+// field she cannot see, and this is the field that decided whether a row was a
+// workbook, whether a photo scan could match it, and (before UX-204) whether it
+// appeared on any screen at all. The control is the second half: she is about to
+// add a season of curriculum this way, and a label she can only accept or reject
+// costs her the whole card and a re-typed sentence every time the model guesses
+// wrong.
+describe('ActionConfirmCard — addActivity type control (UX-193)', () => {
+  const addWith = (over: Partial<Record<string, unknown>> = {}): PendingAction[] => [
+    {
+      id: 'msg1_0',
+      status: 'pending',
+      action: { ...ADD, ...over } as PendingAction['action'],
+    },
+  ]
+
+  function renderAdd(pending: PendingAction[], onChangeActivityType = vi.fn()) {
+    render(
+      <ActionConfirmCard
+        pending={pending}
+        familyChildren={CHILDREN}
+        activityConfigs={CURRICULUM_CONFIGS}
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+        onConfirmAll={vi.fn()}
+        onChangeActivityType={onChangeActivityType}
+      />,
+    )
+    return onChangeActivityType
+  }
+
+  it('names the type in words on the shape line', () => {
+    renderAdd(addWith())
+    expect(screen.getByText('an app · Math · 20m · daily')).toBeInTheDocument()
+  })
+
+  it('offers a chip for every kind, and asks the question in plain words', () => {
+    renderAdd(addWith())
+    expect(screen.getByText('What kind of thing is it?')).toBeInTheDocument()
+    for (const label of ['Workbook', 'Routine', 'Formation', 'Activity', 'App', 'Evaluation']) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+  })
+
+  it('says what the current choice means and where the row will land', () => {
+    renderAdd(addWith())
+    expect(screen.getByText(/Lands under Apps & Other Activities\./)).toBeInTheDocument()
+  })
+
+  // Codex P2, round 1 — the card may not promise a scan the write cannot do.
+  it('does not promise a photo scan for a workbook with no lesson number', () => {
+    renderAdd(addWith({ type: 'workbook' }))
+    expect(screen.getByText(/no lesson number, a photo of a page cannot find it/))
+      .toBeInTheDocument()
+  })
+
+  // Codex P2, round 2 — the route it names has to be one that exists.
+  it('sends her to the chat, not to a Curriculum control that does not exist', () => {
+    renderAdd(addWith({ type: 'workbook' }))
+    expect(screen.getByText(/Tell me the lesson number/)).toBeInTheDocument()
+  })
+
+  // Codex P2, round 2 — a hand-made evaluation is UX-204's shape: planned every
+  // day, and no menu at Progress → Curriculum to finish or remove it.
+  it('will not let her pick Evaluation, and says why', () => {
+    const onChange = renderAdd(addWith())
+
+    const chip = screen.getByText('Evaluation').closest('.MuiChip-root')
+    expect(chip).toHaveClass('Mui-disabled')
+
+    screen.getByText('Evaluation').click()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('explains the fate of a proposal that ARRIVED as an evaluation', () => {
+    // The picker refusing to offer it says nothing about a card the model
+    // already proposed as one, so the reason takes the note's place.
+    renderAdd(addWith({ type: 'evaluation' }))
+    expect(screen.getByText(/planned every day and has no ⋮ menu/)).toBeInTheDocument()
+  })
+
+  it('does promise it once the proposal carries one', () => {
+    renderAdd(addWith({ type: 'workbook', totalUnits: 60, currentPosition: 1 }))
+    expect(screen.getByText(/photo of a page can find it/)).toBeInTheDocument()
+  })
+
+  it('hands the correction back with the action and the new type', () => {
+    const onChange = renderAdd(addWith())
+
+    screen.getByText('Workbook').click()
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange.mock.calls[0][1]).toBe('workbook')
+    expect((onChange.mock.calls[0][0] as { name: string }).name).toBe('Khan Academy math')
+  })
+
+  it('will not let a SHARED add be made a workbook', () => {
+    const onChange = renderAdd(addWith({ shared: true }))
+
+    const chip = screen.getByText('Workbook').closest('.MuiChip-root')
+    expect(chip).toHaveClass('Mui-disabled')
+
+    screen.getByText('Workbook').click()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('offers no control once the card has been confirmed', () => {
+    render(
+      <ActionConfirmCard
+        pending={[{ id: 'msg1_0', status: 'applied', action: ADD }]}
+        familyChildren={CHILDREN}
+        activityConfigs={CURRICULUM_CONFIGS}
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+        onConfirmAll={vi.fn()}
+        onChangeActivityType={vi.fn()}
+      />,
+    )
+
+    // The field is written; a control offering to change it would be a lie.
+    expect(screen.queryByText('What kind of thing is it?')).not.toBeInTheDocument()
+    // But the type is still NAMED, which is the half that must always hold.
+    expect(screen.getByText('an app · Math · 20m · daily')).toBeInTheDocument()
+  })
+
+  it('still names the type when no control is wired at all', () => {
+    render(
+      <ActionConfirmCard
+        pending={addWith()}
+        familyChildren={CHILDREN}
+        activityConfigs={CURRICULUM_CONFIGS}
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+        onConfirmAll={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('an app · Math · 20m · daily')).toBeInTheDocument()
+    expect(screen.queryByText('What kind of thing is it?')).not.toBeInTheDocument()
   })
 })

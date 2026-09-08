@@ -12,12 +12,17 @@ import TimerOutlinedIcon from '@mui/icons-material/TimerOutlined'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import Link from '@mui/material/Link'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import type { ChatAction, Child } from '../../core/types'
+import type { ActivityType } from '../../core/types/enums'
+import { WORKBOOK_OWNER_REASON } from '../../core/firebase/activityConfigWrites'
+import type { AddActivityAction } from './activityTypeChoices'
+import { activityTypeChoices, sectionTitleForType } from './activityTypeChoices'
 import { describeActivityAudience } from './activityMinutesView'
 import type { ResolvedCurriculumAction } from './curriculumActions'
 import {
@@ -44,6 +49,12 @@ import {
   isDayItemAction,
   resolveDayItemAction,
 } from './dayItemActions'
+import type { SnapshotAction } from './snapshotActions'
+import {
+  describeSnapshotAction,
+  isSnapshotAction,
+  snapshotActionFootnote,
+} from './snapshotActions'
 import {
   describeDraftNextWeek,
   DRAFT_FOOTNOTE,
@@ -106,6 +117,13 @@ interface ActionConfirmCardProps {
   onConfirm: (action: ChatAction) => void
   onDismiss: (action: ChatAction) => void
   onConfirmAll: () => void
+  /**
+   * Correct the `type` the model guessed on a still-pending `addActivity`
+   * (UX-193). Optional so a caller that has not wired it simply renders the
+   * label without the control — the field is named either way, which is the
+   * half of the fix that must never be optional.
+   */
+  onChangeActivityType?: (action: ChatAction, type: ActivityType) => void
 }
 
 /**
@@ -160,39 +178,16 @@ function describeSightWord(
   return `${verb} sight word "${action.word.toLowerCase()}" for ${childName}`
 }
 
-/** The Tier-C Option-2 additive snapshot kinds (6b). */
-type SnapshotAction = Extract<
-  ChatAction,
-  { kind: 'addPrioritySkill' | 'addSupport' | 'addStopRule' | 'markSkillProgress' }
->
-
-const isSnapshotAction = (action: ChatAction): action is SnapshotAction =>
-  action.kind === 'addPrioritySkill' ||
-  action.kind === 'addSupport' ||
-  action.kind === 'addStopRule' ||
-  action.kind === 'markSkillProgress'
-
-/** Plain-language preview for a proposed additive snapshot edit (6b). */
-function describeSnapshot(action: SnapshotAction, childName: string): string {
-  switch (action.kind) {
-    case 'addPrioritySkill':
-      return `Add to ${childName}'s priority skills: "${action.skill}"`
-    case 'addSupport':
-      return `Add to ${childName}'s supports: "${action.support}"`
-    case 'addStopRule':
-      return `Add to ${childName}'s stop rules: "${action.rule}"`
-    case 'markSkillProgress':
-      return action.mastered
-        ? `Mark "${action.skill}" as mastered for ${childName}`
-        : `Mark "${action.skill}" as progressing for ${childName}`
-  }
-}
-
 /**
  * Preview for an additive Skill-Snapshot edit. These write the authoritative
  * "what to teach next" record, so the card is framed as visibly weightier than
  * a sight-word card: a "Updates {child}'s skill snapshot" label sits above the
  * action line so Shelly registers what she's confirming before she taps.
+ *
+ * The footnote (UX-187) is the card catching up with the write: a
+ * `markSkillProgress` card said *progressing* over a writer that recorded full
+ * mastery, so the line under the preview now states what the write does and
+ * names the one screen that can set or lower a level.
  */
 function SnapshotEditPreview({
   action,
@@ -201,6 +196,7 @@ function SnapshotEditPreview({
   action: SnapshotAction
   childName: string
 }) {
+  const footnote = snapshotActionFootnote(action, childName)
   return (
     <Stack spacing={0.25}>
       <Typography
@@ -210,8 +206,13 @@ function SnapshotEditPreview({
         Updates {childName}'s skill snapshot
       </Typography>
       <Typography variant="body2" sx={{ fontWeight: 600 }}>
-        {describeSnapshot(action, childName)}
+        {describeSnapshotAction(action, childName)}
       </Typography>
+      {footnote && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          {footnote}
+        </Typography>
+      )}
     </Stack>
   )
 }
@@ -356,14 +357,97 @@ function DayItemPreview({
  * one: the program stops appearing in future plans, everything already logged
  * stays, and there is no undo anywhere in the app.
  */
+/**
+ * The `type` control on an `addActivity` card (UX-193).
+ *
+ * The model picks `type` from prose, and it is the field that decides whether
+ * the row is a workbook — DATA-08 ownership, whether a photo scan can ever match
+ * it, how the planner treats it, and (before UX-204 gave them a section) whether
+ * it appeared on any screen at all. The card used to show every other field and
+ * not this one.
+ *
+ * A row of chips rather than a label, deliberately. A label she can only accept
+ * or reject means a wrong guess costs her the whole card and a re-typed
+ * sentence, and she is about to add a season of curriculum this way. The chip
+ * that is already selected reads as the model's answer; tapping another corrects
+ * it before anything is written.
+ *
+ * The selected chip carries a one-line note saying what that choice MEANS and
+ * which section of Progress → Curriculum the row will appear under — read from
+ * `SECTION_FOR_TYPE`, the tab's own partition, so the card cannot promise a
+ * heading the tab does not have.
+ */
+function ActivityTypePicker({
+  action,
+  onChange,
+}: {
+  action: AddActivityAction
+  onChange: (type: ActivityType) => void
+}) {
+  const choices = activityTypeChoices(action)
+  const selected = choices.find((c) => c.type === action.type)
+  return (
+    <Box sx={{ mt: 0.5 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+        What kind of thing is it?
+      </Typography>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
+        {choices.map((choice) => (
+          <Chip
+            key={choice.type}
+            size="small"
+            label={choice.label}
+            title={choice.disabledReason ?? choice.note}
+            disabled={Boolean(choice.disabledReason)}
+            color={choice.type === action.type ? 'warning' : 'default'}
+            variant={choice.type === action.type ? 'filled' : 'outlined'}
+            onClick={choice.disabledReason ? undefined : () => onChange(choice.type)}
+            sx={{ height: 28 }}
+          />
+        ))}
+      </Box>
+      {/* A disabled choice's REASON replaces its note when it is the one
+          selected (Codex P2, round 2). The model can propose `type:
+          'evaluation'` on its own, and the picker refusing to offer it says
+          nothing about a card that already arrived as one — so when it has, the
+          sentence explaining why nobody should pick it is the sentence she
+          needs, in the place the note would have been. */}
+      {selected && (
+        <Typography
+          variant="caption"
+          color={selected.disabledReason ? 'warning.main' : 'text.secondary'}
+          sx={{ display: 'block', mt: 0.25 }}
+        >
+          {selected.disabledReason ?? selected.note} Lands under{' '}
+          {sectionTitleForType(action.type)}.
+        </Typography>
+      )}
+      {/* The DATA-08 rule, in the layer that can speak it. A shared workbook is
+          refused by the parser AND by the resolver, so offering the chip would
+          give her a Confirm that silently does nothing. */}
+      {action.shared === true && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+          {WORKBOOK_OWNER_REASON}
+        </Typography>
+      )}
+    </Box>
+  )
+}
+
 function CurriculumPreview({
   resolved,
   childName,
   allChildNames,
+  onChangeType,
 }: {
   resolved: ResolvedCurriculumAction
   childName: string
   allChildNames: string[]
+  /**
+   * Correct the model's `type` guess before confirming (UX-193). Absent on a
+   * card that is no longer pending — once she has tapped, the field is written.
+   */
+  onChangeType?: (type: ActivityType) => void
 }) {
   const { action, duplicates } = resolved
   const isAdd = action.kind === 'addActivity'
@@ -391,6 +475,7 @@ function CurriculumPreview({
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
             {describeAddActivityShape(action)}
           </Typography>
+          {onChangeType && <ActivityTypePicker action={action} onChange={onChangeType} />}
           <Typography
             variant="caption"
             sx={{
@@ -682,6 +767,7 @@ export default function ActionConfirmCard({
   onConfirm,
   onDismiss,
   onConfirmAll,
+  onChangeActivityType,
 }: ActionConfirmCardProps) {
   if (pending.length === 0 && suppressed.length === 0) return null
 
@@ -888,6 +974,15 @@ export default function ActionConfirmCard({
                     resolved={curriculumResolved}
                     childName={childName(action.childId)}
                     allChildNames={allChildNames}
+                    // UX-193 — correctable only while the card is still
+                    // pending. Once she has tapped, `type` is written; a
+                    // control on an applied card would offer to change
+                    // something it cannot change.
+                    onChangeType={
+                      isPending && onChangeActivityType && action.kind === 'addActivity'
+                        ? (type) => onChangeActivityType(action, type)
+                        : undefined
+                    }
                   />
                 ) : dadLabResolved ? (
                   <DadLabPreview resolved={dadLabResolved} />
@@ -956,6 +1051,27 @@ export default function ActionConfirmCard({
                       the planner, so it settles on "Sent" (UX-32). */}
                   <Typography variant="caption">
                     {appliedVerb(action)}
+                  </Typography>
+                </Box>
+              )}
+              {/* UX-190 — the confirmed write reached the writer and the writer
+                  had nothing to do: the record already said what was asked, or
+                  the words matched nothing on it. Deliberately NOT a green tick
+                  (nothing was written) and NOT an error (nothing failed) — an
+                  info mark and the writer's own reason, in the card's place. */}
+              {item.status === 'no-change' && (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 0.5,
+                    color: 'text.secondary',
+                    maxWidth: 220,
+                  }}
+                >
+                  <InfoOutlinedIcon fontSize="small" />
+                  <Typography variant="caption">
+                    {item.notice ?? 'Nothing to change'}
                   </Typography>
                 </Box>
               )}
