@@ -18,7 +18,7 @@ import {
   syncActivityPositionToModel,
 } from '../firebase/activityConfigWrites'
 import { activityConfigsCollection, db } from '../firebase/firestore'
-import { ensureDefaultActivityConfigs, migrateToActivityConfigs } from '../firebase/migrateActivityConfigs'
+import { ensureDefaultActivityConfigs } from '../firebase/migrateActivityConfigs'
 import type { NewActivityConfig } from '../firebase/activityConfigWrites'
 import type { ActivityConfig } from '../types'
 
@@ -56,15 +56,21 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   // (e.g. type-aware guards) without re-creating their callbacks.
   const configsRef = useRef<ActivityConfig[]>([])
 
-  // Run migration on first load if needed, then ensure defaults exist
+  // Seed defaults on first load if the child has none.
+  //
+  // ONE call, not two (UX-231). This ran `migrateToActivityConfigs` and then
+  // `ensureDefaultActivityConfigs` — two seeders with two different lists, both
+  // guarding with the same check-then-act read — from a hook mounted on three
+  // surfaces at once. Both reads came back empty on a first load and both wrote,
+  // which is where the owner's duplicate curriculum rows came from. There is one
+  // seeder now, and concurrent callers share its in-flight run.
   useEffect(() => {
     if (!familyId || !childId) return
-    migrateToActivityConfigs(familyId, childId)
-      .then(() => ensureDefaultActivityConfigs(familyId, childId))
+    ensureDefaultActivityConfigs(familyId, childId)
       .then(() => setMigrationDone(true))
       .catch((err) => {
-        console.error('[ActivityConfigs] Migration failed:', err)
-        setMigrationDone(true) // Continue even if migration fails
+        console.error('[ActivityConfigs] Seeding defaults failed:', err)
+        setMigrationDone(true) // Continue even if seeding fails
       })
   }, [familyId, childId])
 

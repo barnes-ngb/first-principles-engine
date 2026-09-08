@@ -87,7 +87,6 @@ import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useDailyPlan } from './useDailyPlan'
 import { useDayLog } from './useDayLog'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
-import { ensureDefaultActivityConfigs } from '../../core/firebase/migrateActivityConfigs'
 import { useRolloverUnchecked } from './useRolloverUnchecked'
 import { useUnappliedDraft } from './useUnappliedDraft'
 import { selectTodayDayBanner } from './unappliedDraft'
@@ -558,13 +557,12 @@ export default function TodayPage() {
     }
   }, [selectedBook, selectedChildId, familyId, activeChild, weekFocus, aiChat, setSnackMessage, children])
 
-  // Ensure default activity configs exist (routine, formation, workbooks)
-  // so the planner generates full-length plans even if the user hasn't visited Settings.
-  useEffect(() => {
-    if (familyId && selectedChildId) {
-      void ensureDefaultActivityConfigs(familyId, selectedChildId)
-    }
-  }, [familyId, selectedChildId])
+  // Default activity configs (routine, formation, workbooks) are seeded by the
+  // `useActivityConfigs(selectedChildId)` mounted above — this page used to ALSO
+  // call `ensureDefaultActivityConfigs` here, with the same familyId and the same
+  // child, which made Today a second seed path on top of the hook's (UX-231).
+  // The seeder is idempotent now, so a duplicate call is merely wasted; it is
+  // gone because the fewest call paths is the point.
 
   // Load skill snapshot for print materials
   useEffect(() => {
