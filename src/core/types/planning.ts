@@ -1165,12 +1165,60 @@ export interface ActivityConfig {
   // Workbook-specific fields (optional)
   /** Curriculum provider (e.g., "GATB", "Explode the Code") */
   curriculum?: string
-  /** Total lessons/chapters/units */
+  /**
+   * Total lessons/chapters/units.
+   *
+   * **A strand never has one** (UX-281). A strand is a subject the family keeps
+   * returning to, so there is no end to be a fraction of, and nothing may print
+   * one: `strandProgressLabel` renders a bare count, and the parent-only
+   * coverage line's `positionPhrase` already omits an absent total rather than
+   * inventing a denominator. A field that does not exist must not be shown as
+   * zero.
+   */
   totalUnits?: number
-  /** Current position (lesson/page number) */
+  /**
+   * Current position (lesson/page number).
+   *
+   * **On a strand this is the session count** (UX-282) — how many times the
+   * family has come back to this subject. It is written only by
+   * `logStrandSession`, only ever as an atomic `increment(1)`, and it never goes
+   * down: not when an artifact is deleted, not when a session is edited. The
+   * count is of afternoons that happened, and deleting a photo does not un-happen
+   * the afternoon.
+   *
+   * Reusing this field rather than adding a second counter is what puts a strand
+   * into the UX-212 weekly position snapshot and the UX-213 observed-coverage
+   * rate for free — both key on the presence of a position, not on the type.
+   */
   currentPosition?: number
-  /** Unit label: "lesson", "chapter", "unit" */
+  /**
+   * Unit label: "lesson", "chapter", "unit" — and `"session"` on a strand.
+   *
+   * Load-bearing on a strand: `computeObservedCoverage` resolves
+   * `unitLabel || 'lesson'`, so a strand that stored nothing would be described
+   * to the parent in the vocabulary of the one shape it is not.
+   */
   unitLabel?: string
+  /**
+   * Topics this strand has covered, most-recent-first (UX-282).
+   *
+   * A **suggestion cache**, and only that. Its job is to offer back a name she
+   * has already used — the third Ancient Egypt session offers "Ancient Egypt"
+   * and files with the other two — which is what turns a pile of captures into a
+   * thread without asking her to plan an arc up front.
+   *
+   * **It is never the only record of a topic.** Every session writes its topic
+   * onto the `Artifact` it captured (`Artifact.topic`), which is the durable
+   * record; this array is derived, capped at `MAX_RECENT_TOPICS`, trimmed from
+   * the oldest end, and losing its tail costs a suggestion and nothing else.
+   * That is why a session requires evidence: it is what keeps this array
+   * derivable rather than authoritative.
+   *
+   * Additive and optional — absent on every config that exists today, and no
+   * migration. Normalized by `features/progress/strand.ts`, which owns the cap
+   * and delegates the same-topic rule to `nameKey` (UX-205).
+   */
+  recentTopics?: string[]
   /** Certificate-derived curriculum metadata (migration bridge from WorkbookConfig.curriculum). */
   curriculumMeta?: CurriculumMeta
 

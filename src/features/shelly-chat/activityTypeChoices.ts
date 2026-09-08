@@ -85,6 +85,11 @@ export const ACTIVITY_TYPE_WORDS: Record<
     phrase: 'an evaluation',
     note: 'Auto-managed — the app schedules these itself.',
   },
+  [ActivityType.Strand]: {
+    label: 'Strand',
+    phrase: 'a strand',
+    note: 'A subject you keep returning to. Counts sessions and topics, with no set order and no total.',
+  },
 }
 
 /** "a workbook" — never the raw `'workbook'`. */

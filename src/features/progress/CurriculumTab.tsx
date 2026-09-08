@@ -60,7 +60,9 @@ import {
   CurriculumSection,
   groupCurriculumConfigs,
   OTHER_ACTIVITIES_DESCRIPTION,
+  STRANDS_DESCRIPTION,
 } from './curriculumGrouping'
+import { mostRecentTopic, strandRowSummary } from './strand'
 import { failedPageIndexes, processScanBatch } from './multiPageScan'
 import {
   buildDeleteActivityPrompt,
@@ -123,7 +125,7 @@ export default function CurriculumTab() {
   // independent filters over a six-member enum left `activity` and `app` configs
   // rendered nowhere while they went on planning every day; `groupCurriculumConfigs`
   // places every type by a `Record<ActivityType, …>` a new member cannot escape.
-  const { workbooks, routines, other, evaluations, completed } = useMemo(
+  const { workbooks, routines, other, evaluations, strands, completed } = useMemo(
     () => groupCurriculumConfigs(configs),
     [configs],
   )
@@ -801,6 +803,65 @@ export default function CurriculumTab() {
                   />
                 </ListItem>
               ))}
+            </List>
+          </SectionCard>
+        )}
+
+        {/*
+          Strands (UX-281) — curriculum with no lessons, that still keeps count.
+
+          Its own section, because its row is a different row: a count with no
+          total and the topic it last covered. Rendered with the SAME `ListItem`
+          + `openMenu` shape as Routine Activities, so rename / mark-complete /
+          quick-log / delete come with it rather than growing a second, weaker
+          menu — the UX-204 rule that a new section inherits the existing ⋮
+          rather than reinventing part of it.
+
+          There is no progress bar and no total, deliberately. A strand has no
+          end, so a bar would either be empty forever or imply one.
+        */}
+        {strands.length > 0 && (
+          <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Strands]}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              {STRANDS_DESCRIPTION}
+            </Typography>
+            <List dense disablePadding>
+              {strands.map((config) => {
+                const topic = mostRecentTopic(config)
+                return (
+                  <ListItem
+                    key={config.id}
+                    secondaryAction={
+                      <IconButton size="small" onClick={(e) => openMenu(e, config)}>
+                        <MoreVertIcon fontSize="small" />
+                      </IconButton>
+                    }
+                  >
+                    <ListItemText
+                      primary={config.name}
+                      secondary={
+                        <>
+                          {strandRowSummary(
+                            config,
+                            ActivityFrequencyLabel[config.frequency] ?? config.frequency,
+                          )}
+                          {topic && (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: 'block' }}
+                            >
+                              {`Last topic: ${topic}`}
+                            </Typography>
+                          )}
+                          <ActivityAliases config={config} />
+                        </>
+                      }
+                      secondaryTypographyProps={{ component: 'div' }}
+                    />
+                  </ListItem>
+                )
+              })}
             </List>
           </SectionCard>
         )}
