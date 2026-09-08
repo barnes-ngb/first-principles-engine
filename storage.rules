@@ -12,9 +12,26 @@ service firebase.storage {
     }
 
     // Artifacts (existing — photos, audio, notes from Today/Dad Lab)
+    //
+    // `delete` is stated SEPARATELY from create/update, the same split the
+    // public catalog rule below already uses. A single `allow write` covers
+    // create, update AND delete, and `isValidUpload()` reads
+    // `request.resource`, which is **null on a delete** — so the size/type
+    // check errored and every delete was denied, whatever the owner asked.
+    //
+    // Two callers were silently failing on that: the UX-282 strand-session
+    // rollback (which cleans up an upload whose session then failed, so a
+    // half-written capture does not leave a private photo behind and leak
+    // another copy on every retry) and `ChapterResponsesTab`'s audio cleanup,
+    // which has always swallowed the denial as "non-blocking".
+    //
+    // Deliberately no upload validation on the delete branch — there is no
+    // incoming file to validate — and still owner-scoped to this family's own
+    // subtree, so it grants nothing across families.
     match /families/{familyId}/artifacts/{allPaths=**} {
       allow read: if isOwner(familyId);
-      allow write: if isOwner(familyId) && isValidUpload();
+      allow create, update: if isOwner(familyId) && isValidUpload();
+      allow delete: if isOwner(familyId);
     }
 
     // Books (photos, audio narration, uploaded images)

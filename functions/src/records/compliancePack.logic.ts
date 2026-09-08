@@ -1,3 +1,5 @@
+import { isLinkEvidenceType } from "../shared/linkEvidence.js";
+
 /**
  * Compliance pack archive — the pure half (FEAT-126).
  *
@@ -65,6 +67,18 @@ export const PackSkipReason = {
   PackSizeCap: "pack-size-cap",
   /** A media link in the markdown that no artifact in this range claimed. */
   NotInManifest: "not-in-manifest",
+  /**
+   * The artifact records an EXTERNAL address, not a file (UX-285).
+   *
+   * A strand session's *"the video we watched"* (UX-283) carries a public
+   * `http(s)` URL that nothing ever uploaded. It is not a broken Storage link
+   * and reporting it as one — *"could not be resolved to a file"* — describes a
+   * correct record as a failure, which on a compliance surface is the one thing
+   * that must not happen. It is a **kept** record with a known, stated
+   * limitation: the address is written into the portfolio's Links section and
+   * the manifest says why no file accompanies it.
+   */
+  ExternalLink: "external-link",
 } as const;
 export type PackSkipReason =
   (typeof PackSkipReason)[keyof typeof PackSkipReason];
@@ -78,6 +92,8 @@ const SKIP_REASON_TEXT: Record<PackSkipReason, string> = {
   [PackSkipReason.FileTooLarge]: "file larger than this archive allows",
   [PackSkipReason.PackSizeCap]: "archive size limit reached before this file",
   [PackSkipReason.NotInManifest]: "media link not matched to an artifact in this range",
+  [PackSkipReason.ExternalLink]:
+    "an external link, recorded in the portfolio — not a file in this archive",
 };
 
 /** Plain-language reason text, for both the inline marker and the manifest. */
@@ -276,6 +292,86 @@ export function mediaEntryName(
   }
 }
 
+/** Hosts whose links cannot survive as evidence in an offline archive. */
+const REMOTE_STORAGE_HOSTS = [
+  "firebasestorage.googleapis.com",
+  "storage.googleapis.com",
+];
+
+/**
+ * Does this URL name Storage at all, parseable or not?
+ *
+ * Declared above {@link isExternalLink} because that classification depends on
+ * it: a Storage URL is never external, however malformed.
+ */
+const isRemoteStorageUrl = (url: string): boolean => {
+  const ref = parseStorageObjectRef(url);
+  if (ref) return true;
+  const trimmed = url.trim();
+  // `gs://` stays an explicit prefix test — it is a scheme, not a host.
+  if (trimmed.toLowerCase().startsWith("gs://")) return true;
+  try {
+    // HOSTNAME, not "contains" (Codex): a legitimate external address can
+    // mention a Storage host in its path or query — a redirect such as
+    // `…/r?next=https%3A%2F%2Fstorage.googleapis.com%2F…` is the ordinary
+    // percent-encoded shape — and the substring test classified the whole
+    // address as Storage, so the archive replaced a captured link with an
+    // "evidence unavailable" marker and lost it.
+    const host = new URL(trimmed).hostname.toLowerCase();
+    return REMOTE_STORAGE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+  } catch {
+    // Unparseable: fall back to the substring test rather than declaring a
+    // string we cannot read to be safe.
+    const lower = trimmed.toLowerCase();
+    return REMOTE_STORAGE_HOSTS.some((h) => lower.includes(h));
+  }
+};
+
+/**
+ * Is this entry an external reference rather than a file that failed to resolve?
+ *
+ * BOTH halves are required, and each rules out a different wrong answer:
+ *
+ *   • the artifact's **type** must be one the portfolio records as a link
+ *     (`isLinkEvidenceType`, the shared rule) — otherwise a `Photo` whose URL
+ *     points off Storage would be reported as *"recorded in the portfolio"*
+ *     when the Links section holds no such row. A photo that should be a file
+ *     and is not is a defect, and keeps reporting as one.
+ *   • the **URL** must be `http(s)`, checked only after `parseStorageObjectRef`
+ *     has already declined it, so a Storage URL can never reach here.
+ *     `javascript:`, `data:` and a malformed `gs://` name no reachable address
+ *     and stay unreadable.
+ */
+export function isExternalLink(url: string, type?: string): boolean {
+  if (!isLinkEvidenceType(type)) return false;
+  // A MALFORMED Storage URL is not an external link, and calling one that would
+  // break the whole export (Codex): `parseStorageObjectRef` declines
+  // `https://firebasestorage.googleapis.com/bad-path`, so on `http(s)` alone it
+  // would be classed external, survive `rewritePortfolioMedia` untouched, and
+  // then be caught by `findRemainingRemoteUrls` — which aborts the archive
+  // rather than shipping a live Storage link. It stays `unreadable-url`, which
+  // is reported in the manifest and rewritten to a marker, exactly as before.
+  if (isRemoteStorageUrl(url)) return false;
+  // ...and never preserve a link the archive's own leak guard will flag.
+  //
+  // An external link is written into the portfolio VERBATIM, and
+  // `findRemainingRemoteUrls` then refuses to ship an archive containing
+  // anything that reads as a Storage URL — it scans the rendered text, so an
+  // UNENCODED nested address (`…?next=https://storage.googleapis.com/…`) trips
+  // it wherever it sits. Preserving such a link would abort the whole export
+  // over one unusual URL; classing it `unreadable-url` replaces it with a
+  // marker, names it in the manifest, and the pack still builds. The archive's
+  // integrity guard outranks preserving one address, and the ordinary
+  // percent-encoded form is unaffected.
+  if (findRemainingRemoteUrls(url).length > 0) return false;
+  try {
+    const { protocol } = new URL(url.trim());
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Turn the caller's artifact list into the archive's media plan.
  *
@@ -308,7 +404,18 @@ export function planPackMedia(
     for (const url of urls) {
       const ref = parseStorageObjectRef(url);
       if (!ref) {
-        entries.push({ ...base, url, skipReason: PackSkipReason.UnreadableUrl });
+        // An `http(s)` URL that is not a Storage object is an external
+        // reference, not a broken one (UX-285) — the two are different facts
+        // and the manifest says which. Anything else (a malformed `gs://`, a
+        // `data:` blob, garbage) stays UNREADABLE: it names no file and no
+        // reachable address either, so it is still a defect to report.
+        entries.push({
+          ...base,
+          url,
+          skipReason: isExternalLink(url, base.type)
+            ? PackSkipReason.ExternalLink
+            : PackSkipReason.UnreadableUrl,
+        });
         continue;
       }
       if (!isPathWithinFamily(ref.path, familyId)) {
@@ -371,19 +478,6 @@ export function checkSizeAllowance(
 /** Any markdown link or image: `[text](target)` / `![text](target)`. */
 const MARKDOWN_LINK = /(!?)\[([^\]\n]*)\]\(([^)\s]+)\)/g;
 
-/** Hosts whose links cannot survive as evidence in an offline archive. */
-const REMOTE_STORAGE_HOSTS = [
-  "firebasestorage.googleapis.com",
-  "storage.googleapis.com",
-];
-
-const isRemoteStorageUrl = (url: string): boolean => {
-  const ref = parseStorageObjectRef(url);
-  if (ref) return true;
-  const lower = url.toLowerCase();
-  return REMOTE_STORAGE_HOSTS.some((h) => lower.includes(h));
-};
-
 /**
  * Rewrite the portfolio markdown so it reads offline.
  *
@@ -396,6 +490,11 @@ const isRemoteStorageUrl = (url: string): boolean => {
  *
  * A storage link the plan never claimed is marked `not-in-manifest` rather than
  * left intact, and is reported back so the manifest can account for it too.
+ *
+ * **An external link survives untouched** (UX-285): this function matches every
+ * markdown link, not only images, and the rule it enforces is *no revocable
+ * Storage token in the archive* — a public address is not one, and replacing it
+ * would delete the only record of where that evidence lives.
  */
 export function rewritePortfolioMedia(
   markdown: string,
@@ -415,6 +514,15 @@ export function rewritePortfolioMedia(
         if (entry.entryName && !entry.skipReason) {
           return `${bang}[${text}](${entry.entryName})`;
         }
+        // An EXTERNAL link is left exactly as written (UX-285). This function
+        // matches any markdown link, not only images, so the portfolio's Links
+        // section would otherwise have every entry replaced by an "evidence
+        // unavailable" marker — deleting the address this section exists to
+        // record, and doing it in the same breath as a reason reading
+        // "recorded in the portfolio". The rewrite's purpose is that nothing
+        // points at a revocable Storage token; a public video URL is not one,
+        // and it is the record.
+        if (entry.skipReason === PackSkipReason.ExternalLink) return whole;
         return unavailableMarker(
           entry.artifactId,
           entry.skipReason ?? PackSkipReason.FetchFailed,

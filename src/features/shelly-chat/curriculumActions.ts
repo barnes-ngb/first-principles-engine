@@ -16,9 +16,11 @@
 // Pure by design, so "a hallucinated id never reaches a write" is testable
 // without Firestore.
 
+import { isStrand } from '../progress/strand'
 import { WORKBOOK_OWNER_REASON } from '../../core/firebase/activityConfigWrites'
 import type { ChatAction } from '../../core/types'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
+import { matchesActivityName } from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 import { describeActivityType } from './activityTypeChoices'
 import type { ChatActivityConfig } from './useShellyChatActions'
@@ -92,7 +94,11 @@ export const CURRICULUM_NOTICES = {
  * "Sight word games", a second "Dad's Lab: micro:bit" — each one raising the day
  * budget by its own minutes, so the app never saw the number as wrong.
  *
- * **Exact-key match only.** {@link nameKey} drops punctuation and case, so
+ * **Exact-key match, across every name the row answers to.** Since UX-280 a
+ * config can carry alternates, and {@link matchesActivityName} checks the name
+ * and each of those — so an add naming the cover matches a row she renamed away
+ * from it. The comparison itself is unchanged: exact on `nameKey`, one name at
+ * a time. {@link nameKey} drops punctuation and case, so
  * "Booster cards" matches "booster cards!" — but "The Good and the Beautiful
  * Math" does NOT match "Good and the Beautiful Math", because those differ by a
  * real word. A looser near-match would catch that pair and would also catch
@@ -127,7 +133,11 @@ export function findDuplicateActivities(
   return configs.filter(
     (c) =>
       !c.completed &&
-      nameKey(c.name) === key &&
+      // UX-280: a row also counts when the add matches one of its ALTERNATES —
+      // adding "Simply Good and Beautiful Math K" beside a row she renamed to
+      // "Math K" is the duplicate this notice exists to name. Still exact on
+      // `nameKey`, alias by alias: alternates widen what is compared, never how.
+      matchesActivityName(c, action.name) &&
       (audience === 'both' || c.childId === 'both' || c.childId === audience),
   )
 }
@@ -163,6 +173,21 @@ function frequencyPhrase(config: ChatActivityConfig): string {
 /** "GATB Math 3 is already finished" — never quoting an id back. */
 export function alreadyCompleteNotice(name: string): string {
   return `"${name}" is already marked finished, so nothing was changed. It stays in the Completed list on Progress → Curriculum.`
+}
+
+/**
+ * The refusal for a STRAND, whose count is not a position to be set (UX-282).
+ *
+ * A strand's `currentPosition` is a tally of sessions that happened, moved only
+ * by `logStrandSession` and only ever by an atomic `increment(1)`. The generic
+ * position action writes an ABSOLUTE value, so once a strand had logged its
+ * first session it satisfied the "tracks a position" gate below and a confirmed
+ * card could set the count to any number — lowering it, or raising it with no
+ * topic and no evidence, which is the one thing the feature's rails forbid
+ * (Codex). Refused with the verb that does move it.
+ */
+export function strandPositionNotice(name: string): string {
+  return `"${name}" counts sessions, not lesson numbers, and the count only goes up as sessions are recorded. To add one, tap Record a session on "${name}" at Progress → Curriculum.`
 }
 
 /** The refusal for a config that has no position to set. */
@@ -273,6 +298,11 @@ export function resolveCurriculumAction(
     // Only offered for configs that track position at all. A routine has no
     // lesson number, so "he's on lesson 107" against one is a mismatch worth
     // naming rather than a write worth inventing a field for.
+    // A strand's count is not a position (UX-282). Checked BEFORE the
+    // tracks-a-position gate, which a strand passes the moment it has a session.
+    if (isStrand(config)) {
+      return { ok: false, notice: strandPositionNotice(config.name) }
+    }
     if (config.currentPosition == null && config.totalUnits == null) {
       return { ok: false, notice: noPositionNotice(config.name) }
     }

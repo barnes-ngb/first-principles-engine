@@ -96,6 +96,33 @@ describe("toCurriculumPositions", () => {
     expect(record).not.toHaveProperty("completed");
   });
 
+  // ── A strand (UX-281) ─────────────────────────────────────────────────────
+  //
+  // A strand is curriculum with no lessons and no end: it carries a
+  // `currentPosition` (its session count) and deliberately no `totalUnits`.
+  // This function keys on the PRESENCE of a position rather than on
+  // `type === "workbook"`, which is why a strand reaches the weekly snapshot —
+  // and therefore the parent's observed-coverage line — with no change here.
+  // These pin that, so a later narrowing to workbooks-only fails loudly instead
+  // of silently dropping a strand out of the record.
+  it("records a strand, with no totalUnits invented for it", () => {
+    expect(
+      toCurriculumPositions([
+        config("s1", { name: "History", currentPosition: 14, unitLabel: "session" }),
+      ]),
+    ).toEqual([
+      { configId: "s1", name: "History", currentPosition: 14, unitLabel: "session" },
+    ]);
+  });
+
+  it("carries the strand's unit label, so the rate reads sessions not lessons", () => {
+    const [record] = toCurriculumPositions([
+      config("s1", { name: "History", currentPosition: 1, unitLabel: "session" }),
+    ]);
+    expect(record.unitLabel).toBe("session");
+    expect(record).not.toHaveProperty("totalUnits");
+  });
+
   it("records a finished program, flagged, so its final position is on file", () => {
     expect(
       toCurriculumPositions([

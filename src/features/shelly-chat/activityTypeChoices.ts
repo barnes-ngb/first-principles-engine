@@ -35,6 +35,7 @@ import {
   CURRICULUM_SECTION_TITLE,
   SECTION_FOR_TYPE,
 } from '../progress/curriculumGrouping'
+import { withoutStrandPositionFields } from '../progress/strand'
 
 /** The `addActivity` kind, narrowed off the union. */
 export type AddActivityAction = Extract<ChatAction, { kind: 'addActivity' }>
@@ -84,6 +85,11 @@ export const ACTIVITY_TYPE_WORDS: Record<
     label: 'Evaluation',
     phrase: 'an evaluation',
     note: 'Auto-managed — the app schedules these itself.',
+  },
+  [ActivityType.Strand]: {
+    label: 'Strand',
+    phrase: 'a strand',
+    note: 'A subject you keep returning to. Counts sessions and topics, with no set order and no total.',
   },
 }
 
@@ -173,6 +179,40 @@ export const EVALUATION_NOT_OFFERED_REASON =
   'Evaluations are managed by the app. One added by hand is planned every day and has no ⋮ menu at Progress → Curriculum, so it cannot be finished or removed.'
 
 /**
+ * Where each type sits on the card, lowest first.
+ *
+ * **A `Record<ActivityType, number>`, and it is the third rail this file and
+ * `curriculumGrouping` hold between them (UX-281).** The order used to be a
+ * hand-written array, and adding the seventh `ActivityType` walked straight
+ * past it: `ACTIVITY_TYPE_WORDS` and `SECTION_FOR_TYPE` both failed to compile
+ * and *this* silently dropped the new member off the card — a type a parent
+ * could not pick, on the door whose whole purpose (UX-193) is that she can
+ * correct the model's guess. Only a test noticed, and a test is the thing the
+ * other two rails were written to stop relying on.
+ *
+ * A rank rather than a list, so a new member fails to compile until somebody
+ * decides where it goes.
+ */
+const ACTIVITY_TYPE_RANK: Record<ActivityType, number> = {
+  [ActivityType.Workbook]: 0,
+  [ActivityType.Routine]: 1,
+  [ActivityType.Formation]: 2,
+  // A strand sits with the catch-alls rather than beside the workbook: it is
+  // curriculum, but it is the shape a parent reaches for when the thing she is
+  // describing has no order to it.
+  [ActivityType.Strand]: 3,
+  [ActivityType.Activity]: 4,
+  [ActivityType.App]: 5,
+  // The auto-managed one stays last.
+  [ActivityType.Evaluation]: 6,
+}
+
+/** Every type, in card order. Derived, so it cannot fall behind the enum. */
+export const ACTIVITY_TYPE_ORDER: ActivityType[] = (
+  Object.keys(ACTIVITY_TYPE_RANK) as ActivityType[]
+).sort((a, b) => ACTIVITY_TYPE_RANK[a] - ACTIVITY_TYPE_RANK[b])
+
+/**
  * The choices offered on the card, in the order a parent thinks about them —
  * the two that carry a lesson number and the daily shape first, the catch-alls
  * after, and the auto-managed one last.
@@ -186,14 +226,7 @@ export const EVALUATION_NOT_OFFERED_REASON =
  */
 export function activityTypeChoices(action: AddActivityAction): ActivityTypeChoice[] {
   const shared = action.shared === true
-  const order: ActivityType[] = [
-    ActivityType.Workbook,
-    ActivityType.Routine,
-    ActivityType.Formation,
-    ActivityType.Activity,
-    ActivityType.App,
-    ActivityType.Evaluation,
-  ]
+  const order = ACTIVITY_TYPE_ORDER
   const positioned = tracksPosition(action)
   return order.map((type) => ({
     type,
@@ -228,5 +261,10 @@ export function withActivityType(
   type: ActivityType,
 ): AddActivityAction {
   if (action.type === type) return action
-  return { ...action, type }
+  // A strand has no total and no position handed to it from outside (Codex
+  // round 1): a workbook-shaped proposal retyped as a strand would otherwise
+  // keep `totalUnits`/`currentPosition`, and the write derives `scannable` from
+  // their presence — the row would start at an unrelated lesson count and the
+  // weekly snapshot would report "session 1 of 60".
+  return withoutStrandPositionFields({ ...action, type })
 }

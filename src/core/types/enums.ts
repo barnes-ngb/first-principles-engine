@@ -382,6 +382,7 @@ export const ActivityType = {
   Activity: 'activity',
   App: 'app',
   Evaluation: 'evaluation',
+  Strand: 'strand',
 } as const
 export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType]
 

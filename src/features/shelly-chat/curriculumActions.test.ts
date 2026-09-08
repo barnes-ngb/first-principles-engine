@@ -53,7 +53,30 @@ const finished: ChatActivityConfig = {
   sortOrder: 3,
 }
 
+/**
+ * A strand mid-way through its sessions (UX-282). `currentPosition` is a TALLY,
+ * not a bookmark: it is moved only by `logStrandSession` and only ever by an
+ * atomic `increment(1)`.
+ */
+const historyStrand: ChatActivityConfig = {
+  id: 'cfg-history',
+  name: 'History',
+  childId: 'lincoln',
+  defaultMinutes: 30,
+  type: 'strand',
+  currentPosition: 14,
+  unitLabel: 'session',
+  sortOrder: 4,
+}
+
 const CONFIGS = [morningRoutine, gatb, finished]
+
+/**
+ * Deliberately NOT in `CONFIGS`: that array's `sortOrder` values are asserted
+ * by the add / nextActivitySortOrder tests, and a fixture that quietly moves an
+ * unrelated expectation is how a shared fixture stops being trustworthy.
+ */
+const STRAND_CONFIGS = [...CONFIGS, historyStrand]
 
 const complete = (activityConfigId: string, childId = 'lincoln'): CurriculumAction => ({
   kind: 'markActivityComplete',
@@ -200,6 +223,38 @@ describe('resolveCurriculumAction — setActivityPosition bounds', () => {
 
   it('accepts the last lesson exactly', () => {
     expect(resolveCurriculumAction(setPosition('cfg-gatb', 140), CONFIGS, true).ok).toBe(true)
+  })
+
+  // ── A strand's count is not a position (Codex) ────────────────────────────
+  //
+  // The gate below passes for anything carrying a `currentPosition`, which a
+  // strand has the moment it logs its first session — so this generic action
+  // reached `setActivityConfigPosition`, an ABSOLUTE write, and a confirmed
+  // card could lower the count or raise it with no topic and no evidence. Both
+  // are what the feature's rails exist to forbid.
+  it('refuses to set a strand position, however many sessions it has', () => {
+    const result = resolveCurriculumAction(setPosition('cfg-history', 3), STRAND_CONFIGS, true)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.notice).toContain('History')
+      expect(result.notice).toContain('counts sessions')
+      // Names the verb that DOES move it, rather than only refusing.
+      expect(result.notice).toContain('Record a session')
+    }
+  })
+
+  it('refuses a strand even when the number would RAISE the count', () => {
+    // Raising it with no topic and no artifact breaks the evidence rule just as
+    // surely as lowering it breaks the monotonic one.
+    expect(
+      resolveCurriculumAction(setPosition('cfg-history', 99), STRAND_CONFIGS, true).ok,
+    ).toBe(false)
+  })
+
+  it('does not refuse an ordinary workbook by the same rule', () => {
+    expect(
+      resolveCurriculumAction(setPosition('cfg-gatb', 12), STRAND_CONFIGS, true).ok,
+    ).toBe(true)
   })
 
   it('accepts a position on a config with a position but no known total', () => {

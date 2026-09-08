@@ -44,20 +44,34 @@ import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import type { NewActivityConfig } from '../../core/hooks/useActivityConfigs'
 import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
 import { useScan } from '../../core/hooks/useScan'
+import { ScanDoor } from '../../core/hooks/scanFailureNote'
 import { isWorkbookMatch, useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import type { ActivityConfig, CertificateScanResult, ScanRecord, ScanResult } from '../../core/types'
 import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
 import { ActivityFrequencyLabel } from '../../core/types/enums'
+import { activityNames } from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
+import RenameActivityDialog from './RenameActivityDialog'
+import { ALIAS_SECTION_LABEL } from './renameActivity'
 import EditRoutinesDialog from './EditRoutinesDialog'
 import {
   CURRICULUM_SECTION_TITLE,
   CurriculumSection,
   groupCurriculumConfigs,
   OTHER_ACTIVITIES_DESCRIPTION,
+  STRANDS_DESCRIPTION,
 } from './curriculumGrouping'
-import { processScanBatch } from './multiPageScan'
+import { mostRecentTopic, strandRowSummary } from './strand'
+import StrandSessionDialog from './StrandSessionDialog'
+import type { StrandSessionEvidence } from './strandSession'
+import {
+  logStrandSession,
+  STRAND_SESSION_FAILED_CLEAN,
+  StrandSessionFailure,
+  StrandSessionRefused,
+} from '../../core/firebase/strandSessionWrites'
+import { failedPageIndexes, processScanBatch } from './multiPageScan'
 import {
   buildDeleteActivityPrompt,
   deleteFailureNotice,
@@ -73,6 +87,7 @@ export default function CurriculumTab() {
     setActiveChildId,
     isLoading: isLoadingChildren,
     addChild,
+    isChildProfile,
   } = useActiveChild()
   const {
     configs,
@@ -114,11 +129,60 @@ export default function CurriculumTab() {
     return unsub
   }, [familyId, activeChildId])
 
+  // ── Strand session capture (UX-283) ──────────────────────────────────────
+  // The row's own door onto recording a session. Parent-gated on capability at
+  // the control AND again at the write, because this tab renders for a kid
+  // profile today and a session moves a curriculum row's count.
+  const [sessionTarget, setSessionTarget] = useState<ActivityConfig | null>(null)
+  const [sessionSaving, setSessionSaving] = useState(false)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+
+  const handleLogSession = useCallback(
+    async (topic: string, evidence: StrandSessionEvidence) => {
+      if (!familyId || !activeChildId || !sessionTarget) return
+      if (isChildProfile) return
+      setSessionSaving(true)
+      setSessionError(null)
+      try {
+        await logStrandSession({
+          familyId,
+          config: sessionTarget,
+          childId: activeChildId,
+          topic,
+          evidence,
+        })
+        setSessionTarget(null)
+      } catch (err) {
+        // The refusal sentences are the writer's, so the parent reads one
+        // wording of the rule. Anything else says what did NOT happen rather
+        // than implying the session was recorded (the `deleteFailureNotice`
+        // doctrine): the dialog stays open with her capture intact.
+        setSessionError(
+          // Both of ours carry the parent-facing sentence already: a refusal
+          // states the rule, and a failure states which of the two truths
+          // applies — cleaned up, or evidence left behind that a blind retry
+          // would duplicate (Codex round 1).
+          // One base for every failure that carries its own sentence (Codex
+          // round 2), rather than a growing `instanceof` list here: a refusal
+          // states the rule; a failure states which truth applies — cleaned up,
+          // evidence left behind that a blind retry would duplicate, or the
+          // strand removed while the dialog was open.
+          err instanceof StrandSessionRefused || err instanceof StrandSessionFailure
+            ? err.message
+            : STRAND_SESSION_FAILED_CLEAN,
+        )
+      } finally {
+        setSessionSaving(false)
+      }
+    },
+    [familyId, activeChildId, sessionTarget, isChildProfile],
+  )
+
   // Group configs by type — a PARTITION, not a set of filters (UX-204). Four
   // independent filters over a six-member enum left `activity` and `app` configs
   // rendered nowhere while they went on planning every day; `groupCurriculumConfigs`
   // places every type by a `Record<ActivityType, …>` a new member cannot escape.
-  const { workbooks, routines, other, evaluations, completed } = useMemo(
+  const { workbooks, routines, other, evaluations, strands, completed } = useMemo(
     () => groupCurriculumConfigs(configs),
     [configs],
   )
@@ -128,19 +192,18 @@ export default function CurriculumTab() {
     (config: ActivityConfig): ScanRecord[] => {
       // UX-205: the one shared name-comparison rule, not a fourth copy of it.
       const norm = nameKey
-      const configName = norm(config.name)
-      const configCurriculum = norm(config.curriculum)
+      // UX-280: every name this row answers to, plus the publisher slot. A card
+      // whose name she shortened would otherwise show none of its own scans —
+      // they were detected under the cover's title, which is now an alternate.
+      const configKeys = [...activityNames(config), config.curriculum ?? '']
+        .map(norm)
+        .filter(Boolean)
       return recentScans.filter((s) => {
         if (!s.results || s.results.pageType === 'certificate') return false
         const scanSubject = norm(s.results.subject)
         const detected = s.results.curriculumDetected
         const scanCurr = norm(detected?.name)
-        return (
-          (configName && scanSubject.includes(configName)) ||
-          (configName && scanCurr.includes(configName)) ||
-          (configCurriculum && scanCurr.includes(configCurriculum)) ||
-          (configCurriculum && scanSubject.includes(configCurriculum))
-        )
+        return configKeys.some((key) => scanSubject.includes(key) || scanCurr.includes(key))
       })
     },
     [recentScans],
@@ -173,6 +236,9 @@ export default function CurriculumTab() {
   // Reassign-owner dialog (DATA-08): move a workbook to its real child owner.
   const [reassign, setReassign] = useState<ActivityConfig | null>(null)
 
+  /** UX-279: rename dialog. Parent-only, on capability — see `handleRename`. */
+  const [renaming, setRenaming] = useState<ActivityConfig | null>(null)
+
   // Edit routines dialog
   const [editRoutinesOpen, setEditRoutinesOpen] = useState(false)
 
@@ -180,7 +246,9 @@ export default function CurriculumTab() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   // Scan state
-  const { scan, scanning, clearScan } = useScan()
+  const { scan, scanning, lastError: lastScanError, clearScan } = useScan(
+    ScanDoor.Curriculum,
+  )
   const { syncScanToConfig } = useScanToActivityConfig()
   const {
     buildPreview: buildCertPreview,
@@ -190,7 +258,16 @@ export default function CurriculumTab() {
     error: certError,
     clearState: clearCertState,
   } = useCertificateProgress()
-  const [scanSnack, setScanSnack] = useState<string | null>(null)
+  /**
+   * The scan notice. `failed` keeps a failure on screen until it's dismissed —
+   * a reason that auto-hides in three seconds is the "sometimes just
+   * disappears" half of the owner's report (UX-275).
+   */
+  const [scanSnack, setScanSnack] = useState<{ message: string; failed: boolean } | null>(
+    null,
+  )
+  /** Staged pages left over from the last batch because they failed (UX-275). */
+  const [failedPageCount, setFailedPageCount] = useState(0)
   /** Which card is currently scanning (null = "Add to Curriculum" generic scan). */
   const [scanningConfigId, setScanningConfigId] = useState<string | null>(null)
   /** Pending certificate result awaiting confirmation, scoped to a specific card. */
@@ -258,6 +335,30 @@ export default function CurriculumTab() {
         ? `"${config.name}" added to the kids' quick log`
         : `"${config.name}" removed from the kids' quick log`,
     )
+  }
+
+  /**
+   * Write a rename (UX-279).
+   *
+   * Writes `name` and the alternates, and **nothing else** — no day log, no
+   * applied week, no artifact title, no recorded minute. A logged label is
+   * evidence of the day it was logged on; renaming the program does not change
+   * what happened.
+   *
+   * Parent-gated at the write as well as at the menu. The tab renders for a kid
+   * profile today, so a control that only hid itself would be a control a kid
+   * could still reach through a stale dialog — the same two-layer rule the
+   * planner's curriculum follow-up uses (UX-232).
+   */
+  const handleRename = async (configId: string, name: string, aliases: string[]) => {
+    if (isChildProfile) return
+    const config = configs.find((c) => c.id === configId)
+    if (!config || config.completed) return
+    // Deliberately UNCAUGHT: the dialog awaits this and keeps itself open on a
+    // rejection, so swallowing the error here would close it over a write that
+    // never landed (Codex round 1, P2).
+    await updateConfig(configId, { name, aliases })
+    setSnack(`Renamed to "${name}"`)
   }
 
   const handleReassign = async (config: ActivityConfig, childId: string) => {
@@ -335,6 +436,34 @@ export default function CurriculumTab() {
   // pages merge (DATA-15 matcher) and distinct workbooks each get a config.
   const [stagedPages, setStagedPages] = useState<{ file: File; url: string }[]>([])
   const [batchProcessing, setBatchProcessing] = useState(false)
+  /**
+   * The child these photos were picked for. Staged pages now OUTLIVE a failed
+   * batch (UX-275), so without this a parent could switch the child selector and
+   * hit "Retry failed pages" and the scan records, `activityConfigs` position
+   * and skill-map writes would all land on the OTHER child — pages of Lincoln's
+   * math book written into London's curriculum (Codex round 1, P1). A record
+   * written to the wrong child is the one failure this tab must not have, so the
+   * batch is bound to its child at staging time and dropped on a switch: the
+   * photos are two taps to re-pick, a wrong record is not.
+   */
+  const [stagedChildId, setStagedChildId] = useState<string | null>(null)
+  /**
+   * The active child as it is NOW, readable from inside an in-flight batch. A
+   * running `handleScanPages` holds the child it started with in its closure —
+   * correct for its own writes — but its `finally` restores the failed pages
+   * long after a switch may have happened, and the switch effect cannot see a
+   * batch that has not finished (Codex round 2, P1).
+   */
+  const activeChildIdRef = useRef(activeChildId)
+  useEffect(() => {
+    activeChildIdRef.current = activeChildId
+  }, [activeChildId])
+  /**
+   * Set when the switch effect drops a batch. A flag rather than an endpoint
+   * comparison, because switching away and back again during a scan also leaves
+   * the staged pages cleared and their object URLs revoked.
+   */
+  const batchInvalidatedRef = useRef(false)
 
   // Revoke any pending object URLs on unmount.
   const stagedRef = useRef(stagedPages)
@@ -348,14 +477,38 @@ export default function CurriculumTab() {
     [],
   )
 
-  const handleStagePages = useCallback((files: File[]) => {
-    setStagedPages((prev) => [
-      ...prev,
-      ...files.map((file) => ({ file, url: URL.createObjectURL(file) })),
-    ])
-  }, [])
+  // A staged batch belongs to the child it was picked for. Switching the child
+  // selector drops it rather than carrying it across — see `stagedChildId`.
+  useEffect(() => {
+    if (!stagedChildId || stagedChildId === activeChildId) return
+    batchInvalidatedRef.current = true
+    stagedPages.forEach((p) => URL.revokeObjectURL(p.url))
+    if (stagedPages.length > 0) {
+      setScanSnack({
+        message: 'Staged pages cleared — they were picked for another child.',
+        failed: false,
+      })
+    }
+    setStagedPages([])
+    setFailedPageCount(0)
+    setStagedChildId(null)
+  }, [activeChildId, stagedChildId, stagedPages])
+
+  const handleStagePages = useCallback(
+    (files: File[]) => {
+      if (!activeChildId) return
+      setFailedPageCount(0)
+      setStagedChildId(activeChildId)
+      setStagedPages((prev) => [
+        ...prev,
+        ...files.map((file) => ({ file, url: URL.createObjectURL(file) })),
+      ])
+    },
+    [activeChildId],
+  )
 
   const removeStagedPage = useCallback((index: number) => {
+    setFailedPageCount(0)
     setStagedPages((prev) => {
       const next = [...prev]
       const [removed] = next.splice(index, 1)
@@ -366,31 +519,83 @@ export default function CurriculumTab() {
 
   const handleScanPages = useCallback(async () => {
     if (!familyId || !activeChildId || stagedPages.length === 0) return
+    // The guard at the write, not only in the effect above: a batch is scanned
+    // for the child it was picked for or it is not scanned at all. Nothing here
+    // may write a scan record, a workbook position or a skill map to a child
+    // whose name was not on the screen when the photos were taken.
+    if (stagedChildId && stagedChildId !== activeChildId) return
     const pages = stagedPages
+    batchInvalidatedRef.current = false
     setBatchProcessing(true)
+    setFailedPageCount(0)
+    // UX-275: which pages to KEEP staged. `null` means "we don't know" — keep
+    // every one of them, because re-picking six photos is the recovery problem
+    // the owner asked us to fix.
+    let keep: Set<number> | null = null
     try {
       const summary = await processScanBatch(
         pages.map((p) => p.file),
         {
           // Sequential: each scan + apply awaits before the next page (see
           // processScanBatch). No Promise.all — that's the write-race fix.
-          scanOne: (file) => scan(file, familyId, activeChildId),
+          //
+          // UX-275: `scan` reports a failure by returning null and setting
+          // React state the loop can't read, so re-throw the reason it kept for
+          // us — otherwise every page's outcome reads a bare "Scan failed".
+          scanOne: async (file) => {
+            const record = await scan(file, familyId, activeChildId)
+            if (!record) throw new Error(lastScanError() ?? 'Scan failed')
+            return record
+          },
           syncOne: (results) => syncScanToConfig(activeChildId, results),
           onWorksheet: (results) => feedSkillMap(results),
         },
       )
-      setScanSnack(summary.message)
+      setScanSnack({ message: summary.message, failed: summary.failedCount > 0 })
+      keep = new Set(failedPageIndexes(summary))
+      setFailedPageCount(keep.size)
     } catch (err) {
       console.error('[CurriculumTab] Multi-page scan failed', err)
-      setScanSnack('Scan failed — please try again')
+      const msg = err instanceof Error ? err.message : String(err)
+      setScanSnack({ message: `Scan failed — ${msg}`, failed: true })
+      setFailedPageCount(pages.length)
     } finally {
-      pages.forEach((p) => URL.revokeObjectURL(p.url))
-      setStagedPages([])
+      if (batchInvalidatedRef.current || activeChildIdRef.current !== activeChildId) {
+        // The child changed WHILE this batch was running. Restoring the failed
+        // pages now would hand them to the new child with no owner recorded —
+        // the switch effect has already run and cleared `stagedChildId`, so the
+        // retry guard would wave them through. Discard the completion instead:
+        // nothing written this run is affected (every write used the child this
+        // batch started with, from the closure), and re-picking is two taps.
+        pages.forEach((p) => URL.revokeObjectURL(p.url))
+        setStagedPages([])
+        setStagedChildId(null)
+        setFailedPageCount(0)
+      } else {
+        const kept = (i: number) => keep === null || keep.has(i)
+        pages.forEach((p, i) => {
+          if (!kept(i)) URL.revokeObjectURL(p.url)
+        })
+        const remaining = pages.filter((_, i) => kept(i))
+        setStagedPages(remaining)
+        // Re-stamp the owner: the batch outlived it only if pages did.
+        setStagedChildId(remaining.length > 0 ? activeChildId : null)
+      }
       setBatchProcessing(false)
       // Discard the last single-page record left in useScan state.
       clearScan()
     }
-  }, [familyId, activeChildId, stagedPages, scan, syncScanToConfig, feedSkillMap, clearScan])
+  }, [
+    familyId,
+    activeChildId,
+    stagedChildId,
+    stagedPages,
+    scan,
+    lastScanError,
+    syncScanToConfig,
+    feedSkillMap,
+    clearScan,
+  ])
 
   /**
    * Apply a scan result to a specific card. Worksheet results write directly
@@ -405,16 +610,19 @@ export default function CurriculumTab() {
           setCertConfirm({ result: results, config })
         } catch (err) {
           console.error('[CurriculumTab] Failed to build certificate preview', err)
-          setScanSnack('Failed to read certificate')
+          setScanSnack({ message: 'Failed to read certificate', failed: true })
         }
         return
       }
       try {
         const r = await syncScanToConfig(activeChildId, results, { targetConfigId: config.id })
         if (r.action === 'updated' && r.position) {
-          setScanSnack(`Updated ${r.configName} to lesson ${r.position}`)
+          setScanSnack({
+            message: `Updated ${r.configName} to lesson ${r.position}`,
+            failed: false,
+          })
         } else if (r.action === 'updated') {
-          setScanSnack(`Updated ${r.configName}`)
+          setScanSnack({ message: `Updated ${r.configName}`, failed: false })
         }
       } catch (err) {
         console.error('[CurriculumTab] Failed to sync config:', err)
@@ -430,15 +638,32 @@ export default function CurriculumTab() {
       setScanningConfigId(config.id)
       try {
         const record = await scan(file, familyId, activeChildId)
-        if (!record?.results) return
+        if (!record?.results) {
+          // UX-275: a failure on a card's own camera used to render nothing at
+          // all — spinner, then the page as it was. Say what happened.
+          setScanSnack({
+            message: lastScanError() ?? 'Scan failed — no analysis came back.',
+            failed: true,
+          })
+          return
+        }
 
         const results = record.results
-        const cardName = config.curriculum || config.name
+        // UX-280 (Codex round 1, P2): every name this row answers to, not one.
+        // The untargeted lookup gained the alias ladder and this guard did not,
+        // so scanning the OLD cover from a renamed card raised a false
+        // "that doesn't look like this workbook" prompt — on the exact path the
+        // alternates exist to keep working.
+        const cardNames = [config.curriculum ?? '', ...activityNames(config)].filter(Boolean)
         const detectedName = isCertificateScan(results)
           ? results.curriculumName
           : results.curriculumDetected?.name || results.subject
 
-        if (detectedName && cardName && !isWorkbookMatch(cardName, detectedName)) {
+        if (
+          detectedName &&
+          cardNames.length > 0 &&
+          !cardNames.some((cardName) => isWorkbookMatch(cardName, detectedName))
+        ) {
           setMismatchPrompt({ result: results, config, detectedName })
           return
         }
@@ -448,7 +673,7 @@ export default function CurriculumTab() {
         setScanningConfigId(null)
       }
     },
-    [familyId, activeChildId, scan, applyScanToCard],
+    [familyId, activeChildId, scan, lastScanError, applyScanToCard],
   )
 
   const handleConfirmCertificate = useCallback(async () => {
@@ -457,7 +682,7 @@ export default function CurriculumTab() {
       await applyCertUpdate(familyId, activeChildId, certConfirm.result, {
         targetConfigId: certConfirm.config.id,
       })
-      setScanSnack(`Updated ${certConfirm.config.name}`)
+      setScanSnack({ message: `Updated ${certConfirm.config.name}`, failed: false })
     } catch (err) {
       console.error('[CurriculumTab] Failed to apply certificate update', err)
     } finally {
@@ -583,7 +808,13 @@ export default function CurriculumTab() {
                 >
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
@@ -619,10 +850,87 @@ export default function CurriculumTab() {
                 >
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
+            </List>
+          </SectionCard>
+        )}
+
+        {/*
+          Strands (UX-281) — curriculum with no lessons, that still keeps count.
+
+          Its own section, because its row is a different row: a count with no
+          total and the topic it last covered. Rendered with the SAME `ListItem`
+          + `openMenu` shape as Routine Activities, so rename / mark-complete /
+          quick-log / delete come with it rather than growing a second, weaker
+          menu — the UX-204 rule that a new section inherits the existing ⋮
+          rather than reinventing part of it.
+
+          There is no progress bar and no total, deliberately. A strand has no
+          end, so a bar would either be empty forever or imply one.
+        */}
+        {strands.length > 0 && (
+          <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Strands]}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              {STRANDS_DESCRIPTION}
+            </Typography>
+            <List dense disablePadding>
+              {strands.map((config) => {
+                const topic = mostRecentTopic(config)
+                return (
+                  <ListItem
+                    key={config.id}
+                    secondaryAction={
+                      <IconButton size="small" onClick={(e) => openMenu(e, config)}>
+                        <MoreVertIcon fontSize="small" />
+                      </IconButton>
+                    }
+                  >
+                    <ListItemText
+                      primary={config.name}
+                      secondary={
+                        <>
+                          {strandRowSummary(
+                            config,
+                            ActivityFrequencyLabel[config.frequency] ?? config.frequency,
+                          )}
+                          {topic && (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: 'block' }}
+                            >
+                              {`Last topic: ${topic}`}
+                            </Typography>
+                          )}
+                          <ActivityAliases config={config} />
+                          {!isChildProfile && (
+                            <Button
+                              size="small"
+                              sx={{ mt: 0.5, ml: -1 }}
+                              onClick={() => {
+                                setSessionError(null)
+                                setSessionTarget(config)
+                              }}
+                            >
+                              Record a session
+                            </Button>
+                          )}
+                        </>
+                      }
+                      secondaryTypographyProps={{ component: 'div' }}
+                    />
+                  </ListItem>
+                )
+              })}
             </List>
           </SectionCard>
         )}
@@ -635,7 +943,13 @@ export default function CurriculumTab() {
                 <ListItem key={config.id}>
                   <ListItemText
                     primary={config.name}
-                    secondary={`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                    secondary={
+                      <>
+                        {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
+                        <ActivityAliases config={config} />
+                      </>
+                    }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                 </ListItem>
               ))}
@@ -691,6 +1005,26 @@ export default function CurriculumTab() {
                 card; different workbooks each get their own.
               </Typography>
               <ScanButton multiple onCaptureFiles={handleStagePages} variant="button" />
+
+              {/* UX-275: pages that failed stay staged, so retrying is one tap
+                  instead of re-picking six photos from the gallery. */}
+              {failedPageCount > 0 && stagedPages.length > 0 && (
+                <Alert
+                  severity="warning"
+                  action={
+                    <Button
+                      color="inherit"
+                      size="small"
+                      onClick={() => void handleScanPages()}
+                    >
+                      Retry failed pages
+                    </Button>
+                  }
+                >
+                  {failedPageCount} page{failedPageCount === 1 ? '' : 's'} didn&apos;t go
+                  through — still here, nothing lost.
+                </Alert>
+              )}
 
               {stagedPages.length > 0 && (
                 <>
@@ -750,6 +1084,21 @@ export default function CurriculumTab() {
 
       {/* Three-dot context menu */}
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
+        {/* UX-279: the publisher's name on the cover and what the family calls
+            it are different strings, and until now the row had one slot for
+            both. Parent-only on capability, never on a name. A finished program
+            never reaches here — the Completed section has no menu. */}
+        {!isChildProfile && (
+          <MenuItem
+            onClick={() => {
+              if (menuConfig) setRenaming(menuConfig)
+              closeMenu()
+            }}
+          >
+            <EditIcon fontSize="small" sx={{ mr: 1 }} />
+            Rename
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             if (menuConfig) {
@@ -907,6 +1256,29 @@ export default function CurriculumTab() {
       />
 
       {/* Add Activity dialog */}
+      <RenameActivityDialog
+        config={renaming}
+        siblings={configs}
+        onSave={handleRename}
+        onClose={() => setRenaming(null)}
+      />
+
+      {sessionTarget && (
+        <StrandSessionDialog
+          open
+          config={sessionTarget}
+          isChildProfile={isChildProfile}
+          voiceProfile={{ id: activeChildId ?? '' }}
+          saving={sessionSaving}
+          error={sessionError}
+          onClose={() => {
+            setSessionTarget(null)
+            setSessionError(null)
+          }}
+          onSave={(topic, evidence) => void handleLogSession(topic, evidence)}
+        />
+      )}
+
       <AddActivityDialog
         open={addDialogOpen}
         childId={activeChildId}
@@ -1003,12 +1375,23 @@ export default function CurriculumTab() {
         onClose={() => setSnack(null)}
         message={snack}
       />
+      {/* A failure stays until it is read; a success still gets out of the way. */}
       <Snackbar
         open={!!scanSnack}
-        autoHideDuration={3000}
-        onClose={() => setScanSnack(null)}
-        message={scanSnack}
-      />
+        autoHideDuration={scanSnack?.failed ? null : 3000}
+        onClose={(_e, reason) => {
+          if (scanSnack?.failed && reason === 'clickaway') return
+          setScanSnack(null)
+        }}
+      >
+        <Alert
+          severity={scanSnack?.failed ? 'error' : 'success'}
+          variant="filled"
+          onClose={() => setScanSnack(null)}
+        >
+          {scanSnack?.message ?? ''}
+        </Alert>
+      </Snackbar>
     </Container>
   )
 }
@@ -1022,6 +1405,23 @@ interface WorkbookCardProps {
   onReassign: () => void
   onScanCapture: (file: File) => void
   scanning: boolean
+}
+
+/**
+ * The row's other names, small, beneath it (UX-280) — the owner's "tags of
+ * alternate names beneath the curriculum".
+ *
+ * Quiet on purpose: these are a matching aid, not a second title. A row with
+ * none renders nothing extra, which is every row that exists today.
+ */
+function ActivityAliases({ config }: { config: ActivityConfig }) {
+  const aliases = activityNames(config).slice(1)
+  if (aliases.length === 0) return null
+  return (
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+      {ALIAS_SECTION_LABEL}: {aliases.join(' · ')}
+    </Typography>
+  )
 }
 
 function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCapture, scanning }: WorkbookCardProps) {
@@ -1042,6 +1442,7 @@ function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCaptu
             {config.subjectBucket} · {ActivityFrequencyLabel[config.frequency] ?? config.frequency}{' '}
             · {config.defaultMinutes}m
           </Typography>
+          <ActivityAliases config={config} />
         </Box>
         <IconButton size="small" onClick={(e) => onOpenMenu(e, config)}>
           <MoreVertIcon fontSize="small" />

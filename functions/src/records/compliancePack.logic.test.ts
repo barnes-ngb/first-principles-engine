@@ -140,6 +140,175 @@ describe("planPackMedia", () => {
     );
     expect(entries[0].skipReason).toBe(PackSkipReason.UnreadableUrl);
   });
+
+  // ── UX-285: a link is not a broken file ──────────────────────────────────
+  //
+  // A Video artifact records an EXTERNAL address by design — nothing was ever
+  // uploaded for it — so reporting "media link could not be resolved to a file"
+  // describes a correct record as a failure, on the one surface where that must
+  // not happen.
+  it("reports a Video artifact's external address as a link, not a failure", () => {
+    const entries = planPackMedia(
+      [
+        {
+          id: "vid-1",
+          title: "Ancient Egypt",
+          type: "Video",
+          urls: ["https://example.com/watch?v=abc"],
+        },
+      ],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBe(PackSkipReason.ExternalLink);
+    expect(describeSkipReason(PackSkipReason.ExternalLink)).not.toMatch(/could not/i);
+  });
+
+  it("keeps a PHOTO's foreign URL unreadable — that one really is a defect", () => {
+    // The distinction is what kind of evidence this is, not whether the URL
+    // parsed: a photo that should be a file and is not cannot be archived, and
+    // calling it "recorded in the portfolio" would be false — the Links section
+    // holds no row for it.
+    const entries = planPackMedia(
+      [{ id: "p-1", type: "Photo", urls: ["https://example.com/photo.jpg"] }],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBe(PackSkipReason.UnreadableUrl);
+  });
+
+  it("keeps a non-web scheme unreadable even on a Video artifact", () => {
+    for (const url of ["javascript:alert(1)", "data:text/html,x", "gs://nope"]) {
+      const entries = planPackMedia([{ id: "v", type: "Video", urls: [url] }], FAMILY);
+      expect(entries[0].skipReason, url).toBe(PackSkipReason.UnreadableUrl);
+    }
+  });
+
+  it("keeps a MALFORMED Storage URL unreadable, not external", () => {
+    // Classing it external would leave it intact through the rewrite, and
+    // `findRemainingRemoteUrls` then ABORTS the whole archive rather than ship
+    // a live Storage link — so this misclassification broke the export outright
+    // rather than mislabelling one row.
+    const entries = planPackMedia(
+      [
+        {
+          id: "v",
+          type: "Video",
+          urls: ["https://firebasestorage.googleapis.com/bad-path"],
+        },
+      ],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBe(PackSkipReason.UnreadableUrl);
+  });
+
+  it("does not let a malformed Storage URL survive the rewrite", () => {
+    const url = "https://firebasestorage.googleapis.com/bad-path";
+    const entries = planPackMedia([{ id: "v", type: "Video", urls: [url] }], FAMILY);
+    const { markdown } = rewritePortfolioMedia(`- [Egypt](${url})`, entries);
+
+    expect(markdown).toContain("evidence unavailable");
+    expect(findRemainingRemoteUrls(markdown)).toEqual([]);
+  });
+
+  it("keeps an external link that merely MENTIONS a Storage host", () => {
+    // The ordinary percent-encoded redirect. The substring test called the
+    // whole address Storage, so the archive replaced a captured link with an
+    // "evidence unavailable" marker and lost it (Codex).
+    const url =
+      "https://example.com/r?next=https%3A%2F%2Fstorage.googleapis.com%2Fx";
+    const entries = planPackMedia([{ id: "v", type: "Video", urls: [url] }], FAMILY);
+    expect(entries[0].skipReason).toBe(PackSkipReason.ExternalLink);
+
+    const { markdown } = rewritePortfolioMedia(`- [Egypt](${url})`, entries);
+    expect(markdown).toContain(url);
+    expect(findRemainingRemoteUrls(markdown)).toEqual([]);
+  });
+
+  it("matches a Storage SUBDOMAIN by host, not by luck", () => {
+    // `<bucket>.storage.googleapis.com` PARSES, and correctly reports
+    // outside-family — so the case that exercises the host comparison is a
+    // firebasestorage subdomain, which `parseStorageObjectRef` declines.
+    const entries = planPackMedia(
+      [{ id: "v", type: "Video", urls: ["https://x.firebasestorage.googleapis.com/bad"] }],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBe(PackSkipReason.UnreadableUrl);
+  });
+
+  it("still refuses a real bucket subdomain outside the family", () => {
+    const entries = planPackMedia(
+      [{ id: "v", type: "Video", urls: ["https://x.storage.googleapis.com/a"] }],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBe(PackSkipReason.OutsideFamily);
+  });
+
+  it("refuses to preserve a link the leak guard would flag, so the pack still builds", () => {
+    // An UNENCODED nested address trips `findRemainingRemoteUrls` wherever it
+    // sits, and that guard aborts the entire export. A marker loses one unusual
+    // link; preserving it would lose the archive.
+    const url = "https://example.com/r?next=https://storage.googleapis.com/x";
+    const entries = planPackMedia([{ id: "v", type: "Video", urls: [url] }], FAMILY);
+    expect(entries[0].skipReason).toBe(PackSkipReason.UnreadableUrl);
+
+    const { markdown } = rewritePortfolioMedia(`- [Egypt](${url})`, entries);
+    expect(findRemainingRemoteUrls(markdown)).toEqual([]);
+  });
+
+  it("never treats a Storage URL as external", () => {
+    const entries = planPackMedia(
+      [{ id: "v", type: "Video", urls: [downloadUrl(PHOTO_PATH)] }],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBeUndefined();
+    expect(entries[0].objectPath).toBe(PHOTO_PATH);
+  });
+});
+
+// ── UX-285: the Links section must survive the rewrite ──────────────────────
+//
+// `rewritePortfolioMedia` matches EVERY markdown link, not only images, so the
+// portfolio's new Links section would otherwise have each entry replaced by an
+// "evidence unavailable" marker — deleting the address the section exists to
+// record, and doing it alongside a reason reading "recorded in the portfolio".
+// The rule the rewrite enforces is *no revocable Storage token in the archive*;
+// a public address is not one.
+describe("rewritePortfolioMedia and external links", () => {
+  const LINK = "https://example.com/watch?v=abc";
+
+  it("leaves an external link exactly as written", () => {
+    const entries = planPackMedia(
+      [{ id: "vid-1", title: "Ancient Egypt", type: "Video", urls: [LINK] }],
+      FAMILY,
+    );
+    const md = `### Links
+
+- [Ancient Egypt](${LINK})
+`;
+    const { markdown } = rewritePortfolioMedia(md, entries);
+
+    expect(markdown).toContain(`- [Ancient Egypt](${LINK})`);
+    expect(markdown).not.toContain("evidence unavailable");
+  });
+
+  it("still marks a Storage link that has no file in the pack", () => {
+    // The external-link case must not have widened into "leave everything".
+    const entries = planPackMedia(
+      [{ id: "p-1", type: "Photo", urls: [downloadUrl(PHOTO_PATH)] }],
+      FAMILY,
+    ).map((e) => ({ ...e, skipReason: PackSkipReason.NotFound }));
+    const md = `![Volcano](${downloadUrl(PHOTO_PATH)})`;
+    const { markdown } = rewritePortfolioMedia(md, entries);
+
+    expect(markdown).toContain("evidence unavailable");
+    expect(markdown).not.toContain("firebasestorage");
+  });
+
+  it("reports no external link as a remaining remote URL", () => {
+    // The offline-readability scan must not read a public video address as a
+    // leftover Storage token.
+    const md = `- [Ancient Egypt](${LINK})`;
+    expect(findRemainingRemoteUrls(md)).toEqual([]);
+  });
 });
 
 describe("checkSizeAllowance", () => {

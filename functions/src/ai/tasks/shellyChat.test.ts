@@ -1342,14 +1342,44 @@ describe("buildCurriculumActionAddendum (FEAT-143)", () => {
     expect(OUT).not.toContain("${");
   });
 
+  // HAND-KEPT, and it has already failed once: `ActivityType` lives in the
+  // client project (`src/core/types/enums.ts`), which this project cannot
+  // import, so this list looked exhaustive while omitting `strand` — the model
+  // was told to pick one of six, and a parent asking for a history strand was
+  // steered to another type even though the parser accepts it (Codex). The
+  // client's parser derives its gate from the enum; only this prose does not.
+  // Adding an `ActivityType` member means adding it here and to the prompt.
   it("states every enum the parser rejects outside of", () => {
-    for (const type of ["workbook", "routine", "app", "activity", "formation", "evaluation"]) {
+    for (const type of [
+      "workbook",
+      "routine",
+      "app",
+      "activity",
+      "formation",
+      "evaluation",
+      "strand",
+    ]) {
       expect(OUT, `type=${type}`).toContain(type);
     }
     for (const freq of ["daily", "3x", "2x", "1x", "as-needed"]) {
       expect(OUT, `frequency=${freq}`).toContain(freq);
     }
     expect(OUT).toContain("between 5 and 120");
+  });
+
+  it("teaches what a strand is, and that it carries no total", () => {
+    // Without the no-total rule the model would offer `totalUnits` on a strand
+    // exactly as it does for a workbook, and the action would be rejected after
+    // the parent had already read a plausible card.
+    expect(OUT).toContain("A STRAND is");
+    expect(OUT).toContain('NO "totalUnits"');
+    expect(OUT).toContain("counts SESSIONS");
+  });
+
+  it("sends a strand count change to the surface that can make one", () => {
+    // The count is not settable — it moves by recording a session — so the
+    // prompt names that verb rather than letting the model propose a position.
+    expect(OUT).toContain("Record a session");
   });
 
   it("teaches the DATA-08 owner rule — a workbook is never shared", () => {

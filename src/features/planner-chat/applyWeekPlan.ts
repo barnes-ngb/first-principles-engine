@@ -66,6 +66,9 @@ import {
   findWorkbookConfigId,
   type WorkbookConfigLike,
 } from '../../core/utils/workbookMatching'
+import { findStrandConfigId } from '../progress/strand'
+import { activityMatchNames } from '../../core/utils/activityNames'
+import { nameKey } from '../../core/utils/nameKey'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
 import { dayLogDocId } from '../today/daylog.model'
 import { setDayLogGuarded } from '../today/dayWriteGuard'
@@ -234,6 +237,27 @@ export function subjectToDayBlockType(subject: SubjectBucket): DayBlockType {
  * point at which the item's workbook identity is still recoverable — the
  * routine→item pipeline round-trips through free text and drops the config id.
  */
+/**
+ * Does a NON-strand activity answer to this title too?
+ *
+ * Compared through `activityMatchNames` + `nameKey`, the same rule the strand
+ * matcher uses, so the two cannot disagree about whether a name collides.
+ * Completed programs are ignored — a finished row plans nothing and cannot be
+ * what this item came from.
+ */
+function ambiguousAcrossTypes(title: string, configs: ApplyWorkbookConfig[]): boolean {
+  const key = nameKey(title)
+  if (!key) return false
+  return configs.some(
+    (config) =>
+      config.type !== 'strand' &&
+      // `WorkbookConfigLike` carries no `completed`; a full `ActivityConfig`
+      // does, so read it structurally rather than widening the matcher's type.
+      (config as { completed?: boolean }).completed !== true &&
+      activityMatchNames(config).some((name: string) => nameKey(name) === key),
+  )
+}
+
 export function buildApplyChecklist(
   items: DraftDayPlan['items'],
   activityConfigs: ApplyWorkbookConfig[],
@@ -244,8 +268,26 @@ export function buildApplyChecklist(
       { label: item.title, subjectBucket: item.subjectBucket },
       activityConfigs,
     )
+    // UX-283: stamped from the RAW title, before the duration is rendered into
+    // the label below — the same reason `findWorkbookConfigId` is called here
+    // rather than later off the stored row. Resolving a strand by name after
+    // the fact means undoing that rendering, which is ambiguous by
+    // construction.
+    //
+    // **Declined when the title is ambiguous ACROSS types** (Codex).
+    // `findStrandConfigId` refuses two strands answering to one name, but a
+    // strand and a WORKBOOK sharing a title is a different collision: the draft
+    // item carries no source config, so a workbook row would be stamped with
+    // both `workbookConfigId` and this — offering "Record a session" on a
+    // workbook and moving an unrelated strand's count, which no increment can
+    // take back. A missed stamp costs the day-surface button; the Curriculum
+    // row's own is one screen away.
+    const strandConfigId = ambiguousAcrossTypes(item.title, activityConfigs)
+      ? undefined
+      : findStrandConfigId({ label: item.title }, activityConfigs)
     return {
       label: `${item.title} (${item.estimatedMinutes}m)`,
+      ...(strandConfigId ? { strandConfigId } : {}),
       completed: false,
       skillTags: item.skillTags,
       ladderRef: item.ladderRef,

@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box'
+import Link from '@mui/material/Link'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
@@ -63,7 +64,34 @@ export default function ArtifactCard({ artifact }: ArtifactCardProps) {
             <Box component="audio" controls src={artifact.uri} sx={{ width: '100%' }} />
           )}
 
-          {artifact.content && (
+          {/*
+            A Video artifact's `uri` is an EXTERNAL link, not a Storage download
+            URL — nothing is uploaded for it — so it is rendered as a link
+            rather than as media (Codex round 1). Before this, `uri` was drawn
+            only for Photo and Audio. `rel="noreferrer"` because the destination
+            is arbitrary and parent-supplied.
+
+            NOTE (Codex round 3): this component is imported nowhere, so this
+            case reaches no user. It is kept because it is correct behaviour for
+            the card and the place a reader looks for it — but it is NOT what
+            makes a captured link openable. That is `PortfolioPage`'s own link
+            row and the portfolio markdown's Links section (UX-285); if this
+            component is ever mounted, check those first rather than assuming
+            this is the live path.
+          */}
+          {artifact.type === EvidenceType.Video && artifact.uri && (
+            <Link
+              href={artifact.uri}
+              target="_blank"
+              rel="noreferrer"
+              variant="body2"
+              sx={{ overflowWrap: 'anywhere' }}
+            >
+              {artifact.uri}
+            </Link>
+          )}
+
+          {artifact.content && artifact.content !== artifact.uri && (
             <Typography variant="body2" color="text.secondary">
               {artifact.content}
             </Typography>

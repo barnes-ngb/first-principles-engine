@@ -99,6 +99,15 @@ import {
   swapWatchVideoOnLiveDay,
 } from '../today/liveDayEdit'
 import MoveToDayDialog from '../today/MoveToDayDialog'
+import {
+  findRemovedItemConfig,
+  REMOVED_ITEM_DELETE_LABEL,
+  REMOVED_ITEM_KEEP_LABEL,
+  removedItemFollowUpParagraphs,
+  removedItemFollowUpTitle,
+} from './removedItemFollowUp'
+import type { RemovedItemFollowUp } from './removedItemFollowUp'
+import { deleteFailureNotice } from '../progress/removeActivityCopy'
 import { useAppliedWeekDays } from './useAppliedWeekDays'
 import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import { activityConfigsToRoutineText, defaultAppBlocks, parseRoutineTotalMinutes } from './chatPlanner.logic'
@@ -116,6 +125,8 @@ import {
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { applyDraftWeek, WeekApplyError } from './applyWeekPlan'
+import { parsePlannerBoundary } from '../../../functions/src/shared/plannerBoundary'
+import { BOUNDARY_BARE_REFUSAL_TEXT, BOUNDARY_DURING_GENERATE_TEXT } from './PlannerBoundaryLink'
 import {
   appliedConfirmation,
   applyButtonLabel,
@@ -129,6 +140,7 @@ import {
   collectPlannerRequestAsks,
   composePlannerMessage,
   formatShapedByLine,
+  withDeclinedAskCleared,
 } from './plannerRequest'
 import {
   buildDayTypeSection,
@@ -145,6 +157,7 @@ import FoundationsFocusLine from './FoundationsFocusLine'
 import LessonCardPreview from './LessonCardPreview'
 import PlanSummaryPanel from './PlanSummaryPanel'
 import { useScan } from '../../core/hooks/useScan'
+import { ScanDoor } from '../../core/hooks/scanFailureNote'
 import QuickSuggestionButtons from './QuickSuggestionButtons'
 import { buildMaterialsPrompt, openPrintWindow } from './generateMaterials'
 import ChapterBookPicker from './ChapterBookPicker'
@@ -339,6 +352,8 @@ export default function PlannerChatPage() {
   }, [weekPlan, currentDraft, applied, forceSetup])
   // Confirmation dialog state
   const [confirmNewPlan, setConfirmNewPlan] = useState(false)
+  /** UX-232: the curriculum row a just-removed draft row named, while the offer is open. */
+  const [removedItemFollowUp, setRemovedItemFollowUp] = useState<RemovedItemFollowUp | null>(null)
 
   // Prior-plan detection: distinguishes first-visit user (full wizard) from returning user (compact setup)
   const [hasPriorPlan, setHasPriorPlan] = useState<boolean | null>(null)
@@ -381,7 +396,7 @@ export default function PlannerChatPage() {
     scanning: scanLoading,
     error: scanError,
     clearScan,
-  } = useScan()
+  } = useScan(ScanDoor.Planner)
 
   // Setup wizard state
   const [setupComplete, setSetupComplete] = useState(false)
@@ -411,7 +426,7 @@ export default function PlannerChatPage() {
   const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
   // Activity configs → routine text (replaces old free-text dailyRoutine)
-  const { configs: activityConfigs } = useActivityConfigs(activeChildId ?? '')
+  const { configs: activityConfigs, deleteConfig } = useActivityConfigs(activeChildId ?? '')
   const dailyRoutine = useMemo(
     () => activityConfigsToRoutineText(activityConfigs),
     [activityConfigs],
@@ -1379,6 +1394,8 @@ Return as JSON:
     const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedPhotoDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
+    // UX-269: set when the AI answered with a refusal instead of a week.
+    let declinedDuringGenerate: string | undefined
 
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       // AI path: send context to Cloud Function
@@ -1397,6 +1414,13 @@ Return as JSON:
         messages: aiMessages,
       })
 
+      // UX-269: read the boundary BEFORE deciding whether the plan parsed. A
+      // declined ask can arrive either way — as prose the plan parser rejects
+      // (Codex round 2, P2) or, now that the prompt tells the model to plan the
+      // week anyway, as a perfectly good plan with a marker after it, which
+      // `extractJsonObject` ignores wholesale (Codex round 3, P2). Parsing only
+      // in the failure branch dropped the second case without a trace.
+      declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       if (rawAiDraft) {
         const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
@@ -1425,8 +1449,9 @@ Return as JSON:
     const assistantMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.Assistant,
-      text: `Here's your draft plan${aiLabel} based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}`,
+      text: `Here's your draft plan${aiLabel} based on ${photoLabels.length} workbook page${photoLabels.length > 1 ? 's' : ''}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot.` : ''} You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}${declinedDuringGenerate ? `\n\n${BOUNDARY_DURING_GENERATE_TEXT}` : ''}`,
       draftPlan: draft,
+      ...(declinedDuringGenerate ? { boundaryJobId: declinedDuringGenerate } : {}),
       createdAt: new Date().toISOString(),
     }
 
@@ -1458,6 +1483,8 @@ Return as JSON:
     const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
     let draft: DraftWeeklyPlan
     let usedAI = false
+    // UX-269: set when the AI answered with a refusal instead of a week.
+    let declinedDuringGenerate: string | undefined
 
     if (isEnabled(AIFeatureFlag.AiPlanning) && activeChildId) {
       const prompt = buildPlannerPrompt(inputs)
@@ -1492,6 +1519,8 @@ Return as JSON:
         })
       }
 
+      // UX-269: before the branch — see the note in the photo path.
+      declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       if (rawAiDraft) {
         const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
@@ -1525,8 +1554,9 @@ Return as JSON:
     const assistantMsg: ChatMessage = {
       id: generateItemId(),
       role: ChatMessageRole.Assistant,
-      text: `Here's your draft plan${aiLabel}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot. ` : ''}You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}`,
+      text: `Here's your draft plan${aiLabel}. ${draft.skipSuggestions.length > 0 ? `I have ${draft.skipSuggestions.length} suggestion${draft.skipSuggestions.length > 1 ? 's' : ''} based on the skill snapshot. ` : ''}You can adjust by saying things like "make Wed light" or "move math to Tue/Thu".${usedAI && shapedByLine ? `\n\n${shapedByLine}` : ''}${declinedDuringGenerate ? `\n\n${BOUNDARY_DURING_GENERATE_TEXT}` : ''}`,
       draftPlan: draft,
+      ...(declinedDuringGenerate ? { boundaryJobId: declinedDuringGenerate } : {}),
       createdAt: new Date().toISOString(),
     }
 
@@ -1621,6 +1651,9 @@ Return as JSON:
       const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
       const aiDraft = rawAiDraft ? shapeDraft(rawAiDraft) : null
       let assistantMsg: ChatMessage
+      // UX-269: set when the reply turns out to be a refusal, so the ask that
+      // drew it can be un-flagged below.
+      let declinedAsk = false
       if (aiDraft) {
         setCurrentDraft(aiDraft)
         assistantMsg = {
@@ -1669,17 +1702,48 @@ Return as JSON:
           }
           setSnack({ text: 'AI response had formatting issues — used local planner.', severity: 'info' })
         }
-      } else {
-        // Non-plan text response (conversational reply) or service unavailable
+      } else if (response?.message) {
+        // Non-plan text response — a conversational reply, which is the ONE
+        // branch a refusal can arrive in (UX-269). The marker is read and
+        // stripped here, in the one place, so the stored message never carries
+        // it; the id (not a route) is what is stored, so a screen that moves
+        // fixes every stored conversation at once.
+        const boundary = parsePlannerBoundary(response.message)
+        declinedAsk = boundary.destination !== null
         assistantMsg = {
           id: generateItemId(),
           role: ChatMessageRole.Assistant,
-          text: response?.message ?? 'Sorry, the AI service is unavailable right now. Try again or disable AI planning in Settings.',
+          // A reply that was nothing but a marker leaves no text at all, and an
+          // empty assistant turn is both a bubble that reads as lost and an
+          // empty content block on the next call in this thread.
+          text: boundary.text || (boundary.destination ? BOUNDARY_BARE_REFUSAL_TEXT : ''),
+          ...(boundary.destination ? { boundaryJobId: boundary.destination.id } : {}),
+          createdAt: new Date().toISOString(),
+        }
+      } else {
+        // Service unavailable. Deliberately NOT a boundary: the chat did not
+        // decline a job, it failed to answer at all, and hanging an "Open Ask
+        // AI" button off an outage would point her at a screen that is just as
+        // unavailable.
+        assistantMsg = {
+          id: generateItemId(),
+          role: ChatMessageRole.Assistant,
+          text: 'Sorry, the AI service is unavailable right now. Try again or disable AI planning in Settings.',
           createdAt: new Date().toISOString(),
         }
       }
 
-      const final = [...updatedWithUser, assistantMsg]
+      // A DECLINED ask is not a description of the week (UX-269, Codex P1).
+      // FEAT-198 forwards every `typedByParent` turn into the request section of
+      // the NEXT generate, so leaving the flag on "log two hours" would re-send
+      // a job the planner cannot do on every regenerate for the life of this
+      // conversation — each one drawing another refusal where a plan was asked
+      // for. The turn stays in the transcript exactly as she typed it; only its
+      // "forward this as my request" flag is cleared.
+      const turns = declinedAsk
+        ? withDeclinedAskCleared(updatedWithUser, userMsg.id)
+        : updatedWithUser
+      const final = [...turns, assistantMsg]
       setMessages(final)
       const persistStatus = applied ? { status: PlannerConversationStatus.Applied } : {}
       void persistConversation({ messages: final, currentDraft: aiDraft ?? currentDraft ?? undefined, ...persistStatus })
@@ -1832,6 +1896,8 @@ Return as JSON:
       const inputs = { snapshot, hoursPerDay, appBlocks: filteredAppBlocks, assignments, adjustments, dailyRoutine: filteredDailyRoutine, subjectTimeDefaults: mergedDefaults }
       let draft: DraftWeeklyPlan
       let usedAI = false
+      // UX-269: set when the AI answered with a refusal instead of a week.
+      let declinedDuringGenerate: string | undefined
       // UX-233: distinguishes "the flag is off, this is the local planner as
       // designed" from "the AI planner was asked and did not answer". Only the
       // second is worth telling the parent about, and only the second was silent.
@@ -1863,6 +1929,8 @@ Return as JSON:
           taskType: TaskType.Plan,
           messages: [{ role: 'user', content: fullPrompt }],
         })
+        // UX-269: before the branch — see the note in the photo path.
+        declinedDuringGenerate = parsePlannerBoundary(response?.message).destination?.id
         const rawAiDraft = response ? parseAIResponse(response, prioritySkillTags) : null
         if (rawAiDraft) {
           const fillResult = fillMissingDaysFromRoutine(rawAiDraft, filteredDailyRoutine, hoursPerDay)
@@ -1901,8 +1969,9 @@ Return as JSON:
       const assistantMsg: ChatMessage = {
         id: generateItemId(),
         role: ChatMessageRole.Assistant,
-        text: draftTurnText({ usedAI, fellBackToLocal, shapedByLine }),
+        text: `${draftTurnText({ usedAI, fellBackToLocal, shapedByLine })}${declinedDuringGenerate ? `\n\n${BOUNDARY_DURING_GENERATE_TEXT}` : ''}`,
         draftPlan: draft,
+        ...(declinedDuringGenerate ? { boundaryJobId: declinedDuringGenerate } : {}),
         createdAt: new Date().toISOString(),
       }
       const updatedMessages = [...messages, userMsg, assistantMsg]
@@ -2215,8 +2284,39 @@ Generate a plan for Monday through Friday.`.trim()
     [applied, isParent, appliedWeekDaysLoaded, resolveLiveRow, currentDraft, activeChild?.name],
   )
 
+  /**
+   * Offer to remove the curriculum row a just-removed plan row named (UX-232).
+   *
+   * The ✕ edits a copy — a draft pre-Apply, a saved day after it — and the next
+   * plan is regenerated from Curriculum either way, so a row taken off this week
+   * comes back on the next Redo. That is exactly what the owner hit, and nothing
+   * on screen said it.
+   *
+   * **Both removal paths call this** (Codex round 3). It began life inline at
+   * the end of the pre-Apply branch, which the applied branch returns before
+   * reaching — so a ✕ after Apply changed the day, left Curriculum untouched and
+   * offered nothing, which is the same silent copy the feature exists to fix.
+   *
+   * It only OPENS a dialog. The delete happens on that dialog's button, so no
+   * removal here can reach a curriculum write on its own. Parent-only, and again
+   * at the write itself.
+   */
+  const offerCurriculumFollowUp = useCallback(
+    (removed: DraftPlanItem | undefined) => {
+      if (!isParent) return
+      const followUp = findRemovedItemConfig(removed, activityConfigs)
+      if (followUp) setRemovedItemFollowUp(followUp)
+    },
+    [isParent, activityConfigs],
+  )
+
   const handleRemoveItem = useCallback((dayIndex: number, itemIndex: number) => {
     if (!currentDraft) return
+
+    // Read before either branch edits its copy — the applied branch resolves and
+    // writes the saved day first, and this row is gone from the draft by the
+    // time the offer is made.
+    const removed = currentDraft.days[dayIndex]?.items[itemIndex]
 
     // Post-Apply: the removal has to land in the saved day. Do that FIRST and
     // only mirror the card on success, so the parent is never shown a week the
@@ -2255,6 +2355,14 @@ Generate a plan for Monday through Friday.`.trim()
         setCurrentDraft(mirrored)
         void persistConversation({ currentDraft: mirrored })
         setSnack({ text: `Removed from ${row.dayLabel}.`, severity: 'success' })
+        // The live week needs the offer just as much as the draft does (Codex
+        // round 3). This branch returns below, so without the call here a ✕
+        // after Apply took the row off the day, left Curriculum untouched, and
+        // said nothing — and the next Redo brought it back, which is the exact
+        // behaviour UX-232 exists to stop. Offered only after the day write
+        // actually succeeded: nothing about a curriculum row is worth raising
+        // when the removal the parent asked for did not land.
+        offerCurriculumFollowUp(removed)
       })()
       return
     }
@@ -2269,7 +2377,34 @@ Generate a plan for Monday through Friday.`.trim()
     }
     setCurrentDraft(updated)
     setPlanDirty(true)
-  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation])
+    offerCurriculumFollowUp(removed)
+  }, [currentDraft, applied, isParent, resolveLiveRow, familyId, activeChildId, activeChild?.name, persistConversation, offerCurriculumFollowUp])
+
+  /**
+   * Delete the curriculum row a removed draft row named (UX-232).
+   *
+   * The second, separate act. Routed through the hook's own `deleteConfig` — the
+   * same write Progress → Curriculum performs — and deliberately NOT bundled
+   * into Apply: a week write and a curriculum delete are different decisions and
+   * a parent may want either without the other. Parent-gated at the write as
+   * well as in the UI, on capability and never on a name.
+   */
+  const handleConfirmRemoveFromCurriculum = useCallback(async () => {
+    const followUp = removedItemFollowUp
+    setRemovedItemFollowUp(null)
+    if (!followUp || !isParent) return
+    try {
+      await deleteConfig(followUp.configId)
+      setSnack({ text: `Removed ${followUp.configName} from Curriculum.`, severity: 'success' })
+    } catch (err) {
+      console.error('[Planner] Failed to remove the activity from Curriculum', err)
+      // The draft edit already stands; only the curriculum delete failed, and
+      // saying so is the difference between "it's gone" and "it will be back".
+      // `deleteFailureNotice` is UX-83's shape and Curriculum's own words — one
+      // delete, one failure sentence.
+      setSnack({ text: deleteFailureNotice(followUp.configName), severity: 'error' })
+    }
+  }, [removedItemFollowUp, isParent, deleteConfig])
 
   /**
    * Move a row to another day of the week — the edit this run exists for
@@ -3661,6 +3796,37 @@ ${dayPrompts}`
         onAddVideo={isParent ? async (video) => { await addWatchVideo(video) } : undefined}
         onManageLibrary={isParent ? () => navigate('/watch') : undefined}
       />
+
+      {/* UX-232: the ✕ edits the draft, and the draft is regenerated from
+          Curriculum — so a row taken off this week comes back on the next Redo.
+          Say so, and offer the second step, as its own confirmed act. Rendered
+          at the top level rather than inside a phase block because the ✕ is
+          offered on more than one phase. */}
+      <Dialog open={removedItemFollowUp !== null} onClose={() => setRemovedItemFollowUp(null)}>
+        <DialogTitle>
+          {removedItemFollowUp ? removedItemFollowUpTitle(removedItemFollowUp) : ''}
+        </DialogTitle>
+        <DialogContent>
+          {/* One spaced paragraph per sentence, as Curriculum's own delete
+              dialog renders this same warning — a five-sentence block on a
+              phone is a wall, and this is the screen where the words have to
+              be read before an irreversible tap. */}
+          {(removedItemFollowUp ? removedItemFollowUpParagraphs(removedItemFollowUp) : []).map(
+            (line, i) => (
+              <DialogContentText key={line} sx={i === 0 ? undefined : { mt: 1.5 }}>
+                {line}
+              </DialogContentText>
+            ),
+          )}
+        </DialogContent>
+        <DialogActions>
+          {/* Declining leaves the draft edit exactly as it is today. */}
+          <Button onClick={() => setRemovedItemFollowUp(null)}>{REMOVED_ITEM_KEEP_LABEL}</Button>
+          <Button onClick={handleConfirmRemoveFromCurriculum} color="error" variant="contained">
+            {REMOVED_ITEM_DELETE_LABEL}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* FEAT-138: "it's happening Thursday now". */}
       <MoveToDayDialog

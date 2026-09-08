@@ -11,9 +11,9 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 // FEAT-199: a plain read of the family's activity configs. Deliberately NOT
-// `useActivityConfigs` — that hook runs `migrateToActivityConfigs` /
-// `ensureDefaultActivityConfigs` and exposes the writer surface, and a kid
-// opening Today must not seed or migrate anything. This is the same read-only
+// `useActivityConfigs` — that hook runs `ensureDefaultActivityConfigs` and
+// exposes the writer surface, and a kid opening Today must not seed
+// anything. This is the same read-only
 // subscribe the Shelly portal made for the same reason (FEAT-135); it is
 // imported rather than copied so there is one definition of it.
 import { useChatActivityConfigs } from '../shelly-chat/useChatActivityConfigs'

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
+import Link from '@mui/material/Link'
 import Chip from '@mui/material/Chip'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
@@ -22,6 +23,7 @@ import Alert from '@mui/material/Alert'
 import Snackbar from '@mui/material/Snackbar'
 
 import DrawIcon from '@mui/icons-material/Draw'
+import LinkIcon from '@mui/icons-material/Link'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 
 import Page from '../../components/Page'
@@ -411,6 +413,15 @@ export default function PortfolioPage() {
                 const artType = artifact.type as string
                 const isPhoto = artType === EvidenceType.Photo || artType === 'photo'
                 const isAudio = artType === EvidenceType.Audio || artType === 'audio'
+                // UX-285: a Video artifact's `uri` is an EXTERNAL address — a
+                // strand session's "the video we watched" (UX-283) — so it is
+                // neither embeddable media nor a Storage download URL. It used
+                // to render as nothing: `content` carried a copy of the link,
+                // and `content` is drawn as one truncated no-wrap line, so a
+                // parent saw a clipped address they could not open or select.
+                const isVideoLink =
+                  (artType === EvidenceType.Video || artType === 'video') &&
+                  Boolean(artifact.uri)
                 const isBookArtifact = /page book/i.test(artifact.title ?? '')
                 // Prefer the multi-media array (FEAT-25 capture); fall back to the
                 // single `uri` so existing one-photo/one-audio artifacts are unchanged.
@@ -492,6 +503,29 @@ export default function PortfolioPage() {
                       </Stack>
                     )}
 
+                    {isVideoLink && (
+                      <Stack
+                        direction="row"
+                        spacing={0.5}
+                        alignItems="center"
+                        sx={{ flexShrink: 0, maxWidth: 220 }}
+                      >
+                        <LinkIcon fontSize="small" color="action" />
+                        <Link
+                          href={artifact.uri}
+                          target="_blank"
+                          rel="noreferrer"
+                          variant="caption"
+                          // The address is arbitrary and parent-supplied, so it
+                          // wraps rather than overflowing the card.
+                          sx={{ overflowWrap: 'anywhere' }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Open link
+                        </Link>
+                      </Stack>
+                    )}
+
                     <Stack spacing={0.5} flex={1}>
                       <Stack
                         direction="row"
@@ -530,7 +564,12 @@ export default function PortfolioPage() {
                           />
                         )}
                       </Stack>
-                      {artifact.content && (
+                      {/* UX-285: a video artifact stores its address in BOTH
+                          `uri` and `content` (so the link is legible wherever
+                          only content renders). Where the link itself is now
+                          drawn, showing the same URL again as a clipped line is
+                          noise, not a second fact. */}
+                      {artifact.content && artifact.content !== artifact.uri && (
                         <Typography
                           variant="caption"
                           color="text.secondary"

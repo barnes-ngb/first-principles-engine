@@ -20,8 +20,8 @@
 //
 // ── Why an opt-in flag, and not "every config is a chip" ────────────────────
 //
-// Because every family already has configs. `migrateToActivityConfigs` /
-// `ensureDefaultActivityConfigs` seed roughly fourteen of them on first load —
+// Because every family already has configs. `ensureDefaultActivityConfigs`
+// seeds ten of them on first load, plus one per legacy workbook —
 // *Prayer and Scripture*, *Handwriting (while read-aloud)*, *Knowledge Mine*,
 // *Fluency Practice*, the workbooks. Those are the PLANNED day, which the
 // checklist above this card already shows. Turning all of them into chips would

@@ -361,6 +361,24 @@ export interface ChecklistItem {
    */
   workbookConfigId?: string
   /**
+   * The strand config this row was planned from (UX-283).
+   *
+   * The **stable** join, stamped at apply time when the config identity is
+   * still known — the FEAT-62 pattern `workbookConfigId` already follows, and
+   * for the same reason. A stored label is `${title} (${estimatedMinutes}m)`,
+   * so resolving a row by name means undoing a rendering, and that is
+   * ambiguous by construction: a strand genuinely named *"History (30m)"* and
+   * one named *"History"* planned at 30m can produce labels that read alike.
+   * A name match cannot tell them apart, and picking one would record an
+   * afternoon against the wrong count.
+   *
+   * Additive and optional: absent on every row that exists today and on any row
+   * added by hand, so readers fall back to `findStrandConfigId` — which refuses
+   * an ambiguous name rather than guessing. Named for the strand rather than
+   * generically, so it reads as the sibling of `workbookConfigId` it is.
+   */
+  strandConfigId?: string
+  /**
    * Set after a routed workbook capture registers the page to the curriculum
    * (FEAT-62). Drives the quiet "registered to {name} · Lesson {n}" confirmation
    * line on Today so a parent can see it counted without visiting Progress.
@@ -509,6 +527,19 @@ export interface ChatMessage {
    * her request. Additive and optional — an older conversation simply has none.
    */
   typedByParent?: boolean
+  /**
+   * The job this assistant turn declined, when it declined one (UX-269).
+   *
+   * The **id only** — `'curriculum'`, `'records'`, … — never a route. The route
+   * lives in `functions/src/shared/plannerBoundary.ts` and is resolved at
+   * render, so a screen that moves does not strand every link a stored
+   * conversation carries. An id the table no longer knows resolves to the
+   * general Ask AI link rather than to nothing.
+   *
+   * Additive and optional: an older conversation simply has none, and a turn
+   * that declined nothing never sets it.
+   */
+  boundaryJobId?: string
   createdAt: string
 }
 
@@ -1118,6 +1149,24 @@ export interface ActivityConfig {
   id: string
   /** Activity display name (e.g., "Good and the Beautiful Reading") */
   name: string
+  /**
+   * Other names this activity answers to (UX-280).
+   *
+   * A curriculum row's `name` is both the label a parent reads and the key a
+   * scanned page is matched against, and those want different strings: the
+   * cover says "Simply Good and Beautiful Math K — Course Book", she calls it
+   * "Math K". Renaming (UX-279) keeps the old name here automatically, so the
+   * label can be hers while the join key stays the publisher's.
+   *
+   * Additive and optional — absent on every config that exists today, and no
+   * migration. Normalized by `core/utils/activityNames`, which owns the cap
+   * (`MAX_ACTIVITY_ALIASES`) and the de-duplication rule. Read by the matchers
+   * that ask *is this the same program?* (the scan matcher, the duplicate
+   * notice, the workbook bridge) and deliberately NOT sent to the planner,
+   * which is told to copy these names verbatim and would treat a synonym as
+   * licence to invent a third.
+   */
+  aliases?: string[]
   /** Activity category */
   type: ActivityType
   /** Subject for color-coding and grouping */
@@ -1134,12 +1183,60 @@ export interface ActivityConfig {
   // Workbook-specific fields (optional)
   /** Curriculum provider (e.g., "GATB", "Explode the Code") */
   curriculum?: string
-  /** Total lessons/chapters/units */
+  /**
+   * Total lessons/chapters/units.
+   *
+   * **A strand never has one** (UX-281). A strand is a subject the family keeps
+   * returning to, so there is no end to be a fraction of, and nothing may print
+   * one: `strandProgressLabel` renders a bare count, and the parent-only
+   * coverage line's `positionPhrase` already omits an absent total rather than
+   * inventing a denominator. A field that does not exist must not be shown as
+   * zero.
+   */
   totalUnits?: number
-  /** Current position (lesson/page number) */
+  /**
+   * Current position (lesson/page number).
+   *
+   * **On a strand this is the session count** (UX-282) — how many times the
+   * family has come back to this subject. It is written only by
+   * `logStrandSession`, only ever as an atomic `increment(1)`, and it never goes
+   * down: not when an artifact is deleted, not when a session is edited. The
+   * count is of afternoons that happened, and deleting a photo does not un-happen
+   * the afternoon.
+   *
+   * Reusing this field rather than adding a second counter is what puts a strand
+   * into the UX-212 weekly position snapshot and the UX-213 observed-coverage
+   * rate for free — both key on the presence of a position, not on the type.
+   */
   currentPosition?: number
-  /** Unit label: "lesson", "chapter", "unit" */
+  /**
+   * Unit label: "lesson", "chapter", "unit" — and `"session"` on a strand.
+   *
+   * Load-bearing on a strand: `computeObservedCoverage` resolves
+   * `unitLabel || 'lesson'`, so a strand that stored nothing would be described
+   * to the parent in the vocabulary of the one shape it is not.
+   */
   unitLabel?: string
+  /**
+   * Topics this strand has covered, most-recent-first (UX-282).
+   *
+   * A **suggestion cache**, and only that. Its job is to offer back a name she
+   * has already used — the third Ancient Egypt session offers "Ancient Egypt"
+   * and files with the other two — which is what turns a pile of captures into a
+   * thread without asking her to plan an arc up front.
+   *
+   * **It is never the only record of a topic.** Every session writes its topic
+   * onto the `Artifact` it captured (`Artifact.topic`), which is the durable
+   * record; this array is derived, capped at `MAX_RECENT_TOPICS`, trimmed from
+   * the oldest end, and losing its tail costs a suggestion and nothing else.
+   * That is why a session requires evidence: it is what keeps this array
+   * derivable rather than authoritative.
+   *
+   * Additive and optional — absent on every config that exists today, and no
+   * migration. Normalized by `features/progress/strand.ts`, which owns the cap
+   * and delegates the same-topic rule to `nameKey` (UX-205).
+   */
+  recentTopics?: string[]
   /** Certificate-derived curriculum metadata (migration bridge from WorkbookConfig.curriculum). */
   curriculumMeta?: CurriculumMeta
 

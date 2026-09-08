@@ -125,6 +125,20 @@ than ported into it):
   rule as two copies with a comment naming the mirror; this is that same rule with the
   comment replaced by the compiler.
 
+- `plannerBoundary.ts` (UX-269) — the six job→destination pairs the planner chat refuses
+  and points at, plus the marker parser. Both sides need the *same* table for different
+  halves of it: the Cloud Function builds the prompt's job list from `covers`, the app
+  resolves `route` and `linkLabel` into a button. The pairs already existed as **prose**
+  inside `shellyChat.ts`'s `NAVIGATION_HONESTY_RULE`, written for one model to read; a
+  second consumer needing them as *data* would otherwise have written its own copy —
+  which is what this directory exists to stop. Regenerating that prose from this table is
+  FEAT-214, a separate run: the rule is untouched here.
+
+  The parser lives here rather than in the app because the prompt shows the marker and
+  the client strips it, and the two must not drift: `plan.boundary.test.ts` parses the
+  exact strings the prompt teaches, so a change to either syntax fails to build a passing
+  test rather than silently leaking `[[BOUNDARY:…]]` into a sentence a parent reads.
+
 Still a hand-kept copy (named while consolidating slice 4, out of all four slices'
 scope):
 

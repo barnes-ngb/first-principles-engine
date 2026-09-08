@@ -57,7 +57,7 @@ describe('resolveQuickLogChips — the no-configs regression guard', () => {
 
   it('shows the same six when the family has configs but has flagged none', () => {
     // The shape every family really has: `ensureDefaultActivityConfigs` seeds
-    // roughly fourteen of these on first load, none of them quick-log.
+    // ten of these on first load, none of them quick-log.
     const seeded = [
       config({ id: 'a', name: 'Prayer and Scripture' }),
       config({ id: 'b', name: 'Knowledge Mine', sortOrder: 81 }),

@@ -6,6 +6,7 @@ import type { ActivityConfig, CertificateScanResult, CurriculumMeta } from '../t
 import { SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
 import { writeSnapshotUpdate } from '../../features/evaluate/skillSnapshotWrites'
+import { activityMatchNames } from '../utils/activityNames'
 
 export interface CertificateProgressOptions {
   /**
@@ -77,8 +78,15 @@ export function useCertificateProgress(): UseCertificateProgressResult {
         const allSnap = await getDocs(
           query(colRef, where('childId', 'in', [childId, 'both']), where('type', '==', 'workbook')),
         )
+        // UX-280 (Codex round 2): every name this row answers to. A manually
+        // added workbook has no `curriculum`, so after a rename the certificate's
+        // own title survives ONLY as an alternate — and this lookup missing it
+        // does not merely fail to update, it falls through to the create branch
+        // and writes a SECOND config for the same book.
         const matchingDoc = allSnap.docs.find((d) =>
-          normalizeCurriculumKey(d.data().name ?? d.data().curriculum ?? '') === normalizedKey,
+          activityMatchNames(d.data()).some(
+            (name) => normalizeCurriculumKey(name) === normalizedKey,
+          ),
         )
         existingConfig = (matchingDoc?.data() as ActivityConfig | undefined) ?? null
       }
@@ -141,8 +149,12 @@ export function useCertificateProgress(): UseCertificateProgressResult {
           const allSnap = await getDocs(
             query(colRef, where('childId', 'in', [childId, 'both']), where('type', '==', 'workbook')),
           )
+          // UX-280 (Codex round 2) — the same rule as `buildPreview` above, and
+          // the path that actually writes: a miss here creates a duplicate.
           const m = allSnap.docs.find((d) =>
-            normalizeCurriculumKey(d.data().name ?? d.data().curriculum ?? '') === normalizedKey,
+            activityMatchNames(d.data()).some(
+              (name) => normalizeCurriculumKey(name) === normalizedKey,
+            ),
           )
           if (m) matchingDoc = { ref: m.ref, data: () => m.data() as ActivityConfig }
         }

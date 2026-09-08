@@ -63,6 +63,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
+import { findStrandConfigId } from '../progress/strand'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 import {
   ENGAGEMENT_RETEST_REASON,
@@ -185,6 +186,18 @@ interface TodayChecklistProps {
    */
   onAddWatchItem?: () => void
   /**
+   * Record a strand session for a planned strand row (UX-283) — the day-surface
+   * sibling of the Curriculum row's own button.
+   *
+   * The caller owns the dialog and the write, because a session write moves a
+   * curriculum row's count and belongs beside the other config writes, not in a
+   * checklist renderer.
+   *
+   * **Parent-gated by injection**, like `onAddWatchItem`: `TodayPage` passes it
+   * and kids never reach this component at all. Absent → no button renders.
+   */
+  onStrandSessionOpen?: (configId: string) => void
+  /**
    * Move a row to another day of the week (FEAT-138) — *"sometimes the video
    * changes the day it will be watched"*. The caller owns the day picker and the
    * two-document write (`liveDayEdit.moveItemToLiveDay`), because the target day
@@ -259,6 +272,7 @@ export default function TodayChecklist({
   onTeachHelperOpen,
   onWatchOpen,
   onAddWatchItem,
+  onStrandSessionOpen,
   onMoveItemToDay,
   onSwapWatchItem,
   onUnifiedCapture,
@@ -1262,6 +1276,37 @@ export default function TodayChecklist({
                     {item.workbookScanRegistration.position != null && ` · Lesson ${item.workbookScanRegistration.position}`}
                   </Typography>
                 )}
+
+                {/*
+                  UX-283: a planned strand row gets its capture door here, on the
+                  day it was planned for — the sibling of the Curriculum row's
+                  own button, so recording a session does not mean leaving the
+                  screen she is standing on.
+
+                  Parent-gated by injection (`TodayPage` passes the handler;
+                  kids render `KidChecklist` and never reach this component),
+                  the same rule `onAddWatchItem` and `onMoveItemToDay` follow.
+                  The item is matched to a strand by name through
+                  `activityMatchNames`, so a renamed strand keeps its button.
+                */}
+                {(() => {
+                  if (!onStrandSessionOpen) return null
+                  // `item` carries the stamped `strandConfigId` when the plan
+                  // wrote one, and `findStrandConfigId` prefers it — the same
+                  // `stamp ?? resolve by name` shape the workbook join uses.
+                  const strandId = findStrandConfigId(item, configs ?? [])
+                  if (!strandId) return null
+                  return (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => onStrandSessionOpen(strandId)}
+                      sx={{ ml: 5, mt: 0.5 }}
+                    >
+                      Record a session
+                    </Button>
+                  )
+                })()}
 
                 {/* FEAT-62 backfill: a workbook-linked item whose photo was saved as
                     a plain artifact (captured before the routing fix, or analysis

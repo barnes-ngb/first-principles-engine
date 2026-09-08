@@ -49,13 +49,18 @@ describe('every ActivityType is placed', () => {
   it('renders a non-completed config of EVERY type somewhere', () => {
     const configs = ALL_TYPES.map((type, i) => config({ id: `a${i}`, type }))
     const grouped = groupCurriculumConfigs(configs)
-    const rendered = [
-      ...grouped.workbooks,
-      ...grouped.routines,
-      ...grouped.other,
-      ...grouped.evaluations,
-    ]
+    // Derived from `CurriculumSection`, not a hand-written bucket list: the
+    // list this test used to hold was itself the shape of the bug it guards
+    // against, and adding the Strands section (UX-281) walked straight into it.
+    // Now a new section that the tab forgets to render fails here instead of
+    // needing somebody to remember to extend an array.
+    const rendered = Object.values(CurriculumSection).flatMap((section) => grouped[section])
     expect(rendered.map((c) => c.id).sort()).toEqual(configs.map((c) => c.id).sort())
+  })
+
+  it('places a strand in its own section — not among the workbooks (UX-281)', () => {
+    expect(sectionForType(ActivityType.Strand)).toBe(CurriculumSection.Strands)
+    expect(sectionForType(ActivityType.Strand)).not.toBe(CurriculumSection.Workbooks)
   })
 
   it('places activity and app in Other — the section that did not exist', () => {
@@ -79,14 +84,12 @@ describe('groupCurriculumConfigs', () => {
       config({ id: 'a', type: ActivityType.Activity }),
       config({ id: 'p', type: ActivityType.App }),
       config({ id: 'e', type: ActivityType.Evaluation }),
+      config({ id: 's', type: ActivityType.Strand }),
       config({ id: 'done', type: ActivityType.App, completed: true }),
     ]
     const g = groupCurriculumConfigs(configs)
     const total =
-      g.workbooks.length +
-      g.routines.length +
-      g.other.length +
-      g.evaluations.length +
+      Object.values(CurriculumSection).reduce((n, section) => n + g[section].length, 0) +
       g.completed.length
     expect(total).toBe(configs.length)
   })
