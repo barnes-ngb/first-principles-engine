@@ -16,11 +16,15 @@ import type { ScanRecord } from '../../core/types'
 
 vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'fam-1' }))
 
+let activeChildId = 'lincoln'
 vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
-    activeChildId: 'lincoln',
-    activeChild: { id: 'lincoln', name: 'Lincoln' },
-    children: [{ id: 'lincoln', name: 'Lincoln' }],
+    activeChildId,
+    activeChild: { id: activeChildId, name: activeChildId },
+    children: [
+      { id: 'lincoln', name: 'Lincoln' },
+      { id: 'london', name: 'London' },
+    ],
     setActiveChildId: vi.fn(),
     isChildProfile: false,
     isLoading: false,
@@ -140,6 +144,7 @@ beforeEach(() => {
     createObjectURL: vi.fn(() => `blob:page-${n++}`),
     revokeObjectURL: vi.fn(),
   })
+  activeChildId = 'lincoln'
   scanMock.mockReset()
   syncMock.mockReset()
   syncMock.mockResolvedValue({
@@ -151,9 +156,10 @@ beforeEach(() => {
 })
 
 async function stageAndScan(user: ReturnType<typeof userEvent.setup>) {
-  render(<CurriculumTab />)
+  const view = render(<CurriculumTab />)
   await user.click(screen.getByText('STAGE_TWO'))
   await user.click(await screen.findByRole('button', { name: /Scan 2 pages/i }))
+  return view
 }
 
 describe('CurriculumTab — a failed batch keeps its reason and its photos (UX-275)', () => {
@@ -195,6 +201,29 @@ describe('CurriculumTab — a failed batch keeps its reason and its photos (UX-2
     expect(screen.getByText(/1 page didn’t go through|1 page didn't go through/)).toBeInTheDocument()
     expect(screen.getByText(/GATB Math/)).toBeInTheDocument()
     expect(screen.getByText(/1 page failed/)).toBeInTheDocument()
+  })
+
+  it('never carries a retained batch to another child (Codex round 1, P1)', async () => {
+    const user = userEvent.setup()
+    scanMock.mockResolvedValue(null)
+    const view = await stageAndScan(user)
+
+    // Two of Lincoln's pages failed and are still staged.
+    await waitFor(() => expect(screen.getByAltText('Page 1')).toBeInTheDocument())
+    expect(scanMock).toHaveBeenCalledTimes(2)
+    expect(scanMock.mock.calls.every((c) => c[2] === 'lincoln')).toBe(true)
+
+    // The parent switches to the other child. The photos go; nothing is written.
+    scanMock.mockClear()
+    activeChildId = 'london'
+    view.rerender(<CurriculumTab />)
+
+    await waitFor(() => expect(screen.queryByAltText('Page 1')).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /Retry failed pages/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Scan \d+ pages?/i })).not.toBeInTheDocument()
+    expect(await screen.findByText(/picked for another child/i)).toBeInTheDocument()
+    expect(scanMock).not.toHaveBeenCalled()
+    expect(syncMock).not.toHaveBeenCalled()
   })
 
   it('clears every photo when they all landed', async () => {

@@ -98,9 +98,22 @@ async function resolveScanUpload(
   const asFile = (blob: Blob, type: string): File =>
     blob instanceof File && blob.type === type ? blob : new File([blob], file.name, { type })
 
+  // `converted` means "the bytes we send are not the bytes that were picked" —
+  // whichever step re-encoded them. `compressIfNeeded` returns the file ITSELF
+  // when it does nothing (under the threshold, or an undecodable image), so
+  // identity is the exact test. Reporting only the unsupported-format re-encode
+  // here would have a diagnostic read `in=image/png converted=no
+  // sent=image/jpeg` — internally inconsistent, on the one path this
+  // instrumentation exists to explain (Codex round 1, P2).
+  const compressedHere = (compressed as Blob) !== (file as Blob)
+
   const initialType = compressed.type || file.type
   if (isScanMediaType(initialType)) {
-    return { uploadFile: asFile(compressed, initialType), mediaType: initialType, converted: false }
+    return {
+      uploadFile: asFile(compressed, initialType),
+      mediaType: initialType,
+      converted: compressedHere,
+    }
   }
 
   const reencoded = await compressImage(compressed, {

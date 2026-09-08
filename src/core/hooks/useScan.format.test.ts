@@ -219,6 +219,42 @@ describe('useScan — UX-278: an unreadable format is refused, not relabelled', 
     expect(report.message).not.toContain('base64')
   })
 
+  it("reports a compression conversion as a conversion (Codex round 1, P2)", async () => {
+    // A large PNG: `compressIfNeeded` re-encoded it, so `in=` and `sent=` differ
+    // and the note must not read converted=no beside them.
+    compressIfNeededMock.mockResolvedValue(new Blob(['jpeg'], { type: 'image/jpeg' }))
+    chatMock.mockRejectedValue(new Error('AI service unavailable'))
+    const { result } = renderHook(() => useScan(ScanDoor.Curriculum))
+
+    await act(async () => {
+      await result.current.scan(
+        new File(['png'], 'page.png', { type: 'image/png' }),
+        'fam',
+        'child-1',
+      )
+    })
+
+    const report = reportErrorMock.mock.calls[0][0]
+    expect(report.message).toContain('in=image/png')
+    expect(report.message).toContain('sent=image/jpeg')
+    expect(report.message).toContain('converted=yes')
+  })
+
+  it('reports an untouched file as unconverted', async () => {
+    const jpg = new File(['jpg'], 'page.jpg', { type: 'image/jpeg' })
+    compressIfNeededMock.mockResolvedValue(jpg) // under the threshold
+    chatMock.mockRejectedValue(new Error('AI service unavailable'))
+    const { result } = renderHook(() => useScan(ScanDoor.Certificate))
+
+    await act(async () => {
+      await result.current.scan(jpg, 'fam', 'child-1')
+    })
+
+    const report = reportErrorMock.mock.calls[0][0]
+    expect(report.message).toContain('converted=no')
+    expect(report.message).toContain('sent=image/jpeg')
+  })
+
   it('reports nothing when the scan succeeds', async () => {
     const jpg = new File(['jpg'], 'page.jpg', { type: 'image/jpeg' })
     compressIfNeededMock.mockResolvedValue(jpg)

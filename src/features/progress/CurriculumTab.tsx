@@ -347,6 +347,17 @@ export default function CurriculumTab() {
   // pages merge (DATA-15 matcher) and distinct workbooks each get a config.
   const [stagedPages, setStagedPages] = useState<{ file: File; url: string }[]>([])
   const [batchProcessing, setBatchProcessing] = useState(false)
+  /**
+   * The child these photos were picked for. Staged pages now OUTLIVE a failed
+   * batch (UX-275), so without this a parent could switch the child selector and
+   * hit "Retry failed pages" and the scan records, `activityConfigs` position
+   * and skill-map writes would all land on the OTHER child — pages of Lincoln's
+   * math book written into London's curriculum (Codex round 1, P1). A record
+   * written to the wrong child is the one failure this tab must not have, so the
+   * batch is bound to its child at staging time and dropped on a switch: the
+   * photos are two taps to re-pick, a wrong record is not.
+   */
+  const [stagedChildId, setStagedChildId] = useState<string | null>(null)
 
   // Revoke any pending object URLs on unmount.
   const stagedRef = useRef(stagedPages)
@@ -360,13 +371,34 @@ export default function CurriculumTab() {
     [],
   )
 
-  const handleStagePages = useCallback((files: File[]) => {
+  // A staged batch belongs to the child it was picked for. Switching the child
+  // selector drops it rather than carrying it across — see `stagedChildId`.
+  useEffect(() => {
+    if (!stagedChildId || stagedChildId === activeChildId) return
+    stagedPages.forEach((p) => URL.revokeObjectURL(p.url))
+    if (stagedPages.length > 0) {
+      setScanSnack({
+        message: 'Staged pages cleared — they were picked for another child.',
+        failed: false,
+      })
+    }
+    setStagedPages([])
     setFailedPageCount(0)
-    setStagedPages((prev) => [
-      ...prev,
-      ...files.map((file) => ({ file, url: URL.createObjectURL(file) })),
-    ])
-  }, [])
+    setStagedChildId(null)
+  }, [activeChildId, stagedChildId, stagedPages])
+
+  const handleStagePages = useCallback(
+    (files: File[]) => {
+      if (!activeChildId) return
+      setFailedPageCount(0)
+      setStagedChildId(activeChildId)
+      setStagedPages((prev) => [
+        ...prev,
+        ...files.map((file) => ({ file, url: URL.createObjectURL(file) })),
+      ])
+    },
+    [activeChildId],
+  )
 
   const removeStagedPage = useCallback((index: number) => {
     setFailedPageCount(0)
@@ -380,6 +412,11 @@ export default function CurriculumTab() {
 
   const handleScanPages = useCallback(async () => {
     if (!familyId || !activeChildId || stagedPages.length === 0) return
+    // The guard at the write, not only in the effect above: a batch is scanned
+    // for the child it was picked for or it is not scanned at all. Nothing here
+    // may write a scan record, a workbook position or a skill map to a child
+    // whose name was not on the screen when the photos were taken.
+    if (stagedChildId && stagedChildId !== activeChildId) return
     const pages = stagedPages
     setBatchProcessing(true)
     setFailedPageCount(0)
@@ -427,6 +464,7 @@ export default function CurriculumTab() {
   }, [
     familyId,
     activeChildId,
+    stagedChildId,
     stagedPages,
     scan,
     lastScanError,
