@@ -20,6 +20,7 @@ import { useCertificateProgress } from '../../core/hooks/useCertificateProgress'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import { useScan } from '../../core/hooks/useScan'
+import { ScanDoor } from '../../core/hooks/scanFailureNote'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import type { CertificateScanResult, CurriculumDetected } from '../../core/types'
 import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
@@ -27,7 +28,9 @@ import { isCertificateScan, isWorksheetScan } from '../../core/types/planning'
 export default function CertificateScanSection() {
   const familyId = useFamilyId()
   const { activeChildId, activeChild } = useActiveChild()
-  const { scan, scanResult, scanning, error: scanError, clearScan } = useScan()
+  const { scan, scanResult, scanning, error: scanError, clearScan } = useScan(
+    ScanDoor.Certificate,
+  )
   const {
     buildPreview,
     applyUpdate,

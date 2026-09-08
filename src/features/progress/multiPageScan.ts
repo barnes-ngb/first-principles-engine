@@ -114,6 +114,35 @@ export async function processScanBatch(
   return summarizeScanBatch(outcomes)
 }
 
+/** Longest reason text carried into the combined summary line. */
+const MAX_REASON_LENGTH = 160
+
+/**
+ * The reason(s) the failed pages gave, de-duplicated and capped (UX-275).
+ * Returns `null` when no page carried one, so the summary falls back to the
+ * bare count rather than printing a dangling dash.
+ */
+export function failureReason(outcomes: readonly PageOutcome[]): string | null {
+  const seen: string[] = []
+  for (const o of outcomes) {
+    if (o.status !== 'failed') continue
+    const reason = (o.error ?? '').trim()
+    if (!reason || seen.includes(reason)) continue
+    seen.push(reason)
+    if (seen.length === 2) break
+  }
+  if (seen.length === 0) return null
+  const joined = seen.join('; ')
+  return joined.length > MAX_REASON_LENGTH
+    ? `${joined.slice(0, MAX_REASON_LENGTH).trimEnd()}…`
+    : joined
+}
+
+/** Indexes of the pages that failed — the ones worth keeping staged to retry. */
+export function failedPageIndexes(summary: BatchScanSummary): number[] {
+  return summary.outcomes.filter((o) => o.status === 'failed').map((o) => o.index)
+}
+
 /**
  * Roll per-page outcomes into a combined summary. Pure — unit-testable without
  * Firestore. Successful pages are grouped by `configId` (first-seen order); a
@@ -170,7 +199,16 @@ export function summarizeScanBatch(outcomes: PageOutcome[]): BatchScanSummary {
 
   const failedCount = marked.filter((o) => o.status === 'failed').length
   const skippedCount = marked.filter((o) => o.status === 'skipped').length
-  if (failedCount > 0) parts.push(`${failedCount} page${failedCount > 1 ? 's' : ''} failed`)
+  if (failedCount > 0) {
+    // UX-275: the per-page reasons already existed and were summarised away, so
+    // a parent read "2 pages failed" and had nothing to act on. Name the
+    // reason. Distinct reasons only (four pages of the same unsupported photo
+    // is one sentence, not four), capped so the snackbar stays a sentence.
+    const reason = failureReason(marked)
+    parts.push(
+      `${failedCount} page${failedCount > 1 ? 's' : ''} failed${reason ? ` — ${reason}` : ''}`,
+    )
+  }
   if (skippedCount > 0) {
     parts.push(`${skippedCount} page${skippedCount > 1 ? 's' : ''} not recognized`)
   }

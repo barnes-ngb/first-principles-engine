@@ -1,11 +1,16 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { addDoc, serverTimestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 
 import { useAI, TaskType } from '../ai/useAI'
-import { compressIfNeeded } from '../utils/compressImage'
+import { compressIfNeeded, compressImage } from '../utils/compressImage'
+import { isScanMediaType, unsupportedFormatMessage } from '../utils/scanImageFormat'
+import type { ScanMediaType } from '../utils/scanImageFormat'
 import { scansCollection } from '../firebase/firestore'
 import { storage } from '../firebase/storage'
+import { ErrorSource, reportError } from '../observability'
+import { ScanDoor, scanFailureNote } from './scanFailureNote'
+import type { ScanFailureShape } from './scanFailureNote'
 import { deriveScanContentNote } from '../utils/contentNote'
 import type { CaptureContext } from '../utils/contentNote'
 import type { ScanRecord, ScanResult } from '../types'
@@ -37,9 +42,29 @@ export interface UseScanResult {
   scanning: boolean
   /** Error from the most recent scan attempt. */
   error: string | null
+  /**
+   * The most recent failure's message, readable synchronously right after
+   * `scan()` resolves (UX-275).
+   *
+   * `scan` reports a failure by returning `null` and setting `error` — but
+   * `error` is React state, so a caller awaiting `scan` in a loop still sees the
+   * previous render's value and cannot tell WHY a page failed. The multi-page
+   * batch read that stale value and reported "Scan failed" for everything. This
+   * is the same message, from a ref, available immediately.
+   */
+  lastError: () => string | null
   /** Clear the current scan result. */
   clearScan: () => void
 }
+
+/**
+ * What a parent reads when the analysis came back unparseable. Deliberately the
+ * app's OWN sentence: the model's raw text is unbounded and may echo the child's
+ * page, so it stays on the scan record and reaches neither the screen nor the
+ * error log.
+ */
+const ANALYSIS_UNREADABLE =
+  "The analysis came back in a form the app couldn't read. Nothing was added to the curriculum — try that page again."
 
 /** Convert a File to a base64-encoded string (data portion only). */
 async function fileToBase64(file: File): Promise<string> {
@@ -56,19 +81,73 @@ async function fileToBase64(file: File): Promise<string> {
   })
 }
 
-/** Infer media type from a File. */
-function inferMediaType(file: File): 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' {
-  if (file.type === 'image/png') return 'image/png'
-  if (file.type === 'image/gif') return 'image/gif'
-  if (file.type === 'image/webp') return 'image/webp'
-  return 'image/jpeg'
+/**
+ * Resolve the bytes we will actually send, and the type we will declare for
+ * them (UX-278).
+ *
+ * The old `inferMediaType` guessed `image/jpeg` for anything it did not
+ * recognise, so an unreadable format was relabelled and sent. Now: a supported
+ * type passes straight through; an unsupported one gets ONE honest conversion
+ * attempt — the canvas re-encodes it to JPEG, which is how a small AVIF, or a
+ * file the picker handed over with no type at all, still works — and if the
+ * browser cannot decode it either (HEIC in Chrome), it is refused BY NAME
+ * before any upload or paid API call.
+ *
+ * `compressImage` resolves with the ORIGINAL blob when the decode fails, so the
+ * "still unsupported" branch is a real answer, not a swallowed error.
+ */
+async function resolveScanUpload(
+  file: File,
+  compressed: Blob,
+): Promise<{ uploadFile: File; mediaType: ScanMediaType; converted: boolean }> {
+  // UX-277: `compressImage` renders to a canvas and re-encodes — the bytes that
+  // come back are JPEG whatever went in. Read the type off the RETURNED blob,
+  // never off the input file. (When nothing was compressed, `compressIfNeeded`
+  // returns the original File, so that branch already carries the right type.)
+  const asFile = (blob: Blob, type: string): File =>
+    blob instanceof File && blob.type === type ? blob : new File([blob], file.name, { type })
+
+  // `converted` means "the bytes we send are not the bytes that were picked" —
+  // whichever step re-encoded them. `compressIfNeeded` returns the file ITSELF
+  // when it does nothing (under the threshold, or an undecodable image), so
+  // identity is the exact test. Reporting only the unsupported-format re-encode
+  // here would have a diagnostic read `in=image/png converted=no
+  // sent=image/jpeg` — internally inconsistent, on the one path this
+  // instrumentation exists to explain (Codex round 1, P2).
+  const compressedHere = (compressed as Blob) !== (file as Blob)
+
+  const initialType = compressed.type || file.type
+  if (isScanMediaType(initialType)) {
+    return {
+      uploadFile: asFile(compressed, initialType),
+      mediaType: initialType,
+      converted: compressedHere,
+    }
+  }
+
+  const reencoded = await compressImage(compressed, {
+    maxWidth: 2048,
+    maxHeight: 2048,
+    quality: 0.85,
+  })
+  const reencodedType = reencoded.type
+  if (isScanMediaType(reencodedType)) {
+    return { uploadFile: asFile(reencoded, reencodedType), mediaType: reencodedType, converted: true }
+  }
+
+  throw new Error(unsupportedFormatMessage(initialType, file.name))
 }
 
-export function useScan(): UseScanResult {
+/**
+ * @param door which scan surface this hook instance belongs to. Used only to
+ *   label a reported failure in Diagnostics (UX-276); it changes no behaviour.
+ */
+export function useScan(door: ScanDoor = ScanDoor.Unknown): UseScanResult {
   const { chat } = useAI()
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanResult, setScanResult] = useState<ScanRecord | null>(null)
+  const errorRef = useRef<string | null>(null)
 
   const scan = useCallback(
     async (
@@ -80,6 +159,28 @@ export function useScan(): UseScanResult {
       setScanning(true)
       setError(null)
       setScanResult(null)
+      errorRef.current = null
+
+      // UX-276: what a reported failure will carry about the picture — its
+      // shape only. Filled in as we learn it, so a failure at any step reports
+      // how far it got. No bytes, no file name, no path.
+      const shape: ScanFailureShape = { inputType: file.type, sizeBytes: file.size }
+
+      /**
+       * The one path from a caught scan failure to the error log. Every message
+       * that reaches it is either the app's own sentence or an exception's, and
+       * `reportError` scrubs it again — the model's own text is never passed in.
+       */
+      const report = (name: string, message: string, stack: string | null): void => {
+        void reportError({
+          name,
+          message: `${scanFailureNote(door, shape)} ${message}`,
+          stack,
+          route: typeof window !== 'undefined' ? window.location.pathname : null,
+          section: door,
+          source: ErrorSource.Handled,
+        })
+      }
 
       try {
         // 1. Compress large images to stay within CF payload limits (~10MB)
@@ -88,22 +189,23 @@ export function useScan(): UseScanResult {
           maxHeight: 2048,
           quality: 0.85,
         })
-        const uploadFile =
-          compressed instanceof File
-            ? compressed
-            : new File([compressed], file.name, { type: file.type })
+        // 1b. Resolve the bytes we will send and the type we will declare for
+        //     them — converting an unsupported format where we can, refusing it
+        //     by name where we can't (UX-277 / UX-278). Before any upload.
+        const { uploadFile, mediaType, converted } = await resolveScanUpload(file, compressed)
+        shape.converted = converted
+        shape.sentType = mediaType
 
-        // 2. Upload compressed image to Firebase Storage
+        // 2. Upload the exact bytes we are about to analyse
         const ts = new Date().toISOString().replace(/[:.]/g, '-')
         const ext = file.name.split('.').pop() ?? 'jpg'
         const storagePath = `families/${familyId}/scans/${ts}.${ext}`
         const storageRef = ref(storage, storagePath)
-        await uploadBytes(storageRef, compressed)
+        await uploadBytes(storageRef, uploadFile)
         const imageUrl = await getDownloadURL(storageRef)
 
         // 3. Convert compressed image to base64 for the vision API
         const imageBase64 = await fileToBase64(uploadFile)
-        const mediaType = inferMediaType(uploadFile)
 
         // 4. Call the scan Cloud Function
         let response
@@ -178,16 +280,41 @@ export function useScan(): UseScanResult {
         record.id = docRef.id
 
         setScanResult(record)
+
+        // A scan whose analysis could not be parsed is a FAILURE that throws
+        // nothing: the record is saved and returned with `results: null`, so it
+        // reached neither the error state nor the sink — the certificate door
+        // rendered nothing at all and Diagnostics never heard about it. That is
+        // "spinner then nothing" arriving by a second route (Codex round 2, P2).
+        // The model's own text is NOT what we report or show: it is unbounded
+        // free text that may echo the child's page. The record keeps it (that is
+        // the family's own scan document); the log and the screen get the app's
+        // own sentence.
+        if (!results) {
+          errorRef.current = ANALYSIS_UNREADABLE
+          setError(ANALYSIS_UNREADABLE)
+          report('ScanAnalysisUnreadable', 'analysis response was not JSON', null)
+        }
         return record
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
+        errorRef.current = msg
         setError(msg)
+        // UX-276: a caught failure reached no sink — the reporter was wired to
+        // uncaught errors only, which is why there was nothing to grab. Send it
+        // through the SAME scrubbing path as everything else, carrying the
+        // picture's shape and never the picture.
+        report(
+          err instanceof Error ? err.name : 'Error',
+          msg,
+          err instanceof Error ? (err.stack ?? null) : null,
+        )
         return null
       } finally {
         setScanning(false)
       }
     },
-    [chat],
+    [chat, door],
   )
 
   const recordAction = useCallback(
@@ -205,7 +332,10 @@ export function useScan(): UseScanResult {
   const clearScan = useCallback(() => {
     setScanResult(null)
     setError(null)
+    errorRef.current = null
   }, [])
 
-  return { scan, recordAction, scanResult, scanning, error, clearScan }
+  const lastError = useCallback(() => errorRef.current, [])
+
+  return { scan, recordAction, scanResult, scanning, error, lastError, clearScan }
 }

@@ -177,7 +177,8 @@ describe('summarizeScanBatch', () => {
     ]
     const summary = summarizeScanBatch(outcomes)
     expect(summary.message).toBe(
-      'Updated GATB Math → L34; 2 pages merged into GATB Math; Added Reading Eggs → L1; 1 page failed',
+      // UX-275: the failed page's own reason rides with the count.
+      'Updated GATB Math → L34; 2 pages merged into GATB Math; Added Reading Eggs → L1; 1 page failed — boom',
     )
     expect(summary.mergedConfigs).toBe(1)
     expect(summary.failedCount).toBe(1)
