@@ -53,7 +53,7 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 
-import type { ActivityConfig } from '../types'
+import type { ActivityConfig, Artifact } from '../types'
 import { EvidenceType } from '../types/enums'
 import { mergeRecentTopic, readRecentTopics } from '../../features/progress/strand'
 import {
@@ -61,7 +61,10 @@ import {
   planStrandSession,
   type StrandSessionEvidence,
 } from '../../features/progress/strandSession'
+import { deleteObject, ref as storageRef } from 'firebase/storage'
+
 import { activityConfigsCollection, artifactsCollection, db } from './firestore'
+import { storage } from './storage'
 import { generateFilename, uploadArtifactFile } from './upload'
 
 export interface LogStrandSessionArgs {
@@ -79,6 +82,15 @@ export interface LogStrandSessionArgs {
 
 export interface LogStrandSessionResult {
   artifactIds: string[]
+  /**
+   * The artifacts written, each carrying its id (Codex round 2).
+   *
+   * Returned so a caller holding a local evidence list can append them.
+   * `TodayPage`'s `todayArtifacts` is filled by a one-shot `getDocs` that
+   * reruns only on a family / child / date change, exactly as every other
+   * capture path on that page already accounts for.
+   */
+  artifacts: Artifact[]
   /** The topic as stored — hers, whitespace-normalized. */
   topic: string
 }
@@ -90,6 +102,30 @@ export interface LogStrandSessionResult {
 export class StrandSessionRefused extends Error {}
 
 /**
+ * Base for a failure that carries its own parent-facing sentence.
+ *
+ * Callers render `err.message` for anything under this and for
+ * {@link StrandSessionRefused}; everything else gets the generic clean-failure
+ * line. One base rather than a growing `instanceof` list at every call site.
+ */
+export class StrandSessionFailure extends Error {}
+
+/**
+ * Thrown when the strand was deleted while the dialog was open (Codex round 2).
+ *
+ * The transaction used to return quietly on a missing document, so the count
+ * never moved, the topic was never filed — and `logStrandSession` reported
+ * success, closing the dialog on *"Session recorded."* over artifacts belonging
+ * to a row that no longer exists. A session that did not happen must not be
+ * reported as one.
+ */
+export class StrandSessionGone extends StrandSessionFailure {}
+
+/** What a caller renders when the strand vanished under the session. */
+export const STRAND_SESSION_GONE_MESSAGE =
+  'That activity was removed while this was open, so the session was not recorded.'
+
+/**
  * Thrown when a session FAILED partway and its evidence could not be cleaned up
  * (Codex round 1).
  *
@@ -99,7 +135,7 @@ export class StrandSessionRefused extends Error {}
  * different one: telling her nothing was saved would send her to retry and
  * silently duplicate the evidence she can already see in the gallery.
  */
-export class StrandSessionPartiallySaved extends Error {}
+export class StrandSessionPartiallySaved extends StrandSessionFailure {}
 
 /** What a caller renders for a failure whose evidence WAS cleaned up. */
 export const STRAND_SESSION_FAILED_CLEAN =
@@ -124,7 +160,7 @@ export async function logStrandSession(
   // `recentTopics` from the plan is deliberately NOT used: the merge is redone
   // inside the transaction against whatever is actually stored, so a second
   // device's topic cannot be overwritten by this one's stale read.
-  const { topic, kinds } = decision.plan
+  const { topic, kinds, link: sessionLink } = decision.plan
 
   const createdAt = new Date().toISOString()
   const base = {
@@ -135,40 +171,61 @@ export async function logStrandSession(
     dayLogId: args.dayLogId,
     weekKey: args.weekKey,
   }
-  const artifactIds: string[] = []
 
-  // ── 1. Evidence ───────────────────────────────────────────────────────────
-  // One artifact per kind, so a session that produced a photo AND a recording
-  // reads as two pieces of evidence in the gallery rather than one with a
-  // hidden attachment — which is how every other capture surface in the app
-  // treats them.
-  //
-  // **The whole attempt rolls back on failure** (Codex round 1). Without it a
-  // failed upload left real artifact documents behind while both callers said
-  // *"Nothing was saved"* and offered a retry — so retrying duplicated the
-  // evidence, or left a media-less artifact beside a complete one, while the
-  // count moved once. The artifact-to-session relationship is the record this
-  // feature exists to keep; a half-written one is worse than none.
+  // Everything this attempt created, so a failure can undo ALL of it.
+  const artifacts: Artifact[] = []
+  const artifactIds: string[] = []
+  // Storage objects too (Codex round 2): deleting only the Firestore documents
+  // left the uploaded files behind under `families/{id}/artifacts/{id}/…` while
+  // the caller said "Nothing was saved" — private evidence retained after a
+  // failure, and another orphaned copy on every retry.
+  const storagePaths: string[] = []
+
+  const record = (id: string, artifact: Omit<Artifact, 'id'>) => {
+    artifactIds.push(id)
+    artifacts.push({ ...artifact, id })
+  }
+
+  /**
+   * Undo the attempt, best effort. Returns false when anything survived, which
+   * is a different sentence to the parent — never a blind "try again".
+   */
+  const rollback = async (): Promise<boolean> => {
+    const results = await Promise.allSettled([
+      ...artifactIds.map((id) =>
+        deleteDoc(doc(artifactsCollection(args.familyId), id)),
+      ),
+      ...storagePaths.map((path) => deleteObject(storageRef(storage, path))),
+    ])
+    return results.every((r) => r.status === 'fulfilled')
+  }
+
   try {
+    // ── 1. Evidence ─────────────────────────────────────────────────────────
+    // One artifact per kind, so a session that produced a photo AND a recording
+    // reads as two pieces of evidence in the gallery rather than one with a
+    // hidden attachment — which is how every other capture surface in the app
+    // treats them.
     for (const type of kinds) {
       if (type === EvidenceType.Photo) {
         const files = args.evidence.photos ?? []
         const artifact = buildStrandArtifact({ ...base, type })
         const ref = await addDoc(artifactsCollection(args.familyId), artifact)
-        artifactIds.push(ref.id)
+        record(ref.id, artifact)
         const urls: string[] = []
         for (let i = 0; i < files.length; i++) {
           const file = files[i]
           const ext = file.name.split('.').pop() ?? 'jpg'
           // Index-prefixed so filenames stay distinct within the same millisecond.
           const filename = `${i}-${generateFilename(ext)}`
-          const { downloadUrl } = await uploadArtifactFile(
+          const uploaded = await uploadArtifactFile(
             args.familyId,
             ref.id,
             file,
             filename,
           )
-          urls.push(downloadUrl)
+          storagePaths.push(uploaded.storagePath)
+          urls.push(uploaded.downloadUrl)
         }
         await updateDoc(doc(artifactsCollection(args.familyId), ref.id), {
           uri: urls[0],
@@ -182,17 +239,18 @@ export async function logStrandSession(
         if (!blob) continue
         const artifact = buildStrandArtifact({ ...base, type })
         const ref = await addDoc(artifactsCollection(args.familyId), artifact)
-        artifactIds.push(ref.id)
+        record(ref.id, artifact)
         const filename = generateFilename('webm')
-        const { downloadUrl } = await uploadArtifactFile(
+        const uploaded = await uploadArtifactFile(
           args.familyId,
           ref.id,
           blob,
           filename,
         )
+        storagePaths.push(uploaded.storagePath)
         await updateDoc(doc(artifactsCollection(args.familyId), ref.id), {
-          uri: downloadUrl,
-          mediaUrls: [downloadUrl],
+          uri: uploaded.downloadUrl,
+          mediaUrls: [uploaded.downloadUrl],
         })
         continue
       }
@@ -204,17 +262,17 @@ export async function logStrandSession(
           content: (args.evidence.note ?? '').trim(),
         })
         const ref = await addDoc(artifactsCollection(args.familyId), artifact)
-        artifactIds.push(ref.id)
+        record(ref.id, artifact)
         continue
       }
 
-      // Video — a link to what they watched. Written to `uri` AND `content`
-      // (Codex round 1): `ArtifactCard` and the portfolio render `uri` only for
-      // Photo and Audio, so a link-only session would have advanced the count
-      // and produced an artifact whose URL could not be opened or even read.
-      // `content` is the field a Note already renders as text, so the link is
-      // legible everywhere before `ArtifactCard` grows its own Video case.
-      const link = (args.evidence.videoUrl ?? '').trim()
+      // Video — a link to what they watched, already normalized to an http(s)
+      // URL by `planStrandSession` (a bare "youtube.com/…" would otherwise
+      // reach an href as an app-relative path). Written to `uri` AND `content`:
+      // `ArtifactCard` and the portfolio render `uri` only for Photo and Audio,
+      // so `content` is what makes the link legible everywhere, and the card's
+      // own Video case makes it openable.
+      const link = sessionLink ?? ''
       const artifact = buildStrandArtifact({
         ...base,
         type,
@@ -222,53 +280,48 @@ export async function logStrandSession(
         content: link,
       })
       const ref = await addDoc(artifactsCollection(args.familyId), artifact)
-      artifactIds.push(ref.id)
+      record(ref.id, artifact)
     }
+
+    // ── 2. The count, and the topic cache ───────────────────────────────────
+    // INSIDE the rollback's try (Codex round 2): this transaction was outside
+    // it, so a failure here left every artifact in place while the caller
+    // classified it as a clean failure and invited a retry that would duplicate
+    // them all.
+    //
+    // A transaction because the two fields have different concurrency needs and
+    // only one is safe as a blind write:
+    //
+    //   • `currentPosition` is an atomic `increment(1)` — still never a
+    //     computed absolute, so the "the count only goes up" rail is untouched
+    //     and a transaction retry cannot double-count; and
+    //   • `recentTopics` is an ordinary array, so two devices logging different
+    //     topics from their own stale `args.config` would race last-write-wins
+    //     and silently drop one topic, with the row's "Last topic" then naming
+    //     the losing session.
+    const configRef = doc(activityConfigsCollection(args.familyId), args.config.id)
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(configRef)
+      // The strand was deleted while the dialog was open. Returning quietly
+      // here reported a session that never happened; the attempt is failed and
+      // rolled back instead.
+      if (!snap.exists()) throw new StrandSessionGone(STRAND_SESSION_GONE_MESSAGE)
+      // The stored document is unvalidated Firestore data; `readRecentTopics`
+      // does the structural narrowing, so the cast only gets it through the door.
+      const stored = readRecentTopics(
+        (snap.data() ?? {}) as Pick<ActivityConfig, 'recentTopics'>,
+      )
+      tx.update(configRef, {
+        currentPosition: increment(1),
+        recentTopics: mergeRecentTopic(stored, topic),
+        updatedAt: new Date().toISOString(),
+      })
+    })
   } catch (err) {
-    // Best-effort rollback, then report which of the two truths applies.
-    const cleanup = await Promise.allSettled(
-      artifactIds.map((id) =>
-        deleteDoc(doc(artifactsCollection(args.familyId), id)),
-      ),
-    )
-    if (cleanup.some((r) => r.status === 'rejected')) {
-      throw new StrandSessionPartiallySaved(STRAND_SESSION_FAILED_PARTIAL)
-    }
+    const clean = await rollback()
+    if (!clean) throw new StrandSessionPartiallySaved(STRAND_SESSION_FAILED_PARTIAL)
     throw err
   }
 
-  // ── 2. The count, and the topic cache ─────────────────────────────────────
-  // In a TRANSACTION (Codex round 1), because the two fields have different
-  // concurrency needs and only one of them is safe as a blind write:
-  //
-  //   • `currentPosition` is an atomic `increment(1)` — still never a computed
-  //     absolute, so the "the count only goes up" rail is untouched; and
-  //   • `recentTopics` is an ordinary array, so two devices logging different
-  //     topics from their own stale `args.config` would race last-write-wins
-  //     and silently drop one topic from the suggestion cache — with the row's
-  //     "Last topic" then naming the losing session.
-  //
-  // Reading the array inside the transaction makes the merge apply to whatever
-  // is actually stored, and Firestore retries the whole unit on contention. The
-  // increment sentinel is still what moves the count, so a retry cannot
-  // double-count. A missing document is left alone rather than created: the
-  // strand is being logged against, so it exists; inventing one here would
-  // write a config with no name, type or owner.
-  const configRef = doc(activityConfigsCollection(args.familyId), args.config.id)
-  await runTransaction(db, async (tx) => {
-    const snap = await tx.get(configRef)
-    if (!snap.exists()) return
-    // The stored document is unvalidated Firestore data; `readRecentTopics`
-    // does the structural narrowing, so the cast only gets it through the door.
-    const stored = readRecentTopics(
-      (snap.data() ?? {}) as Pick<ActivityConfig, 'recentTopics'>,
-    )
-    tx.update(configRef, {
-      currentPosition: increment(1),
-      recentTopics: mergeRecentTopic(stored, topic),
-      updatedAt: new Date().toISOString(),
-    })
-  })
-
-  return { artifactIds, topic }
+  return { artifactIds, artifacts, topic }
 }

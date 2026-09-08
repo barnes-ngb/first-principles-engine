@@ -11,6 +11,7 @@ import {
   buildStrandArtifact,
   evidenceKinds,
   hasEvidence,
+  normalizeEvidenceLink,
   planStrandSession,
   STRAND_SESSION_REFUSALS,
 } from './strandSession'
@@ -146,5 +147,76 @@ describe('the artifact a session writes', () => {
     expect(bare).not.toHaveProperty('weekKey')
     expect(bare).not.toHaveProperty('uri')
     expect(bare).not.toHaveProperty('content')
+  })
+})
+
+// ── Codex round 2: a link must be one before it counts as evidence ──────────
+describe('normalizeEvidenceLink', () => {
+  it('keeps a full http(s) URL', () => {
+    expect(normalizeEvidenceLink('https://example.com/watch?v=1')).toBe(
+      'https://example.com/watch?v=1',
+    )
+    expect(normalizeEvidenceLink('http://example.com/')).toBe('http://example.com/')
+  })
+
+  it('normalizes the bare domain a person actually pastes', () => {
+    // What you get copying off a phone's address bar. Left alone it reaches
+    // ArtifactCard's href as an app-RELATIVE path and navigates inside the app.
+    expect(normalizeEvidenceLink('youtube.com/watch?v=abc')).toBe(
+      'https://youtube.com/watch?v=abc',
+    )
+  })
+
+  it('refuses a scheme that must never reach an href', () => {
+    expect(normalizeEvidenceLink('javascript:alert(1)')).toBeNull()
+    expect(normalizeEvidenceLink('data:text/html,<b>x</b>')).toBeNull()
+    expect(normalizeEvidenceLink('file:///etc/passwd')).toBeNull()
+  })
+
+  it('refuses nonsense and empties', () => {
+    expect(normalizeEvidenceLink('   ')).toBeNull()
+    expect(normalizeEvidenceLink(undefined)).toBeNull()
+    // `https://` alone has no host to reach and does not parse.
+    expect(normalizeEvidenceLink('https://')).toBeNull()
+    expect(normalizeEvidenceLink('mailto:someone@example.com')).toBeNull()
+  })
+
+  it('treats an extra slash as the address it plainly is', () => {
+    // `https:///nohost` is normalized by WHATWG to host `nohost` — a real
+    // address, so it is kept rather than refused on a typo.
+    expect(normalizeEvidenceLink('https:///nohost')).toBe('https://nohost/')
+  })
+})
+
+describe('a link that is not one', () => {
+  it('is not evidence', () => {
+    expect(hasEvidence({ videoUrl: 'javascript:alert(1)' })).toBe(false)
+  })
+
+  it('is refused BY NAME, not as "add some evidence"', () => {
+    // She can see the link in the box; a notice ignoring it reads as the app
+    // not working.
+    const result = planStrandSession(strand(), 'Ancient Egypt', {
+      videoUrl: 'javascript:alert(1)',
+    })
+    expect(result).toEqual({ ok: false, reason: STRAND_SESSION_REFUSALS.badLink })
+  })
+
+  it('is refused even when other evidence would have carried the session', () => {
+    // Otherwise the session saves and the link she typed silently vanishes.
+    const result = planStrandSession(strand(), 'Ancient Egypt', {
+      note: 'we watched a video',
+      videoUrl: 'not a url at all ??',
+    })
+    expect(result.ok).toBe(false)
+  })
+
+  it('carries the normalized link on the plan when it is good', () => {
+    const result = planStrandSession(strand(), 'Ancient Egypt', {
+      videoUrl: 'youtube.com/watch?v=abc',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.plan.link).toBe('https://youtube.com/watch?v=abc')
   })
 })

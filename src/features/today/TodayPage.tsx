@@ -36,7 +36,7 @@ import { useActivityConfigs } from '../../core/hooks/useActivityConfigs'
 import {
   logStrandSession,
   STRAND_SESSION_FAILED_CLEAN,
-  StrandSessionPartiallySaved,
+  StrandSessionFailure,
   StrandSessionRefused,
 } from '../../core/firebase/strandSessionWrites'
 import StrandSessionDialog from '../progress/StrandSessionDialog'
@@ -976,7 +976,7 @@ export default function TodayPage() {
       setStrandSessionSaving(true)
       setStrandSessionError(null)
       try {
-        await logStrandSession({
+        const { artifacts } = await logStrandSession({
           familyId,
           config: strandSessionConfig,
           childId: selectedChildId,
@@ -984,6 +984,12 @@ export default function TodayPage() {
           evidence,
           dayLogId: today,
         })
+        // Today's evidence list is filled by a one-shot `getDocs` that reruns
+        // only on a family / child / date change, so a new artifact is invisible
+        // until reload unless the writer adds it — which is what every other
+        // capture path on this page already does (Codex round 2). It also feeds
+        // the checklist's photo resolution.
+        setTodayArtifacts((prev) => [...artifacts, ...prev])
         setStrandSessionId(null)
         setSnackMessage({ text: 'Session recorded.', severity: 'success' })
       } catch (err) {
@@ -994,8 +1000,12 @@ export default function TodayPage() {
           // states the rule, and a failure states which of the two truths
           // applies — cleaned up, or evidence left behind that a blind retry
           // would duplicate (Codex round 1).
-          err instanceof StrandSessionRefused ||
-          err instanceof StrandSessionPartiallySaved
+          // One base for every failure that carries its own sentence (Codex
+          // round 2), rather than a growing `instanceof` list here: a refusal
+          // states the rule; a failure states which truth applies — cleaned up,
+          // evidence left behind that a blind retry would duplicate, or the
+          // strand removed while the dialog was open.
+          err instanceof StrandSessionRefused || err instanceof StrandSessionFailure
             ? err.message
             : STRAND_SESSION_FAILED_CLEAN,
         )

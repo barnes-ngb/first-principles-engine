@@ -124,10 +124,29 @@ describe('all four evidence kinds are first-class', () => {
     renderDialog()
     typeTopic('Ancient Egypt')
     fireEvent.change(screen.getByLabelText('A note'), { target: { value: 'we read a book' } })
-    fireEvent.change(screen.getByLabelText('A link'), { target: { value: 'https://v' } })
+    fireEvent.change(screen.getByLabelText('A link'), {
+      target: { value: 'https://example.com/v' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Record session' }))
     expect(onSave.mock.calls[0][1].note).toBe('we read a book')
-    expect(onSave.mock.calls[0][1].videoUrl).toBe('https://v')
+    expect(onSave.mock.calls[0][1].videoUrl).toBe('https://example.com/v')
+  })
+
+  it('accepts the bare domain a person actually pastes', () => {
+    renderDialog()
+    typeTopic('Ancient Egypt')
+    fireEvent.change(screen.getByLabelText('A link'), {
+      target: { value: 'youtube.com/watch?v=abc' },
+    })
+    expect(screen.getByRole('button', { name: 'Record session' })).toBeEnabled()
+  })
+
+  it('says so when the link is not one, rather than "add some evidence"', () => {
+    renderDialog()
+    typeTopic('Ancient Egypt')
+    fireEvent.change(screen.getByLabelText('A link'), { target: { value: 'not a url ??' } })
+    expect(screen.getByRole('button', { name: 'Record session' })).toBeDisabled()
+    expect(screen.getByText(STRAND_SESSION_REFUSALS.badLink)).toBeInTheDocument()
   })
 
   it('offers voice beside the note — not a sixth typed-only surface (TEST-216)', () => {

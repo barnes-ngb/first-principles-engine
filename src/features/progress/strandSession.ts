@@ -52,6 +52,8 @@ export const STRAND_SESSION_REFUSALS = {
   noTopic: 'Give this session a topic first — what was it about?',
   noEvidence:
     'Add a photo, a recording, a note or a link. A session records what actually happened, and that record is what keeps the topic.',
+  badLink:
+    "That link doesn't look like a web address. Paste the whole thing, starting with https://",
 } as const
 
 export type StrandSessionRefusal =
@@ -64,6 +66,8 @@ export interface StrandSessionPlan {
   recentTopics: string[]
   /** Which evidence kinds this session actually carries. */
   kinds: EvidenceType[]
+  /** The normalized link, when one was given. `null` otherwise. */
+  link: string | null
 }
 
 export type StrandSessionDecision =
@@ -73,6 +77,43 @@ export type StrandSessionDecision =
 /** Does this evidence carry anything at all? */
 export function hasEvidence(evidence: StrandSessionEvidence): boolean {
   return evidenceKinds(evidence).length > 0
+}
+
+/**
+ * The link as it will be stored, or `null` when it is not a usable one
+ * (Codex round 2).
+ *
+ * Two failures this closes, both of which counted a session and stored
+ * something nobody could open:
+ *
+ *   • a **bare domain** — `youtube.com/watch?v=…`, which is what a person
+ *     copies off a phone's address bar — reaches `ArtifactCard`'s `href` as an
+ *     application-RELATIVE path, so tapping it navigates inside the app; and
+ *   • any other **scheme**, which satisfied a non-empty string check and
+ *     nothing else.
+ *
+ * A bare domain is normalized rather than refused, because it is the common
+ * shape of a correct paste and refusing it would be pedantry about a slash.
+ * Anything that is not `http:` or `https:` after that IS refused — including
+ * `javascript:` and `data:`, which must never reach an `href` this app renders.
+ */
+export function normalizeEvidenceLink(raw: string | undefined): string | null {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return null
+  // A leading scheme-like prefix is respected; anything else is a bare domain.
+  const candidate = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`
+  let parsed: URL
+  try {
+    parsed = new URL(candidate)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+  // A scheme with no host ("https:///x") is not a web address either.
+  if (!parsed.hostname) return null
+  return parsed.toString()
 }
 
 /**
@@ -87,7 +128,7 @@ export function evidenceKinds(evidence: StrandSessionEvidence): EvidenceType[] {
   if (evidence.photos && evidence.photos.length > 0) kinds.push(EvidenceType.Photo)
   if (evidence.audio) kinds.push(EvidenceType.Audio)
   if (evidence.note && evidence.note.trim()) kinds.push(EvidenceType.Note)
-  if (evidence.videoUrl && evidence.videoUrl.trim()) kinds.push(EvidenceType.Video)
+  if (normalizeEvidenceLink(evidence.videoUrl)) kinds.push(EvidenceType.Video)
   return kinds
 }
 
@@ -109,6 +150,14 @@ export function planStrandSession(
   const topic = normalizeTopic(rawTopic)
   if (!topic) return { ok: false, reason: STRAND_SESSION_REFUSALS.noTopic }
 
+  // A link she typed that cannot be stored is refused BY NAME rather than
+  // falling through to "add some evidence" — she can see the link in the box,
+  // so a notice that ignores it reads as the app not working.
+  const typedLink = (evidence.videoUrl ?? '').trim()
+  if (typedLink && !normalizeEvidenceLink(typedLink)) {
+    return { ok: false, reason: STRAND_SESSION_REFUSALS.badLink }
+  }
+
   const kinds = evidenceKinds(evidence)
   if (kinds.length === 0) {
     return { ok: false, reason: STRAND_SESSION_REFUSALS.noEvidence }
@@ -120,6 +169,7 @@ export function planStrandSession(
       topic,
       recentTopics: mergeRecentTopic(readRecentTopics(config), topic),
       kinds,
+      link: normalizeEvidenceLink(evidence.videoUrl),
     },
   }
 }

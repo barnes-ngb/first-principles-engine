@@ -11,6 +11,8 @@ const incrementMock = vi.fn((n: number) => ({ __increment: n }))
 const deleteDocMock = vi.fn<(ref: unknown) => Promise<void>>(async () => undefined)
 /** The config document as the transaction sees it. */
 let storedConfig: Record<string, unknown> | null = { recentTopics: [] }
+/** Set to make the final config update fail. */
+let updateConfigThrows: Error | null = null
 
 vi.mock('firebase/firestore', () => ({
   addDoc: (col: unknown, data: unknown) => addDocMock(col, data),
@@ -31,10 +33,18 @@ vi.mock('firebase/firestore', () => ({
         data: () => storedConfig,
       }),
       update: (ref: unknown, data: unknown) => {
+        if (updateConfigThrows) throw updateConfigThrows
         void updateDocMock(ref, data)
       },
     }),
 }))
+
+const deleteObjectMock = vi.fn<(ref: unknown) => Promise<void>>(async () => undefined)
+vi.mock('firebase/storage', () => ({
+  deleteObject: (ref: unknown) => deleteObjectMock(ref),
+  ref: (_storage: unknown, path: string) => ({ __path: path }),
+}))
+vi.mock('./storage', () => ({ storage: { __storage: true } }))
 
 vi.mock('./firestore', () => ({
   artifactsCollection: () => ({ __col: 'artifacts' }),
@@ -59,6 +69,7 @@ import { ActivityFrequency, ActivityType, SubjectBucket } from '../types/enums'
 import {
   logStrandSession,
   STRAND_SESSION_FAILED_PARTIAL,
+  StrandSessionGone,
   StrandSessionPartiallySaved,
   StrandSessionRefused,
 } from './strandSessionWrites'
@@ -106,6 +117,9 @@ beforeEach(() => {
   uploadMock.mockClear()
   deleteDocMock.mockClear()
   deleteDocMock.mockImplementation(async () => undefined)
+  deleteObjectMock.mockClear()
+  deleteObjectMock.mockImplementation(async () => undefined)
+  updateConfigThrows = null
   uploadMock.mockImplementation(async () => ({
     downloadUrl: 'https://example/f.jpg',
     storagePath: 'p',
@@ -329,10 +343,15 @@ describe('the topic merge reads the CURRENT stored value', () => {
     expect(typeof configUpdate()?.currentPosition).not.toBe('number')
   })
 
-  it('leaves a missing config alone rather than creating one', async () => {
+  it('refuses when the strand was deleted, rather than reporting a session', async () => {
+    // It used to return quietly: the count never moved, the topic was never
+    // filed, and the caller closed on "Session recorded." over artifacts
+    // belonging to a row that no longer exists (Codex round 2).
     storedConfig = null
-    await logStrandSession(args())
+    await expect(logStrandSession(args())).rejects.toBeInstanceOf(StrandSessionGone)
     expect(configUpdate()).toBeUndefined()
+    // ...and the evidence is rolled back with it.
+    expect(deleteDocMock).toHaveBeenCalledTimes(addDocMock.mock.calls.length)
   })
 })
 
@@ -344,5 +363,78 @@ describe('a captured link is readable, not only stored', () => {
       uri: 'https://example/watch',
       content: 'https://example/watch',
     })
+  })
+})
+
+describe('the rollback covers the WHOLE attempt (Codex round 2)', () => {
+  it('undoes the evidence when the final config update fails', async () => {
+    // The transaction used to sit outside the rollback try, so a failure here
+    // left every artifact in place while the caller called it a clean failure
+    // and invited a retry that would duplicate them all.
+    updateConfigThrows = new Error('permission-denied')
+    await expect(logStrandSession(args())).rejects.toThrow('permission-denied')
+    expect(deleteDocMock).toHaveBeenCalledTimes(addDocMock.mock.calls.length)
+  })
+
+  it('deletes uploaded storage objects, not only the documents', async () => {
+    // Deleting only Firestore left private evidence in Storage while the parent
+    // was told nothing was saved, and leaked another copy on every retry.
+    let calls = 0
+    uploadMock.mockImplementation(async () => {
+      calls += 1
+      if (calls > 1) throw new Error('upload failed')
+      return { downloadUrl: 'https://example/f.jpg', storagePath: 'families/fam/artifacts/a/0.jpg' }
+    })
+    await expect(
+      logStrandSession(
+        args({
+          evidence: {
+            photos: [
+              new File(['x'], 'a.jpg', { type: 'image/jpeg' }),
+              new File(['y'], 'b.jpg', { type: 'image/jpeg' }),
+            ],
+          },
+        }),
+      ),
+    ).rejects.toThrow('upload failed')
+    expect(deleteObjectMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports the partial truth when a storage delete also fails', async () => {
+    uploadMock.mockImplementation(async () => ({
+      downloadUrl: 'https://example/f.jpg',
+      storagePath: 'families/fam/artifacts/a/0.jpg',
+    }))
+    updateConfigThrows = new Error('offline')
+    deleteObjectMock.mockImplementation(async () => {
+      throw new Error('offline')
+    })
+    await expect(
+      logStrandSession(
+        args({ evidence: { photos: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } }),
+      ),
+    ).rejects.toBeInstanceOf(StrandSessionPartiallySaved)
+  })
+})
+
+describe('the caller gets the artifacts back (Codex round 2)', () => {
+  it('returns each artifact carrying its id, so a local list can show it', async () => {
+    const result = await logStrandSession(
+      args({ evidence: { note: 'we read a book', videoUrl: 'youtube.com/watch?v=abc' } }),
+    )
+    expect(result.artifacts).toHaveLength(2)
+    expect(result.artifacts.map((a) => a.id)).toEqual(result.artifactIds)
+    for (const artifact of result.artifacts) {
+      expect(artifact.topic).toBe('Ancient Egypt')
+      expect(artifact.activityConfigId).toBe('s1')
+    }
+  })
+
+  it('stores the NORMALIZED link, not the bare domain she pasted', async () => {
+    const result = await logStrandSession(
+      args({ evidence: { videoUrl: 'youtube.com/watch?v=abc' } }),
+    )
+    expect(result.artifacts[0].uri).toBe('https://youtube.com/watch?v=abc')
+    expect(result.artifacts[0].content).toBe('https://youtube.com/watch?v=abc')
   })
 })

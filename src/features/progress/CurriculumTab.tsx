@@ -68,7 +68,7 @@ import type { StrandSessionEvidence } from './strandSession'
 import {
   logStrandSession,
   STRAND_SESSION_FAILED_CLEAN,
-  StrandSessionPartiallySaved,
+  StrandSessionFailure,
   StrandSessionRefused,
 } from '../../core/firebase/strandSessionWrites'
 import { failedPageIndexes, processScanBatch } from './multiPageScan'
@@ -162,8 +162,12 @@ export default function CurriculumTab() {
           // states the rule, and a failure states which of the two truths
           // applies — cleaned up, or evidence left behind that a blind retry
           // would duplicate (Codex round 1).
-          err instanceof StrandSessionRefused ||
-          err instanceof StrandSessionPartiallySaved
+          // One base for every failure that carries its own sentence (Codex
+          // round 2), rather than a growing `instanceof` list here: a refusal
+          // states the rule; a failure states which truth applies — cleaned up,
+          // evidence left behind that a blind retry would duplicate, or the
+          // strand removed while the dialog was open.
+          err instanceof StrandSessionRefused || err instanceof StrandSessionFailure
             ? err.message
             : STRAND_SESSION_FAILED_CLEAN,
         )
