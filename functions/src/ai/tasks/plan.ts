@@ -14,6 +14,67 @@ import { buildContextForTask } from "../contextSlices.js";
 
 // Import plan-specific prompt pieces from chat.ts
 import { buildPlanOutputInstructions } from "../chat.js";
+import {
+  PLANNER_BOUNDARY_JOBS,
+  PLANNER_BOUNDARY_MARKER_EXAMPLE,
+  PLANNER_BOUNDARY_MARKER_UNPLACED,
+} from "../../shared/plannerBoundary.js";
+
+/**
+ * What the planner chat cannot do, and how it points instead (UX-269).
+ *
+ * ## Why this task had no boundary rule at all
+ *
+ * `shellyChat.ts` has carried `NAVIGATION_HONESTY_RULE` since FEAT-135, because
+ * that chat invented a "schedule settings screen" and a parent went looking for
+ * it. The planner chat is the *other* door onto the same model and it pushed
+ * eleven prompt sections with **no** boundary of any kind — so asked to change
+ * the curriculum, or to log some hours, it answered as confidently as it answers
+ * a question about Wednesday, and nothing it said was true.
+ *
+ * ## Why this is short, and does not port Ask AI's trio
+ *
+ * `CONFIRM_CARD_RULE` and `NO_SUBSTITUTION_RULE` are rules about **confirm cards
+ * and action grammars** — machinery this surface does not have. Stating them
+ * here would describe a machine that does not exist on this door. And `plan.ts`
+ * already pushes eleven sections at a model that must return strict JSON with no
+ * preamble; a long prose rule competes with that. So: the honesty half of the
+ * navigation rule, the marker, and nothing else.
+ *
+ * ## Why a marker rather than a screen name
+ *
+ * The model names the JOB it declined; the app owns the route. A model-composed
+ * path is the invented-screen failure with a tap on it. The marker is a **hint,
+ * not a gate** — `parsePlannerBoundary` strips every shape of it and falls back
+ * to a single general Ask AI link when the job is unreadable, so the worst case
+ * is a general link rather than a wrong one.
+ */
+export function buildPlannerBoundarySection(): string {
+  const jobLines = PLANNER_BOUNDARY_JOBS.map(
+    (job) => `- ${job.id} — ${job.covers}`,
+  );
+  return [
+    "WHAT THIS PLANNER CHAT CANNOT DO (hard rule):",
+    "From here you can only shape the WEEK'S DRAFT PLAN — which items sit on which day, their",
+    "order and their minutes. Nothing else you say reaches the app. In particular you CANNOT change:",
+    ...jobLines,
+    "",
+    "- NEVER say you have made one of those changes, and NEVER say one is coming — you cannot know,",
+    "  and she plans around what you tell her.",
+    "- NEVER name a screen, tab, setting or menu of your own. Inventing a plausible-sounding location",
+    "  is worse than admitting the gap, because she will go looking for something that isn't there.",
+    "  Do NOT write a URL or a path either. The marker below is how you point — the app draws the button.",
+    "- When she asks for one of those jobs: say plainly you can't do it from here, then say in the same",
+    "  breath what you CAN do for the week instead, and end your reply with EXACTLY ONE marker on its",
+    "  own final line, naming the closest job id from the list above:",
+    `    ${PLANNER_BOUNDARY_MARKER_EXAMPLE}`,
+    "  If none of the ids above fits what she asked for, write the marker with no id at all:",
+    `    ${PLANNER_BOUNDARY_MARKER_UNPLACED}`,
+    "  Never guess an id that isn't in the list — a wrong destination is worse than a general one.",
+    "- Emit the marker ONLY when you are declining one of those jobs. Never on an ordinary reply, never",
+    "  more than once, and NEVER anywhere inside a JSON plan response.",
+  ].join("\n");
+}
 
 /** Load per-child subject time defaults from plannerDefaults doc. */
 async function loadSubjectTimeDefaults(
@@ -38,6 +99,11 @@ export const handlePlan = async (
   const sections = await buildContextForTask("plan", {
     db, familyId, childId, childData, snapshotData,
   });
+
+  // The boundary goes in HIGH, above the capitals it has to beat (UX-261's
+  // lesson: a rule at the bottom loses to a hard rule at the top, and this
+  // prompt's own "YOUR #1 JOB" routine block shouts).
+  sections.push(buildPlannerBoundarySection());
 
   // Load per-child subject time defaults and inject into system prompt
   const subjectDefaults = await loadSubjectTimeDefaults(db, familyId, childId);

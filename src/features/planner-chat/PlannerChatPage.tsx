@@ -125,6 +125,8 @@ import {
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { applyDraftWeek, WeekApplyError } from './applyWeekPlan'
+import { parsePlannerBoundary } from '../../../functions/src/shared/plannerBoundary'
+import { BOUNDARY_BARE_REFUSAL_TEXT } from './PlannerBoundaryLink'
 import {
   appliedConfirmation,
   applyButtonLabel,
@@ -1680,12 +1682,32 @@ Return as JSON:
           }
           setSnack({ text: 'AI response had formatting issues — used local planner.', severity: 'info' })
         }
-      } else {
-        // Non-plan text response (conversational reply) or service unavailable
+      } else if (response?.message) {
+        // Non-plan text response — a conversational reply, which is the ONE
+        // branch a refusal can arrive in (UX-269). The marker is read and
+        // stripped here, in the one place, so the stored message never carries
+        // it; the id (not a route) is what is stored, so a screen that moves
+        // fixes every stored conversation at once.
+        const boundary = parsePlannerBoundary(response.message)
         assistantMsg = {
           id: generateItemId(),
           role: ChatMessageRole.Assistant,
-          text: response?.message ?? 'Sorry, the AI service is unavailable right now. Try again or disable AI planning in Settings.',
+          // A reply that was nothing but a marker leaves no text at all, and an
+          // empty assistant turn is both a bubble that reads as lost and an
+          // empty content block on the next call in this thread.
+          text: boundary.text || (boundary.destination ? BOUNDARY_BARE_REFUSAL_TEXT : ''),
+          ...(boundary.destination ? { boundaryJobId: boundary.destination.id } : {}),
+          createdAt: new Date().toISOString(),
+        }
+      } else {
+        // Service unavailable. Deliberately NOT a boundary: the chat did not
+        // decline a job, it failed to answer at all, and hanging an "Open Ask
+        // AI" button off an outage would point her at a screen that is just as
+        // unavailable.
+        assistantMsg = {
+          id: generateItemId(),
+          role: ChatMessageRole.Assistant,
+          text: 'Sorry, the AI service is unavailable right now. Try again or disable AI planning in Settings.',
           createdAt: new Date().toISOString(),
         }
       }

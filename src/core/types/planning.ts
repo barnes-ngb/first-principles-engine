@@ -509,6 +509,19 @@ export interface ChatMessage {
    * her request. Additive and optional — an older conversation simply has none.
    */
   typedByParent?: boolean
+  /**
+   * The job this assistant turn declined, when it declined one (UX-269).
+   *
+   * The **id only** — `'curriculum'`, `'records'`, … — never a route. The route
+   * lives in `functions/src/shared/plannerBoundary.ts` and is resolved at
+   * render, so a screen that moves does not strand every link a stored
+   * conversation carries. An id the table no longer knows resolves to the
+   * general Ask AI link rather than to nothing.
+   *
+   * Additive and optional: an older conversation simply has none, and a turn
+   * that declined nothing never sets it.
+   */
+  boundaryJobId?: string
   createdAt: string
 }
 
