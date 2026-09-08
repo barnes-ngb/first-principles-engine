@@ -209,6 +209,51 @@ describe("planPackMedia", () => {
     expect(findRemainingRemoteUrls(markdown)).toEqual([]);
   });
 
+  it("keeps an external link that merely MENTIONS a Storage host", () => {
+    // The ordinary percent-encoded redirect. The substring test called the
+    // whole address Storage, so the archive replaced a captured link with an
+    // "evidence unavailable" marker and lost it (Codex).
+    const url =
+      "https://example.com/r?next=https%3A%2F%2Fstorage.googleapis.com%2Fx";
+    const entries = planPackMedia([{ id: "v", type: "Video", urls: [url] }], FAMILY);
+    expect(entries[0].skipReason).toBe(PackSkipReason.ExternalLink);
+
+    const { markdown } = rewritePortfolioMedia(`- [Egypt](${url})`, entries);
+    expect(markdown).toContain(url);
+    expect(findRemainingRemoteUrls(markdown)).toEqual([]);
+  });
+
+  it("matches a Storage SUBDOMAIN by host, not by luck", () => {
+    // `<bucket>.storage.googleapis.com` PARSES, and correctly reports
+    // outside-family — so the case that exercises the host comparison is a
+    // firebasestorage subdomain, which `parseStorageObjectRef` declines.
+    const entries = planPackMedia(
+      [{ id: "v", type: "Video", urls: ["https://x.firebasestorage.googleapis.com/bad"] }],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBe(PackSkipReason.UnreadableUrl);
+  });
+
+  it("still refuses a real bucket subdomain outside the family", () => {
+    const entries = planPackMedia(
+      [{ id: "v", type: "Video", urls: ["https://x.storage.googleapis.com/a"] }],
+      FAMILY,
+    );
+    expect(entries[0].skipReason).toBe(PackSkipReason.OutsideFamily);
+  });
+
+  it("refuses to preserve a link the leak guard would flag, so the pack still builds", () => {
+    // An UNENCODED nested address trips `findRemainingRemoteUrls` wherever it
+    // sits, and that guard aborts the entire export. A marker loses one unusual
+    // link; preserving it would lose the archive.
+    const url = "https://example.com/r?next=https://storage.googleapis.com/x";
+    const entries = planPackMedia([{ id: "v", type: "Video", urls: [url] }], FAMILY);
+    expect(entries[0].skipReason).toBe(PackSkipReason.UnreadableUrl);
+
+    const { markdown } = rewritePortfolioMedia(`- [Egypt](${url})`, entries);
+    expect(findRemainingRemoteUrls(markdown)).toEqual([]);
+  });
+
   it("never treats a Storage URL as external", () => {
     const entries = planPackMedia(
       [{ id: "v", type: "Video", urls: [downloadUrl(PHOTO_PATH)] }],

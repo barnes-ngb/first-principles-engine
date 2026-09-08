@@ -307,8 +307,24 @@ const REMOTE_STORAGE_HOSTS = [
 const isRemoteStorageUrl = (url: string): boolean => {
   const ref = parseStorageObjectRef(url);
   if (ref) return true;
-  const lower = url.toLowerCase();
-  return REMOTE_STORAGE_HOSTS.some((h) => lower.includes(h));
+  const trimmed = url.trim();
+  // `gs://` stays an explicit prefix test — it is a scheme, not a host.
+  if (trimmed.toLowerCase().startsWith("gs://")) return true;
+  try {
+    // HOSTNAME, not "contains" (Codex): a legitimate external address can
+    // mention a Storage host in its path or query — a redirect such as
+    // `…/r?next=https%3A%2F%2Fstorage.googleapis.com%2F…` is the ordinary
+    // percent-encoded shape — and the substring test classified the whole
+    // address as Storage, so the archive replaced a captured link with an
+    // "evidence unavailable" marker and lost it.
+    const host = new URL(trimmed).hostname.toLowerCase();
+    return REMOTE_STORAGE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+  } catch {
+    // Unparseable: fall back to the substring test rather than declaring a
+    // string we cannot read to be safe.
+    const lower = trimmed.toLowerCase();
+    return REMOTE_STORAGE_HOSTS.some((h) => lower.includes(h));
+  }
 };
 
 /**
@@ -336,6 +352,18 @@ export function isExternalLink(url: string, type?: string): boolean {
   // rather than shipping a live Storage link. It stays `unreadable-url`, which
   // is reported in the manifest and rewritten to a marker, exactly as before.
   if (isRemoteStorageUrl(url)) return false;
+  // ...and never preserve a link the archive's own leak guard will flag.
+  //
+  // An external link is written into the portfolio VERBATIM, and
+  // `findRemainingRemoteUrls` then refuses to ship an archive containing
+  // anything that reads as a Storage URL — it scans the rendered text, so an
+  // UNENCODED nested address (`…?next=https://storage.googleapis.com/…`) trips
+  // it wherever it sits. Preserving such a link would abort the whole export
+  // over one unusual URL; classing it `unreadable-url` replaces it with a
+  // marker, names it in the manifest, and the pack still builds. The archive's
+  // integrity guard outranks preserving one address, and the ordinary
+  // percent-encoded form is unaffected.
+  if (findRemainingRemoteUrls(url).length > 0) return false;
   try {
     const { protocol } = new URL(url.trim());
     return protocol === "http:" || protocol === "https:";
