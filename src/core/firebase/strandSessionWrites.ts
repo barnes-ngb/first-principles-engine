@@ -176,6 +176,13 @@ export const STRAND_SESSION_FAILED_CLEAN =
 /** ...and when it was not. Never invites a blind retry. */
 export const STRAND_SESSION_FAILED_PARTIAL =
   'That session was not fully recorded. Some of what you captured was saved but the session was not counted — check the gallery before adding it again.'
+/*
+ * The sentence promises the gallery can show it, and the rollback is ordered so
+ * that it can (Codex): an artifact whose file could not be deleted keeps its
+ * document, so it appears there with its media. Deleting the document first
+ * would have left a private object nothing points at — unreachable from the
+ * screen this line sends her to, and re-orphaned on every retry.
+ */
 
 /**
  * Log one strand session: evidence, then +1, then the topic cache.
@@ -207,11 +214,17 @@ export async function logStrandSession(
   // Everything this attempt created, so a failure can undo ALL of it.
   const artifacts: Artifact[] = []
   const artifactIds: string[] = []
-  // Storage objects too (Codex round 2): deleting only the Firestore documents
-  // left the uploaded files behind under `families/{id}/artifacts/{id}/…` while
-  // the caller said "Nothing was saved" — private evidence retained after a
-  // failure, and another orphaned copy on every retry.
-  const storagePaths: string[] = []
+  // Storage objects too (Codex round 2), keyed BY ARTIFACT: deleting only the
+  // Firestore documents left the uploaded files behind under
+  // `families/{id}/artifacts/{id}/…` while the caller said "Nothing was saved".
+  // Keyed rather than flat because the rollback has to decide per artifact
+  // whether its document may go.
+  const storagePathsByArtifact = new Map<string, string[]>()
+  const recordPath = (artifactId: string, path: string) => {
+    const paths = storagePathsByArtifact.get(artifactId)
+    if (paths) paths.push(path)
+    else storagePathsByArtifact.set(artifactId, [path])
+  }
 
   const record = (id: string, artifact: Omit<Artifact, 'id'>) => {
     artifactIds.push(id)
@@ -241,20 +254,33 @@ export async function logStrandSession(
    * is a different sentence to the parent — never a blind "try again".
    */
   const rollback = async (): Promise<boolean> => {
-    const docDeletes = await Promise.allSettled(
-      artifactIds.map((id) =>
-        deleteDoc(doc(artifactsCollection(args.familyId), id)),
-      ),
-    )
-    const objectDeletes = await Promise.allSettled(
-      storagePaths.map((path) => deleteObject(storageRef(storage, path))),
-    )
-    return (
-      docDeletes.every((r) => r.status === 'fulfilled') &&
-      objectDeletes.every(
+    let clean = true
+    for (const id of artifactIds) {
+      // The OBJECT goes first, and the document only if it did (Codex).
+      // Deleting the document first and then failing on the file leaves a
+      // private photo in Storage that nothing points at — invisible in the very
+      // gallery the failure message tells her to check, and re-orphaned on
+      // every retry. Keeping the document instead leaves the artifact visible,
+      // with its media, where she can see it and remove it.
+      const objectDeletes = await Promise.allSettled(
+        (storagePathsByArtifact.get(id) ?? []).map((path) =>
+          deleteObject(storageRef(storage, path)),
+        ),
+      )
+      const objectsGone = objectDeletes.every(
         (r) => r.status === 'fulfilled' || isAlreadyGone(r.reason),
       )
-    )
+      if (!objectsGone) {
+        clean = false
+        continue
+      }
+      try {
+        await deleteDoc(doc(artifactsCollection(args.familyId), id))
+      } catch {
+        clean = false
+      }
+    }
+    return clean
   }
 
   try {
@@ -279,7 +305,7 @@ export async function logStrandSession(
           // uploads and then fetches the download URL, so a failure in the
           // second step leaves an object at this exact path with nothing handed
           // back to clean up.
-          storagePaths.push(artifactStoragePath(args.familyId, ref.id, filename))
+          recordPath(ref.id, artifactStoragePath(args.familyId, ref.id, filename))
           const uploaded = await uploadArtifactFile(
             args.familyId,
             ref.id,
@@ -303,7 +329,7 @@ export async function logStrandSession(
         const ref = await addDoc(artifactsCollection(args.familyId), artifact)
         record(ref.id, artifact)
         const filename = generateFilename('webm')
-        storagePaths.push(artifactStoragePath(args.familyId, ref.id, filename))
+        recordPath(ref.id, artifactStoragePath(args.familyId, ref.id, filename))
         const uploaded = await uploadArtifactFile(
           args.familyId,
           ref.id,

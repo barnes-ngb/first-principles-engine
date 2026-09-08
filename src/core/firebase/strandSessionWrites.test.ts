@@ -577,3 +577,65 @@ describe('the strand is re-checked inside the transaction', () => {
     expect(incrementMock).toHaveBeenCalledWith(1)
   })
 })
+
+// ── The orphan the failure message would have hidden (Codex) ─────────────────
+describe('rollback removes the file before the record that points at it', () => {
+  const photoArgs = () =>
+    args({ evidence: { photos: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } })
+
+  beforeEach(() => {
+    uploadMock.mockImplementation(async () => ({
+      downloadUrl: 'https://example/f.jpg',
+      storagePath: 'families/fam/artifacts/a/0.jpg',
+    }))
+  })
+
+  it('keeps the artifact document when its file could not be deleted', async () => {
+    // Otherwise the private object survives with nothing pointing at it —
+    // invisible in the gallery the failure message tells her to check.
+    updateConfigThrows = new Error('offline')
+    deleteObjectMock.mockImplementation(async () => {
+      const err = new Error('denied') as Error & { code?: string }
+      err.code = 'storage/unauthorized'
+      throw err
+    })
+
+    await expect(logStrandSession(photoArgs())).rejects.toBeInstanceOf(
+      StrandSessionPartiallySaved,
+    )
+    expect(deleteObjectMock).toHaveBeenCalled()
+    expect(deleteDocMock).not.toHaveBeenCalled()
+  })
+
+  it('deletes the document once its file is gone', async () => {
+    updateConfigThrows = new Error('offline')
+    await expect(logStrandSession(photoArgs())).rejects.toThrow('offline')
+    expect(deleteObjectMock).toHaveBeenCalledTimes(1)
+    expect(deleteDocMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('deletes a file-less artifact document with nothing to wait on', async () => {
+    updateConfigThrows = new Error('offline')
+    await expect(logStrandSession(args({ evidence: { note: 'n' } }))).rejects.toThrow(
+      'offline',
+    )
+    expect(deleteObjectMock).not.toHaveBeenCalled()
+    expect(deleteDocMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports clean when the file was never created', async () => {
+    // `storage/object-not-found` is nothing left behind, so the document goes
+    // too and the honest message is the plain one.
+    uploadMock.mockImplementation(async () => {
+      throw new Error('upload failed')
+    })
+    deleteObjectMock.mockImplementation(async () => {
+      const err = new Error('not found') as Error & { code?: string }
+      err.code = 'storage/object-not-found'
+      throw err
+    })
+
+    await expect(logStrandSession(photoArgs())).rejects.toThrow('upload failed')
+    expect(deleteDocMock).toHaveBeenCalledTimes(1)
+  })
+})

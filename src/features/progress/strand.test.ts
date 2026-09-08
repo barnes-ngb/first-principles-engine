@@ -250,11 +250,18 @@ describe('findStrandConfigId', () => {
     ).toBe('s2')
   })
 
-  it('falls back to the name when the stamped id names nothing live', () => {
-    // A row stamped against a strand since deleted, or since finished.
+  it('does NOT fall back to the name when the stamped strand is gone', () => {
+    // The row already said which strand it meant. Falling back would offer a
+    // button for a DIFFERENT strand that happens to answer to the same label,
+    // and record an irreversible increment against a row this was never planned
+    // from — the ambiguity case arriving disguised as a safe fallback (Codex).
     expect(
       findStrandConfigId({ label: 'History (30m)', strandConfigId: 'gone' }, [history]),
-    ).toBe('s1')
+    ).toBeUndefined()
+  })
+
+  it('reserves the name path for a row that never carried a stamp', () => {
+    expect(findStrandConfigId({ label: 'History (30m)' }, [history])).toBe('s1')
   })
 
   it('ignores a stamp pointing at a finished strand', () => {

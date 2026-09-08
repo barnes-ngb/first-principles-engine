@@ -339,15 +339,23 @@ export function findStrandConfigId(
   item: { label?: string; strandConfigId?: string },
   configs: StrandLike[],
 ): string | undefined {
-  // The STAMPED join wins outright when the row carries one (UX-283): it was
+  // The STAMPED join is AUTHORITATIVE when the row carries one (UX-283): it was
   // written at apply time from the raw title, so it needs no un-rendering and
-  // survives a rename. Only a row that predates the stamp, or one added by
-  // hand, falls through to matching on the label.
+  // survives a rename.
+  //
+  // **A stale stamp resolves to nothing — it never falls back to the label**
+  // (Codex). A row planned from a strand since deleted or finished would
+  // otherwise match some OTHER live strand answering to the same label, and
+  // record an afternoon against a row it was never planned from. That is the
+  // ambiguity case again, arriving by a route that looks like a safe fallback:
+  // the row already told us which strand it meant, and the answer is that that
+  // strand is gone, not that another will do. The name path is only for a row
+  // that never carried a stamp — a legacy row, or one added by hand.
   if (item.strandConfigId) {
     const stamped = configs.find(
       (c) => c.id === item.strandConfigId && c.type === ActivityType.Strand && !c.completed,
     )
-    if (stamped) return stamped.id
+    return stamped?.id
   }
 
   const candidates = itemLabelCandidates(item.label)
