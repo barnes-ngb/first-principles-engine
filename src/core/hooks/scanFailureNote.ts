@@ -44,13 +44,25 @@ export interface ScanFailureShape {
   sentType?: string | null
 }
 
-/** Bytes → a short size token with no four-digit run for `redactText` to eat. */
+/**
+ * Bytes → a short size token with no four-digit run for `redactText` to eat.
+ *
+ * The unit is chosen from the ROUNDED value, not the raw one (Codex round 3):
+ * picking it first let 1000–1023 B print as `1023B` and 999.5 KiB round up to
+ * `1000KB`, both of which `redactText` correctly eats as `[num]` — losing the
+ * size on exactly the boundary cases, in a helper whose whole contract is that
+ * it survives the scrubber.
+ */
 function sizeToken(bytes: number | null | undefined): string {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return 'unknown'
-  if (bytes < 1024) return `${Math.round(bytes)}B`
-  const kb = bytes / 1024
-  if (kb < 1000) return `${Math.round(kb)}KB`
-  return `${(kb / 1024).toFixed(2)}MB`
+  const b = Math.round(bytes)
+  if (b < 1000) return `${b}B`
+  const kb = Math.round(bytes / 1024)
+  if (kb < 1000) return `${kb}KB`
+  const mb = bytes / (1024 * 1024)
+  // A phone cannot produce a terabyte-scale photo, but the contract is the
+  // contract: no token this function returns may carry a four-digit run.
+  return mb >= 1000 ? '999+MB' : `${mb.toFixed(2)}MB`
 }
 
 function typeToken(type: string | null | undefined): string {
