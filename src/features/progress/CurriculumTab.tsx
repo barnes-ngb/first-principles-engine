@@ -57,7 +57,7 @@ import {
   groupCurriculumConfigs,
   OTHER_ACTIVITIES_DESCRIPTION,
 } from './curriculumGrouping'
-import { processScanBatch } from './multiPageScan'
+import { failedPageIndexes, processScanBatch } from './multiPageScan'
 import {
   buildDeleteActivityPrompt,
   deleteFailureNotice,
@@ -180,7 +180,7 @@ export default function CurriculumTab() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   // Scan state
-  const { scan, scanning, clearScan } = useScan()
+  const { scan, scanning, lastError: lastScanError, clearScan } = useScan()
   const { syncScanToConfig } = useScanToActivityConfig()
   const {
     buildPreview: buildCertPreview,
@@ -190,7 +190,16 @@ export default function CurriculumTab() {
     error: certError,
     clearState: clearCertState,
   } = useCertificateProgress()
-  const [scanSnack, setScanSnack] = useState<string | null>(null)
+  /**
+   * The scan notice. `failed` keeps a failure on screen until it's dismissed —
+   * a reason that auto-hides in three seconds is the "sometimes just
+   * disappears" half of the owner's report (UX-275).
+   */
+  const [scanSnack, setScanSnack] = useState<{ message: string; failed: boolean } | null>(
+    null,
+  )
+  /** Staged pages left over from the last batch because they failed (UX-275). */
+  const [failedPageCount, setFailedPageCount] = useState(0)
   /** Which card is currently scanning (null = "Add to Curriculum" generic scan). */
   const [scanningConfigId, setScanningConfigId] = useState<string | null>(null)
   /** Pending certificate result awaiting confirmation, scoped to a specific card. */
@@ -349,6 +358,7 @@ export default function CurriculumTab() {
   )
 
   const handleStagePages = useCallback((files: File[]) => {
+    setFailedPageCount(0)
     setStagedPages((prev) => [
       ...prev,
       ...files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -356,6 +366,7 @@ export default function CurriculumTab() {
   }, [])
 
   const removeStagedPage = useCallback((index: number) => {
+    setFailedPageCount(0)
     setStagedPages((prev) => {
       const next = [...prev]
       const [removed] = next.splice(index, 1)
@@ -368,29 +379,58 @@ export default function CurriculumTab() {
     if (!familyId || !activeChildId || stagedPages.length === 0) return
     const pages = stagedPages
     setBatchProcessing(true)
+    setFailedPageCount(0)
+    // UX-275: which pages to KEEP staged. `null` means "we don't know" — keep
+    // every one of them, because re-picking six photos is the recovery problem
+    // the owner asked us to fix.
+    let keep: Set<number> | null = null
     try {
       const summary = await processScanBatch(
         pages.map((p) => p.file),
         {
           // Sequential: each scan + apply awaits before the next page (see
           // processScanBatch). No Promise.all — that's the write-race fix.
-          scanOne: (file) => scan(file, familyId, activeChildId),
+          //
+          // UX-275: `scan` reports a failure by returning null and setting
+          // React state the loop can't read, so re-throw the reason it kept for
+          // us — otherwise every page's outcome reads a bare "Scan failed".
+          scanOne: async (file) => {
+            const record = await scan(file, familyId, activeChildId)
+            if (!record) throw new Error(lastScanError() ?? 'Scan failed')
+            return record
+          },
           syncOne: (results) => syncScanToConfig(activeChildId, results),
           onWorksheet: (results) => feedSkillMap(results),
         },
       )
-      setScanSnack(summary.message)
+      setScanSnack({ message: summary.message, failed: summary.failedCount > 0 })
+      keep = new Set(failedPageIndexes(summary))
+      setFailedPageCount(keep.size)
     } catch (err) {
       console.error('[CurriculumTab] Multi-page scan failed', err)
-      setScanSnack('Scan failed — please try again')
+      const msg = err instanceof Error ? err.message : String(err)
+      setScanSnack({ message: `Scan failed — ${msg}`, failed: true })
+      setFailedPageCount(pages.length)
     } finally {
-      pages.forEach((p) => URL.revokeObjectURL(p.url))
-      setStagedPages([])
+      const kept = (i: number) => keep === null || keep.has(i)
+      pages.forEach((p, i) => {
+        if (!kept(i)) URL.revokeObjectURL(p.url)
+      })
+      setStagedPages(pages.filter((_, i) => kept(i)))
       setBatchProcessing(false)
       // Discard the last single-page record left in useScan state.
       clearScan()
     }
-  }, [familyId, activeChildId, stagedPages, scan, syncScanToConfig, feedSkillMap, clearScan])
+  }, [
+    familyId,
+    activeChildId,
+    stagedPages,
+    scan,
+    lastScanError,
+    syncScanToConfig,
+    feedSkillMap,
+    clearScan,
+  ])
 
   /**
    * Apply a scan result to a specific card. Worksheet results write directly
@@ -405,16 +445,19 @@ export default function CurriculumTab() {
           setCertConfirm({ result: results, config })
         } catch (err) {
           console.error('[CurriculumTab] Failed to build certificate preview', err)
-          setScanSnack('Failed to read certificate')
+          setScanSnack({ message: 'Failed to read certificate', failed: true })
         }
         return
       }
       try {
         const r = await syncScanToConfig(activeChildId, results, { targetConfigId: config.id })
         if (r.action === 'updated' && r.position) {
-          setScanSnack(`Updated ${r.configName} to lesson ${r.position}`)
+          setScanSnack({
+            message: `Updated ${r.configName} to lesson ${r.position}`,
+            failed: false,
+          })
         } else if (r.action === 'updated') {
-          setScanSnack(`Updated ${r.configName}`)
+          setScanSnack({ message: `Updated ${r.configName}`, failed: false })
         }
       } catch (err) {
         console.error('[CurriculumTab] Failed to sync config:', err)
@@ -430,7 +473,15 @@ export default function CurriculumTab() {
       setScanningConfigId(config.id)
       try {
         const record = await scan(file, familyId, activeChildId)
-        if (!record?.results) return
+        if (!record?.results) {
+          // UX-275: a failure on a card's own camera used to render nothing at
+          // all — spinner, then the page as it was. Say what happened.
+          setScanSnack({
+            message: lastScanError() ?? 'Scan failed — no analysis came back.',
+            failed: true,
+          })
+          return
+        }
 
         const results = record.results
         const cardName = config.curriculum || config.name
@@ -448,7 +499,7 @@ export default function CurriculumTab() {
         setScanningConfigId(null)
       }
     },
-    [familyId, activeChildId, scan, applyScanToCard],
+    [familyId, activeChildId, scan, lastScanError, applyScanToCard],
   )
 
   const handleConfirmCertificate = useCallback(async () => {
@@ -457,7 +508,7 @@ export default function CurriculumTab() {
       await applyCertUpdate(familyId, activeChildId, certConfirm.result, {
         targetConfigId: certConfirm.config.id,
       })
-      setScanSnack(`Updated ${certConfirm.config.name}`)
+      setScanSnack({ message: `Updated ${certConfirm.config.name}`, failed: false })
     } catch (err) {
       console.error('[CurriculumTab] Failed to apply certificate update', err)
     } finally {
@@ -691,6 +742,26 @@ export default function CurriculumTab() {
                 card; different workbooks each get their own.
               </Typography>
               <ScanButton multiple onCaptureFiles={handleStagePages} variant="button" />
+
+              {/* UX-275: pages that failed stay staged, so retrying is one tap
+                  instead of re-picking six photos from the gallery. */}
+              {failedPageCount > 0 && stagedPages.length > 0 && (
+                <Alert
+                  severity="warning"
+                  action={
+                    <Button
+                      color="inherit"
+                      size="small"
+                      onClick={() => void handleScanPages()}
+                    >
+                      Retry failed pages
+                    </Button>
+                  }
+                >
+                  {failedPageCount} page{failedPageCount === 1 ? '' : 's'} didn&apos;t go
+                  through — still here, nothing lost.
+                </Alert>
+              )}
 
               {stagedPages.length > 0 && (
                 <>
@@ -1003,12 +1074,23 @@ export default function CurriculumTab() {
         onClose={() => setSnack(null)}
         message={snack}
       />
+      {/* A failure stays until it is read; a success still gets out of the way. */}
       <Snackbar
         open={!!scanSnack}
-        autoHideDuration={3000}
-        onClose={() => setScanSnack(null)}
-        message={scanSnack}
-      />
+        autoHideDuration={scanSnack?.failed ? null : 3000}
+        onClose={(_e, reason) => {
+          if (scanSnack?.failed && reason === 'clickaway') return
+          setScanSnack(null)
+        }}
+      >
+        <Alert
+          severity={scanSnack?.failed ? 'error' : 'success'}
+          variant="filled"
+          onClose={() => setScanSnack(null)}
+        >
+          {scanSnack?.message ?? ''}
+        </Alert>
+      </Snackbar>
     </Container>
   )
 }

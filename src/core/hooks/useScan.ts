@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { addDoc, serverTimestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 
@@ -39,6 +39,17 @@ export interface UseScanResult {
   scanning: boolean
   /** Error from the most recent scan attempt. */
   error: string | null
+  /**
+   * The most recent failure's message, readable synchronously right after
+   * `scan()` resolves (UX-275).
+   *
+   * `scan` reports a failure by returning `null` and setting `error` — but
+   * `error` is React state, so a caller awaiting `scan` in a loop still sees the
+   * previous render's value and cannot tell WHY a page failed. The multi-page
+   * batch read that stale value and reported "Scan failed" for everything. This
+   * is the same message, from a ref, available immediately.
+   */
+  lastError: () => string | null
   /** Clear the current scan result. */
   clearScan: () => void
 }
@@ -107,6 +118,7 @@ export function useScan(): UseScanResult {
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanResult, setScanResult] = useState<ScanRecord | null>(null)
+  const errorRef = useRef<string | null>(null)
 
   const scan = useCallback(
     async (
@@ -118,6 +130,7 @@ export function useScan(): UseScanResult {
       setScanning(true)
       setError(null)
       setScanResult(null)
+      errorRef.current = null
 
       try {
         // 1. Compress large images to stay within CF payload limits (~10MB)
@@ -218,6 +231,7 @@ export function useScan(): UseScanResult {
         return record
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
+        errorRef.current = msg
         setError(msg)
         return null
       } finally {
@@ -242,7 +256,10 @@ export function useScan(): UseScanResult {
   const clearScan = useCallback(() => {
     setScanResult(null)
     setError(null)
+    errorRef.current = null
   }, [])
 
-  return { scan, recordAction, scanResult, scanning, error, clearScan }
+  const lastError = useCallback(() => errorRef.current, [])
+
+  return { scan, recordAction, scanResult, scanning, error, lastError, clearScan }
 }
