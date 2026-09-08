@@ -172,6 +172,20 @@ describe('CurriculumTab — rename (UX-279)', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
+  it('stays open and says what is still true when the write fails', async () => {
+    // Codex round 1, P2. Closing on the tap and voiding the promise left a
+    // rejected write with no error, no retry and the edits discarded — and the
+    // parent reading the unchanged row as her rename having been ignored.
+    mockUpdateConfig.mockRejectedValueOnce(new Error('offline'))
+    const user = userEvent.setup()
+    render(<CurriculumTab />)
+    await renameTo(user, 'Math K')
+
+    expect(await screen.findByText(/still called what it was/i)).toBeInTheDocument()
+    // The dialog is still open, with her typing intact.
+    expect(screen.getByLabelText('Name')).toHaveValue('Math K')
+  })
+
   it('is parent-only, on capability', async () => {
     mockIsChildProfile.mockReturnValue(true)
     const user = userEvent.setup()

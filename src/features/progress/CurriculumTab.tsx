@@ -295,6 +295,9 @@ export default function CurriculumTab() {
     if (isChildProfile) return
     const config = configs.find((c) => c.id === configId)
     if (!config || config.completed) return
+    // Deliberately UNCAUGHT: the dialog awaits this and keeps itself open on a
+    // rejection, so swallowing the error here would close it over a write that
+    // never landed (Codex round 1, P2).
     await updateConfig(configId, { name, aliases })
     setSnack(`Renamed to "${name}"`)
   }
@@ -587,12 +590,21 @@ export default function CurriculumTab() {
         }
 
         const results = record.results
-        const cardName = config.curriculum || config.name
+        // UX-280 (Codex round 1, P2): every name this row answers to, not one.
+        // The untargeted lookup gained the alias ladder and this guard did not,
+        // so scanning the OLD cover from a renamed card raised a false
+        // "that doesn't look like this workbook" prompt — on the exact path the
+        // alternates exist to keep working.
+        const cardNames = [config.curriculum ?? '', ...activityNames(config)].filter(Boolean)
         const detectedName = isCertificateScan(results)
           ? results.curriculumName
           : results.curriculumDetected?.name || results.subject
 
-        if (detectedName && cardName && !isWorkbookMatch(cardName, detectedName)) {
+        if (
+          detectedName &&
+          cardNames.length > 0 &&
+          !cardNames.some((cardName) => isWorkbookMatch(cardName, detectedName))
+        ) {
           setMismatchPrompt({ result: results, config, detectedName })
           return
         }
@@ -1117,7 +1129,7 @@ export default function CurriculumTab() {
       <RenameActivityDialog
         config={renaming}
         siblings={configs}
-        onSave={(id, name, aliases) => void handleRename(id, name, aliases)}
+        onSave={handleRename}
         onClose={() => setRenaming(null)}
       />
 

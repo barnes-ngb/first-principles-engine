@@ -171,3 +171,16 @@ export const ALIAS_FIELD_HELP =
 export function aliasCapNotice(cap: number = MAX_ACTIVITY_ALIASES): string {
   return `That's ${cap} names, which is the most one activity can have. Remove one to add another.`
 }
+
+/**
+ * The line for a rename that did not land (Codex round 1, P2).
+ *
+ * The house rule for a failed write, set by `deleteFailureNotice`: say what is
+ * still true, not just that something went wrong. A rename whose write was
+ * rejected leaves the row exactly as it was, and a parent who reads only
+ * "something went wrong" does not know whether her curriculum is now half
+ * renamed.
+ */
+export function renameFailureNotice(name: string): string {
+  return `Couldn't save that — "${name}" is still called what it was, and nothing else changed. Check your connection and try again.`
+}

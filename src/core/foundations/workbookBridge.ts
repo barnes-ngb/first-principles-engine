@@ -505,9 +505,33 @@ export function bridgeNameForActivity(
   config: (NamedActivity & { curriculum?: string | null }) | null | undefined,
 ): string | undefined {
   if (!config) return undefined
+  // Exactly what the callers picked before this function existed. Returned
+  // whenever the alternates cannot improve on it — so a row that resolved a
+  // bridge by its name still resolves the same one, and a row that resolved
+  // none still resolves none.
   const fallback = config.name ?? config.curriculum ?? undefined
+
+  const resolved: { name: string; sourceId: string }[] = []
   for (const candidate of [...activityNames(config), config.curriculum ?? '']) {
-    if (candidate && workbookBridgeForSource(candidate)) return candidate
+    if (!candidate) continue
+    const bridge = workbookBridgeForSource(candidate)
+    if (bridge) resolved.push({ name: candidate, sourceId: bridge.sourceId })
   }
-  return fallback ?? undefined
+  if (resolved.length === 0) return fallback ?? undefined
+
+  // **Candidates that disagree are not a vote (Codex round 1, P2).** Alternates
+  // are free text a parent types, so one row's names can resolve to two
+  // different curricula — and taking the first in list order would let the
+  // ORDER OF A TEXT FIELD decide which curriculum's unit map is written into a
+  // child's learner model. This module refuses to guess between two bridges
+  // everywhere else (`matchWorkbookBridge` returns `ambiguous` on a tie rather
+  // than picking), and it refuses here too.
+  //
+  // Disagreement falls back rather than returning nothing, because returning
+  // nothing would switch OFF a sync that worked before the alternates existed:
+  // the fallback is the single name these callers always used, so a stray
+  // alternate can add a bridge but can never move or remove one.
+  const [first] = resolved
+  if (resolved.some((r) => r.sourceId !== first.sourceId)) return fallback ?? undefined
+  return first.name
 }

@@ -14,7 +14,12 @@ import Typography from '@mui/material/Typography'
 import type { ChatActivityConfig } from '../shelly-chat/useShellyChatActions'
 import type { ActivityConfig } from '../../core/types/planning'
 import { MAX_ACTIVITY_ALIASES, normalizeAliases } from '../../core/utils/activityNames'
-import { ALIAS_FIELD_HELP, ALIAS_SECTION_LABEL, aliasCapNotice } from './renameActivity'
+import {
+  ALIAS_FIELD_HELP,
+  ALIAS_SECTION_LABEL,
+  aliasCapNotice,
+  renameFailureNotice,
+} from './renameActivity'
 import { planRename } from './renameActivity'
 
 interface RenameActivityDialogProps {
@@ -22,7 +27,8 @@ interface RenameActivityDialogProps {
   config: ActivityConfig | null
   /** The rows it sits beside, for the duplicate notice. */
   siblings: readonly ChatActivityConfig[]
-  onSave: (configId: string, name: string, aliases: string[]) => void
+  /** Resolves when the write has landed; REJECTS when it has not. */
+  onSave: (configId: string, name: string, aliases: string[]) => Promise<void>
   onClose: () => void
 }
 
@@ -64,6 +70,8 @@ function RenameActivityDialogBody({
   onClose,
 }: RenameActivityDialogProps & { config: ActivityConfig }) {
   const [name, setName] = useState(config.name)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   /** The alternates as edited here — the carried old name is added at save. */
   const [aliases, setAliases] = useState<string[]>(() => config.aliases ?? [])
   const [draftAlias, setDraftAlias] = useState('')
@@ -105,6 +113,8 @@ function RenameActivityDialogBody({
           {plan.duplicateNotice ? (
             <Alert severity="info">{plan.duplicateNotice}</Alert>
           ) : null}
+
+          {saveError ? <Alert severity="error">{saveError}</Alert> : null}
 
           {plan.carriesOldName ? (
             <Alert severity="success">
@@ -164,17 +174,28 @@ function RenameActivityDialogBody({
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        {/* The dialog closes only once the write has LANDED (Codex round 1,
+            P2). Closing on the tap and voiding the promise meant a rejected or
+            timed-out write left the parent with no error, no retry and her
+            edits discarded — she would read the unchanged row as her rename
+            having been ignored. */}
         <Button
           variant="contained"
-          disabled={!canSave}
+          disabled={!canSave || saving}
           onClick={() => {
             if (plan.name == null) return
+            setSaving(true)
+            setSaveError('')
             onSave(config.id, plan.name, plan.aliases ?? [])
-            onClose()
+              .then(onClose)
+              .catch(() => setSaveError(renameFailureNotice(config.name)))
+              .finally(() => setSaving(false))
           }}
         >
-          Save
+          {saving ? 'Saving…' : 'Save'}
         </Button>
       </DialogActions>
     </Dialog>

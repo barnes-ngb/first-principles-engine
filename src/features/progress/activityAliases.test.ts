@@ -59,6 +59,25 @@ describe('a scan still finds a renamed workbook (UX-280)', () => {
   })
 })
 
+describe("the card's own scan guard sees alternates (UX-280)", () => {
+  it('does not call a scan of the OLD cover a mismatch', () => {
+    // Codex round 1, P2. `handleCardCapture` compared `curriculum || name` and
+    // raised "that doesn't look like this workbook" on a mismatch — so scanning
+    // the old cover from a renamed card raised a false prompt on the exact path
+    // the alternates exist to keep working. This is that guard's rule.
+    const renamed = config({ name: 'Phonics', aliases: ['Explode the Code Book 3'] })
+    const cardNames = [renamed.curriculum ?? '', ...activityNames(renamed)].filter(Boolean)
+    const mismatch = !cardNames.some((n) => isWorkbookMatch(n, 'Explode the Code'))
+    expect(mismatch).toBe(false)
+  })
+
+  it('still calls a genuinely different book a mismatch', () => {
+    const renamed = config({ name: 'Phonics', aliases: ['Explode the Code Book 3'] })
+    const cardNames = [renamed.curriculum ?? '', ...activityNames(renamed)].filter(Boolean)
+    expect(cardNames.some((n) => isWorkbookMatch(n, 'Mathseeds'))).toBe(false)
+  })
+})
+
 describe('the duplicate notice sees alternates (UX-280)', () => {
   const add = {
     kind: 'addActivity' as const,
@@ -99,6 +118,25 @@ describe('the workbook bridge follows the rename (UX-280)', () => {
     expect(bridgeNameForActivity({ name: 'Math K' })).toBe('Math K')
     expect(bridgeNameForActivity({ name: null, curriculum: 'Some Book' })).toBe('Some Book')
     expect(bridgeNameForActivity(null)).toBeUndefined()
+  })
+
+  it('refuses to pick between names that resolve to DIFFERENT bridges', () => {
+    // Codex round 1, P2. Alternates are free text, so one row's names can
+    // resolve to two curricula — and taking the first in list order would let
+    // the order of a text field decide which curriculum's unit map is written
+    // into a child's learner model. This module refuses to guess between two
+    // bridges everywhere else, and it refuses here.
+    const conflicted = { name: 'Mathseeds', aliases: ['TGTB LA 1'] }
+    expect(workbookBridgeForSource('Mathseeds')?.sourceId).toBe('mathseeds')
+    expect(workbookBridgeForSource('TGTB LA 1')?.sourceId).toBe('tgtbLanguageArts1')
+    // Falls back to the single name the callers always used — so a stray
+    // alternate can ADD a bridge, but can never move or remove one.
+    expect(bridgeNameForActivity(conflicted)).toBe('Mathseeds')
+  })
+
+  it('agreeing names are not a conflict', () => {
+    const agreeing = { name: 'Mathseeds', aliases: ['Math Seeds', 'Reading Eggs Mathseeds'] }
+    expect(workbookBridgeForSource(bridgeNameForActivity(agreeing))?.sourceId).toBe('mathseeds')
   })
 })
 
