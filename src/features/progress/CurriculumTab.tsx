@@ -52,6 +52,7 @@ import { ActivityFrequencyLabel } from '../../core/types/enums'
 import { activityNames } from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
+import CertificateScanSection from './CertificateScanSection'
 import RenameActivityDialog from './RenameActivityDialog'
 import { ALIAS_SECTION_LABEL } from './renameActivity'
 import SetPositionDialog from './SetPositionDialog'
@@ -1181,6 +1182,28 @@ export default function CurriculumTab() {
             </Stack>
           </SectionCard>
         )}
+
+        {/* UX-326 / UX-319 — the certificate door, moved down from the
+            ProgressPage shell to sit immediately above the staging area it
+            duplicates. It used to render above the tab bar, so on every tab a
+            per-child write control sat above the only thing on the page that
+            names or changes the child (UX-319); here it is below this tab's own
+            selector, and beside the other door onto the same job.
+
+            It goes to Curriculum rather than to Foundations with the other three
+            deliberately: UX-315 has already decided this section's destination —
+            it is to be MERGED into the staging door below, one door with two page
+            types. Parking it on Foundations now would move it across that
+            decision and turn UX-315 into a cross-page migration instead of a
+            local edit. This is a move, not a rewrite: same component, same copy,
+            same gating. The two doors are still two doors — only the ordering is
+            fixed here. */}
+        <SectionCard title="Scan Certificate or Progress Report">
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Photograph a curriculum certificate or progress report to automatically update workbook progress.
+          </Typography>
+          <CertificateScanSection />
+        </SectionCard>
 
         {/* Scan to Add New Workbook — multi-page staging + sequential apply */}
         <Card sx={{ p: 2 }}>

@@ -4,16 +4,10 @@ import Box from '@mui/material/Box'
 import Container from '@mui/material/Container'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
-import Typography from '@mui/material/Typography'
 
 import HelpStrip from '../../components/HelpStrip'
-import SectionCard from '../../components/SectionCard'
-import CertificateScanSection from './CertificateScanSection'
 import CurriculumTab from './CurriculumTab'
 import FoundationsTab from './FoundationsTab'
-import FoundationsDiagPanel from './FoundationsDiagPanel'
-import DataReviewExportPanel from '../records/DataReviewExportPanel'
-import FoundationsReviewLauncher from '../foundations-review/FoundationsReviewLauncher'
 import LearningMap from './learning-map/LearningMap'
 import MonthlyBooksTab from '../monthly-review/MonthlyBooksTab'
 import { PROGRESS_TABS } from './progressNav'
@@ -76,29 +70,18 @@ export default function ProgressPage() {
           </Tabs>
         </Box>
       </Container>
-      <Container maxWidth="lg" sx={{ py: 2 }}>
-        <SectionCard title="Scan Certificate or Progress Report">
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Photograph a curriculum certificate or progress report to automatically update workbook progress.
-          </Typography>
-          <CertificateScanSection />
-        </SectionCard>
-      </Container>
-      {/* Foundations Review Chat (FEAT-51, slice 2a) — parent-only (Progress is a
-          parentOnly route). The primary interface for feeding the Learner Model
-          by conversation + upload; the Foundations tab reads what it feeds. */}
-      <Container maxWidth="lg" sx={{ py: 1 }}>
-        <FoundationsReviewLauncher />
-      </Container>
-      {/* Flag-gated ( ?diag=1 ), parent-only — Learner Model seeder + preview (FEAT-48). */}
-      <Container maxWidth="lg" sx={{ py: 0 }}>
-        <FoundationsDiagPanel />
-      </Container>
-      {/* Flag-gated ( ?diag=1 ), parent-only — read-only per-child data-review
-          export for AI-assisted data audit (FEAT-120). Writes nothing. */}
-      <Container maxWidth="lg" sx={{ py: 0 }}>
-        <DataReviewExportPanel />
-      </Container>
+      {/* UX-326: the tab bar is followed by the TAB, and by nothing else.
+          `CertificateScanSection`, `FoundationsReviewLauncher`,
+          `FoundationsDiagPanel` and `DataReviewExportPanel` used to render here,
+          between the tabs and their content — four sections, none of them
+          tab-specific, on all six tabs. A parent who tapped Word Wall scrolled
+          past a certificate scanner, a review chat and (with `?diag=1`) two
+          diagnostic panels, one of which stacks every child's full 60-concept
+          terrain, before reaching the word wall — and past all of it before
+          reaching the tab's own child selector, which is UX-319. Each has moved
+          to the tab whose job it shares: the three Foundations-shaped ones to
+          `FoundationsTab`, the certificate scanner to `CurriculumTab` (above the
+          staging area it is destined to merge with — UX-315). */}
       {TABS[tab]?.render()}
     </>
   )

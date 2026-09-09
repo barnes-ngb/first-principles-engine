@@ -19,6 +19,7 @@ import { ErrorState } from '../../components/states'
 import { practiceWordsUsedIn, storyReadabilityClause } from './storyPracticeWords'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { inFlightDraftNotice } from './draftOwnership'
 import type { Book, BookPage } from '../../core/types'
 import { booksCollection } from '../../core/firebase/firestore'
 import { addDoc } from 'firebase/firestore'
@@ -62,6 +63,13 @@ export default function CreateSightWordBook() {
   // parent target any length in the 5–15 range for this sight-word tool.
   const [pageCount, setPageCount] = useState<number>(DEFAULT_TARGET_PAGE_COUNT)
   const [preview, setPreview] = useState<GeneratedStory | null>(null)
+  /**
+   * The child the story in `preview` was written FOR — captured when it was
+   * generated, not read again at Finish (Codex round 1 on UX-324). The header
+   * chip can now switch child on this screen, and the draft does not move with
+   * it: the write follows the draft. See `draftOwnership.inFlightDraftNotice`.
+   */
+  const [draftChild, setDraftChild] = useState<{ id: string; name: string } | null>(null)
   /** The named failure from the last generate attempt (UX-117); `null` when none. */
   const [genFailure, setGenFailure] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
@@ -106,11 +114,22 @@ export default function CreateSightWordBook() {
         pageCount,
       )
       setPreview(result)
+      setDraftChild({ id: childId, name: activeChild?.name ?? '' })
     } catch (err) {
       setPreview(null)
+      setDraftChild(null)
       setGenFailure(err instanceof Error ? err.message : String(err))
     }
-  }, [familyId, childId, wordList, theme, pageCount, generateStory, childDefaults.defaultTheme])
+  }, [
+    familyId,
+    childId,
+    activeChild?.name,
+    wordList,
+    theme,
+    pageCount,
+    generateStory,
+    childDefaults.defaultTheme,
+  ])
 
   /**
    * Which requested words the pages actually hold, and therefore which they do
@@ -134,18 +153,42 @@ export default function CreateSightWordBook() {
   }, [preview, wordList])
 
   const readabilityClause = useMemo(
-    () => storyReadabilityClause(activeChild?.name ?? 'this reader', preview?.readability),
-    [activeChild?.name, preview?.readability],
+    () =>
+      storyReadabilityClause(
+        draftChild?.name || activeChild?.name || 'this reader',
+        preview?.readability,
+      ),
+    [draftChild?.name, activeChild?.name, preview?.readability],
   )
 
   const handleUseSample = useCallback(() => {
     setPreview(SAMPLE_STORY)
+    setDraftChild({ id: childId, name: activeChild?.name ?? '' })
     setWordsInput(SAMPLE_STORY.allSightWordsUsed.join(', '))
     setTheme('Minecraft adventure with a cat')
-  }, [])
+  }, [childId, activeChild?.name])
+
+  /**
+   * Who this draft is saved for, and the defaults that ride with it. `childId`
+   * is the header's live answer and is right for everything BEFORE a story
+   * exists (which words to offer, which theme to generate with); once one
+   * does, the draft's own child is the answer — including `difficulty`, which
+   * is a property of the reader the story was written for.
+   */
+  const writeChild = draftChild ?? (activeChild ? { id: activeChild.id, name: activeChild.name } : null)
+  const writeChildId = writeChild?.id ?? ''
+  const writeDefaults =
+    (writeChild?.name ?? '').toLowerCase() === 'lincoln'
+      ? CHILD_BOOK_DEFAULTS.lincoln
+      : CHILD_BOOK_DEFAULTS.london
+  /** Said only when the header has moved off the draft's child. */
+  const draftChildLine = inFlightDraftNotice(
+    draftChild ? { childId: draftChild.id, childName: draftChild.name } : null,
+    childId,
+  )
 
   const handlePublish = useCallback(async () => {
-    if (!preview || !familyId || !childId) return
+    if (!preview || !familyId || !writeChildId) return
     setPublishing(true)
     try {
       const now = new Date().toISOString()
@@ -161,7 +204,7 @@ export default function CreateSightWordBook() {
       }))
 
       const newBook: Omit<Book, 'id'> = {
-        childId,
+        childId: writeChildId,
         title: preview.title,
         pages,
         status: 'complete',
@@ -173,11 +216,11 @@ export default function CreateSightWordBook() {
         sightWords: [...new Set(wordList)],
         theme: inferBookTheme('', wordList, 'storybook'),
         createdBy: 'parent',
-        createdFor: childId,
+        createdFor: writeChildId,
         generationConfig: {
           words: wordList,
-          theme: theme || childDefaults.defaultTheme,
-          difficulty: childDefaults.difficulty,
+          theme: theme || writeDefaults.defaultTheme,
+          difficulty: writeDefaults.difficulty,
           pageCount,
         },
       }
@@ -187,10 +230,10 @@ export default function CreateSightWordBook() {
     } finally {
       setPublishing(false)
     }
-  }, [preview, familyId, childId, wordList, theme, pageCount, navigate, childDefaults])
+  }, [preview, familyId, writeChildId, writeDefaults, wordList, theme, pageCount, navigate])
 
   const handleEditInEditor = useCallback(async () => {
-    if (!preview || !familyId || !childId) return
+    if (!preview || !familyId || !writeChildId) return
     setPublishing(true)
     try {
       const now = new Date().toISOString()
@@ -206,7 +249,7 @@ export default function CreateSightWordBook() {
       }))
 
       const newBook: Omit<Book, 'id'> = {
-        childId,
+        childId: writeChildId,
         title: preview.title,
         pages,
         status: 'draft',
@@ -218,11 +261,11 @@ export default function CreateSightWordBook() {
         sightWords: [...new Set(wordList)],
         theme: inferBookTheme('', wordList, 'storybook'),
         createdBy: 'parent',
-        createdFor: childId,
+        createdFor: writeChildId,
         generationConfig: {
           words: wordList,
-          theme: theme || childDefaults.defaultTheme,
-          difficulty: childDefaults.difficulty,
+          theme: theme || writeDefaults.defaultTheme,
+          difficulty: writeDefaults.difficulty,
           pageCount,
         },
       }
@@ -232,7 +275,7 @@ export default function CreateSightWordBook() {
     } finally {
       setPublishing(false)
     }
-  }, [preview, familyId, childId, wordList, theme, pageCount, navigate, childDefaults])
+  }, [preview, familyId, writeChildId, writeDefaults, wordList, theme, pageCount, navigate])
 
   return (
     <Page>
@@ -420,6 +463,16 @@ export default function CreateSightWordBook() {
               </Box>
             ))}
           </Stack>
+
+          {/* The header moved off the child this story was written for
+              (UX-324 made that possible on a screen with no selector). The
+              write follows the draft, and this says so BEFORE the tap rather
+              than in the receipt afterwards — the UX-313 ordering rule. */}
+          {draftChildLine && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              {draftChildLine}
+            </Alert>
+          )}
 
           <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
             <Button

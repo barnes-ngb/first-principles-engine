@@ -34,6 +34,28 @@ export default function QuickAddHours({ familyId, childId, childName, date, onSa
   const [saving, setSaving] = useState(false)
   const [recentlyAdded, setRecentlyAdded] = useState<Array<{ label: string; minutes: number }>>([])
 
+  /**
+   * UX-324 (Codex round 4) — the header's child switcher reaches Records, and
+   * this form stays mounted across the change. A selection made while looking
+   * at one child would then be written for another (`handleSave` reads the live
+   * `childId`, and this is the compliance `hours` collection), and the session's
+   * "just added" list — which is a receipt for the child it was logged under —
+   * would keep showing the other child's entries.
+   *
+   * A pending selection is an INTENT, not a recorded session: nothing has
+   * happened for anyone yet, and the button and the receipt both name the LIVE
+   * child. So this resets rather than binding to the older child, which is the
+   * opposite of `useCreativeTimer`'s answer (UX-327) and for the opposite
+   * reason — there, real minutes had already elapsed for a named child.
+   */
+  const [formChildId, setFormChildId] = useState(childId)
+  if (formChildId !== childId) {
+    setFormChildId(childId)
+    setSelectedActivity(null)
+    setSelectedMinutes(null)
+    setRecentlyAdded([])
+  }
+
   const handleSave = useCallback(async () => {
     if (!selectedActivity || !selectedMinutes) return
     // DATA-05: never write an unattributed entry.

@@ -41,7 +41,13 @@ export default function BusinessPage() {
     unconfirm,
     removeSale,
   } = useBusinessLog()
-  const { milestones, saving, saveMilestones } = useBusinessGoal(activeChildId)
+  const {
+    milestones,
+    saving,
+    loading: goalLoading,
+    error: goalError,
+    saveMilestones,
+  } = useBusinessGoal(activeChildId)
 
   return (
     <Page>
@@ -111,6 +117,8 @@ export default function BusinessPage() {
                 childId={activeChildId}
                 milestones={milestones}
                 saving={saving}
+                loading={goalLoading}
+                readError={goalError}
                 onSave={saveMilestones}
               />
             </Stack>

@@ -15,6 +15,7 @@ import TimerIcon from '@mui/icons-material/Timer'
 
 import { useFamilyId } from '../core/auth/useAuth'
 import { useActiveChild } from '../core/hooks/useActiveChild'
+import { timerOwnerDiffers, timerOwnerLine } from '../core/hooks/creativeTimerOwner'
 import { useCreativeTimer } from '../core/hooks/useCreativeTimer'
 import { SubjectBucket } from '../core/types/enums'
 
@@ -47,7 +48,7 @@ export default function CreativeTimer({
   defaultDescription = 'Creative time',
 }: CreativeTimerProps) {
   const familyId = useFamilyId()
-  const { activeChildId } = useActiveChild()
+  const { activeChildId, children } = useActiveChild()
 
   const {
     state,
@@ -119,10 +120,34 @@ export default function CreativeTimer({
     )
   }
 
+  // UX-327 — the header can move to another child while this runs, and the
+  // minutes still belong to the child the session was started for. Say so
+  // BEFORE Done is tapped rather than in the receipt afterwards: this is the
+  // one timer surface that writes to the compliance `hours` collection.
+  const ownerElsewhere = timerOwnerDiffers(state.ownerChildId, activeChildId)
+  const ownerName = ownerElsewhere
+    ? children?.find((c) => c.id === state.ownerChildId)?.name
+    : undefined
+
   // Running state
   if (state.isRunning) {
     return (
       <>
+        {ownerElsewhere && (
+          <Box
+            sx={{
+              px: 2,
+              py: 0.5,
+              bgcolor: 'info.50',
+              borderBottom: '1px solid',
+              borderColor: 'info.200',
+            }}
+          >
+            <Typography variant="caption" color="info.main">
+              {timerOwnerLine(ownerName)}
+            </Typography>
+          </Box>
+        )}
         <Box
           sx={{
             px: 2,
