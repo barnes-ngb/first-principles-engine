@@ -84,6 +84,33 @@ describe('syncEvalFindingsToModel', () => {
     expect(setDoc).not.toHaveBeenCalled()
   })
 
+  // UX-322 — a model seeded before the child had any signal is stamped
+  // `no-data`, which five consumers read as "no model at all". A guided eval's
+  // read is real evidence, so this write promotes it.
+  it('promotes a no-data model to seeded when the eval lands evidence', async () => {
+    getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ ...seededModel(), status: 'no-data' }),
+    })
+    setDoc.mockResolvedValue(undefined)
+
+    await syncEvalFindingsToModel('fam-1', 'c1', 'sess-1', [finding('phonics.cvc', 'mastered')], NOW)
+
+    expect((setDoc.mock.calls[0][1] as LearnerModel).status).toBe('seeded')
+  })
+
+  it('leaves a synthesized model’s status alone — the rule never demotes', async () => {
+    getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ ...seededModel(), status: 'synthesized' }),
+    })
+    setDoc.mockResolvedValue(undefined)
+
+    await syncEvalFindingsToModel('fam-1', 'c1', 'sess-1', [finding('phonics.cvc', 'mastered')], NOW)
+
+    expect((setDoc.mock.calls[0][1] as LearnerModel).status).toBe('synthesized')
+  })
+
   it('swallows a thrown model write — never propagates (apply-isolation)', async () => {
     getDoc.mockResolvedValue({ exists: () => true, data: () => seededModel() })
     setDoc.mockRejectedValue(new Error('firestore down'))

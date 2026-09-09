@@ -135,6 +135,15 @@ export default function ReviewActionConfirmCard({
                   Dismissed
                 </Typography>
               )}
+              {/* UX-287 — a confirm that could not be written says so on the card
+                  itself. It is not shown as still-pending: retrying the same tap
+                  would fail the same way, and the session's error line names the
+                  route that fixes it. */}
+              {item.status === 'failed' && (
+                <Typography variant="caption" color="error.main">
+                  Not saved
+                </Typography>
+              )}
             </Paper>
           )
         })}

@@ -36,6 +36,13 @@ import type {
 import { applyAndWriteReviewAction } from '../foundations-review/writeReviewAction'
 import DispositionProfile from './DispositionProfile'
 import {
+  BOOTSTRAP_FAILED_LINE,
+  BOOTSTRAP_RETRY_LABEL,
+  bootstrapRunningLine,
+  emptyFoundationsLines,
+} from './foundationsBootstrap'
+import { useFoundationsBootstrap } from './useFoundationsBootstrap'
+import {
   buildOverrideAction,
   buildReconcileView,
   KEEP_MY_WORD_NOTE,
@@ -100,6 +107,11 @@ export default function FoundationsTab() {
   const { activeChild, activeChildId, children, setActiveChildId, isLoading } =
     useActiveChild()
   const { model, loading } = useLearnerModel(familyId, activeChildId)
+  // UX-286 — the model's ONE non-diagnostic door into existence. Create-only:
+  // it fires when the snapshot has resolved and the document is absent, once per
+  // child, for a profile that may write. Writes `learnerModels` only.
+  const { bootstrapping, failed: bootstrapFailed, retry: retryBootstrap } =
+    useFoundationsBootstrap({ familyId, childId: activeChildId, canEdit, model, loading })
   const [openConcept, setOpenConcept] = useState<TerrainConcept | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -180,9 +192,28 @@ export default function FoundationsTab() {
 
       {loading && <LoadingState label="Loading foundations…" />}
 
-      {!loading && (!model || model.status === 'no-data') && (
-        <EmptyFoundations childName={childName} />
+      {!loading && bootstrapping && (
+        <LoadingState label={bootstrapRunningLine(childName)} />
       )}
+
+      {!loading && !bootstrapping && bootstrapFailed && (
+        <Alert
+          severity="warning"
+          sx={{ mt: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={retryBootstrap}>
+              {BOOTSTRAP_RETRY_LABEL}
+            </Button>
+          }
+        >
+          {BOOTSTRAP_FAILED_LINE}
+        </Alert>
+      )}
+
+      {!loading && !bootstrapping && !bootstrapFailed &&
+        (!model || model.status === 'no-data') && (
+          <EmptyFoundations childName={childName} canEdit={canEdit} />
+        )}
 
       {!loading && model && model.status !== 'no-data' && (
         <FoundationsBody
@@ -212,12 +243,27 @@ export default function FoundationsTab() {
   )
 }
 
-function EmptyFoundations({ childName }: { childName: string }) {
+/**
+ * UX-287 — the empty state names a route that works. Copy (and the capability
+ * split) is the pure `emptyFoundationsLines`; this only renders it.
+ */
+function EmptyFoundations({
+  childName,
+  canEdit,
+}: {
+  childName: string
+  canEdit: boolean
+}) {
+  const lines = emptyFoundationsLines(childName, canEdit)
   return (
     <Alert severity="info" sx={{ mt: 2 }}>
-      Getting to know how {childName} learns. Do a Knowledge Mine round or a
-      Foundations review to start filling this in — it grows as you capture
-      evidence.
+      <Stack spacing={1}>
+        {lines.map((line) => (
+          <Typography key={line} variant="body2">
+            {line}
+          </Typography>
+        ))}
+      </Stack>
     </Alert>
   )
 }

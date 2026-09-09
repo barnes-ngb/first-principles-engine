@@ -1,7 +1,21 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { planWorkbookSync } from './workbookPositionSync'
+// Firestore seam for the async writer below. `planWorkbookSync` is pure and
+// untouched by these mocks.
+const getDoc = vi.fn()
+const setDoc = vi.fn()
+vi.mock('firebase/firestore', () => ({
+  doc: vi.fn(() => ({ __ref: true })),
+  getDoc: (...args: unknown[]) => getDoc(...args),
+  setDoc: (...args: unknown[]) => setDoc(...args),
+}))
+vi.mock('../firebase/firestore', () => ({
+  learnerModelsCollection: () => ({}),
+}))
+
+import { planWorkbookSync, syncWorkbookPositionToModel } from './workbookPositionSync'
 import type { WorkbookSyncInput } from './workbookPositionSync'
+import type { LearnerModel } from '../types/learnerModel'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -155,5 +169,60 @@ describe('planWorkbookSync', () => {
         )
       }
     }
+  })
+})
+
+
+// ── UX-322: a bridged position promotes the model off `no-data` ──────────
+const NOW = '2026-09-09T12:00:00.000Z'
+
+function storedModel(status: LearnerModel['status']): LearnerModel {
+  return {
+    childId: 'c1',
+    graphVersion: 'reading@1+math@1',
+    status,
+    conceptStates: {},
+    modalityCalibration: { reading: { note: '' }, writing: { note: '' }, math: { note: '' } },
+    whatMattersNext: [],
+    changeFeed: [],
+    openQuestions: [],
+    seededAt: NOW,
+    updatedAt: NOW,
+  }
+}
+
+describe('syncWorkbookPositionToModel — status promotion (UX-322)', () => {
+  beforeEach(() => {
+    getDoc.mockReset()
+    setDoc.mockReset()
+    setDoc.mockResolvedValue(undefined)
+  })
+
+  it('promotes a no-data model to seeded when coverage is written', async () => {
+    getDoc.mockResolvedValue({ exists: () => true, data: () => storedModel('no-data') })
+
+    const outcome = await syncWorkbookPositionToModel(
+      'fam-1',
+      'c1',
+      { workbookName: FAST_PHONICS_NAME, position: 10 },
+      NOW,
+    )
+
+    expect(outcome.status).toBe('written')
+    const merge = setDoc.mock.calls[0][1] as Record<string, unknown>
+    expect(merge.status).toBe('seeded')
+  })
+
+  it('omits the status key entirely on an already-seeded model', async () => {
+    getDoc.mockResolvedValue({ exists: () => true, data: () => storedModel('seeded') })
+
+    await syncWorkbookPositionToModel(
+      'fam-1',
+      'c1',
+      { workbookName: FAST_PHONICS_NAME, position: 10 },
+      NOW,
+    )
+
+    expect('status' in (setDoc.mock.calls[0][1] as Record<string, unknown>)).toBe(false)
   })
 })

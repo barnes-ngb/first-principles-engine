@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, where } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -19,30 +19,19 @@ import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
 import {
   activityConfigsCollection,
-  childSkillMapsCollection,
   learnerModelsCollection,
-  sightWordProgressCollection,
-  skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
-import {
-  foundationGraphs,
-  FOUNDATION_NODE_MAP,
-} from '../../core/foundations'
+import { FOUNDATION_NODE_MAP } from '../../core/foundations'
+import { bootstrapLearnerModel } from '../../core/foundations/bootstrapLearnerModel'
 import { syncWorkbookPositionToModel } from '../../core/foundations/workbookPositionSync'
 import type { WorkbookSyncOutcome } from '../../core/foundations/workbookPositionSync'
 import type { ActivityConfig } from '../../core/types'
-import {
-  mergeSeededModel,
-  seedLearnerModel,
-} from '../../core/foundations/seedLearnerModel'
-import type { ChildSkillMap } from '../../core/curriculum/skillStatus'
 import type {
   ConceptStateEntry,
   ConceptStateKind,
   LearnerModel,
 } from '../../core/types/learnerModel'
 import type { LearnerSynthesis } from '../../core/types/learnerModel'
-import type { SightWordProgress, SkillSnapshot } from '../../core/types'
 
 const functions = getFunctions(app)
 const synthesizeFn = httpsCallable<
@@ -98,6 +87,15 @@ function formatSyncOutcome(name: string, position: number, outcome: WorkbookSync
  * doc client-side and renders the stored states grouped solid/forming/frontier/
  * not-yet so the owner can verify seeding truth from a phone. The real Foundations
  * tab is slice 2; this exists only to prove the model.
+ *
+ * **It is no longer the model's only door into existence (FIX-219 / UX-286)** —
+ * that was the defect: every other writer bails on the document's absence, so on
+ * a family that had never typed this flag the engine's central document did not
+ * exist. The Foundations tab now creates it, create-only, and this button stays
+ * as the deliberate **re-seed**. Both go through the one shared
+ * `core/foundations/bootstrapLearnerModel.ts`, so they cannot diverge; what makes
+ * pressing this safe is UX-290, which widened `mergeSeededModel` to preserve every
+ * evidence ref the seeder cannot re-derive rather than only attestations.
  *
  * Reads `skillSnapshots` / `childSkillMaps` / `sightWordProgress`; writes **only**
  * `learnerModels` (merge). No LLM, no other collection touched.
@@ -170,41 +168,11 @@ export default function FoundationsDiagPanel() {
         [childId]: { loading: true, model: prev[childId]?.model ?? null, error: null },
       }))
       try {
-        // Reads only — snapshot, skill map, sight words, existing model.
-        const snapRef = doc(skillSnapshotsCollection(familyId), childId)
-        const mapRef = doc(childSkillMapsCollection(familyId), childId)
-        const modelRef = doc(learnerModelsCollection(familyId), childId)
-        const [snapDoc, mapDoc, existingDoc, swSnap] = await Promise.all([
-          getDoc(snapRef),
-          getDoc(mapRef),
-          getDoc(modelRef),
-          getDocs(query(sightWordProgressCollection(familyId))),
-        ])
-
-        const snapshot: SkillSnapshot | null = snapDoc.exists()
-          ? (snapDoc.data() as SkillSnapshot)
-          : null
-        const skillMap: ChildSkillMap | null = mapDoc.exists()
-          ? (mapDoc.data() as ChildSkillMap)
-          : null
-        const sightWords: SightWordProgress[] = swSnap.docs
-          .filter((d) => d.id.startsWith(`${childId}_`))
-          .map((d) => d.data() as SightWordProgress)
-
-        const fresh = seedLearnerModel(
-          foundationGraphs,
-          childId,
-          snapshot,
-          skillMap,
-          sightWords,
-        )
-        const merged = mergeSeededModel(
-          existingDoc.exists() ? (existingDoc.data() as LearnerModel) : null,
-          fresh,
-        )
-
-        // Writes ONLY learnerModels (merge).
-        await setDoc(modelRef, merged, { merge: true })
+        // The ONE seed-a-child definition (UX-286) — the Foundations tab's
+        // create-only bootstrap calls the same function. This button stays as the
+        // deliberate re-seed, which UX-290 made safe: the merge now preserves
+        // every evidence ref the seeder cannot re-derive, not just attestations.
+        const merged = await bootstrapLearnerModel(familyId, childId)
         setByChild((prev) => ({
           ...prev,
           [childId]: { loading: false, model: merged, error: null },
