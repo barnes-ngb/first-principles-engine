@@ -105,7 +105,7 @@ describe('parseLedgerRowShape (the [ledger-shape] invariant)', () => {
     // ends the table, and the rows after it have no header to belong to.
     const md = [...header, '| **A-1** | 1 | OPEN | a | x |', '', '| **A-2** | 1 | OPEN | b | y |'].join('\n')
     const { breaks, rows } = parseLedgerRowShape(md)
-    expect(breaks).toEqual([4])
+    expect(breaks).toEqual([{ line: 4, kind: 'blank' }])
     // Both rows are still counted, so the cell check covers the orphaned ones too.
     expect(rows.map((r) => r.id)).toEqual(['A-1', 'A-2'])
   })
@@ -128,13 +128,54 @@ describe('parseLedgerRowShape (the [ledger-shape] invariant)', () => {
     expect(malformed).toEqual([])
   })
 
-  it('returns an empty result rather than throwing when there is no ledger header', () => {
-    expect(parseLedgerRowShape('# no table here')).toEqual({
-      expected: 0,
-      rows: [],
-      malformed: [],
-      breaks: [],
-    })
+  // ── Fail-closed cases (Codex, PR #1812) ──────────────────────────────────
+  // The first version of this parser returned a clean empty result for a missing
+  // header, so `runChecks` printed `PASS … all 0 rows have 0 cells` while
+  // parseLedgerIds still found every row — the whole ledger could render as raw
+  // text with all HARD checks green. The test below USED to assert that empty
+  // result as correct, which is how the hole shipped. Each case here now proves
+  // the check FAILS rather than passes vacuously.
+  it('fails closed when the ledger header is missing or mistyped', () => {
+    const { headerMissing, rows } = parseLedgerRowShape(
+      ['| **UX-1** | 1 | OPEN | a | x |', '| **UX-2** | 1 | OPEN | b | y |'].join('\n'),
+    )
+    expect(headerMissing).toBe(true)
+    expect(rows).toEqual([])
+    // The rows are still findable by the ID parser — which is exactly why a
+    // silent pass here was dangerous.
+    expect(parseLedgerIds('| **UX-1** | 1 | OPEN | a | x |').rows).toHaveLength(1)
+  })
+
+  it('fails closed when the |---| delimiter row is missing', () => {
+    const md = ['| ID | Band | Status | Title | Evidence |', '| **UX-1** | 1 | OPEN | a | x |'].join('\n')
+    const { delimiterMissing, rows } = parseLedgerRowShape(md)
+    expect(delimiterMissing).toBe(true)
+    expect(rows).toEqual([])
+  })
+
+  it('accepts the delimiter row in its aligned forms', () => {
+    for (const delim of ['|---|---|---|---|---|', '| :--- | ---: | :---: | --- | --- |']) {
+      const md = [...[header[0], delim], '| **UX-1** | 1 | OPEN | a | x |'].join('\n')
+      const s = parseLedgerRowShape(md)
+      expect(s.delimiterMissing, delim).toBeUndefined()
+      expect(s.rows).toHaveLength(1)
+    }
+  })
+
+  it('treats prose or HTML between rows as a break, like a blank line', () => {
+    const md = [
+      ...header,
+      '| **A-1** | 1 | OPEN | a | x |',
+      'a stray paragraph slipped into the table',
+      '| **A-2** | 1 | OPEN | b | y |',
+    ].join('\n')
+    const { breaks } = parseLedgerRowShape(md)
+    expect(breaks).toEqual([{ line: 4, kind: 'text' }])
+  })
+
+  it('does not flag trailing prose that simply follows the table', () => {
+    const md = [...header, '| **A-1** | 1 | OPEN | a | x |', 'closing note after the table'].join('\n')
+    expect(parseLedgerRowShape(md).breaks).toEqual([])
   })
 })
 
