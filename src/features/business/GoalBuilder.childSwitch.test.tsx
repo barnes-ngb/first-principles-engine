@@ -115,3 +115,36 @@ describe('GoalBuilder — a switch does not carry one child’s draft to another
     expect(screen.getByDisplayValue('A big Lego set')).toBeInTheDocument()
   })
 })
+
+/**
+ * Codex round 4 — the first fix re-seeded honestly, from the wrong data.
+ * `useBusinessGoal` kept the previous child's `milestones` while resubscribing,
+ * so on a switch the builder seeded the NEW child from the OLD child's rows and
+ * cleared `dirty`; an edit made in that window ignored the arriving snapshot and
+ * Save wrote those rows to the new child.
+ *
+ * The hook no longer carries rows across a child change, and the builder does
+ * not become editable until the read for THIS child has settled.
+ */
+describe('GoalBuilder — a delayed snapshot cannot seed the wrong child', () => {
+  it('shows no editable stack while this child’s goal is still loading', () => {
+    render(
+      <GoalBuilder childId="london" milestones={[]} saving={false} loading onSave={onSave} />,
+    )
+    expect(screen.getByText(/Loading this goal/i)).toBeInTheDocument()
+    // Nothing to type into and nothing to save: an edit made against an empty
+    // view would be saved as this child's truth.
+    expect(screen.queryByRole('button', { name: /save goal/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /A game · /i })).not.toBeInTheDocument()
+  })
+
+  it('renders the stack once the read for this child has landed', () => {
+    const { rerender } = render(
+      <GoalBuilder childId="london" milestones={[]} saving={false} loading onSave={onSave} />,
+    )
+    rerender(
+      <GoalBuilder childId="london" milestones={LONDONS} saving={false} onSave={onSave} />,
+    )
+    expect(screen.getByDisplayValue('A big Lego set')).toBeInTheDocument()
+  })
+})

@@ -46,6 +46,12 @@ interface GoalBuilderProps {
   /** Saved stack to seed the editor (recomputed thresholds ignored here). */
   milestones: EditableMilestone[]
   saving: boolean
+  /**
+   * True while this child's stack is still being read. Editing before it lands
+   * means editing against an empty view and then saving that as the truth
+   * (Codex round 4), so the controls wait.
+   */
+  loading?: boolean
   onSave: (childId: string, milestones: EditableMilestone[]) => Promise<void>
 }
 
@@ -57,7 +63,13 @@ interface GoalBuilderProps {
  *
  * Kid-accessible (it's his goal, not money/customer data — no parent gate).
  */
-export default function GoalBuilder({ childId, milestones, saving, onSave }: GoalBuilderProps) {
+export default function GoalBuilder({
+  childId,
+  milestones,
+  saving,
+  loading = false,
+  onSave,
+}: GoalBuilderProps) {
   const [draft, setDraft] = useState<EditableMilestone[]>(milestones)
   const [dirty, setDirty] = useState(false)
   const [seed, setSeed] = useState(milestones)
@@ -136,6 +148,18 @@ export default function GoalBuilder({ childId, milestones, saving, onSave }: Goa
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save your goal.')
     }
+  }
+
+  if (loading) {
+    // Codex round 4 — `useBusinessGoal` keeps no rows across a child change, so
+    // an empty stack here during a switch would be indistinguishable from "this
+    // child has no goal yet". Editing against that and saving would write the
+    // emptiness as the truth, so the controls wait for the read.
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Loading this goal…
+      </Typography>
+    )
   }
 
   return (
@@ -278,7 +302,7 @@ export default function GoalBuilder({ childId, milestones, saving, onSave }: Goa
         variant="contained"
         size="large"
         onClick={handleSave}
-        disabled={saving || !dirty}
+        disabled={saving || !dirty || loading}
         sx={{ alignSelf: 'flex-start' }}
       >
         {saving ? 'Saving…' : 'Save goal'}

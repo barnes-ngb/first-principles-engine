@@ -46,6 +46,12 @@ export function useBusinessGoal(childId: string | null): UseBusinessGoalResult {
       setLoading(false)
       return
     }
+    // UX-324 (Codex round 4) — a child change must not leave the PREVIOUS
+    // child's rows readable while this subscription resolves. `GoalBuilder`
+    // seeds its draft from `milestones`, so stale rows here were a route to
+    // saving one child's goal stack onto another even after that builder was
+    // fixed: it re-seeded honestly, from the wrong data.
+    setMilestones([])
     setLoading(true)
 
     const ref = doc(businessGoalsCollection(familyId), childId)
@@ -60,6 +66,9 @@ export function useBusinessGoal(childId: string | null): UseBusinessGoalResult {
       (err) => {
         console.error('[BusinessGoal] Snapshot error:', err)
         setError(err.message)
+        // Deliberately stays `loading` for the builder's purposes — see
+        // `GoalBuilder`. A dropped read is not "this child has no goal", and
+        // editing against that emptiness would save it as the truth.
         setLoading(false)
       },
     )

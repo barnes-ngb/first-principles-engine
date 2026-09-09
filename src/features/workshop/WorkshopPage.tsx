@@ -143,6 +143,17 @@ export default function WorkshopPage() {
    * quota and the rewards all read the LIVE child. See `workshopChildSwitch`.
    */
   const [workflowChildId, setWorkflowChildId] = useState<string | null>(null)
+  /**
+   * The live value of `workflowChildId`, readable from an in-flight callback
+   * that closed over an older one (Codex round 4). `handleWizardComplete` awaits
+   * AI and image calls; a parent can switch child and start a NEW workflow while
+   * one is still running, and without this the old run's completion would adopt
+   * its game into the new workflow — visible again, and rewarded to whoever is
+   * active now. Its Firestore writes are correct either way (they carry their
+   * own child); what must not happen is the UI adopting a result that is no
+   * longer this workflow's.
+   */
+  const workflowChildRef = useRef<string | null>(null)
   // Resume dialog state
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false)
   const [confirmRestartOpen, setConfirmRestartOpen] = useState(false)
@@ -243,6 +254,12 @@ export default function WorkshopPage() {
     }
   }, [childGames.length, activeChildId, tts])
 
+  /** Change the workflow's owner, keeping the async-readable ref in step. */
+  const setWorkflowChild = useCallback((next: string | null) => {
+    workflowChildRef.current = next
+    setWorkflowChildId(next)
+  }, [])
+
   // ── Draft auto-save helpers ──────────────────────────────────────
 
   const saveDraftStep = useCallback(
@@ -333,8 +350,8 @@ export default function WorkshopPage() {
     setGenerateError(null)
     setDraftDocId(null)
     setLastGameResult(null)
-    setWorkflowChildId(activeChildId)
-  }, [activeChildId])
+    setWorkflowChild(activeChildId)
+  }, [activeChildId, setWorkflowChild])
 
   const handleResumeDraft = useCallback((game: StoryGame) => {
     setCurrentGame(game)
@@ -343,8 +360,8 @@ export default function WorkshopPage() {
     setGenerateError(null)
     // The draft's OWN child, not the header's — a resumed draft is already
     // stamped, and that stamp is what the rest of the workflow must follow.
-    setWorkflowChildId(game.childId ?? activeChildId)
-  }, [activeChildId])
+    setWorkflowChild(game.childId ?? activeChildId)
+  }, [activeChildId, setWorkflowChild])
 
   const handleWizardComplete = useCallback(
     async (inputs: StoryInputs, gameType: GameType) => {
@@ -354,6 +371,12 @@ export default function WorkshopPage() {
       setArtFailure(null)
       lastArtFailureRef.current = null
       setLastWizardInputs({ inputs, gameType })
+
+      // Whose run this is. Compared against the live ref before any result is
+      // adopted, so a completion that lands after the parent moved on is
+      // dropped rather than shown under the new workflow (Codex round 4).
+      const runChild = workflowChildRef.current
+      const runIsStillCurrent = () => workflowChildRef.current === runChild
 
       if (!familyId || !activeChildId) {
         setGenerateError('Missing family or child context.')
@@ -421,6 +444,13 @@ export default function WorkshopPage() {
 
         const now = new Date().toISOString()
 
+        // The document below is this run's real outcome and is written either
+        // way — it carries its own `childId`. What must not happen once the
+        // parent has moved on is this result being ADOPTED into the workflow
+        // now on screen (Codex round 4), so the in-memory game and the phase
+        // are both skipped together rather than half-applied.
+        const adopt = runIsStillCurrent()
+
         if (draftDocId) {
           try {
             await updateDoc(
@@ -436,7 +466,7 @@ export default function WorkshopPage() {
                 currentWizardStep: deleteField(),
               }),
             )
-            setCurrentGame({
+            if (adopt) setCurrentGame({
               id: draftDocId,
               childId: activeChildId,
               createdAt: now,
@@ -464,10 +494,11 @@ export default function WorkshopPage() {
             generatedArt,
           }
           const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
-          setCurrentGame({ ...gameDoc, id: docRef.id })
+          if (adopt) setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
         setDraftDocId(null)
+        if (!adopt) return
         setPhase(GamePhase.Recording)
       } else if (gameType === GameType.Adventure) {
         // ── Adventure generation ───────────────────────────────
@@ -529,6 +560,13 @@ export default function WorkshopPage() {
 
         const now = new Date().toISOString()
 
+        // The document below is this run's real outcome and is written either
+        // way — it carries its own `childId`. What must not happen once the
+        // parent has moved on is this result being ADOPTED into the workflow
+        // now on screen (Codex round 4), so the in-memory game and the phase
+        // are both skipped together rather than half-applied.
+        const adopt = runIsStillCurrent()
+
         if (draftDocId) {
           try {
             await updateDoc(
@@ -544,7 +582,7 @@ export default function WorkshopPage() {
                 currentWizardStep: deleteField(),
               }),
             )
-            setCurrentGame({
+            if (adopt) setCurrentGame({
               id: draftDocId,
               childId: activeChildId,
               createdAt: now,
@@ -572,10 +610,11 @@ export default function WorkshopPage() {
             generatedArt,
           }
           const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
-          setCurrentGame({ ...gameDoc, id: docRef.id })
+          if (adopt) setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
         setDraftDocId(null)
+        if (!adopt) return
         setPhase(GamePhase.Recording)
       } else {
         // ── Board game generation (existing flow) ──────────────
@@ -657,6 +696,13 @@ export default function WorkshopPage() {
 
         const now = new Date().toISOString()
 
+        // The document below is this run's real outcome and is written either
+        // way — it carries its own `childId`. What must not happen once the
+        // parent has moved on is this result being ADOPTED into the workflow
+        // now on screen (Codex round 4), so the in-memory game and the phase
+        // are both skipped together rather than half-applied.
+        const adopt = runIsStillCurrent()
+
         if (draftDocId) {
           try {
             await updateDoc(
@@ -672,7 +718,7 @@ export default function WorkshopPage() {
                 currentWizardStep: deleteField(),
               }),
             )
-            setCurrentGame({
+            if (adopt) setCurrentGame({
               id: draftDocId,
               childId: activeChildId,
               createdAt: now,
@@ -700,10 +746,11 @@ export default function WorkshopPage() {
             generatedArt,
           }
           const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
-          setCurrentGame({ ...gameDoc, id: docRef.id })
+          if (adopt) setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
         setDraftDocId(null)
+        if (!adopt) return
         setPhase(GamePhase.Recording)
       }
     },
@@ -738,8 +785,8 @@ export default function WorkshopPage() {
     setCurrentGame(null)
     setDraftDocId(null)
     setGenerateError(null)
-    setWorkflowChildId(null)
-  }, [])
+    setWorkflowChild(null)
+  }, [setWorkflowChild])
 
   // ── Game selection & resume ──────────────────────────────────────
 
@@ -747,7 +794,7 @@ export default function WorkshopPage() {
     setCurrentGame(game)
     // Playing and rewarding a saved game are the same workflow: the XP, the
     // artifacts and the played-marker all read the live child today.
-    setWorkflowChildId(game.childId ?? activeChildId)
+    setWorkflowChild(game.childId ?? activeChildId)
     const isAdv = game.gameType === GameType.Adventure
     const isCrd = game.gameType === GameType.Cards
     if (isAdv && game.activeAdventureSession?.status === 'playing') {
@@ -759,7 +806,7 @@ export default function WorkshopPage() {
     } else {
       setPhase(GamePhase.Ready)
     }
-  }, [activeChildId])
+  }, [activeChildId, setWorkflowChild])
 
   const handleContinueGame = useCallback(() => {
     setResumeDialogOpen(false)
@@ -1185,8 +1232,8 @@ export default function WorkshopPage() {
     setPhase(GamePhase.Idle)
     setCurrentGame(null)
     setActivePlaytestSession(null)
-    setWorkflowChildId(null)
-  }, [])
+    setWorkflowChild(null)
+  }, [setWorkflowChild])
 
   const handleBackToWorkshop = useCallback(() => {
     setPhase(GamePhase.Idle)
@@ -1194,8 +1241,8 @@ export default function WorkshopPage() {
     setDraftDocId(null)
     setPlaytestFeedback(null)
     setActivePlaytestSession(null)
-    setWorkflowChildId(null)
-  }, [])
+    setWorkflowChild(null)
+  }, [setWorkflowChild])
 
   /** What "Regenerate Art" will spend for a game — the hint's number and the reservation. */
   const regenerateArtCount = useCallback(
