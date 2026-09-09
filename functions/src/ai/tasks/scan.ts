@@ -266,5 +266,10 @@ export const handleScan = async (
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
     },
+    // UX-311: a scan whose reply was truncated by `max_tokens` and one the app
+    // simply could not parse are different failures with different advice, and
+    // without this they reached the client identically. Additive — a client on
+    // an older build ignores it.
+    stopReason: result.stopReason,
   };
 };

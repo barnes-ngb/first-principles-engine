@@ -54,6 +54,8 @@ import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
 import RenameActivityDialog from './RenameActivityDialog'
 import { ALIAS_SECTION_LABEL } from './renameActivity'
+import SetPositionDialog from './SetPositionDialog'
+import { positionFailureNotice, positionSavedNotice } from './manualPosition'
 import EditRoutinesDialog from './EditRoutinesDialog'
 import {
   CURRICULUM_SECTION_TITLE,
@@ -96,6 +98,7 @@ export default function CurriculumTab() {
     updateConfig,
     deleteConfig,
     markComplete,
+    updatePosition,
   } = useActivityConfigs(activeChildId)
 
   // Scans from Firestore
@@ -239,6 +242,10 @@ export default function CurriculumTab() {
   /** UX-279: rename dialog. Parent-only, on capability — see `handleRename`. */
   const [renaming, setRenaming] = useState<ActivityConfig | null>(null)
 
+  /** UX-314: set-a-position-by-hand dialog. Parent-only, on capability. */
+  const [settingPosition, setSettingPosition] = useState<ActivityConfig | null>(null)
+  const [savingPosition, setSavingPosition] = useState(false)
+
   // Edit routines dialog
   const [editRoutinesOpen, setEditRoutinesOpen] = useState(false)
 
@@ -246,9 +253,10 @@ export default function CurriculumTab() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   // Scan state
-  const { scan, scanning, lastError: lastScanError, clearScan } = useScan(
-    ScanDoor.Curriculum,
-  )
+  // `scanning` is deliberately not read: a card's spinner follows
+  // `scanningConfigId`, which spans a whole multi-page capture, while this flag
+  // drops between the pages of one (UX-312).
+  const { scan, lastError: lastScanError, clearScan } = useScan(ScanDoor.Curriculum)
   const { syncScanToConfig } = useScanToActivityConfig()
   const {
     buildPreview: buildCertPreview,
@@ -359,6 +367,35 @@ export default function CurriculumTab() {
     // never landed (Codex round 1, P2).
     await updateConfig(configId, { name, aliases })
     setSnack(`Renamed to "${name}"`)
+  }
+
+  /**
+   * Write a hand-typed position (UX-314).
+   *
+   * Parent-gated at the WRITE as well as at the menu, the rule this tab has
+   * used since the rename door: it renders for a kid profile today, and a
+   * capability check that lives only in the UI is not a check.
+   *
+   * Goes through `updatePosition` — the shared writer the Ask AI confirm card
+   * uses — so a position set here and one set from a chat fold into the learner
+   * model identically, rather than this door inventing a second lane.
+   */
+  const handleSetPosition = async (position: number) => {
+    const config = settingPosition
+    if (!config || isChildProfile || config.completed) return
+    setSavingPosition(true)
+    try {
+      await updatePosition(config.id, position)
+      setSnack(positionSavedNotice(config, position))
+      setSettingPosition(null)
+    } catch (err) {
+      console.error('[CurriculumTab] Failed to set position by hand', err)
+      // The row is UNCHANGED and the dialog stays open — the failure to avoid
+      // is a parent believing a correction was recorded when it was not.
+      setSnack(positionFailureNotice(config))
+    } finally {
+      setSavingPosition(false)
+    }
   }
 
   const handleReassign = async (config: ActivityConfig, childId: string) => {
@@ -676,6 +713,80 @@ export default function CurriculumTab() {
     [familyId, activeChildId, scan, lastScanError, applyScanToCard],
   )
 
+  /**
+   * Several pages onto ONE card (UX-312).
+   *
+   * The owner's report: *"the card only allows me to do one image at a time — I
+   * thought we had multiple image uploads for these curriculums."* He was right;
+   * the app has had multi-capture since the staging batch below, and this door
+   * declined it for no stated reason.
+   *
+   * A single file still takes the untouched single-page path, mismatch prompt
+   * and all — `ScanButton` in multi mode routes the CAMERA here too, one shot at
+   * a time, and that flow must not change. Two or more pages go through the SAME
+   * `processScanBatch` the staging area uses (sequential, never `Promise.all`),
+   * with every page targeted at this card.
+   *
+   * Order does not matter: `syncScanToConfig` only ever moves a position
+   * FORWARD (`lessonNumber > current`), so photographing lessons 12, 10 and 14
+   * in any order leaves the card at 14.
+   */
+  const handleCardCaptureFiles = useCallback(
+    async (config: ActivityConfig, files: File[]) => {
+      if (!familyId || !activeChildId || files.length === 0) return
+      if (files.length === 1) {
+        await handleCardCapture(config, files[0])
+        return
+      }
+      setScanningConfigId(config.id)
+      try {
+        const cardNames = [config.curriculum ?? '', ...activityNames(config)].filter(Boolean)
+        const summary = await processScanBatch(files, {
+          scanOne: async (file) => {
+            const record = await scan(file, familyId, activeChildId)
+            if (!record) throw new Error(lastScanError() ?? 'Scan failed')
+            return record
+          },
+          syncOne: async (results) => {
+            // The card's own mismatch guard, per page. A batch cannot stop to
+            // ask about each one, so a page that names a different workbook is
+            // reported by name and NOT applied — the alternative is writing a
+            // reading page's lesson number onto the math card silently.
+            const detectedName = results.curriculumDetected?.name || results.subject
+            if (
+              detectedName &&
+              cardNames.length > 0 &&
+              !cardNames.some((cardName) => isWorkbookMatch(cardName, detectedName))
+            ) {
+              throw new Error(`doesn't look like ${config.name}`)
+            }
+            return syncScanToConfig(activeChildId, results, { targetConfigId: config.id })
+          },
+          onWorksheet: (results) => feedSkillMap(results),
+        })
+        setScanSnack({ message: summary.message, failed: summary.failedCount > 0 })
+      } catch (err) {
+        console.error('[CurriculumTab] Multi-page card scan failed', err)
+        const msg = err instanceof Error ? err.message : String(err)
+        setScanSnack({ message: `Scan failed — ${msg}`, failed: true })
+      } finally {
+        setScanningConfigId(null)
+        // Discard the last single-page record left in useScan state.
+        clearScan()
+      }
+    },
+    [
+      familyId,
+      activeChildId,
+      handleCardCapture,
+      scan,
+      lastScanError,
+      syncScanToConfig,
+      feedSkillMap,
+      clearScan,
+    ],
+  )
+
   const handleConfirmCertificate = useCallback(async () => {
     if (!familyId || !activeChildId || !certConfirm) return
     try {
@@ -772,8 +883,11 @@ export default function CurriculumTab() {
                     recentScans={matchedScans}
                     onOpenMenu={openMenu}
                     onReassign={() => setReassign(config)}
-                    onScanCapture={(file) => void handleCardCapture(config, file)}
-                    scanning={scanning && scanningConfigId === config.id}
+                    onScanCaptureFiles={(files) => void handleCardCaptureFiles(config, files)}
+                    // UX-312: `scanningConfigId` spans the WHOLE capture —
+                    // `scanning` drops between the pages of a batch, which
+                    // would flicker the button back to "Add Page" mid-run.
+                    scanning={scanningConfigId === config.id}
                   />
                 )
               })}
@@ -1099,6 +1213,23 @@ export default function CurriculumTab() {
             Rename
           </MenuItem>
         )}
+        {/* UX-314: the by-hand route to a position. Offered on rows that HAVE
+            a position (a workbook), never on a strand — a strand's count is an
+            increment written only by a captured session (UX-283), and a
+            typeable count would make it a number rather than a record.
+            Parent-only on capability, as Rename is: this tab renders for a kid
+            profile today. */}
+        {!isChildProfile && menuConfig?.type === 'workbook' && (
+          <MenuItem
+            onClick={() => {
+              if (menuConfig) setSettingPosition(menuConfig)
+              closeMenu()
+            }}
+          >
+            <LocationOnIcon fontSize="small" sx={{ mr: 1 }} />
+            Set lesson
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             if (menuConfig) {
@@ -1263,6 +1394,20 @@ export default function CurriculumTab() {
         onClose={() => setRenaming(null)}
       />
 
+      {/* UX-314: where we are, by hand — the route that has to work when the
+          scanner does not. */}
+      {settingPosition && (
+        <SetPositionDialog
+          // Keyed by the row: opening a different card mounts a fresh dialog
+          // seeded from THAT row, with no effect re-seeding state.
+          key={settingPosition.id}
+          config={settingPosition}
+          saving={savingPosition}
+          onSave={handleSetPosition}
+          onClose={() => setSettingPosition(null)}
+        />
+      )}
+
       {sessionTarget && (
         <StrandSessionDialog
           open
@@ -1403,7 +1548,12 @@ interface WorkbookCardProps {
   recentScans: ScanRecord[]
   onOpenMenu: (e: React.MouseEvent<HTMLElement>, config: ActivityConfig) => void
   onReassign: () => void
-  onScanCapture: (file: File) => void
+  /**
+   * Every page the parent picked (UX-312). The gallery can hand over several at
+   * once; the camera still returns one shot per tap, so a one-file call is the
+   * ordinary single-page capture and behaves exactly as it always has.
+   */
+  onScanCaptureFiles: (files: File[]) => void
   scanning: boolean
 }
 
@@ -1424,7 +1574,7 @@ function ActivityAliases({ config }: { config: ActivityConfig }) {
   )
 }
 
-function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCapture, scanning }: WorkbookCardProps) {
+function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCaptureFiles, scanning }: WorkbookCardProps) {
   const progress =
     config.currentPosition && config.totalUnits
       ? (config.currentPosition / config.totalUnits) * 100
@@ -1513,7 +1663,12 @@ function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCaptu
       {/* Actions */}
       {config.scannable && (
         <Box sx={{ mt: 2 }}>
-          <ScanButton onCapture={onScanCapture} variant="button" loading={scanning} />
+          <ScanButton
+            multiple
+            onCaptureFiles={onScanCaptureFiles}
+            variant="button"
+            loading={scanning}
+          />
         </Box>
       )}
     </Card>

@@ -197,7 +197,12 @@ export async function callClaudeWithVision(opts: {
   imageBase64: string;
   mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
   textPrompt: string;
-}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+}): Promise<{
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  stopReason: string;
+}> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey: opts.apiKey });
 
@@ -226,14 +231,26 @@ export async function callClaudeWithVision(opts: {
     ],
   });
 
-  const firstBlock = completion.content[0];
-  const text =
-    firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
+  // Concatenate EVERY text block, exactly as `callClaude` does (UX-311).
+  // Reading only `content[0]` returned "" whenever the response led with a
+  // non-text block — and "" parses as nothing, so the caller reported the
+  // analysis as unreadable when the analysis was in block two. A plain
+  // single-text-block response yields exactly that block's text, as before.
+  let text = "";
+  for (const block of completion.content) {
+    if (block.type === "text") {
+      text += (text ? "\n\n" : "") + block.text;
+    }
+  }
 
   return {
     text,
     inputTokens: completion.usage.input_tokens,
     outputTokens: completion.usage.output_tokens,
+    // Why the model stopped, so a caller can tell a reply cut short by the
+    // output budget from one it simply could not read (the FEAT-169 rule,
+    // which `callClaude` has had since the story path needed it).
+    stopReason: completion.stop_reason ?? "unknown",
   };
 }
 
