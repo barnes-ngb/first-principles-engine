@@ -109,6 +109,65 @@ describe('syncQuestResultsToModel', () => {
     expect(mockSetDoc.mock.calls[0][2]).toEqual({ merge: true })
   })
 
+  // UX-322 — a quest result is real evidence even when the upgrade-only writer
+  // moved no state, so a model stamped `no-data` is promoted either way.
+  it('promotes a no-data model to seeded once quest evidence lands', async () => {
+    const stored = { childId: 'child-1', status: 'no-data', conceptStates: {}, changeFeed: [] }
+    const next = {
+      childId: 'child-1',
+      status: 'no-data',
+      conceptStates: {
+        'reading.phonics.cvc': {
+          state: 'frontier',
+          evidence: [{ kind: 'quest', sourceId: 'sess-1', note: 'n', observedAt: 'now' }],
+        },
+      },
+      changeFeed: [],
+    }
+
+    mockComputeResults.mockReturnValue([{ conceptId: 'reading.phonics.cvc', correct: 1, total: 3 }])
+    mockGetDoc.mockResolvedValue({ exists: () => true, data: () => stored })
+    // changedConceptIds empty — the promotion must not be keyed on a state move.
+    mockApplyResults.mockReturnValue({ model: next, changedConceptIds: [] })
+
+    await syncQuestResultsToModel(
+      'fam-1', 'child-1', 'sess-1',
+      [{ targetConceptId: 'reading.phonics.cvc', correct: true }],
+      ['reading.phonics.cvc'],
+      '2026-07-01T12:00:00Z',
+    )
+
+    expect(mockSetDoc.mock.calls[0][1].status).toBe('seeded')
+  })
+
+  it('leaves an already-seeded status alone', async () => {
+    const stored = { childId: 'child-1', status: 'seeded', conceptStates: {}, changeFeed: [] }
+    const next = {
+      childId: 'child-1',
+      status: 'seeded',
+      conceptStates: {
+        'reading.phonics.cvc': {
+          state: 'solid',
+          evidence: [{ kind: 'quest', sourceId: 'sess-1', note: 'n', observedAt: 'now' }],
+        },
+      },
+      changeFeed: [],
+    }
+
+    mockComputeResults.mockReturnValue([{ conceptId: 'reading.phonics.cvc', correct: 3, total: 3 }])
+    mockGetDoc.mockResolvedValue({ exists: () => true, data: () => stored })
+    mockApplyResults.mockReturnValue({ model: next, changedConceptIds: ['reading.phonics.cvc'] })
+
+    await syncQuestResultsToModel(
+      'fam-1', 'child-1', 'sess-1',
+      [{ targetConceptId: 'reading.phonics.cvc', correct: true }],
+      ['reading.phonics.cvc'],
+      '2026-07-01T12:00:00Z',
+    )
+
+    expect(mockSetDoc.mock.calls[0][1].status).toBe('seeded')
+  })
+
   it('sets synthesisStaleAt when concepts actually changed state', async () => {
     const model = { childId: 'child-1', conceptStates: {}, changeFeed: [] }
     const next = { childId: 'child-1', conceptStates: {}, changeFeed: [] }

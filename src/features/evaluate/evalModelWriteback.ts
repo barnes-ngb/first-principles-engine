@@ -15,6 +15,7 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 import { learnerModelsCollection } from '../../core/firebase/firestore'
+import { promotedModelStatus } from '../../core/foundations/modelStatus'
 import {
   applyEvalFindingsToModel,
   computeEvalRead,
@@ -55,6 +56,12 @@ export async function syncEvalFindingsToModel(
     // A guided eval always writes evidence and may move state; mark the LLM
     // synthesis stale (FEAT-57, D4) so the next beat regenerates whatMattersNext.
     next.synthesisStaleAt = nowIso
+
+    // UX-322 — a guided eval's read is real evidence, so a model seeded before
+    // the child had any signal stops being stamped `no-data` (which five readers
+    // treat as "no model at all"). Shared rule; never demotes.
+    const promoted = promotedModelStatus(next)
+    if (promoted) next.status = promoted
 
     // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them),
     // exactly like the diag seeder and the other model writers.

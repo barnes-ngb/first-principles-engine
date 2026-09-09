@@ -16,6 +16,7 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 import { learnerModelsCollection } from '../firebase/firestore'
+import { promotedModelStatus } from './modelStatus'
 import {
   applyBridgeCoverageToModel,
   bridgeCoveredConcepts,
@@ -113,6 +114,10 @@ export async function syncWorkbookPositionToModel(
     )
     if (changedConceptIds.length === 0) return { status: 'no-coverage', source }
 
+    // UX-322 — a bridged position is `curriculumPosition` evidence; promote a
+    // model still stamped `no-data` through the shared rule (never demotes).
+    const promotedStatus = promotedModelStatus(next)
+
     // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them) —
     // the same convention the diag seeder and the other model writers use.
     const merge: Partial<LearnerModel> = {
@@ -123,6 +128,7 @@ export async function syncWorkbookPositionToModel(
       changeFeed: next.changeFeed,
       updatedAt: next.updatedAt,
       synthesisStaleAt: next.updatedAt,
+      ...(promotedStatus ? { status: promotedStatus } : {}),
     }
     await setDoc(modelRef, JSON.parse(JSON.stringify(merge)), { merge: true })
     return { status: 'written', source, changedConceptIds }

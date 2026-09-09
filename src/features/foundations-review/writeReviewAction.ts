@@ -15,12 +15,16 @@
 //     changed concept state, so the stored synthesis is now behind (FEAT-57, D4).
 //   - `openQuestions` / `changeFeed` ride along as whole arrays (the projector
 //     returns them already-appended).
+//   - `status` rides along ONLY when this write promotes the model off `no-data`
+//     (UX-322), through the shared `promotedModelStatus` rule. A `queueTest`
+//     appends no evidence and so promotes nothing.
 //
 // `learnerModels` only. No `skillSnapshots`, no XP, no compliance/hours.
 
 import { setDoc } from 'firebase/firestore'
 import type { DocumentReference } from 'firebase/firestore'
 
+import { promotedModelStatus } from '../../core/foundations/modelStatus'
 import {
   applyReviewActionToModel,
   type AppliedReviewAction,
@@ -47,6 +51,11 @@ export function buildReviewActionMerge(
   if (changedConceptId) {
     merge.conceptStates = { [changedConceptId]: model.conceptStates[changedConceptId] }
   }
+  // UX-322 — an attestation or a named curriculum position is real evidence; a
+  // model still stamped `no-data` is promoted so the five status-keyed consumers
+  // stop reading it as nothing.
+  const status = promotedModelStatus(model)
+  if (status) merge.status = status
   return merge as Partial<LearnerModel>
 }
 

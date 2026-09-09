@@ -36,3 +36,24 @@ describe('ReviewActionConfirmCard — §14 display rules', () => {
     expect(screen.getAllByText('Confirm').length).toBeGreaterThan(0)
   })
 })
+
+
+// UX-287 — a confirm that could not be written reads as *not saved*, never as
+// still-pending (which is what a silent no-op left on screen).
+describe('ReviewActionConfirmCard — a failed confirm (UX-287)', () => {
+  it('says Not saved and offers no Confirm on that card', () => {
+    const failed: PendingReviewAction[] = [{ ...pending[0], status: 'failed' }]
+    render(
+      <ReviewActionConfirmCard
+        pending={failed}
+        childName="Lincoln"
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+        onConfirmAll={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Not saved')).toBeInTheDocument()
+    expect(screen.queryByText('Confirm')).toBeNull()
+    expect(screen.queryByText('Done')).toBeNull()
+  })
+})

@@ -57,6 +57,14 @@ const AGENDA_LIMIT = 18
  */
 export const MAX_UPLOAD_PHOTOS = 4
 
+/**
+ * Shown when a confirm arrives with no learner model to write to (UX-287). It
+ * names the route that creates one — the Foundations tab bootstraps it on open
+ * (UX-286) — rather than failing silently, which is what it used to do.
+ */
+const NO_MODEL_MESSAGE =
+  'Couldn’t save that — this child’s map isn’t set up yet. Open the Foundations tab to set it up, then run this review again.'
+
 /** Hard client ceiling on the vision extraction call — under the CF's 300s. */
 const UPLOAD_TIMEOUT_MS = 120_000
 
@@ -71,7 +79,14 @@ const UPLOAD_FAILURE_MESSAGE: Record<UploadFailure, string> = {
   server: 'The Learning Engine hit a problem reading that — please try again.',
 }
 
-export type ReviewActionStatus = 'pending' | 'applied' | 'dismissed'
+/**
+ * `failed` (UX-287) is the state a confirm lands in when the write could not
+ * happen at all — today, only when this child has no learner model to write to.
+ * Before it, that path was a `console.warn` and a return: no error, no state
+ * change, the card still reading *pending*, and a parent with no way to know the
+ * tap did nothing.
+ */
+export type ReviewActionStatus = 'pending' | 'applied' | 'dismissed' | 'failed'
 
 export interface PendingReviewAction {
   id: string
@@ -383,7 +398,14 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
       }
       const base = modelRef.current
       if (!base) {
+        // UX-287 — say so. There is nothing to retry here (the model will not
+        // appear mid-session), so the card goes to `failed` rather than back to
+        // `pending`, and the sentence names the one route that fixes it.
         console.warn('[foundationsReview] no model loaded; cannot apply', action)
+        setError(NO_MODEL_MESSAGE)
+        setPending((prev) =>
+          prev.map((p) => (p.action === action ? { ...p, status: 'failed' } : p)),
+        )
         return
       }
       const applied = applyReviewActionToModel(base, action, now())
