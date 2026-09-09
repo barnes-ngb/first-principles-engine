@@ -16,6 +16,7 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 import { learnerModelsCollection } from '../../core/firebase/firestore'
+import { promotedModelStatus } from '../../core/foundations/modelStatus'
 import {
   applyQuestResultsToModel,
   computeQuestConceptResults,
@@ -61,6 +62,11 @@ export async function syncQuestResultsToModel(
     // (FEAT-57, D4) so the next beat regenerates whatMattersNext/narrative. Only
     // when something actually changed — evidence-only appends don't invalidate it.
     if (changedConceptIds.length > 0) next.synthesisStaleAt = nowIso
+
+    // UX-322 — a quest result is real evidence even when it moved no state
+    // (upgrade-only), so promote a model still stamped `no-data`. Shared rule.
+    const promoted = promotedModelStatus(next)
+    if (promoted) next.status = promoted
 
     // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them),
     // exactly like the diag seeder and the other model writers.

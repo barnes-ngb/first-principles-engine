@@ -54,6 +54,8 @@ import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
 import RenameActivityDialog from './RenameActivityDialog'
 import { ALIAS_SECTION_LABEL } from './renameActivity'
+import SetPositionDialog from './SetPositionDialog'
+import { positionFailureNotice, positionSavedNotice } from './manualPosition'
 import EditRoutinesDialog from './EditRoutinesDialog'
 import {
   CURRICULUM_SECTION_TITLE,
@@ -96,6 +98,7 @@ export default function CurriculumTab() {
     updateConfig,
     deleteConfig,
     markComplete,
+    updatePosition,
   } = useActivityConfigs(activeChildId)
 
   // Scans from Firestore
@@ -239,6 +242,10 @@ export default function CurriculumTab() {
   /** UX-279: rename dialog. Parent-only, on capability — see `handleRename`. */
   const [renaming, setRenaming] = useState<ActivityConfig | null>(null)
 
+  /** UX-314: set-a-position-by-hand dialog. Parent-only, on capability. */
+  const [settingPosition, setSettingPosition] = useState<ActivityConfig | null>(null)
+  const [savingPosition, setSavingPosition] = useState(false)
+
   // Edit routines dialog
   const [editRoutinesOpen, setEditRoutinesOpen] = useState(false)
 
@@ -246,9 +253,10 @@ export default function CurriculumTab() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   // Scan state
-  const { scan, scanning, lastError: lastScanError, clearScan } = useScan(
-    ScanDoor.Curriculum,
-  )
+  // `scanning` is deliberately not read: a card's spinner follows
+  // `scanningConfigId`, which spans a whole multi-page capture, while this flag
+  // drops between the pages of one (UX-312).
+  const { scan, lastError: lastScanError, clearScan } = useScan(ScanDoor.Curriculum)
   const { syncScanToConfig } = useScanToActivityConfig()
   const {
     buildPreview: buildCertPreview,
@@ -270,10 +278,25 @@ export default function CurriculumTab() {
   const [failedPageCount, setFailedPageCount] = useState(0)
   /** Which card is currently scanning (null = "Add to Curriculum" generic scan). */
   const [scanningConfigId, setScanningConfigId] = useState<string | null>(null)
-  /** Pending certificate result awaiting confirmation, scoped to a specific card. */
+  /**
+   * Pending certificate result awaiting confirmation, scoped to a specific card
+   * — and, since UX-321, to the CHILD it was scanned for.
+   *
+   * `handleConfirmCertificate` used to pair the card captured when the scan ran
+   * with whatever `activeChildId` was when the parent tapped Confirm. Those are
+   * the same value almost always and different exactly when it matters: switch
+   * the child selector while a scan is in flight and the write updated the old
+   * child's card while `useCertificateProgress` wrote the certificate's
+   * mastered skills into the NEW child's snapshot (Codex round 2, P1).
+   *
+   * Carrying the child here binds the whole confirmation to one child, so the
+   * dialog can only ever write where its own scan came from — the single-page
+   * path included, where the same hazard existed with a narrower window.
+   */
   const [certConfirm, setCertConfirm] = useState<{
     result: CertificateScanResult
     config: ActivityConfig
+    childId: string
   } | null>(null)
   /** Mismatch warning when scan detects a different curriculum than the card. */
   const [mismatchPrompt, setMismatchPrompt] = useState<{
@@ -359,6 +382,35 @@ export default function CurriculumTab() {
     // never landed (Codex round 1, P2).
     await updateConfig(configId, { name, aliases })
     setSnack(`Renamed to "${name}"`)
+  }
+
+  /**
+   * Write a hand-typed position (UX-314).
+   *
+   * Parent-gated at the WRITE as well as at the menu, the rule this tab has
+   * used since the rename door: it renders for a kid profile today, and a
+   * capability check that lives only in the UI is not a check.
+   *
+   * Goes through `updatePosition` — the shared writer the Ask AI confirm card
+   * uses — so a position set here and one set from a chat fold into the learner
+   * model identically, rather than this door inventing a second lane.
+   */
+  const handleSetPosition = async (position: number) => {
+    const config = settingPosition
+    if (!config || isChildProfile || config.completed) return
+    setSavingPosition(true)
+    try {
+      await updatePosition(config.id, position)
+      setSnack(positionSavedNotice(config, position))
+      setSettingPosition(null)
+    } catch (err) {
+      console.error('[CurriculumTab] Failed to set position by hand', err)
+      // The row is UNCHANGED and the dialog stays open — the failure to avoid
+      // is a parent believing a correction was recorded when it was not.
+      setSnack(positionFailureNotice(config))
+    } finally {
+      setSavingPosition(false)
+    }
   }
 
   const handleReassign = async (config: ActivityConfig, childId: string) => {
@@ -542,9 +594,16 @@ export default function CurriculumTab() {
           // UX-275: `scan` reports a failure by returning null and setting
           // React state the loop can't read, so re-throw the reason it kept for
           // us — otherwise every page's outcome reads a bare "Scan failed".
+          //
+          // UX-321: test `results`, not the record. A page whose ANALYSIS was
+          // unusable comes back as a non-null record with `results: null`, and
+          // testing the record alone let `processScanBatch` replace the
+          // classified UX-311 reason with a generic "No analysis returned" —
+          // the same defect UX-275 fixed, reintroduced by the second route a
+          // scan can fail through.
           scanOne: async (file) => {
             const record = await scan(file, familyId, activeChildId)
-            if (!record) throw new Error(lastScanError() ?? 'Scan failed')
+            if (!record?.results) throw new Error(lastScanError() ?? 'Scan failed')
             return record
           },
           syncOne: (results) => syncScanToConfig(activeChildId, results),
@@ -607,7 +666,9 @@ export default function CurriculumTab() {
       if (isCertificateScan(results)) {
         try {
           await buildCertPreview(familyId, activeChildId, results, { targetConfigId: config.id })
-          setCertConfirm({ result: results, config })
+          // Stamp the child the preview was built for, so Confirm cannot pair
+          // this card with a different child later (UX-321).
+          setCertConfirm({ result: results, config, childId: activeChildId })
         } catch (err) {
           console.error('[CurriculumTab] Failed to build certificate preview', err)
           setScanSnack({ message: 'Failed to read certificate', failed: true })
@@ -676,10 +737,141 @@ export default function CurriculumTab() {
     [familyId, activeChildId, scan, lastScanError, applyScanToCard],
   )
 
+  /**
+   * Several pages onto ONE card (UX-312).
+   *
+   * The owner's report: *"the card only allows me to do one image at a time — I
+   * thought we had multiple image uploads for these curriculums."* He was right;
+   * the app has had multi-capture since the staging batch below, and this door
+   * declined it for no stated reason.
+   *
+   * A single file still takes the untouched single-page path, mismatch prompt
+   * and all — `ScanButton` in multi mode routes the CAMERA here too, one shot at
+   * a time, and that flow must not change. Two or more pages go through the SAME
+   * `processScanBatch` the staging area uses (sequential, never `Promise.all`),
+   * with every page targeted at this card.
+   *
+   * Order does not matter: `syncScanToConfig` only ever moves a position
+   * FORWARD (`lessonNumber > current`), so photographing lessons 12, 10 and 14
+   * in any order leaves the card at 14.
+   */
+  const handleCardCaptureFiles = useCallback(
+    async (config: ActivityConfig, files: File[]) => {
+      if (!familyId || !activeChildId || files.length === 0) return
+      if (files.length === 1) {
+        await handleCardCapture(config, files[0])
+        return
+      }
+      setScanningConfigId(config.id)
+      try {
+        const cardNames = [config.curriculum ?? '', ...activityNames(config)].filter(Boolean)
+        /**
+         * Does a scanned page name THIS card? One definition for both branches
+         * (Codex round 2, P1): the worksheet guard lived in `syncOne` only, so
+         * the certificate branch claimed any certificate at all — and
+         * `applyUpdate` deliberately writes to its `targetConfigId` regardless
+         * of the certificate's own name, so a Reading Eggs certificate in a
+         * Math K batch would have written its milestone and skills onto Math K.
+         */
+        const matchesCard = (detectedName: string | undefined | null): boolean => {
+          if (!detectedName || cardNames.length === 0) return true
+          return cardNames.some((cardName) => isWorkbookMatch(cardName, detectedName))
+        }
+        // UX-321: a certificate keeps its confirm card here, exactly as it does
+        // for a single-page capture. Claimed during the loop, acted on after it
+        // — the dialog must not open while pages are still being scanned.
+        const claimedCertificates: CertificateScanResult[] = []
+        const summary = await processScanBatch(files, {
+          scanOne: async (file) => {
+            const record = await scan(file, familyId, activeChildId)
+            // `results`, not the record: `useScan` reports an unusable analysis
+            // by RETURNING a record with `results: null` and keeping the
+            // classified reason in `lastError()`. Testing the record alone let
+            // `processScanBatch` replace that reason with a generic "No
+            // analysis returned" — losing the UX-311 diagnosis on exactly the
+            // page that needed it (Codex round 1, P2).
+            if (!record?.results) throw new Error(lastScanError() ?? 'Scan failed')
+            return record
+          },
+          claimNonWorksheet: (results) => {
+            if (!isCertificateScan(results)) return false
+            // A certificate for a DIFFERENT book is not this card's to claim.
+            // Left unclaimed it reports as "not recognized", which is the
+            // honest answer for this door — and the safe one, since claiming it
+            // would write another curriculum's milestone onto this card.
+            if (!matchesCard(results.curriculumName)) return false
+            claimedCertificates.push(results)
+            return true
+          },
+          syncOne: async (results) => {
+            // The card's own mismatch guard, per page. A batch cannot stop to
+            // ask about each one, so a page that names a different workbook is
+            // reported by name and NOT applied — the alternative is writing a
+            // reading page's lesson number onto the math card silently.
+            const detectedName = results.curriculumDetected?.name || results.subject
+            if (!matchesCard(detectedName)) {
+              throw new Error(`doesn't look like ${config.name}`)
+            }
+            return syncScanToConfig(activeChildId, results, { targetConfigId: config.id })
+          },
+          onWorksheet: (results) => feedSkillMap(results),
+        })
+        // More than one certificate in a batch has one dialog between them, so
+        // say which is being confirmed rather than silently dropping the rest.
+        const extraCerts =
+          claimedCertificates.length > 1
+            ? '; confirming the first — scan the others one at a time'
+            : ''
+        setScanSnack({
+          message: `${summary.message}${extraCerts}`,
+          failed: summary.failedCount > 0,
+        })
+        if (claimedCertificates[0] && activeChildIdRef.current === activeChildId) {
+          // Opens the same confirm dialog a single-page certificate capture
+          // does, targeted at this card.
+          //
+          // Guarded on the child (Codex round 2, P1): a batch spans several
+          // scans, so the selector can move under it, and installing a
+          // confirmation built for the previous child's card after the
+          // component has re-rendered for the new one is how a certificate ends
+          // up written across two children's records. The same `ref` the
+          // staging batch uses — readable from inside an in-flight run, which
+          // the state value is not.
+          await applyScanToCard(claimedCertificates[0], config)
+        }
+      } catch (err) {
+        console.error('[CurriculumTab] Multi-page card scan failed', err)
+        const msg = err instanceof Error ? err.message : String(err)
+        setScanSnack({ message: `Scan failed — ${msg}`, failed: true })
+      } finally {
+        setScanningConfigId(null)
+        // Discard the last single-page record left in useScan state.
+        clearScan()
+      }
+    },
+    [
+      familyId,
+      activeChildId,
+      handleCardCapture,
+      // UX-321: the certificate branch calls it, so a stale closure here would
+      // open a confirm card built against an earlier config or child.
+      applyScanToCard,
+      scan,
+      lastScanError,
+      syncScanToConfig,
+      feedSkillMap,
+      clearScan,
+    ],
+  )
+
   const handleConfirmCertificate = useCallback(async () => {
-    if (!familyId || !activeChildId || !certConfirm) return
+    if (!familyId || !certConfirm) return
     try {
-      await applyCertUpdate(familyId, activeChildId, certConfirm.result, {
+      // The child this certificate was SCANNED for, never the one selected now
+      // (UX-321). The card and the child must come from the same scan, or the
+      // position lands on one child's record and the mastered skills on
+      // another's.
+      await applyCertUpdate(familyId, certConfirm.childId, certConfirm.result, {
         targetConfigId: certConfirm.config.id,
       })
       setScanSnack({ message: `Updated ${certConfirm.config.name}`, failed: false })
@@ -689,7 +881,7 @@ export default function CurriculumTab() {
       setCertConfirm(null)
       clearCertState()
     }
-  }, [familyId, activeChildId, certConfirm, applyCertUpdate, clearCertState])
+  }, [familyId, certConfirm, applyCertUpdate, clearCertState])
 
   const handleCancelCertificate = useCallback(() => {
     setCertConfirm(null)
@@ -772,8 +964,11 @@ export default function CurriculumTab() {
                     recentScans={matchedScans}
                     onOpenMenu={openMenu}
                     onReassign={() => setReassign(config)}
-                    onScanCapture={(file) => void handleCardCapture(config, file)}
-                    scanning={scanning && scanningConfigId === config.id}
+                    onScanCaptureFiles={(files) => void handleCardCaptureFiles(config, files)}
+                    // UX-312: `scanningConfigId` spans the WHOLE capture —
+                    // `scanning` drops between the pages of a batch, which
+                    // would flicker the button back to "Add Page" mid-run.
+                    scanning={scanningConfigId === config.id}
                   />
                 )
               })}
@@ -1099,6 +1294,23 @@ export default function CurriculumTab() {
             Rename
           </MenuItem>
         )}
+        {/* UX-314: the by-hand route to a position. Offered on rows that HAVE
+            a position (a workbook), never on a strand — a strand's count is an
+            increment written only by a captured session (UX-283), and a
+            typeable count would make it a number rather than a record.
+            Parent-only on capability, as Rename is: this tab renders for a kid
+            profile today. */}
+        {!isChildProfile && menuConfig?.type === 'workbook' && (
+          <MenuItem
+            onClick={() => {
+              if (menuConfig) setSettingPosition(menuConfig)
+              closeMenu()
+            }}
+          >
+            <LocationOnIcon fontSize="small" sx={{ mr: 1 }} />
+            Set lesson
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             if (menuConfig) {
@@ -1263,6 +1475,20 @@ export default function CurriculumTab() {
         onClose={() => setRenaming(null)}
       />
 
+      {/* UX-314: where we are, by hand — the route that has to work when the
+          scanner does not. */}
+      {settingPosition && (
+        <SetPositionDialog
+          // Keyed by the row: opening a different card mounts a fresh dialog
+          // seeded from THAT row, with no effect re-seeding state.
+          key={settingPosition.id}
+          config={settingPosition}
+          saving={savingPosition}
+          onSave={handleSetPosition}
+          onClose={() => setSettingPosition(null)}
+        />
+      )}
+
       {sessionTarget && (
         <StrandSessionDialog
           open
@@ -1403,7 +1629,12 @@ interface WorkbookCardProps {
   recentScans: ScanRecord[]
   onOpenMenu: (e: React.MouseEvent<HTMLElement>, config: ActivityConfig) => void
   onReassign: () => void
-  onScanCapture: (file: File) => void
+  /**
+   * Every page the parent picked (UX-312). The gallery can hand over several at
+   * once; the camera still returns one shot per tap, so a one-file call is the
+   * ordinary single-page capture and behaves exactly as it always has.
+   */
+  onScanCaptureFiles: (files: File[]) => void
   scanning: boolean
 }
 
@@ -1424,7 +1655,7 @@ function ActivityAliases({ config }: { config: ActivityConfig }) {
   )
 }
 
-function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCapture, scanning }: WorkbookCardProps) {
+function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCaptureFiles, scanning }: WorkbookCardProps) {
   const progress =
     config.currentPosition && config.totalUnits
       ? (config.currentPosition / config.totalUnits) * 100
@@ -1513,7 +1744,12 @@ function WorkbookCard({ config, recentScans, onOpenMenu, onReassign, onScanCaptu
       {/* Actions */}
       {config.scannable && (
         <Box sx={{ mt: 2 }}>
-          <ScanButton onCapture={onScanCapture} variant="button" loading={scanning} />
+          <ScanButton
+            multiple
+            onCaptureFiles={onScanCaptureFiles}
+            variant="button"
+            loading={scanning}
+          />
         </Box>
       )}
     </Card>

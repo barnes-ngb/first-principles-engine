@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { foundationGraphs, FOUNDATION_NODE_MAP } from './index'
+import { MasteryGate, SkillLevel } from '../types/enums'
 import { mergeSeededModel, seedLearnerModel } from './seedLearnerModel'
 import type { ConceptStateKind, LearnerModel } from '../types/learnerModel'
 import type { SkillSnapshot, WorkingLevel } from '../types/evaluation'
@@ -226,7 +227,7 @@ describe('seedLearnerModel — graceful degrade', () => {
   })
 })
 
-describe('mergeSeededModel — attestation guard', () => {
+describe('mergeSeededModel — non-derivable evidence guard', () => {
   it('returns the fresh seed when there is no existing model', () => {
     const fresh = seed(snapshot({ workingLevels: { phonics: wl(4) } }))
     expect(mergeSeededModel(null, fresh)).toBe(fresh)
@@ -260,5 +261,199 @@ describe('mergeSeededModel — attestation guard', () => {
     expect(merged.conceptStates['reading.phonics.letterSounds'].state).toBe('frontier')
     // Update keeps the original seededAt.
     expect(merged.seededAt).toBe('2026-06-01T00:00:00.000Z')
+  })
+})
+
+
+// ── UX-290: a re-seed must not eat evidence the seeder cannot re-derive ──
+describe('mergeSeededModel — UX-290 widened preserve rule', () => {
+  /** An existing model with ONE node carrying a single ref of the given kind. */
+  function existingWith(
+    fresh: LearnerModel,
+    nodeId: string,
+    kind: string,
+  ): LearnerModel {
+    return {
+      ...fresh,
+      seededAt: '2026-06-01T00:00:00.000Z',
+      conceptStates: {
+        ...fresh.conceptStates,
+        [nodeId]: {
+          state: 'solid',
+          evidence: [
+            {
+              kind: kind as never,
+              sourceId: 'src-1',
+              note: 'observed',
+              observedAt: '2026-06-01T00:00:00.000Z',
+            },
+          ],
+        },
+      },
+    }
+  }
+
+  // `reading.fluency.phrasing` is one of the 22 nodes the seeder has no driver
+  // for, so the fresh seed for it is `{state:'not-yet', evidence:[]}` — the exact
+  // shape that used to overwrite an eval or a quest result.
+  const DRIVERLESS = 'reading.fluency.accuracy'
+
+  it('preserves a concept whose only evidence is a guided eval read', () => {
+    const fresh = seed(snapshot({ workingLevels: { phonics: wl(4) } }))
+    expect(fresh.conceptStates[DRIVERLESS].state).toBe('not-yet')
+
+    const merged = mergeSeededModel(existingWith(fresh, DRIVERLESS, 'eval'), fresh)
+    expect(merged.conceptStates[DRIVERLESS].state).toBe('solid')
+    expect(merged.conceptStates[DRIVERLESS].evidence[0].kind).toBe('eval')
+  })
+
+  it('preserves a concept whose only evidence is a Knowledge Mine result', () => {
+    const fresh = seed(snapshot({ workingLevels: { phonics: wl(4) } }))
+    const merged = mergeSeededModel(existingWith(fresh, DRIVERLESS, 'quest'), fresh)
+    expect(merged.conceptStates[DRIVERLESS].state).toBe('solid')
+    expect(merged.conceptStates[DRIVERLESS].evidence[0].kind).toBe('quest')
+  })
+
+  it('preserves a scan ref too — the rule is "not re-derivable", not a list', () => {
+    const fresh = seed(snapshot({ workingLevels: { phonics: wl(4) } }))
+    const merged = mergeSeededModel(existingWith(fresh, DRIVERLESS, 'scan'), fresh)
+    expect(merged.conceptStates[DRIVERLESS].state).toBe('solid')
+  })
+
+  // The other direction: what the seeder DOES derive is still recomputed, or a
+  // re-seed could never move a state that a new working level had changed.
+  it('replaces a concept whose only evidence is a seeder-derived workingLevel', () => {
+    const fresh = seed(snapshot({ workingLevels: { phonics: wl(1) } }))
+    const node = 'reading.phonics.letterSounds'
+    expect(fresh.conceptStates[node].state).toBe('frontier')
+
+    const merged = mergeSeededModel(existingWith(fresh, node, 'workingLevel'), fresh)
+    expect(merged.conceptStates[node].state).toBe('frontier')
+    expect(merged.conceptStates[node].evidence[0].sourceId).not.toBe('src-1')
+  })
+
+  it('replaces a sightWordShare / prioritySkill / completedProgram entry', () => {
+    const fresh = seed(snapshot({ workingLevels: { phonics: wl(1) } }))
+    for (const kind of ['sightWordShare', 'prioritySkill', 'completedProgram']) {
+      const merged = mergeSeededModel(existingWith(fresh, DRIVERLESS, kind), fresh)
+      expect(merged.conceptStates[DRIVERLESS].state).toBe('not-yet')
+      expect(merged.conceptStates[DRIVERLESS].evidence).toHaveLength(0)
+    }
+  })
+
+  it('preserves a mixed trail — one non-derivable ref is enough', () => {
+    const fresh = seed(snapshot({ workingLevels: { phonics: wl(1) } }))
+    const node = 'reading.phonics.letterSounds'
+    const existing: LearnerModel = {
+      ...fresh,
+      conceptStates: {
+        ...fresh.conceptStates,
+        [node]: {
+          state: 'solid',
+          evidence: [
+            { kind: 'workingLevel', sourceId: 'snap', note: 'n', observedAt: NOW },
+            { kind: 'eval', sourceId: 'sess-1', note: 'n', observedAt: NOW },
+          ],
+        },
+      },
+    }
+    expect(mergeSeededModel(existing, fresh).conceptStates[node].evidence).toHaveLength(2)
+  })
+
+  // Pins the derivable list from the SEEDER's own side: every kind a rich seed
+  // emits must be one the merge is allowed to recompute, or a re-seed would
+  // preserve its own output and stop being idempotent.
+  it('every evidence kind the seeder emits is treated as re-derivable', () => {
+    const kindsIn = (m: LearnerModel) =>
+      Object.values(m.conceptStates).flatMap((e) => e.evidence.map((r) => r.kind))
+
+    // Two seeds, because a completed program can claim the sight-word node and
+    // suppress its share ref — the union is what the seeder can emit at all.
+    const rich = seed(
+      snapshot({
+        workingLevels: { phonics: wl(4), math: wl(8), writing: wl(3) },
+        prioritySkills: [
+          {
+            tag: 'reading.phonics.cvc',
+            label: 'CVC words',
+            level: SkillLevel.Secure,
+            masteryGate: MasteryGate.IndependentConsistent,
+          },
+        ],
+      }),
+      sightWords(10, 9),
+    )
+    const withProgram = seed(snapshot({ completedPrograms: ['reading-eggs'] }))
+    const emitted = new Set([...kindsIn(rich), ...kindsIn(withProgram)])
+    // All four seeder-emitted kinds are exercised, so the pin is not vacuous.
+    expect([...emitted].sort()).toEqual([
+      'completedProgram',
+      'prioritySkill',
+      'sightWordShare',
+      'workingLevel',
+    ])
+
+    // Re-seeding a model built from the seeder's own output must reproduce it
+    // exactly:
+    // nothing the seeder emits is preserved as if it were a record of an event.
+    const again = mergeSeededModel(rich, rich)
+    expect(again.conceptStates).toEqual(rich.conceptStates)
+    for (const kind of emitted) {
+      expect(['workingLevel', 'sightWordShare', 'prioritySkill', 'completedProgram']).toContain(kind)
+    }
+  })
+})
+
+
+// ── Codex round 1: a re-seed never demotes the model's status ────────────
+describe('mergeSeededModel — status is never demoted by a re-seed', () => {
+  /** A fresh seed from inputs carrying no signal at all: status `no-data`. */
+  const signalless = () => seed(snapshot({}))
+
+  function existingAt(status: LearnerModel['status'], kind: string): LearnerModel {
+    const base = signalless()
+    return {
+      ...base,
+      status,
+      conceptStates: {
+        ...base.conceptStates,
+        'reading.fluency.accuracy': {
+          state: 'solid',
+          evidence: [{ kind: kind as never, sourceId: 's', note: 'n', observedAt: NOW }],
+        },
+      },
+    }
+  }
+
+  it('keeps `seeded` when the fresh seed found no signal today', () => {
+    const fresh = signalless()
+    expect(fresh.status).toBe('no-data')
+    // The merge preserves the eval evidence; demoting alongside it would tell
+    // five consumers the evidence-bearing model is absent.
+    const merged = mergeSeededModel(existingAt('seeded', 'eval'), fresh)
+    expect(merged.status).toBe('seeded')
+    expect(merged.conceptStates['reading.fluency.accuracy'].state).toBe('solid')
+  })
+
+  it('keeps `synthesized` — a re-seed marks the synthesis stale, it does not undo it', () => {
+    const merged = mergeSeededModel(existingAt('synthesized', 'attestation'), signalless())
+    expect(merged.status).toBe('synthesized')
+    expect(merged.synthesisStaleAt).toBeTruthy()
+  })
+
+  it('promotes a `no-data` model the merge just handed real evidence', () => {
+    const merged = mergeSeededModel(existingAt('no-data', 'quest'), signalless())
+    expect(merged.status).toBe('seeded')
+  })
+
+  it('stays `no-data` when nothing anywhere carries evidence', () => {
+    const merged = mergeSeededModel(signalless(), signalless())
+    expect(merged.status).toBe('no-data')
+  })
+
+  it('takes the fresh seed’s `seeded` when today’s inputs DO carry signal', () => {
+    const fresh = seed(snapshot({ workingLevels: { phonics: wl(4) } }))
+    expect(fresh.status).toBe('seeded')
+    expect(mergeSeededModel(existingAt('no-data', 'workingLevel'), fresh).status).toBe('seeded')
   })
 })

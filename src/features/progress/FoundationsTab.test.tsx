@@ -49,6 +49,18 @@ vi.mock('../foundations-review/writeReviewAction', () => ({
   applyAndWriteReviewAction: (...args: unknown[]) => mockApplyAndWrite(...(args as [])),
 }))
 vi.mock('firebase/firestore', () => ({ doc: vi.fn(() => ({})) }))
+
+// UX-286 — the create-only bootstrap seam. The decision and the write are pinned
+// in `foundationsBootstrap.test.ts` / `useFoundationsBootstrap.test.tsx`; here we
+// only assert what the tab renders while it runs and when it fails.
+const mockBootstrap = vi.fn(() => ({
+  bootstrapping: false,
+  failed: false,
+  retry: vi.fn(),
+}))
+vi.mock('./useFoundationsBootstrap', () => ({
+  useFoundationsBootstrap: (...args: unknown[]) => mockBootstrap(...(args as [])),
+}))
 vi.mock('../../core/firebase/firestore', () => ({
   learnerModelsCollection: vi.fn(() => ({})),
 }))
@@ -118,6 +130,7 @@ function fullModel(): LearnerModel {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockBootstrap.mockReturnValue({ bootstrapping: false, failed: false, retry: vi.fn() })
   mockCanEdit.mockReturnValue(true)
   mockUseActiveChild.mockReturnValue({
     activeChild: { id: 'c1', name: 'Lincoln' },
@@ -165,13 +178,57 @@ describe('FoundationsTab', () => {
     expect(text).not.toContain(CVC)
   })
 
-  it('shows a warm empty state when the model is no-data', () => {
+  // ── UX-286: the create-only bootstrap, as the tab renders it ───────────
+  it('passes the tab’s own capability and snapshot state to the bootstrap', () => {
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: null })
+    render(<FoundationsTab />)
+    expect(mockBootstrap).toHaveBeenCalledWith(
+      expect.objectContaining({ familyId: 'fam-1', childId: 'c1', canEdit: true, model: null, loading: false }),
+    )
+  })
+
+  it('gates the bootstrap on capability, never on a name', () => {
+    mockCanEdit.mockReturnValue(false)
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: null })
+    render(<FoundationsTab />)
+    expect(mockBootstrap).toHaveBeenCalledWith(
+      expect.objectContaining({ canEdit: false }),
+    )
+  })
+
+  it('says the map is being set up, naming the child, while it runs', () => {
+    mockBootstrap.mockReturnValue({ bootstrapping: true, failed: false, retry: vi.fn() })
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: null })
+    render(<FoundationsTab />)
+    expect(screen.getByText(/Setting up Lincoln's map/)).toBeInTheDocument()
+    // Not the empty state — nothing is known yet either way.
+    expect(document.body.textContent ?? '').not.toMatch(/Nothing has been recorded/)
+  })
+
+  it('shows a real failure message and a Try again, not a console warning', async () => {
+    const retry = vi.fn()
+    mockBootstrap.mockReturnValue({ bootstrapping: false, failed: true, retry })
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: null })
+    render(<FoundationsTab />)
+    expect(screen.getByText(/Could not set up this map/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(retry).toHaveBeenCalledTimes(1)
+  })
+
+  // UX-287 — the empty state names a route that works. It used to send the parent
+  // to a Knowledge Mine round (returns early with no model) or a Foundations
+  // review (confirmed silently into a console.warn).
+  it('shows an empty state that names a working route and no dead end', () => {
     mockUseLearnerModel.mockReturnValue({
       loading: false,
       model: { ...fullModel(), status: 'no-data' },
     })
     render(<FoundationsTab />)
-    expect(screen.getByText(/Getting to know how Lincoln learns/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Nothing has been recorded on Lincoln's map yet/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Foundations Review card above/)).toBeInTheDocument()
+    expect(document.body.textContent ?? '').not.toMatch(/Knowledge Mine/i)
   })
 })
 

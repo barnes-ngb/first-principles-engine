@@ -109,6 +109,30 @@ describe('writeReviewAction', () => {
   })
 })
 
+// ── UX-322: a confirmed write promotes the model off `no-data` ───────────
+describe('buildReviewActionMerge — status promotion (UX-322)', () => {
+  const noData = (): LearnerModel => ({ ...emptyModel(), status: 'no-data' })
+
+  it('promotes a no-data model to seeded when an attestation lands', () => {
+    const applied = applyReviewActionToModel(noData(), attest, NOW)
+    expect(buildReviewActionMerge(applied).status).toBe('seeded')
+  })
+
+  it('promotes nothing for a queueTest — a queued check is not evidence', () => {
+    const applied = applyReviewActionToModel(
+      noData(),
+      { kind: 'queueTest', childId: 'c1', conceptId: LONG },
+      NOW,
+    )
+    expect(buildReviewActionMerge(applied).status).toBeUndefined()
+  })
+
+  it('omits the key entirely on an already-seeded model', () => {
+    const applied = applyReviewActionToModel(emptyModel(), attest, NOW)
+    expect('status' in buildReviewActionMerge(applied)).toBe(false)
+  })
+})
+
 describe('applyAndWriteReviewAction', () => {
   it('applies then persists, returning the next model', async () => {
     const next = await applyAndWriteReviewAction(REF, emptyModel(), attest, NOW)

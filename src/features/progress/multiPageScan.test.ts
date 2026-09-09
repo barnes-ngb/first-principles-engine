@@ -195,4 +195,36 @@ describe('summarizeScanBatch', () => {
   it('falls back to a friendly message when there is nothing to report', () => {
     expect(summarizeScanBatch([]).message).toBe('No workbook pages recognized')
   })
+
+  // UX-321: a page the CALLER claimed was recognized — its owner is just not
+  // this loop. "Not recognized" is right for the staging area, which has
+  // nowhere to send a certificate, and wrong for a workbook card, which opens
+  // a confirm dialog for one.
+  it('reports a claimed page as one to confirm, never as unrecognized', () => {
+    const summary = summarizeScanBatch([{ index: 0, status: 'claimed' }])
+    expect(summary.message).toBe('1 certificate to confirm')
+    expect(summary.claimedCount).toBe(1)
+    expect(summary.skippedCount).toBe(0)
+  })
+
+  it('keeps claimed and skipped pages apart in one batch', () => {
+    const summary = summarizeScanBatch([
+      { index: 0, status: 'created', configId: 'a', configName: 'GATB Math', position: 5 },
+      { index: 1, status: 'claimed' },
+      { index: 2, status: 'skipped' },
+    ])
+    expect(summary.message).toBe(
+      'Added GATB Math → L5; 1 page not recognized; 1 certificate to confirm',
+    )
+    expect(summary.claimedCount).toBe(1)
+    expect(summary.skippedCount).toBe(1)
+  })
+
+  it('counts nothing as claimed for a caller that claims nothing', () => {
+    // The staging area passes no `claimNonWorksheet`, so its behaviour is
+    // byte-for-byte what it was.
+    const summary = summarizeScanBatch([{ index: 0, status: 'skipped' }])
+    expect(summary.claimedCount).toBe(0)
+    expect(summary.message).toBe('1 page not recognized')
+  })
 })

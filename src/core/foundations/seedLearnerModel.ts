@@ -45,6 +45,7 @@ import type {
 import type { SkillSnapshot } from '../types/evaluation'
 import type { SightWordProgress } from '../types/books'
 import type { ChildSkillMap } from '../curriculum/skillStatus'
+import { promotedModelStatus } from './modelStatus'
 
 /** Single-band → ordinal. Range bands (`K-1`, `1-2`) never reach band seeding. */
 const BAND_ORDER: Record<string, number> = { K: 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5 }
@@ -354,19 +355,77 @@ export function seedLearnerModel(
 }
 
 /**
- * Merge a freshly seeded model over an existing stored one, **preserving any
- * concept the Review Chat wrote** — an entry carrying an `attestation` (parent
- * "I've seen it") or a `curriculumPosition` ("covered in Fast Phonics"). Neither
- * is recomputable from the deterministic signals the seeder reads, so a re-seed
- * must never clobber them. **Slice 2a (FEAT-51) creates the first real ones** —
- * before it, this guard was a no-op forward-declaration.
+ * The four evidence kinds this seeder **derives**, and therefore the only ones a
+ * re-seed may safely recompute. Written as the *derivable* list rather than as an
+ * allow-list of things to keep, so a new {@link EvidenceKind} is **preserved by
+ * default** (UX-290): the failure mode of forgetting to add a kind here is a
+ * redundant preserve, never a destroyed record of something that happened.
  *
- * Likewise the chat-only judgment arrays — `openQuestions` (queued kid-facing
- * checks) and `changeFeed` (the "what moved" log) — are appended by the chat and
- * emptied by the seeder; carry the existing ones forward so a re-seed does not
+ * Pinned from the seeder's own side by `seedLearnerModel.test.ts` — a rich seed's
+ * emitted kinds must all appear here.
+ */
+const SEEDER_DERIVED_EVIDENCE: ReadonlySet<string> = new Set([
+  'workingLevel',
+  'sightWordShare',
+  'prioritySkill',
+  'completedProgram',
+])
+
+/** True when the entry carries at least one ref the seeder cannot re-derive. */
+function carriesNonDerivableEvidence(entry: ConceptStateEntry): boolean {
+  return Boolean(entry.evidence?.some((e) => !SEEDER_DERIVED_EVIDENCE.has(e.kind)))
+}
+
+/**
+ * The `status` a re-seed leaves behind. **A re-seed never demotes** (Codex round
+ * 1): spreading the fresh seed's status straight through meant that re-seeding a
+ * `seeded` or `synthesized` model on a day its snapshot and sight-word inputs
+ * happened to carry no signal stamped it `no-data` — while the merge above was
+ * busy *preserving* that model's attestation / eval / quest evidence. The five
+ * status-keyed consumers would then read an evidence-bearing model as absent,
+ * which is UX-322's defect arriving through a second door. (It also quietly
+ * demoted `synthesized` → `seeded` on every re-seed, since `synthesis` itself is
+ * preserved below.)
+ *
+ * So an established status stands, and a `no-data` one is promoted by the SAME
+ * shared rule every incremental writer uses — read against the **merged** states,
+ * because those are what the document will hold.
+ */
+function mergedStatus(
+  existing: LearnerModel,
+  seeded: LearnerModel,
+  mergedStates: Record<string, ConceptStateEntry>,
+): LearnerModel['status'] {
+  if (existing.status && existing.status !== 'no-data') return existing.status
+  return (
+    promotedModelStatus({ ...seeded, conceptStates: mergedStates }) ?? seeded.status
+  )
+}
+
+/**
+ * Merge a freshly seeded model over an existing stored one, **preserving any
+ * concept carrying evidence the seeder cannot re-derive** — a parent
+ * `attestation` ("I've seen it"), a `curriculumPosition` ("covered in Fast
+ * Phonics"), a guided eval's read, a Knowledge Mine result, a scan.
+ *
+ * **UX-290 widened this rule.** It used to name `attestation` and
+ * `curriculumPosition` only, so a concept whose evidence was an `eval` or a
+ * `quest` ref was replaced wholesale by the fresh seed — and for the nodes the
+ * seeder has no driver for, the fresh seed is `{state:'not-yet', evidence:[]}`.
+ * A guided evaluation's read and a Mine session's result were both erasable by a
+ * button press. The rule is now stated as *"not re-derivable"* against
+ * {@link SEEDER_DERIVED_EVIDENCE}: the seeder recomputes what it derives from the
+ * snapshot and the sight-word list, and everything else is a record of something
+ * that happened and survives.
+ *
+ * Likewise the judgment arrays — `openQuestions` (queued kid-facing checks) and
+ * `changeFeed` (the "what moved" log) — are appended by the incremental writers
+ * and emptied by the seeder; carry the existing ones forward so a re-seed does not
  * erase a queued test or the change history. Concept *states* (the recomputable
- * part) still come from the fresh seed except where a chat-written entry above
- * pins them.
+ * part) still come from the fresh seed except where a preserved entry above pins
+ * them. **Still open (UX-290's other half):** a re-seed appends no `changeFeed`
+ * line for the transitions it performs, so the feed remains a log of every
+ * *incremental* transition rather than of every transition.
  */
 export function mergeSeededModel(
   existing: LearnerModel | null | undefined,
@@ -375,14 +434,12 @@ export function mergeSeededModel(
   if (!existing) return seeded
   const merged: Record<string, ConceptStateEntry> = { ...seeded.conceptStates }
   for (const [nodeId, entry] of Object.entries(existing.conceptStates ?? {})) {
-    const chatWritten = entry.evidence?.some(
-      (e) => e.kind === 'attestation' || e.kind === 'curriculumPosition',
-    )
-    if (chatWritten) merged[nodeId] = entry
+    if (carriesNonDerivableEvidence(entry)) merged[nodeId] = entry
   }
   return {
     ...seeded,
     conceptStates: merged,
+    status: mergedStatus(existing, seeded, merged),
     // Carry forward chat-appended judgment arrays the seeder empties.
     openQuestions:
       existing.openQuestions?.length ? existing.openQuestions : seeded.openQuestions,
