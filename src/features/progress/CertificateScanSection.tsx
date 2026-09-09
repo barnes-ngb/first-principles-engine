@@ -196,7 +196,25 @@ export default function CertificateScanSection() {
     <Box sx={{ mt: 2 }}>
       {/* Scan trigger */}
       {!scanResult && !scanning && (
-        <ScanButton onCapture={handleCapture} variant="button" />
+        <Stack spacing={1}>
+          {/*
+            Whose record this changes, BEFORE it changes it (UX-313).
+
+            This door sits above the tabs, and the child selector lives inside
+            them — so a parent reaches the first scan control on the page having
+            passed nothing that names a child. It writes to the active child,
+            which is correct, but the only place the child was named was the
+            success alert AFTER the write ("Progress updated for Lincoln!"), and
+            a records surface should not let someone learn the target of a write
+            from its receipt.
+          */}
+          {childName && (
+            <Typography variant="body2" color="text.secondary">
+              This updates <strong>{childName}</strong>&apos;s curriculum.
+            </Typography>
+          )}
+          <ScanButton onCapture={handleCapture} variant="button" />
+        </Stack>
       )}
 
       {/* Loading state */}
@@ -257,6 +275,14 @@ export default function CertificateScanSection() {
         <DialogContent>
           {preview && (
             <Stack spacing={1.5} sx={{ mt: 1 }}>
+              {/* UX-313: the confirm card for a per-child write names the child.
+                  It listed curriculum, milestone, level, position and skills —
+                  everything except whose record was about to change. */}
+              {childName && (
+                <Typography variant="body2">
+                  <strong>Child:</strong> {childName}
+                </Typography>
+              )}
               <Typography variant="body2">
                 <strong>Curriculum:</strong> {preview.workbookName}
               </Typography>

@@ -15,7 +15,7 @@ import { isWorksheetScan } from '../../core/types/planning'
  * loop and rolls the per-page outcomes into one combined summary.
  */
 
-export type PageStatus = 'created' | 'updated' | 'merged' | 'skipped' | 'failed'
+export type PageStatus = 'created' | 'updated' | 'merged' | 'skipped' | 'failed' | 'claimed'
 
 export interface PageOutcome {
   index: number
@@ -40,6 +40,12 @@ export interface BatchScanSummary {
   failedCount: number
   /** Pages that scanned but weren't a workbook page (nothing to apply). */
   skippedCount: number
+  /**
+   * Pages the CALLER claimed (UX-321) — a non-worksheet page it will handle
+   * itself, rather than one there was nowhere to send. Zero for a caller that
+   * passes no `claimNonWorksheet`, which is the staging area.
+   */
+  claimedCount: number
   /** Human-readable combined summary for the snackbar. */
   message: string
 }
@@ -51,6 +57,22 @@ export interface BatchScanHandlers {
   syncOne: (results: WorksheetScanResult) => Promise<ScanConfigResult>
   /** Optional side-effect after a successful worksheet apply (e.g. skill map). */
   onWorksheet?: (results: ScanResult) => Promise<void> | void
+  /**
+   * Optional (UX-321). Called for a page whose analysis is NOT a worksheet —
+   * which, since `isWorksheetScan` is `pageType !== 'certificate'`, means a
+   * certificate. Return `true` to CLAIM it: the caller will handle the page
+   * itself, and the batch reports it as claimed instead of "not recognized".
+   *
+   * It exists because "not recognized" is right for the staging area, which has
+   * nowhere to send a certificate, and **wrong for a workbook card**, which
+   * opens a confirm dialog for one. Without it, a certificate picked alongside
+   * one other page silently reported as unrecognised while the identical file
+   * picked alone opened the dialog (Codex round 1, P2).
+   *
+   * Synchronous by design: it decides ownership, it does not do the work. The
+   * caller acts after the batch, so nothing blocks mid-loop.
+   */
+  claimNonWorksheet?: (results: ScanResult, index: number) => boolean
 }
 
 /**
@@ -77,8 +99,10 @@ export async function processScanBatch(
         continue
       }
       if (!isWorksheetScan(results)) {
-        // Certificates / non-workbook pages: nothing to auto-apply here.
-        outcomes.push({ index: i, status: 'skipped' })
+        // Certificates / non-workbook pages: nothing to auto-apply HERE — but
+        // the caller may own one (UX-321). Unclaimed is the previous behaviour.
+        const claimed = handlers.claimNonWorksheet?.(results, i) === true
+        outcomes.push({ index: i, status: claimed ? 'claimed' : 'skipped' })
         continue
       }
       const r = await handlers.syncOne(results)
@@ -212,6 +236,11 @@ export function summarizeScanBatch(outcomes: PageOutcome[]): BatchScanSummary {
   if (skippedCount > 0) {
     parts.push(`${skippedCount} page${skippedCount > 1 ? 's' : ''} not recognized`)
   }
+  const claimedCount = marked.filter((o) => o.status === 'claimed').length
+  if (claimedCount > 0) {
+    // UX-321: a claimed page WAS recognized — its owner is just not this loop.
+    parts.push(`${claimedCount} certificate${claimedCount > 1 ? 's' : ''} to confirm`)
+  }
 
   return {
     outcomes: marked,
@@ -220,6 +249,7 @@ export function summarizeScanBatch(outcomes: PageOutcome[]): BatchScanSummary {
     mergedConfigs,
     failedCount,
     skippedCount,
+    claimedCount,
     message: parts.length > 0 ? parts.join('; ') : 'No workbook pages recognized',
   }
 }
