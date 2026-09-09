@@ -214,8 +214,25 @@ describe('parseLedgerRowShape (the [ledger-shape] invariant)', () => {
     expect(breaks).toEqual([{ line: 4, kind: 'text' }])
   })
 
-  it('does not flag trailing prose that simply follows the table', () => {
-    const md = [...header, '| **A-1** | 1 | OPEN | a | x |', 'closing note after the table'].join('\n')
+  // INVERTED (Codex round 3, PR #1814). This test used to assert that a trailing
+  // non-table line is fine — and that permissiveness was the hole: when the LAST
+  // row loses its leading `|`, no pipe-led row follows it, so a position-based
+  // filter discarded it as "prose" and the check passed. The identical damage one
+  // row earlier was caught; position was the only difference. Second time in this
+  // PR that a test of mine encoded the permissive assumption an exploit then used.
+  it('flags a damaged FINAL row that lost its leading pipe', () => {
+    const md = [
+      ...header,
+      '| **A-1** | 1 | OPEN | a | x |',
+      '**A-2** | 1 | OPEN | b |',
+      '',
+      '† footnote',
+    ].join('\n')
+    expect(parseLedgerRowShape(md).breaks).toEqual([{ line: 4, kind: 'text' }])
+  })
+
+  it('still accepts the legitimate ending: a trailing blank then the footnote', () => {
+    const md = [...header, '| **A-1** | 1 | OPEN | a | x |', '', '† DATA-01 was promoted…'].join('\n')
     expect(parseLedgerRowShape(md).breaks).toEqual([])
   })
 })

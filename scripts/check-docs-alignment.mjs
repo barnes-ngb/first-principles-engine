@@ -175,10 +175,20 @@ export function parseLedgerRowShape(md) {
     rows.push({ id: m ? m[1].trim() : null, cells: cellsIn(line), line: i + 1 })
   }
 
-  // A break only SPLITS the table if a row follows it; a trailing blank (before
-  // the `†` footnote) is how the table is supposed to end.
+  // A trailing BLANK is how the table is supposed to end (the one before the `†`
+  // footnote), so a blank is a split only when a row follows it.
+  //
+  // A trailing TEXT line is not given the same benefit (Codex, PR #1814). If the
+  // LAST row loses its leading `|` — `**A-2** | 1 | OPEN | b |` — no pipe-led row
+  // follows it, so a position-based filter discarded it as "prose after the
+  // table" and the check passed. The identical damage one row earlier was
+  // caught: position was the only difference. Nothing between the header and the
+  // §6 terminator should be a non-table line, so every text break is kept
+  // wherever it falls. The cost is that genuine closing prose inside §6 would now
+  // be flagged — there is none today, the message says to move it out, and after
+  // six fail-open findings this check should err closed.
   const lastRowLine = rows.length ? rows[rows.length - 1].line : 0
-  const splits = breaks.filter((b) => b.line < lastRowLine)
+  const splits = breaks.filter((b) => b.kind === 'text' || b.line < lastRowLine)
 
   const malformed = rows.filter((r) => r.cells !== expected)
   return { expected, rows, malformed, breaks: splits }
