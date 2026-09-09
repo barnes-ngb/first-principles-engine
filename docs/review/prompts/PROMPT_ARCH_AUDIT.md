@@ -19,7 +19,9 @@ write the qualifier instead ("most", "the majority", "at least N") and say why. 
 derived, never counted by hand** in `CLAUDE.md` for the full rule and the evidence behind it. Where a
 figure's source of truth is **outside** the repo (a PR's review history, a console reading), no committed
 script can pin it: cite it precisely enough to be audited (PR number, commit SHA, date) and mark it
-hand-counted.
+hand-counted. The case this exists for is a **survey** — a count read across a body of code larger than the change;
+a count over the run's own diff is pinned by that diff, so naming the command that prints it is derivation
+enough, and a short list is best **named rather than counted**.
 
 ## Step 0 — Orient
 
