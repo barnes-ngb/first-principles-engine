@@ -52,7 +52,9 @@ vi.mock('../useStoryGenerator', () => ({
   useStoryGenerator: () => ({ generateStory: generateStoryMock, loading: false, error: null }),
 }))
 
-const addDocMock = vi.fn(async (..._args: unknown[]) => ({ id: 'book-1' }))
+const addDocMock = vi.fn<(...args: unknown[]) => Promise<{ id: string }>>(async () => ({
+  id: 'book-1',
+}))
 vi.mock('firebase/firestore', () => ({ addDoc: (...a: unknown[]) => addDocMock(...a) }))
 vi.mock('../../../core/firebase/firestore', () => ({ booksCollection: () => ({}) }))
 vi.mock('../../../components/Page', () => ({
