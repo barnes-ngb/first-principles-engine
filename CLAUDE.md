@@ -75,10 +75,24 @@ round 1 would have raised none of them. (Those two figures are themselves hand-c
 history of PR #1810 — rounds `dfdedb42` / `c5754dbb` / `cc408b4a` — which is the external-source case this
 paragraph covers, and DOC-23's own round 1 raised exactly that as a finding.)
 
+**Verify the tree you are about to push, after the last edit.** The verification suite runs on the **exact
+tree you push**, after the last edit — a green run from before your final fix is evidence about a tree that no
+longer exists. If you amend or add a commit after verifying, verify again; and note that a moved head also
+invalidates a pending review ask, which must then be re-made against the new commit. PR #1817 pushed a head
+whose CI `test` job failed and said so itself — *"I re-ran lint before that last type fix, not after"* — which
+cost a cycle and forced the round to be re-asked, because Codex reviews a commit and the head had moved.
+
 **End of run.** A run is not finished when the PR opens; it is finished when the automated review round on
-that PR is answered. After opening the PR, **poll every 30 seconds and act on the first qualifying signal**:
-ten minutes is the **ceiling, not the duration** — the point at which you give up, not the length of the
-wait, and a window that has already produced its answer is over. Read three things: the PR's
+that PR is answered. After opening the PR, **poll on a 60–90 second interval and act on the first qualifying
+signal**: ten minutes is the **ceiling, not the duration** — the point at which you give up, not the length of
+the wait, and a window that has already produced its answer is over. **Report once per round, not once per
+tick**: one line when the round is asked (naming the head and the clock time), and one line when it comes back
+or the window closes. A tick that finds nothing is not worth a line — the next line the human reads should be
+the round's result. **A wall of identical status lines is indistinguishable from a hung run to the person
+reading it**, and that is the whole reason for the rule: PR #1817 polled three rounds at the old 30-second
+cadence, produced well over a hundred consecutive lines reading "Waiting.", and the owner interrupted the
+session to ask whether it was looping. It was not — it was obeying the cadence this protocol set. Read three
+things: the PR's
 **reviews**, its **inline review threads** (`/repos/{owner}/{repo}/pulls/{n}/reviews` plus
 `/pulls/{n}/comments`, or the GraphQL `reviewThreads`) — Codex anchors its findings to lines, and
 `gh pr view <n> --comments` fetches top-level comments and review bodies but **no** review threads, so it
@@ -111,6 +125,19 @@ still raising real findings at its cap is a diff that should have been two runs.
 can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding and on which head, and
 stop. The human decides whether to merge, open a follow-up, or paste the remainder into a new run.
 
+**The status-cell flip happens on the run's final commit whatever the round's outcome.** A run that ends
+`CODEX ROUND: open — do not merge yet` still flips its own rows to the house `**MERGED** (PR #NNNN, …)` form
+as its last act, because the human is the one who merges and the row reaches `main` only if they do. The
+*"round N is unreviewed"* fact belongs in the **row body** and in the PR summary's first line — never in the
+status cell, which `[ledger-status]` reads as a claim that the PR is open. **A run must not stop while its own
+PR is unmergeable**: before posting the summary, run `node scripts/check-docs-alignment.mjs` and confirm
+`[ledger-status]` reports no row claiming an open PR. If it does, fix it and re-verify — that is part of
+finishing, not part of merging. PR #1817 ended at its cap and left its own rows reading `**BUILT** (PR open) —
+do not merge`; `[ledger-status]` is **SOFT off `main` and HARD on `main`** and its `OPEN_PR_STATUS_PATTERNS`
+match both `/PR open/i` and `/do not merge/i`, so merging that PR turned `docs:check` HARD-red on `main` and
+blocked the next `deploy` push — the exact failure DOC-22 exists to prevent, and unblocking it costs a
+separate run.
+
 The round is done when one comes back clean or a whole window passes with nothing — never stop on an
 unanswered one. Then post the run's summary — **its one summary, not a second one after an earlier "done"
 post** — with, as its first line, one of: `CODEX ROUND: done — safe to merge` · `CODEX ROUND: none arrived in
@@ -137,6 +164,18 @@ field, the parent lab form's field lists, day templates, chat context, the broth
 each its own small design, plus the cosmetic `isLincoln` flag, which stays: it is personality, not
 access.
 
+**A global control that changes a scoped identity obliges every mounted editor in that scope to decide what
+the change means.** `FIX-220` made the app-bar chip a real child switcher, and its three Codex rounds each
+found the **same class** of defect in a different mounted child-scoped editor: a generated story re-filed
+under the newly-selected child (books), a Workshop wizard following the switch instead of staying with the
+child it started for, and a dirty goal stack saved onto another child's record (business). A fourth,
+`UX-327`, is the creative timer crediting its minutes to whoever is active when it stops. None was reachable
+before the switcher existed on screens with no selector of their own. **So: before widening the reach of a
+control that changes `activeChildId` — or any other scoped identity — enumerate every mounted editor holding
+unsaved or in-flight state for that scope, and state for each whether it re-seeds, refuses, or stays with the
+identity it started under.** The safe default is that persisted work stays with the identity it was started
+for, and unsaved work is re-seeded with the loss made visible.
+
 ### Ledger integrity & base discipline
 
 - **Branch from fresh `origin/main`, and verify the ledger head against the remote before editing.**
@@ -148,6 +187,16 @@ access.
 - **A ledger diff that shows deletions, reordering, or reopened items means your branch is on the
   wrong base — stop, rebase onto current `origin/main`, and redo.** A correct ledger PR reads
   `+N rows / −0`, one file changed.
+- **The status-cell flip is the run's last act, whatever the round's outcome.** A row's status cell is
+  flipped to the house `**MERGED** (PR #NNNN, …)` form on the run's **final pre-merge commit** — including
+  on a run that ends `CODEX ROUND: open — do not merge yet`, because there is no later run to make that
+  commit and the row reaches `main` only if the human merges. Every phrase about a round's outcome lives in
+  the **row body** and in the PR summary's first line, **never** in the status cell, which `[ledger-status]`
+  reads as a claim that the PR is open (DOC-22's rule, one outcome further on). **A run must not stop while
+  its own PR is unmergeable**: before posting the summary, run `node scripts/check-docs-alignment.mjs` and
+  confirm `[ledger-status]` reports no row claiming an open PR; if it does, fix it and re-verify. That check
+  is part of finishing, not part of merging — the rule is SOFT off `main` and HARD **on** `main`, so a cell
+  left open sails through the PR and reddens `main` for everyone the moment it lands.
 - **Single-writer-ish ownership.** The home-base chat owns the review ledger. The build chat edits
   only its portal rows (`FEAT-01`, portal `FUNC-*`, `ARCH-10`). Routines may flip a row **they are
   claiming** to `IN PROGRESS` but must not rewrite other rows. When two PRs touch the ledger, merge

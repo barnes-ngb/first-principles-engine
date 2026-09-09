@@ -52,7 +52,11 @@ Make the smallest change that closes it. Preserve behavior exactly (no observabl
 Add/keep tests proving it. No new heavy dependencies (bundle is tracked debt).
 
 ## Step 6 — Verify & PR
-Green before and after. Branch `auto/arch-<id>-<slug>`. PR `fix(<area>): <id> — <desc> (auto)`.
+Green before and after. **The verification suite runs on the exact tree you push, after the last edit** — a
+green run from before your final fix is evidence about a tree that no longer exists. If you amend or add a
+commit after verifying, verify again, and note that a moved head also invalidates a pending review ask, which
+must then be re-made against the new commit.
+Branch `auto/arch-<id>-<slug>`. PR `fix(<area>): <id> — <desc> (auto)`.
 **Do not merge.** Update the ledger row to `IN PROGRESS` with the PR link. Then run **End of run** below,
 and post the 4-line summary there — the item, what changed, before/after evidence, and confirmation no
 invariant was touched — under the `CODEX ROUND:` first line. Do not post a summary before the Codex round
@@ -65,9 +69,14 @@ A run is not finished when the PR opens; it is finished when the **automated rev
 answered**. This is the run's last step, and the summary below is the run's **one** summary — do not post a
 finish-looking summary before it.
 
-1. **Poll for the Codex round** every 30 seconds, up to 10 minutes — the ten minutes is the **ceiling, not
-   the duration**: act on the first qualifying signal, and a window that has already produced its answer is
-   over. Read three things:
+1. **Poll for the Codex round** on a **60–90 second** interval, up to 10 minutes — the ten minutes is the
+   **ceiling, not the duration**: act on the first qualifying signal, and a window that has already produced
+   its answer is over. **Report once per round, not once per tick** — one line when the round is asked
+   (naming the head and the clock time), and one line when it comes back or the window closes. A tick that
+   finds nothing is not worth a line; the next line the human reads should be the round's result. **A wall of
+   identical status lines is indistinguishable from a hung run to the person reading it** — PR #1817 polled
+   three rounds at the old 30-second cadence, produced well over a hundred consecutive lines reading
+   "Waiting.", and the owner interrupted the session to ask whether it was looping. Read three things:
    - the PR's **reviews** (`/repos/{owner}/{repo}/pulls/{n}/reviews`);
    - its **inline review threads** (`/pulls/{n}/comments`, or the GraphQL `reviewThreads`) — Codex anchors
      its findings to lines, and `gh pr view <n> --comments` fetches top-level comments and review bodies but
@@ -109,6 +118,14 @@ finish-looking summary before it.
 
    **On the line after it, state how long each round actually took to come back** (e.g. *"rounds: 6m, 4m,
    clean at 3m"*), so the ceiling can be tuned from evidence rather than guessed again.
+
+   **Before you post it, flip your ledger rows' status cells** to the house `**MERGED** (PR #NNNN, …)` form
+   on the run's final commit — **whatever the round's outcome, including `open — do not merge yet`**, since
+   the human is the one who merges and the row reaches `main` only if they do; the *"round N is unreviewed"*
+   fact belongs in the **row body** and in this summary's first line, never in the status cell, which
+   `[ledger-status]` reads as a claim that the PR is open. Then run `node scripts/check-docs-alignment.mjs`
+   and confirm `[ledger-status]` reports no row claiming an open PR — **a run must not stop while its own PR
+   is unmergeable**, and that check is part of finishing, not part of merging.
 
 Never subscribe to the PR, never schedule a check-in, reminder, wake-up or scheduled task of any kind, and
 never stay resident to "watch CI" — CI's result is on the PR page. Then, as the **last action of the run**:
