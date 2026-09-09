@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -129,6 +130,77 @@ describe('useFoundationsBootstrap (UX-286)', () => {
 
     await waitFor(() => expect(result.current.failed).toBe(true))
     expect(result.current.bootstrapping).toBe(false)
+  })
+
+  // ── Codex round 2 ──────────────────────────────────────────────────────
+  // Both findings were about the round-1 fix's own state handling: a mounted
+  // ref that StrictMode latched off, and a shared boolean a child switch left
+  // stuck on. Every piece of state is keyed now, so both are gone by shape.
+
+  it('reports its result under StrictMode’s setup → cleanup → setup', async () => {
+    let release: (() => void) | undefined
+    bootstrap.mockImplementationOnce(
+      () => new Promise<never>((resolve) => { release = () => resolve({} as never) }),
+    )
+    const { result } = renderHook(() => useFoundationsBootstrap(args()), {
+      wrapper: StrictMode,
+    })
+    await waitFor(() => expect(result.current.bootstrapping).toBe(true))
+    // The attempted-key ref survives the replay, so exactly one seed runs.
+    expect(bootstrap).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      release?.()
+    })
+    await waitFor(() => expect(result.current.bootstrapping).toBe(false))
+  })
+
+  it('surfaces a StrictMode failure instead of hiding it in development', async () => {
+    bootstrap.mockRejectedValueOnce(new Error('firestore down') as never)
+    const { result } = renderHook(() => useFoundationsBootstrap(args()), {
+      wrapper: StrictMode,
+    })
+    await waitFor(() => expect(result.current.failed).toBe(true))
+    expect(result.current.bootstrapping).toBe(false)
+  })
+
+  it('does not show the new child as bootstrapping when the old one is mid-write', async () => {
+    let release: (() => void) | undefined
+    bootstrap.mockImplementationOnce(
+      () => new Promise<never>((resolve) => { release = () => resolve({} as never) }),
+    )
+    const { result, rerender } = renderHook(
+      (p: ReturnType<typeof args>) => useFoundationsBootstrap(p),
+      { initialProps: args() },
+    )
+    await waitFor(() => expect(result.current.bootstrapping).toBe(true))
+
+    // c2 already has a model, so its effect returns early and starts nothing.
+    // A shared boolean left the tab reading "Setting up c2's map…" forever.
+    rerender(args({ childId: 'c2', model: model() }))
+    expect(result.current.bootstrapping).toBe(false)
+    expect(bootstrap).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      release?.()
+    })
+    expect(result.current.bootstrapping).toBe(false)
+  })
+
+  it('keeps one child’s failure off another child’s view', async () => {
+    bootstrap.mockRejectedValueOnce(new Error('firestore down') as never)
+    const { result, rerender } = renderHook(
+      (p: ReturnType<typeof args>) => useFoundationsBootstrap(p),
+      { initialProps: args() },
+    )
+    await waitFor(() => expect(result.current.failed).toBe(true))
+
+    rerender(args({ childId: 'c2', model: model() }))
+    expect(result.current.failed).toBe(false)
+
+    // And c1 still shows its own failure when the parent goes back.
+    rerender(args())
+    expect(result.current.failed).toBe(true)
   })
 
   it('drops the result when the active child changed mid-write', async () => {
