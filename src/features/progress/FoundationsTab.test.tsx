@@ -37,6 +37,19 @@ vi.mock('../../components/ChildSelector', () => ({
   default: () => <div>CHILD_SELECTOR</div>,
 }))
 
+// UX-326 moved three sections into this tab. They are self-contained (the two
+// diagnostic panels gate themselves on `canEdit` and then `?diag=1`, and reach
+// their own Firestore doors), so they are markers here — their placement and
+// their gating from the new home are pinned in
+// `FoundationsTab.movedSections.test.tsx`, with the real panels.
+vi.mock('../foundations-review/FoundationsReviewLauncher', () => ({
+  default: () => <div>REVIEW_LAUNCHER</div>,
+}))
+vi.mock('./FoundationsDiagPanel', () => ({ default: () => <div>DIAG_PANEL</div> }))
+vi.mock('../records/DataReviewExportPanel', () => ({
+  default: () => <div>DATA_REVIEW_EXPORT</div>,
+}))
+
 // The write seam (FEAT-66). Firestore itself is never touched in tests; the
 // projector + merge shape are pinned in their own suites.
 const mockApplyAndWrite = vi.fn(async (...args: unknown[]) => {

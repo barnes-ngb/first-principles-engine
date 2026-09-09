@@ -28,6 +28,8 @@ import type {
   ConceptStateKind,
   LearnerModel,
 } from '../../core/types/learnerModel'
+import DataReviewExportPanel from '../records/DataReviewExportPanel'
+import FoundationsReviewLauncher from '../foundations-review/FoundationsReviewLauncher'
 import ReviewActionConfirmCard from '../foundations-review/ReviewActionConfirmCard'
 import type {
   FoundationsReviewAction,
@@ -35,6 +37,7 @@ import type {
 } from '../foundations-review/foundationsReviewActions'
 import { applyAndWriteReviewAction } from '../foundations-review/writeReviewAction'
 import DispositionProfile from './DispositionProfile'
+import FoundationsDiagPanel from './FoundationsDiagPanel'
 import {
   BOOTSTRAP_FAILED_LINE,
   BOOTSTRAP_RETRY_LABEL,
@@ -184,6 +187,17 @@ export default function FoundationsTab() {
         emptyMessage="Add a child to see their foundations."
       />
 
+      {/* Foundations Review Chat (FEAT-51, slice 2a) — a ~10-minute parent
+          conversation that establishes where each child really is, and the
+          primary way the Learner Model gets fed. UX-326 moved it here, below
+          this tab's child selector: it feeds the model, and this tab is what
+          shows the model. It rendered in the ProgressPage shell before, above
+          every tab and above every selector on the page. Same component, same
+          props, same gating — only its home changed. */}
+      <Box sx={{ mt: 2 }}>
+        <FoundationsReviewLauncher />
+      </Box>
+
       {savedNotice && (
         <Alert severity="success" sx={{ mt: 2 }} onClose={() => setSavedNotice(null)}>
           {savedNotice}
@@ -228,6 +242,14 @@ export default function FoundationsTab() {
       <Box sx={{ mt: 3 }}>
         <DispositionProfile />
       </Box>
+
+      {/* UX-326 — the two `?diag=1` panels, at the bottom of the tab whose data
+          they diagnose. Both still gate themselves on `canEdit` FIRST and then
+          on `?diag=1` (a surface flag, never access control), so nothing about
+          who sees them changed; they simply no longer render above every one of
+          the six tabs. They carry their own margins, so no wrapper here. */}
+      <FoundationsDiagPanel />
+      <DataReviewExportPanel />
 
       <ConceptEvidenceDrawer
         concept={openConcept}

@@ -82,6 +82,12 @@ vi.mock('../../core/curriculum/updateSkillMapFromFindings', () => ({
 vi.mock('../../components/ChildSelector', () => ({ default: () => <div>CHILD_SELECTOR</div> }))
 vi.mock('../../components/ScanAnalysisPanel', () => ({ default: () => null }))
 
+// UX-326 moved the certificate door into this tab, and it renders a ScanButton
+// of its own — which would make the stand-in picker below ambiguous. It is a
+// marker here; its own suites own it, and its placement is pinned in
+// `CurriculumTab.certificateDoor.test.tsx`.
+vi.mock('./CertificateScanSection', () => ({ default: () => <div>CERTIFICATE_DOOR</div> }))
+
 // A stand-in for the real picker: one tap stages two photos.
 vi.mock('../../components/ScanButton', () => ({
   default: ({ onCaptureFiles }: { onCaptureFiles?: (files: File[]) => void }) => (
