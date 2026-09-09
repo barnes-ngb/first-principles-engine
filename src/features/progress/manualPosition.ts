@@ -82,15 +82,18 @@ export function parsePositionInput(
   if (position < 1) {
     return { ok: false, error: 'Use a whole number, like 14.' }
   }
-  if (position > MAX_POSITION) {
-    return { ok: false, error: `That looks too high — the most this can be is ${MAX_POSITION}.` }
-  }
   const unit = config.unitLabel?.trim() || 'lesson'
+  // The book's OWN total is checked first, because it is the more specific and
+  // more useful sentence: a 60-lesson book given 10000 should say "this book has
+  // 60", not "the most this can be is 9999", which is true and unhelpful.
   if (config.totalUnits && position > config.totalUnits) {
     return {
       ok: false,
       error: `This book has ${config.totalUnits} ${unit}s, so ${position} is past the end. Mark it complete instead, or raise the total when you add it.`,
     }
+  }
+  if (position > MAX_POSITION) {
+    return { ok: false, error: `That looks too high — the most this can be is ${MAX_POSITION}.` }
   }
   return { ok: true, position }
 }

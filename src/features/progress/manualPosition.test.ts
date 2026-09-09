@@ -82,6 +82,14 @@ describe('parsePositionInput', () => {
     expect(out.ok).toBe(false)
   })
 
+  it("prefers the book's own total over the typo guard — the specific sentence wins", () => {
+    // A 60-lesson book given 10000 should say "this book has 60", not "the most
+    // this can be is 9999", which is true and unhelpful.
+    const out = parsePositionInput('10000', book({ totalUnits: 60 }))
+    expect(out).toMatchObject({ error: expect.stringContaining('60') })
+    expect(out).toMatchObject({ error: expect.not.stringContaining(String(MAX_POSITION)) })
+  })
+
   it("uses the row's own unit word when refusing", () => {
     const out = parsePositionInput('99', book({ totalUnits: 20, unitLabel: 'chapter' }))
     expect(out).toMatchObject({ error: expect.stringContaining('chapters') })
