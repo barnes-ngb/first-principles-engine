@@ -262,14 +262,14 @@ does not, every row is *No* (UX-286).
 | **Workbook scan** (`useScanToActivityConfig`) | lesson/page position, curriculum name | `activityConfigs.currentPosition`, `scans`, `skillSnapshots.workingLevels` | **Yes — for 3 curricula.** `syncWorkbookPositionToModel`, capped at `forming` | A bridge for the seeded G&B rows (UX-289) |
 | **Manual position edit** (Curriculum, chat card) | position | `activityConfigs` | **Yes**, same path via `syncActivityPositionToModel` | — |
 | **Guided evaluation** (`EvaluateChatPage`) | per-skill `mastered`/`emerging`/`not-yet` | `evaluationSessions`, `skillSnapshots` | **Yes — the only calibrated writer**, but drops the four core math ops | Fix `mapFindingToNode`'s two math targets (UX-288) |
-| **Foundations Review Chat** | parent's word, named curriculum positions | `learnerReviewSessions` + `learnerModels` | **Yes — richest path**, and the only one that can reach `solid` | It cannot bootstrap; confirm silently no-ops with no model (UX-287) |
+| **Foundations Review Chat** | parent's word, named curriculum positions | `learnerReviewSessions` + `learnerModels` | **Yes — the richest path**, and the only one where a parent's word alone sets the state. It is *not* the only route to `solid`: a `mastered` eval finding, an all-correct quest on a targeted concept, and the seeder's below-working-level rule all reach it too | It cannot bootstrap; confirm silently no-ops with no model (UX-287) |
 | **Foundations tab concept override** | parent's word | `learnerModels` | **Yes** (same writer) | — |
 | **Today: stuck chip / `struggled` / "tricky"** | a struggle on one checklist item | `days`, `skillSnapshots.conceptualBlocks` | **Question only** — one `openQuestion`, no state | By design; the answer comes from the quest |
 | **Knowledge Mine** (`useQuestSession`) | per-question correct/skip, word progress | `evaluationSessions`, `children/{id}/wordProgress`, `skillSnapshots` | **Partly** — only concepts already queued as `openQuestions`, capped at 3/session, upgrade-only. An untargeted session writes **nothing** | Non-trivial: it needs the queue to be non-empty, which needs a model |
 | **Sight words** (`useSightWordProgress`) | per-word mastery, interactions | `sightWordProgress` | **Once, at seed time.** `recordInteraction`/`confirmMastery` write no model | A share→concept re-sync on mastery change (UX-293) |
 | **Teach-backs** (`KidTeachBack`) | audio/text of a child explaining | `artifacts`, `days`, `weeklyReviews.evidence` | **No** | Design §8 specifies a teach-back computation; unbuilt |
 | **Book reads / read-aloud** | pages, minutes, chapter position | `books`, `bookProgress` | **No** | Nothing maps a book to a concept |
-| **Chapter responses** | a child's answers to chapter questions | `chapterResponses` | **No** | Would need a comprehension-node bridge (all 7 unreachable, UX-295) |
+| **Chapter responses** | a child's answers to chapter questions | `chapterResponses` | **No** | Would need a comprehension-node bridge — 7 of the strand's 9 nodes have no automatic path (UX-295) |
 | **Dad Lab reports + concept arcs** | beats, items, artifacts, an arc of concepts | `dadLabReports`, `conceptArcs` | **No** | Arcs already name concepts in prose; no id-level link |
 | **Artifacts** (photo / audio / note / link) | the actual evidence | `artifacts` | **No** — not even counted | — |
 | **Quick-log chips** (both surfaces) | "I did more" — subject + minutes | `days` | **No** — the items carry no `skillTags`, so even the FEAT-69 path cannot see them | Tagging the chips |
@@ -313,10 +313,12 @@ feed forward rather than emptying it.
 positive finding in this run.**
 
 - `ConceptStateEntry.state` **is** overwritten in place (the current value only).
-- `ConceptStateEntry.evidence[]` is **append-only at five of the six writers** —
+- `ConceptStateEntry.evidence[]` is **append-only at every incremental writer except one** —
   `[...(prev?.evidence ?? []), evidence]` — and each ref carries `observedAt`, its `kind`, its
-  `sourceId`, and (since FEAT-66) the `readState` the ref itself asserted.
-- **The exception is the workbook position sync.** `applyBridgeCoverageToModel` filters out its OWN
+  `sourceId`, and (since FEAT-66) the `readState` the ref itself asserted. **There are two
+  exceptions in total**, and they are different in kind: one replaces a *ref* (below), the other
+  replaces a whole *entry* (the re-seed, two bullets down).
+- **Exception 1 — the workbook position sync.** `applyBridgeCoverageToModel` filters out its OWN
   prior `curriculumPosition` ref for the same source before appending the replacement — deliberately,
   so a re-sync updates rather than accumulates, and deliberately narrow, so a Review-Chat *witness*
   carrying the same canonical `source` (but no `positionSync` flag) is preserved. The consequence for
@@ -326,9 +328,14 @@ positive finding in this run.**
   `changeFeed` line reading `workbookSync: covered in ${source} ${unitLabel} (capped at ${toState})`
   before the ref can ever be replaced. So *"what unit did the March sync record"* is answerable from
   the feed; *"was it a scan or a typed correction"* is not.
-- **The re-seed appends nothing.** `mergeSeededModel` replaces non-attested entries with freshly
-  derived states and carries the existing `changeFeed` forward unchanged — no line is appended for
-  the transitions it just performed. So `changeFeed` records every **incremental** transition, not
+- **Exception 2 — the re-seed replaces whole entries, and appends nothing.** `mergeSeededModel`
+  keeps an entry only when its evidence carries an `attestation` or a `curriculumPosition`; **an
+  entry holding only `eval` and/or `quest` refs is replaced wholesale** by the freshly derived state,
+  which for a driver-less node is `{state:'not-yet', evidence:[]}`. So this is a second
+  non-append-only path, and one that can change a state *without appending a ref at all* — the one
+  place §3.1's "every non-`not-yet` state carries at least one EvidenceRef" invariant is reached from
+  the other side. It also carries the existing `changeFeed` forward unchanged — no line is appended
+  for the transitions it just performed. So `changeFeed` records every **incremental** transition, not
   every transition: across a re-seed, states move and the log is silent about it. This is a second,
   separate break from the workbook one, and it is the more consequential of the two because it is
   invisible in the data rather than merely lossy.
@@ -435,10 +442,11 @@ three rungs and every band-seeded concept keeps the state it was given the day s
 
 **UX-292 · Thirteen capture surfaces write nothing a model can read.** See §4. Teach-backs, book
 reads, chapter responses, Dad Lab reports and concept arcs, artifacts, quick-log chips, Life Day
-chips, strand sessions, the weekly reflection, `businessLog`, non-struggle day-log completions,
-Knowledge Mine `wordProgress`, and post-seed sight-word interactions. Two of these are deliberate
-(`businessLog`, the weekly reflection — both have explicit "never a learner-model input" rails).
-The rest are simply unwired. *Files: §4's table.*
+chips, strand sessions, the weekly reflection, `businessLog`, and non-struggle day-log completions.
+Two of the eleven are deliberate (`businessLog`, the weekly reflection — both have explicit "never a
+learner-model input" rails); the rest are simply unwired. Knowledge Mine `wordProgress` and post-seed
+sight-word interactions are **not** additional surfaces — they are substreams of the Knowledge Mine
+and Sight Words rows already counted as degraded. *Files: §4's table.*
 
 **UX-293 · Sight-word mastery reaches the model exactly once.** `sightWordProgress` is read on the
 model path only by `seedLearnerModel`, which folds it to a single share on
@@ -473,11 +481,16 @@ eliminate, and it is the one graph-shaped instance still open: a re-curation tha
 generator leaves the AI slice naming concepts the model no longer has, with no failing test.
 *Files: `functions/src/ai/data/foundationsGraphSummary.{ts,test.ts}`, `scripts/genFoundationsSummary.ts`.*
 
-**UX-297 · Every model write is an unbounded whole-array read-modify-write.** Six fire-and-forget
-writers `getDoc`, mutate `changeFeed` / `openQuestions` / a concept's `evidence[]`, and merge the
-whole array back. Nothing caps any of the three, and they live in one Firestore document with a 1 MB
-ceiling. Two writers firing in the same second (a scan sync and a struggle chip, say) silently lose
-one. *Files: `writeReviewAction.ts:39-50`, `stuckRetestQueue.ts:126-133`,
+**UX-297 · Every model write is an unbounded whole-array write from a stale snapshot.** Six paths
+mutate `changeFeed` / `openQuestions` / a concept's `evidence[]` and merge the **whole array** back,
+and they reach that stale array by two different routes. **Four are fire-and-forget read-modify-write**
+— the eval write-back, the quest write-back, the workbook position sync and the stuck-retest queue —
+each doing its own `getDoc` and merging without awaiting anything. The seeder does the same
+read-modify-write but **awaits** both halves. And `writeReviewAction` performs **no read at all**: it
+merges arrays built from the caller's in-memory snapshot, which is the same hazard arriving by a
+different door and is the one a subcollection would not fix on its own. Nothing caps any of the three
+arrays, and they live in one Firestore document with a 1 MB ceiling. Two of them landing in the same
+second (a scan sync and a struggle chip, say) silently lose one. *Files: `writeReviewAction.ts:39-50`, `stuckRetestQueue.ts:126-133`,
 `workbookPositionSync.ts:118-126`, `questModelSync.ts:67`, `evalModelWriteback.ts:61`.*
 
 **UX-298 · The synthesis "client regenerate-on-read path" documented in `learnerSynthesis.ts` does
