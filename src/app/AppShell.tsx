@@ -2,10 +2,10 @@ import { useCallback, useState } from 'react'
 import type { ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import Box from '@mui/material/Box'
-import Chip from '@mui/material/Chip'
 import Drawer from '@mui/material/Drawer'
 import IconButton from '@mui/material/IconButton'
 import MenuIcon from '@mui/icons-material/Menu'
+import ChildSwitcherChip from '../components/ChildSwitcherChip'
 import DebugPanel from '../components/DebugPanel'
 import ProfileMenu from '../components/ProfileMenu'
 import { useAuth } from '../core/auth/useAuth'
@@ -110,12 +110,10 @@ function NavContent({
               childName={activeChild.name}
             />
           )}
-          <Chip
-            label={activeChild.name}
-            size="small"
-            variant="outlined"
-            color="primary"
-          />
+          {/* UX-324: the same switcher the mobile header renders. Both name
+              chips are ONE component so they can never disagree about whether
+              the name is a control. */}
+          <ChildSwitcherChip />
         </Box>
       )}
       <nav>
@@ -255,12 +253,10 @@ export function AppShell({ children }: AppShellProps) {
                 childName={activeChild.name}
               />
             )}
-            <Chip
-              label={activeChild.name}
-              size="small"
-              variant="outlined"
-              color="primary"
-            />
+            {/* UX-324 — the shell's one place to change the child. Read-only
+                for a kid profile and for a single-child family; see
+                `components/childSwitcher.ts`. */}
+            <ChildSwitcherChip />
           </Box>
         )}
         <ProfileMenu />
