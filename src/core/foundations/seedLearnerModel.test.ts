@@ -403,3 +403,57 @@ describe('mergeSeededModel — UX-290 widened preserve rule', () => {
     }
   })
 })
+
+
+// ── Codex round 1: a re-seed never demotes the model's status ────────────
+describe('mergeSeededModel — status is never demoted by a re-seed', () => {
+  /** A fresh seed from inputs carrying no signal at all: status `no-data`. */
+  const signalless = () => seed(snapshot({}))
+
+  function existingAt(status: LearnerModel['status'], kind: string): LearnerModel {
+    const base = signalless()
+    return {
+      ...base,
+      status,
+      conceptStates: {
+        ...base.conceptStates,
+        'reading.fluency.accuracy': {
+          state: 'solid',
+          evidence: [{ kind: kind as never, sourceId: 's', note: 'n', observedAt: NOW }],
+        },
+      },
+    }
+  }
+
+  it('keeps `seeded` when the fresh seed found no signal today', () => {
+    const fresh = signalless()
+    expect(fresh.status).toBe('no-data')
+    // The merge preserves the eval evidence; demoting alongside it would tell
+    // five consumers the evidence-bearing model is absent.
+    const merged = mergeSeededModel(existingAt('seeded', 'eval'), fresh)
+    expect(merged.status).toBe('seeded')
+    expect(merged.conceptStates['reading.fluency.accuracy'].state).toBe('solid')
+  })
+
+  it('keeps `synthesized` — a re-seed marks the synthesis stale, it does not undo it', () => {
+    const merged = mergeSeededModel(existingAt('synthesized', 'attestation'), signalless())
+    expect(merged.status).toBe('synthesized')
+    expect(merged.synthesisStaleAt).toBeTruthy()
+  })
+
+  it('promotes a `no-data` model the merge just handed real evidence', () => {
+    const merged = mergeSeededModel(existingAt('no-data', 'quest'), signalless())
+    expect(merged.status).toBe('seeded')
+  })
+
+  it('stays `no-data` when nothing anywhere carries evidence', () => {
+    const merged = mergeSeededModel(signalless(), signalless())
+    expect(merged.status).toBe('no-data')
+  })
+
+  it('takes the fresh seed’s `seeded` when today’s inputs DO carry signal', () => {
+    const fresh = seed(snapshot({ workingLevels: { phonics: wl(4) } }))
+    expect(fresh.status).toBe('seeded')
+    expect(mergeSeededModel(existingAt('no-data', 'workingLevel'), fresh).status).toBe('seeded')
+  })
+})

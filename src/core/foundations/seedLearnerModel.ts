@@ -45,6 +45,7 @@ import type {
 import type { SkillSnapshot } from '../types/evaluation'
 import type { SightWordProgress } from '../types/books'
 import type { ChildSkillMap } from '../curriculum/skillStatus'
+import { promotedModelStatus } from './modelStatus'
 
 /** Single-band → ordinal. Range bands (`K-1`, `1-2`) never reach band seeding. */
 const BAND_ORDER: Record<string, number> = { K: 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5 }
@@ -376,6 +377,32 @@ function carriesNonDerivableEvidence(entry: ConceptStateEntry): boolean {
 }
 
 /**
+ * The `status` a re-seed leaves behind. **A re-seed never demotes** (Codex round
+ * 1): spreading the fresh seed's status straight through meant that re-seeding a
+ * `seeded` or `synthesized` model on a day its snapshot and sight-word inputs
+ * happened to carry no signal stamped it `no-data` — while the merge above was
+ * busy *preserving* that model's attestation / eval / quest evidence. The five
+ * status-keyed consumers would then read an evidence-bearing model as absent,
+ * which is UX-322's defect arriving through a second door. (It also quietly
+ * demoted `synthesized` → `seeded` on every re-seed, since `synthesis` itself is
+ * preserved below.)
+ *
+ * So an established status stands, and a `no-data` one is promoted by the SAME
+ * shared rule every incremental writer uses — read against the **merged** states,
+ * because those are what the document will hold.
+ */
+function mergedStatus(
+  existing: LearnerModel,
+  seeded: LearnerModel,
+  mergedStates: Record<string, ConceptStateEntry>,
+): LearnerModel['status'] {
+  if (existing.status && existing.status !== 'no-data') return existing.status
+  return (
+    promotedModelStatus({ ...seeded, conceptStates: mergedStates }) ?? seeded.status
+  )
+}
+
+/**
  * Merge a freshly seeded model over an existing stored one, **preserving any
  * concept carrying evidence the seeder cannot re-derive** — a parent
  * `attestation` ("I've seen it"), a `curriculumPosition` ("covered in Fast
@@ -412,6 +439,7 @@ export function mergeSeededModel(
   return {
     ...seeded,
     conceptStates: merged,
+    status: mergedStatus(existing, seeded, merged),
     // Carry forward chat-appended judgment arrays the seeder empties.
     openQuestions:
       existing.openQuestions?.length ? existing.openQuestions : seeded.openQuestions,

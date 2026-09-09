@@ -172,7 +172,9 @@ export default function FoundationsDiagPanel() {
         // create-only bootstrap calls the same function. This button stays as the
         // deliberate re-seed, which UX-290 made safe: the merge now preserves
         // every evidence ref the seeder cannot re-derive, not just attestations.
-        const merged = await bootstrapLearnerModel(familyId, childId)
+        // `'reseed'` — this button's whole job is to re-seed an EXISTING model;
+        // the tab's create-only mode would leave it untouched.
+        const merged = await bootstrapLearnerModel(familyId, childId, 'reseed')
         setByChild((prev) => ({
           ...prev,
           [childId]: { loading: false, model: merged, error: null },

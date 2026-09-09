@@ -25,10 +25,11 @@
 // every evidence ref the seeder cannot re-derive. Callers still guard (a wasted
 // round of four reads is worth avoiding); this is the floor under the guard.
 
-import { doc, getDoc, getDocs, query, setDoc } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, runTransaction } from 'firebase/firestore'
 
 import {
   childSkillMapsCollection,
+  db,
   learnerModelsCollection,
   sightWordProgressCollection,
   skillSnapshotsCollection,
@@ -39,9 +40,12 @@ import type { ChildSkillMap } from '../curriculum/skillStatus'
 import type { LearnerModel } from '../types/learnerModel'
 import type { SightWordProgress, SkillSnapshot } from '../types'
 
+/** Which of the two callers this is. See the header. */
+export type BootstrapMode = 'create-only' | 'reseed'
+
 /**
  * Seed (or re-seed) one child's `learnerModels/{childId}` from their derived
- * signals and return the model that was written.
+ * signals and return the model the document now holds.
  *
  * Throws on failure — callers decide how to surface it. There is no swallowed
  * error here: a bootstrap that silently did nothing is the defect this exists to
@@ -50,15 +54,16 @@ import type { SightWordProgress, SkillSnapshot } from '../types'
 export async function bootstrapLearnerModel(
   familyId: string,
   childId: string,
+  mode: BootstrapMode = 'create-only',
 ): Promise<LearnerModel> {
-  // Reads only — snapshot, skill map, sight words, existing model.
+  // Inputs — read outside the transaction. They are not the contended document,
+  // and the sight-word read is a collection query, which a transaction cannot run.
   const snapRef = doc(skillSnapshotsCollection(familyId), childId)
   const mapRef = doc(childSkillMapsCollection(familyId), childId)
   const modelRef = doc(learnerModelsCollection(familyId), childId)
-  const [snapDoc, mapDoc, existingDoc, swSnap] = await Promise.all([
+  const [snapDoc, mapDoc, swSnap] = await Promise.all([
     getDoc(snapRef),
     getDoc(mapRef),
-    getDoc(modelRef),
     getDocs(query(sightWordProgressCollection(familyId))),
   ])
 
@@ -73,12 +78,19 @@ export async function bootstrapLearnerModel(
     .map((d) => d.data() as SightWordProgress)
 
   const fresh = seedLearnerModel(foundationGraphs, childId, snapshot, skillMap, sightWords)
-  const merged = mergeSeededModel(
-    existingDoc.exists() ? (existingDoc.data() as LearnerModel) : null,
-    fresh,
-  )
 
-  // Writes ONLY learnerModels (merge).
-  await setDoc(modelRef, merged, { merge: true })
-  return merged
+  // The contended document is read AND written in one unit, so a concurrent
+  // incremental write is not overwritten by a stale seed.
+  return runTransaction(db, async (tx) => {
+    const existingDoc = await tx.get(modelRef)
+    const existing = existingDoc.exists() ? (existingDoc.data() as LearnerModel) : null
+
+    // A document that appeared since the caller decided is left exactly as it is.
+    if (mode === 'create-only' && existing) return existing
+
+    const merged = mergeSeededModel(existing, fresh)
+    // Writes ONLY learnerModels (merge).
+    tx.set(modelRef, merged, { merge: true })
+    return merged
+  })
 }
