@@ -67,26 +67,30 @@ describe('Workshop workflows stay with their child (UX-324)', () => {
 describe('a stale generation cannot be adopted into a newer workflow', () => {
   const code = pageSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
-  it('reads the CURRENT owner from a ref, not the run’s stale closure', () => {
-    expect(code).toMatch(/const workflowChildRef = useRef<string \| null>\(null\)/)
-    expect(code).toMatch(/const runChild = workflowChildRef\.current/)
-    expect(code).toMatch(/workflowChildRef\.current === runChild/)
+  it('identifies a run by a TOKEN, not by its owner id', () => {
+    // The id aliases an A → B → A sequence onto a run that is no longer this
+    // one; a counter cannot alias (Codex round 5).
+    expect(code).toMatch(/const workflowTokenRef = useRef\(0\)/)
+    expect(code).toMatch(/const runToken = workflowTokenRef\.current/)
+    expect(code).toMatch(/workflowTokenRef\.current === runToken/)
+    expect(code).not.toMatch(/workflowChildRef\.current === runChild/)
   })
 
-  it('decides ONCE per run and applies the game and the phase together', () => {
-    // Half-applying is the hazard: a stale `currentGame` under a live phase is
-    // the same defect wearing the fix.
-    const decided = code.match(/const adopt = runIsStillCurrent\(\)/g) ?? []
-    expect(decided).toHaveLength(3)
-    const guardedGames = code.match(/if \(adopt\) setCurrentGame\(/g) ?? []
+  it('bumps the token every time the workflow owner changes', () => {
+    expect(code).toMatch(/workflowTokenRef\.current \+= 1/)
+  })
+
+  it('decides adoption AFTER the persistence await, never before it', () => {
+    // A switch during the write would be missed by a decision snapshotted
+    // ahead of it (Codex round 5).
+    expect(code).not.toMatch(/const adopt = runIsStillCurrent\(\)/)
+    const guardedGames = code.match(/if \(runIsStillCurrent\(\)\) setCurrentGame\(/g) ?? []
     expect(guardedGames).toHaveLength(6)
-    const guardedPhase = code.match(/if \(!adopt\) return\s+setPhase\(GamePhase\.Recording\)/g) ?? []
+    const guardedPhase = code.match(/if \(!runIsStillCurrent\(\)\) return\s+setPhase\(GamePhase\.Recording\)/g) ?? []
     expect(guardedPhase).toHaveLength(3)
   })
 
-  it('keeps the ref and the state in step through one setter', () => {
-    // A ref may not be written during render, and two call sites that could
-    // disagree is the bug class this whole PR is about.
+  it('keeps the refs and the state in step through one setter', () => {
     expect(code).toMatch(/const setWorkflowChild = useCallback\(/)
     expect(code).not.toMatch(/workflowChildRef\.current = workflowChildId/)
   })

@@ -45,6 +45,7 @@ export default function BusinessPage() {
     milestones,
     saving,
     loading: goalLoading,
+    error: goalError,
     saveMilestones,
   } = useBusinessGoal(activeChildId)
 
@@ -117,6 +118,7 @@ export default function BusinessPage() {
                 milestones={milestones}
                 saving={saving}
                 loading={goalLoading}
+                readError={goalError}
                 onSave={saveMilestones}
               />
             </Stack>

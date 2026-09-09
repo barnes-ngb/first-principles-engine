@@ -148,3 +148,32 @@ describe('GoalBuilder — a delayed snapshot cannot seed the wrong child', () =>
     expect(screen.getByDisplayValue('A big Lego set')).toBeInTheDocument()
   })
 })
+
+/**
+ * Codex round 5 — a failed read is not an empty goal. `useBusinessGoal` clears
+ * the previous child's rows on a switch, so if the new child's listener fails
+ * the stack is `[]` for a reason that has nothing to do with that child. An
+ * editable empty stack there invites saving the emptiness over a goal that was
+ * never read.
+ */
+describe('GoalBuilder — a failed read is never rendered as "no goal"', () => {
+  it('refuses to edit, and says why', () => {
+    render(
+      <GoalBuilder
+        childId="london"
+        milestones={[]}
+        saving={false}
+        readError="permission-denied"
+        onSave={onSave}
+      />,
+    )
+    expect(screen.getByText(/Couldn’t read this goal|Couldn't read this goal/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /save goal/i })).not.toBeInTheDocument()
+  })
+
+  it('is not confused with the empty-but-successful read', () => {
+    render(<GoalBuilder childId="london" milestones={[]} saving={false} onSave={onSave} />)
+    expect(screen.queryByText(/Couldn’t read this goal|Couldn't read this goal/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /A game · /i })).toBeInTheDocument()
+  })
+})

@@ -154,6 +154,14 @@ export default function WorkshopPage() {
    * longer this workflow's.
    */
   const workflowChildRef = useRef<string | null>(null)
+  /**
+   * A unique token per workflow, bumped every time the owner changes (Codex
+   * round 5). The owner ID alone is not identity: an A → B → A switch aliases a
+   * brand-new A workflow with an older A run still in flight, and the older
+   * run's completion would then be adopted as the new one's. A counter cannot
+   * alias.
+   */
+  const workflowTokenRef = useRef(0)
   // Resume dialog state
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false)
   const [confirmRestartOpen, setConfirmRestartOpen] = useState(false)
@@ -257,6 +265,7 @@ export default function WorkshopPage() {
   /** Change the workflow's owner, keeping the async-readable ref in step. */
   const setWorkflowChild = useCallback((next: string | null) => {
     workflowChildRef.current = next
+    workflowTokenRef.current += 1
     setWorkflowChildId(next)
   }, [])
 
@@ -372,11 +381,12 @@ export default function WorkshopPage() {
       lastArtFailureRef.current = null
       setLastWizardInputs({ inputs, gameType })
 
-      // Whose run this is. Compared against the live ref before any result is
-      // adopted, so a completion that lands after the parent moved on is
-      // dropped rather than shown under the new workflow (Codex round 4).
-      const runChild = workflowChildRef.current
-      const runIsStillCurrent = () => workflowChildRef.current === runChild
+      // WHICH run this is — a token, not the owner id, because the id aliases
+      // an A → B → A sequence onto a run that is no longer this one (Codex
+      // round 5). Read as late as possible, after the final persistence await,
+      // since a switch during that write would otherwise be missed.
+      const runToken = workflowTokenRef.current
+      const runIsStillCurrent = () => workflowTokenRef.current === runToken
 
       if (!familyId || !activeChildId) {
         setGenerateError('Missing family or child context.')
@@ -444,13 +454,6 @@ export default function WorkshopPage() {
 
         const now = new Date().toISOString()
 
-        // The document below is this run's real outcome and is written either
-        // way — it carries its own `childId`. What must not happen once the
-        // parent has moved on is this result being ADOPTED into the workflow
-        // now on screen (Codex round 4), so the in-memory game and the phase
-        // are both skipped together rather than half-applied.
-        const adopt = runIsStillCurrent()
-
         if (draftDocId) {
           try {
             await updateDoc(
@@ -466,7 +469,11 @@ export default function WorkshopPage() {
                 currentWizardStep: deleteField(),
               }),
             )
-            if (adopt) setCurrentGame({
+            // Decided AFTER the await, not before it: a switch during the
+            // write would otherwise be missed (Codex round 5). The document
+            // itself is this run's real outcome and is written either way — it
+            // carries its own `childId`.
+            if (runIsStillCurrent()) setCurrentGame({
               id: draftDocId,
               childId: activeChildId,
               createdAt: now,
@@ -494,11 +501,14 @@ export default function WorkshopPage() {
             generatedArt,
           }
           const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
-          if (adopt) setCurrentGame({ ...gameDoc, id: docRef.id })
+          if (runIsStillCurrent()) setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
         setDraftDocId(null)
-        if (!adopt) return
+        // One decision for the phase, taken at the same instant as the game
+        // above: a stale `currentGame` under a live phase is the same defect
+        // wearing the fix.
+        if (!runIsStillCurrent()) return
         setPhase(GamePhase.Recording)
       } else if (gameType === GameType.Adventure) {
         // ── Adventure generation ───────────────────────────────
@@ -560,13 +570,6 @@ export default function WorkshopPage() {
 
         const now = new Date().toISOString()
 
-        // The document below is this run's real outcome and is written either
-        // way — it carries its own `childId`. What must not happen once the
-        // parent has moved on is this result being ADOPTED into the workflow
-        // now on screen (Codex round 4), so the in-memory game and the phase
-        // are both skipped together rather than half-applied.
-        const adopt = runIsStillCurrent()
-
         if (draftDocId) {
           try {
             await updateDoc(
@@ -582,7 +585,11 @@ export default function WorkshopPage() {
                 currentWizardStep: deleteField(),
               }),
             )
-            if (adopt) setCurrentGame({
+            // Decided AFTER the await, not before it: a switch during the
+            // write would otherwise be missed (Codex round 5). The document
+            // itself is this run's real outcome and is written either way — it
+            // carries its own `childId`.
+            if (runIsStillCurrent()) setCurrentGame({
               id: draftDocId,
               childId: activeChildId,
               createdAt: now,
@@ -610,11 +617,14 @@ export default function WorkshopPage() {
             generatedArt,
           }
           const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
-          if (adopt) setCurrentGame({ ...gameDoc, id: docRef.id })
+          if (runIsStillCurrent()) setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
         setDraftDocId(null)
-        if (!adopt) return
+        // One decision for the phase, taken at the same instant as the game
+        // above: a stale `currentGame` under a live phase is the same defect
+        // wearing the fix.
+        if (!runIsStillCurrent()) return
         setPhase(GamePhase.Recording)
       } else {
         // ── Board game generation (existing flow) ──────────────
@@ -696,13 +706,6 @@ export default function WorkshopPage() {
 
         const now = new Date().toISOString()
 
-        // The document below is this run's real outcome and is written either
-        // way — it carries its own `childId`. What must not happen once the
-        // parent has moved on is this result being ADOPTED into the workflow
-        // now on screen (Codex round 4), so the in-memory game and the phase
-        // are both skipped together rather than half-applied.
-        const adopt = runIsStillCurrent()
-
         if (draftDocId) {
           try {
             await updateDoc(
@@ -718,7 +721,11 @@ export default function WorkshopPage() {
                 currentWizardStep: deleteField(),
               }),
             )
-            if (adopt) setCurrentGame({
+            // Decided AFTER the await, not before it: a switch during the
+            // write would otherwise be missed (Codex round 5). The document
+            // itself is this run's real outcome and is written either way — it
+            // carries its own `childId`.
+            if (runIsStillCurrent()) setCurrentGame({
               id: draftDocId,
               childId: activeChildId,
               createdAt: now,
@@ -746,11 +753,14 @@ export default function WorkshopPage() {
             generatedArt,
           }
           const docRef = await addDoc(storyGamesCollection(familyId), stripUndefined(gameDoc as unknown as Record<string, unknown>) as Omit<StoryGame, 'id'>)
-          if (adopt) setCurrentGame({ ...gameDoc, id: docRef.id })
+          if (runIsStillCurrent()) setCurrentGame({ ...gameDoc, id: docRef.id })
         }
 
         setDraftDocId(null)
-        if (!adopt) return
+        // One decision for the phase, taken at the same instant as the game
+        // above: a stale `currentGame` under a live phase is the same defect
+        // wearing the fix.
+        if (!runIsStillCurrent()) return
         setPhase(GamePhase.Recording)
       }
     },

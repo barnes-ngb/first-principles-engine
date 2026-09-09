@@ -52,6 +52,12 @@ interface GoalBuilderProps {
    * (Codex round 4), so the controls wait.
    */
   loading?: boolean
+  /**
+   * Set when the read FAILED. Same hazard as `loading` and a worse one, because
+   * it does not resolve: the stack shows empty, and a save would replace a goal
+   * that was never read (Codex round 5).
+   */
+  readError?: string | null
   onSave: (childId: string, milestones: EditableMilestone[]) => Promise<void>
 }
 
@@ -68,6 +74,7 @@ export default function GoalBuilder({
   milestones,
   saving,
   loading = false,
+  readError = null,
   onSave,
 }: GoalBuilderProps) {
   const [draft, setDraft] = useState<EditableMilestone[]>(milestones)
@@ -148,6 +155,16 @@ export default function GoalBuilder({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save your goal.')
     }
+  }
+
+  if (readError) {
+    // Never rendered as "no goal yet" — this page's own rule, and a records
+    // rule generally: a failed read is not an affirmative empty result.
+    return (
+      <Typography variant="body2" color="error">
+        Couldn&apos;t read this goal, so it can&apos;t be edited right now. Try again in a moment.
+      </Typography>
+    )
   }
 
   if (loading) {
