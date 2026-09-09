@@ -117,15 +117,36 @@ export function parseLedgerRowShape(md) {
   const lines = md.split(/\r?\n/)
   // Count cells by unescaped pipes: `| a | b |` is 3 pipes / 2 cells.
   const cellsIn = (line) => (line.match(/(?<!\\)\|/g) || []).length - 1
+  const empty = { expected: 0, rows: [], malformed: [], breaks: [] }
 
   const headerIdx = lines.findIndex((l) => /^\|\s*ID\s*\|\s*Band\s*\|\s*Status\s*\|/.test(l))
-  if (headerIdx === -1) return { expected: 0, rows: [], malformed: [], breaks: [] }
+  // FAIL CLOSED on a missing or mistyped header (Codex, PR #1812). Returning a
+  // clean empty result here reported `PASS … all 0 rows have 0 cells` while
+  // `parseLedgerIds` still found every row — i.e. the whole ledger could render
+  // as raw text with all HARD checks green, which is the precise failure this
+  // invariant exists to catch, inside the invariant itself.
+  if (headerIdx === -1) return { ...empty, headerMissing: true }
+
+  // GFM requires the delimiter row directly under the header, AND requires it to
+  // have the SAME cell count as the header — a four-cell `|---|---|---|---|`
+  // under a five-cell header is syntactically fine and still means "not a table",
+  // so every row renders as raw text (Codex, PR #1814). Both are reported, and
+  // separately: "missing" would be a misleading thing to print about a delimiter
+  // that is present but the wrong width.
   const expected = cellsIn(lines[headerIdx])
+  const delimiter = lines[headerIdx + 1] ?? ''
+  if (!/^\|(?:\s*:?-{3,}:?\s*\|)+$/.test(delimiter)) {
+    return { ...empty, expected, delimiterMissing: true }
+  }
+  const delimiterCells = cellsIn(delimiter)
+  if (delimiterCells !== expected) {
+    return { ...empty, expected, delimiterCells, delimiterMismatch: true }
+  }
 
   const rows = []
   const breaks = []
   // The table runs to the section's end: the `†` footnote or the next heading.
-  for (let i = headerIdx + 1; i < lines.length; i++) {
+  for (let i = headerIdx + 2; i < lines.length; i++) {
     const line = lines[i]
     if (line.startsWith('† ') || line.startsWith('## ')) break
     if (line.trim() === '') {
@@ -133,17 +154,41 @@ export function parseLedgerRowShape(md) {
       // should name every break, not just the first. Trailing blanks (the one
       // separating the table from the `†` footnote) are dropped below: a blank
       // only SPLITS the table if more rows follow it.
-      breaks.push(i + 1)
+      breaks.push({ line: i + 1, kind: 'blank' })
       continue
     }
-    const m = line.match(/^\|\s*\*\*([A-Z]+-\d+)\*\*\s*\|/)
-    if (m) rows.push({ id: m[1], cells: cellsIn(line), line: i + 1 })
+    if (!line.startsWith('|')) {
+      // Prose, HTML or anything else between rows terminates the table exactly
+      // as a blank line does. Silently skipping these let a stray paragraph
+      // orphan every row below it while this check still claimed one table.
+      breaks.push({ line: i + 1, kind: 'text' })
+      continue
+    }
+    // EVERY pipe-led line in the table is checked, not just ones whose first
+    // cell is a well-formed bold ID (Codex, PR #1814). Matching only ID rows let
+    // `| stray |`, or a row whose bold markup is damaged, carry the wrong cell
+    // count with neither a row nor a break recorded — PASS again. It also skipped
+    // `FEAT-192a`, a real row whose letter-suffixed id no ledger regex matches.
+    // The id here is a LABEL for the failure message only; it never gates the
+    // check, so an unnameable row is still counted.
+    const m = line.match(/^\|\s*\*\*([^*|]+)\*\*\s*\|/)
+    rows.push({ id: m ? m[1].trim() : null, cells: cellsIn(line), line: i + 1 })
   }
 
-  // A blank line only SPLITS the table if a row follows it; a trailing blank
-  // (before the `†` footnote) is how the table is supposed to end.
+  // A trailing BLANK is how the table is supposed to end (the one before the `†`
+  // footnote), so a blank is a split only when a row follows it.
+  //
+  // A trailing TEXT line is not given the same benefit (Codex, PR #1814). If the
+  // LAST row loses its leading `|` — `**A-2** | 1 | OPEN | b |` — no pipe-led row
+  // follows it, so a position-based filter discarded it as "prose after the
+  // table" and the check passed. The identical damage one row earlier was
+  // caught: position was the only difference. Nothing between the header and the
+  // §6 terminator should be a non-table line, so every text break is kept
+  // wherever it falls. The cost is that genuine closing prose inside §6 would now
+  // be flagged — there is none today, the message says to move it out, and after
+  // six fail-open findings this check should err closed.
   const lastRowLine = rows.length ? rows[rows.length - 1].line : 0
-  const splits = breaks.filter((ln) => ln < lastRowLine)
+  const splits = breaks.filter((b) => b.kind === 'text' || b.line < lastRowLine)
 
   const malformed = rows.filter((r) => r.cells !== expected)
   return { expected, rows, malformed, breaks: splits }
@@ -726,7 +771,17 @@ export function runChecks({ fix = false } = {}) {
 
   // ── Check 1b: Ledger table shape — one table, N cells per row (HARD) ───────
   const shape = parseLedgerRowShape(ledgerMd)
-  if (shape.breaks.length === 0 && shape.malformed.length === 0) {
+  if (shape.headerMissing || shape.delimiterMissing || shape.delimiterMismatch) {
+    // Both are fail-closed states: without a header + delimiter row GFM renders
+    // the whole of §6 as raw text, so "no rows to check" must never read as PASS.
+    const why = shape.headerMissing
+      ? 'no `| ID | Band | Status | …` header row found — §6 cannot render as a table at all'
+      : shape.delimiterMismatch
+        ? `the §6 delimiter row has ${shape.delimiterCells} cells but the header has ${shape.expected} — GFM needs them equal, or every row renders as raw text`
+        : 'the `|---|---|` delimiter row under the §6 header is missing or malformed — GFM needs it, or every row renders as raw text'
+    log(paint(RED, `FAIL  [ledger-shape] ${why}`))
+    hard.push({ check: 'ledger-shape', message: why })
+  } else if (shape.breaks.length === 0 && shape.malformed.length === 0) {
     log(
       paint(
         GREEN,
@@ -738,12 +793,16 @@ export function runChecks({ fix = false } = {}) {
       log(
         paint(
           RED,
-          `FAIL  [ledger-shape] blank line(s) inside the §6 table — a blank line ENDS a markdown table, so every row after the first break renders as raw text:`,
+          `FAIL  [ledger-shape] the §6 table is split — a blank line or any non-table line ENDS a markdown table, so every row after the first break renders as raw text:`,
         ),
       )
-      for (const ln of shape.breaks) {
-        log(`        line ${ln} is blank; delete it so §6 stays one table`)
-        hard.push({ check: 'ledger-shape', message: `blank line at ${ln} splits the ledger table` })
+      for (const b of shape.breaks) {
+        const fix =
+          b.kind === 'blank'
+            ? `line ${b.line} is blank; delete it so §6 stays one table`
+            : `line ${b.line} is not a table row; move it out of §6 so the table is unbroken`
+        log(`        ${fix}`)
+        hard.push({ check: 'ledger-shape', message: `${b.kind} line at ${b.line} splits the ledger table` })
       }
     }
     if (shape.malformed.length) {
@@ -754,10 +813,11 @@ export function runChecks({ fix = false } = {}) {
         ),
       )
       for (const r of shape.malformed) {
-        log(`        ${r.id} (line ${r.line}) has ${r.cells} cells`)
+        const label = r.id ? `${r.id} (line ${r.line})` : `the row at line ${r.line}`
+        log(`        ${label} has ${r.cells} cells`)
         hard.push({
           check: 'ledger-shape',
-          message: `${r.id} at line ${r.line} has ${r.cells} cells, expected ${shape.expected}`,
+          message: `${r.id ?? 'row'} at line ${r.line} has ${r.cells} cells, expected ${shape.expected}`,
         })
       }
     }
