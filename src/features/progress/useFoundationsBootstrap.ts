@@ -20,7 +20,12 @@
 // behind exactly that flag. The snapshot arriving IS this write's expected
 // outcome, not a reason to discard its result.
 //
-// **And every piece of state here is keyed by (family, child)** (Codex round 2).
+// **And every piece of state here is keyed by (family, child)** (Codex rounds 2
+// and 3 — the in-flight state is a keyed SET, for the same reason failures are:
+// a single running key was replaced by a second child's overlapping bootstrap,
+// so switching back to the first reported `bootstrapping: false` while its
+// transaction was still running, and its attempted guard blocked a re-run, so the
+// tab briefly showed the empty state for a child it was actively creating).
 // The first fix for the above used a live-key ref plus a mounted ref, and both
 // were their own hazard: under `StrictMode` the mount effect ran setup → cleanup
 // → setup, so the mounted ref latched `false` for the life of the component and
@@ -73,8 +78,8 @@ export function useFoundationsBootstrap({
   loading,
 }: UseFoundationsBootstrapArgs): UseFoundationsBootstrapResult {
   const attemptedRef = useRef<Set<string>>(new Set())
-  /** The key currently being bootstrapped, or null. Never a bare boolean — see the header. */
-  const [runningKey, setRunningKey] = useState<string | null>(null)
+  /** Every key with a bootstrap in flight. A set, not one key — see the header. */
+  const [runningKeys, setRunningKeys] = useState<ReadonlySet<string>>(() => new Set())
   /** Every key whose last attempt threw. Keyed so one child's failure is not another's. */
   const [failedKeys, setFailedKeys] = useState<ReadonlySet<string>>(() => new Set())
   // Bumped by `retry`. It is an effect dependency so re-arming actually re-runs
@@ -97,7 +102,7 @@ export function useFoundationsBootstrap({
     // Mark BEFORE awaiting — a second render during the write must not start one.
     attemptedRef.current.add(key)
     const startedKey = key
-    setRunningKey(startedKey)
+    setRunningKeys((prev) => new Set(prev).add(startedKey))
     setFailedKeys((prev) => without(prev, startedKey))
     void (async () => {
       try {
@@ -108,8 +113,9 @@ export function useFoundationsBootstrap({
         console.error('[foundations] bootstrap failed:', err)
         setFailedKeys((prev) => new Set(prev).add(startedKey))
       } finally {
-        // Only clear the flag if it is still OURS — a newer run owns it otherwise.
-        setRunningKey((current) => (current === startedKey ? null : current))
+        // Clears only its OWN key, so a concurrent run for another child is
+        // untouched and each child reports its own truth.
+        setRunningKeys((prev) => without(prev, startedKey))
       }
     })()
   }, [canEdit, loading, model, familyId, childId, key, retryNonce])
@@ -120,5 +126,5 @@ export function useFoundationsBootstrap({
     setRetryNonce((n) => n + 1)
   }, [key])
 
-  return { bootstrapping: runningKey === key, failed: failedKeys.has(key), retry }
+  return { bootstrapping: runningKeys.has(key), failed: failedKeys.has(key), retry }
 }

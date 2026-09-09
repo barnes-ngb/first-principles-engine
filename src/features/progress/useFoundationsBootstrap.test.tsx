@@ -187,6 +187,46 @@ describe('useFoundationsBootstrap (UX-286)', () => {
     expect(result.current.bootstrapping).toBe(false)
   })
 
+  // Codex round 3 — two overlapping bootstraps, switching back before either
+  // settles. A single running key was replaced by the second child's, so the
+  // first reported `bootstrapping: false` while its transaction was still
+  // running and its attempted guard blocked a re-run — the tab showed the empty
+  // state for a child it was actively creating.
+  it('keeps each concurrently running child’s state its own', async () => {
+    const release: Record<string, (() => void) | undefined> = {}
+    bootstrap.mockImplementation(((...a: unknown[]) =>
+      new Promise<never>((resolve) => {
+        release[a[1] as string] = () => resolve({} as never)
+      })) as never)
+    const { result, rerender } = renderHook(
+      (p: ReturnType<typeof args>) => useFoundationsBootstrap(p),
+      { initialProps: args() },
+    )
+    await waitFor(() => expect(result.current.bootstrapping).toBe(true))
+
+    // Both children absent, switched quickly: two overlapping bootstraps.
+    rerender(args({ childId: 'c2' }))
+    await waitFor(() => expect(bootstrap).toHaveBeenCalledTimes(2))
+    expect(result.current.bootstrapping).toBe(true)
+
+    // Back to c1 before either settles — c1 is still being created.
+    rerender(args())
+    expect(result.current.bootstrapping).toBe(true)
+
+    // c2 settling does not clear c1's state.
+    await act(async () => {
+      release['c2']?.()
+    })
+    expect(result.current.bootstrapping).toBe(true)
+
+    await act(async () => {
+      release['c1']?.()
+    })
+    await waitFor(() => expect(result.current.bootstrapping).toBe(false))
+    rerender(args({ childId: 'c2' }))
+    expect(result.current.bootstrapping).toBe(false)
+  })
+
   it('keeps one child’s failure off another child’s view', async () => {
     bootstrap.mockRejectedValueOnce(new Error('firestore down') as never)
     const { result, rerender } = renderHook(
