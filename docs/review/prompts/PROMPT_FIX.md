@@ -23,7 +23,9 @@ family's homeschool and its compliance records.
   that asserts counts, every number in it must come from a **committed** test or script that derives it from
   the source of truth, and the number you write must be the number that script prints — otherwise write the
   qualifier ("most", "at least N") and say why. See **Numbers in prose are derived, never counted by hand**
-  in `CLAUDE.md`.
+  in `CLAUDE.md`. Where a figure's source of truth is **outside** the repo (a PR's review history, a
+  console reading), no committed script can pin it: cite it precisely enough to be audited (PR number,
+  commit SHA, date) and mark it hand-counted.
 
 ## Step 0 — Load the issue
 
@@ -109,7 +111,9 @@ finish-looking summary before it.
 
    **The cap follows the size of the change.** Measure the PR at open with
    `git diff --shortstat origin/main...HEAD` and state the figure in the PR body, so the cap is auditable.
-   Under ~500 changed lines: **at most two rounds**. At or above ~500: **at most three**. A clean round ends
+   **Changed lines** = insertions + deletions as `--shortstat` reports them; the boundary is **exact**, so
+   two runs cannot classify the same PR differently: **under 500 → at most two rounds; 500 or more → at most
+   three**. A clean round ends
    the run before either cap (step 2), so the cap only ever binds on a PR that is still raising findings —
    and a small diff still raising real findings at its cap is a diff that should have been two runs. At the
    cap, address what you can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding

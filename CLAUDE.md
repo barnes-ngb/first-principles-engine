@@ -53,15 +53,21 @@ reviewing / merging a PR.
 
 **Numbers in prose are derived, never counted by hand.** When a run's deliverable is a document that
 asserts counts — a census, an audit, a walkthrough, an alignment sweep, any review doc — every number in the
-prose must come from a **committed** test or script that derives it from the source of truth, and the number
-written in the document must be the number that test prints. Run it and paste from it; do not retype it. If a
-number cannot be derived, write the qualifier instead of the number ("most", "the majority", "at least N")
-and say in the document why it is not derived. A count asserted from a reading of the code is a finding
-waiting to happen: on PR #1810 twelve of thirteen review findings were arithmetic, and one count moved three
-times across three rounds because correcting one number changed the others and nothing pinned any of them.
-Code with tests converges under review because a fix is asserted and the assertion holds still; numbers
-asserted in prose do not. Had the deriving test existed before the prose, round 1 would have raised none of
-them.
+prose **whose source of truth is in this repository** must come from a **committed** test or script that
+derives it from that source, and the number written in the document must be the number that script prints.
+Run it and paste from it; do not retype it. If such a number cannot be derived, write the qualifier instead
+of the number ("most", "the majority", "at least N") and say in the document why it is not derived.
+Where the source of truth is **outside** the repo — a PR's review history, a console reading, a production
+log — no committed script can pin it, so the rule is different and stated so rather than quietly waived:
+**cite the source precisely enough to be audited** (PR number, commit SHA, date), **mark the figure as
+hand-counted**, and prefer a qualifier wherever the exact value is not load-bearing. A count asserted from a
+reading of the code is a finding waiting to happen: on PR #1810 twelve of thirteen review findings were
+arithmetic, and one count moved three times across three rounds because correcting one number changed the
+others and nothing pinned any of them. Code with tests converges under review because a fix is asserted and
+the assertion holds still; numbers asserted in prose do not. Had the deriving test existed before the prose,
+round 1 would have raised none of them. (Those two figures are themselves hand-counted from the review
+history of PR #1810 — rounds `dfdedb42` / `c5754dbb` / `cc408b4a` — which is the external-source case this
+paragraph covers, and DOC-23's own round 1 raised exactly that as a finding.)
 
 **End of run.** A run is not finished when the PR opens; it is finished when the automated review round on
 that PR is answered. After opening the PR, **poll every 30 seconds and act on the first qualifying signal**:
@@ -91,7 +97,9 @@ a round keeps raising findings, up to the cap below.**
 
 **The cap follows the size of the change.** Measure the PR at open with
 `git diff --shortstat origin/main...HEAD` and state the figure in the PR body, so the cap is auditable.
-Under ~500 changed lines: **at most two rounds**. At or above ~500: **at most three**. A clean round ends the
+**Changed lines** = insertions + deletions as `--shortstat` reports them; the boundary is **exact**, so two
+runs cannot classify the same PR differently: **under 500 → at most two rounds; 500 or more → at most
+three**. A clean round ends the
 run before either cap, so the cap only ever binds on a PR that is still raising findings — and a small diff
 still raising real findings at its cap is a diff that should have been two runs. At the cap, address what you
 can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding and on which head, and
