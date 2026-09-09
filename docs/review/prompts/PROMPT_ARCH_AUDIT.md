@@ -12,6 +12,17 @@ You are performing the monthly deep audit for the First Principles Engine. This 
 validate and propose** — you do **not** apply risky fixes here (those go through `PROMPT_FIX.md`,
 one issue at a time, reviewed). Mechanical, zero-risk doc corrections may be applied directly.
 
+**Numbers in prose are derived, never counted by hand.** This run's deliverable is a document full of
+counts, so every number in it must come from a **committed** test or script that derives it from the source
+of truth, and the number you write must be the number that script prints — where a count cannot be derived,
+write the qualifier instead ("most", "the majority", "at least N") and say why. See **Numbers in prose are
+derived, never counted by hand** in `CLAUDE.md` for the full rule and the evidence behind it. Where a
+figure's source of truth is **outside** the repo (a PR's review history, a console reading), no committed
+script can pin it: cite it precisely enough to be audited (PR number, commit SHA, date) and mark it
+hand-counted. The case this exists for is a **survey** — a count read across a body of code larger than the change;
+a count over the run's own diff is pinned by that diff, so naming the command that prints it is derivation
+enough, and a short list is best **named rather than counted**.
+
 ## Step 0 — Orient
 
 1. Read `docs/PROCESS_OVERVIEW.md` **first** — how this project is developed, the audit pipeline (incl. the COLLISION rule), and the kid learning loop. The three lenses below come straight from it.
@@ -103,7 +114,9 @@ A run is not finished when the PR opens; it is finished when the **automated rev
 answered**. This is the run's last step, and the summary below is the run's **one** summary — do not post a
 finish-looking summary before it.
 
-1. **Poll for the Codex round**, up to 10 minutes, reading three things:
+1. **Poll for the Codex round** every 30 seconds, up to 10 minutes — the ten minutes is the **ceiling, not
+   the duration**: act on the first qualifying signal, and a window that has already produced its answer is
+   over. Read three things:
    - the PR's **reviews** (`/repos/{owner}/{repo}/pulls/{n}/reviews`);
    - its **inline review threads** (`/pulls/{n}/comments`, or the GraphQL `reviewThreads`) — Codex anchors
      its findings to lines, and `gh pr view <n> --comments` fetches top-level comments and review bodies but
@@ -116,21 +129,35 @@ finish-looking summary before it.
      that commit must **be** the head you asked about — one naming an older SHA is the previous round
      arriving late, however recent its timestamp — and only when none is named may you fall back to it
      post-dating the ask; a reaction on the PR itself must have been added **within this round's window**.
-     A 👍 from a human or another bot is not a review result, and an older one is not this round's. A qualifying clean signal closes the round
-     immediately; don't burn the rest of the window on it.
-2. **If the round raised no findings, go straight to step 5.** Never re-ask for a review of an unchanged head.
+     A 👍 from a human or another bot is not a review result, and an older one is not this round's.
+2. **A round that comes back clean ends the run — go straight to step 5 and stop.** A qualifying clean signal
+   closes the round the moment it arrives; don't burn the rest of the window on it. There is **no confirming
+   round, no second window, and no re-ask on an unchanged head.**
 3. **Address every finding in the same PR**, and push.
 4. **Ask for the next round** with an `@codex review` comment — Codex reviews on PR open, on a draft
    going ready, and on that comment, **not** on every push, so without the ask the next window times out
-   silently — then poll another full 10-minute window, reactions included, against the new head commit.
-   **If that round raises a finding, go back to step 3 and repeat 3–4** — as many times as it takes. The
+   silently — then poll another window on the same rule, reactions included, against the new head commit.
+   **If that round raises a finding, go back to step 3 and repeat 3–4** — up to the cap below. The
    round is done when one comes back clean or a whole window passes with nothing; never stop on an
    unanswered one.
-   At most three rounds. If a third round still raises findings, address what you can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding and on which head, and stop. The human decides whether to merge, open a follow-up, or paste the remainder into a new run.
+
+   **The cap follows the size of the change.** Measure the PR at open with
+   `git diff --shortstat origin/main...HEAD` and state the figure in the PR body, so the cap is auditable.
+   **Changed lines** = insertions + deletions as `--shortstat` reports them; the boundary is **exact**, so
+   two runs cannot classify the same PR differently: **under 500 → at most two rounds; 500 or more → at most
+   three**. A clean round ends
+   the run before either cap (step 2), so the cap only ever binds on a PR that is still raising findings —
+   and a small diff still raising real findings at its cap is a diff that should have been two runs. At the
+   cap, address what you can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding
+   and on which head, and stop. The human decides whether to merge, open a follow-up, or paste the remainder
+   into a new run.
 5. **Post the summary**, with as its first line one of:
    - `CODEX ROUND: done — safe to merge`
    - `CODEX ROUND: none arrived in 10 min — safe to merge`
    - `CODEX ROUND: open — do not merge yet`
+
+   **On the line after it, state how long each round actually took to come back** (e.g. *"rounds: 6m, 4m,
+   clean at 3m"*), so the ceiling can be tuned from evidence rather than guessed again.
 
 Never subscribe to the PR, never schedule a check-in, reminder, wake-up or scheduled task of any kind, and
 never stay resident to "watch CI" — CI's result is on the PR page. Then, as the **last action of the run**:

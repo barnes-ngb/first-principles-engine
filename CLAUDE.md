@@ -51,8 +51,34 @@ If a fix-making routine exists, it is scoped to one ledger issue at a time behin
 human to run a local command — their actions are limited to: pasting a run, uploading a file, and
 reviewing / merging a PR.
 
+**Numbers in prose are derived, never counted by hand.** When a run's deliverable is a document that
+asserts counts — a census, an audit, a walkthrough, an alignment sweep, any review doc — every number in the
+prose **whose source of truth is in this repository** must come from a **committed** test or script that
+derives it from that source, and the number written in the document must be the number that script prints.
+Run it and paste from it; do not retype it. If such a number cannot be derived, write the qualifier instead
+of the number ("most", "the majority", "at least N") and say in the document why it is not derived.
+**The case this exists for is a survey** — a count obtained by reading across a body of code larger than the
+change itself ("19 of 22 tags map to nothing", "5 of 19 capture surfaces reach the model"), which is
+expensive to recount, easy to get wrong, and moves when you fix one of its parts. A count over the run's
+**own diff** is already pinned by that diff, so naming the command that prints it and quoting its output
+(`git diff --numstat`, a `grep -c`) is derivation enough — and where a list is short, it is better **named rather than
+counted**, since a named list is its own check and cannot go stale against a recount.
+Where the source of truth is **outside** the repo — a PR's review history, a console reading, a production
+log — no committed script can pin it, so the rule is different and stated so rather than quietly waived:
+**cite the source precisely enough to be audited** (PR number, commit SHA, date), **mark the figure as
+hand-counted**, and prefer a qualifier wherever the exact value is not load-bearing. A count asserted from a
+reading of the code is a finding waiting to happen: on PR #1810 twelve of thirteen review findings were
+arithmetic, and one count moved three times across three rounds because correcting one number changed the
+others and nothing pinned any of them. Code with tests converges under review because a fix is asserted and
+the assertion holds still; numbers asserted in prose do not. Had the deriving test existed before the prose,
+round 1 would have raised none of them. (Those two figures are themselves hand-counted from the review
+history of PR #1810 — rounds `dfdedb42` / `c5754dbb` / `cc408b4a` — which is the external-source case this
+paragraph covers, and DOC-23's own round 1 raised exactly that as a finding.)
+
 **End of run.** A run is not finished when the PR opens; it is finished when the automated review round on
-that PR is answered. After opening the PR, poll for up to 10 minutes, reading three things: the PR's
+that PR is answered. After opening the PR, **poll every 30 seconds and act on the first qualifying signal**:
+ten minutes is the **ceiling, not the duration** — the point at which you give up, not the length of the
+wait, and a window that has already produced its answer is over. Read three things: the PR's
 **reviews**, its **inline review threads** (`/repos/{owner}/{repo}/pulls/{n}/reviews` plus
 `/pulls/{n}/comments`, or the GraphQL `reviewThreads`) — Codex anchors its findings to lines, and
 `gh pr view <n> --comments` fetches top-level comments and review bodies but **no** review threads, so it
@@ -65,18 +91,32 @@ and belongs to **this** head: when the comment names a reviewed commit, that com
 asked about — one naming an older SHA is the previous round arriving late, however recent its timestamp — and
 only when none is named may you fall back to it post-dating the ask; a reaction on the PR itself must have
 been added **within this round's window**. A 👍 from a human or another bot is not a review result, and an
-older one is not this round's. A qualifying clean signal closes the round immediately; don't burn the rest of
-the window on it. **If the round raised nothing, go straight to the summary** — never re-ask for a review of
-an unchanged head. If it raised findings: address every one **in the same PR**, push, then **ask** for the
-next round with an `@codex review` comment (Codex reviews on PR open, on a draft going ready, and on that
-comment — **not** on every push, so without the ask the next window times out silently), and poll the same
-10-minute window, reactions included, against the new head commit. **Repeat for as long as a round keeps
-raising findings.**
-At most three rounds. If a third round still raises findings, address what you can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding and on which head, and stop. The human decides whether to merge, open a follow-up, or paste the remainder into a new run.
+older one is not this round's.
+
+**A round that comes back clean ends the run — post the summary and stop.** A qualifying clean signal closes
+the round the moment it arrives; don't burn the rest of the window on it. There is **no confirming round, no
+second window, and no re-ask on an unchanged head.** If it raised findings: address every one **in the same
+PR**, push, then **ask** for the next round with an `@codex review` comment (Codex reviews on PR open, on a
+draft going ready, and on that comment — **not** on every push, so without the ask the next window times out
+silently), and poll the same window, reactions included, against the new head commit. **Repeat for as long as
+a round keeps raising findings, up to the cap below.**
+
+**The cap follows the size of the change.** Measure the PR at open with
+`git diff --shortstat origin/main...HEAD` and state the figure in the PR body, so the cap is auditable.
+**Changed lines** = insertions + deletions as `--shortstat` reports them; the boundary is **exact**, so two
+runs cannot classify the same PR differently: **under 500 → at most two rounds; 500 or more → at most
+three**. A clean round ends the
+run before either cap, so the cap only ever binds on a PR that is still raising findings — and a small diff
+still raising real findings at its cap is a diff that should have been two runs. At the cap, address what you
+can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding and on which head, and
+stop. The human decides whether to merge, open a follow-up, or paste the remainder into a new run.
+
 The round is done when one comes back clean or a whole window passes with nothing — never stop on an
 unanswered one. Then post the run's summary — **its one summary, not a second one after an earlier "done"
 post** — with, as its first line, one of: `CODEX ROUND: done — safe to merge` · `CODEX ROUND: none arrived in
-10 min — safe to merge` · `CODEX ROUND: open — do not merge yet`. Never subscribe to the PR, never schedule a
+10 min — safe to merge` · `CODEX ROUND: open — do not merge yet`. **On the line after it, state how long each
+round actually took to come back** (e.g. *"rounds: 6m, 4m, clean at 3m"*), so the ceiling can be tuned from
+evidence rather than guessed again. Never subscribe to the PR, never schedule a
 check-in, reminder, wake-up or scheduled task of any kind, and never stay resident to "watch CI" — CI's
 result is on the PR page. Then, as the **last action of the run**: where the harness subscribed the session
 for you when the PR was created, **unsubscribe** — otherwise the run stays armed exactly as this protocol
