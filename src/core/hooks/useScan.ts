@@ -11,6 +11,7 @@ import { storage } from '../firebase/storage'
 import { ErrorSource, reportError } from '../observability'
 import { ScanDoor, scanFailureNote } from './scanFailureNote'
 import type { ScanFailureShape } from './scanFailureNote'
+import { readScanAnalysis, ScanFailureKind, SCAN_FAILURE_MESSAGE } from './scanAnalysis'
 import { deriveScanContentNote } from '../utils/contentNote'
 import type { CaptureContext } from '../utils/contentNote'
 import type { ScanRecord, ScanResult } from '../types'
@@ -57,14 +58,13 @@ export interface UseScanResult {
   clearScan: () => void
 }
 
-/**
- * What a parent reads when the analysis came back unparseable. Deliberately the
- * app's OWN sentence: the model's raw text is unbounded and may echo the child's
- * page, so it stays on the scan record and reaches neither the screen nor the
- * error log.
+/*
+ * What a parent reads when the analysis did not come back is `scanAnalysis.ts`'s
+ * `SCAN_FAILURE_MESSAGE` — one sentence per failure since UX-311, where there
+ * used to be one sentence for all four. Deliberately still the app's OWN words:
+ * the model's raw text is unbounded and may echo the child's page, so it stays
+ * on the scan record and reaches neither the screen nor the error log.
  */
-const ANALYSIS_UNREADABLE =
-  "The analysis came back in a form the app couldn't read. Nothing was added to the curriculum — try that page again."
 
 /** Convert a File to a base64-encoded string (data portion only). */
 async function fileToBase64(file: File): Promise<string> {
@@ -239,15 +239,19 @@ export function useScan(door: ScanDoor = ScanDoor.Unknown): UseScanResult {
           )
         }
 
-        // 5. Parse the AI response
-        let results: ScanResult | null = null
-        let parseError: string | undefined
-        try {
-          results = JSON.parse(response.message) as ScanResult
-        } catch {
-          // AI returned non-JSON — may be an error message
-          parseError = response.message
-        }
+        // 5. Read the AI response (UX-311).
+        //
+        // Tolerant about wrapping, strict about shape: the shared
+        // `sanitizeAndParseJson` forgives the fences and preamble the prompt
+        // asks the model not to use, and a reply is an analysis only if it
+        // carries a real `pageType`. See `scanAnalysis.ts` for why "try that
+        // page again" was the wrong advice for three of the four failures.
+        const outcome = readScanAnalysis(response.message, response.stopReason)
+        const results: ScanResult | null = outcome.results
+        // The record keeps the model's own text when we could not use it —
+        // that is the family's own scan document, and it is the only place the
+        // raw reply is ever kept.
+        const parseError = results ? undefined : response.message
 
         // 6. Save to Firestore
         //
@@ -291,9 +295,17 @@ export function useScan(door: ScanDoor = ScanDoor.Unknown): UseScanResult {
         // the family's own scan document); the log and the screen get the app's
         // own sentence.
         if (!results) {
-          errorRef.current = ANALYSIS_UNREADABLE
-          setError(ANALYSIS_UNREADABLE)
-          report('ScanAnalysisUnreadable', 'analysis response was not JSON', null)
+          const message = outcome.message ?? SCAN_FAILURE_MESSAGE[ScanFailureKind.Unreadable]
+          errorRef.current = message
+          setError(message)
+          // UX-311: the log line names WHICH failure it was, from the app's own
+          // vocabulary. `outcome.detail` is written by `scanAnalysis` and never
+          // carries the model's text.
+          report(
+            `ScanAnalysis:${outcome.kind ?? ScanFailureKind.Unreadable}`,
+            outcome.detail ?? 'analysis response was not usable',
+            null,
+          )
         }
         return record
       } catch (err) {
