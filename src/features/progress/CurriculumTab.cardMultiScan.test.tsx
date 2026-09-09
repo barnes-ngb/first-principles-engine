@@ -62,9 +62,10 @@ vi.mock('../../core/hooks/useActivityConfigs', () => ({
   }),
 }))
 
+const buildCertPreviewMock = vi.fn()
 vi.mock('../../core/hooks/useCertificateProgress', () => ({
   useCertificateProgress: () => ({
-    buildPreview: vi.fn(),
+    buildPreview: (...a: unknown[]) => buildCertPreviewMock(...a),
     applyUpdate: vi.fn(),
     preview: null,
     applying: false,
@@ -74,12 +75,15 @@ vi.mock('../../core/hooks/useCertificateProgress', () => ({
   }),
 }))
 
+/** A classified UX-311 reason, as `useScan.lastError()` would carry it. */
+const CLASSIFIED_REASON = 'The AI would not analyse this picture'
+
 const scanMock = vi.fn()
 vi.mock('../../core/hooks/useScan', () => ({
   useScan: () => ({
     scan: (...args: unknown[]) => scanMock(...args),
     scanning: false,
-    lastError: () => 'Scan failed',
+    lastError: () => CLASSIFIED_REASON,
     clearScan: vi.fn(),
   }),
 }))
@@ -158,6 +162,33 @@ function record(name: string, lesson: number): ScanRecord {
   } as ScanRecord
 }
 
+function certificateRecord(): ScanRecord {
+  return {
+    childId: 'lincoln',
+    imageUrl: '',
+    storagePath: '',
+    action: 'pending',
+    results: {
+      pageType: 'certificate',
+      curriculum: 'gatb',
+      curriculumName: 'Math K',
+      level: 'Level K',
+      milestone: 'Unit 3 complete',
+      lessonRange: '1-30',
+      skillsCovered: [],
+      wordsRead: [],
+      date: '2026-09-08',
+      childName: 'Lincoln',
+      suggestedSnapshotUpdate: {
+        masteredSkills: [],
+        recommendedStartLevel: null,
+        notes: '',
+      },
+    },
+    createdAt: '2026-09-08T00:00:00.000Z',
+  } as ScanRecord
+}
+
 /**
  * Tap the CARD's picker.
  *
@@ -176,6 +207,8 @@ async function pick() {
 beforeEach(() => {
   scanMock.mockReset()
   syncMock.mockReset()
+  buildCertPreviewMock.mockReset()
+  buildCertPreviewMock.mockResolvedValue(undefined)
   pickCount = 2
   syncMock.mockResolvedValue({
     action: 'updated',
@@ -240,6 +273,43 @@ describe('a workbook card takes several pages (UX-312)', () => {
 
     await waitFor(() => expect(syncMock).toHaveBeenCalledTimes(1))
     expect(syncMock.mock.calls[0][2]).toEqual({ targetConfigId: 'cfg-math' })
+  })
+
+  it('keeps a certificate’s confirm card when it arrives beside another page', async () => {
+    // Codex round 1, P2. `processScanBatch` marks every non-worksheet page
+    // `skipped`, which is right for the staging area and wrong for a card: the
+    // identical file picked ALONE opens the confirm dialog, so picking it with
+    // one other page must not report it as "not recognized".
+    scanMock
+      .mockResolvedValueOnce(record('Math K', 10))
+      .mockResolvedValueOnce(certificateRecord())
+
+    render(<CurriculumTab />)
+    await pick()
+
+    await waitFor(() => expect(buildCertPreviewMock).toHaveBeenCalledTimes(1))
+    // Targeted at THIS card, as the single-page path is.
+    expect(buildCertPreviewMock.mock.calls[0][3]).toEqual({ targetConfigId: 'cfg-math' })
+    expect(await screen.findByText(/1 certificate to confirm/i)).toBeInTheDocument()
+    expect(screen.queryByText(/not recognized/i)).not.toBeInTheDocument()
+    // The worksheet page beside it still landed.
+    expect(syncMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('names the classified scan reason for a failed page, not a generic one', async () => {
+    // Codex round 1, P2. `useScan` reports an unusable analysis by RETURNING a
+    // record with `results: null` — not by returning null — so testing the
+    // record alone let the batch report "No analysis returned" and throw away
+    // the UX-311 diagnosis on the one page that needed it.
+    scanMock
+      .mockResolvedValueOnce(record('Math K', 10))
+      .mockResolvedValueOnce({ ...record('Math K', 11), results: null })
+
+    render(<CurriculumTab />)
+    await pick()
+
+    expect(await screen.findByText(new RegExp(CLASSIFIED_REASON, 'i'))).toBeInTheDocument()
+    expect(screen.queryByText(/No analysis returned/i)).not.toBeInTheDocument()
   })
 
   it('raises the single-page mismatch PROMPT rather than skipping, for one file', async () => {

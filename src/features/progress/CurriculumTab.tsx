@@ -579,9 +579,16 @@ export default function CurriculumTab() {
           // UX-275: `scan` reports a failure by returning null and setting
           // React state the loop can't read, so re-throw the reason it kept for
           // us — otherwise every page's outcome reads a bare "Scan failed".
+          //
+          // UX-321: test `results`, not the record. A page whose ANALYSIS was
+          // unusable comes back as a non-null record with `results: null`, and
+          // testing the record alone let `processScanBatch` replace the
+          // classified UX-311 reason with a generic "No analysis returned" —
+          // the same defect UX-275 fixed, reintroduced by the second route a
+          // scan can fail through.
           scanOne: async (file) => {
             const record = await scan(file, familyId, activeChildId)
-            if (!record) throw new Error(lastScanError() ?? 'Scan failed')
+            if (!record?.results) throw new Error(lastScanError() ?? 'Scan failed')
             return record
           },
           syncOne: (results) => syncScanToConfig(activeChildId, results),
@@ -741,11 +748,26 @@ export default function CurriculumTab() {
       setScanningConfigId(config.id)
       try {
         const cardNames = [config.curriculum ?? '', ...activityNames(config)].filter(Boolean)
+        // UX-321: a certificate keeps its confirm card here, exactly as it does
+        // for a single-page capture. Claimed during the loop, acted on after it
+        // — the dialog must not open while pages are still being scanned.
+        const claimedCertificates: CertificateScanResult[] = []
         const summary = await processScanBatch(files, {
           scanOne: async (file) => {
             const record = await scan(file, familyId, activeChildId)
-            if (!record) throw new Error(lastScanError() ?? 'Scan failed')
+            // `results`, not the record: `useScan` reports an unusable analysis
+            // by RETURNING a record with `results: null` and keeping the
+            // classified reason in `lastError()`. Testing the record alone let
+            // `processScanBatch` replace that reason with a generic "No
+            // analysis returned" — losing the UX-311 diagnosis on exactly the
+            // page that needed it (Codex round 1, P2).
+            if (!record?.results) throw new Error(lastScanError() ?? 'Scan failed')
             return record
+          },
+          claimNonWorksheet: (results) => {
+            if (!isCertificateScan(results)) return false
+            claimedCertificates.push(results)
+            return true
           },
           syncOne: async (results) => {
             // The card's own mismatch guard, per page. A batch cannot stop to
@@ -764,7 +786,21 @@ export default function CurriculumTab() {
           },
           onWorksheet: (results) => feedSkillMap(results),
         })
-        setScanSnack({ message: summary.message, failed: summary.failedCount > 0 })
+        // More than one certificate in a batch has one dialog between them, so
+        // say which is being confirmed rather than silently dropping the rest.
+        const extraCerts =
+          claimedCertificates.length > 1
+            ? '; confirming the first — scan the others one at a time'
+            : ''
+        setScanSnack({
+          message: `${summary.message}${extraCerts}`,
+          failed: summary.failedCount > 0,
+        })
+        if (claimedCertificates[0]) {
+          // Opens the same confirm dialog a single-page certificate capture
+          // does, targeted at this card.
+          await applyScanToCard(claimedCertificates[0], config)
+        }
       } catch (err) {
         console.error('[CurriculumTab] Multi-page card scan failed', err)
         const msg = err instanceof Error ? err.message : String(err)
@@ -779,6 +815,9 @@ export default function CurriculumTab() {
       familyId,
       activeChildId,
       handleCardCapture,
+      // UX-321: the certificate branch calls it, so a stale closure here would
+      // open a confirm card built against an earlier config or child.
+      applyScanToCard,
       scan,
       lastScanError,
       syncScanToConfig,
