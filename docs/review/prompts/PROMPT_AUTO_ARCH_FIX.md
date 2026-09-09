@@ -119,13 +119,23 @@ finish-looking summary before it.
    **On the line after it, state how long each round actually took to come back** (e.g. *"rounds: 6m, 4m,
    clean at 3m"*), so the ceiling can be tuned from evidence rather than guessed again.
 
-   **Before you post it, flip your ledger rows' status cells** to the house `**MERGED** (PR #NNNN, …)` form
-   on the run's final commit — **whatever the round's outcome, including `open — do not merge yet`**, since
-   the human is the one who merges and the row reaches `main` only if they do; the *"round N is unreviewed"*
-   fact belongs in the **row body** and in this summary's first line, never in the status cell, which
-   `[ledger-status]` reads as a claim that the PR is open. Then run `node scripts/check-docs-alignment.mjs`
-   and confirm `[ledger-status]` reports no row claiming an open PR — **a run must not stop while its own PR
-   is unmergeable**, and that check is part of finishing, not part of merging.
+   **Your ledger rows' status cells are flipped** to the house `**MERGED** (PR #NNNN, …)` form before the
+   run ends — **whatever the round's outcome, including `open — do not merge yet`**, since the human is the
+   one who merges and the row reaches `main` only if they do; the *"round N is unreviewed"* fact belongs in
+   the **row body** and in this summary's first line, never in the status cell, which `[ledger-status]` reads
+   as a claim that the PR is open.
+
+   **Flip in the same push as your last content change** (step 3), so the head that was reviewed is the head
+   you hand over — the PR's number is known the moment it opens, so every push answering a round carries the
+   flip with it. Exactly one case has no such push: a run whose **first** round came back clean or empty with
+   nothing to answer. There the flip is its own final commit, it carries **nothing but the status cell** — no
+   code, and no prose the reviewer read — so it does not re-open the round, and this summary names **both**
+   commits, the head that was reviewed and the head that carries the flip. Anything more in that commit is a
+   content change: push it, ask a fresh round against it (step 4), and poll.
+
+   Either way, before posting: run `node scripts/check-docs-alignment.mjs` and confirm `[ledger-status]`
+   reports no row claiming an open PR — **a run must not stop while its own PR is unmergeable**, and that
+   check is part of finishing, not part of merging.
 
 Never subscribe to the PR, never schedule a check-in, reminder, wake-up or scheduled task of any kind, and
 never stay resident to "watch CI" — CI's result is on the PR page. Then, as the **last action of the run**:

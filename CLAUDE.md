@@ -125,11 +125,20 @@ still raising real findings at its cap is a diff that should have been two runs.
 can, post `CODEX ROUND: open — do not merge yet` naming exactly what is outstanding and on which head, and
 stop. The human decides whether to merge, open a follow-up, or paste the remainder into a new run.
 
-**The status-cell flip happens on the run's final commit whatever the round's outcome.** A run that ends
-`CODEX ROUND: open — do not merge yet` still flips its own rows to the house `**MERGED** (PR #NNNN, …)` form
-as its last act, because the human is the one who merges and the row reaches `main` only if they do. The
-*"round N is unreviewed"* fact belongs in the **row body** and in the PR summary's first line — never in the
-status cell, which `[ledger-status]` reads as a claim that the PR is open. **A run must not stop while its own
+**The status-cell flip happens whatever the round's outcome, and it rides the LAST content push.** A run that
+ends `CODEX ROUND: open — do not merge yet` still flips its own rows to the house `**MERGED** (PR #NNNN, …)`
+form, because the human is the one who merges and the row reaches `main` only if they do. **Flip in the same
+push as your last content change, so the head that was reviewed is the head you hand over** — the PR's number
+is known the moment it opens, so every push that answers a round carries the flip with it. Exactly one case
+has no such push: a run whose **first** round comes back clean or empty with nothing to answer. There the flip
+is its own final commit, and because that commit changes **nothing but a ledger status cell** — no code, and
+no prose the reviewer read — it does not re-open the round; name **both** commits in the summary, the head
+that was reviewed and the head that carries the flip, so the gap is stated rather than hidden. **Nothing else
+may ride in that commit**: anything more is a content change, and a content change is pushed, asked for a
+fresh round, and polled like any other (PR #1818 round 1 — an earlier draft of this rule put the flip after
+the reviewed head in *every* case, which would have had each run post `safe to merge` about a commit nobody
+read). The *"round N is unreviewed"* fact belongs in the **row body** and in the PR summary's first line —
+never in the status cell, which `[ledger-status]` reads as a claim that the PR is open. **A run must not stop while its own
 PR is unmergeable**: before posting the summary, run `node scripts/check-docs-alignment.mjs` and confirm
 `[ledger-status]` reports no row claiming an open PR. If it does, fix it and re-verify — that is part of
 finishing, not part of merging. PR #1817 ended at its cap and left its own rows reading `**BUILT** (PR open) —
@@ -187,10 +196,13 @@ for, and unsaved work is re-seeded with the loss made visible.
 - **A ledger diff that shows deletions, reordering, or reopened items means your branch is on the
   wrong base — stop, rebase onto current `origin/main`, and redo.** A correct ledger PR reads
   `+N rows / −0`, one file changed.
-- **The status-cell flip is the run's last act, whatever the round's outcome.** A row's status cell is
-  flipped to the house `**MERGED** (PR #NNNN, …)` form on the run's **final pre-merge commit** — including
-  on a run that ends `CODEX ROUND: open — do not merge yet`, because there is no later run to make that
-  commit and the row reaches `main` only if the human merges. Every phrase about a round's outcome lives in
+- **The status cell is flipped whatever the round's outcome, and the flip rides the last content push.**
+  A row's cell goes to the house `**MERGED** (PR #NNNN, …)` form before the run ends — including on a run
+  that ends `CODEX ROUND: open — do not merge yet`, because there is no later run to make that commit and
+  the row reaches `main` only if the human merges. **Put it in the same push as your last content change**,
+  so the reviewed head is the head handed over; only a run whose first round came back clean or empty with
+  nothing to answer flips in a commit of its own, that commit carries **nothing but the status cell**, and
+  the summary names both the reviewed head and the flipped one. Every phrase about a round's outcome lives in
   the **row body** and in the PR summary's first line, **never** in the status cell, which `[ledger-status]`
   reads as a claim that the PR is open (DOC-22's rule, one outcome further on). **A run must not stop while
   its own PR is unmergeable**: before posting the summary, run `node scripts/check-docs-alignment.mjs` and
