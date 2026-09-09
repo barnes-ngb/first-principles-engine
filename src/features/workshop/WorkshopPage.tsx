@@ -23,6 +23,7 @@ import type {
   VoiceRecordingMap,
 } from '../../core/types'
 import { GamePhase, GameType, PlaytestStatus, WorkshopStatus } from '../../core/types/workshop'
+import { workflowLeftItsChild, workshopSwitchedAwayLine } from './workshopChildSwitch'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
@@ -134,6 +135,14 @@ export default function WorkshopPage() {
   const [generateError, setGenerateError] = useState<string | null>(null)
   // Draft doc ID for auto-save during wizard
   const [draftDocId, setDraftDocId] = useState<string | null>(null)
+  /**
+   * The child this in-flight workflow belongs to — `null` at the workshop home
+   * (UX-324, Codex round 2). The header chip can now switch child on this
+   * screen, and a workflow does not move with it: the draft is stamped with
+   * the child it started under and never restamped, while generation, the art
+   * quota and the rewards all read the LIVE child. See `workshopChildSwitch`.
+   */
+  const [workflowChildId, setWorkflowChildId] = useState<string | null>(null)
   // Resume dialog state
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false)
   const [confirmRestartOpen, setConfirmRestartOpen] = useState(false)
@@ -324,14 +333,18 @@ export default function WorkshopPage() {
     setGenerateError(null)
     setDraftDocId(null)
     setLastGameResult(null)
-  }, [])
+    setWorkflowChildId(activeChildId)
+  }, [activeChildId])
 
   const handleResumeDraft = useCallback((game: StoryGame) => {
     setCurrentGame(game)
     setDraftDocId(game.id ?? null)
     setPhase(GamePhase.Wizard)
     setGenerateError(null)
-  }, [])
+    // The draft's OWN child, not the header's — a resumed draft is already
+    // stamped, and that stamp is what the rest of the workflow must follow.
+    setWorkflowChildId(game.childId ?? activeChildId)
+  }, [activeChildId])
 
   const handleWizardComplete = useCallback(
     async (inputs: StoryInputs, gameType: GameType) => {
@@ -725,12 +738,16 @@ export default function WorkshopPage() {
     setCurrentGame(null)
     setDraftDocId(null)
     setGenerateError(null)
+    setWorkflowChildId(null)
   }, [])
 
   // ── Game selection & resume ──────────────────────────────────────
 
   const handleSelectExistingGame = useCallback((game: StoryGame) => {
     setCurrentGame(game)
+    // Playing and rewarding a saved game are the same workflow: the XP, the
+    // artifacts and the played-marker all read the live child today.
+    setWorkflowChildId(game.childId ?? activeChildId)
     const isAdv = game.gameType === GameType.Adventure
     const isCrd = game.gameType === GameType.Cards
     if (isAdv && game.activeAdventureSession?.status === 'playing') {
@@ -742,7 +759,7 @@ export default function WorkshopPage() {
     } else {
       setPhase(GamePhase.Ready)
     }
-  }, [])
+  }, [activeChildId])
 
   const handleContinueGame = useCallback(() => {
     setResumeDialogOpen(false)
@@ -1168,6 +1185,7 @@ export default function WorkshopPage() {
     setPhase(GamePhase.Idle)
     setCurrentGame(null)
     setActivePlaytestSession(null)
+    setWorkflowChildId(null)
   }, [])
 
   const handleBackToWorkshop = useCallback(() => {
@@ -1176,6 +1194,7 @@ export default function WorkshopPage() {
     setDraftDocId(null)
     setPlaytestFeedback(null)
     setActivePlaytestSession(null)
+    setWorkflowChildId(null)
   }, [])
 
   /** What "Regenerate Art" will spend for a game — the hint's number and the reservation. */
@@ -1221,6 +1240,34 @@ export default function WorkshopPage() {
     [familyId, countedGenerateImage, reserveArt, regenerateArtCount, currentGame],
   )
 
+  /**
+   * UX-324 (Codex round 2) — the header chip can switch child from anywhere,
+   * and this screen has no selector of its own. A workflow started for one
+   * child must not FINISH under another: its draft is stamped once, at
+   * creation, and never restamped, while generation, `currentGame`, the art
+   * quota and every reward read the LIVE child. So a wizard begun for Lincoln
+   * and completed after a switch produced London-calibrated work, London's
+   * quota spend and London's rewards on a Lincoln-owned game.
+   *
+   * The workflow is therefore **hidden, not destroyed** — derived at render,
+   * never written — so no door onto those writes is reachable while the header
+   * is on someone else, and switching back brings the work back exactly as it
+   * was. That is why this is a `const` and not an effect: there is no state to
+   * reset, so there is nothing to get wrong on the way back.
+   *
+   * It is the opposite of the books answer (`draftOwnership.inFlightDraftNotice`,
+   * where the write is re-bound to the draft) because the trade is different: a
+   * generated story lives only in local state and cost a paid call, so it must
+   * still be saveable; a Workshop draft is already saved under its own child
+   * and listed on that child's shelf.
+   */
+  const workflowLeftChild = workflowLeftItsChild(workflowChildId, activeChildId)
+  const workflowOwnerName = workflowLeftChild
+    ? children.find((c) => c.id === workflowChildId)?.name
+    : undefined
+  /** What renders while the header is on a child this workflow is not for. */
+  const renderPhase = workflowLeftChild ? GamePhase.Idle : phase
+
   const titleArt = currentGame?.generatedArt?.titleScreen
 
   // Build current player name for resume dialog
@@ -1243,7 +1290,15 @@ export default function WorkshopPage() {
         defaultSubject={SubjectBucket.Art}
         defaultDescription="Game design"
       />
-      {phase === GamePhase.Idle && (
+      {/* UX-324 (Codex round 2) — a switch mid-workflow ends it, and this says
+          whose game it was and that it is still there. Dismissible, because it
+          is a note about what just happened, not a state of the page. */}
+      {workflowLeftChild && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {workshopSwitchedAwayLine(workflowOwnerName)}
+        </Alert>
+      )}
+      {renderPhase === GamePhase.Idle && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
             Game Workshop
@@ -1296,7 +1351,7 @@ export default function WorkshopPage() {
         </Box>
       )}
 
-      {phase === GamePhase.Wizard && (
+      {renderPhase === GamePhase.Wizard && (
         <>
           {generateError && (
             <Typography color="error" sx={{ mb: 2, textAlign: 'center' }}>
@@ -1391,7 +1446,7 @@ export default function WorkshopPage() {
         </Alert>
       </Snackbar>
 
-      {phase === GamePhase.Generating && (
+      {renderPhase === GamePhase.Generating && (
         generateError ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>
             <Typography variant="h5" gutterBottom sx={{ fontWeight: 700 }}>
@@ -1429,7 +1484,7 @@ export default function WorkshopPage() {
         )
       )}
 
-      {phase === GamePhase.Recording && currentGame?.id && activeChildId && familyId && (
+      {renderPhase === GamePhase.Recording && currentGame?.id && activeChildId && familyId && (
         <>
           {currentGame.generatedGame && (
             <VoiceRecordingStep
@@ -1470,7 +1525,7 @@ export default function WorkshopPage() {
         </>
       )}
 
-      {phase === GamePhase.Ready && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
+      {renderPhase === GamePhase.Ready && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
         <Box sx={{ textAlign: 'center', py: 4 }}>
           {/* Title screen hero image */}
           {titleArt ? (
@@ -1592,7 +1647,7 @@ export default function WorkshopPage() {
         </Box>
       )}
 
-      {phase === GamePhase.Playing && !isAdventure && currentGame?.generatedGame && (
+      {renderPhase === GamePhase.Playing && !isAdventure && currentGame?.generatedGame && (
         <GamePlayView
           game={currentGame.generatedGame}
           gameId={currentGame.id}
@@ -1605,7 +1660,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playing && isAdventure && currentGame?.adventureTree && (
+      {renderPhase === GamePhase.Playing && isAdventure && currentGame?.adventureTree && (
         <AdventurePlayView
           adventure={currentGame.adventureTree}
           gameTitle={gameTitle ?? 'Adventure'}
@@ -1620,7 +1675,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'matching' && (
+      {renderPhase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'matching' && (
         <MatchingPlayView
           cardGame={currentGame.cardGame}
           gameId={currentGame.id}
@@ -1634,7 +1689,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'collecting' && (
+      {renderPhase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'collecting' && (
         <CollectingPlayView
           cardGame={currentGame.cardGame}
           gameId={currentGame.id}
@@ -1648,7 +1703,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'battle' && (
+      {renderPhase === GamePhase.Playing && isCards && currentGame?.cardGame && currentGame.cardGame.mechanic === 'battle' && (
         <BattlePlayView
           cardGame={currentGame.cardGame}
           gameId={currentGame.id}
@@ -1662,7 +1717,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playtesting && !isAdventure && currentGame?.generatedGame && currentGame.id && familyId && activeChildId && !playtestFeedback && (
+      {renderPhase === GamePhase.Playtesting && !isAdventure && currentGame?.generatedGame && currentGame.id && familyId && activeChildId && !playtestFeedback && (
         <PlaytestView
           game={currentGame.generatedGame}
           gameId={currentGame.id}
@@ -1676,7 +1731,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playtesting && isAdventure && currentGame?.adventureTree && currentGame.id && familyId && activeChildId && !playtestFeedback && (
+      {renderPhase === GamePhase.Playtesting && isAdventure && currentGame?.adventureTree && currentGame.id && familyId && activeChildId && !playtestFeedback && (
         <AdventurePlaytestView
           adventure={currentGame.adventureTree}
           gameId={currentGame.id}
@@ -1690,7 +1745,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Playtesting && playtestFeedback && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
+      {renderPhase === GamePhase.Playtesting && playtestFeedback && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
         <PlaytestSummaryView
           feedback={playtestFeedback}
           cards={currentGame?.generatedGame?.challengeCards ?? []}
@@ -1703,7 +1758,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.PlaytestReview && currentGame && activePlaytestSession && familyId && activeChildId && (
+      {renderPhase === GamePhase.PlaytestReview && currentGame && activePlaytestSession && familyId && activeChildId && (
         <PlaytestReviewView
           game={currentGame}
           playtestSession={activePlaytestSession}
@@ -1715,7 +1770,7 @@ export default function WorkshopPage() {
         />
       )}
 
-      {phase === GamePhase.Finished && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
+      {renderPhase === GamePhase.Finished && (currentGame?.generatedGame || currentGame?.adventureTree || currentGame?.cardGame) && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           {currentGame?.generatedArt?.titleScreen && (
             <Box
