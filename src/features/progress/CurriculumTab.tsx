@@ -278,10 +278,25 @@ export default function CurriculumTab() {
   const [failedPageCount, setFailedPageCount] = useState(0)
   /** Which card is currently scanning (null = "Add to Curriculum" generic scan). */
   const [scanningConfigId, setScanningConfigId] = useState<string | null>(null)
-  /** Pending certificate result awaiting confirmation, scoped to a specific card. */
+  /**
+   * Pending certificate result awaiting confirmation, scoped to a specific card
+   * — and, since UX-321, to the CHILD it was scanned for.
+   *
+   * `handleConfirmCertificate` used to pair the card captured when the scan ran
+   * with whatever `activeChildId` was when the parent tapped Confirm. Those are
+   * the same value almost always and different exactly when it matters: switch
+   * the child selector while a scan is in flight and the write updated the old
+   * child's card while `useCertificateProgress` wrote the certificate's
+   * mastered skills into the NEW child's snapshot (Codex round 2, P1).
+   *
+   * Carrying the child here binds the whole confirmation to one child, so the
+   * dialog can only ever write where its own scan came from — the single-page
+   * path included, where the same hazard existed with a narrower window.
+   */
   const [certConfirm, setCertConfirm] = useState<{
     result: CertificateScanResult
     config: ActivityConfig
+    childId: string
   } | null>(null)
   /** Mismatch warning when scan detects a different curriculum than the card. */
   const [mismatchPrompt, setMismatchPrompt] = useState<{
@@ -651,7 +666,9 @@ export default function CurriculumTab() {
       if (isCertificateScan(results)) {
         try {
           await buildCertPreview(familyId, activeChildId, results, { targetConfigId: config.id })
-          setCertConfirm({ result: results, config })
+          // Stamp the child the preview was built for, so Confirm cannot pair
+          // this card with a different child later (UX-321).
+          setCertConfirm({ result: results, config, childId: activeChildId })
         } catch (err) {
           console.error('[CurriculumTab] Failed to build certificate preview', err)
           setScanSnack({ message: 'Failed to read certificate', failed: true })
@@ -748,6 +765,18 @@ export default function CurriculumTab() {
       setScanningConfigId(config.id)
       try {
         const cardNames = [config.curriculum ?? '', ...activityNames(config)].filter(Boolean)
+        /**
+         * Does a scanned page name THIS card? One definition for both branches
+         * (Codex round 2, P1): the worksheet guard lived in `syncOne` only, so
+         * the certificate branch claimed any certificate at all — and
+         * `applyUpdate` deliberately writes to its `targetConfigId` regardless
+         * of the certificate's own name, so a Reading Eggs certificate in a
+         * Math K batch would have written its milestone and skills onto Math K.
+         */
+        const matchesCard = (detectedName: string | undefined | null): boolean => {
+          if (!detectedName || cardNames.length === 0) return true
+          return cardNames.some((cardName) => isWorkbookMatch(cardName, detectedName))
+        }
         // UX-321: a certificate keeps its confirm card here, exactly as it does
         // for a single-page capture. Claimed during the loop, acted on after it
         // — the dialog must not open while pages are still being scanned.
@@ -766,6 +795,11 @@ export default function CurriculumTab() {
           },
           claimNonWorksheet: (results) => {
             if (!isCertificateScan(results)) return false
+            // A certificate for a DIFFERENT book is not this card's to claim.
+            // Left unclaimed it reports as "not recognized", which is the
+            // honest answer for this door — and the safe one, since claiming it
+            // would write another curriculum's milestone onto this card.
+            if (!matchesCard(results.curriculumName)) return false
             claimedCertificates.push(results)
             return true
           },
@@ -775,11 +809,7 @@ export default function CurriculumTab() {
             // reported by name and NOT applied — the alternative is writing a
             // reading page's lesson number onto the math card silently.
             const detectedName = results.curriculumDetected?.name || results.subject
-            if (
-              detectedName &&
-              cardNames.length > 0 &&
-              !cardNames.some((cardName) => isWorkbookMatch(cardName, detectedName))
-            ) {
+            if (!matchesCard(detectedName)) {
               throw new Error(`doesn't look like ${config.name}`)
             }
             return syncScanToConfig(activeChildId, results, { targetConfigId: config.id })
@@ -796,9 +826,17 @@ export default function CurriculumTab() {
           message: `${summary.message}${extraCerts}`,
           failed: summary.failedCount > 0,
         })
-        if (claimedCertificates[0]) {
+        if (claimedCertificates[0] && activeChildIdRef.current === activeChildId) {
           // Opens the same confirm dialog a single-page certificate capture
           // does, targeted at this card.
+          //
+          // Guarded on the child (Codex round 2, P1): a batch spans several
+          // scans, so the selector can move under it, and installing a
+          // confirmation built for the previous child's card after the
+          // component has re-rendered for the new one is how a certificate ends
+          // up written across two children's records. The same `ref` the
+          // staging batch uses — readable from inside an in-flight run, which
+          // the state value is not.
           await applyScanToCard(claimedCertificates[0], config)
         }
       } catch (err) {
@@ -827,9 +865,13 @@ export default function CurriculumTab() {
   )
 
   const handleConfirmCertificate = useCallback(async () => {
-    if (!familyId || !activeChildId || !certConfirm) return
+    if (!familyId || !certConfirm) return
     try {
-      await applyCertUpdate(familyId, activeChildId, certConfirm.result, {
+      // The child this certificate was SCANNED for, never the one selected now
+      // (UX-321). The card and the child must come from the same scan, or the
+      // position lands on one child's record and the mastered skills on
+      // another's.
+      await applyCertUpdate(familyId, certConfirm.childId, certConfirm.result, {
         targetConfigId: certConfirm.config.id,
       })
       setScanSnack({ message: `Updated ${certConfirm.config.name}`, failed: false })
@@ -839,7 +881,7 @@ export default function CurriculumTab() {
       setCertConfirm(null)
       clearCertState()
     }
-  }, [familyId, activeChildId, certConfirm, applyCertUpdate, clearCertState])
+  }, [familyId, certConfirm, applyCertUpdate, clearCertState])
 
   const handleCancelCertificate = useCallback(() => {
     setCertConfirm(null)

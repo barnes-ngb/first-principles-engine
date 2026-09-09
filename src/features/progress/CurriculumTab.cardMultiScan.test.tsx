@@ -19,10 +19,11 @@ import type { ActivityConfig, ScanRecord } from '../../core/types'
 
 vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'fam-1' }))
 
+let activeChildId = 'lincoln'
 vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
-    activeChildId: 'lincoln',
-    activeChild: { id: 'lincoln', name: 'Lincoln' },
+    activeChildId,
+    activeChild: { id: activeChildId, name: activeChildId },
     children: [{ id: 'lincoln', name: 'Lincoln' }],
     setActiveChildId: vi.fn(),
     isChildProfile: false,
@@ -63,10 +64,11 @@ vi.mock('../../core/hooks/useActivityConfigs', () => ({
 }))
 
 const buildCertPreviewMock = vi.fn()
+const applyCertUpdateMock = vi.fn()
 vi.mock('../../core/hooks/useCertificateProgress', () => ({
   useCertificateProgress: () => ({
     buildPreview: (...a: unknown[]) => buildCertPreviewMock(...a),
-    applyUpdate: vi.fn(),
+    applyUpdate: (...a: unknown[]) => applyCertUpdateMock(...a),
     preview: null,
     applying: false,
     applied: null,
@@ -162,7 +164,7 @@ function record(name: string, lesson: number): ScanRecord {
   } as ScanRecord
 }
 
-function certificateRecord(): ScanRecord {
+function certificateRecord(name = 'Math K'): ScanRecord {
   return {
     childId: 'lincoln',
     imageUrl: '',
@@ -171,7 +173,7 @@ function certificateRecord(): ScanRecord {
     results: {
       pageType: 'certificate',
       curriculum: 'gatb',
-      curriculumName: 'Math K',
+      curriculumName: name,
       level: 'Level K',
       milestone: 'Unit 3 complete',
       lessonRange: '1-30',
@@ -209,6 +211,9 @@ beforeEach(() => {
   syncMock.mockReset()
   buildCertPreviewMock.mockReset()
   buildCertPreviewMock.mockResolvedValue(undefined)
+  applyCertUpdateMock.mockReset()
+  applyCertUpdateMock.mockResolvedValue(undefined)
+  activeChildId = 'lincoln'
   pickCount = 2
   syncMock.mockResolvedValue({
     action: 'updated',
@@ -296,6 +301,24 @@ describe('a workbook card takes several pages (UX-312)', () => {
     expect(syncMock).toHaveBeenCalledTimes(1)
   })
 
+  it('does NOT claim a certificate for a different book', async () => {
+    // Codex round 2, P1. `applyUpdate` deliberately writes to its
+    // `targetConfigId` regardless of the certificate's own name, so claiming a
+    // Reading Eggs certificate in a Math K batch would write its milestone and
+    // skills onto Math K. Unclaimed, it reports as unrecognized — which is the
+    // honest answer for this door, and the safe one.
+    scanMock
+      .mockResolvedValueOnce(record('Math K', 10))
+      .mockResolvedValueOnce(certificateRecord('Reading Eggs'))
+
+    render(<CurriculumTab />)
+    await pick()
+
+    await waitFor(() => expect(syncMock).toHaveBeenCalledTimes(1))
+    expect(buildCertPreviewMock).not.toHaveBeenCalled()
+    expect(await screen.findByText(/1 page not recognized/i)).toBeInTheDocument()
+  })
+
   it('names the classified scan reason for a failed page, not a generic one', async () => {
     // Codex round 1, P2. `useScan` reports an unusable analysis by RETURNING a
     // record with `results: null` — not by returning null — so testing the
@@ -310,6 +333,30 @@ describe('a workbook card takes several pages (UX-312)', () => {
 
     expect(await screen.findByText(new RegExp(CLASSIFIED_REASON, 'i'))).toBeInTheDocument()
     expect(screen.queryByText(/No analysis returned/i)).not.toBeInTheDocument()
+  })
+
+  it('confirms a certificate against the child it was SCANNED for', async () => {
+    // Codex round 2, P1. `handleConfirmCertificate` paired the card captured
+    // when the scan ran with whatever `activeChildId` was when Confirm was
+    // tapped — so switching the selector mid-flight wrote the position onto the
+    // old child's card and the mastered skills into the NEW child's snapshot.
+    //
+    // The re-render is what makes this discriminating: without it the stale
+    // closure still holds the original child and the buggy code passes too.
+    pickCount = 1
+    scanMock.mockResolvedValueOnce(certificateRecord('Math K'))
+
+    const { rerender } = render(<CurriculumTab />)
+    await pick()
+    await waitFor(() => expect(buildCertPreviewMock).toHaveBeenCalledTimes(1))
+
+    activeChildId = 'london'
+    rerender(<CurriculumTab />)
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: /Confirm Update/i }))
+
+    await waitFor(() => expect(applyCertUpdateMock).toHaveBeenCalledTimes(1))
+    expect(applyCertUpdateMock.mock.calls[0][1]).toBe('lincoln')
   })
 
   it('raises the single-page mismatch PROMPT rather than skipping, for one file', async () => {
