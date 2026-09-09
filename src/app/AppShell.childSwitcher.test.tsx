@@ -27,6 +27,24 @@ const activeChildRef = {
   },
 }
 
+/**
+ * UX-330 — the switcher ships OFF behind `CHILD_SWITCHER_ENABLED`. The blocks
+ * that exercise the switchable path force it on; the last block reads the
+ * shipped constant. The mock delegates to the **real** `canSwitchChild` and
+ * only supplies the `enabled` argument the chip omits, so these still test the
+ * rule rather than a stub — `undefined` falls through to its default.
+ */
+const forceSwitcherEnabled: { current: boolean | undefined } = { current: undefined }
+vi.mock('../components/childSwitcher', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../components/childSwitcher')>()
+  return {
+    ...actual,
+    canSwitchChild: (
+      audience: import('../components/childSwitcher').ChildSwitcherAudience,
+    ) => actual.canSwitchChild(audience, forceSwitcherEnabled.current),
+  }
+})
+
 vi.mock('../core/profile/useProfile', () => ({
   useProfile: () => ({ profile: profileRef.current }),
 }))
@@ -55,6 +73,7 @@ function renderShell() {
 }
 
 beforeEach(() => {
+  forceSwitcherEnabled.current = true
   profileRef.current = UserProfile.Parents
   activeChildRef.current = {
     activeChild: { id: 'c1', name: 'Lincoln' },
@@ -68,7 +87,7 @@ beforeEach(() => {
   }
 })
 
-describe('AppShell child chips (UX-324)', () => {
+describe('AppShell child chips (UX-324, switch forced on)', () => {
   it('renders the switcher at BOTH name-chip sites for a parent', () => {
     renderShell()
     // Mobile header + sidebar nav. Both are the same component, so neither can
@@ -93,5 +112,24 @@ describe('AppShell child chips (UX-324)', () => {
     renderShell()
     expect(screen.queryByRole('button', { name: SWITCHER })).not.toBeInTheDocument()
     expect(screen.getAllByText('Lincoln').length).toBeGreaterThan(0)
+  })
+})
+
+describe('AppShell child chips as they SHIP (UX-330 — switch off)', () => {
+  beforeEach(() => {
+    // Read the shipped `CHILD_SWITCHER_ENABLED`, not a forced value.
+    forceSwitcherEnabled.current = undefined
+  })
+
+  it('renders the read-only chip at BOTH sites, even for a parent with two children', () => {
+    renderShell()
+
+    // Both sites still name the child — the shell is not silent about whose
+    // day it is; it just does not claim to be a control.
+    expect(screen.getAllByText('Lincoln')).toHaveLength(2)
+    // No caret, no menu, nothing pressable — at either site.
+    expect(screen.queryByTestId('ArrowDropDownIcon')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: SWITCHER })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 })
