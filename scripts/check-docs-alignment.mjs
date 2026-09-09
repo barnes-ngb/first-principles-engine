@@ -164,8 +164,15 @@ export function parseLedgerRowShape(md) {
       breaks.push({ line: i + 1, kind: 'text' })
       continue
     }
-    const m = line.match(/^\|\s*\*\*([A-Z]+-\d+)\*\*\s*\|/)
-    if (m) rows.push({ id: m[1], cells: cellsIn(line), line: i + 1 })
+    // EVERY pipe-led line in the table is checked, not just ones whose first
+    // cell is a well-formed bold ID (Codex, PR #1814). Matching only ID rows let
+    // `| stray |`, or a row whose bold markup is damaged, carry the wrong cell
+    // count with neither a row nor a break recorded — PASS again. It also skipped
+    // `FEAT-192a`, a real row whose letter-suffixed id no ledger regex matches.
+    // The id here is a LABEL for the failure message only; it never gates the
+    // check, so an unnameable row is still counted.
+    const m = line.match(/^\|\s*\*\*([^*|]+)\*\*\s*\|/)
+    rows.push({ id: m ? m[1].trim() : null, cells: cellsIn(line), line: i + 1 })
   }
 
   // A break only SPLITS the table if a row follows it; a trailing blank (before
@@ -796,10 +803,11 @@ export function runChecks({ fix = false } = {}) {
         ),
       )
       for (const r of shape.malformed) {
-        log(`        ${r.id} (line ${r.line}) has ${r.cells} cells`)
+        const label = r.id ? `${r.id} (line ${r.line})` : `the row at line ${r.line}`
+        log(`        ${label} has ${r.cells} cells`)
         hard.push({
           check: 'ledger-shape',
-          message: `${r.id} at line ${r.line} has ${r.cells} cells, expected ${shape.expected}`,
+          message: `${r.id ?? 'row'} at line ${r.line} has ${r.cells} cells, expected ${shape.expected}`,
         })
       }
     }

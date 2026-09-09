@@ -181,6 +181,28 @@ describe('parseLedgerRowShape (the [ledger-shape] invariant)', () => {
     }
   })
 
+  it('checks EVERY pipe-led line, not just well-formed ID rows', () => {
+    // Matching only `| **ID-1** |` rows let a pipe-led line with the wrong cell
+    // count pass with neither a row nor a break recorded (Codex, PR #1814).
+    const md = [...header, '| **UX-1** | 1 | OPEN | a | x |', '| stray |'].join('\n')
+    const { malformed } = parseLedgerRowShape(md)
+    expect(malformed).toHaveLength(1)
+    expect(malformed[0].cells).toBe(1)
+    // Unnameable rows are still counted; `id` is a label for the message only.
+    expect(malformed[0].id).toBeNull()
+  })
+
+  it('counts a row whose id no ledger regex matches, and passes it when well-formed', () => {
+    // FEAT-192a is real and live: a letter-suffixed id that `parseLedgerIds`
+    // does not match, so it is invisible to [ledger-ids]. The shape check must
+    // still measure it — it is a row on the page whatever its id looks like.
+    const md = [...header, '| **FEAT-192a** | 2 | MERGED | t | e |'].join('\n')
+    const s = parseLedgerRowShape(md)
+    expect(s.rows.map((r) => r.id)).toEqual(['FEAT-192a'])
+    expect(s.malformed).toEqual([])
+    expect(parseLedgerIds(md).rows).toEqual([]) // …and [ledger-ids] still cannot see it
+  })
+
   it('treats prose or HTML between rows as a break, like a blank line', () => {
     const md = [
       ...header,
