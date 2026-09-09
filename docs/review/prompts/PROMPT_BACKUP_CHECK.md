@@ -83,6 +83,12 @@ A run is not finished when the PR opens; it is finished when the **automated rev
 answered**. This is the run's last step, and the summary below is the run's **one** summary — do not post a
 finish-looking summary before it.
 
+**First, attach the round to the head you want reviewed.** Codex reviews on PR open — the *opening* commit —
+so if anything was pushed after that (the close-out's ledger-link commit is the usual one), the PR-open round
+belongs to a head that has moved, and the first window would time out on a head nobody was asked about. Post
+an `@codex review` comment and poll against the new head. Where nothing was pushed after the PR opened, the
+PR-open round **is** the first round and no ask is needed.
+
 1. **Poll for the Codex round** on a **60–90 second** interval, up to 10 minutes — the ten minutes is the
    **ceiling, not the duration**: act on the first qualifying signal, and a window that has already produced
    its answer is over. **Report once per round, not once per tick** — one line when the round is asked

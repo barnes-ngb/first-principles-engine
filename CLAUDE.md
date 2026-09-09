@@ -83,8 +83,12 @@ whose CI `test` job failed and said so itself — *"I re-ran lint before that la
 cost a cycle and forced the round to be re-asked, because Codex reviews a commit and the head had moved.
 
 **End of run.** A run is not finished when the PR opens; it is finished when the automated review round on
-that PR is answered. After opening the PR, **poll on a 60–90 second interval and act on the first qualifying
-signal**: ten minutes is the **ceiling, not the duration** — the point at which you give up, not the length of
+that PR is answered. **First make sure the round is attached to the head you want reviewed:** Codex reviews on
+PR open — the *opening* commit — so if anything was pushed after that (the close-out's ledger-link commit is
+the usual one), the PR-open round belongs to a head that has moved. Post an `@codex review` comment and poll
+against the new head; without it the first window times out on a head nobody was asked about. Where nothing
+was pushed after the PR opened, the PR-open round **is** the first round and no ask is needed. Then **poll on a
+60–90 second interval and act on the first qualifying signal**: ten minutes is the **ceiling, not the duration** — the point at which you give up, not the length of
 the wait, and a window that has already produced its answer is over. **Report once per round, not once per
 tick**: one line when the round is asked (naming the head and the clock time), and one line when it comes back
 or the window closes. A tick that finds nothing is not worth a line — the next line the human reads should be

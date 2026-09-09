@@ -81,13 +81,21 @@ the new commit.
 
 1. Open a PR: `fix(<area>): <issue-id> — <short description>`. Include before/after evidence and the test results. **Do not merge.**
 2. Update the ledger row in `docs/review/REVIEW_HOME_BASE.md` → status `IN PROGRESS` (PR open, awaiting review) with the PR link.
-3. Then run **End of run** below, and post the 4-line summary there — what changed, what's verified, any follow-on issues discovered (add them to the ledger with new IDs), and whether anything still needs a human decision — under the `CODEX ROUND:` first line. Do not post a summary before the Codex round is answered.
+3. **That push moved the head off the one Codex reviewed on open** — so post an `@codex review` comment and
+   treat *that* as the first round's ask. Skip it only if step 2 pushed nothing.
+4. Then run **End of run** below, and post the 4-line summary there — what changed, what's verified, any follow-on issues discovered (add them to the ledger with new IDs), and whether anything still needs a human decision — under the `CODEX ROUND:` first line. Do not post a summary before the Codex round is answered.
 
 ## End of run
 
 A run is not finished when the PR opens; it is finished when the **automated review round on that PR is
 answered**. This is the run's last step, and the summary below is the run's **one** summary — do not post a
 finish-looking summary before it.
+
+**First, attach the round to the head you want reviewed.** Codex reviews on PR open — the *opening* commit —
+so if anything was pushed after that (the close-out's ledger-link commit is the usual one), the PR-open round
+belongs to a head that has moved, and the first window would time out on a head nobody was asked about. Post
+an `@codex review` comment and poll against the new head. Where nothing was pushed after the PR opened, the
+PR-open round **is** the first round and no ask is needed.
 
 1. **Poll for the Codex round** on a **60–90 second** interval, up to 10 minutes — the ten minutes is the
    **ceiling, not the duration**: act on the first qualifying signal, and a window that has already produced

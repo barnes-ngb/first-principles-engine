@@ -57,7 +57,9 @@ green run from before your final fix is evidence about a tree that no longer exi
 commit after verifying, verify again, and note that a moved head also invalidates a pending review ask, which
 must then be re-made against the new commit.
 Branch `auto/arch-<id>-<slug>`. PR `fix(<area>): <id> — <desc> (auto)`.
-**Do not merge.** Update the ledger row to `IN PROGRESS` with the PR link. Then run **End of run** below,
+**Do not merge.** Update the ledger row to `IN PROGRESS` with the PR link — that push moves the head off the
+one Codex reviewed on open, so post an `@codex review` comment and treat that as the first round's ask. Then
+run **End of run** below,
 and post the 4-line summary there — the item, what changed, before/after evidence, and confirmation no
 invariant was touched — under the `CODEX ROUND:` first line. Do not post a summary before the Codex round
 is answered. A green run
@@ -68,6 +70,12 @@ status means it executed, not that it's correct — the human reviews the PR.
 A run is not finished when the PR opens; it is finished when the **automated review round on that PR is
 answered**. This is the run's last step, and the summary below is the run's **one** summary — do not post a
 finish-looking summary before it.
+
+**First, attach the round to the head you want reviewed.** Codex reviews on PR open — the *opening* commit —
+so if anything was pushed after that (the close-out's ledger-link commit is the usual one), the PR-open round
+belongs to a head that has moved, and the first window would time out on a head nobody was asked about. Post
+an `@codex review` comment and poll against the new head. Where nothing was pushed after the PR opened, the
+PR-open round **is** the first round and no ask is needed.
 
 1. **Poll for the Codex round** on a **60–90 second** interval, up to 10 minutes — the ten minutes is the
    **ceiling, not the duration**: act on the first qualifying signal, and a window that has already produced
