@@ -61,8 +61,8 @@ of the number ("most", "the majority", "at least N") and say in the document why
 change itself ("19 of 22 tags map to nothing", "5 of 19 capture surfaces reach the model"), which is
 expensive to recount, easy to get wrong, and moves when you fix one of its parts. A count over the run's
 **own diff** is already pinned by that diff, so naming the command that prints it and quoting its output
-(`git diff --numstat`, a `grep -c`) is derivation enough — and where a list is short, **name its members
-instead of counting them**, since a named list is its own check and cannot go stale against a recount.
+(`git diff --numstat`, a `grep -c`) is derivation enough — and where a list is short, it is better **named rather than
+counted**, since a named list is its own check and cannot go stale against a recount.
 Where the source of truth is **outside** the repo — a PR's review history, a console reading, a production
 log — no committed script can pin it, so the rule is different and stated so rather than quietly waived:
 **cite the source precisely enough to be audited** (PR number, commit SHA, date), **mark the figure as
