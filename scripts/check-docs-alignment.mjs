@@ -84,6 +84,72 @@ export function parseLedgerIds(md) {
 }
 
 /**
+ * Parse the SHAPE of the §6 ledger table: is it one table, and does every row
+ * have the header's column count?
+ *
+ * WHY THIS EXISTS (2026-09-09). The ledger is read on a phone, and two failure
+ * modes had made most of it unreadable for months without anything noticing —
+ * both invisible to every other check here, because both leave the file parsing
+ * fine and every row's ID, status and anchor intact:
+ *
+ *   1. **A blank line inside the table.** A blank line TERMINATES a table in
+ *      GFM, and a following run of `|` lines with no header + delimiter row is
+ *      not a table at all — it renders as a paragraph with the pipes and
+ *      asterisks showing. Six stray blanks had split §6 into eight fragments:
+ *      463 rows, of which 100 rendered as a table and 363 as raw text.
+ *   2. **An unescaped `|` inside a code span.** Still a cell separator, so a row
+ *      writing a union type like `status:'new'|'making'` spills its content into
+ *      phantom columns. 34 rows were affected, one as far as 13 cells.
+ *
+ * The two are checked together because they are not independent: the cell count
+ * is only meaningful once the table's extent is known, and (1) is what decides
+ * that extent. A five-cell rule alone would have passed the pre-fix file by
+ * silently ignoring the 363 rows it could not see.
+ *
+ * Deliberately NOT checked: whether the Evidence cell has content. 49 rows carry
+ * their evidence as prose in the Title cell and render an empty last column —
+ * a style inconsistency, not a break, and filling them is a content decision the
+ * home-base chat owns.
+ *
+ * @returns {{ expected: number, rows: {id,cells,line}[], malformed: {id,cells,line}[], breaks: number[] }}
+ */
+export function parseLedgerRowShape(md) {
+  const lines = md.split(/\r?\n/)
+  // Count cells by unescaped pipes: `| a | b |` is 3 pipes / 2 cells.
+  const cellsIn = (line) => (line.match(/(?<!\\)\|/g) || []).length - 1
+
+  const headerIdx = lines.findIndex((l) => /^\|\s*ID\s*\|\s*Band\s*\|\s*Status\s*\|/.test(l))
+  if (headerIdx === -1) return { expected: 0, rows: [], malformed: [], breaks: [] }
+  const expected = cellsIn(lines[headerIdx])
+
+  const rows = []
+  const breaks = []
+  // The table runs to the section's end: the `†` footnote or the next heading.
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.startsWith('† ') || line.startsWith('## ')) break
+    if (line.trim() === '') {
+      // A blank line ends the table. Record it and keep scanning — one report
+      // should name every break, not just the first. Trailing blanks (the one
+      // separating the table from the `†` footnote) are dropped below: a blank
+      // only SPLITS the table if more rows follow it.
+      breaks.push(i + 1)
+      continue
+    }
+    const m = line.match(/^\|\s*\*\*([A-Z]+-\d+)\*\*\s*\|/)
+    if (m) rows.push({ id: m[1], cells: cellsIn(line), line: i + 1 })
+  }
+
+  // A blank line only SPLITS the table if a row follows it; a trailing blank
+  // (before the `†` footnote) is how the table is supposed to end.
+  const lastRowLine = rows.length ? rows[rows.length - 1].line : 0
+  const splits = breaks.filter((ln) => ln < lastRowLine)
+
+  const malformed = rows.filter((r) => r.cells !== expected)
+  return { expected, rows, malformed, breaks: splits }
+}
+
+/**
  * Parse the ledger's rows into their ID + STATUS cell. `parseLedgerIds` above
  * reads the ID column only; this reads the status too, for the [ledger-status]
  * invariant.
@@ -654,6 +720,46 @@ export function runChecks({ fix = false } = {}) {
     for (const g of gaps) {
       log(paint(YELLOW, `INFO  [ledger-ids] lane ${g.lane} has a gap ≥3: missing ${g.missing.join(', ')}`))
       info.push({ check: 'ledger-ids', message: `lane ${g.lane} missing ${g.missing.join(', ')}` })
+    }
+  }
+  log('')
+
+  // ── Check 1b: Ledger table shape — one table, N cells per row (HARD) ───────
+  const shape = parseLedgerRowShape(ledgerMd)
+  if (shape.breaks.length === 0 && shape.malformed.length === 0) {
+    log(
+      paint(
+        GREEN,
+        `PASS  [ledger-shape] §6 is one table; all ${shape.rows.length} rows have ${shape.expected} cells`,
+      ),
+    )
+  } else {
+    if (shape.breaks.length) {
+      log(
+        paint(
+          RED,
+          `FAIL  [ledger-shape] blank line(s) inside the §6 table — a blank line ENDS a markdown table, so every row after the first break renders as raw text:`,
+        ),
+      )
+      for (const ln of shape.breaks) {
+        log(`        line ${ln} is blank; delete it so §6 stays one table`)
+        hard.push({ check: 'ledger-shape', message: `blank line at ${ln} splits the ledger table` })
+      }
+    }
+    if (shape.malformed.length) {
+      log(
+        paint(
+          RED,
+          `FAIL  [ledger-shape] row(s) whose cell count != ${shape.expected} (usually an unescaped \`|\` inside a code span — write \`\\|\`):`,
+        ),
+      )
+      for (const r of shape.malformed) {
+        log(`        ${r.id} (line ${r.line}) has ${r.cells} cells`)
+        hard.push({
+          check: 'ledger-shape',
+          message: `${r.id} at line ${r.line} has ${r.cells} cells, expected ${shape.expected}`,
+        })
+      }
     }
   }
   log('')

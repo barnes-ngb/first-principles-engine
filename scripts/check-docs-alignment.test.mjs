@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
   parseLedgerIds,
+  parseLedgerRowShape,
   parseLedgerStatusCells,
   findOpenPrStatusRows,
   findContradictoryStatusRows,
@@ -60,6 +61,80 @@ describe('parseLedgerIds', () => {
     const doc = gaps.find((g) => g.lane === 'DOC')
     expect(doc.missing).toEqual([3, 4, 5])
     expect(gaps.find((g) => g.lane === 'ARCH')).toBeUndefined()
+  })
+})
+
+describe('parseLedgerRowShape (the [ledger-shape] invariant)', () => {
+  const header = ['| ID | Band | Status | Title | Evidence |', '|---|---|---|---|---|']
+
+  it('passes a well-formed table and reads the column count off the header', () => {
+    const md = [...header, '| **DOC-07** | 1 | OPEN | a | x |', '| **DOC-08** | 1 | OPEN | b | y |'].join('\n')
+    const { expected, rows, malformed, breaks } = parseLedgerRowShape(md)
+    expect(expected).toBe(5)
+    expect(rows).toHaveLength(2)
+    expect(malformed).toEqual([])
+    expect(breaks).toEqual([])
+  })
+
+  it('flags a row that SPILLS on an unescaped pipe inside a code span', () => {
+    // The real FEAT-89 shape: a union type written without escaping.
+    const md = [
+      ...header,
+      "| **FEAT-89** | 2 | MERGED | `status:'new'|'making'|'ready'` | x |",
+      '| **FEAT-90** | 2 | MERGED | fine | y |',
+    ].join('\n')
+    const { malformed } = parseLedgerRowShape(md)
+    expect(malformed.map((r) => r.id)).toEqual(['FEAT-89'])
+    expect(malformed[0].cells).toBe(7)
+  })
+
+  it('accepts the same row once the pipes are escaped', () => {
+    const md = [...header, "| **FEAT-89** | 2 | MERGED | `status:'new'\\|'making'` | x |"].join('\n')
+    expect(parseLedgerRowShape(md).malformed).toEqual([])
+  })
+
+  it('flags a SHORT row (four cells against a five-column header)', () => {
+    const md = [...header, '| **UX-180** | 3 | OPEN | evidence merged into the title |'].join('\n')
+    const { malformed } = parseLedgerRowShape(md)
+    expect(malformed.map((r) => r.id)).toEqual(['UX-180'])
+    expect(malformed[0].cells).toBe(4)
+  })
+
+  it('flags a blank line that SPLITS the table, naming its line number', () => {
+    // The defect that made 363 of 463 rows render as raw text: a blank line
+    // ends the table, and the rows after it have no header to belong to.
+    const md = [...header, '| **A-1** | 1 | OPEN | a | x |', '', '| **A-2** | 1 | OPEN | b | y |'].join('\n')
+    const { breaks, rows } = parseLedgerRowShape(md)
+    expect(breaks).toEqual([4])
+    // Both rows are still counted, so the cell check covers the orphaned ones too.
+    expect(rows.map((r) => r.id)).toEqual(['A-1', 'A-2'])
+  })
+
+  it('does NOT flag the trailing blank that ends the table before the footnote', () => {
+    const md = [...header, '| **A-1** | 1 | OPEN | a | x |', '', '† DATA-01 was promoted…'].join('\n')
+    expect(parseLedgerRowShape(md).breaks).toEqual([])
+  })
+
+  it('stops at the next heading and ignores rows in a later table', () => {
+    const md = [
+      ...header,
+      '| **A-1** | 1 | OPEN | a | x |',
+      '',
+      '## 7. Triggers',
+      '| **B-1** | 1 | OPEN | not in the ledger |',
+    ].join('\n')
+    const { rows, malformed } = parseLedgerRowShape(md)
+    expect(rows.map((r) => r.id)).toEqual(['A-1'])
+    expect(malformed).toEqual([])
+  })
+
+  it('returns an empty result rather than throwing when there is no ledger header', () => {
+    expect(parseLedgerRowShape('# no table here')).toEqual({
+      expected: 0,
+      rows: [],
+      malformed: [],
+      breaks: [],
+    })
   })
 })
 

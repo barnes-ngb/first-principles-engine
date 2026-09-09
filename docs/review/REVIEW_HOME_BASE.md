@@ -595,6 +595,16 @@ No local commands, ever.
 - **Inspect → validate → propose for anything touching an invariant.** Hours math, XP ledger, and the additive-hours rule are never auto-fixed. They land as a proposal in the ledger for a human call.
 - **One issue ID per fix run.** Keeps PRs small and reviewable.
 - **Ledger is the memory.** If it isn't in the ledger, it didn't happen. Every audit and fix updates it.
+- **A ledger row is five cells, and §6 is ONE table — `[ledger-shape]` in `docs:check` is HARD on both (2026-09-09).**
+  Two ways a row breaks, both of which leave the file parsing fine and every ID, status and anchor intact, so nothing
+  else here catches them — and both of which had made most of the ledger unreadable on a phone for months:
+  **(1)** an unescaped `` `|` `` inside a code span is still a cell separator, so a row writing a union type like
+  `` `status:'new'|'making'` `` spills into phantom columns — **write `\|` inside backticks** (34 rows were affected,
+  one as far as 13 cells); **(2)** a **blank line inside the table ends it**, and the rows after it have no header to
+  belong to, so they render as raw text with the pipes and asterisks showing (six stray blanks had split §6 into eight
+  fragments: 463 rows, of which 100 rendered as a table and 363 as literal markdown). The two are checked together
+  because a cell count is only meaningful once the table's extent is known, and (2) is what decides that extent.
+  Short rows fail too, so a row with its evidence merged into the Title cell needs an explicit empty `|` at the end.
 - **Environment is Claude Code web, phone-first.** Nathan rarely runs anything locally. Claude Code web executes all builds/lint/tests/git in its own environment as part of running a prompt. No prompt should ask the human to run a command, install tooling, or use a local shell. The human's actions are limited to: pasting a prompt, uploading files, and reviewing/merging PRs from the phone.
 - **A run ends when the Codex round is answered — then it stops (DOC-18).** After opening the PR a run polls the
   automated review for up to 10 minutes — the **inline review threads**, not just the PR's comments, which is where
