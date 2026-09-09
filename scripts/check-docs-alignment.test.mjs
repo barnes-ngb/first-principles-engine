@@ -153,6 +153,25 @@ describe('parseLedgerRowShape (the [ledger-shape] invariant)', () => {
     expect(rows).toEqual([])
   })
 
+  it('fails closed when the delimiter row cell count differs from the header', () => {
+    // GFM requires header and delimiter to have the SAME number of cells; a
+    // four-cell delimiter under a five-cell header is syntactically valid and
+    // still means "not a table", so every row renders as raw text. Caught by
+    // Codex on PR #1814 — the same fail-open class as the three above.
+    for (const [delim, cells] of [
+      ['|---|---|---|---|', 4],
+      ['|---|---|---|---|---|---|', 6],
+    ]) {
+      const s = parseLedgerRowShape([header[0], delim, '| **UX-1** | 1 | OPEN | a | x |'].join('\n'))
+      expect(s.delimiterMismatch, delim).toBe(true)
+      expect(s.delimiterCells).toBe(cells)
+      expect(s.expected).toBe(5)
+      // The rows must NOT be reported as fine — that was the hole.
+      expect(s.rows).toEqual([])
+      expect(s.malformed).toEqual([])
+    }
+  })
+
   it('accepts the delimiter row in its aligned forms', () => {
     for (const delim of ['|---|---|---|---|---|', '| :--- | ---: | :---: | --- | --- |']) {
       const md = [...[header[0], delim], '| **UX-1** | 1 | OPEN | a | x |'].join('\n')

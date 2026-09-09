@@ -127,14 +127,22 @@ export function parseLedgerRowShape(md) {
   // invariant exists to catch, inside the invariant itself.
   if (headerIdx === -1) return { ...empty, headerMissing: true }
 
-  // GFM requires the delimiter row directly under the header; without it the
-  // block is not a table at all, so every row renders as raw text.
+  // GFM requires the delimiter row directly under the header, AND requires it to
+  // have the SAME cell count as the header — a four-cell `|---|---|---|---|`
+  // under a five-cell header is syntactically fine and still means "not a table",
+  // so every row renders as raw text (Codex, PR #1814). Both are reported, and
+  // separately: "missing" would be a misleading thing to print about a delimiter
+  // that is present but the wrong width.
+  const expected = cellsIn(lines[headerIdx])
   const delimiter = lines[headerIdx + 1] ?? ''
   if (!/^\|(?:\s*:?-{3,}:?\s*\|)+$/.test(delimiter)) {
-    return { ...empty, expected: cellsIn(lines[headerIdx]), delimiterMissing: true }
+    return { ...empty, expected, delimiterMissing: true }
+  }
+  const delimiterCells = cellsIn(delimiter)
+  if (delimiterCells !== expected) {
+    return { ...empty, expected, delimiterCells, delimiterMismatch: true }
   }
 
-  const expected = cellsIn(lines[headerIdx])
   const rows = []
   const breaks = []
   // The table runs to the section's end: the `†` footnote or the next heading.
@@ -746,12 +754,14 @@ export function runChecks({ fix = false } = {}) {
 
   // ── Check 1b: Ledger table shape — one table, N cells per row (HARD) ───────
   const shape = parseLedgerRowShape(ledgerMd)
-  if (shape.headerMissing || shape.delimiterMissing) {
+  if (shape.headerMissing || shape.delimiterMissing || shape.delimiterMismatch) {
     // Both are fail-closed states: without a header + delimiter row GFM renders
     // the whole of §6 as raw text, so "no rows to check" must never read as PASS.
     const why = shape.headerMissing
       ? 'no `| ID | Band | Status | …` header row found — §6 cannot render as a table at all'
-      : 'the `|---|---|` delimiter row under the §6 header is missing or malformed — GFM needs it, or every row renders as raw text'
+      : shape.delimiterMismatch
+        ? `the §6 delimiter row has ${shape.delimiterCells} cells but the header has ${shape.expected} — GFM needs them equal, or every row renders as raw text`
+        : 'the `|---|---|` delimiter row under the §6 header is missing or malformed — GFM needs it, or every row renders as raw text'
     log(paint(RED, `FAIL  [ledger-shape] ${why}`))
     hard.push({ check: 'ledger-shape', message: why })
   } else if (shape.breaks.length === 0 && shape.malformed.length === 0) {
