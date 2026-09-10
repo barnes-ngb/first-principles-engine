@@ -41,7 +41,7 @@ function storedAt(phonicsLevel: number, over: Partial<LearnerModel> = {}): Learn
       snapshot(phonicsLevel, SEEDED_AT),
       SEEDED_AT,
     ),
-    projectedThrough: { phonics: phonicsLevel },
+    projectedThrough: { phonics: phonicsLevel, writing: null, math: null },
     modalityCalibration: { reading: { note: '' }, writing: { note: '' }, math: { note: '' } },
     whatMattersNext: [],
     changeFeed: [],
@@ -67,7 +67,7 @@ describe('shouldReprojectWorkingLevels — the watermark is the INPUTS', () => {
   // Codex round 2, finding 1 — the reason this compares values per field rather
   // than one maximum timestamp.
   it('sees a level change a clock-skewed device stamped OLDER than another level', () => {
-    const model = storedAt(5, { projectedThrough: { phonics: 5, math: 3 } })
+    const model = storedAt(5, { projectedThrough: { phonics: 5, math: 3, writing: null } })
     const skewed = {
       childId: 'c1',
       workingLevels: {
@@ -80,18 +80,22 @@ describe('shouldReprojectWorkingLevels — the watermark is the INPUTS', () => {
   })
 
   it('sees a same-field level whose stamp moved BACKWARDS', () => {
-    const model = storedAt(7, { projectedThrough: { phonics: 7 } })
+    const model = storedAt(7, { projectedThrough: { phonics: 7, writing: null, math: null } })
     expect(shouldReprojectWorkingLevels(model, snapshot(4, '2026-01-01T00:00:00.000Z'))).toBe(
       true,
     )
   })
 
   it('sees a level that appeared, and one that was cleared', () => {
+    const none = { phonics: null, writing: null, math: null }
+    expect(shouldReprojectWorkingLevels(storedAt(5, { projectedThrough: none }), snapshot(5))).toBe(
+      true,
+    )
     expect(
-      shouldReprojectWorkingLevels(storedAt(5, { projectedThrough: {} }), snapshot(5)),
-    ).toBe(true)
-    expect(
-      shouldReprojectWorkingLevels(storedAt(5, { projectedThrough: { phonics: 5 } }), null),
+      shouldReprojectWorkingLevels(
+        storedAt(5, { projectedThrough: { ...none, phonics: 5 } }),
+        null,
+      ),
     ).toBe(true)
   })
 
@@ -145,14 +149,34 @@ describe('currentDrivingLevels', () => {
     expect(currentDrivingLevels(snap)).toEqual({ phonics: 5, math: 3, writing: 2 })
   })
 
-  it('drops a non-finite or absent level, so "none" and "NaN" compare equal', () => {
-    expect(currentDrivingLevels(null)).toEqual({})
+  it('is TOTAL — every driving key present, "no level" as null, never omitted', () => {
+    // Codex round 3: an omitted key survives Firestore's `{merge:true}` forever,
+    // so the next mount reads a cleared level as different and the projection
+    // re-runs and re-writes on every mount.
+    const none = { phonics: null, writing: null, math: null }
+    expect(currentDrivingLevels(null)).toEqual(none)
     expect(
       currentDrivingLevels({
         childId: 'c1',
         workingLevels: { phonics: { level: NaN }, math: { level: undefined } },
       } as unknown as SkillSnapshot),
-    ).toEqual({})
+    ).toEqual(none)
+    expect(Object.keys(currentDrivingLevels(snapshot(5))).sort()).toEqual([
+      'math',
+      'phonics',
+      'writing',
+    ])
+  })
+
+  it('a cleared level settles in ONE write, not on every mount forever', () => {
+    // phonics 5 + math 3 was projected; math has since been cleared.
+    const model = storedAt(5, { projectedThrough: { phonics: 5, math: 3, writing: null } })
+    expect(shouldReprojectWorkingLevels(model, snapshot(5))).toBe(true)
+
+    // Writing the TOTAL map is what settles it — every leaf is overwritten, so
+    // the stale `math: 3` cannot survive the merge.
+    const settled = storedAt(5, { projectedThrough: currentDrivingLevels(snapshot(5)) })
+    expect(shouldReprojectWorkingLevels(settled, snapshot(5))).toBe(false)
   })
 
   it('is what the seeder records, so a fresh model needs no re-projection', () => {

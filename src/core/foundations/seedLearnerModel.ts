@@ -137,6 +137,8 @@ export type DriverKeysHaveProjectionSlots = [
 ] extends [never, never]
   ? true
   : never
+/** Instantiated so the check above is enforced rather than merely declared. */
+export const DRIVER_KEYS_HAVE_PROJECTION_SLOTS: DriverKeysHaveProjectionSlots = true
 
 /**
  * The child's current levels for the keys that actually drive band seeding — the
@@ -144,16 +146,19 @@ export type DriverKeysHaveProjectionSlots = [
  * level changes no band-derived state, so it is not read: including it would cost
  * a write every time an unrelated level moved.
  *
- * A non-finite or absent level becomes an absent slot, so "no level" and "level
- * NaN" compare equal and neither is mistaken for a change.
+ * **Total, never partial** — every driving key is present and "no level" is
+ * `null`, because Firestore's `{ merge: true }` would leave an omitted key's
+ * previous value behind and the watermark would never clear (Codex round 3; see
+ * {@link ProjectedWorkingLevels}). A non-finite level is `null` too, so "no
+ * level" and "level NaN" compare equal and neither is mistaken for a change.
  */
 export function currentDrivingLevels(
   snapshot: SkillSnapshot | null,
 ): ProjectedWorkingLevels {
-  const out: ProjectedWorkingLevels = {}
+  const out = {} as ProjectedWorkingLevels
   for (const key of WORKING_LEVEL_DRIVER_KEYS) {
     const level = snapshot?.workingLevels?.[key]?.level
-    if (typeof level === 'number' && Number.isFinite(level)) out[key] = level
+    out[key] = typeof level === 'number' && Number.isFinite(level) ? level : null
   }
   return out
 }

@@ -515,6 +515,8 @@ describe('seedLearnerModel — the projection watermark', () => {
   const seed = (partial: Partial<SkillSnapshot>) =>
     seedLearnerModel(foundationGraphs, 'child-1', snapshot(partial), null, [], { now: NOW })
 
+  const NO_LEVELS = { phonics: null, writing: null, math: null }
+
   it('records exactly the levels the band pass was computed from', () => {
     const model = seed({ workingLevels: { phonics: wl(5), math: wl(3), writing: wl(2) } })
     expect(model.projectedThrough).toEqual({ phonics: 5, math: 3, writing: 2 })
@@ -524,22 +526,27 @@ describe('seedLearnerModel — the projection watermark', () => {
     const model = seed({
       workingLevels: { phonics: wl(5), comprehension: wl(4), sentence: wl(1) },
     })
-    expect(model.projectedThrough).toEqual({ phonics: 5 })
+    expect(model.projectedThrough).toEqual({ ...NO_LEVELS, phonics: 5 })
   })
 
-  it('records an empty watermark rather than none when there are no levels', () => {
-    // `{}` is a fact — "projected from nothing" — and it is what stops the
-    // re-projection re-running on every mount for a child with no snapshot.
-    expect(seed({}).projectedThrough).toEqual({})
+  it('is TOTAL — a level the child has none of is null, never an omitted key', () => {
+    // Codex round 3: an omitted key survives Firestore's `{merge:true}`, so the
+    // watermark could never clear and the projection would re-write every mount.
+    expect(seed({}).projectedThrough).toEqual(NO_LEVELS)
+    expect(Object.keys(seed({ workingLevels: { phonics: wl(5) } }).projectedThrough ?? {}).sort())
+      .toEqual(['math', 'phonics', 'writing'])
   })
 
   it('a re-seed carries the FRESH levels forward, not the stored ones', () => {
     const existing: LearnerModel = {
       ...seed({ workingLevels: { phonics: wl(5) } }),
-      projectedThrough: { phonics: 5 },
+      projectedThrough: { ...NO_LEVELS, phonics: 5 },
     }
     const fresh = seed({ workingLevels: { phonics: wl(7) } })
     // A re-seed recomputed every band-derived state, so its inputs are the truth.
-    expect(mergeSeededModel(existing, fresh).projectedThrough).toEqual({ phonics: 7 })
+    expect(mergeSeededModel(existing, fresh).projectedThrough).toEqual({
+      ...NO_LEVELS,
+      phonics: 7,
+    })
   })
 })

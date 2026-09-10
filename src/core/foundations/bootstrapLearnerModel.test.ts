@@ -156,7 +156,7 @@ function seededInJuly(over: Partial<LearnerModel> = {}): LearnerModel {
       snapshotAt(5, SEEDED_AT),
       SEEDED_AT,
     ),
-    projectedThrough: { phonics: 5 },
+    projectedThrough: { phonics: 5, writing: null, math: null },
     modalityCalibration: { reading: { note: '' }, writing: { note: '' }, math: { note: '' } },
     whatMattersNext: [],
     changeFeed: [],
@@ -211,7 +211,7 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     const model = await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
     expect(txSet).not.toHaveBeenCalled()
-    expect(model?.projectedThrough).toEqual({ phonics: 5 })
+    expect(model?.projectedThrough).toEqual({ phonics: 5, writing: null, math: null })
   })
 
   it('writes projectedThrough ALONE when the levels moved but no state did', async () => {
@@ -226,7 +226,7 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
       ),
       // Recorded as level 5 while its states already reflect 7 — so the watermark
       // is stale, the projection runs, and nothing has anywhere to move.
-      projectedThrough: { phonics: 5 },
+      projectedThrough: { phonics: 5, writing: null, math: null },
     }
     txReads({ model: stored7, snapshot: snapshotAt(7, LEVEL_MOVED_AT) })
 
@@ -236,7 +236,7 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     const payload = txSet.mock.calls[0][1] as Record<string, unknown>
     expect(Object.keys(payload)).toEqual(['projectedThrough'])
     // The LEVELS that were projected, never this client's clock.
-    expect(payload.projectedThrough).toEqual({ phonics: 7 })
+    expect(payload.projectedThrough).toEqual({ phonics: 7, writing: null, math: null })
     expect(txSet.mock.calls[0][2]).toEqual({ merge: true })
   })
 
@@ -251,7 +251,7 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     expect(payload.changeFeed.length).toBeGreaterThan(0)
     // The watermark is the LEVELS; synthesisStaleAt is a real wall clock, because
     // it answers "how old is the synthesis", not "what have I read".
-    expect(payload.projectedThrough).toEqual({ phonics: 7 })
+    expect(payload.projectedThrough).toEqual({ phonics: 7, writing: null, math: null })
     expect(Date.parse(payload.synthesisStaleAt as string)).toBeGreaterThan(
       Date.parse(LEVEL_MOVED_AT),
     )
@@ -297,8 +297,10 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     const model = await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
     expect(txSet).toHaveBeenCalledTimes(1)
-    expect(txSet.mock.calls[0][1]).toEqual({ projectedThrough: {} })
-    expect(model?.projectedThrough).toEqual({})
+    expect(txSet.mock.calls[0][1]).toEqual({
+      projectedThrough: { phonics: null, writing: null, math: null },
+    })
+    expect(model?.projectedThrough).toEqual({ phonics: null, writing: null, math: null })
   })
 
   // Codex round 2, finding 2 — a model that never recorded a projection is
@@ -313,7 +315,9 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
 
     // Its states already match level 5, so nothing moves — only the watermark.
     expect(txSet).toHaveBeenCalledTimes(1)
-    expect(txSet.mock.calls[0][1]).toEqual({ projectedThrough: { phonics: 5 } })
+    expect(txSet.mock.calls[0][1]).toEqual({
+      projectedThrough: { phonics: 5, writing: null, math: null },
+    })
 
     // And with that recorded, the next visit writes nothing.
     vi.clearAllMocks()

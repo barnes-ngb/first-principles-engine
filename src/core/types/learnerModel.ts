@@ -271,16 +271,20 @@ export interface LearnerReviewSession {
 }
 
 /**
- * The working levels a projection was computed from (UX-291). One optional slot
- * per band-seeding driver key; `workingLevelProjection.ts` holds a compile-time
- * check that these keys are exactly `WORKING_LEVEL_DRIVER_KEYS`, so a new driver
- * fails to compile until it is given a slot here.
+ * The working levels a projection was computed from (UX-291). One slot per
+ * band-seeding driver key; `seedLearnerModel.ts` holds a compile-time check that
+ * these keys are exactly `WORKING_LEVEL_DRIVER_KEYS`, so a new driver fails to
+ * compile until it is given a slot here.
+ *
+ * **Every key is always present, and "no level" is `null`, not an omission**
+ * (Codex round 3). Firestore's `{ merge: true }` merges a nested map leaf by
+ * leaf: writing `{phonics: 5}` over a stored `{phonics: 5, math: 3}` leaves
+ * `math: 3` behind. An omitted slot would therefore never clear, the next mount
+ * would read the cleared level as different, and the projection would re-run and
+ * re-write on **every** mount forever — the exact "a no-op is a no-op" property
+ * this watermark exists to provide. A total map has no stale leaf to survive.
  */
-export interface ProjectedWorkingLevels {
-  phonics?: number
-  writing?: number
-  math?: number
-}
+export type ProjectedWorkingLevels = Record<'phonics' | 'writing' | 'math', number | null>
 
 export interface LearnerModel {
   id?: string

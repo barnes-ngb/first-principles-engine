@@ -75,7 +75,8 @@ const STATE_RANK: Record<ConceptStateKind, number> = {
  * replaced and why each of them swallowed real updates. A level that moved in
  * either direction, a level that appeared, and a level that was cleared are all
  * differences; whether a difference may *move a state* is the upgrade-only rule's
- * question, not this one's.
+ * question, not this one's. The recorded map is **total** — see
+ * {@link ProjectedWorkingLevels} for why an omitted slot would loop forever.
  *
  * **An unrecorded projection is not a completed one.** A model with no
  * `projectedThrough` — every model written before this feature, and any model
@@ -94,7 +95,10 @@ export function shouldReprojectWorkingLevels(
   const projected = model.projectedThrough
   if (!projected) return true
   const current = currentDrivingLevels(snapshot)
-  return WORKING_LEVEL_DRIVER_KEYS.some((key) => current[key] !== projected[key])
+  // `?? null` on the STORED side only: the current side is total by construction,
+  // and a stored map missing a key (one written before a driver key was added) is
+  // read as "no level recorded", which self-heals on the write below.
+  return WORKING_LEVEL_DRIVER_KEYS.some((key) => current[key] !== (projected[key] ?? null))
 }
 
 /** The deterministic `changeFeed` cause for a projected move. Upgrades only, so no down-wording is needed. */
