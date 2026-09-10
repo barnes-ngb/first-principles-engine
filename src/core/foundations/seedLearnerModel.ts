@@ -53,9 +53,18 @@ import { promotedModelStatus } from './modelStatus'
 /** Single-band → ordinal. Range bands (`K-1`, `1-2`) never reach band seeding. */
 const BAND_ORDER: Record<string, number> = { K: 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5 }
 
+/**
+ * The working-level fields that drive band seeding — **one definition**, read by
+ * {@link driverFor}, by {@link workingLevel} and by the re-projection's
+ * "are the levels newer than the projection" decision (UX-291). A new driver key
+ * added here fails to compile until every one of them accounts for it.
+ */
+export const WORKING_LEVEL_DRIVER_KEYS = ['phonics', 'writing', 'math'] as const
+export type WorkingLevelDriverKey = (typeof WORKING_LEVEL_DRIVER_KEYS)[number]
+
 /** Which working-level field drives a node, if any. */
 type Driver =
-  | { key: 'phonics' | 'writing' | 'math' }
+  | { key: WorkingLevelDriverKey }
   | { key: 'math'; overrideLevel: 7 | 8 }
   | { key: 'sightWord' }
   | null
@@ -97,7 +106,7 @@ function driverFor(node: ConceptNode): Driver {
 }
 
 /** Working level → frontier band (ordinal). `undefined` when no level exists. */
-function levelToBand(key: 'phonics' | 'writing' | 'math', level: number | undefined): number | undefined {
+function levelToBand(key: WorkingLevelDriverKey, level: number | undefined): number | undefined {
   if (level == null) return undefined
   if (key === 'math') {
     // Monotonic; L7/L8 nudge up but those nodes are handled by node-id override.
@@ -118,7 +127,7 @@ function levelToBand(key: 'phonics' | 'writing' | 'math', level: number | undefi
 /** Read a working level for a domain key from the snapshot. */
 function workingLevel(
   snapshot: SkillSnapshot | null,
-  key: 'phonics' | 'writing' | 'math',
+  key: WorkingLevelDriverKey,
 ): number | undefined {
   return snapshot?.workingLevels?.[key]?.level
 }
@@ -178,6 +187,106 @@ function buildModalityCalibration(snapshot: SkillSnapshot | null): ModalityCalib
   }
 }
 
+/**
+ * The `workingLevel` EvidenceRef the band pass stamps. One definition, so the
+ * seeder and the re-projection cannot word the same fact differently.
+ */
+function workingLevelEvidenceRef(
+  childId: string,
+  domain: string,
+  level: number,
+  below: boolean,
+  now: string,
+): EvidenceRef {
+  return {
+    kind: 'workingLevel',
+    sourceId: `skillSnapshot:${childId}`,
+    note: below ? `Below ${domain} working level ${level}` : `At ${domain} working level ${level}`,
+    observedAt: now,
+    domain,
+    level,
+  }
+}
+
+/**
+ * **The band pass, on its own** — the one definition of *what a working level says
+ * about a concept*, extracted so it can be run twice: once by
+ * {@link seedLearnerModel} at creation, and once by the re-projection that keeps
+ * the terrain moving after a level does (UX-291).
+ *
+ * Returns an entry for **exactly** the nodes a working level drives — the
+ * band-flow nodes plus the two L7/L8 scope markers — and nothing else. A
+ * sight-word node, an evidence-only node and a node the seeder resolves from a
+ * priority skill or a completed program are all absent from the result, because
+ * none of them is a band-derived state and a projection has no business touching
+ * them. (Sight-word mastery has the same frozen-at-seed-time defect and its own
+ * ledger row, UX-293; it is deliberately not folded in here.)
+ *
+ * With no level for a domain, every node that domain drives comes back
+ * `not-yet` with empty evidence — the seeder's own behaviour, and what makes
+ * "never demote on absence" fall out of the projection's upgrade-only rule
+ * rather than needing a second guard.
+ */
+export function projectWorkingLevelStates(
+  graphs: ConceptGraph[],
+  childId: string,
+  snapshot: SkillSnapshot | null,
+  now: string,
+): Record<string, ConceptStateEntry> {
+  const out: Record<string, ConceptStateEntry> = {}
+  const notYet = (): ConceptStateEntry => ({ state: 'not-yet', evidence: [], seededAt: now })
+
+  for (const node of graphs.flatMap((g) => g.nodes)) {
+    const driver = driverFor(node)
+    if (driver == null || driver.key === 'sightWord') continue
+
+    // L7/L8 node-id override (regrouping / multiTables).
+    if ('overrideLevel' in driver) {
+      const level = workingLevel(snapshot, 'math')
+      const T = driver.overrideLevel
+      if (level == null || level < T) {
+        out[node.id] = notYet()
+      } else if (level === T) {
+        out[node.id] = {
+          state: 'frontier',
+          evidence: [workingLevelEvidenceRef(childId, 'math', level, false, now)],
+          seededAt: now,
+        }
+      } else {
+        out[node.id] = {
+          state: 'solid',
+          evidence: [workingLevelEvidenceRef(childId, 'math', level, true, now)],
+          seededAt: now,
+        }
+      }
+      continue
+    }
+
+    // Ordinary band seeding.
+    const level = workingLevel(snapshot, driver.key)
+    const frontierBand = levelToBand(driver.key, level)
+    const nodeBand = BAND_ORDER[node.band]
+    if (frontierBand == null || nodeBand == null) {
+      out[node.id] = notYet()
+    } else if (nodeBand < frontierBand) {
+      out[node.id] = {
+        state: 'solid',
+        evidence: [workingLevelEvidenceRef(childId, driver.key, level as number, true, now)],
+        seededAt: now,
+      }
+    } else if (nodeBand === frontierBand) {
+      out[node.id] = {
+        state: 'frontier',
+        evidence: [workingLevelEvidenceRef(childId, driver.key, level as number, false, now)],
+        seededAt: now,
+      }
+    } else {
+      out[node.id] = notYet()
+    }
+  }
+  return out
+}
+
 /** Options that keep the seeder pure and testable. */
 export interface SeedOptions {
   /** ISO timestamp stamped on every seeded entry (injectable for tests). */
@@ -232,20 +341,9 @@ export function seedLearnerModel(
   const conceptStates: Record<string, ConceptStateEntry> = {}
   const notYet = (): ConceptStateEntry => ({ state: 'not-yet', evidence: [], seededAt: now })
 
-  const workingLevelEvidence = (
-    domain: string,
-    level: number,
-    below: boolean,
-  ): EvidenceRef => ({
-    kind: 'workingLevel',
-    sourceId: `skillSnapshot:${childId}`,
-    note: below
-      ? `Below ${domain} working level ${level}`
-      : `At ${domain} working level ${level}`,
-    observedAt: now,
-    domain,
-    level,
-  })
+  // Steps 5 & 6 below are the band pass, and it has ONE definition (UX-291) —
+  // this call — because the re-projection runs the same rule on newer levels.
+  const banded = projectWorkingLevelStates(graphs, childId, snapshot, now)
 
   for (const node of graphs.flatMap((g) => g.nodes)) {
     // 1) Gate-3 priority skill wins outright.
@@ -298,51 +396,8 @@ export function seedLearnerModel(
       continue
     }
 
-    // 5) L7/L8 node-id override (regrouping / multiTables).
-    if ('overrideLevel' in driver) {
-      const level = workingLevel(snapshot, 'math')
-      const T = driver.overrideLevel
-      if (level == null || level < T) {
-        conceptStates[node.id] = notYet()
-      } else if (level === T) {
-        conceptStates[node.id] = {
-          state: 'frontier',
-          evidence: [workingLevelEvidence('math', level, false)],
-          seededAt: now,
-        }
-      } else {
-        conceptStates[node.id] = {
-          state: 'solid',
-          evidence: [workingLevelEvidence('math', level, true)],
-          seededAt: now,
-        }
-      }
-      continue
-    }
-
-    // 6) Ordinary band seeding.
-    const level = workingLevel(snapshot, driver.key)
-    const frontierBand = levelToBand(driver.key, level)
-    const nodeBand = BAND_ORDER[node.band]
-    if (frontierBand == null || nodeBand == null) {
-      conceptStates[node.id] = notYet()
-      continue
-    }
-    if (nodeBand < frontierBand) {
-      conceptStates[node.id] = {
-        state: 'solid',
-        evidence: [workingLevelEvidence(driver.key, level as number, true)],
-        seededAt: now,
-      }
-    } else if (nodeBand === frontierBand) {
-      conceptStates[node.id] = {
-        state: 'frontier',
-        evidence: [workingLevelEvidence(driver.key, level as number, false)],
-        seededAt: now,
-      }
-    } else {
-      conceptStates[node.id] = notYet()
-    }
+    // 5 & 6) Band seeding (L7/L8 node-id override included) — the shared pass.
+    conceptStates[node.id] = banded[node.id] ?? notYet()
   }
 
   const hasSignal =
@@ -382,8 +437,17 @@ const SEEDER_DERIVED_EVIDENCE: ReadonlySet<string> = new Set([
   'completedProgram',
 ])
 
-/** True when the entry carries at least one ref the seeder cannot re-derive. */
-function carriesNonDerivableEvidence(entry: ConceptStateEntry): boolean {
+/**
+ * True when the entry carries at least one ref the seeder cannot re-derive — a
+ * parent `attestation`, a `curriculumPosition`, a guided eval's read, a Knowledge
+ * Mine result, a scan.
+ *
+ * Exported because the UX-290 preserve rule has **two** consumers now: the
+ * re-seed's {@link mergeSeededModel}, and the UX-291 re-projection, which refuses
+ * to move such a concept at any level change. Two copies of this predicate would
+ * be two answers to "may a derived writer overwrite what someone witnessed".
+ */
+export function carriesNonDerivableEvidence(entry: ConceptStateEntry): boolean {
   return Boolean(entry.evidence?.some((e) => !SEEDER_DERIVED_EVIDENCE.has(e.kind)))
 }
 
@@ -434,9 +498,17 @@ function mergedStatus(
  * and emptied by the seeder; carry the existing ones forward so a re-seed does not
  * erase a queued test or the change history. Concept *states* (the recomputable
  * part) still come from the fresh seed except where a preserved entry above pins
- * them. **Still open (UX-290's other half):** a re-seed appends no `changeFeed`
- * line for the transitions it performs, so the feed remains a log of every
- * *incremental* transition rather than of every transition.
+ * them.
+ *
+ * **UX-290's other half is now closed on the automatic path and open only on this
+ * one (UX-291).** The re-*projection* — the thing that actually moves a band-derived
+ * state after a working level moves, and therefore the source of the biggest
+ * movements in the model — appends a `changeFeed` line for every transition it
+ * performs (`workingLevelProjection.ts`). This wholesale re-seed still does not:
+ * it recomputes every band-derived state at once, so the feed it would emit is a
+ * diff of the whole deterministic layer rather than a record of something that
+ * happened. It is reachable only from the `?diag=1` button, which is a deliberate
+ * operator act on a panel whose own docstring says it exists to prove the model.
  */
 export function mergeSeededModel(
   existing: LearnerModel | null | undefined,

@@ -40,6 +40,7 @@ import DispositionProfile from './DispositionProfile'
 import FoundationsDiagPanel from './FoundationsDiagPanel'
 import {
   BOOTSTRAP_FAILED_LINE,
+  REPROJECTION_FAILED_LINE,
   BOOTSTRAP_RETRY_LABEL,
   bootstrapRunningLine,
   emptyFoundationsLines,
@@ -113,8 +114,12 @@ export default function FoundationsTab() {
   // UX-286 — the model's ONE non-diagnostic door into existence. Create-only:
   // it fires when the snapshot has resolved and the document is absent, once per
   // child, for a profile that may write. Writes `learnerModels` only.
-  const { bootstrapping, failed: bootstrapFailed, retry: retryBootstrap } =
-    useFoundationsBootstrap({ familyId, childId: activeChildId, canEdit, model, loading })
+  const {
+    bootstrapping,
+    failed: bootstrapFailed,
+    reprojectFailed,
+    retry: retryBootstrap,
+  } = useFoundationsBootstrap({ familyId, childId: activeChildId, canEdit, model, loading })
   const [openConcept, setOpenConcept] = useState<TerrainConcept | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -221,6 +226,24 @@ export default function FoundationsTab() {
           }
         >
           {BOOTSTRAP_FAILED_LINE}
+        </Alert>
+      )}
+
+      {/* A failed re-projection (UX-291) is a quiet notice BESIDE the terrain, not
+          in place of it: the map below is real, it is just not refreshed from the
+          latest working levels. Blanking a page of evidence to say so would cost
+          more than the staleness it reports. */}
+      {!loading && !bootstrapping && !bootstrapFailed && reprojectFailed && (
+        <Alert
+          severity="info"
+          sx={{ mt: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={retryBootstrap}>
+              {BOOTSTRAP_RETRY_LABEL}
+            </Button>
+          }
+        >
+          {REPROJECTION_FAILED_LINE}
         </Alert>
       )}
 

@@ -36,12 +36,29 @@ import {
 } from '../firebase/firestore'
 import { foundationGraphs } from './index'
 import { mergeSeededModel, seedLearnerModel } from './seedLearnerModel'
+import { promotedModelStatus } from './modelStatus'
+import {
+  applyWorkingLevelProjection,
+  shouldReprojectWorkingLevels,
+} from './workingLevelProjection'
 import type { ChildSkillMap } from '../curriculum/skillStatus'
 import type { LearnerModel } from '../types/learnerModel'
 import type { SightWordProgress, SkillSnapshot } from '../types'
 
-/** Which of the two callers this is. See the header. */
-export type BootstrapMode = 'create-only' | 'reseed'
+/**
+ * Which caller this is. See the header.
+ *
+ * - `'create-only'` — the Foundations tab's once-per-child create. A document
+ *   that appeared meanwhile is left exactly as it is.
+ * - `'reseed'` — the `?diag=1` button. Recomputes everything and folds it through
+ *   {@link mergeSeededModel}.
+ * - `'reproject'` — the narrow refresh (UX-291). Recomputes the **band-derived**
+ *   states only, from the child's current working levels, and only when those
+ *   levels are newer than the last projection. Never creates a document, never
+ *   reads the skill map or the sight-word list, never demotes, and writes nothing
+ *   at all when the levels have not moved.
+ */
+export type BootstrapMode = 'create-only' | 'reseed' | 'reproject'
 
 /**
  * Seed (or re-seed) one child's `learnerModels/{childId}` from their derived
@@ -55,12 +72,20 @@ export async function bootstrapLearnerModel(
   familyId: string,
   childId: string,
   mode: BootstrapMode = 'create-only',
-): Promise<LearnerModel> {
-  // Inputs — read outside the transaction. They are not the contended document,
-  // and the sight-word read is a collection query, which a transaction cannot run.
+): Promise<LearnerModel | null> {
   const snapRef = doc(skillSnapshotsCollection(familyId), childId)
   const mapRef = doc(childSkillMapsCollection(familyId), childId)
   const modelRef = doc(learnerModelsCollection(familyId), childId)
+
+  // The narrow path (UX-291). It reads ONE input — the snapshot the levels live
+  // on — because a projection of working levels needs nothing else, and a page
+  // view is not worth four reads.
+  if (mode === 'reproject') {
+    return reprojectWorkingLevels(childId, snapRef, modelRef)
+  }
+
+  // Inputs — read outside the transaction. They are not the contended document,
+  // and the sight-word read is a collection query, which a transaction cannot run.
   const [snapDoc, mapDoc, swSnap] = await Promise.all([
     getDoc(snapRef),
     getDoc(mapRef),
@@ -92,5 +117,72 @@ export async function bootstrapLearnerModel(
     // Writes ONLY learnerModels (merge).
     tx.set(modelRef, merged, { merge: true })
     return merged
+  })
+}
+
+/**
+ * Recompute the band-derived concept states from the child's current working
+ * levels (UX-291). Returns the model the document now holds, or `null` when there
+ * is no model to project onto — this mode never creates one.
+ *
+ * The decision is made **inside** the transaction, against the document the write
+ * would land on rather than against whatever a caller happened to be rendering:
+ * the pure {@link shouldReprojectWorkingLevels} compares the snapshot's own
+ * `WorkingLevel.updatedAt` stamps to the model's `projectedAt`. Unchanged levels
+ * leave the transaction having written nothing.
+ *
+ * Three write shapes, and only three:
+ *   - levels not newer      → no write at all;
+ *   - levels newer, nothing moved (every affected concept is already at or above
+ *     what the level says, or carries witnessed evidence) → `projectedAt` alone,
+ *     so the same no-op is not recomputed on every later visit;
+ *   - states moved          → states + `changeFeed` + `updatedAt` + `projectedAt`
+ *     + `synthesisStaleAt` (FEAT-57 D4), and the shared `promotedModelStatus`
+ *     rule (UX-322) applied rather than re-implemented.
+ */
+async function reprojectWorkingLevels(
+  childId: string,
+  snapRef: ReturnType<typeof doc>,
+  modelRef: ReturnType<typeof doc>,
+): Promise<LearnerModel | null> {
+  const snapDoc = await getDoc(snapRef)
+  const snapshot: SkillSnapshot | null = snapDoc.exists()
+    ? (snapDoc.data() as SkillSnapshot)
+    : null
+  // No snapshot means no working levels, and a projection with no levels is a
+  // projection of `not-yet` — which the upgrade-only fold would discard anyway.
+  if (!snapshot) return null
+
+  return runTransaction(db, async (tx) => {
+    const existingDoc = await tx.get(modelRef)
+    if (!existingDoc.exists()) return null
+    const existing = existingDoc.data() as LearnerModel
+
+    if (!shouldReprojectWorkingLevels(existing, snapshot)) return existing
+
+    const now = new Date().toISOString()
+    const { model: next, changedConceptIds } = applyWorkingLevelProjection(
+      existing,
+      foundationGraphs,
+      childId,
+      snapshot,
+      now,
+    )
+
+    if (changedConceptIds.length === 0) {
+      // Record that the projection ran, and nothing else — no `updatedAt`, no
+      // `synthesisStaleAt`, no feed line.
+      tx.set(modelRef, { projectedAt: now }, { merge: true })
+      return { ...existing, projectedAt: now }
+    }
+
+    const payload: LearnerModel = { ...next, projectedAt: now, synthesisStaleAt: now }
+    const promoted = promotedModelStatus(payload)
+    if (promoted) payload.status = promoted
+
+    // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them),
+    // exactly like every other model writer.
+    tx.set(modelRef, JSON.parse(JSON.stringify(payload)), { merge: true })
+    return payload
   })
 }
