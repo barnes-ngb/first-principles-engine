@@ -10,7 +10,9 @@ import {
   resolveFoundationConcepts,
 } from './curriculumNodeBridge'
 import { FOUNDATION_NODE_MAP } from './index'
+import { TAG_CONCEPT_BRIDGE } from './tagConceptBridge'
 import { mapFindingToNode } from '../curriculum/mapFindingToNode'
+import { MathTags } from '../types/skillTags'
 
 /** Resolve straight from a finding tag, the way both callers do. */
 function fromTag(tag: string) {
@@ -137,6 +139,49 @@ describe('resolveFoundationConcepts — no detail means no write, never a guess'
     // away — and addWithin20/subWithin20 are different concepts.
     const r = fromTag('math.operations.within-20')
     expect(r.conceptIds).toEqual([])
+  })
+})
+
+describe('resolveFoundationConcepts — agreement with the curated tag bridge', () => {
+  // `tagConceptBridge.ts` is the owner-curated answer for the `skillTags.ts`
+  // catalog, and those tags reach this module too (a `prioritySkill` carries
+  // one). Two answers to one question is what this repo's one-definition rail
+  // forbids — so where both answer, they must agree, DERIVED from the catalog
+  // rather than hand-checked. Codex round 1 found the defect this catches.
+  const SPLIT_IDS = ['math.operations.addSub', 'math.operations.multDiv']
+
+  it('agrees with TAG_CONCEPT_BRIDGE on every catalog math tag this module splits', () => {
+    const checked: string[] = []
+    for (const tag of Object.values(MathTags)) {
+      const nodeId = mapFindingToNode(tag)
+      if (!nodeId || !SPLIT_IDS.includes(nodeId)) continue // not this module's surface
+      const curated = TAG_CONCEPT_BRIDGE[tag]
+      if (!curated || curated.length === 0) continue // curated as no-guess
+      checked.push(tag)
+      expect(resolveFoundationConcepts(nodeId, tag).conceptIds, tag).toEqual(curated)
+    }
+    // The rail is worthless if it checks nothing — pin that it has a surface.
+    expect(checked.sort()).toEqual([
+      'math.addition.facts',
+      'math.subtraction.noRegroup',
+      'math.subtraction.regroup',
+    ])
+  })
+
+  it('reads "no regrouping" as the ABSENCE of regrouping, not as regrouping', () => {
+    // The negation contains the word it negates. Marking the harder concept
+    // solid for a child who has demonstrated the opposite is worse than silence.
+    for (const tag of [
+      'math.subtraction.noRegroup',
+      'math.subtraction.no-regroup',
+      'math.subtraction.without-regrouping',
+    ]) {
+      expect(fromTag(tag).conceptIds, tag).toEqual(['math.operations.twoDigit'])
+    }
+    // …and the affirmative tag is untouched.
+    expect(fromTag('math.subtraction.regroup').conceptIds).toEqual([
+      'math.operations.regrouping',
+    ])
   })
 })
 

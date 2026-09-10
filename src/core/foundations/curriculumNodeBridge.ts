@@ -70,6 +70,20 @@
 //     because a second answer to this one question is exactly what this repo's
 //     one-definition rail exists to prevent.
 //
+// ## It may not disagree with the curated table
+//
+// `tagConceptBridge.ts` is the owner-curated `skillTag → conceptId` answer for
+// the **catalog** tags in `skillTags.ts`, and those tags reach this module too
+// (a `prioritySkill` carries one). Where both answer, they must agree, and that
+// is enforced by test over every catalog `MathTags` member whose bridge answer
+// is one of the two ids split here — not by hand-checking. Codex round 1 found
+// exactly the defect that rail exists to catch: `math.subtraction.noRegroup`
+// normalises to `...noregroup`, which CONTAINS `regroup`, so a bare substring
+// match marked the harder `regrouping` concept solid for a child who had
+// demonstrated the opposite. Where a curated answer exists it is taken verbatim
+// rather than re-derived (`noRegroup` → `twoDigit`, `additionFacts` →
+// `addWithin20`).
+//
 // The **curriculumMap-side** consumers are deliberately NOT changed and must
 // not read this module: `updateSkillMapFromFindings` and
 // `deriveWorkingLevelMastery` write `childSkillMaps`, whose ids are
@@ -121,12 +135,22 @@ function tagTokens(tag: string): string {
   return tag.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
-/** Small-facts band: `within-20`, `within-10`, `single`/`single-digit`. */
+/** Small-facts band: `within-20`, `within-10`, `single`/`single-digit`, `facts`. */
 function namesSmallNumberBand(t: string): boolean {
-  if (t.includes('single')) return true
+  if (t.includes('single') || t.includes('facts')) return true
   const within = /within(\d+)/.exec(t)
   return within != null && Number(within[1]) <= 20
 }
+
+/**
+ * A tag that names the ABSENCE of regrouping — `math.subtraction.noRegroup` is a
+ * live catalog tag (`skillTags.ts` `MathTags.SubtractionNoRegroup`) and a real
+ * priority skill. Tested before `regroup`, because the negation contains the
+ * word it negates: a bare substring match reads "no regrouping" as "regrouping"
+ * and marks the HARDER concept solid on a skill the child has not demonstrated,
+ * which is worse than the silence this module exists to fix (Codex round 1).
+ */
+const NO_REGROUP = /(no|without)regroup/
 
 /**
  * `math.operations.addSub` → the addition/subtraction concept the tag names.
@@ -138,6 +162,10 @@ function namesSmallNumberBand(t: string): boolean {
  * tags), so this settles a hypothetical rather than reversing a live case.
  */
 function resolveAddSub(t: string): string | null {
+  // Negation first — see NO_REGROUP. `twoDigit` is not a fallback here: it is
+  // the answer `tagConceptBridge` already curates for this tag ("two-digit
+  // subtraction without regrouping lives in the two-digit-ops node").
+  if (NO_REGROUP.test(t)) return 'math.operations.twoDigit'
   if (t.includes('regroup')) return 'math.operations.regrouping'
   if (t.includes('multidigit')) return 'math.operations.multiDigit'
   if (t.includes('twodigit')) return 'math.operations.twoDigit'

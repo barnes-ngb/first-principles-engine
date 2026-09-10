@@ -41,6 +41,7 @@ import { computeEvalRead } from './evalModelSync'
 import { FoundationBridgeOutcome, resolveFoundationConcepts } from './curriculumNodeBridge'
 import { mapFindingToNode } from '../curriculum/mapFindingToNode'
 import { CURRICULUM_NODE_MAP } from '../curriculum/curriculumMap'
+import { TAG_CONCEPT_BRIDGE } from './tagConceptBridge'
 import type { EvaluationFinding } from '../types/evaluation'
 
 function finding(skill: string, status: EvaluationFinding['status'] = 'not-yet'): EvaluationFinding {
@@ -256,6 +257,20 @@ describe('UX-288 — the declared boundary and the skill-map side are untouched'
         'curriculumNodeBridge',
       )
     }
+  })
+
+  it('UX-348 (filed, not fixed): math.wordProblems outruns its curated concept', () => {
+    // The owner-curated `tagConceptBridge` routes the catalog tag
+    // `math.wordProblems` to `math.problemSolving.oneStep` ("catalog evidence is
+    // single-step word problems"), but `mapFindingToNode`'s prefix table answers
+    // the band-5 multi-step `math.problemSolving` — a REAL foundations node, so
+    // it passes straight through this module and nothing filters it. Same shape
+    // as Codex round 1's finding (a harder concept marked solid on weaker
+    // evidence) but off this module's surface: it is a passthrough of a genuine
+    // foundations id, not one of the two curriculumMap ids split here. Fixing it
+    // means changing `mapFindingToNode`, which this run may not do.
+    expect(mapFindingToNode('math.wordProblems')).toBe('math.problemSolving')
+    expect(TAG_CONCEPT_BRIDGE['math.wordProblems']).toEqual(['math.problemSolving.oneStep'])
   })
 
   it('UX-347 (filed, not fixed): writing.paragraph routes to a MATH concept', () => {
