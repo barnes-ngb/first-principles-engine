@@ -29,7 +29,7 @@ import { useBusinessLog } from './useBusinessLog'
  * see pending sales; only a parent OKs them onto the meter.
  */
 export default function BusinessPage() {
-  const { activeChildId } = useActiveChild()
+  const { activeChildId, activeChild } = useActiveChild()
   const { canEdit } = useProfile()
   const {
     entries,
@@ -64,7 +64,11 @@ export default function BusinessPage() {
         <SectionCard title="Operations">
           <Stack spacing={3}>
             {activeChildId ? (
-              <SaleEntryForm childId={activeChildId} onLogSale={addSale} />
+              <SaleEntryForm
+                childId={activeChildId}
+                childName={activeChild?.name}
+                onLogSale={addSale}
+              />
             ) : (
               <Typography variant="body2" color="text.secondary">
                 Loading…

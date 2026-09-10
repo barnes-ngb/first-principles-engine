@@ -72,7 +72,22 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
   // uncapped and never touches the counter. `capped === !canEdit` because the
   // only non-parent profiles are the kids.
   const capped = !canEdit
-  const { atLimit, limit, remaining, recordGeneration } = useArtQuota(activeChildId, { capped })
+  /**
+   * UX-329 (Codex round 3, P2) — the quota follows the ROSTER, not the header.
+   *
+   * `KitBuilderForm` is bound to `editing.childId` while editing a saved
+   * roster, and `makeGenerateArt` writes the art onto that roster — but this
+   * counter and the budget printed on the help sheet were read from
+   * `activeChildId`. So a kid editing his own kit after the header moved spent
+   * his brother's weekly allowance on it, which lets one boy bypass his own cap
+   * and can block the other. The BIND has to include the quota owner or it is
+   * only half a binding.
+   *
+   * The create path is unaffected: `canGenerateArt` is false until a roster has
+   * been saved, so there is no generation to meter before `editing` exists.
+   */
+  const rosterOwnerId = mode.kind === 'edit' ? mode.roster.childId : activeChildId
+  const { atLimit, limit, remaining, recordGeneration } = useArtQuota(rosterOwnerId, { capped })
 
   const nameById = useMemo(() => {
     const m: Record<string, string> = {}
@@ -212,6 +227,9 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
     return (
       <KitBuilderForm
         childId={editing ? editing.childId : activeChildId}
+        // UX-329 — the form captures both at mount and saves to the child the
+        // roster was STARTED for, so this name is the one it will print.
+        childName={nameById[editing ? editing.childId : activeChildId]}
         roster={editing}
         onSave={handleSave}
         onCancel={() => setMode({ kind: 'list' })}

@@ -189,6 +189,33 @@ unsaved or in-flight state for that scope, and state for each whether it re-seed
 identity it started under.** The safe default is that persisted work stays with the identity it was started
 for, and unsaved work is re-seeded with the loss made visible.
 
+**That rail is now checkable, and it has a vocabulary, a registry and a test (`UX-329`).** Five rounds each
+finding one more surface was not five unlucky reviews: **nothing in the repo knew the list existed**, so a
+seventh could join it and nothing would notice. Three things close that. **One — the five verdicts**, which
+are the answers those six fixes turned out to need, and which a new surface picks from rather than
+re-deriving: **BIND** (the work is unsaved and expensive to recreate, so the *write* is bound to the identity
+the work was created under, and the surface says so before the tap — `CreateSightWordBook`,
+`useCreativeTimer.ownerChildId`, `KitBuilderForm`); **HIDE** (the work is already persisted under its own
+child, so the surface stops rendering for the new one and is restored on switching back — nothing is written,
+so nothing is lost — `WorkshopPage`); **RESET** (the work is cheap to retype, so re-seed from the new
+identity, clear `dirty`, and **make the loss visible** — `GoalBuilder`, `QuickAddHours`, `SaleEntryForm`,
+`RecordsPage`'s historical-hours dialog); **GATE** (the read has not settled or has **failed**, so the surface
+is not editable at all — a failed read is *not* an affirmative empty result, which is the exact defect
+Codex round 5 caught in `useBusinessGoal`); and **SAFE** (it genuinely carries its own id or holds nothing
+across a change — **and it says why, with the line that makes it true**, because an unexplained SAFE is the
+row that comes back as a P1). **Two — the registry**,
+`docs/review/CHILD_SWITCH_SURFACE_CENSUS_2026-09.md`, one row per surface, six columns, no blank cells,
+derived from the source and not typed out (`npm run census:child-switch` prints its every number, which is
+also the derived-numbers rule above). **Three — the enforcement**,
+`src/test/childSwitchSurfaces.invariant.test.ts`, which fails closed on an unclassified candidate, a stale or
+duplicated or blank or mis-worded row, and a census that parses to nothing — the `[ledger-shape]` lesson that
+a guard passing on malformed input is worse than no guard — and which proves it can fail by feeding itself a
+deliberately unclassified surface. **So: a new surface that reads `useActiveChild`, or is handed a scoped
+identity, and holds editable state, declares its verdict when it is written — in the same PR — not when a
+reviewer finds it.** The heuristic over-matches on purpose: a surface it catches that turns out to be fine
+costs one SAFE row with a reason, and a surface it cannot see is a hole. The three shapes it still misses are
+named in the census's §6 and were checked by hand.
+
 ### Ledger integrity & base discipline
 
 - **Branch from fresh `origin/main`, and verify the ledger head against the remote before editing.**
