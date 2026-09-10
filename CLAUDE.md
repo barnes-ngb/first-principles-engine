@@ -54,16 +54,23 @@ Anything that touches a number, a total, a rate or a rule stops for a decision e
 queue, not the judgement.
 
 **This decision supersedes a `FILE, DO NOT FIX` already written on a ledger row, where that row's fix
-is attribution-only.** Those rows were filed *before* the decision and their stop was conditioned on
-exactly this authorisation — `UX-336` (*"`xpLedger` is on `CLAUDE.md`'s never-silently-change list, so
-AUDIT-222 classified it and stopped"*), `UX-339` (*"it touches **three** propose-and-confirm rails at
-once"*) and `UX-340` (*"outside the authorised scope"*) are the three such rows open today, all three
-are unblocked, and `FIX-223` is the run that implements them. This sentence is where that supersession
-lives rather than in the rows themselves, because a correct ledger PR reads `+N rows / −0` and an
-in-place edit to an existing row body is the diff signature this repo reads as a stale base (›
-**Ledger integrity & base discipline**). So **where a row's stop directive and this paragraph
-disagree, this paragraph is the later decision** — but only for an attribution-only fix, and a run
-that cannot tell still stops.
+is attribution-only.** Such rows were filed *before* the decision and their stop was conditioned on
+exactly this authorisation, so **a row is superseded by the REASON its stop gives — one of these rails
+and nothing else — never by being listed here.** That is deliberate: which rows qualify is a survey
+across a ledger that moves, and a list written here would be stale the next time one is filed. The
+three the decision was made for are the census's open P1s — `UX-336` (*"`xpLedger` is on `CLAUDE.md`'s
+never-silently-change list, so AUDIT-222 classified it and stopped"*), `UX-339` (*"it touches **three**
+propose-and-confirm rails at once"*) and `UX-340` (*"outside the authorised scope"*) — and `FIX-223` is
+the run that implements them. **They are not all of them**, which an earlier draft of this paragraph
+wrongly implied (Codex round 2 on PR #1822): `UX-341` is `UX-336`'s shape on an admin surface, filed
+because it writes `xpLedger`, and `UX-342` reads *"FILE, DO NOT FIX — hours rail"* over a picked
+video's unchanged minutes — both attribution-only RESETs, both superseded, and both named here as
+examples of the reason rather than as a closed set. This sentence is where the supersession lives
+rather than in the rows themselves, because a correct ledger PR reads `+N rows / −0` and an in-place
+edit to an existing row body is the diff signature this repo reads as a stale base (› **Ledger
+integrity & base discipline**). So **where a row's stop directive and this paragraph disagree, this
+paragraph is the later decision** — but only for an attribution-only fix, and a run that cannot tell
+still stops.
 
 **The review ledger is the backlog + memory.** `docs/review/REVIEW_HOME_BASE.md` §6 is the source of
 truth for open work (ID prefixes: `ARCH-` / `FUNC-` / `TEST-` / `DATA-` / `ETHOS-` / `DOC-` / `FEAT-`).
