@@ -59,8 +59,14 @@ unclassified. That pattern worked — it is why the child-switch P1 count is zer
   enumerate. One order rule is mechanical and asserted: *no keyword may be a
   prefix of an earlier-declared keyword*, since the earlier one always wins —
   which is why `cvce` is now declared before `cvc` and `times` before `time`.
-  The rest is stated in prose and pinned by named test (`repeatedaddition`
-  before `addition`, because repeated addition **is** multiplication).
+  The rest is stated in prose and pinned by named test, and there are **two live
+  pairs**: `repeatedaddition` before `addition`, because repeated addition **is**
+  multiplication (`math.operations.arrays` in the foundations graph); and
+  `inference` before the generic `comprehension`, a P1 from Codex round 3, which
+  found the other order sending `reading.comprehension.cause-effect-inference`
+  to *explicit recall* — a different and easier concept. **Exact aliases for the
+  enumerated tags are not enough**, because the reading prompt hands the model no
+  closed list at all.
 - **A domain anchor.** A tag whose leading segment declares a domain may not
   resolve outside it. There is exactly one lane and **it is keyed on both ends**:
   a `writing.*` tag that *names spelling* may reach a **named phonics or
@@ -92,13 +98,17 @@ unclassified. That pattern worked — it is why the child-switch P1 count is zer
   `derivedFoundationConcepts`, because *"the curated answer wins"* and *"the
   derived route would have said the same"* are different claims and only the
   second catches the next `UX-348`.
-- **Narrowing.** Four curriculumMap ids that **are** foundations concepts carry
+- **Narrowing.** Five curriculumMap ids that **are** foundations concepts carry
   more specific concepts underneath them, and the coarse id is the harder one.
   `curriculumNodeBridge` now reads the tag's own detail *before* the passthrough:
   `math.problemSolving` → `oneStep`, `math.number.counting` →
-  `digitRecognition` / `comparison` / `skipCount`, `math.measurement.time` →
-  `money`, `math.fractions.concepts` → `compare`. The last two were found by
-  **this census**, not by a report.
+  `digitRecognition` / `comparison` / `skipCount`, **both** measurement nodes
+  (`time` and `length`) → `money`, and `math.fractions.concepts` → `compare`. The
+  measurement and fraction cases were found by **this census**, not by a report.
+  Registering the measurement resolver on the time node alone was a P1 from
+  Codex round 3: `math.measurement.money` is not a curriculumMap id, so it walks
+  up to the `math.measurement` prefix and arrives at **length**, where nothing
+  narrowed it — the same defect one node over.
 
 ### What was NOT changed
 
@@ -504,6 +514,18 @@ Three things it cannot see, checked by hand:
    nothing, or CURATED about a tag the curated table has no answer for — but
    *"`math.money` should reach the money concept, not the time one"* is a
    judgement, and it took a person reading two graphs side by side to see it.
-3. **A `curriculumMap.ts` or foundations-graph edit that changes a node's
+3. **A tag no source enumerates — and this is the structural one.** Every one of
+   the six review findings on PR #1827 was about a tag the registry does not
+   contain: `writing.fluency`, `writing.spelling.fluency`,
+   `math.measurement.money`, `reading.comprehension.cause-effect-inference`,
+   `math.number-sense.comparison`. The reading evaluation prompt hands the model
+   no closed list, so the emittable set is **unbounded**, and a registry of what
+   the app *declares* can never be a registry of what arrives. Which is why every
+   fix in this run is a change to a **rule** — a boundary, an order, a lane keyed
+   at both ends, a resolver registered on every node a tag can reach — and never
+   an alias for the tag that was reported. Read the registry as *"here is what we
+   know we emit, and where it lands"*, never as *"here is everything that can
+   arrive"*.
+4. **A `curriculumMap.ts` or foundations-graph edit that changes a node's
    meaning.** The registry pins ids, not semantics. A renamed node whose id stays
    the same passes.

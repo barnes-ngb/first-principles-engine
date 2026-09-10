@@ -201,9 +201,12 @@ interface KeywordRule {
  *     before `cvc` and `times` before `time`.
  *   - *By hand, pinned by named test:* where two keywords both match a real tag
  *     without either being the other's prefix, the more specific skill is
- *     declared first. `repeatedaddition` before `addition` is the live case —
- *     "repeated addition" IS multiplication (`math.operations.arrays` in the
- *     foundations graph), and reading it as addition recorded the wrong strand.
+ *     declared first. Two live cases: `repeatedaddition` before `addition`
+ *     ("repeated addition" IS multiplication — `math.operations.arrays` in the
+ *     foundations graph — and reading it as addition recorded the wrong strand),
+ *     and `inference` before the generic `comprehension` (Codex round 3 on
+ *     PR #1827: the other order sent a plainly-inferential compound tag to
+ *     EXPLICIT recall, an easier concept the model could then be downgraded on).
  *
  * Every `node` is a `curriculumMap` id — the contract in this file's header —
  * pinned by test against `CURRICULUM_NODE_MAP`.
@@ -221,8 +224,15 @@ export const KEYWORD_FALLBACKS: readonly KeywordRule[] = [
   { keywords: ['lettersound'], node: 'reading.phonics.letterSounds' },
   { keywords: ['rhym'], node: 'reading.phonics.cvc' },
   { keywords: ['vocabulary', 'contextclue'], node: 'reading.vocabulary.contextClues' },
-  { keywords: ['comprehension', 'mainidea'], node: 'reading.comprehension.explicit' },
+  // `inference` BEFORE the generic `comprehension`, for the same reason
+  // `repeatedaddition` comes before `addition`: a named sub-skill beats the
+  // domain word. Codex round 3 on PR #1827 (P1) found the other order sending
+  // `reading.comprehension.cause-effect-inference` — a tag the prompt does not
+  // enumerate but the model can plainly emit — to EXPLICIT recall, a different
+  // and easier concept that `computeEvalRead` would then accept and could
+  // downgrade. Exact aliases for today's enumerated tags are not enough.
   { keywords: ['inference'], node: 'reading.comprehension.inference' },
+  { keywords: ['comprehension', 'mainidea'], node: 'reading.comprehension.explicit' },
   { keywords: ['fluency'], node: 'reading.fluency.accuracy' },
   { keywords: ['multisyllab'], node: 'reading.decoding.multisyllable' },
 
@@ -247,7 +257,12 @@ export const KEYWORD_FALLBACKS: readonly KeywordRule[] = [
   // move a concept DOWN, so choosing one of the three would be the guess FIX-224
   // forbids. The narrowing rule in `curriculumNodeBridge` answers only when the
   // tag's own detail says which — and a tag that says lands.
-  { keywords: ['numbercomparison'], node: 'math.number.comparison' },
+  // `comparison` standalone as well as `numbercomparison`: the phrase builder
+  // joins only CONTIGUOUS words, so a refined tag like
+  // `math.number-sense.comparison` has no `numbercomparison` phrase in it — the
+  // `sense` sits between the two — and used to fall to the counting node and be
+  // declined there as having no detail (Codex round 3 on PR #1827, P2).
+  { keywords: ['numbercomparison', 'comparison'], node: 'math.number.comparison' },
   { keywords: ['counting', 'skipcount', 'numbersense', 'digitrecognition'], node: 'math.number.counting' },
   // "Repeated addition" is multiplication. Declared before `addition`, which also
   // matches it — the ordering rule stated above, and the one live instance of it.

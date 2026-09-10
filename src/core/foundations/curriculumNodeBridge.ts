@@ -302,24 +302,42 @@ function resolveProblemSolving(phrases: readonly string[]): string | null {
  */
 function resolveNumberSense(phrases: readonly string[]): string | null {
   if (names(phrases, 'digitrecognition')) return 'math.number.digitRecognition'
-  if (names(phrases, 'numbercomparison')) return 'math.number.comparison'
+  // `comparison` standalone as well: the phrase builder joins only CONTIGUOUS
+  // words, so `math.number-sense.comparison` carries no `numbercomparison`
+  // phrase — `sense` sits between the two — and used to be declined here as
+  // having no detail (Codex round 3 on PR #1827, P2).
+  if (names(phrases, 'numbercomparison') || names(phrases, 'comparison')) {
+    return 'math.number.comparison'
+  }
   if (names(phrases, 'skipcount')) return 'math.number.skipCount'
   if (names(phrases, 'count')) return 'math.number.counting'
   return null
 }
 
 /**
- * `math.measurement.time` → telling time or counting money (FIX-226).
+ * The measurement strand: length, telling time, or counting money (FIX-226).
  *
- * The curriculum map has ONE node for both — its label is literally "Time &
- * money" — so `math.money` and `math.time` are given the same id there and
- * always were. The foundations graph keeps them apart: `math.measurement.time`
- * is "Tell time" at band 2 and `math.measurement.money` is "Count money" at band
- * 3, and it makes the second depend on the first. So a money finding used to be
- * recorded against telling the time — a different skill, and the easier one.
- * Found by AUDIT-226's census, which is what a census is for.
+ * The curriculum map has **two** measurement nodes and the foundations graph has
+ * **three**: `math.measurement.length` ("Measure things", band 2),
+ * `math.measurement.time` ("Tell time", band 2) and `math.measurement.money`
+ * ("Count money", band 3, which the graph makes depend on telling time). The map
+ * folds money into its time node — the label is literally "Time & money" — so
+ * `math.money` and `math.time` have always shared it there, and a money finding
+ * was recorded against telling the time: a different skill, and the easier one.
+ *
+ * **It is registered on BOTH map nodes, and that is the repair Codex round 3
+ * found missing** (P1 on PR #1827). `math.measurement.money` is a tag the
+ * evaluator can plainly emit, and it is not a curriculumMap id, so
+ * `mapFindingToNode` walks it up to the `math.measurement` prefix and answers
+ * `math.measurement.length`. Registering the resolver on the time node alone
+ * left that path unnarrowed, so money evidence landed on **length** — the same
+ * defect one node over.
+ *
+ * `fallback` is the node the tag arrived on: unlike number sense, a bare
+ * `math.measurement` or `math.measurement.length` names a real concept of its
+ * own, so the coarse answer stands rather than declining.
  */
-function resolveTimeOrMoney(phrases: readonly string[]): string | null {
+function resolveMeasurement(phrases: readonly string[], fallback: string): string | null {
   const money = names(phrases, 'money') || names(phrases, 'coin')
   const time = names(phrases, 'time') || names(phrases, 'clock')
   // A tag naming both names two concepts — the number-sense rule, so: no guess.
@@ -328,7 +346,7 @@ function resolveTimeOrMoney(phrases: readonly string[]): string | null {
   if (money && time) return null
   if (money) return 'math.measurement.money'
   if (time) return 'math.measurement.time'
-  return null
+  return fallback
 }
 
 /**
@@ -361,7 +379,11 @@ const DETAIL_RESOLVERS: Record<string, (phrases: readonly string[]) => string | 
 const NARROWING_RESOLVERS: Record<string, (phrases: readonly string[]) => string | null> = {
   'math.problemSolving': resolveProblemSolving,
   'math.number.counting': resolveNumberSense,
-  'math.measurement.time': resolveTimeOrMoney,
+  // Both measurement nodes, because a money tag can arrive at either (Codex
+  // round 3): `math.money` resolves to the time node by prefix entry, and
+  // `math.measurement.money` walks up to the length node by prefix WALK.
+  'math.measurement.time': (phrases) => resolveMeasurement(phrases, 'math.measurement.time'),
+  'math.measurement.length': (phrases) => resolveMeasurement(phrases, 'math.measurement.length'),
   'math.fractions.concepts': resolveFractions,
 }
 

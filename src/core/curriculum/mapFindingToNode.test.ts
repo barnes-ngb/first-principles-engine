@@ -329,6 +329,45 @@ describe('FIX-226 — the inference tags the Knowledge Mine prompt emits', () =>
   })
 })
 
+describe('FIX-226 — a named sub-skill beats the domain word (Codex round 3)', () => {
+  it('routes a plainly-inferential compound tag to inference, not explicit recall', () => {
+    // P1. The generic `comprehension` rule used to be declared first, so a tag
+    // the prompt does not enumerate but the model can plainly emit landed on
+    // EXPLICIT recall — a different, easier concept `computeEvalRead` accepts
+    // and can downgrade. Exact aliases for today's enumerated tags are not
+    // enough; the ORDER has to carry the rule.
+    expect(mapFindingToNode('reading.comprehension.cause-effect-inference')).toBe(
+      'reading.comprehension.inference',
+    )
+    expect(mapFindingToNode('reading.inference')).toBe('reading.comprehension.inference')
+  })
+
+  it('still sends the rest of the comprehension family to explicit recall', () => {
+    for (const tag of [
+      'reading.comprehension.theme',
+      'reading.comprehension.whoWhat',
+      'reading.comprehension.compareContrast',
+    ]) {
+      expect(mapFindingToNode(tag), tag).toBe('reading.comprehension.explicit')
+    }
+    expect(mapFindingToNode('reading.comprehension.mainIdea')).toBe(
+      'reading.comprehension.mainIdea',
+    )
+  })
+
+  it('reads a standalone comparison detail, which no contiguous phrase carries', () => {
+    // P2. The phrase builder joins only CONTIGUOUS words, so
+    // `math.number-sense.comparison` carries no `numbercomparison` phrase —
+    // `sense` sits between the two — and the tag used to fall to the counting
+    // node and be declined there.
+    expect(mapFindingToNode('math.number-sense.comparison')).toBe('math.number.comparison')
+    expect(mapFindingToNode('number-comparison')).toBe('math.number.comparison')
+    // …without admitting the words that merely look like it.
+    expect(mapFindingToNode('compare-contrast')).toBeNull()
+    expect(mapFindingToNode('math.fractions.comparing')).toBe('math.fractions.concepts')
+  })
+})
+
 describe('FIX-226 — "repeated addition" is multiplication', () => {
   it('reads the more specific keyword first', () => {
     // `repeated-addition` matches BOTH `repeatedaddition` and `addition`; the

@@ -286,6 +286,46 @@ describe('FIX-226 — narrowing an id the graph DOES define (UX-346 / UX-348)', 
     expect(fromTag('math.wordProblems').conceptIds).toEqual(['math.problemSolving.oneStep'])
   })
 
+  it('narrows a money tag however it arrives at the measurement strand (Codex round 3)', () => {
+    // P1. `math.money` reaches the TIME node through a prefix entry, while
+    // `math.measurement.money` — a tag the evaluator can plainly emit, and not a
+    // curriculumMap id — walks up to the `math.measurement` prefix and reaches
+    // the LENGTH node. Registering the resolver on the time node alone left that
+    // second path unnarrowed, so money evidence landed on length: the same
+    // defect one node over.
+    expect(mapFindingToNode('math.money')).toBe('math.measurement.time')
+    expect(mapFindingToNode('math.measurement.money')).toBe('math.measurement.length')
+    // `math.measurement.coins` rather than a bare `math.coins`: the prefix table
+    // has no `coin` keyword, so only a tag under the `math.measurement` prefix
+    // reaches the strand at all — which is what makes the resolver's `coin`
+    // branch live rather than dead, the distinction UX-347 was about.
+    for (const tag of ['math.money', 'math.measurement.money', 'math.measurement.coins']) {
+      expect(fromTag(tag).conceptIds, tag).toEqual(['math.measurement.money'])
+    }
+    expect(mapFindingToNode('math.coins')).toBeNull()
+    // …and the nodes that are not about money keep their own answers.
+    expect(fromTag('math.time').conceptIds).toEqual(['math.measurement.time'])
+    expect(fromTag('math.measurement').conceptIds).toEqual(['math.measurement.length'])
+    expect(fromTag('math.measurement.length').conceptIds).toEqual(['math.measurement.length'])
+  })
+
+  it('declines a measurement tag that names both time and money', () => {
+    // Two concepts named at once is the number-sense rule, applied here too.
+    expect(fromTag('math.measurement.time-and-money').conceptIds).toEqual([])
+  })
+
+  it('reads a standalone comparison detail on the counting node (Codex round 3)', () => {
+    // P2. Belt to the keyword fix in `mapFindingToNode`: a tag that still
+    // arrives on the counting node while naming comparison is narrowed rather
+    // than declined.
+    expect(resolveFoundationConcepts('math.number.counting', 'math.counting.comparison')
+      .conceptIds).toEqual(['math.number.comparison'])
+    // A bare number-sense tag still declines — it names three concepts.
+    expect(resolveFoundationConcepts('math.number.counting', 'math.number-sense').outcome).toBe(
+      FoundationBridgeOutcome.NoDetail,
+    )
+  })
+
   it('never returns a concept the graph does not define', () => {
     for (const tag of [
       'math.number-sense',
@@ -293,6 +333,9 @@ describe('FIX-226 — narrowing an id the graph DOES define (UX-346 / UX-348)', 
       'math.digit-recognition',
       'math.wordProblems',
       'math.word-problems.multi-step',
+      'math.measurement.money',
+      'math.number-sense.comparison',
+      'reading.comprehension.cause-effect-inference',
     ]) {
       for (const id of fromTag(tag).conceptIds) {
         expect(FOUNDATION_NODE_MAP[id], `${tag} → ${id}`).toBeDefined()
