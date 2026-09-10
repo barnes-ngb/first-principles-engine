@@ -369,3 +369,34 @@ describe('applyReDerivedMastery — sight-word + priority-skill inputs', () => {
     expect(skills['reading.phonics.digraphs'].status).toBe(SkillStatus.Mastered)
   })
 })
+
+// ── FIX-226 — the `cvce` keyword re-order moved no derived answer ─────────
+//
+// `cvce` used to resolve to `reading.phonics.cvc`, because `cvc` is a prefix of
+// it and was declared first. Declaring `cvce` first is strictly more correct,
+// and the reason it is also SAFE is that this function's output does not move:
+// `cvce`'s level-mates already wrote `reading.phonics.longVowels` at L5, and
+// `cvc` (L2) already wrote `reading.phonics.cvc` as Mastered, which is sticky.
+// Asserted rather than argued, because this function writes `childSkillMaps`.
+describe('FIX-226 — the keyword re-order does not move a derived phonics answer', () => {
+  it('marks the same nodes at phonics level 5 as before the re-order', () => {
+    const derived = deriveWorkingLevelMastery({ phonics: { level: 5 } } as never)
+    expect(derived['reading.phonics.cvc']).toBe(SkillStatus.Mastered)
+    expect(derived['reading.phonics.longVowels']).toBe(SkillStatus.InProgress)
+  })
+
+  it('marks the same nodes at phonics level 8, above every silent-e key', () => {
+    const derived = deriveWorkingLevelMastery({ phonics: { level: 8 } } as never)
+    expect(derived['reading.phonics.cvc']).toBe(SkillStatus.Mastered)
+    expect(derived['reading.phonics.longVowels']).toBe(SkillStatus.Mastered)
+  })
+
+  it('reaches the Level-1 number node the UX-346 keywords joined, and no more', () => {
+    // `number-sense` / `digit-recognition` / `number-comparison` used to resolve
+    // to nothing. `math.number.counting` was already written by `counting` at
+    // the same level, so the only new node is the comparison one the map has.
+    const derived = deriveWorkingLevelMastery({ math: { level: 4 } } as never)
+    expect(derived['math.number.counting']).toBe(SkillStatus.Mastered)
+    expect(derived['math.number.comparison']).toBe(SkillStatus.Mastered)
+  })
+})

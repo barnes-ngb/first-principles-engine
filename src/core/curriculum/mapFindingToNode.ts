@@ -7,9 +7,68 @@
  * "math.operations.addSub", "speech.sounds.late").
  *
  * This module bridges the two with exact matches, prefix matches, and keyword fallbacks.
+ *
+ * ## The contract, unchanged (FIX-226)
+ *
+ * **It answers with `curriculumMap` node ids and nothing else.** The foundations
+ * concept graph is a *different* namespace, and the translation onto it is the
+ * separate `core/foundations/curriculumNodeBridge.ts` (FIX-224 / UX-288). So a
+ * concept that exists only in the foundations graph — `math.problemSolving.oneStep`,
+ * `math.number.digitRecognition` — can never be returned from here however
+ * plainly a tag names it; that resolution happens one step later, on the
+ * foundations side, and `childSkillMaps` is untouched by it.
+ *
+ * ## Why the keyword fallback works the way it does (FIX-226 / UX-347)
+ *
+ * The fallback used to be an ordered chain of `norm.includes(keyword)` tests over
+ * a tag whose separators had been **stripped**, and that technique produced at
+ * least three independent defects, two of them found by accident:
+ *
+ *   - `writing.paragraph` → `math.data.graphs`, because "para**graph**" contains
+ *     `graph` and the math tests ran before the writing ones (UX-347). The
+ *     `paragraph` rule below was therefore **unreachable for every input it
+ *     exists to catch** — dead code that looked live.
+ *   - `math.subtraction.noRegroup` reads as `regroup` once the hyphen is gone, so
+ *     a negation matched the thing it negates (Codex round 1 on FIX-224, fixed
+ *     there; the same trap, one module over).
+ *   - `multiplication.fluency` → `reading.fluency.accuracy`, a math tag on a
+ *     reading node, which `deriveWorkingLevelMastery` has to defend against with
+ *     a domain filter of its own.
+ *
+ * Three changes, and the first is the repair — the other two are the belt:
+ *
+ *   1. **A keyword matches at word boundaries, never mid-word.** The tag is split
+ *      into words on every separator *and* on camelCase (`writing.paragraph` →
+ *      `writing` · `paragraph`), and a keyword must be a **prefix of one whole
+ *      phrase** — a contiguous run of those words joined up. `graph` is not a
+ *      prefix of `paragraph`, so it cannot match; `lettersound` still matches
+ *      `letter-sounds` (a prefix of the phrase `lettersounds`), which is why the
+ *      loose stems the table depends on (`measur`, `multipl`, `divis`, `rhym`)
+ *      still work. Re-ordering the chain would have fixed the one reported tag
+ *      and left the technique that produced it, so ordering is **not** the fix.
+ *   2. **The rules are a declared table, not a prose if-chain**, so their order is
+ *      data that a test can enumerate — and one order rule is mechanical and
+ *      asserted: *no keyword may be a prefix of an earlier-declared keyword*
+ *      (`cvce` before `cvc`, `times` before `time`), because the earlier one
+ *      would otherwise always win.
+ *   3. **A tag that declares a domain may not resolve across it.** `math.*` may
+ *      not answer with a reading node, `writing.*` may not answer with a math
+ *      one. The single exception is declared with its reason
+ *      (`DOMAINS_A_TAG_MAY_REACH`): a `writing.*` spelling tag may reach a
+ *      `reading.*` node, the lane `deriveWorkingLevelMastery` already permits
+ *      ("spelling a CVC word implies you can decode it"). The anchor applies to
+ *      the keyword fallback only — steps 1-3 are exact or curated answers and are
+ *      not second-guessed.
+ *
+ * `docs/review/FINDING_TAG_BRIDGE_CENSUS_2026-09.md` is the registry of every tag
+ * the app can hand this function, where each one lands, and why;
+ * `src/test/findingTagBridge.invariant.test.ts` fails closed when a tag joins it
+ * unclassified or resolves into the wrong domain.
  */
 
 import { CURRICULUM_MAPS, CURRICULUM_NODE_MAP } from './curriculumMap'
+import type { CurriculumDomain } from './curriculumMap'
+import { phrasesName, tagPhrases } from './tagPhrases'
 
 // ── Exact / prefix mapping ─────────────────────────────────────
 
@@ -42,12 +101,22 @@ const FINDING_PREFIX_MAP: Record<string, string> = {
   'reading.comprehension.inference': 'reading.comprehension.inference',
   'reading.comprehension.mainidea': 'reading.comprehension.mainIdea',
   'reading.comprehension.sequencing': 'reading.comprehension.explicit',
+  // The Knowledge Mine prompt's own two inference tags, whose labels say so:
+  // "Cause-effect inference" and "Multi-step inference". Both used to fall to the
+  // generic `comprehension` keyword and be recorded as EXPLICIT recall — a
+  // different skill, and an easier one (FIX-226). `reading.comprehension.inference`
+  // is a live node in both maps, so this is a literal correspondence, not a guess.
+  'reading.comprehension.infercause': 'reading.comprehension.inference',
+  'reading.comprehension.multistepinference': 'reading.comprehension.inference',
   'reading.vocabulary.contextclues': 'reading.vocabulary.contextClues',
   'reading.vocabulary.wordparts': 'reading.vocabulary.wordParts',
   'reading.vocabulary.synonymsantonyms': 'reading.vocabulary.everyday',
   'reading.fluency': 'reading.fluency.accuracy',
 
   // ── Math ────────────────────────────────────────────────
+  // The number-sense family (UX-346) is deliberately NOT here — it is a keyword
+  // rule instead, so a tag that names WHICH number skill was tested is not
+  // shadowed by a prefix entry for the family. See `KEYWORD_FALLBACKS`.
   'math.counting': 'math.number.counting',
   'math.skipcounting': 'math.number.counting',
   'math.placevalue': 'math.number.placeValue',
@@ -83,10 +152,15 @@ const FINDING_PREFIX_MAP: Record<string, string> = {
 }
 
 /**
- * Normalize a finding tag for lookup:
+ * Normalize a finding tag for the EXACT and PREFIX lookups (steps 1-3):
  * - lowercase
  * - strip spaces, hyphens, underscores between segments
  * - collapse dots
+ *
+ * This is deliberately lossy — it is what makes `math.addition.within-20` walk up
+ * to the `math.addition` prefix entry. The keyword fallback does **not** use it,
+ * because losing the separators is exactly how `paragraph` came to contain
+ * `graph`; step 4 reads the ORIGINAL tag through {@link tagPhrases}.
  */
 function normalize(tag: string): string {
   return tag
@@ -96,6 +170,171 @@ function normalize(tag: string): string {
     .replace(/\s+/g, '')          // collapse remaining spaces
     .replace(/\.{2,}/g, '.')      // collapse double dots
     .replace(/^\.|\.$/g, '')      // trim leading/trailing dots
+}
+
+// ── Keyword fallback (step 4) ───────────────────────────────────
+//
+// The word/phrase rule this step matches on has ONE definition, shared with
+// `foundations/curriculumNodeBridge`'s detail resolvers: `./tagPhrases`. Both
+// modules used to ask *does this tag name this thing* with `String.includes` over
+// a tag whose separators had been stripped, and that is the technique UX-347 came
+// out of.
+
+/** One fallback rule: any of these keywords, in this position, means this node. */
+interface KeywordRule {
+  readonly keywords: readonly string[]
+  readonly node: string
+}
+
+/**
+ * The keyword fallback, as an ordered table.
+ *
+ * **Order is data and it is load-bearing**, so two things are asserted about it
+ * rather than left to whoever edits next (`mapFindingToNode.test.ts`):
+ *
+ *   - *Mechanically:* no keyword may be a prefix of an earlier-declared keyword,
+ *     since the earlier one would always win. That is why `cvce` is declared
+ *     before `cvc` and `times` before `time`.
+ *   - *By hand, pinned by named test:* where two keywords both match a real tag
+ *     without either being the other's prefix, the more specific skill is
+ *     declared first. `repeatedaddition` before `addition` is the live case —
+ *     "repeated addition" IS multiplication (`math.operations.arrays` in the
+ *     foundations graph), and reading it as addition recorded the wrong strand.
+ *
+ * Every `node` is a `curriculumMap` id — the contract in this file's header —
+ * pinned by test against `CURRICULUM_NODE_MAP`.
+ */
+export const KEYWORD_FALLBACKS: readonly KeywordRule[] = [
+  // ── Reading ─────────────────────────────────────────────
+  // `cvce` first: `cvc` is a prefix of it, so declaring `cvc` earlier would send
+  // every silent-e tag to the CVC node three levels below it.
+  { keywords: ['cvce', 'longvowel', 'vowelteam'], node: 'reading.phonics.longVowels' },
+  { keywords: ['cvc', 'shorta', 'shorte', 'shorti', 'shorto', 'shortu'], node: 'reading.phonics.cvc' },
+  { keywords: ['blend'], node: 'reading.phonics.blends' },
+  { keywords: ['digraph'], node: 'reading.phonics.digraphs' },
+  { keywords: ['rcontrolled'], node: 'reading.phonics.rControlled' },
+  { keywords: ['sightword'], node: 'reading.phonics.sightWords' },
+  { keywords: ['lettersound'], node: 'reading.phonics.letterSounds' },
+  { keywords: ['rhym'], node: 'reading.phonics.cvc' },
+  { keywords: ['vocabulary', 'contextclue'], node: 'reading.vocabulary.contextClues' },
+  { keywords: ['comprehension', 'mainidea'], node: 'reading.comprehension.explicit' },
+  { keywords: ['inference'], node: 'reading.comprehension.inference' },
+  { keywords: ['fluency'], node: 'reading.fluency.accuracy' },
+  { keywords: ['multisyllab'], node: 'reading.decoding.multisyllable' },
+
+  // ── Math ────────────────────────────────────────────────
+  { keywords: ['placevalue'], node: 'math.number.placeValue' },
+  // UX-346: `math.number-sense` is the FIRST tag in the evaluation prompt's own
+  // math list — Level 1, the floor of the whole ladder — and it used to resolve
+  // to **nothing at all**: no prefix entry, and none of these keywords existed
+  // (`counting` and `placevalue` were tested, `numbersense` was not). So a
+  // Level-1 finding reached neither `childSkillMaps` nor the learner model and
+  // logged one `console.warn` nobody reads.
+  //
+  // `numbercomparison` is declared first because the curriculum map has a node of
+  // its own for comparing numbers; the rest of the family shares the Level-1
+  // counting node, which is the same node the existing `counting` level-map key
+  // already resolves to — so `deriveWorkingLevelMastery`'s output does not move
+  // and the only change is that previously-null tags now have a target.
+  //
+  // **A BARE `math.number-sense` still writes nothing to the learner model**, and
+  // that is a rule rather than an accident: it names three K-band concepts at once
+  // (counting, digit recognition, comparison), and `applyEvalFindingsToModel` may
+  // move a concept DOWN, so choosing one of the three would be the guess FIX-224
+  // forbids. The narrowing rule in `curriculumNodeBridge` answers only when the
+  // tag's own detail says which — and a tag that says lands.
+  { keywords: ['numbercomparison'], node: 'math.number.comparison' },
+  { keywords: ['counting', 'skipcount', 'numbersense', 'digitrecognition'], node: 'math.number.counting' },
+  // "Repeated addition" is multiplication. Declared before `addition`, which also
+  // matches it — the ordering rule stated above, and the one live instance of it.
+  { keywords: ['repeatedaddition'], node: 'math.operations.multDiv' },
+  { keywords: ['addition', 'subtraction'], node: 'math.operations.addSub' },
+  { keywords: ['multipl', 'divis', 'times', 'tables'], node: 'math.operations.multDiv' },
+  { keywords: ['fraction'], node: 'math.fractions.concepts' },
+  { keywords: ['measur'], node: 'math.measurement.length' },
+  { keywords: ['geometry', 'shape'], node: 'math.geometry.shapes' },
+  // `times` (above) is matched first, so `times-tables` cannot land here.
+  { keywords: ['time', 'money', 'clock'], node: 'math.measurement.time' },
+  { keywords: ['twodigit', 'multidigit'], node: 'math.operations.multiDigit' },
+  { keywords: ['decimal', 'percent'], node: 'math.decimals' },
+  { keywords: ['pattern', 'algebra'], node: 'math.algebra.patterns' },
+  { keywords: ['area', 'perimeter'], node: 'math.geometry.area' },
+  { keywords: ['wordproblem', 'problemsolv'], node: 'math.problemSolving' },
+  { keywords: ['graph', 'data'], node: 'math.data.graphs' },
+
+  // ── Speech ──────────────────────────────────────────────
+  { keywords: ['articulation', 'speechsounds'], node: 'speech.sounds.late' },
+  { keywords: ['metathesis'], node: 'speech.sequencing' },
+  { keywords: ['connectedspeech', 'intelligib'], node: 'speech.connected' },
+
+  // ── Writing ─────────────────────────────────────────────
+  // These three sat BELOW the math section and `paragraph` was unreachable
+  // (UX-347). They stay last: the boundary rule, not the ordering, is what makes
+  // them reachable, and moving them would have hidden the real defect.
+  { keywords: ['spelling'], node: 'writing.mechanics.spelling' },
+  { keywords: ['sentence'], node: 'writing.composition.sentence' },
+  { keywords: ['paragraph'], node: 'writing.composition.paragraph' },
+]
+
+// ── Domain anchor (step 4) ──────────────────────────────────────
+
+/**
+ * The domain a tag DECLARES, read off its leading segment. A tag whose first
+ * segment is not one of these declares nothing — every level-map key
+ * (`counting`, `two-digit.addition`, `multiplication.fluency`) is in that
+ * position — and is left to the ordered table alone.
+ */
+const DOMAIN_BY_LEADING_SEGMENT: Record<string, CurriculumDomain> = {
+  phonics: 'reading',
+  reading: 'reading',
+  math: 'math',
+  writing: 'writing',
+  speech: 'speech',
+}
+
+/**
+ * Which curriculum domains a declared-domain tag's keyword answer may land in.
+ *
+ * The single cross-domain lane is `writing` → `reading`, and it is the one
+ * `deriveWorkingLevelMastery` already declares for its writing key: spelling a
+ * CVC word implies you can decode it, so `writing.spelling.sightWord` reaching
+ * `reading.phonics.sightWords` is intended and is left exactly as it was. The
+ * lane is **one-directional** — a `reading.*` tag may not answer with a writing
+ * node — because the implication only runs that way.
+ */
+const DOMAINS_A_TAG_MAY_REACH: Record<CurriculumDomain, readonly CurriculumDomain[]> = {
+  reading: ['reading'],
+  math: ['math'],
+  writing: ['writing', 'reading'],
+  speech: ['speech'],
+}
+
+/**
+ * Would this keyword answer cross the domain the tag declared? Belt to the
+ * boundary rule's braces: `writing.paragraph` is stopped by the boundary rule
+ * before it can reach `math.data.graphs`, and stopped again here if a future
+ * keyword makes the same mistake a different way.
+ */
+function crossesDeclaredDomain(tag: string, nodeId: string): boolean {
+  const declared = DOMAIN_BY_LEADING_SEGMENT[normalize(tag).split('.')[0] ?? '']
+  if (!declared) return false
+  const nodeDomain = CURRICULUM_NODE_MAP[nodeId]?.domain
+  if (!nodeDomain) return false
+  return !DOMAINS_A_TAG_MAY_REACH[declared].includes(nodeDomain)
+}
+
+/**
+ * Step 4 alone, exported so the census and the guard can report on the fallback
+ * separately from the exact and prefix answers above it.
+ */
+export function keywordFallbackNode(tag: string): string | null {
+  const phrases = tagPhrases(tag)
+  for (const rule of KEYWORD_FALLBACKS) {
+    if (!rule.keywords.some((keyword) => phrasesName(phrases, keyword))) continue
+    if (crossesDeclaredDomain(tag, rule.node)) continue
+    return rule.node
+  }
+  return null
 }
 
 /**
@@ -122,46 +361,8 @@ export function mapFindingToNode(findingSkillTag: string): string | null {
   }
 
   // 4) Keyword fallback — catch tags that don't match the prefix structure
-  // Reading
-  if (norm.includes('cvc') || /short[aeiou]/.test(norm)) return 'reading.phonics.cvc'
-  if (norm.includes('blend')) return 'reading.phonics.blends'
-  if (norm.includes('digraph')) return 'reading.phonics.digraphs'
-  if (norm.includes('longvowel') || norm.includes('cvce') || norm.includes('vowelteam')) return 'reading.phonics.longVowels'
-  if (norm.includes('rcontrolled')) return 'reading.phonics.rControlled'
-  if (norm.includes('sightword')) return 'reading.phonics.sightWords'
-  if (norm.includes('lettersound')) return 'reading.phonics.letterSounds'
-  if (norm.includes('rhym')) return 'reading.phonics.cvc'
-  if (norm.includes('vocabulary') || norm.includes('contextclue')) return 'reading.vocabulary.contextClues'
-  if (norm.includes('comprehension') || norm.includes('mainidea')) return 'reading.comprehension.explicit'
-  if (norm.includes('inference')) return 'reading.comprehension.inference'
-  if (norm.includes('fluency')) return 'reading.fluency.accuracy'
-  if (norm.includes('multisyllab')) return 'reading.decoding.multisyllable'
-
-  // Math
-  if (norm.includes('placevalue')) return 'math.number.placeValue'
-  if (norm.includes('counting') || norm.includes('skipcount')) return 'math.number.counting'
-  if (norm.includes('addition') || norm.includes('subtraction')) return 'math.operations.addSub'
-  if (norm.includes('multipl') || norm.includes('divis') || norm.includes('times') || norm.includes('tables')) return 'math.operations.multDiv'
-  if (norm.includes('fraction')) return 'math.fractions.concepts'
-  if (norm.includes('measur')) return 'math.measurement.length'
-  if (norm.includes('geometry') || norm.includes('shape')) return 'math.geometry.shapes'
-  if (norm.includes('time') || norm.includes('money') || norm.includes('clock')) return 'math.measurement.time'
-  if (norm.includes('twodigit') || norm.includes('multidigit')) return 'math.operations.multiDigit'
-  if (norm.includes('decimal') || norm.includes('percent')) return 'math.decimals'
-  if (norm.includes('pattern') || norm.includes('algebra')) return 'math.algebra.patterns'
-  if (norm.includes('area') || norm.includes('perimeter')) return 'math.geometry.area'
-  if (norm.includes('wordproblem') || norm.includes('problemsolv')) return 'math.problemSolving'
-  if (norm.includes('graph') || norm.includes('data')) return 'math.data.graphs'
-
-  // Speech
-  if (norm.includes('articulation') || norm.includes('speech.sounds')) return 'speech.sounds.late'
-  if (norm.includes('metathesis')) return 'speech.sequencing'
-  if (norm.includes('connectedspeech') || norm.includes('intelligib')) return 'speech.connected'
-
-  // Writing
-  if (norm.includes('spelling')) return 'writing.mechanics.spelling'
-  if (norm.includes('sentence')) return 'writing.composition.sentence'
-  if (norm.includes('paragraph')) return 'writing.composition.paragraph'
+  const fallback = keywordFallbackNode(findingSkillTag)
+  if (fallback) return fallback
 
   console.warn(`[LearningMap] Unmapped finding tag: "${findingSkillTag}" (normalized: "${norm}")`)
   return null
