@@ -123,6 +123,11 @@ describe('UX-347 — no tag resolves into a domain it does not name', () => {
     const spelling = classifyTag('writing.spelling.sightWord', [TagSource.Catalog])
     expect(spelling.node).toBe('reading.phonics.sightWords')
     expect(spelling.crossDomain).toBe(false)
+    // Codex round 2, P1: and only onto the decoding nodes the implication
+    // justifies — a compound tag does not carry the lane to fluency.
+    expect(classifyTag('writing.spelling.fluency', [TagSource.PromptExample]).node).toBe(
+      'writing.mechanics.spelling',
+    )
   })
 
   it('reads the declared domain off the leading segment only', () => {

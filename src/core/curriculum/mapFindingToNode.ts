@@ -53,15 +53,16 @@
  *      would otherwise always win.
  *   3. **A tag that declares a domain may not resolve across it.** `math.*` may
  *      not answer with a reading node, `writing.*` may not answer with a math
- *      one. There is exactly one lane (`CROSS_DOMAIN_LANES`) and it is gated on
- *      the tag, not on its domain: a `writing.*` tag that **names spelling** may
- *      reach a `reading.*` node, the lane `deriveWorkingLevelMastery` already
- *      permits ("spelling a CVC word implies you can decode it"). Gating it at
- *      the domain level — the first version of this rule — let `writing.fluency`
- *      reach `reading.fluency.accuracy`, which is `UX-347` reintroduced by its
- *      own guard (Codex round 1 on PR #1827). The anchor applies to the keyword
- *      fallback only — steps 1-3 are exact or curated answers and are not
- *      second-guessed.
+ *      one. There is exactly one lane (`CROSS_DOMAIN_LANES`), and it is keyed on
+ *      **both ends**: a `writing.*` tag that *names spelling* may reach a
+ *      **named phonics or decoding** node, which is the lane
+ *      `deriveWorkingLevelMastery` already permits ("spelling a CVC word implies
+ *      you can decode it") and nothing wider. Each end cost a review round on
+ *      PR #1827: gating at the domain level let `writing.fluency` reach
+ *      `reading.fluency.accuracy` (round 1), and gating the source alone let
+ *      `writing.spelling.fluency` reach it too (round 2) — both `UX-347`'s own
+ *      shape through its own guard. The anchor applies to the keyword fallback
+ *      only — steps 1-3 are exact or curated answers and are not second-guessed.
  *
  * `docs/review/FINDING_TAG_BRIDGE_CENSUS_2026-09.md` is the registry of every tag
  * the app can hand this function, where each one lands, and why;
@@ -298,37 +299,72 @@ const DOMAIN_BY_LEADING_SEGMENT: Record<string, CurriculumDomain> = {
 /**
  * A declared cross-domain lane: a tag in one domain that may legitimately answer
  * with a node in another — **but only when the tag itself names the thing that
- * makes the implication true.**
+ * makes the implication true, AND only onto the nodes that implication reaches.**
  *
- * The `named` gate is load-bearing, and Codex round 1 on PR #1827 is why it
- * exists. The first version of this anchor allowed the pairing at the DOMAIN
- * level (`writing` may reach `reading`), which is a much wider claim than the
- * justification supports: it let `writing.fluency` reach
- * `reading.fluency.accuracy` and `writing.inference` reach
- * `reading.comprehension.inference` — both real foundations concepts, so a
- * writing evaluation could update or downgrade an unrelated reading concept.
- * That is `UX-347`'s exact shape, reintroduced by the guard written to stop it.
+ * Both halves of that are load-bearing, and each was a P1 from a review round on
+ * PR #1827:
+ *
+ *   - **Round 1** — the first version allowed the pairing at the DOMAIN level
+ *     (`writing` may reach `reading`), which is a far wider claim than the
+ *     justification supports: `writing.fluency` reached
+ *     `reading.fluency.accuracy` and `writing.inference` reached
+ *     `reading.comprehension.inference`.
+ *   - **Round 2** — gating on the tag naming `spelling` constrained the *source*
+ *     and left the *destination* open, so a compound tag carried the lane
+ *     anywhere a reading keyword happened to point: `writing.spelling.fluency`
+ *     still reached `reading.fluency.accuracy`, and `writing.spelling.inference`
+ *     still reached `reading.comprehension.inference`.
+ *
+ * Both are `UX-347`'s shape — a writing finding landing on a real foundations
+ * reading concept, which `computeEvalRead` accepts and can DOWNGRADE — through
+ * the guard written to stop it. So a lane now names its destinations explicitly:
+ * *"spelling a CVC word implies you can decode it"* justifies the phonics and
+ * decoding nodes and **nothing else**. Fluency, vocabulary and comprehension are
+ * not implied by spelling a word.
  */
 interface CrossDomainLane {
   from: CurriculumDomain
-  to: CurriculumDomain
   /** The lane opens only for a tag naming one of these (see `tagPhrases`). */
   named: readonly string[]
+  /**
+   * …and only onto these exact nodes. An explicit list rather than an
+   * `reading.phonics.*` prefix, because a prefix would silently admit whatever
+   * node is added to the curriculum map next; a test asserts every id here is a
+   * live `curriculumMap` node outside `from`, so a typo fails rather than
+   * quietly closing the lane.
+   */
+  nodes: readonly string[]
 }
 
 /**
  * Every cross-domain lane there is, and there is exactly one.
  *
- * `writing` **spelling** → `reading`: spelling a CVC word implies you can decode
- * it, so `writing.spelling.sightWord` reaching `reading.phonics.sightWords` is
- * intended and is left exactly as it was. It is the lane
- * `deriveWorkingLevelMastery` already declares for its writing key, and it is
- * **one-directional** — a `reading.*` tag may not answer with a writing node —
- * because the implication only runs that way.
+ * `writing` **spelling** → `reading` **decoding**: spelling a word implies you
+ * can decode it, so `writing.spelling.sightWord` reaching
+ * `reading.phonics.sightWords` is intended and is left exactly as it was. It is
+ * the lane `deriveWorkingLevelMastery` already declares for its writing key, and
+ * it is **one-directional** — a `reading.*` tag may not answer with a writing
+ * node — because the implication only runs that way.
  */
 const CROSS_DOMAIN_LANES: readonly CrossDomainLane[] = [
-  { from: 'writing', to: 'reading', named: ['spelling'] },
+  {
+    from: 'writing',
+    named: ['spelling'],
+    nodes: [
+      'reading.phonics.letterSounds',
+      'reading.phonics.cvc',
+      'reading.phonics.blends',
+      'reading.phonics.digraphs',
+      'reading.phonics.longVowels',
+      'reading.phonics.rControlled',
+      'reading.phonics.sightWords',
+      'reading.decoding.multisyllable',
+    ],
+  },
 ]
+
+/** The lanes, exported so a test can assert every destination is a real node. */
+export const CROSS_DOMAIN_LANE_TABLE = CROSS_DOMAIN_LANES
 
 /**
  * Would this keyword answer cross the domain the tag declared?
@@ -346,11 +382,14 @@ export function resolvesOutsideDeclaredDomain(tag: string, nodeId: string): bool
   const nodeDomain = CURRICULUM_NODE_MAP[nodeId]?.domain
   if (!nodeDomain) return false
   if (nodeDomain === declared) return false
-  const lane = CROSS_DOMAIN_LANES.find((l) => l.from === declared && l.to === nodeDomain)
+  // A lane is keyed by BOTH ends: where the tag is from, and which node it wants.
+  const lane = CROSS_DOMAIN_LANES.find(
+    (l) => l.from === declared && l.nodes.includes(nodeId),
+  )
   if (!lane) return true
-  // The lane exists, so it comes down to whether THIS tag names the thing that
-  // makes it true. A writing tag that does not say "spelling" is not carrying
-  // spelling evidence, whatever else it says.
+  // The lane exists and the destination is one it justifies, so it comes down to
+  // whether THIS tag names the thing that makes it true. A writing tag that does
+  // not say "spelling" is not carrying spelling evidence, whatever else it says.
   return !lane.named.some((keyword) => tagNames(tag, keyword))
 }
 

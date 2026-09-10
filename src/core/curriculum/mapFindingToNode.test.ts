@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  CROSS_DOMAIN_LANE_TABLE,
   declaredTagDomain,
   findingStatusToSkillStatus,
   getNodesForProgram,
@@ -225,6 +226,39 @@ describe('UX-347 — a writing finding is no longer written onto a math concept'
     expect(mapFindingToNode('writing.sightWords')).toBeNull()
   })
 
+  it('opens that lane onto DECODING nodes only, not wherever a reading keyword points', () => {
+    // Codex round 2 on PR #1827, P1. Gating on the tag naming spelling
+    // constrained the SOURCE and left the DESTINATION open, so a compound tag
+    // carried the lane anywhere a reading keyword happened to point. Spelling a
+    // word implies decoding it; it implies nothing about fluency, vocabulary or
+    // comprehension. These now stay on the writing side, which is honest — they
+    // ARE spelling findings.
+    expect(mapFindingToNode('writing.spelling.fluency')).toBe('writing.mechanics.spelling')
+    expect(mapFindingToNode('writing.spelling.inference')).toBe('writing.mechanics.spelling')
+    expect(mapFindingToNode('writing.spelling.comprehension')).toBe('writing.mechanics.spelling')
+    // …and a decoding destination the implication does justify still opens it.
+    expect(mapFindingToNode('writing.spelling.multisyllable')).toBe(
+      'reading.decoding.multisyllable',
+    )
+  })
+
+  it('names every lane destination as a live curriculumMap node outside its own domain', () => {
+    // A typo in the destination list would silently CLOSE the lane, which is the
+    // quiet failure direction — nothing would look broken.
+    expect(CROSS_DOMAIN_LANE_TABLE.length).toBe(1)
+    for (const lane of CROSS_DOMAIN_LANE_TABLE) {
+      expect(lane.nodes.length, 'a lane with no destinations is not a lane').toBeGreaterThan(0)
+      expect(lane.named.length).toBeGreaterThan(0)
+      for (const nodeId of lane.nodes) {
+        const node = CURRICULUM_NODE_MAP[nodeId]
+        expect(node, `${nodeId} is not a curriculumMap node`).toBeDefined()
+        expect(node.domain, `${nodeId} is inside ${lane.from}, so it needs no lane`).not.toBe(
+          lane.from,
+        )
+      }
+    }
+  })
+
   it('is still one-directional — a reading tag may not answer with a writing node', () => {
     expect(mapFindingToNode('reading.paragraph')).toBeNull()
     // …and the lane's own keyword does not open it in reverse: a reading tag
@@ -234,6 +268,10 @@ describe('UX-347 — a writing finding is no longer written onto a math concept'
 
   it('exposes the anchor rule so the registry classifies by it rather than a copy', () => {
     expect(resolvesOutsideDeclaredDomain('writing.fluency', 'reading.fluency.accuracy')).toBe(true)
+    // The destination half: a spelling tag onto a node the lane does not name.
+    expect(
+      resolvesOutsideDeclaredDomain('writing.spelling.fluency', 'reading.fluency.accuracy'),
+    ).toBe(true)
     expect(
       resolvesOutsideDeclaredDomain('writing.spelling.sightWord', 'reading.phonics.sightWords'),
     ).toBe(false)

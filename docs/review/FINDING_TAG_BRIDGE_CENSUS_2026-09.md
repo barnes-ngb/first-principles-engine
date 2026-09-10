@@ -62,19 +62,28 @@ unclassified. That pattern worked — it is why the child-switch P1 count is zer
   The rest is stated in prose and pinned by named test (`repeatedaddition`
   before `addition`, because repeated addition **is** multiplication).
 - **A domain anchor.** A tag whose leading segment declares a domain may not
-  resolve outside it. There is exactly one lane and **it is gated on the tag, not
-  on its domain**: a `writing.*` tag that *names spelling* may reach a `reading.*`
-  node, the lane `deriveWorkingLevelMastery` already permits ("spelling a CVC
-  word implies you can decode it"), and it is one-directional.
-  **Codex round 1 on PR #1827 is why the gate exists** (P1): the first version
-  allowed the pairing at the domain level, which is a much wider claim than the
-  justification supports — `writing.fluency` reached `reading.fluency.accuracy`
-  and `writing.inference` reached `reading.comprehension.inference`, both real
-  foundations concepts, so a writing evaluation could update or **downgrade** an
-  unrelated reading one. That is `UX-347`'s exact shape, reintroduced by the
-  guard written to stop it. **The anchor changes no answer for any of the 177
-  tags below** — it is a guard against the tags the universe does not yet
-  contain, `writing.paragraph` being exactly one of those.
+  resolve outside it. There is exactly one lane and **it is keyed on both ends**:
+  a `writing.*` tag that *names spelling* may reach a **named phonics or
+  decoding** node — the lane `deriveWorkingLevelMastery` already permits
+  ("spelling a CVC word implies you can decode it") — and nothing wider. It is
+  one-directional.
+
+  **Each end of that cost a review round on PR #1827, both P1, and both were
+  right.** Round 1: the first version allowed the pairing at the *domain* level,
+  so `writing.fluency` reached `reading.fluency.accuracy` and
+  `writing.inference` reached `reading.comprehension.inference`. Round 2: gating
+  on the tag naming `spelling` constrained the *source* and left the
+  *destination* open, so a compound tag carried the lane wherever a reading
+  keyword happened to point — `writing.spelling.fluency` reached
+  `reading.fluency.accuracy` too. Both are `UX-347`'s exact shape — a writing
+  finding on a real foundations reading concept, which `computeEvalRead` accepts
+  and can **downgrade** — reintroduced by the guard written to stop it. Spelling
+  a word implies decoding it and implies nothing about fluency, vocabulary or
+  comprehension, so those tags now stay on the writing side, where they belong.
+
+  **The anchor changes no answer for any of the 177 tags below** — it is a guard
+  against the tags the universe does not yet contain, `writing.paragraph` being
+  exactly one of those.
 - **The curated table is now the authority, not merely something to agree
   with.** Where `tagConceptBridge` has a non-empty answer it is taken verbatim
   and the derived route is not consulted — which is `UX-348`. An **empty** entry
@@ -471,16 +480,18 @@ lesson that a guard which passes on malformed input is worse than no guard.
 
 Three things it cannot see, checked by hand:
 
-0. **Nothing, about the anchor's own width.** The guard checks that no tag in the
+0. **Anything about the anchor's own width.** The guard checks that no tag in the
    universe resolves cross-domain, and **no enumerated tag uses the lane except
-   `writing.spelling.sightWord`** — so a lane that was too *wide* passed it
-   silently, which is what Codex round 1 caught. The width is pinned directly, by
-   named test in `mapFindingToNode.test.ts` (`writing.fluency`,
-   `writing.inference`, `writing.cvc`, `writing.sightWords` → null) and by one in
-   the guard, because the registry cannot see a hole no enumerated tag falls
-   into. The registry classifies by the app's own `resolvesOutsideDeclaredDomain`
-   rather than a copy of the rule, so a future narrowing cannot leave this
-   document reporting the old one.
+   `writing.spelling.sightWord`** — so a lane that is too *wide* passes it
+   silently. That is not hypothetical: it is what both P1s on PR #1827 were, one
+   at each end of the lane. The width is pinned directly instead, by named test
+   in `mapFindingToNode.test.ts` (`writing.fluency` / `writing.inference` /
+   `writing.cvc` / `writing.sightWords` → null; `writing.spelling.fluency` /
+   `.inference` / `.comprehension` → the writing node) and by one in the guard,
+   because the registry cannot see a hole no enumerated tag falls into. Both the
+   registry and the census classify by the app's own
+   `resolvesOutsideDeclaredDomain` rather than a copy of the rule, so a further
+   narrowing cannot leave this document reporting the old width.
 1. **A tag the model invents.** The reading evaluation prompt gives the model no
    closed list at all — only the `"skill": "…"` examples in §3 — so it can emit
    anything, and `writing.paragraph`, the tag `UX-347` was reported on, is
