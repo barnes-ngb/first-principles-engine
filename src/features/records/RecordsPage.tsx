@@ -90,6 +90,11 @@ import {
   describeArchiveResult,
   requestCompliancePackArchive,
 } from './compliancePackArchive'
+import {
+  clearedHistoricalHoursDraft,
+  historicalHoursDraftIsEmpty,
+  historicalHoursSwitchNotice,
+} from './historicalHoursOwnership'
 
 const formatHours = (minutes: number) => (minutes / 60).toFixed(2)
 
@@ -244,6 +249,60 @@ function HoursComplianceTab() {
   const [estimateEndMonth, setEstimateEndMonth] = useState('')
   const [estimateDailyHours, setEstimateDailyHours] = useState('')
   const [estimateDaysPerWeek, setEstimateDaysPerWeek] = useState('4')
+
+  /**
+   * UX-329 — the Historical Hours draft belongs to the child it was typed for,
+   * and a child change clears it rather than re-targeting it.
+   *
+   * Both save handlers below read the LIVE `activeChildId`, and this dialog
+   * stays mounted across a switch (the header chip reaches Records, and this
+   * page has its own selectors besides), so a form filled while looking at one
+   * child's records used to be written as the other child's `hoursAdjustments`
+   * — and the quick-estimate path writes one adjustment per subject per month,
+   * so one tap could misattribute a whole school year.
+   *
+   * RESET, not BIND: nothing has been recorded for anybody yet, so there is no
+   * work to preserve, and writing months of compliance history to a child the
+   * parent has navigated away from would be the same surprise in the other
+   * direction. Same answer, same rail, same reasoning as `QuickAddHours`
+   * (UX-328). The loss is announced — an emptied form with no sentence is how
+   * this class hides. `historicalHoursNotice` stays until the dialog is closed,
+   * so it is still there to explain the blank fields if the switch happened
+   * while the dialog was shut.
+   *
+   * Adjusting state during render is React's own answer to "derive from a
+   * changed prop"; this repo's lint forbids the set-state-in-effect form.
+   */
+  const [hoursFormChildId, setHoursFormChildId] = useState(activeChildId ?? '')
+  const [historicalHoursNotice, setHistoricalHoursNotice] = useState<string | null>(null)
+  if (hoursFormChildId !== (activeChildId ?? '')) {
+    const draft = {
+      backfillMonth,
+      backfillEntries,
+      estimateStartMonth,
+      estimateEndMonth,
+      estimateDailyHours,
+    }
+    const cleared = clearedHistoricalHoursDraft(draft)
+    setHistoricalHoursNotice(
+      historicalHoursSwitchNotice(
+        !historicalHoursDraftIsEmpty(draft),
+        childNameById.get(hoursFormChildId),
+        activeChild?.name,
+      ),
+    )
+    setHoursFormChildId(activeChildId ?? '')
+    setBackfillMonth(cleared.backfillMonth)
+    setBackfillEntries(
+      cleared.backfillEntries.map((e) => ({
+        subject: e.subject as SubjectBucket,
+        hours: e.hours,
+      })),
+    )
+    setEstimateStartMonth(cleared.estimateStartMonth)
+    setEstimateEndMonth(cleared.estimateEndMonth)
+    setEstimateDailyHours(cleared.estimateDailyHours)
+  }
 
   const fetchRecords = useCallback(async () => {
     const hoursQuery = query(
@@ -1302,7 +1361,15 @@ function HoursComplianceTab() {
         </Box>
       )}
 
-      <Dialog open={backfillOpen} onClose={() => setBackfillOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={backfillOpen}
+        onClose={() => {
+          setBackfillOpen(false)
+          setHistoricalHoursNotice(null)
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>Add Historical Hours</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
@@ -1327,6 +1394,14 @@ function HoursComplianceTab() {
               <Typography variant="caption" color="text.secondary">
                 Adding hours for: {activeChild?.name ?? 'selected child'}
               </Typography>
+            )}
+
+            {/* UX-329 — a child change cleared a typed draft; say so rather
+                than presenting an emptied form as if nothing had happened. */}
+            {historicalHoursNotice && (
+              <Alert severity="info" onClose={() => setHistoricalHoursNotice(null)}>
+                {historicalHoursNotice}
+              </Alert>
             )}
 
             {quickEstimateMode ? (

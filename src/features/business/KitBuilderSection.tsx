@@ -212,6 +212,9 @@ export default function KitBuilderSection({ activeChildId, canEdit }: KitBuilder
     return (
       <KitBuilderForm
         childId={editing ? editing.childId : activeChildId}
+        // UX-329 — the form captures both at mount and saves to the child the
+        // roster was STARTED for, so this name is the one it will print.
+        childName={nameById[editing ? editing.childId : activeChildId]}
         roster={editing}
         onSave={handleSave}
         onCancel={() => setMode({ kind: 'list' })}
