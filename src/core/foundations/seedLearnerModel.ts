@@ -8,7 +8,9 @@
  * - `SIGHT_WORD_MASTERED_THRESHOLD` (0.8) is imported verbatim (D7).
  * - Gate-3 priority skills and completed programs route through the same
  *   `mapFindingToNode` / `getNodesForProgram` bridges the Learning Map uses, so the
- *   two can never silently disagree (the FUNC-02 principle).
+ *   two can never silently disagree (the FUNC-02 principle). A priority skill's
+ *   curriculumMap answer is then resolved to foundations concept(s) by the one
+ *   shared `curriculumNodeBridge` the guided eval uses (FIX-224 / UX-288).
  *
  * Seeding rules (per the graphs):
  * - **Band below working level → `solid`; at level → `frontier`; above → `not-yet`.**
@@ -34,6 +36,7 @@ import type { ConceptGraph, ConceptNode } from './types'
 import { foundationGraphVersion } from './index'
 import { SIGHT_WORD_MASTERED_THRESHOLD } from '../curriculum/deriveWorkingLevelMastery'
 import { getNodesForProgram, mapFindingToNode } from '../curriculum/mapFindingToNode'
+import { resolveFoundationConcepts } from './curriculumNodeBridge'
 import { MasteryGate } from '../types/enums'
 import type {
   ConceptStateEntry,
@@ -202,12 +205,20 @@ export function seedLearnerModel(
 ): LearnerModel {
   const now = opts.now ?? new Date().toISOString()
 
-  // Gate-3 priority skills → node id → skill label (strongest signal).
+  // Gate-3 priority skills → concept id → skill label (strongest signal).
+  //
+  // FIX-224 / UX-288: this Map is keyed by `mapFindingToNode`'s answer and looked
+  // up below by **foundations graph node id**, so a tag answering with a
+  // curriculumMap-only id (`math.operations.addSub` / `multDiv`) set a key no
+  // node ever has and seeded nothing — silently. Lincoln's own default priority
+  // skill, `math.subtraction.regroup`, is one of them. The shared
+  // `resolveFoundationConcepts` turns that answer into the concept(s) the tag
+  // actually names, or none where its detail cannot say which.
   const prioritySkillNodes = new Map<string, string>()
   for (const skill of snapshot?.prioritySkills ?? []) {
     if (skill.masteryGate !== MasteryGate.IndependentConsistent) continue
-    const nodeId = mapFindingToNode(skill.tag)
-    if (nodeId) prioritySkillNodes.set(nodeId, skill.label)
+    const { conceptIds } = resolveFoundationConcepts(mapFindingToNode(skill.tag), skill.tag)
+    for (const conceptId of conceptIds) prioritySkillNodes.set(conceptId, skill.label)
   }
 
   // Completed programs → node id → program id.
