@@ -42,6 +42,8 @@ import { FoundationBridgeOutcome, resolveFoundationConcepts } from './curriculum
 import { mapFindingToNode } from '../curriculum/mapFindingToNode'
 import { CURRICULUM_NODE_MAP } from '../curriculum/curriculumMap'
 import { TAG_CONCEPT_BRIDGE } from './tagConceptBridge'
+import { promptListTags } from '../../test/findingTagBridge'
+import { loadChatPromptSource } from '../../test/findingTagSources'
 import type { EvaluationFinding } from '../types/evaluation'
 
 function finding(skill: string, status: EvaluationFinding['status'] = 'not-yet'): EvaluationFinding {
@@ -53,6 +55,11 @@ function finding(skill: string, status: EvaluationFinding['status'] = 'not-yet')
  * from the "SKILL TAGS for math findings" list in `functions/src/ai/chat.ts`,
  * in prompt order. Named rather than counted: this list is the actual input
  * surface, so it is its own check and cannot drift against a recount.
+ *
+ * It is a hand copy, so AUDIT-226 added the one thing that keeps a hand copy
+ * honest — a test below asserting it equals the list the census DERIVES from
+ * that prompt file. Without it, a tag added to the prompt would leave this
+ * suite green while the tag reached nothing.
  */
 const EVAL_PROMPT_MATH_TAGS = [
   'math.number-sense',
@@ -76,6 +83,13 @@ const EVAL_PROMPT_MATH_TAGS = [
   'math.multiplication.tables',
   'math.times-tables',
 ] as const
+
+describe('AUDIT-226 — the hand-copied prompt list still matches the prompt', () => {
+  it('equals the list derived from the SKILL TAGS block itself', () => {
+    const derived = promptListTags(loadChatPromptSource()).filter((t) => t.startsWith('math.'))
+    expect(derived).toEqual([...EVAL_PROMPT_MATH_TAGS])
+  })
+})
 
 describe('UX-288 — the finding bridge is UNCHANGED, and still answers in curriculumMap ids', () => {
   it('still maps addition and subtraction to a node the foundations graph does not define', () => {
@@ -121,7 +135,7 @@ describe('UX-288 — the finding bridge is UNCHANGED, and still answers in curri
 })
 
 describe('UX-288 — the eval now reaches the concepts its findings are about', () => {
-  it('lands every math tag the eval prompt emits, except the one that never mapped at all', () => {
+  it('lands every math tag the eval prompt emits, except the one that names three concepts', () => {
     const landed: string[] = []
     const dropped: string[] = []
     for (const tag of EVAL_PROMPT_MATH_TAGS) {
@@ -132,11 +146,22 @@ describe('UX-288 — the eval now reaches the concepts its findings are about', 
       }
     }
 
-    // Before FIX-224 twelve of these wrote nothing. Exactly one still does, and
-    // it fails one step EARLIER — `mapFindingToNode` returns null for it, which
-    // is a gap in a file this run may not change (filed as UX-346).
+    // Before FIX-224 twelve of these wrote nothing. One still does — and FIX-226
+    // changed WHY, which is the whole point of that run. `math.number-sense` used
+    // to resolve to nothing at all (UX-346); it now resolves to the curriculum
+    // map's Level-1 number node, and the learner-model half DECLINES by rule
+    // because the tag's own gloss names three K-band concepts at once. A drop by
+    // declared rule with a recorded outcome is not the same thing as a tag
+    // falling off the end of a keyword chain into a `console.warn`.
     expect(dropped).toEqual(['math.number-sense'])
-    expect(mapFindingToNode('math.number-sense')).toBeNull()
+    expect(mapFindingToNode('math.number-sense')).toBe('math.number.counting')
+    expect(
+      resolveFoundationConcepts(mapFindingToNode('math.number-sense'), 'math.number-sense').outcome,
+    ).toBe(FoundationBridgeOutcome.NoDetail)
+    // …and a Level-1 tag that says WHICH skill was tested lands.
+    expect(computeEvalRead([finding('math.number-sense.counting')])[0]?.conceptId).toBe(
+      'math.number.counting',
+    )
     expect(landed).toHaveLength(EVAL_PROMPT_MATH_TAGS.length - 1)
   })
 
@@ -259,25 +284,42 @@ describe('UX-288 — the declared boundary and the skill-map side are untouched'
     }
   })
 
-  it('UX-348 (filed, not fixed): math.wordProblems outruns its curated concept', () => {
+  it('UX-348 (FIXED by FIX-226): math.wordProblems reaches its curated concept', () => {
     // The owner-curated `tagConceptBridge` routes the catalog tag
     // `math.wordProblems` to `math.problemSolving.oneStep` ("catalog evidence is
-    // single-step word problems"), but `mapFindingToNode`'s prefix table answers
-    // the band-5 multi-step `math.problemSolving` — a REAL foundations node, so
-    // it passes straight through this module and nothing filters it. Same shape
-    // as Codex round 1's finding (a harder concept marked solid on weaker
-    // evidence) but off this module's surface: it is a passthrough of a genuine
-    // foundations id, not one of the two curriculumMap ids split here. Fixing it
-    // means changing `mapFindingToNode`, which this run may not do.
+    // single-step word problems"); `mapFindingToNode`'s prefix table answers the
+    // band-5 multi-step `math.problemSolving`, which is a REAL foundations node,
+    // so it used to pass straight through with nothing to compare it against and
+    // a Gate-3 priority skill seeded the harder concept solid.
+    //
+    // `mapFindingToNode` is still unchanged — `oneStep` is not a curriculumMap id
+    // and that function's contract is curriculumMap ids — so the fix is the
+    // curated table's precedence plus a narrowing resolver, both here. The skill
+    // map still records the coarse node, which is the only one the map has.
     expect(mapFindingToNode('math.wordProblems')).toBe('math.problemSolving')
     expect(TAG_CONCEPT_BRIDGE['math.wordProblems']).toEqual(['math.problemSolving.oneStep'])
+    expect(computeEvalRead([finding('math.wordProblems')])[0]?.conceptId).toBe(
+      'math.problemSolving.oneStep',
+    )
+    // The prompt's own multi-step tag still means the band-5 concept.
+    expect(computeEvalRead([finding('math.word-problems.multi-step')])[0]?.conceptId).toBe(
+      'math.problemSolving',
+    )
   })
 
-  it('UX-347 (filed, not fixed): writing.paragraph routes to a MATH concept', () => {
-    // `mapFindingToNode`'s keyword fallback tests `graph` before it reaches its
-    // writing section, so "para-graph" matches. Pre-existing and inside a file
-    // this run may not change; characterized here so it cannot be lost.
-    expect(mapFindingToNode('writing.paragraph')).toBe('math.data.graphs')
-    expect(computeEvalRead([finding('writing.paragraph')])[0]?.conceptId).toBe('math.data.graphs')
+  it('UX-347 (FIXED by FIX-226): writing.paragraph no longer routes to a MATH concept', () => {
+    // `mapFindingToNode`'s keyword fallback used to test `graph` as a SUBSTRING
+    // before it reached its writing section, so "para-graph" matched and a
+    // writing finding was written onto `math.data.graphs` — a real foundations
+    // concept, so nothing downstream filtered it, on the one writer permitted to
+    // move a concept DOWN. The boundary rule in `curriculum/tagPhrases.ts` closes
+    // it by construction: `graph` is not a prefix of the word `paragraph`.
+    expect(mapFindingToNode('writing.paragraph')).toBe('writing.composition.paragraph')
+    // The writing half of the curriculum map has no foundations domain, so the
+    // eval now writes NOTHING for it — the declared boundary, not a lie.
+    expect(computeEvalRead([finding('writing.paragraph')])).toHaveLength(0)
+    expect(
+      resolveFoundationConcepts(mapFindingToNode('writing.paragraph'), 'writing.paragraph').outcome,
+    ).toBe(FoundationBridgeOutcome.OutsideDomain)
   })
 })
