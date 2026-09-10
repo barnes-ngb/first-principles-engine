@@ -93,6 +93,7 @@ import {
 import MoveToDayDialog from './MoveToDayDialog'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useDailyPlan } from './useDailyPlan'
+import { dailyPlanGateNote } from './dailyPlanGate'
 import { useDayLog } from './useDayLog'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { useRolloverUnchecked } from './useRolloverUnchecked'
@@ -422,19 +423,40 @@ export default function TodayPage() {
   )
 
   // Load/persist daily plan (energy + planType) to Firestore
-  const { dailyPlan, saveDailyPlan } = useDailyPlan({
+  const {
+    dailyPlan,
+    isEditable: dayPlanEditable,
+    isLoading: dayPlanLoading,
+    loadFailed: dayPlanReadFailed,
+    saveDailyPlan,
+  } = useDailyPlan({
     familyId,
     childId: selectedChildId,
     date: today,
   })
 
-  // Restore energy + planType from saved dailyPlan on load
+  /**
+   * Restore energy + planType from the saved dailyPlan on load.
+   *
+   * UX-345 — the `if (dailyPlan)` guard alone never CLEARED, so on a child
+   * change the two values stayed at the previous child's until (and unless) the
+   * new child's document supplied replacements. Both ride in every
+   * `saveDailyPlan` payload beside `sessions`, so a settled read that finds no
+   * plan has to seed the defaults rather than leave his brother's day type
+   * standing. Only once the read has SETTLED: a plan absent because the read is
+   * still open is not a plan absent.
+   */
   useEffect(() => {
     if (dailyPlan) {
       setEnergy(dailyPlan.energy)
       setPlanType(dailyPlan.planType)
+      return
     }
-  }, [dailyPlan])
+    if (!dayPlanLoading && !dayPlanReadFailed) {
+      setEnergy(EnergyLevel.Normal)
+      setPlanType(PlanType.Normal)
+    }
+  }, [dailyPlan, dayPlanLoading, dayPlanReadFailed])
 
   // --- Rollover: carry forward unchecked items from previous school day + enforce daily budget ---
   useRolloverUnchecked({
@@ -1200,9 +1222,18 @@ export default function TodayPage() {
         energy={energy}
         onEnergyChange={handleEnergyChange}
         planType={planType}
-        canEditDayType={canEditLiveDay}
+        canEditDayType={canEditLiveDay && dayPlanEditable}
         onDayTypeChange={handleDayTypeChange}
         saveState={saveState}
+        /* UX-345 — GATE: both controls write the plan document, so neither is
+           live until this child's read has settled, and neither comes back
+           after one that failed. */
+        planSettled={dayPlanEditable}
+        planNote={dailyPlanGateNote({
+          isLoading: dayPlanLoading,
+          loadFailed: dayPlanReadFailed,
+          hasTarget: Boolean(selectedChildId),
+        })}
       />
 
       {/* --- FEAT-200: on a Life Day, Today is a place to RECORD, not a list to

@@ -55,6 +55,17 @@ interface DayStatusRowProps {
   canEditDayType: boolean
   onDayTypeChange: (planType: PlanType) => void
   saveState: SaveState
+  /**
+   * UX-345 — has this child's `dailyPlans` read settled? Both controls here
+   * write that document (energy and plan type ride in the same payload as its
+   * `sessions`), so until it has, neither may be tapped: the hook would
+   * otherwise carry the previously-selected child's sessions onto this child's
+   * day. Optional and defaulting to `true` so every existing caller and test
+   * renders exactly as before.
+   */
+  planSettled?: boolean
+  /** The one line saying why, from `dailyPlanGate`. `null` when nothing to say. */
+  planNote?: string | null
 }
 
 function dayTypeColor(planType: PlanType): 'success' | 'default' | 'info' {
@@ -70,16 +81,26 @@ export default function DayStatusRow({
   canEditDayType,
   onDayTypeChange,
   saveState,
+  planSettled = true,
+  planNote = null,
 }: DayStatusRowProps) {
   const [dayTypeAnchor, setDayTypeAnchor] = useState<HTMLElement | null>(null)
 
-  const openMenu = canEditDayType
+  const openMenu = canEditDayType && planSettled
     ? (e: React.MouseEvent<HTMLElement>) => setDayTypeAnchor(e.currentTarget)
     : undefined
 
   return (
     <SectionCard title="How's today going?">
       <Stack spacing={1.5}>
+        {/* UX-345 — the one line that says why the two questions below are not
+            tappable. It never asserts anything about the day itself: "no plan
+            yet" over a read that never landed is the defect, not the message. */}
+        {planNote && (
+          <Typography variant="caption" color="text.secondary">
+            {planNote}
+          </Typography>
+        )}
         {/* Question 1 — energy. The save indicator rides with the heading rather
             than the controls: it is status, not a thing to tap, and it is the
             item that was pushed off-screen when it competed with them. */}
@@ -100,6 +121,7 @@ export default function DayStatusRow({
           exclusive
           size="small"
           fullWidth
+          disabled={!planSettled}
           onChange={(_e, value) => { if (value) onEnergyChange(value as EnergyLevel) }}
         >
           {Object.values(EnergyLevel).map((level) => (
@@ -128,10 +150,10 @@ export default function DayStatusRow({
             color={dayTypeColor(planType)}
             variant="outlined"
             onClick={openMenu}
-            deleteIcon={canEditDayType ? <ArrowDropDownIcon /> : undefined}
+            deleteIcon={canEditDayType && planSettled ? <ArrowDropDownIcon /> : undefined}
             onDelete={openMenu}
             aria-label={
-              canEditDayType
+              canEditDayType && planSettled
                 ? `Kind of day: ${PlanTypeLabel[planType]}. Change it.`
                 : undefined
             }

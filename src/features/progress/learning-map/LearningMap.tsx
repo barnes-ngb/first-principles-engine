@@ -13,12 +13,20 @@ import { CURRICULUM_MAPS } from '../../../core/curriculum/curriculumMap'
 import type { CurriculumNode } from '../../../core/curriculum/curriculumMap'
 import { SkillStatus } from '../../../core/curriculum/skillStatus'
 import { useSkillMap } from '../../../core/curriculum/useSkillMap'
+import { skillMapGateNote } from '../../../core/curriculum/skillMapGate'
 import DomainSection from './DomainSection'
 import SkillDetailDrawer from './SkillDetailDrawer'
 
 export default function LearningMap() {
   const { activeChildId, activeChild } = useActiveChild()
-  const { isLoading, getNodeStatus, updateNodeStatus, domainSummaries } = useSkillMap(activeChildId)
+  const {
+    isLoading,
+    loadFailed,
+    isEditable,
+    getNodeStatus,
+    updateNodeStatus,
+    domainSummaries,
+  } = useSkillMap(activeChildId)
   const [domainTab, setDomainTab] = useState(0)
   const [selectedNode, setSelectedNode] = useState<CurriculumNode | null>(null)
 
@@ -34,6 +42,13 @@ export default function LearningMap() {
     setSelectedNode(null)
   }, [])
 
+  /**
+   * UX-344 — GATE. `updateNodeStatus` spreads the loaded map into its write, so
+   * the drawer's status buttons are only offered once THIS child's map has
+   * loaded and only when the read succeeded. Passing `undefined` rather than a
+   * no-op handler is deliberate: the drawer then renders no buttons at all,
+   * instead of buttons that silently do nothing.
+   */
   const handleUpdateStatus = useCallback(
     async (nodeId: string, status: SkillStatus) => {
       await updateNodeStatus(nodeId, status, 'manual')
@@ -58,6 +73,14 @@ export default function LearningMap() {
   }
 
   const currentDomainMap = CURRICULUM_MAPS[domainTab]
+  // A failed read never renders as an empty map: on a screen whose job is to
+  // report what a child knows, "nothing recorded" over a dropped read is a
+  // false statement about the child.
+  const gateNote = skillMapGateNote({
+    isLoading,
+    loadFailed,
+    hasTarget: Boolean(activeChildId),
+  })
 
   return (
     <Container maxWidth="lg" sx={{ py: 2 }}>
@@ -67,6 +90,12 @@ export default function LearningMap() {
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Tap any skill to see details, practice ideas, and mark progress.
       </Typography>
+
+      {gateNote && (
+        <Typography variant="body2" color="warning.main" sx={{ mb: 2 }}>
+          {gateNote}
+        </Typography>
+      )}
 
       {/* Domain summary bars */}
       <Stack spacing={1} sx={{ mb: 2 }}>
@@ -130,7 +159,7 @@ export default function LearningMap() {
         node={selectedNode}
         status={selectedNode ? getNodeStatus(selectedNode.id) : undefined}
         onClose={handleCloseDrawer}
-        onUpdateStatus={handleUpdateStatus}
+        onUpdateStatus={isEditable ? handleUpdateStatus : undefined}
         getNodeStatus={getNodeStatus}
       />
     </Container>
