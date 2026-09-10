@@ -75,20 +75,30 @@ candidates: 94 (hook arm 42, prop arm 52)
 files rendering an in-page <ChildSelector>: 8
 feature files referencing setActiveChildId (any in-page child control): 13
 census rows: 94
-by verdict: {"BIND":6,"HIDE":3,"RESET":19,"GATE":7,"SAFE":59}
-by severity: {"P1":2,"P2":6,"P3":3,"—":83}
+by verdict: {"BIND":6,"HIDE":3,"RESET":19,"GATE":10,"SAFE":56}
+by severity: {"P1":5,"P2":6,"P3":3,"—":80}
 ```
 
-Read that as: **94 surfaces classified**, **59 SAFE with a stated reason**, and **35 that a switch
+Read that as: **94 surfaces classified**, **56 SAFE with a stated reason**, and **38 that a switch
 genuinely reaches and that therefore had to decide something**.
 
-The verdict tally counts the **prescribed** answer, so a row reading *"RESET needed"* is counted as a
-RESET; the **Severity** column is what separates settled from open, and the two tallies are the same
-split seen from either side. Doing the arithmetic on the block above: `94 − 59 SAFE = 35` deciding
-rows; `2 P1 + 6 P2 + 3 P3 = 11` of them are **open**; `35 − 11 = 24` need no further work, of which
+The verdict tally counts the **prescribed** answer, so a row reading *"GATE needed"* is counted as a
+GATE; the **Severity** column is what separates settled from open, and the two tallies are the same
+split seen from either side. Doing the arithmetic on the block above: `94 − 56 SAFE = 38` deciding
+rows; `5 P1 + 6 P2 + 3 P3 = 14` of them are **open**; `38 − 14 = 24` need no further work, of which
 **4 are fixed in this run** (`RecordsPage`, `SaleEntryForm`, `KitBuilderForm`, `CertificateScanSection`)
 and **20 were already answered** — the six PR #1817 fixes plus fourteen surfaces whose hosts already
-gate or re-key them. The 83 dashes in the severity tally are the 59 SAFE rows plus those 24.
+gate or re-key them. The 80 dashes in the severity tally are the 56 SAFE rows plus those 24.
+
+**Three of those SAFE rows were wrong, and a review round found them (`UX-344`, `UX-345`).** They are
+the reason rule 2 above is written the way it is, so they are corrected in place rather than quietly
+edited: `useSkillMap` (I checked `updateSkillMap`, which has no caller, and missed `updateNodeStatus`,
+which `LearningMap` calls), `LearningMap` (the document *reference* is rebuilt from the live child;
+the *payload* is the previous child's whole skill map) and `useDailyPlan` (the row named the loaded
+document as the only thing carried over and then dismissed it — it is spread into the write). All
+three are now GATE-needed P1s. **A registry whose SAFE rows are wrong is worse than no registry**,
+which is this document's own thesis turned on itself; the corrections are the most important lines in
+it.
 
 **The candidate set grew from 80 to 94 during review**, and that is the most useful thing in this
 document. Codex round 1 on PR #1820 found the first heuristic silent on `CertificateScanSection`,
@@ -99,14 +109,15 @@ pendingResult)`) rather than an object field. So the census reported green over 
 outing. The heuristic gained a positional-argument arm rather than that one file being added by hand,
 which cost 14 more rows, all SAFE or already answered.
 
-The 11 open rows carry ledger ids `UX-331` … `UX-343`. That is **13 ids for 14 open items**, because
+The 14 open rows carry ledger ids `UX-331` … `UX-345`. That is **15 ids for 17 open items**, because
 three of them (`UX-334`, `UX-337`, `UX-340`) sit on §5b's second-editor rows rather than in the
-registry table, and `UX-343` covers two registry rows — `TodayPage` and the capture hook mounted
-inside it, which are the same dialog stack on the same page.
+registry table, `UX-343` covers two registry rows — `TodayPage` and the capture hook mounted inside
+it, which are the same dialog stack on the same page — and `UX-344` covers the `useSkillMap` /
+`LearningMap` pair, which are one defect seen from the hook and from its only caller.
 
 The two arms are how the surface comes by the identity it writes with — `useActiveChild` directly
 (**hook**, 42) or a `childId` handed down by a caller (**prop**, 52). Both are in the class: the
-switch reaches a prop-threaded editor **through** its parent, and two of this run's three P1s
+switch reaches a prop-threaded editor **through** its parent, and two of this run's four fixes
 (`SaleEntryForm`, `KitBuilderForm`) are prop-arm surfaces that a hook-only heuristic could not see.
 
 **The header switcher is currently OFF** (`CHILD_SWITCHER_ENABLED === false`, UX-330), so the shell
@@ -123,7 +134,7 @@ the constant flips back.
 | `src/components/ChildSwitcherChip.tsx` | one menu anchor element | nothing — a source scan already pins that it writes no Firestore document | It **is** the shell switch (off since UX-330) | **SAFE** — the anchor is a DOM node for a menu, not child-scoped state, and the chip's whole job is to call `setActiveChildId` | — |
 | `src/components/CreativeTimer.tsx` | a picked subject and a save flag around `useCreativeTimer` | delegated — `useCreativeTimer` writes `hours` | Selector (mounted on several pages) | **BIND** — the hook carries `ownerChildId` from `startTimer` (UX-327), and this host already renders `timerOwnerDiffers(state.ownerChildId, activeChildId)` so a running timer names the child its minutes will go to | — |
 | `src/components/DebugPanel.tsx` | a minimised flag and a service-worker status string | nothing — it is a read-only diagnostic overlay | Everywhere it is mounted | **SAFE** — it renders `activeChildId` as text and writes nothing anywhere | — |
-| `src/core/curriculum/useSkillMap.ts` | the loaded `ChildSkillMap` for the `childId` prop | `childSkillMaps/{childId}` — create-if-missing on read, plus an `updateSkillMap` writer | Selector (via `LearningMap` on Progress) | **SAFE** — `updateSkillMap` has **no caller in the repo**; the only live write is the create-if-missing initialisation, keyed on the `childId` the effect was re-run with | — |
+| `src/core/curriculum/useSkillMap.ts` | the loaded `ChildSkillMap` for the `childId` prop | `childSkillMaps/{childId}` — create-if-missing on read, plus an `updateSkillMap` writer | Selector (via `LearningMap` on Progress) | **GATE** needed — this row was **wrong**, and Codex round 4 caught it: I checked `updateSkillMap` (which genuinely has no caller) and missed `updateNodeStatus`, which `LearningMap` calls. `skillMap` is not cleared on a `childId` change, and a rejected `getDoc` leaves the previous child's map in state with `isLoading` false — so the next status edit spreads `...skillMap?.skills` into a `setDoc` on the **new** child's document. Clear or key the loaded map, and stay un-editable after a failed read | P1 · `UX-344` |
 | `src/core/hooks/useActivityConfigs.ts` | the child's `ActivityConfig[]` | `activityConfigs` — `updateDoc`/`deleteDoc` by document id; the seeder is keyed on `childId` | Selector (Curriculum, Planner, Today) | **SAFE** — every write addresses a document **by its own id**, so a stale row edits the document it names and never the live child | — |
 | `src/core/hooks/useCertificateProgress.ts` | a computed `CertificatePreview` | `activityConfigs` + `skillSnapshots` via `applyCertUpdate(familyId, childId, …)` | Selector (Curriculum) | **SAFE** — every entry point takes `childId` as an argument; the preview's owner is captured by the caller (`CurriculumTab`'s `certConfirm.childId`), not read live at Confirm | — |
 | `src/core/hooks/useCreativeTimer.ts` | a running timer session (start time, subject, note) | `hours` — one entry per stopped session | Selector (several pages) | **BIND** — `ownerChildId` captured at `startTimer`, restored by `resumePersistedTimer`, resolved through `creativeTimerOwner.ts` (UX-327) | — |
@@ -176,7 +187,7 @@ the constant flips back.
 | `src/features/progress/FoundationsDiagPanel.tsx` | per-child loading / error / model state | `learnerModels` via `bootstrapLearnerModel('reseed')` | Selector (Foundations tab, `?diag=1`) | **SAFE** — every piece of its state is a map **keyed by `childId`** and each action takes the child id of the row whose button was tapped | — |
 | `src/features/progress/FoundationsTab.tsx` | an open concept drawer, an override selection | `learnerModels/{activeChildId}` via `writeReviewAction` | Selector (its own `ChildSelector`) | **SAFE** — the override refuses when `action.childId !== activeChildId`, and the action is built from the same `childId` the drawer was opened under | — |
 | `src/features/progress/WordWall.tsx` | a selected word, a multi-select set | nothing — it navigates; the write is `useWordWall`'s | Selector (Progress) | **SAFE** — a selection reaches no write on this surface; the navigation carries `childId` explicitly | — |
-| `src/features/progress/learning-map/LearningMap.tsx` | a domain tab and a selected node | `childSkillMaps` via `useSkillMap.updateNodeStatus` | Selector (Progress) | **SAFE** — `updateNodeStatus` rebuilds the document reference from the `childId` the hook currently holds, and a selected node is a curriculum node, not child-scoped work | — |
+| `src/features/progress/learning-map/LearningMap.tsx` | a domain tab and a selected node | `childSkillMaps` via `useSkillMap.updateNodeStatus` | Selector (Progress) | **GATE** needed — this row was **wrong** (Codex round 4). The document *reference* is rebuilt from the live `childId`, which is what I checked; the *payload* is not — `useSkillMap` hands over the previous child's `skills` map, so one child's whole skill map can be written onto the other's document. The selected node is fine; the map behind it is not | P1 · `UX-344` |
 | `src/features/progress/useWordWall.ts` | the child's word list, a filter | `children/{childId}/wordProgress/{word}` | Selector (Progress) | **SAFE** — the document path is rebuilt from the current `childId` at the moment of the write, and the list is re-read on a prop change | — |
 | `src/features/quest/KnowledgeMinePage.tsx` | which domain is open, a resumable session | `evaluationSessions` — marks a session abandoned | Shell only | **RESET** needed — the resume card holds the previous child's session while the page reads the live child | P3 · `UX-338` |
 | `src/features/quest/useQuestSession.ts` | a **running quest** — questions, answers, findings, fluency state | `evaluationSessions`, `skillSnapshots`, `hours`, `xpLedger`, `days`, `wordProgress` | Shell only | **BIND** needed — a quest in flight survives a switch and `endSession` writes every one of those against the live child. **Not fixed here:** it writes `hours`, `skillSnapshots` and `xpLedger`, all three propose-and-confirm | P1 · `UX-339` |
@@ -203,7 +214,7 @@ the constant flips back.
 | `src/features/today/TodayPage.tsx` | a strand-session draft, edit-mode move/swap targets, energy and plan type | `days`, `dailyPlans`, `artifacts`, `scans`, `activityConfigs` | Selector (its own `ChildSelector`) | **RESET** needed — the strand-session dialog and the move/swap targets outlive the switch while every write reads `selectedChildId` live | P2 · `UX-343` |
 | `src/features/today/WeekRibbon.tsx` | one week's day summaries | nothing — a read-only subscription | Selector (Today) | **SAFE** — writes nothing; `subscriptionKey` (`familyId\|childId\|weekStart`) already re-keys the subscription | — |
 | `src/features/today/useBookProgress.ts` | the loaded `BookProgress` | `bookProgress/{childId}_{bookId}` | Selector (Today, Planner) | **SAFE** — the document id is rebuilt from the current `childId` at the write, and the subscription resets on a prop change | — |
-| `src/features/today/useDailyPlan.ts` | the loaded `DailyPlan` | `dailyPlans/{date}_{childId}` — merge-only | Selector (Today) | **SAFE** — the id is rebuilt from the current `childId` and `date` at the moment of the write; nothing is held from the previous child but the loaded document, which is re-read | — |
+| `src/features/today/useDailyPlan.ts` | the loaded `DailyPlan` | `dailyPlans/{date}_{childId}` — merge-only | Selector (Today) | **GATE** needed — this row named the hazard and then **dismissed it wrongly** (Codex round 4). The id is rebuilt from the live `childId`, but `saveDailyPlan` spreads `dailyPlan?.sessions` — and the child-change effect does not clear `dailyPlan` before its `getDoc`, so a toggle during that window writes the previous child's `sessions` onto the new child's plan under `merge: true`. (A *failed* read does clear, so that half of the report does not hold.) Clear before reading, and gate the controls on `isLoading` | P1 · `UX-345` |
 | `src/features/today/useUnifiedCapture.ts` | a staged capture — photo, note, which checklist item | `artifacts`, `scans`, `days`, and (parent only) `activityConfigs` / `childSkillMaps` / `skillSnapshots` | Selector (Today) | **RESET** needed — a staged capture survives the switch and every write reads the `childId` prop live; covered by `UX-343`, which is the same dialog stack on the same page | P3 · `UX-343` |
 | `src/features/watch/useWatchItemCompletion.ts` | which checklist item is being completed | `days` + `artifacts` | Selector (Today) | **SAFE** — the completion writes into `dayLog`, the document the caller passed, and stamps the `childId` of that same day log | — |
 | `src/features/watch/useWatchLibrary.ts` | the family's vetted videos, a `trackedChild` marker | `watchLibrary` — `addDoc` / `updateDoc` by id | Selector (Planner, Today) | **SAFE** — the library is family-scoped with a `childId \| 'both'` filter; vetting writes the caller's body and edits address a video by its own id | — |

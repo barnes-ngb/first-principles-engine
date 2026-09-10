@@ -611,6 +611,12 @@ function HoursComplianceTab() {
       setEstimateStartMonth('')
       setEstimateEndMonth('')
       setEstimateDailyHours('')
+      // Codex round 4, P2 — this one has a real default, so leaving it edited
+      // after a SAVE left the form looking like an unsaved draft: the next
+      // child change then announced that already-recorded hours "weren't
+      // saved", which invites entering them a second time. A saved form is not
+      // a draft, so it goes back with the rest.
+      setEstimateDaysPerWeek(DEFAULT_ESTIMATE_DAYS_PER_WEEK)
       const data = await fetchRecords()
       applyRecords(data)
       setSnackMessage({ text: 'Quick estimate hours saved', severity: 'success' })
