@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   clearedHistoricalHoursDraft,
+  DEFAULT_ESTIMATE_DAYS_PER_WEEK,
   historicalHoursDraftIsEmpty,
   historicalHoursSwitchNotice,
   type HistoricalHoursDraft,
@@ -16,6 +17,7 @@ const BLANK: HistoricalHoursDraft = {
   estimateStartMonth: '',
   estimateEndMonth: '',
   estimateDailyHours: '',
+  estimateDaysPerWeek: DEFAULT_ESTIMATE_DAYS_PER_WEEK,
 }
 
 describe('historicalHoursDraftIsEmpty', () => {
@@ -43,6 +45,22 @@ describe('historicalHoursDraftIsEmpty', () => {
     expect(historicalHoursDraftIsEmpty({ ...BLANK, estimateStartMonth: '2024-09' })).toBe(false)
     expect(historicalHoursDraftIsEmpty({ ...BLANK, estimateEndMonth: '2025-05' })).toBe(false)
     expect(historicalHoursDraftIsEmpty({ ...BLANK, estimateDailyHours: '3' })).toBe(false)
+  })
+
+  /**
+   * Codex round 1, P1 — `estimateDaysPerWeek` is the field with a non-empty
+   * default, and it feeds the minutes `handleSaveQuickEstimate` writes. Read it
+   * like the others and every switch announces work nobody did; ignore it and
+   * one child's school week silently prices the next child's compliance hours.
+   */
+  it('is still true on an untouched days-per-week, which has a real default', () => {
+    expect(
+      historicalHoursDraftIsEmpty({ ...BLANK, estimateDaysPerWeek: DEFAULT_ESTIMATE_DAYS_PER_WEEK }),
+    ).toBe(true)
+  })
+
+  it('is false once days-per-week is CHANGED from the default', () => {
+    expect(historicalHoursDraftIsEmpty({ ...BLANK, estimateDaysPerWeek: '5' })).toBe(false)
   })
 
   it('ignores whitespace, which is not a typed figure', () => {
@@ -78,8 +96,12 @@ describe('clearedHistoricalHoursDraft', () => {
       estimateStartMonth: '2024-09',
       estimateEndMonth: '2025-05',
       estimateDailyHours: '3',
+      estimateDaysPerWeek: '5',
     })
     expect(historicalHoursDraftIsEmpty(cleared)).toBe(true)
+    // POSITIVE CONTROL — the whole point of the round-1 finding: a five-day
+    // week set for one child must not price the next child's estimate.
+    expect(cleared.estimateDaysPerWeek).toBe(DEFAULT_ESTIMATE_DAYS_PER_WEEK)
     expect(cleared.backfillEntries.map((e) => e.subject)).toEqual(['Reading', 'Math'])
   })
 

@@ -46,6 +46,40 @@ export default function CertificateScanSection() {
   const [snack, setSnack] = useState<string | null>(null)
   const [configAction, setConfigAction] = useState<string | null>(null)
 
+  /**
+   * UX-329 (Codex round 1) — a scanned certificate awaiting Confirm belongs to
+   * the child it was scanned for.
+   *
+   * `handleConfirmApply` calls `applyUpdate(familyId, activeChildId,
+   * pendingResult)`, which writes `activityConfigs` and `skillSnapshots`. Since
+   * UX-326 this door renders inside `CurriculumTab`, below that tab's own
+   * `ChildSelector` — so a certificate scanned for one child, then a switch,
+   * then Confirm, applied one child's certificate to the other's record. The
+   * confirm dialog is a *held intent*, which is exactly the class the census
+   * enumerates, and the first census heuristic could not see this surface
+   * because the child id is passed **positionally** rather than as an object
+   * field. The heuristic was widened in the same commit.
+   *
+   * RESET, and the precedent is forty lines below on this same tab:
+   * `stagedChildId` drops a staged scan batch on a child change and says so.
+   * A pending certificate is cheaper still — nothing has been applied to
+   * anybody, and the photo is one tap to re-take. This **prevents** a write; it
+   * changes nothing about what `applyUpdate` writes or how, so the
+   * `skillSnapshots` lane is untouched.
+   */
+  const [scanChildId, setScanChildId] = useState(activeChildId)
+  if (scanChildId !== activeChildId) {
+    setScanChildId(activeChildId)
+    if (pendingResult || confirmOpen) {
+      setSnack('Switched child — that certificate was not applied. Scan it again.')
+    }
+    setConfirmOpen(false)
+    setPendingResult(null)
+    setConfigAction(null)
+    clearCertState()
+    clearScan()
+  }
+
   const handleCapture = useCallback(
     async (file: File) => {
       if (!familyId || !activeChildId) return

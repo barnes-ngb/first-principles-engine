@@ -116,6 +116,28 @@ const FIRESTORE_WRITE =
  */
 const SUBMITS_CHILD = /^\s*(?:childId|activeChildId|ownerChildId)\s*[,:]/m
 
+/**
+ * A child id handed to a call in POSITIONAL argument position —
+ * `applyUpdate(familyId, activeChildId, pendingResult)`.
+ *
+ * Added by Codex round 1 on PR #1820, which found the first version of this
+ * heuristic silent on `CertificateScanSection`: it holds a scanned certificate
+ * awaiting Confirm, reads `useActiveChild`, and delegates the write through a
+ * positional argument — so it matched neither the Firestore-write predicate nor
+ * the object-shorthand one, and the census reported green over a live P1 on the
+ * `activityConfigs` / `skillSnapshots` rail. **A guard that passes on the case
+ * it was written for is worse than no guard**, which is the whole `[ledger-shape]`
+ * lesson this module is built on, so the fix is to widen the heuristic rather
+ * than to add that one file to the census by hand.
+ *
+ * Bounded to a single call's parentheses (`[^()]*`) so it cannot match across
+ * an unrelated expression, and it costs 14 more rows — all SAFE or already
+ * answered. That is the trade this arm exists to make: over-matching costs a
+ * row with a reason, under-matching costs a P1 nobody sees.
+ */
+const SUBMITS_CHILD_POSITIONALLY =
+  /[A-Za-z_$][\w$]*\s*\([^()]*\b(?:childId|activeChildId|ownerChildId)\b\s*[,)]/
+
 /** Holds React state that can outlive a child change. */
 const HOLDS_STATE = /\buseState\s*[<(]/
 
@@ -140,14 +162,16 @@ export function classifyCandidate(file: SourceFile): Candidate | null {
   const { path, source } = file
   if (!HOLDS_STATE.test(source)) return null
   const writes = FIRESTORE_WRITE.test(source)
+  const submits =
+    SUBMITS_CHILD.test(source) || SUBMITS_CHILD_POSITIONALLY.test(source)
   if (READS_ACTIVE_CHILD.test(source)) {
-    if (writes || SUBMITS_CHILD.test(source)) {
+    if (writes || submits) {
       return { path, arm: CandidateArm.Hook }
     }
     return null
   }
   if (!TAKES_CHILD_PROP.test(source)) return null
-  if (writes || (path.endsWith('.tsx') && SUBMITS_CHILD.test(source))) {
+  if (writes || (path.endsWith('.tsx') && submits)) {
     return { path, arm: CandidateArm.Prop }
   }
   return null

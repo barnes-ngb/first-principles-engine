@@ -92,6 +92,7 @@ import {
 } from './compliancePackArchive'
 import {
   clearedHistoricalHoursDraft,
+  DEFAULT_ESTIMATE_DAYS_PER_WEEK,
   historicalHoursDraftIsEmpty,
   historicalHoursSwitchNotice,
 } from './historicalHoursOwnership'
@@ -248,7 +249,9 @@ function HoursComplianceTab() {
   const [estimateStartMonth, setEstimateStartMonth] = useState('')
   const [estimateEndMonth, setEstimateEndMonth] = useState('')
   const [estimateDailyHours, setEstimateDailyHours] = useState('')
-  const [estimateDaysPerWeek, setEstimateDaysPerWeek] = useState('4')
+  const [estimateDaysPerWeek, setEstimateDaysPerWeek] = useState(
+    DEFAULT_ESTIMATE_DAYS_PER_WEEK,
+  )
 
   /**
    * UX-329 — the Historical Hours draft belongs to the child it was typed for,
@@ -282,6 +285,7 @@ function HoursComplianceTab() {
       estimateStartMonth,
       estimateEndMonth,
       estimateDailyHours,
+      estimateDaysPerWeek,
     }
     const cleared = clearedHistoricalHoursDraft(draft)
     setHistoricalHoursNotice(
@@ -302,6 +306,7 @@ function HoursComplianceTab() {
     setEstimateStartMonth(cleared.estimateStartMonth)
     setEstimateEndMonth(cleared.estimateEndMonth)
     setEstimateDailyHours(cleared.estimateDailyHours)
+    setEstimateDaysPerWeek(cleared.estimateDaysPerWeek)
   }
 
   const fetchRecords = useCallback(async () => {

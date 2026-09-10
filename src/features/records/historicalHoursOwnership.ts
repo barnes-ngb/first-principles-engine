@@ -52,21 +52,40 @@ export interface HistoricalHoursDraft {
   estimateEndMonth: string
   /** Quick-estimate mode: hours per school day, as typed (`''` when unset). */
   estimateDailyHours: string
+  /**
+   * Quick-estimate mode: school days per week. Unlike every other field this
+   * one has a NON-EMPTY default, which is why it is handled separately below.
+   */
+  estimateDaysPerWeek: string
 }
+
+/**
+ * The days-per-week the dialog opens on. A real value on an untouched form,
+ * which is what makes this field a special case in both functions below.
+ */
+export const DEFAULT_ESTIMATE_DAYS_PER_WEEK = '4'
 
 /**
  * Is there anything in this draft a person actually typed?
  *
- * `estimateDaysPerWeek` is deliberately NOT read: it is defaulted to `'4'` by
- * the page and is present on a completely untouched form, so counting it would
- * make every draft non-empty and every switch raise a notice about work that
- * was never done.
+ * `estimateDaysPerWeek` is the awkward one, and getting it wrong costs in both
+ * directions (Codex round 1, P1). Reading it like the others would make EVERY
+ * draft non-empty — it is `'4'` on a form nobody has touched — so every switch
+ * would raise a notice about work that was never done. Ignoring it entirely,
+ * which the first version of this module did, leaves a **compliance** field
+ * that a parent set for one child silently in force for the next: set five
+ * days for one child, switch, type a fresh range and a daily rate, and the
+ * second child's adjustments are computed on the first child's schedule.
+ *
+ * So it counts as typed exactly when it DIFFERS from the default, and it is
+ * always restored by `clearedHistoricalHoursDraft` whether it counted or not.
  */
 export function historicalHoursDraftIsEmpty(draft: HistoricalHoursDraft): boolean {
   if (draft.backfillMonth.trim() !== '') return false
   if (draft.estimateStartMonth.trim() !== '') return false
   if (draft.estimateEndMonth.trim() !== '') return false
   if (draft.estimateDailyHours.trim() !== '') return false
+  if (draft.estimateDaysPerWeek.trim() !== DEFAULT_ESTIMATE_DAYS_PER_WEEK) return false
   return draft.backfillEntries.every((e) => !(e.hours > 0))
 }
 
@@ -86,6 +105,10 @@ export function clearedHistoricalHoursDraft(
     estimateStartMonth: '',
     estimateEndMonth: '',
     estimateDailyHours: '',
+    // Restored unconditionally: it drives `handleSaveQuickEstimate`'s minutes,
+    // so leaving one child's schedule in place is a wrong compliance figure
+    // for the next, whether or not it was what triggered the notice.
+    estimateDaysPerWeek: DEFAULT_ESTIMATE_DAYS_PER_WEEK,
   }
 }
 

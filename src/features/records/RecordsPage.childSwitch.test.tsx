@@ -168,6 +168,33 @@ describe('RecordsPage — a child switch does not re-target typed historical hou
     expect(addDoc).not.toHaveBeenCalled()
   })
 
+  /**
+   * Codex round 1, P1 — `estimateDaysPerWeek` has a real default, so it was
+   * left out of the emptiness test AND, by mistake, out of the reset. A school
+   * week set for one child then priced the next child's compliance hours.
+   */
+  it('restores days-per-week, so one child’s week cannot price another’s hours', async () => {
+    const user = userEvent.setup()
+    const { default: RecordsPage } = await import('./RecordsPage')
+    const { rerender } = render(<RecordsPage />)
+
+    await user.click(screen.getByRole('button', { name: /add historical hours/i }))
+    await user.click(screen.getByRole('button', { name: /quick estimate/i }))
+    const days = screen.getByLabelText(/days per week/i)
+    await user.clear(days)
+    await user.type(days, '5')
+    expect(screen.getByDisplayValue('5')).toBeInTheDocument()
+
+    setActive(LONDON)
+    rerender(<RecordsPage />)
+
+    // POSITIVE CONTROL — before the fix this stayed at 5, and a fresh range
+    // typed for London was costed on Lincoln's week.
+    expect(screen.getByLabelText(/days per week/i)).toHaveValue(4)
+    // Changing only this field is still a typed draft, so the loss is stated.
+    expect(screen.getByText(/weren't saved|weren’t saved/i)).toBeInTheDocument()
+  })
+
   it('says nothing when there was no typed draft to lose', async () => {
     const { default: RecordsPage } = await import('./RecordsPage')
     const { rerender } = render(<RecordsPage />)

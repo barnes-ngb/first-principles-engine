@@ -69,24 +69,33 @@ All derived. `npm run census:child-switch`, on this branch:
 ```
 source files scanned (non-test, under src/, excluding src/test/): 752
 files reading useActiveChild: 69
-candidates: 80 (hook arm 32, prop arm 48)
+candidates: 94 (hook arm 42, prop arm 52)
 files rendering an in-page <ChildSelector>: 8
 feature files referencing setActiveChildId (any in-page child control): 13
-census rows: 80
-by verdict: {"BIND":5,"HIDE":3,"RESET":18,"GATE":5,"SAFE":49}
-by severity: {"P1":2,"P2":6,"P3":3,"—":69}
+census rows: 94
+by verdict: {"BIND":6,"HIDE":3,"RESET":19,"GATE":7,"SAFE":59}
+by severity: {"P1":2,"P2":6,"P3":3,"—":83}
 ```
 
-Read that as: **80 surfaces classified**, **49 SAFE with a stated reason**, and **31 that a switch
+Read that as: **94 surfaces classified**, **59 SAFE with a stated reason**, and **35 that a switch
 genuinely reaches and that therefore had to decide something**.
 
 The verdict tally counts the **prescribed** answer, so a row reading *"RESET needed"* is counted as a
 RESET; the **Severity** column is what separates settled from open, and the two tallies are the same
-split seen from either side. Doing the arithmetic on the block above: `80 − 49 SAFE = 31` deciding
-rows; `2 P1 + 6 P2 + 3 P3 = 11` of them are **open**; `31 − 11 = 20` need no further work, of which
-**3 are fixed in this run** (`RecordsPage`, `SaleEntryForm`, `KitBuilderForm`) and **17 were already
-answered** — the six PR #1817 fixes plus eleven surfaces whose hosts already gate or re-key them. The
-69 dashes in the severity tally are the 49 SAFE rows plus those 20.
+split seen from either side. Doing the arithmetic on the block above: `94 − 59 SAFE = 35` deciding
+rows; `2 P1 + 6 P2 + 3 P3 = 11` of them are **open**; `35 − 11 = 24` need no further work, of which
+**4 are fixed in this run** (`RecordsPage`, `SaleEntryForm`, `KitBuilderForm`, `CertificateScanSection`)
+and **20 were already answered** — the six PR #1817 fixes plus fourteen surfaces whose hosts already
+gate or re-key them. The 83 dashes in the severity tally are the 59 SAFE rows plus those 24.
+
+**The candidate set grew from 80 to 94 during review**, and that is the most useful thing in this
+document. Codex round 1 on PR #1820 found the first heuristic silent on `CertificateScanSection`,
+which holds a scanned certificate awaiting Confirm and delegates its `activityConfigs` /
+`skillSnapshots` write through a **positional** argument (`applyUpdate(familyId, activeChildId,
+pendingResult)`) rather than an object field. So the census reported green over a live P1 — the
+`[ledger-shape]` failure mode this guard was explicitly built to avoid, reproduced on its first
+outing. The heuristic gained a positional-argument arm rather than that one file being added by hand,
+which cost 14 more rows, all SAFE or already answered.
 
 The 11 open rows carry ledger ids `UX-331` … `UX-343`. That is **13 ids for 14 open items**, because
 three of them (`UX-334`, `UX-337`, `UX-340`) sit on §5b's second-editor rows rather than in the
@@ -94,7 +103,7 @@ registry table, and `UX-343` covers two registry rows — `TodayPage` and the ca
 inside it, which are the same dialog stack on the same page.
 
 The two arms are how the surface comes by the identity it writes with — `useActiveChild` directly
-(**hook**, 32) or a `childId` handed down by a caller (**prop**, 48). Both are in the class: the
+(**hook**, 42) or a `childId` handed down by a caller (**prop**, 52). Both are in the class: the
 switch reaches a prop-threaded editor **through** its parent, and two of this run's three P1s
 (`SaleEntryForm`, `KitBuilderForm`) are prop-arm surfaces that a hook-only heuristic could not see.
 
@@ -108,6 +117,10 @@ the constant flips back.
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
 |---|---|---|---|---|---|
+| `src/components/ChildSelector.tsx` | one add-child dialog flag | nothing — it calls `onSelect`, and its avatar icon is a read | It **is** the switch (8 pages) | **SAFE** — the control itself holds no child-scoped draft; the dialog boolean survives a selection and means the same thing either way | — |
+| `src/components/ChildSwitcherChip.tsx` | one menu anchor element | nothing — a source scan already pins that it writes no Firestore document | It **is** the shell switch (off since UX-330) | **SAFE** — the anchor is a DOM node for a menu, not child-scoped state, and the chip's whole job is to call `setActiveChildId` | — |
+| `src/components/CreativeTimer.tsx` | a picked subject and a save flag around `useCreativeTimer` | delegated — `useCreativeTimer` writes `hours` | Selector (mounted on several pages) | **BIND** — the hook carries `ownerChildId` from `startTimer` (UX-327), and this host already renders `timerOwnerDiffers(state.ownerChildId, activeChildId)` so a running timer names the child its minutes will go to | — |
+| `src/components/DebugPanel.tsx` | a minimised flag and a service-worker status string | nothing — it is a read-only diagnostic overlay | Everywhere it is mounted | **SAFE** — it renders `activeChildId` as text and writes nothing anywhere | — |
 | `src/core/curriculum/useSkillMap.ts` | the loaded `ChildSkillMap` for the `childId` prop | `childSkillMaps/{childId}` — create-if-missing on read, plus an `updateSkillMap` writer | Selector (via `LearningMap` on Progress) | **SAFE** — `updateSkillMap` has **no caller in the repo**; the only live write is the create-if-missing initialisation, keyed on the `childId` the effect was re-run with | — |
 | `src/core/hooks/useActivityConfigs.ts` | the child's `ActivityConfig[]` | `activityConfigs` — `updateDoc`/`deleteDoc` by document id; the seeder is keyed on `childId` | Selector (Curriculum, Planner, Today) | **SAFE** — every write addresses a document **by its own id**, so a stale row edits the document it names and never the live child | — |
 | `src/core/hooks/useCertificateProgress.ts` | a computed `CertificatePreview` | `activityConfigs` + `skillSnapshots` via `applyCertUpdate(familyId, childId, …)` | Selector (Curriculum) | **SAFE** — every entry point takes `childId` as an argument; the preview's owner is captured by the caller (`CurriculumTab`'s `certConfirm.childId`), not read live at Confirm | — |
@@ -121,9 +134,11 @@ the constant flips back.
 | `src/features/books/BookEditorPage.tsx` | the open book's pages, images and finish-dialog draft | `books/{bookId}`, `stickerLibrary` | Shell only (Books has no selector) | **SAFE** — every write is scoped to the **book** being edited, which carries its own `childId`; the one `stickerLibrary` write is family-scoped | — |
 | `src/features/books/BookGenerateChat.tsx` | chat composer text | delegated to `useBookGenerateChat` | Shell only | **SAFE** — `useBookGenerateChat` persists a draft book as soon as a story exists and every later save keeps that stored `childId`; before that there is no document to mis-file | — |
 | `src/features/books/BookReaderPage.tsx` | page index, reading timer, words encountered | `hours` + `artifacts`, both stamped `book.childId` | Shell only | **SAFE** — the reader's writes read `book.childId`, the document's own field, not the header | — |
+| `src/features/books/BookshelfPage.tsx` | shelf filters, a new-book title and cover style, a resume target | `books` via `createBook` / `deleteBook` | Shell only, plus its own draft-resume switch | **SAFE** — the new-book dialog's `createBook` runs from its own submit with the child read at that moment, and a resume routes through `planDraftResume`, which switches the header to the draft's child **before** the chat mounts (FEAT-188). Filters reach no write | — |
 | `src/features/books/CreateSightWordBook.tsx` | a generated story held only in local state | `books` — the published book | Shell only | **BIND** — `draftChild` captured when the story is generated; both write paths save to it, with `difficulty` riding along, and `inFlightDraftNotice` says so above the buttons (UX-324 round 1) | — |
 | `src/features/books/DrawingGroupCard.tsx` | rename / delete / re-style draft for a sticker group | `stickerLibrary` — partial updates by document id | Shell only | **SAFE** — stickers are family-scoped and every write addresses a sticker by its own id | — |
 | `src/features/books/MakeStickerDialog.tsx` | a generated sticker awaiting save | `stickerLibrary` — `childId: null` by construction | Shell only | **SAFE** — the write stamps `childId: null`; a sticker belongs to the family, so there is no child to mis-target | — |
+| `src/features/books/SightWordDashboard.tsx` | one selected word | `sightWordProgress` via `confirmMastery` | Shell only | **SAFE** — `confirmMastery` is `useSightWordProgress`'s writer, which rebuilds the document id from the `childId` it currently holds; the selected word is a word, not a child-scoped draft | — |
 | `src/features/books/SketchScanner.tsx` | a captured sketch, its cleaned and fancy versions | `stickerLibrary` — `childId: null` by construction | Shell only | **SAFE** — same as above; the `profile` field it does write is a picker the person sets, not the active child | — |
 | `src/features/books/useBackgroundReimagine.ts` | a running reimagine job and its result | `stickerLibrary` + `artifacts`, stamped with the `childId` prop | Shell only | **RESET** needed — a finished job's "save this" survives a switch and the artifact is stamped with the live prop | P3 · `UX-333` |
 | `src/features/books/useBook.ts` | the open book, save state | `books`, `hours`, `artifacts` | Shell only | **SAFE** — every write reads `book.childId` from the loaded document; `useBookshelf`'s `createBook` takes the `childId` it was called with | — |
@@ -145,25 +160,33 @@ the constant flips back.
 | `src/features/foundations-review/FoundationsReviewSession.tsx` | a message draft, staged uploads | delegated to `useFoundationsReview` | Selector (Foundations tab) | **SAFE** — the session is mounted with an explicit `childId` from the launcher's state, not from the header | — |
 | `src/features/foundations-review/useFoundationsReview.ts` | the review transcript, pending actions | `learnerReviewSessions/{childId}_{domain}`, `learnerModels/{childId}` | Selector (Foundations tab) | **SAFE** — `applyAction` refuses outright when `action.childId !== childId`, so a card built for one child cannot be confirmed against another | — |
 | `src/features/monthly-review/DiagnosticPanel.tsx` | an audit result | nothing — a callable read | Shell only | **SAFE** — every call is keyed on `review.childId`, the document's own field | — |
+| `src/features/monthly-review/GenerateNowDialog.tsx` | a picked child and month | `monthlyReviews` via the generate callable | Shell only | **SAFE** — the child is the dialog's **own** `useState` picker, seeded once from `defaultChildId` and thereafter set only by the person; the header does not reach it | — |
+| `src/features/monthly-review/KidBooksAboutMePage.tsx` | the child's published review books | nothing — a read-only query | No — kid-facing page | **GATE** — `lastChildId` is compared during render and the list is emptied with `loading` set back to true, so one child's books are never shown under another's name | — |
+| `src/features/monthly-review/MonthlyBooksTab.tsx` | a child filter, a generate-dialog flag | delegated to `GenerateNowDialog` | Selector (Progress) | **SAFE** — the filter is the tab's own control (defaulting to *all*), and the only write is the dialog's, which carries its own picked child | — |
 | `src/features/monthly-review/MonthlyReviewReader.tsx` | reader mode, page index, publish dialog | `monthlyReviews` via publish/unpublish callables | Shell only | **SAFE** — publish targets `review.childId` and `review.month` from the loaded document | — |
 | `src/features/planner-chat/PlannerChatPage.tsx` | a whole draft week, the chat transcript, day types | `days`, `weeks`, `plannerConversations`, `dailyPlans`, `lessonCards`, `artifacts` | Selector (its own `ChildSelector`) | **RESET** — `conversationDocId` is keyed on `(weekStart, childId)` and the subscribe effect clears `messages` / `currentDraft` / `dayTypes` / `applied` / `setupComplete` before resubscribing (FEAT-112's clear covers the child too) | — |
 | `src/features/planner/TeachHelperDialog.tsx` | a loaded snapshot + lesson card for one item | `lessonCards` | Selector (Today) | **SAFE** — `lessonCardKey` is `${childId}:${item.id}:${item.lessonCardId}` and every load and write is guarded on it, so a stale card cannot be saved under a new child | — |
 | `src/features/progress/AddActivityDialog.tsx` | a typed new activity — name, type, subject, minutes, cadence, position | `activityConfigs` — a new row via `onAdd` | Selector (Curriculum) | **RESET** needed — the form does not reset on a `childId` change and `handleAdd` stamps the live prop, so a typed activity can be created for the sibling | P2 · `UX-335` |
 | `src/features/progress/ArmorTab.tsx` | a typed XP award — amount, reason, type | `xpLedger` via `addXpEvent`, plus armor unlocks | Selector (its own child chips) | **RESET** needed — the award form survives the switch and `doAward` reads the live `childId`. **Not fixed here:** `xpLedger` is on CLAUDE.md's propose-and-confirm list | P1 · `UX-336` |
+| `src/features/progress/CertificateScanSection.tsx` | a scanned certificate result awaiting Confirm, plus its preview | `activityConfigs` + `skillSnapshots` via `applyUpdate(familyId, activeChildId, pendingResult)` | Selector (inside `CurriculumTab` since UX-326) | **RESET** — `scanChildId` is compared during render; the pending result and preview are dropped and the parent is told to scan again. Fixed here (UX-329, Codex round 1) — it **prevents** a write rather than changing one, so the `skillSnapshots` lane is untouched | — |
 | `src/features/progress/CurriculumTab.tsx` | staged scan pages, a strand-session draft, a certificate confirm | `activityConfigs`, `scans`, `skillSnapshots`, `childSkillMaps`, `artifacts` | Selector (its own `ChildSelector`) | **RESET** — `stagedChildId` is stamped at staging time, a switch drops the batch with one line saying so, the write path guards on it again, and a switch **during** a batch discards the completion (UX-275) | — |
 | `src/features/progress/DispositionProfile.tsx` | an inline narrative override being typed, the AI `result` | `children/{activeChildId}.dispositionOverrides` | Selector (its own `ChildSelector`) | **RESET** — the child-change effect clears `overrides` and `editingKey`, and `handleEditSave` returns early without an `editingKey`, so the cross-child write is unreachable | — |
 | `src/features/progress/FoundationsDiagPanel.tsx` | per-child loading / error / model state | `learnerModels` via `bootstrapLearnerModel('reseed')` | Selector (Foundations tab, `?diag=1`) | **SAFE** — every piece of its state is a map **keyed by `childId`** and each action takes the child id of the row whose button was tapped | — |
 | `src/features/progress/FoundationsTab.tsx` | an open concept drawer, an override selection | `learnerModels/{activeChildId}` via `writeReviewAction` | Selector (its own `ChildSelector`) | **SAFE** — the override refuses when `action.childId !== activeChildId`, and the action is built from the same `childId` the drawer was opened under | — |
 | `src/features/progress/WordWall.tsx` | a selected word, a multi-select set | nothing — it navigates; the write is `useWordWall`'s | Selector (Progress) | **SAFE** — a selection reaches no write on this surface; the navigation carries `childId` explicitly | — |
+| `src/features/progress/learning-map/LearningMap.tsx` | a domain tab and a selected node | `childSkillMaps` via `useSkillMap.updateNodeStatus` | Selector (Progress) | **SAFE** — `updateNodeStatus` rebuilds the document reference from the `childId` the hook currently holds, and a selected node is a curriculum node, not child-scoped work | — |
 | `src/features/progress/useWordWall.ts` | the child's word list, a filter | `children/{childId}/wordProgress/{word}` | Selector (Progress) | **SAFE** — the document path is rebuilt from the current `childId` at the moment of the write, and the list is re-read on a prop change | — |
 | `src/features/quest/KnowledgeMinePage.tsx` | which domain is open, a resumable session | `evaluationSessions` — marks a session abandoned | Shell only | **RESET** needed — the resume card holds the previous child's session while the page reads the live child | P3 · `UX-338` |
 | `src/features/quest/useQuestSession.ts` | a **running quest** — questions, answers, findings, fluency state | `evaluationSessions`, `skillSnapshots`, `hours`, `xpLedger`, `days`, `wordProgress` | Shell only | **BIND** needed — a quest in flight survives a switch and `endSession` writes every one of those against the live child. **Not fixed here:** it writes `hours`, `skillSnapshots` and `xpLedger`, all three propose-and-confirm | P1 · `UX-339` |
 | `src/features/records/ChapterResponsesTab.tsx` | a pending delete confirmation | `chapterResponses`, `artifacts` — deletes by document id | Selector (Records) | **SAFE** — the confirmation holds the response object itself and both deletes address documents by their own ids | — |
+| `src/features/records/DataReviewExportPanel.tsx` | per-child export state | nothing — it builds a file to download | Shell only (Progress, `?diag=1`) | **SAFE** — the state is a map **keyed by `childId`** and every build takes the id of the row whose button was tapped | — |
+| `src/features/records/EvaluationHistoryTab.tsx` | the loaded sessions and a selected one | nothing — read-only history | Selector (Records) | **GATE** — `loadedKey` is `${familyId}:${activeChildId}` and the list is not rendered as this child's until the key matches, so one child's sessions are never shown under another's | — |
 | `src/features/records/PortfolioPage.tsx` | a selection of artifacts for export | `artifacts` — one sketch upload | Selector (Records) | **SAFE** — the sketch write runs from the file picker's own change event with no draft held; `selectedIds` drives an export and reaches no write | — |
 | `src/features/records/QuickAddHours.tsx` | a picked activity and duration, a session receipt | `hours` — one entry per log | Selector (Records) | **RESET** — `formChildId` is compared during render; the selection and the receipt are cleared, and both the button and the receipt name the live child (UX-328) | — |
 | `src/features/records/RecordsPage.tsx` | a typed historical-hours draft — a month and five subject figures, or a month range and a daily rate | `hoursAdjustments` — **one document per subject per month** | Selector (Records) | **RESET** — `hoursFormChildId` is compared during render, the draft is cleared through `historicalHoursOwnership.ts`, Save goes dead, and an `Alert` names both children. Fixed here (UX-329) | — |
 | `src/features/settings/AvatarAdminTab.tsx` | typed XP / diamond amounts, a reason, pending regenerations | `avatarProfiles`, `xpLedger`, `dailyArmorSessions`, `children` | Selector (its own child chips) | **RESET** needed — the same shape as `ArmorTab`, on an admin surface. **Not fixed here:** `xpLedger` is propose-and-confirm | P2 · `UX-341` |
 | `src/features/settings/DevAdminTab.tsx` | scan results, selected document ids, backfill results | `chapterBooks`, `weeks`, `bookProgress`, plus admin deletes | Shell only (admin-only tab) | **SAFE** — every destructive action addresses documents by the ids it just listed; the one `selectedChildId` use is the chapter-pool generator, which re-reads on each run | — |
+| `src/features/settings/SoftProfileSection.tsx` | a typed draft per child — motivators, interests, strengths, birthdate, grade | `children/{childId}` via `updateChildIdentity` / `updateChildSoftProfile` | Shell only (Settings) | **SAFE** — `drafts` is a map **keyed by `childId`** and `save(childId)` takes the id of the row being saved, so it edits every child side by side and never follows an active one | — |
 | `src/features/settings/StickerLibraryTab.tsx` | edit / delete / print / make-version drafts | `stickerLibrary` — partial updates by document id | Shell only | **SAFE** — the library is family-scoped and every write addresses a sticker by its own id; no `childId` is written | — |
 | `src/features/settings/VoiceInputSection.tsx` | per-child optimistic override map | `children/{childId}.voiceInputEnhanced` | Shell only (Settings) | **SAFE** — the toggle's handler takes the row's own `childId`; it iterates every child rather than reading the active one | — |
 | `src/features/shelly-chat/ShellyChatPage.tsx` | the chat transcript, a tab selection | delegated to `useShellyChatActions` | Shell only | **SAFE** — the chat's context `childId` is the tab's own binding, and the tab is what a person picks; it is not the header | — |
@@ -226,11 +249,19 @@ them would have the guard counting itself.
 Where the over-match shows up: several prop-arm rows are SAFE because the file's **props interface**
 declares `childId: string` on its own line, which is the same shape as an object-literal shorthand
 submit. `StonebridgeMissionCard` is the clearest case. Tightening the pattern to shorthand-only would
-drop five rows and lose one hook-arm file — a worse trade than five SAFE rows with a reason.
+drop five rows and lose one hook-arm file — a worse trade than five SAFE rows with a reason. The
+positional arm added in round 1 over-matches harder still (any call naming a child id, `doc(col,
+childId)` included) and it is worth every one of the 14 rows it cost: it is the arm that sees
+`CertificateScanSection`.
+
+**A fourth shape it could not see, and now can.** Round 1's finding is recorded here rather than
+quietly fixed, because it is the evidence for how this list should be maintained: the answer to a
+missed surface is to widen the derivation, never to add the file to the table by hand. A hand-added
+row fixes one case and leaves the guard reporting green on the next one.
 
 ## 7. What this run changed, and what it did not
 
-**Fixed (3).** All three with a test whose last case fails when the fix is reverted:
+**Fixed (4).** Each with a test whose last case fails when the fix is reverted:
 
 - `RecordsPage`'s Historical Hours dialog — **RESET**, owner-authorised in advance on the UX-327
   terms. `historicalHoursOwnership.ts` decides whether a draft was typed and what the parent is told;
@@ -239,6 +270,11 @@ drop five rows and lose one hook-arm file — a worse trade than five SAFE rows 
   test asserts it rather than claiming it (12 typed hours still writes 720 minutes).
 - `SaleEntryForm` — **RESET**, with the dropped sale named in kid copy held to the shared bar.
 - `KitBuilderForm` — **BIND**, with *"This kit will be saved for …"* shown before the tap.
+- `CertificateScanSection` — **RESET**, found by Codex round 1 on this PR. A scanned certificate held
+  for Confirm was applied to whoever was active at the tap, writing `activityConfigs` and
+  `skillSnapshots`; it now drops on the change and says to scan again, matching `stagedChildId` forty
+  lines below it on the same tab. It **prevents** a write rather than changing one, so the
+  `skillSnapshots` lane is untouched — no new write path, no change to what `applyUpdate` does.
 
 **Filed, not fixed (14 items under 13 ids).** `UX-331` … `UX-343`. Four of them are on rails this run may not touch and
 say so in their rows: `ArmorTab` and `AvatarAdminTab` write `xpLedger`; `useQuestSession` writes
