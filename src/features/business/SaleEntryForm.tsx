@@ -79,14 +79,24 @@ export default function SaleEntryForm({ childId, childName, onLogSale }: SaleEnt
   const [formChildId, setFormChildId] = useState(childId)
   const [formChildName, setFormChildName] = useState(childName)
   const [droppedFor, setDroppedFor] = useState<string | null>(null)
+  /**
+   * A changed Date is entered work too (Codex round 2, P3). The reset puts the
+   * date back to today, so leaving it out of `hadEntry` meant a sale dated last
+   * Saturday was silently reverted with no notice. Tracked as a flag rather
+   * than by comparing against `todayKey()`, which would read an untouched form
+   * as edited if the app sat open across midnight.
+   */
+  const [dateTouched, setDateTouched] = useState(false)
   if (formChildId !== childId) {
-    const hadEntry = presetKey !== null || amount.trim() !== '' || note.trim() !== ''
+    const hadEntry =
+      presetKey !== null || amount.trim() !== '' || note.trim() !== '' || dateTouched
     setFormChildId(childId)
     setFormChildName(childName)
     setDroppedFor(droppedSaleNotice(hadEntry, formChildName))
     setPresetKey(null)
     setAmount('')
     setDate(todayKey())
+    setDateTouched(false)
     setNote('')
     setError(null)
   }
@@ -107,6 +117,7 @@ export default function SaleEntryForm({ childId, childName, onLogSale }: SaleEnt
     setPresetKey(null)
     setAmount('')
     setDate(todayKey())
+    setDateTouched(false)
     setNote('')
   }
 
@@ -180,7 +191,10 @@ export default function SaleEntryForm({ childId, childName, onLogSale }: SaleEnt
       <TextField
         label="Date"
         value={date}
-        onChange={(e) => setDate(e.target.value)}
+        onChange={(e) => {
+          setDate(e.target.value)
+          setDateTouched(true)
+        }}
         type="date"
         slotProps={{ inputLabel: { shrink: true } }}
         fullWidth

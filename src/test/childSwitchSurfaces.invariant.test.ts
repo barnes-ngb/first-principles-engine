@@ -83,12 +83,15 @@ describe('the child-switch surface census is complete and current', () => {
     }
   })
 
-  it('still sees the three surfaces UX-329 fixed', () => {
+  it('still sees the four surfaces UX-329 fixed', () => {
     const found = new Set(candidates.map((c) => c.path))
     for (const path of [
       'src/features/records/RecordsPage.tsx',
       'src/features/business/SaleEntryForm.tsx',
       'src/features/business/KitBuilderForm.tsx',
+      // Codex round 1 on PR #1820: invisible to the first heuristic, because
+      // it delegates its write through a POSITIONAL child argument.
+      'src/features/progress/CertificateScanSection.tsx',
     ]) {
       expect(found.has(path), `${path} is no longer derived as a candidate`).toBe(true)
     }
@@ -176,6 +179,43 @@ describe('the guard fails closed', () => {
       '| `src/features/records/RecordsPage.tsx` | a | b | c | DEFER | P1 |\n',
     )
     expect(censusProblems([], invented, existing).map((p) => p.kind)).toContain('bad-verdict')
+  })
+
+  /**
+   * Codex round 2, P2 — the first version accepted any cell that merely
+   * CONTAINED a recognised token, so a row reading only `**SAFE**` passed while
+   * the census's own rule is that an unexplained SAFE is the row that comes
+   * back as a P1. A guard a contributor can silence with one word is paperwork.
+   */
+  it('rejects a verdict that names a token but gives no reason', () => {
+    const bare = parseCensusRows(
+      '| `src/features/records/RecordsPage.tsx` | a | b | c | **SAFE** | — |\n',
+    )
+    expect(censusProblems([], bare, existing).map((p) => p.kind)).toContain(
+      'unexplained-verdict',
+    )
+  })
+
+  it('applies the reason rule to every verdict, not only SAFE', () => {
+    // An unexplained BIND is exactly as opaque to the next reader.
+    for (const verdict of CHILD_SWITCH_VERDICTS) {
+      const bare = parseCensusRows(
+        `| \`src/features/records/RecordsPage.tsx\` | a | b | c | **${verdict}** | — |\n`,
+      )
+      expect(
+        censusProblems([], bare, existing).map((p) => p.kind),
+        `${verdict} with no reason was accepted`,
+      ).toContain('unexplained-verdict')
+    }
+  })
+
+  it('accepts a verdict that says why', () => {
+    const explained = parseCensusRows(
+      '| `src/features/records/RecordsPage.tsx` | a | b | c | **SAFE** — every write addresses a document by its own id, never the live child | — |\n',
+    )
+    expect(censusProblems([], explained, existing).map((p) => p.kind)).not.toContain(
+      'unexplained-verdict',
+    )
   })
 
   it('rejects a row naming a file that no longer exists', () => {

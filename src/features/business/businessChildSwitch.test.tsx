@@ -104,6 +104,29 @@ describe('SaleEntryForm — a pending sale is dropped, not re-targeted', () => {
     expect(screen.queryByText(/was not saved/)).not.toBeInTheDocument()
   })
 
+  /**
+   * Codex round 2, P3 — the reset puts the date back to today, so a date the
+   * person changed is entered work: leaving it out of `hadEntry` reverted a
+   * sale dated last Saturday with no notice at all.
+   */
+  it('counts a changed date as entered work', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <SaleEntryForm childId={LINCOLN.id} childName={LINCOLN.name} onLogSale={onLogSale} />,
+    )
+    const date = screen.getByLabelText(/date/i)
+    await user.clear(date)
+    await user.type(date, '2026-09-05')
+
+    rerender(
+      <SaleEntryForm childId={LONDON.id} childName={LONDON.name} onLogSale={onLogSale} />,
+    )
+
+    // POSITIVE CONTROL — before the fix the date silently reverted to today
+    // and the form said nothing at all.
+    expect(screen.getByText('That sale for Lincoln was not saved.')).toBeInTheDocument()
+  })
+
   it('says nothing when nothing had been entered', () => {
     const { rerender } = render(
       <SaleEntryForm childId={LINCOLN.id} childName={LINCOLN.name} onLogSale={onLogSale} />,

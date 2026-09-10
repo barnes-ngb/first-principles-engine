@@ -271,10 +271,38 @@ export interface CensusProblem {
     | 'stale-row'
     | 'duplicate-row'
     | 'bad-verdict'
+    | 'unexplained-verdict'
     | 'blank-cell'
     | 'bad-shape'
     | 'empty-census'
   message: string
+}
+
+/**
+ * How much rationale a verdict cell must carry beyond its token.
+ *
+ * Codex round 2 on PR #1820, P2: the first version accepted any cell that
+ * merely CONTAINED a recognised token, so a row reading only `**SAFE**` passed
+ * — while the census's own rule is that an unexplained SAFE is the row that
+ * comes back as a P1. A guard that lets a future contributor silence it with
+ * one word is not enforcement, it is paperwork.
+ *
+ * The rule applies to all five verdicts, not only SAFE. An unexplained BIND is
+ * exactly as opaque to the next reader, and "which of the five did we pick" was
+ * never the hard part — "why" is. Thirty characters is a floor on carelessness
+ * rather than a measure of quality: it is too short to name a mechanism and
+ * long enough that no honest row is anywhere near it (the shortest real cell in
+ * the census runs to several times this).
+ */
+export const MIN_VERDICT_RATIONALE = 30
+
+/** A verdict cell with its token and bold markers removed. */
+export function verdictRationale(cell: string): string {
+  return cell
+    .replace(/\*\*/g, '')
+    .replace(/\b(?:BIND|HIDE|RESET|GATE|SAFE)\b/, '')
+    .replace(/^[\s\u2014\u2013\-\u00b7:]+/, '')
+    .trim()
 }
 
 /** The bare verdict token inside a cell like `**BIND**` or `BIND — because…`. */
@@ -324,6 +352,11 @@ export function censusProblems(
       problems.push({
         kind: 'bad-verdict',
         message: `line ${row.line}: verdict "${row.verdict}" is not one of ${CHILD_SWITCH_VERDICTS.join(' / ')} — \`${row.path}\``,
+      })
+    } else if (verdictRationale(row.verdict).length < MIN_VERDICT_RATIONALE) {
+      problems.push({
+        kind: 'unexplained-verdict',
+        message: `line ${row.line}: the verdict names a token but no reason — say what makes it true, with the line that makes it so — \`${row.path}\``,
       })
     }
     if (seen.has(row.path)) {
