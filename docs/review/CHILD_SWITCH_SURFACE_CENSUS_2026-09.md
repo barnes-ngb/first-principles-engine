@@ -43,6 +43,13 @@ each member has an answer on record, and that the next member cannot arrive sile
 The **Verdict** column states what the surface does today where it is settled, and what it **must do**
 where the row is still open — an open row names its ledger id in the Severity column.
 
+**`DOC-25` unblocks three of the P1s this document filed.** `UX-336`, `UX-339` and `UX-340` each read
+*FILE, DO NOT FIX* because their fix touches `xpLedger`, `hours`, `skillSnapshots` or
+`hoursAdjustments` — rails that were propose-and-confirm without exception when §7 was written. The
+owner's 2026-09-10 decision (`CLAUDE.md` › **Attribution-only fixes are pre-authorised**) pre-authorises
+a change that alters only **whose** a record is, so those three no longer wait on a decision; their
+verdicts, severities and rows are unchanged, and `FIX-223` is the run that implements them.
+
 ## 3. The five verdicts
 
 This vocabulary is the run's main product. *"The per-surface answers are each different"* is true, and
