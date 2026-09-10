@@ -270,6 +270,22 @@ export interface LearnerReviewSession {
   updatedAt: string
 }
 
+/**
+ * The working levels a projection was computed from (UX-291). One slot per
+ * band-seeding driver key; `seedLearnerModel.ts` holds a compile-time check that
+ * these keys are exactly `WORKING_LEVEL_DRIVER_KEYS`, so a new driver fails to
+ * compile until it is given a slot here.
+ *
+ * **Every key is always present, and "no level" is `null`, not an omission**
+ * (Codex round 3). Firestore's `{ merge: true }` merges a nested map leaf by
+ * leaf: writing `{phonics: 5}` over a stored `{phonics: 5, math: 3}` leaves
+ * `math: 3` behind. An omitted slot would therefore never clear, the next mount
+ * would read the cleared level as different, and the projection would re-run and
+ * re-write on **every** mount forever — the exact "a no-op is a no-op" property
+ * this watermark exists to provide. A total map has no stale leaf to survive.
+ */
+export type ProjectedWorkingLevels = Record<'phonics' | 'writing' | 'math', number | null>
+
 export interface LearnerModel {
   id?: string
   childId: string
@@ -299,5 +315,30 @@ export interface LearnerModel {
    */
   synthesisStaleAt?: string | null
   seededAt: string
+  /**
+   * **The working levels the band-derived concept states were last computed
+   * from** (UX-291) — the inputs themselves, one entry per driving key, not a
+   * timestamp. Additive and optional; absent means *never recorded*, which is
+   * read as "project once and record it", so there is no migration.
+   *
+   * **It holds values, and every timestamp-shaped alternative was wrong** (Codex
+   * rounds 1 and 2, three findings between them). A wall clock watermarked past
+   * levels the projection never read. The newest `WorkingLevel.updatedAt` fixed
+   * that and still could not: collapsing phonics / writing / math into one
+   * maximum cannot establish that *each* was projected, so a clock-skewed device
+   * writing `math` with a stamp older than the standing `phonics` stamp was
+   * swallowed, and a same-field stamp that moved backwards was too. Comparing the
+   * inputs answers the actual question — *are these the levels I already
+   * projected?* — for every field independently, with no clock in it at all, on
+   * a `WorkingLevel.updatedAt` that is written by whichever device did the quest.
+   *
+   * Deliberately **not** `seededAt` re-used. `seededAt` means *when this document
+   * was created* and several readers take it that way; overloading it because a
+   * second writer needed somewhere to put something is the UX-322 mistake, where
+   * a field's meaning drifted and five consumers were left reading the old one.
+   * It is also not `updatedAt`: a projection that moves nothing must leave
+   * `updatedAt` alone, and it still needs to record what it read.
+   */
+  projectedThrough?: ProjectedWorkingLevels
   updatedAt: string
 }

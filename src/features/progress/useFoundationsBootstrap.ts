@@ -1,9 +1,24 @@
-// ── The Foundations tab's create-only learner-model bootstrap (UX-286) ────
+// ── The Foundations tab's learner-model bootstrap (UX-286) and its
+//    working-level re-projection (UX-291) ─────────────────────────────────
 //
-// Thin. Every decision it makes is the pure `shouldBootstrapLearnerModel`; every
-// write it makes is the shared `bootstrapLearnerModel` (`learnerModels` only).
-// What lives here is the once-per-(family, child) re-entry guard and the two bits
-// of state the tab renders: is it running, and did it fail.
+// Thin. Every decision it makes is the pure `resolveFoundationsBootstrapMode`;
+// every write it makes is the shared `bootstrapLearnerModel` (`learnerModels`
+// only). What lives here is the once-per-(family, child) re-entry guard and the
+// bits of state the tab renders: is a create running, and did either mode fail.
+//
+// **One action per child per mount, and the mode is the pure function's answer**
+// (UX-291): the document is absent → create it; the document is there → refresh
+// its band-derived states from the child's current working levels. The two are
+// mutually exclusive by construction, and a freshly created model needs no
+// projection — it was just seeded from those same levels.
+//
+// **The two modes report separately, and only the create blocks the tab.** A
+// create is the tab having nothing to show, so it renders a `LoadingState` in
+// place of the content; a projection is a refresh of a map that is already on
+// screen, so blanking that map to announce it would be worse than the staleness.
+// The keyed sets are therefore keyed by (family, child, MODE) while the attempted
+// guard stays keyed by (family, child) — one action per child, two truths about
+// it, and a running projection can never be mistaken for a missing map.
 //
 // The attempted guard is a ref, not state: two snapshot deliveries for the same
 // child (a re-render, a `loading` flip, a second effect pass) must not produce a
@@ -43,7 +58,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { bootstrapLearnerModel } from '../../core/foundations/bootstrapLearnerModel'
 import type { LearnerModel } from '../../core/types/learnerModel'
-import { shouldBootstrapLearnerModel } from './foundationsBootstrap'
+import { resolveFoundationsBootstrapMode } from './foundationsBootstrap'
 
 export interface UseFoundationsBootstrapArgs {
   familyId: string | undefined
@@ -56,9 +71,13 @@ export interface UseFoundationsBootstrapArgs {
 export interface UseFoundationsBootstrapResult {
   /** True while the create-only write for THIS child is in flight. */
   bootstrapping: boolean
-  /** True when the last attempt for THIS child threw. */
+  /** True when the last create-only attempt for THIS child threw. */
   failed: boolean
-  /** Re-arm and run again — the "Try again" tap. */
+  /** True while the working-level re-projection for THIS child is in flight (UX-291). */
+  reprojecting: boolean
+  /** True when the last re-projection for THIS child threw (UX-291). */
+  reprojectFailed: boolean
+  /** Re-arm and run again — the "Try again" tap. Re-resolves the mode. */
   retry: () => void
 }
 
@@ -87,9 +106,11 @@ export function useFoundationsBootstrap({
   const [retryNonce, setRetryNonce] = useState(0)
 
   const key = `${familyId ?? ''}|${childId ?? ''}`
+  const createKey = `${key}|create-only`
+  const reprojectKey = `${key}|reproject`
 
   useEffect(() => {
-    const shouldRun = shouldBootstrapLearnerModel({
+    const mode = resolveFoundationsBootstrapMode({
       canEdit,
       loading,
       model,
@@ -97,20 +118,21 @@ export function useFoundationsBootstrap({
       childId,
       alreadyAttempted: attemptedRef.current.has(key),
     })
-    if (!shouldRun || !familyId || !childId) return
+    if (!mode || !familyId || !childId) return
 
     // Mark BEFORE awaiting — a second render during the write must not start one.
+    // Keyed by (family, child): ONE action per child per mount, whichever it is.
     attemptedRef.current.add(key)
-    const startedKey = key
+    const startedKey = `${key}|${mode}`
     setRunningKeys((prev) => new Set(prev).add(startedKey))
     setFailedKeys((prev) => without(prev, startedKey))
     void (async () => {
       try {
-        await bootstrapLearnerModel(familyId, childId, 'create-only')
+        await bootstrapLearnerModel(familyId, childId, mode)
         // Nothing is set from the result: the tab redraws from the
         // `useLearnerModel` snapshot, never from local optimistic state.
       } catch (err) {
-        console.error('[foundations] bootstrap failed:', err)
+        console.error(`[foundations] ${mode} failed:`, err)
         setFailedKeys((prev) => new Set(prev).add(startedKey))
       } finally {
         // Clears only its OWN key, so a concurrent run for another child is
@@ -122,9 +144,15 @@ export function useFoundationsBootstrap({
 
   const retry = useCallback(() => {
     attemptedRef.current.delete(key)
-    setFailedKeys((prev) => without(prev, key))
+    setFailedKeys((prev) => without(without(prev, `${key}|create-only`), `${key}|reproject`))
     setRetryNonce((n) => n + 1)
   }, [key])
 
-  return { bootstrapping: runningKeys.has(key), failed: failedKeys.has(key), retry }
+  return {
+    bootstrapping: runningKeys.has(createKey),
+    failed: failedKeys.has(createKey),
+    reprojecting: runningKeys.has(reprojectKey),
+    reprojectFailed: failedKeys.has(reprojectKey),
+    retry,
+  }
 }
