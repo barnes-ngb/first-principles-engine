@@ -22,6 +22,7 @@ import BuildWordQuestionScreen from './BuildWordQuestion'
 import BuildSentenceQuestionScreen from './BuildSentenceQuestion'
 import QuestSummary from './QuestSummary'
 import FluencyPractice from './FluencyPractice'
+import { questOwnerLines } from './questSessionOwner'
 import { extractTargetWord } from './questHelpers'
 import { hasMathCalibration, hasReadingCalibration } from './knowledgeMineAccess'
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
@@ -178,6 +179,37 @@ export default function KnowledgeMinePage() {
     ? [...readingModes.filter((m) => m.questMode !== 'phonics'), ...readingModes.filter((m) => m.questMode === 'phonics')]
     : readingModes
 
+  /**
+   * UX-339 — BIND, said out loud. The header can move to another child while a
+   * quest is running, and every write this session makes still belongs to the
+   * child it was started for. Say so on the screen, BEFORE the last question,
+   * rather than in a receipt afterwards (the UX-313 rule) — this is the surface
+   * that reaches `hours`, `skillSnapshots` and `xpLedger` in one go.
+   *
+   * Kid copy, held to the shared readability bar: the parent moved the header,
+   * but the boy is the one looking at the screen.
+   */
+  const ownerBanner = quest.sessionLeftItsChild ? (
+    <Box
+      sx={{
+        border: `2px solid ${MC.stone}`,
+        bgcolor: 'rgba(0,0,0,0.35)',
+        px: 1.5,
+        py: 1,
+        mb: 1.5,
+      }}
+    >
+      {questOwnerLines(quest.sessionOwnerName).map((line) => (
+        <Typography
+          key={line}
+          sx={{ fontFamily: MC.font, fontSize: '0.5rem', color: MC.white, lineHeight: 1.8 }}
+        >
+          {line}
+        </Typography>
+      ))}
+    </Box>
+  ) : null
+
   // ── Fluency mode screens ────────────────────────────────────
   if (
     quest.screen === QuestScreen.FluencyPassage ||
@@ -200,6 +232,7 @@ export default function KnowledgeMinePage() {
         >
           ← Back to mine
         </Button>
+        {ownerBanner}
         <FluencyPractice quest={quest} />
       </Page>
     )
@@ -398,6 +431,8 @@ export default function KnowledgeMinePage() {
 
   return (
     <Page>
+      {ownerBanner}
+
       {/* Back button (not on summary) */}
       {quest.screen !== QuestScreen.Summary && (
         <Button

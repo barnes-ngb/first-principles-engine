@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   collection,
   doc,
@@ -32,6 +32,12 @@ import { addXpEvent } from '../../core/xp/addXpEvent'
 import { checkAndUnlockArmor } from '../../core/xp/checkAndUnlockArmor'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import { VOXEL_ARMOR_PIECES, XP_THRESHOLDS } from '../avatar/voxel/buildArmorPiece'
+import {
+  armorAwardDraftIsEmpty,
+  armorAwardSwitchNotice,
+  clearedArmorAwardDraft,
+  DEFAULT_AWARD_TYPE,
+} from './armorAwardOwnership'
 import {
   calculateTier,
   getTierBadgeColor,
@@ -229,11 +235,14 @@ const MAX_AWARD = 50
 function QuickAwardXP({
   childId,
   childName,
+  previousChildName,
   currentXp,
   onAward,
 }: {
   childId: string
   childName: string
+  /** UX-336 — the name of the child this form was being filled in for, when it differs. */
+  previousChildName?: (id: string) => string | undefined
   currentXp: number
   onAward: (amount: number, unlocks: string[], tierUp?: { from: string; to: string }) => void
 }) {
@@ -241,9 +250,44 @@ function QuickAwardXP({
   const [open, setOpen] = useState(false)
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
-  const [awardType, setAwardType] = useState<string>('Bonus')
+  const [awardType, setAwardType] = useState<string>(DEFAULT_AWARD_TYPE)
   const [awarding, setAwarding] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+
+  /**
+   * UX-336 — a typed award belongs to the child it was typed for, and a child
+   * change clears it rather than re-pointing it.
+   *
+   * This tab renders its own child chips, so the switch is reachable with the
+   * header switcher off, and `doAward` below reads the live `childId` prop —
+   * so a filled form plus a chip tap plus Award landed one boy's XP on his
+   * brother's `xpLedger`, moving his armor unlocks and tier with it.
+   *
+   * The confirm dialog is closed as part of the reset, and that half is not
+   * cosmetic: it is the **Correction** path, its own button calls `doAward`
+   * directly, and it names the child in its text — so an open one would sit
+   * there reading "Remove 0 XP from <the other boy>" over a live button.
+   *
+   * Adjusting state during render is React's own answer to "derive from a
+   * changed prop"; this repo's lint forbids the set-state-in-effect form.
+   */
+  const [formChildId, setFormChildId] = useState(childId)
+  const [switchNotice, setSwitchNotice] = useState<string | null>(null)
+  if (formChildId !== childId) {
+    const cleared = clearedArmorAwardDraft()
+    setSwitchNotice(
+      armorAwardSwitchNotice(
+        !armorAwardDraftIsEmpty({ amount, reason, awardType }),
+        previousChildName?.(formChildId),
+        childName,
+      ),
+    )
+    setFormChildId(childId)
+    setAmount(cleared.amount)
+    setReason(cleared.reason)
+    setAwardType(cleared.awardType)
+    setConfirmOpen(false)
+  }
 
   const isCorrection = awardType === 'Correction'
   const parsedAmount = parseInt(amount) || 0
@@ -251,9 +295,10 @@ function QuickAwardXP({
   const canSubmit = parsedAmount > 0 && parsedAmount <= MAX_AWARD && reason.trim().length > 0
 
   function resetForm() {
-    setAmount('')
-    setReason('')
-    setAwardType('Bonus')
+    const cleared = clearedArmorAwardDraft()
+    setAmount(cleared.amount)
+    setReason(cleared.reason)
+    setAwardType(cleared.awardType)
   }
 
   function handleSubmit() {
@@ -297,6 +342,9 @@ function QuickAwardXP({
 
       onAward(effectiveAmount, unlockNames, tierUp)
       resetForm()
+      // UX-336 — a granted award answers the stale notice above it; leaving it
+      // up beside a fresh "Awarded +N XP" would say both things at once.
+      setSwitchNotice(null)
       setOpen(false)
     } catch (err) {
       console.error('Failed to award XP:', err)
@@ -307,6 +355,14 @@ function QuickAwardXP({
 
   return (
     <Box sx={{ mb: 2 }}>
+      {/* UX-336 — the dropped award is named, and so is whose it was. It stays
+          until dismissed or until the next award lands: an emptied form with no
+          sentence is how this whole class of defect hides. */}
+      {switchNotice && (
+        <Alert severity="info" sx={{ mb: 1 }} onClose={() => setSwitchNotice(null)}>
+          {switchNotice}
+        </Alert>
+      )}
       {/* Toggle button */}
       <Button
         variant="outlined"
@@ -664,6 +720,12 @@ export default function ArmorTab() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   const childName = activeChild?.name ?? 'Child'
+  // UX-336 — identity, never a literal name: the award notice names the child
+  // it was typed for by looking that id up in the family's own children.
+  const nameForChildId = useCallback(
+    (id: string) => children.find((c) => c.id === id)?.name,
+    [children],
+  )
   const tierKey = calculateTier(xpData.totalXp)
   const tierLabel = TIERS[tierKey]?.label ?? tierKey
   const xpToNext = xpData.nextTierProgress.xpToNext
@@ -716,7 +778,13 @@ export default function ArmorTab() {
       {activeChildId && (
         <>
           <XpOverviewCard totalXp={xpData.totalXp} childName={childName} />
-          <QuickAwardXP childId={activeChildId} childName={childName} currentXp={xpData.totalXp} onAward={handleAward} />
+          <QuickAwardXP
+            childId={activeChildId}
+            childName={childName}
+            previousChildName={nameForChildId}
+            currentXp={xpData.totalXp}
+            onAward={handleAward}
+          />
           <XpHistory
             key={`${activeChildId}-${refreshKey}`}
             childId={activeChildId}

@@ -15,6 +15,11 @@ import { selectQuestTargets } from '../../core/foundations/questTargeting'
 import type { QuestTargetConcept } from '../../core/foundations/questTargeting'
 import { syncQuestResultsToModel } from './questModelSync'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import {
+  questLeftItsChild,
+  resolveQuestOwnerChildId,
+  type QuestSessionOwner,
+} from './questSessionOwner'
 import type { ConceptualBlock, EvaluationFinding, EvaluationSession, PrioritySkill, SkillSnapshot, WordProgress } from '../../core/types'
 import {
   mergeBlock,
@@ -383,8 +388,35 @@ function generateFallbackRecommendations(
 
 export function useQuestSession() {
   const familyId = useFamilyId()
-  const { activeChildId, activeChild } = useActiveChild()
+  const { activeChildId: liveChildId, activeChild: liveChild, children } = useActiveChild()
   const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
+
+  /**
+   * UX-339 — BIND. A quest belongs to the child it was STARTED for.
+   *
+   * `endSession` writes `hours`, `skillSnapshots`, `xpLedger`,
+   * `evaluationSessions`, `days` and `wordProgress`, and `bankAnswerReward`
+   * writes a diamond and its XP as each correct answer arrives. All of them
+   * used to read whoever was active at the moment they ran, and a running quest
+   * survives a change of active child — so a session Lincoln answered could be
+   * filed, credited and levelled as London's, on three propose-and-confirm
+   * rails at once. See `questSessionOwner.ts` for why BIND rather than the
+   * other four verdicts.
+   *
+   * The owner is captured once, at the start of a session (and restored from
+   * the document a resume reopens), and every line below this point resolves
+   * through it. Binding at the TOP rather than at each of the thirty write
+   * sites is deliberate: a fix that has to be remembered at each site is a fix
+   * with a hole in it the next time one is added. With no session running the
+   * ref is null and this resolves to the live child, byte-for-byte the previous
+   * behaviour — so the intro screen, the resume card and the eligibility reads
+   * are untouched.
+   */
+  const sessionOwnerRef = useRef<QuestSessionOwner | null>(null)
+  const activeChildId = resolveQuestOwnerChildId(sessionOwnerRef.current, liveChildId)
+  const activeChild = sessionOwnerRef.current
+    ? children.find((c) => c.id === sessionOwnerRef.current!.childId) ?? liveChild
+    : liveChild
 
   const [screen, setScreen] = useState<QuestScreen>(QuestScreen.Intro)
   const [questState, setQuestState] = useState<QuestState | null>(null)
@@ -614,6 +646,10 @@ export function useQuestSession() {
       setCurrentPassageText('')
       conversationRef.current = []
       bonusRoundUsedRef.current = false
+      // UX-339 — capture the owner in the same breath as the session identity.
+      // From here every write in this session resolves through it, including
+      // the per-answer diamonds banked while the quest is still running.
+      sessionOwnerRef.current = { childId: activeChildId, childName: activeChild.name }
       // Establish the session identity up front so per-answer reward banking has a
       // stable doc id to dedup against (endSession / resetToIntro reuse it).
       sessionIdRef.current = `interactive_${activeChildId}_${Date.now()}`
@@ -2016,6 +2052,16 @@ export function useQuestSession() {
       }
       sessionIdRef.current = docId
 
+      // UX-339 — a resumed session belongs to the child on the DOCUMENT, never
+      // to whoever the header happens to be on. `partialDoc.childId` is what
+      // the earlier run wrote, so resuming under a different active child
+      // continues that child's quest rather than adopting it.
+      const resumedChildId = partialDoc.childId || liveChildId
+      sessionOwnerRef.current = {
+        childId: resumedChildId,
+        childName: children.find((c) => c.id === resumedChildId)?.name ?? '',
+      }
+
       // Restore adaptive state
       setQuestState(saved)
       setAnsweredQuestions(partialDoc.questions ?? [])
@@ -2080,7 +2126,7 @@ export function useQuestSession() {
 
       return true
     },
-    [familyId],
+    [familyId, liveChildId, children],
   )
 
   // ── Reset to intro ────────────────────────────────────────────
@@ -2183,9 +2229,20 @@ export function useQuestSession() {
     bonusRoundUsedRef.current = false
     activeQuestModeRef.current = undefined
     sessionIdRef.current = null
+    // UX-339 — the session is over, so the hook goes back to following the live
+    // child. Cleared LAST, after the partial save above has used it.
+    sessionOwnerRef.current = null
   }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak, sessionTimer])
 
+  // UX-339 — what the quest screen needs to say whose quest this is. Read from
+  // the ref at render: a header change re-renders this hook's consumers, so the
+  // notice appears on the same frame the child chip moves.
+  const sessionOwner = sessionOwnerRef.current
+  const sessionLeftItsChild = questLeftItsChild(sessionOwner, liveChildId)
+
   return {
+    sessionOwnerName: sessionOwner?.childName ?? '',
+    sessionLeftItsChild,
     screen,
     questState,
     currentQuestion,

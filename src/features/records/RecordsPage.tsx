@@ -96,6 +96,11 @@ import {
   historicalHoursDraftIsEmpty,
   historicalHoursSwitchNotice,
 } from './historicalHoursOwnership'
+import {
+  clearedHoursAdjustmentDraft,
+  hoursAdjustmentDraftIsEmpty,
+  hoursAdjustmentSwitchNotice,
+} from './hoursAdjustmentOwnership'
 
 const formatHours = (minutes: number) => (minutes / 60).toFixed(2)
 
@@ -230,6 +235,50 @@ function HoursComplianceTab() {
   useEffect(() => {
     setAdjChildId(activeChildId ?? '')
   }, [activeChildId])
+
+  /**
+   * UX-340 — the typed adjustment belongs to the child it was typed for, and a
+   * child change clears it rather than re-pointing it.
+   *
+   * The effect above is what made this urgent: it silently re-targets *Attribute
+   * to* while the typed minutes, reason and subject stand, so tapping **Add
+   * Adjustment** after a switch filed one boy's minutes against his brother in
+   * `hoursAdjustments` — the collection the compliance pack and
+   * `collectHoursContributions` read. Records has its own `ChildSelector`, so
+   * this is reachable today with the header switcher off.
+   *
+   * RESET, not BIND: nothing has been recorded for anybody yet, the draft is
+   * three fields, and writing a compliance row to a child the parent has
+   * navigated away from is the same surprise in the other direction. Same rail,
+   * same answer and same reasoning as the Historical Hours dialog above
+   * (UX-329) and `QuickAddHours` (UX-328). The loss is announced — an emptied
+   * form with no sentence is how this class hides.
+   *
+   * Adjusting state during render is React's own answer to "derive from a
+   * changed prop"; this repo's lint forbids the set-state-in-effect form.
+   */
+  const [adjFormChildId, setAdjFormChildId] = useState(activeChildId ?? '')
+  const [adjustmentNotice, setAdjustmentNotice] = useState<string | null>(null)
+  if (adjFormChildId !== (activeChildId ?? '')) {
+    const cleared = clearedHoursAdjustmentDraft(formatDateForInput(new Date()))
+    setAdjustmentNotice(
+      hoursAdjustmentSwitchNotice(
+        !hoursAdjustmentDraftIsEmpty({
+          minutes: adjMinutes,
+          reason: adjReason,
+          subject: adjSubject,
+          date: adjDate,
+        }),
+        childNameById.get(adjFormChildId),
+        activeChild?.name,
+      ),
+    )
+    setAdjFormChildId(activeChildId ?? '')
+    setAdjMinutes(cleared.minutes)
+    setAdjReason(cleared.reason)
+    setAdjSubject(cleared.subject as SubjectBucket | '')
+    setAdjDate(cleared.date)
+  }
 
   // Backfill state
   const [backfillOpen, setBackfillOpen] = useState(false)
@@ -496,6 +545,9 @@ function HoursComplianceTab() {
       setAdjMinutes('')
       setAdjReason('')
       setAdjSubject('')
+      // UX-340 — a successful save answers the stale notice above it. Leaving
+      // it up beside a fresh "Adjustment saved" would say both at once.
+      setAdjustmentNotice(null)
       const data = await fetchRecords()
       applyRecords(data)
       setSnackMessage({ text: 'Adjustment saved', severity: 'success' })
@@ -1126,6 +1178,15 @@ function HoursComplianceTab() {
             Add or subtract hours manually. Use negative minutes to reduce.
             Each adjustment is tracked for audit.
           </Typography>
+          {/* UX-340 — the dropped draft is named, and so is whose it was. It
+              stays until the next successful save rather than auto-hiding:
+              this is a compliance record, and the parent needs it there when
+              they look back at the empty fields. */}
+          {adjustmentNotice && (
+            <Alert severity="info" onClose={() => setAdjustmentNotice(null)}>
+              {adjustmentNotice}
+            </Alert>
+          )}
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <TextField
               label="Date"

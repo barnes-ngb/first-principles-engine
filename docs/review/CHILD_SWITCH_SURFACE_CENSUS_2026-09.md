@@ -103,7 +103,8 @@ edited: `useSkillMap` (I checked `updateSkillMap`, which has no caller, and miss
 which `LearningMap` calls), `LearningMap` (the document *reference* is rebuilt from the live child;
 the *payload* is the previous child's whole skill map) and `useDailyPlan` (the row named the loaded
 document as the only thing carried over and then dismissed it — it is spread into the write). All
-three are now GATE-needed P1s. **A registry whose SAFE rows are wrong is worse than no registry**,
+three were re-filed as GATE P1s and are now fixed. **A registry whose SAFE rows are wrong is worse
+than no registry**,
 which is this document's own thesis turned on itself; the corrections are the most important lines in
 it.
 
@@ -116,11 +117,14 @@ pendingResult)`) rather than an object field. So the census reported green over 
 outing. The heuristic gained a positional-argument arm rather than that one file being added by hand,
 which cost 14 more rows, all SAFE or already answered.
 
-The 14 open rows carry ledger ids `UX-331` … `UX-345`. That is **15 ids for 17 open items**, because
-three of them (`UX-334`, `UX-337`, `UX-340`) sit on §5b's second-editor rows rather than in the
-registry table, `UX-343` covers two registry rows — `TodayPage` and the capture hook mounted inside
-it, which are the same dialog stack on the same page — and `UX-344` covers the `useSkillMap` /
-`LearningMap` pair, which are one defect seen from the hook and from its only caller.
+**What is still open after `FIX-223`: 11 items under 10 ids.** Nine are the registry rows the block
+above counts (`6 P2 + 3 P3`) and two are §5b second-editor rows the script cannot see (`UX-334`,
+`UX-337`) — `UX-340`, the third of those, is fixed. The ids are `UX-331`, `UX-332`, `UX-333`,
+`UX-334`, `UX-335`, `UX-337`, `UX-338`, `UX-341`, `UX-342`, `UX-343`; ten ids for eleven items,
+because `UX-343` covers two registry rows — `TodayPage` and the capture hook mounted inside it, which
+are the same dialog stack on the same page. (`AUDIT-222` filed 14 items under 13 ids, and `UX-344`
+covered the `useSkillMap` / `LearningMap` pair, one defect seen from the hook and from its only
+caller.)
 
 The two arms are how the surface comes by the identity it writes with — `useActiveChild` directly
 (**hook**, 42) or a `childId` handed down by a caller (**prop**, 52). Both are in the class: the
@@ -141,7 +145,7 @@ the constant flips back.
 | `src/components/ChildSwitcherChip.tsx` | one menu anchor element | nothing — a source scan already pins that it writes no Firestore document | It **is** the shell switch (off since UX-330) | **SAFE** — the anchor is a DOM node for a menu, not child-scoped state, and the chip's whole job is to call `setActiveChildId` | — |
 | `src/components/CreativeTimer.tsx` | a picked subject and a save flag around `useCreativeTimer` | delegated — `useCreativeTimer` writes `hours` | Selector (mounted on several pages) | **BIND** — the hook carries `ownerChildId` from `startTimer` (UX-327), and this host already renders `timerOwnerDiffers(state.ownerChildId, activeChildId)` so a running timer names the child its minutes will go to | — |
 | `src/components/DebugPanel.tsx` | a minimised flag and a service-worker status string | nothing — it is a read-only diagnostic overlay | Everywhere it is mounted | **SAFE** — it renders `activeChildId` as text and writes nothing anywhere | — |
-| `src/core/curriculum/useSkillMap.ts` | the loaded `ChildSkillMap` for the `childId` prop | `childSkillMaps/{childId}` — create-if-missing on read, plus an `updateSkillMap` writer | Selector (via `LearningMap` on Progress) | **GATE** needed — this row was **wrong**, and Codex round 4 caught it: I checked `updateSkillMap` (which genuinely has no caller) and missed `updateNodeStatus`, which `LearningMap` calls. `skillMap` is not cleared on a `childId` change, and a rejected `getDoc` leaves the previous child's map in state with `isLoading` false — so the next status edit spreads `...skillMap?.skills` into a `setDoc` on the **new** child's document. Clear or key the loaded map, and stay un-editable after a failed read | P1 · `UX-344` |
+| `src/core/curriculum/useSkillMap.ts` | the loaded `ChildSkillMap` for the `childId` prop | `childSkillMaps/{childId}` — create-if-missing on read, plus an `updateSkillMap` writer | Selector (via `LearningMap` on Progress) | **GATE** — this row was **wrong**, and Codex round 4 caught it: I checked `updateSkillMap` (which genuinely has no caller) and missed `updateNodeStatus`, which `LearningMap` calls. `skillMap` was not cleared on a `childId` change, and a rejected `getDoc` escaped the load's only `catch` while `finally` still cleared `isLoading` — so the next status edit spread `...skillMap?.skills` into a `setDoc` on the **new** child's document. Now: the map is dropped **during render** on a target change, an outer `catch` records `loadFailed`, and `updateNodeStatus` refuses unless `skillMapIsEditable` — the shared `core/hooks/childScopedGate` rule, one definition with `useDailyPlan`. Fixed by FIX-223 (UX-344) | — |
 | `src/core/hooks/useActivityConfigs.ts` | the child's `ActivityConfig[]` | `activityConfigs` — `updateDoc`/`deleteDoc` by document id; the seeder is keyed on `childId` | Selector (Curriculum, Planner, Today) | **SAFE** — every write addresses a document **by its own id**, so a stale row edits the document it names and never the live child | — |
 | `src/core/hooks/useCertificateProgress.ts` | a computed `CertificatePreview` | `activityConfigs` + `skillSnapshots` via `applyCertUpdate(familyId, childId, …)` | Selector (Curriculum) | **SAFE** — every entry point takes `childId` as an argument; the preview's owner is captured by the caller (`CurriculumTab`'s `certConfirm.childId`), not read live at Confirm | — |
 | `src/core/hooks/useCreativeTimer.ts` | a running timer session (start time, subject, note) | `hours` — one entry per stopped session | Selector (several pages) | **BIND** — `ownerChildId` captured at `startTimer`, restored by `resumePersistedTimer`, resolved through `creativeTimerOwner.ts` (UX-327) | — |
@@ -187,17 +191,17 @@ the constant flips back.
 | `src/features/planner-chat/PlannerChatPage.tsx` | a whole draft week, the chat transcript, day types | `days`, `weeks`, `plannerConversations`, `dailyPlans`, `lessonCards`, `artifacts` | Selector (its own `ChildSelector`) | **RESET** — `conversationDocId` is keyed on `(weekStart, childId)` and the subscribe effect clears `messages` / `currentDraft` / `dayTypes` / `applied` / `setupComplete` before resubscribing (FEAT-112's clear covers the child too) | — |
 | `src/features/planner/TeachHelperDialog.tsx` | a loaded snapshot + lesson card for one item | `lessonCards` | Selector (Today) | **SAFE** — `lessonCardKey` is `${childId}:${item.id}:${item.lessonCardId}` and every load and write is guarded on it, so a stale card cannot be saved under a new child | — |
 | `src/features/progress/AddActivityDialog.tsx` | a typed new activity — name, type, subject, minutes, cadence, position | `activityConfigs` — a new row via `onAdd` | Selector (Curriculum) | **RESET** needed — the form does not reset on a `childId` change and `handleAdd` stamps the live prop, so a typed activity can be created for the sibling | P2 · `UX-335` |
-| `src/features/progress/ArmorTab.tsx` | a typed XP award — amount, reason, type | `xpLedger` via `addXpEvent`, plus armor unlocks | Selector (its own child chips) | **RESET** needed — the award form survives the switch and `doAward` reads the live `childId`. **Not fixed here:** `xpLedger` is on CLAUDE.md's propose-and-confirm list | P1 · `UX-336` |
+| `src/features/progress/ArmorTab.tsx` | a typed XP award — amount, reason, type | `xpLedger` via `addXpEvent`, plus armor unlocks | Selector (its own child chips) | **RESET** — the award form survived the switch and `doAward` reads the live `childId`. `formChildId` is now compared during render, the draft is cleared through `armorAwardOwnership.ts`, the **Correction** confirm dialog is closed with it (its own button calls `doAward` directly), and an `Alert` names both boys. It **prevents** a write rather than changing one, so no `xpLedger` write path changed — `DOC-25` attribution-only, all four terms in PR #NNNN. Fixed by FIX-223 (UX-336) | — |
 | `src/features/progress/CertificateScanSection.tsx` | a scanned certificate result awaiting Confirm, plus its preview | `activityConfigs` + `skillSnapshots` via `applyUpdate(familyId, activeChildId, pendingResult)` | Selector (inside `CurriculumTab` since UX-326) | **RESET** — `scanChildId` is compared during render; the pending result and preview are dropped and the parent is told to scan again, **and a run token discards a scan that completes after the change** (Codex round 3: `useScan` sets its result unconditionally, so an in-flight scan repopulated after the switch and reached `syncScanToConfig` with the new child's id — `WorkshopPage`'s round-4 defect on another surface). Fixed here (UX-329) — it **prevents** a write rather than changing one, so the `skillSnapshots` lane is untouched | — |
 | `src/features/progress/CurriculumTab.tsx` | staged scan pages, a strand-session draft, a certificate confirm | `activityConfigs`, `scans`, `skillSnapshots`, `childSkillMaps`, `artifacts` | Selector (its own `ChildSelector`) | **RESET** — `stagedChildId` is stamped at staging time, a switch drops the batch with one line saying so, the write path guards on it again, and a switch **during** a batch discards the completion (UX-275) | — |
 | `src/features/progress/DispositionProfile.tsx` | an inline narrative override being typed, the AI `result` | `children/{activeChildId}.dispositionOverrides` | Selector (its own `ChildSelector`) | **RESET** — the child-change effect clears `overrides` and `editingKey`, and `handleEditSave` returns early without an `editingKey`, so the cross-child write is unreachable | — |
 | `src/features/progress/FoundationsDiagPanel.tsx` | per-child loading / error / model state | `learnerModels` via `bootstrapLearnerModel('reseed')` | Selector (Foundations tab, `?diag=1`) | **SAFE** — every piece of its state is a map **keyed by `childId`** and each action takes the child id of the row whose button was tapped | — |
 | `src/features/progress/FoundationsTab.tsx` | an open concept drawer, an override selection | `learnerModels/{activeChildId}` via `writeReviewAction` | Selector (its own `ChildSelector`) | **SAFE** — the override refuses when `action.childId !== activeChildId`, and the action is built from the same `childId` the drawer was opened under | — |
 | `src/features/progress/WordWall.tsx` | a selected word, a multi-select set | nothing — it navigates; the write is `useWordWall`'s | Selector (Progress) | **SAFE** — a selection reaches no write on this surface; the navigation carries `childId` explicitly | — |
-| `src/features/progress/learning-map/LearningMap.tsx` | a domain tab and a selected node | `childSkillMaps` via `useSkillMap.updateNodeStatus` | Selector (Progress) | **GATE** needed — this row was **wrong** (Codex round 4). The document *reference* is rebuilt from the live `childId`, which is what I checked; the *payload* is not — `useSkillMap` hands over the previous child's `skills` map, so one child's whole skill map can be written onto the other's document. The selected node is fine; the map behind it is not | P1 · `UX-344` |
+| `src/features/progress/learning-map/LearningMap.tsx` | a domain tab and a selected node | `childSkillMaps` via `useSkillMap.updateNodeStatus` | Selector (Progress) | **GATE** — this row was **wrong** (Codex round 4). The document *reference* is rebuilt from the live `childId`, which is what I checked; the *payload* was not — `useSkillMap` handed over the previous child's `skills` map, so one child's whole skill map could be written onto the other's document. The hook is now gated, and this host renders `skillMapGateNote` and passes `onUpdateStatus` only while the map is writable, so the drawer shows **no** status buttons rather than buttons that silently do nothing. Fixed by FIX-223 (UX-344) | — |
 | `src/features/progress/useWordWall.ts` | the child's word list, a filter | `children/{childId}/wordProgress/{word}` | Selector (Progress) | **SAFE** — the document path is rebuilt from the current `childId` at the moment of the write, and the list is re-read on a prop change | — |
 | `src/features/quest/KnowledgeMinePage.tsx` | which domain is open, a resumable session | `evaluationSessions` — marks a session abandoned | Shell only | **RESET** needed — the resume card holds the previous child's session while the page reads the live child | P3 · `UX-338` |
-| `src/features/quest/useQuestSession.ts` | a **running quest** — questions, answers, findings, fluency state | `evaluationSessions`, `skillSnapshots`, `hours`, `xpLedger`, `days`, `wordProgress` | Shell only | **BIND** needed — a quest in flight survives a switch and `endSession` writes every one of those against the live child. **Not fixed here:** it writes `hours`, `skillSnapshots` and `xpLedger`, all three propose-and-confirm | P1 · `UX-339` |
+| `src/features/quest/useQuestSession.ts` | a **running quest** — questions, answers, findings, fluency state | `evaluationSessions`, `skillSnapshots`, `hours`, `xpLedger`, `days`, `wordProgress` | Shell only | **BIND** — a quest in flight survived a switch and `endSession` wrote every one of those against the live child, while `bankAnswerReward` had already banked diamonds under its owner. The owner is captured at `startQuest` (and restored from the document a resume reopens) and resolved at the **top** of the hook through `questSessionOwner.ts`, so all thirty write sites follow the session rather than the header; the quest screen names whose it is before the last question. **No number changed** — the 5-minute hours bucket, its floor, `XP_PER_DIAMOND` and the 15-XP bonus are pinned by test with a positive control (`DOC-25` attribution-only, all four terms in PR #NNNN). Fixed by FIX-223 (UX-339) | — |
 | `src/features/records/ChapterResponsesTab.tsx` | a pending delete confirmation | `chapterResponses`, `artifacts` — deletes by document id | Selector (Records) | **SAFE** — the confirmation holds the response object itself and both deletes address documents by their own ids | — |
 | `src/features/records/DataReviewExportPanel.tsx` | per-child export state | nothing — it builds a file to download | Shell only (Progress, `?diag=1`) | **SAFE** — the state is a map **keyed by `childId`** and every build takes the id of the row whose button was tapped | — |
 | `src/features/records/EvaluationHistoryTab.tsx` | the loaded sessions and a selected one | nothing — read-only history | Selector (Records) | **GATE** — `loadedKey` is `${familyId}:${activeChildId}` and the list is not rendered as this child's until the key matches, so one child's sessions are never shown under another's | — |
@@ -221,7 +225,7 @@ the constant flips back.
 | `src/features/today/TodayPage.tsx` | a strand-session draft, edit-mode move/swap targets, energy and plan type | `days`, `dailyPlans`, `artifacts`, `scans`, `activityConfigs` | Selector (its own `ChildSelector`) | **RESET** needed — the strand-session dialog and the move/swap targets outlive the switch while every write reads `selectedChildId` live | P2 · `UX-343` |
 | `src/features/today/WeekRibbon.tsx` | one week's day summaries | nothing — a read-only subscription | Selector (Today) | **SAFE** — writes nothing; `subscriptionKey` (`familyId\|childId\|weekStart`) already re-keys the subscription | — |
 | `src/features/today/useBookProgress.ts` | the loaded `BookProgress` | `bookProgress/{childId}_{bookId}` | Selector (Today, Planner) | **SAFE** — the document id is rebuilt from the current `childId` at the write, and the subscription resets on a prop change | — |
-| `src/features/today/useDailyPlan.ts` | the loaded `DailyPlan` | `dailyPlans/{date}_{childId}` — merge-only | Selector (Today) | **GATE** needed — this row named the hazard and then **dismissed it wrongly** (Codex round 4). The id is rebuilt from the live `childId`, but `saveDailyPlan` spreads `dailyPlan?.sessions` — and the child-change effect does not clear `dailyPlan` before its `getDoc`, so a toggle during that window writes the previous child's `sessions` onto the new child's plan under `merge: true`. (A *failed* read does clear, so that half of the report does not hold.) Clear before reading, and gate the controls on `isLoading` | P1 · `UX-345` |
+| `src/features/today/useDailyPlan.ts` | the loaded `DailyPlan` | `dailyPlans/{date}_{childId}` — merge-only | Selector (Today) | **GATE** — this row named the hazard and then **dismissed it wrongly** (Codex round 4). The id is rebuilt from the live `childId`, but `saveDailyPlan` spreads `dailyPlan?.sessions`, and the child-change effect did not clear `dailyPlan` before its `getDoc` — so a toggle in that window wrote the previous child's `sessions` onto the new child's plan under `merge: true`. Now: the plan is dropped **during render** on a target change, and a failed read sets `loadFailed` rather than passing as an empty day (which would have written `sessions: []` over a day that has some — the half of the report that did not hold turned out to be its own defect). `saveDailyPlan` refuses unless `dailyPlanIsEditable`, and `DayStatusRow`'s two controls are dead while it does. Fixed by FIX-223 (UX-345) | — |
 | `src/features/today/useUnifiedCapture.ts` | a staged capture — photo, note, which checklist item | `artifacts`, `scans`, `days`, and (parent only) `activityConfigs` / `childSkillMaps` / `skillSnapshots` | Selector (Today) | **RESET** needed — a staged capture survives the switch and every write reads the `childId` prop live; covered by `UX-343`, which is the same dialog stack on the same page | P3 · `UX-343` |
 | `src/features/watch/useWatchItemCompletion.ts` | which checklist item is being completed | `days` + `artifacts` | Selector (Today) | **SAFE** — the completion writes into `dayLog`, the document the caller passed, and stamps the `childId` of that same day log | — |
 | `src/features/watch/useWatchLibrary.ts` | the family's vetted videos, a `trackedChild` marker | `watchLibrary` — `addDoc` / `updateDoc` by id | Selector (Planner, Today) | **SAFE** — the library is family-scoped with a `childId \| 'both'` filter; vetting writes the caller's body and edits address a video by its own id | — |
@@ -242,7 +246,7 @@ says RESET" is never read as "everything on that page is answered".
 |---|---|---|---|---|
 | `PlannerChatPage`'s model inputs — `snapshot`, `weekPlan`, `hoursPerDay` | the previous child's skill snapshot | nothing directly; they reach the planner prompt | **RESET** needed — the snapshot listener's `if (snap.exists())` never clears, so a child with no snapshot document leaves the previous child's snapshot in the prompt context | P2 · `UX-334` |
 | `DispositionProfile`'s cached AI narrative — `result` | one child's generated disposition narrative | nothing — display only | **RESET** needed — `result` is only replaced when the new child **has** a fresh cache, so one boy's narrative can be read under the other's name | P2 · `UX-337` |
-| `RecordsPage`'s Manual Hours Adjustment form | typed minutes, a reason, a subject | `hoursAdjustments` — one document | **RESET** needed — `adjChildId` re-syncs to the new child while the typed minutes and reason stay. **Not fixed here:** the owner authorised the Historical Hours dialog specifically and nothing else on the hours rail | P1 · `UX-340` |
+| `RecordsPage`'s Manual Hours Adjustment form | typed minutes, a reason, a subject | `hoursAdjustments` — one document | **RESET** — `adjChildId` re-synced to the new child while the typed minutes and reason stayed. `adjFormChildId` is now compared during render, the draft is cleared through `hoursAdjustmentOwnership.ts`, and an `Alert` names both children; the date is restored but deliberately does **not** count as a typed draft, so a saved adjustment cannot raise a false *"wasn't saved"* on the next switch (UX-329's own round-4 finding, one form over). **No hours math changed** — `DOC-25` attribution-only, all four terms in PR #NNNN. Fixed by FIX-223 (UX-340) | — |
 
 ## 6. What the heuristic cannot see
 
@@ -296,14 +300,17 @@ row fixes one case and leaves the guard reporting green on the next one.
   lines below it on the same tab. It **prevents** a write rather than changing one, so the
   `skillSnapshots` lane is untouched — no new write path, no change to what `applyUpdate` does.
 
-**Filed, not fixed (14 items under 13 ids).** `UX-331` … `UX-343`. Four of them are on rails this run may not touch and
+**Filed, not fixed (14 items under 13 ids).** `UX-331` … `UX-343`. This paragraph is `AUDIT-222`'s own
+record and stands as written; **`FIX-223` has since closed the five P1s**, including all four of the
+rail-blocked items below — see §9. Four of them are on rails that run may not touch and
 say so in their rows: `ArmorTab` and `AvatarAdminTab` write `xpLedger`; `useQuestSession` writes
 `hours`, `skillSnapshots` **and** `xpLedger`; `RecordsPage`'s Manual Hours Adjustment form writes
 `hoursAdjustments`, and the owner's authorisation named the Historical Hours dialog specifically.
 Those are propose-and-confirm decisions, not this run's to make.
 
 **Not done.** The switcher stays off (`CHILD_SWITCHER_ENABLED === false`); flipping it back is its own
-one-line PR once the P1s here are cleared. The eight in-page `ChildSelector`s stay (owner: later) —
+one-line PR once the P1s here are cleared. (They are, as of `FIX-223` — the P2s and P3s are not, and
+the flip is still nobody's side effect.) The eight in-page `ChildSelector`s stay (owner: later) —
 and it is worth restating that they are why these fixes are not deferred: `RecordsPage`, `TodayPage`,
 `CurriculumTab`, `ArmorTab` and `MyAvatarPage` can all be re-targeted **today**, with the shell
 switcher off.
@@ -316,3 +323,36 @@ switcher off.
 > state **declares its verdict when it is written**, not when a reviewer finds it. The five verdicts
 > are the vocabulary, this census is the registry, and
 > `src/test/childSwitchSurfaces.invariant.test.ts` is the enforcement.
+
+## 9. What `FIX-223` closed (2026-09-10)
+
+The five open P1s, in the order they are **reachable** rather than the order they were filed — four of
+them through in-page `ChildSelector`s that have always existed, with the shell switcher still off.
+
+| Id | Surface | Verdict applied | The one thing it changes |
+|---|---|---|---|
+| `UX-345` | `useDailyPlan` | **GATE** | the loaded plan is dropped during render, and a failed read is flagged rather than passing as an empty day |
+| `UX-344` | `useSkillMap` + `LearningMap` | **GATE** | same rule, one definition (`core/hooks/childScopedGate`); the drawer offers no status buttons while the map is un-writable |
+| `UX-340` | `RecordsPage`'s Manual Hours Adjustment form | **RESET** | the typed adjustment is cleared and the loss named, on the same rail as the dialog above it |
+| `UX-336` | `ArmorTab`'s award form | **RESET** | the draft and the Correction confirm dialog go together — that dialog's own button calls `doAward` |
+| `UX-339` | `useQuestSession` | **BIND** | the owner is captured at `startQuest` and resolved at the top of the hook, so all thirty write sites follow the session |
+
+**Three of them cross a propose-and-confirm rail** — `UX-336` (`xpLedger`), `UX-340`
+(`hoursAdjustments`) and `UX-339` (`hours` + `skillSnapshots` + `xpLedger`) — and are landed as
+**attribution-only** fixes under `CLAUDE.md`'s 2026-09-10 pre-authorisation, whose four terms the PR
+body states one by one. No number, fold, rounding, bucket or threshold moves; nothing is stored that
+was not stored before; the unchanged arithmetic is asserted with a positive control rather than
+claimed; and no existing row is rewritten. Rows already misattributed are **data** — correcting
+history is a separate proposal that still stops for a decision, and none was found to file.
+
+**`UX-339`'s verdict was prescribed but not argued**, so this run argued it and agrees: a quest in
+flight is unsaved, expensive (paid model calls, a child's attention, an idle-aware timer counting real
+minutes) and — the decider — **already partly written**, because `bankAnswerReward` banks a diamond
+and its XP as each correct answer arrives. RESET would discard a half-answered quest and orphan those
+diamonds against a session recorded for someone else; HIDE would hide a *running* write rather than
+prevent one; GATE answers a question about a read that settled long ago. BIND is the only one of the
+five that fits, and `questSessionOwner.ts` says so in full.
+
+**Two of the five were SAFE rows a review round overturned** (`UX-344`, `UX-345`), which is why §4's
+correction paragraph is the most important thing in this document and why it is left standing rather
+than tidied away now that both are fixed.
