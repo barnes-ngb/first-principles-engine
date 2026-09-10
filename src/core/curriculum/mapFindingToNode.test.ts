@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  declaredTagDomain,
   findingStatusToSkillStatus,
   getNodesForProgram,
   KEYWORD_FALLBACKS,
   keywordFallbackNode,
   mapFindingToNode,
+  resolvesOutsideDeclaredDomain,
 } from './mapFindingToNode'
 import { CURRICULUM_NODE_MAP } from './curriculumMap'
 
@@ -207,6 +209,40 @@ describe('UX-347 — a writing finding is no longer written onto a math concept'
     // CVC word implies you can decode it"), so the catalog tag keeps the answer
     // it has always had. The lane is one-directional by design.
     expect(mapFindingToNode('writing.spelling.sightWord')).toBe('reading.phonics.sightWords')
+    expect(mapFindingToNode('writing.spelling.cvc')).toBe('reading.phonics.cvc')
+  })
+
+  it('opens that lane for the TAG, not for the whole writing domain', () => {
+    // Codex round 1 on PR #1827, P1. The first version of the anchor allowed the
+    // pairing at the domain level, which is a far wider claim than the
+    // justification supports: a writing tag naming no spelling at all reached a
+    // real foundations reading concept, so a writing evaluation could update or
+    // DOWNGRADE an unrelated reading one. That is UX-347's exact shape,
+    // reintroduced by the guard written to stop it.
+    expect(mapFindingToNode('writing.fluency')).toBeNull()
+    expect(mapFindingToNode('writing.inference')).toBeNull()
+    expect(mapFindingToNode('writing.cvc')).toBeNull()
+    expect(mapFindingToNode('writing.sightWords')).toBeNull()
+  })
+
+  it('is still one-directional — a reading tag may not answer with a writing node', () => {
+    expect(mapFindingToNode('reading.paragraph')).toBeNull()
+    // …and the lane's own keyword does not open it in reverse: a reading tag
+    // naming spelling stays on the reading side, where it belongs.
+    expect(mapFindingToNode('reading.spelling.cvc')).toBe('reading.phonics.cvc')
+  })
+
+  it('exposes the anchor rule so the registry classifies by it rather than a copy', () => {
+    expect(resolvesOutsideDeclaredDomain('writing.fluency', 'reading.fluency.accuracy')).toBe(true)
+    expect(
+      resolvesOutsideDeclaredDomain('writing.spelling.sightWord', 'reading.phonics.sightWords'),
+    ).toBe(false)
+    expect(resolvesOutsideDeclaredDomain('math.addition', 'math.operations.addSub')).toBe(false)
+    // A tag that declares no domain is never crossing one.
+    expect(declaredTagDomain('multiplication.fluency')).toBeNull()
+    expect(resolvesOutsideDeclaredDomain('multiplication.fluency', 'reading.fluency.accuracy')).toBe(
+      false,
+    )
   })
 })
 

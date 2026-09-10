@@ -53,12 +53,15 @@
  *      would otherwise always win.
  *   3. **A tag that declares a domain may not resolve across it.** `math.*` may
  *      not answer with a reading node, `writing.*` may not answer with a math
- *      one. The single exception is declared with its reason
- *      (`DOMAINS_A_TAG_MAY_REACH`): a `writing.*` spelling tag may reach a
- *      `reading.*` node, the lane `deriveWorkingLevelMastery` already permits
- *      ("spelling a CVC word implies you can decode it"). The anchor applies to
- *      the keyword fallback only — steps 1-3 are exact or curated answers and are
- *      not second-guessed.
+ *      one. There is exactly one lane (`CROSS_DOMAIN_LANES`) and it is gated on
+ *      the tag, not on its domain: a `writing.*` tag that **names spelling** may
+ *      reach a `reading.*` node, the lane `deriveWorkingLevelMastery` already
+ *      permits ("spelling a CVC word implies you can decode it"). Gating it at
+ *      the domain level — the first version of this rule — let `writing.fluency`
+ *      reach `reading.fluency.accuracy`, which is `UX-347` reintroduced by its
+ *      own guard (Codex round 1 on PR #1827). The anchor applies to the keyword
+ *      fallback only — steps 1-3 are exact or curated answers and are not
+ *      second-guessed.
  *
  * `docs/review/FINDING_TAG_BRIDGE_CENSUS_2026-09.md` is the registry of every tag
  * the app can hand this function, where each one lands, and why;
@@ -68,7 +71,7 @@
 
 import { CURRICULUM_MAPS, CURRICULUM_NODE_MAP } from './curriculumMap'
 import type { CurriculumDomain } from './curriculumMap'
-import { phrasesName, tagPhrases } from './tagPhrases'
+import { phrasesName, tagNames, tagPhrases } from './tagPhrases'
 
 // ── Exact / prefix mapping ─────────────────────────────────────
 
@@ -293,34 +296,72 @@ const DOMAIN_BY_LEADING_SEGMENT: Record<string, CurriculumDomain> = {
 }
 
 /**
- * Which curriculum domains a declared-domain tag's keyword answer may land in.
+ * A declared cross-domain lane: a tag in one domain that may legitimately answer
+ * with a node in another — **but only when the tag itself names the thing that
+ * makes the implication true.**
  *
- * The single cross-domain lane is `writing` → `reading`, and it is the one
- * `deriveWorkingLevelMastery` already declares for its writing key: spelling a
- * CVC word implies you can decode it, so `writing.spelling.sightWord` reaching
- * `reading.phonics.sightWords` is intended and is left exactly as it was. The
- * lane is **one-directional** — a `reading.*` tag may not answer with a writing
- * node — because the implication only runs that way.
+ * The `named` gate is load-bearing, and Codex round 1 on PR #1827 is why it
+ * exists. The first version of this anchor allowed the pairing at the DOMAIN
+ * level (`writing` may reach `reading`), which is a much wider claim than the
+ * justification supports: it let `writing.fluency` reach
+ * `reading.fluency.accuracy` and `writing.inference` reach
+ * `reading.comprehension.inference` — both real foundations concepts, so a
+ * writing evaluation could update or downgrade an unrelated reading concept.
+ * That is `UX-347`'s exact shape, reintroduced by the guard written to stop it.
  */
-const DOMAINS_A_TAG_MAY_REACH: Record<CurriculumDomain, readonly CurriculumDomain[]> = {
-  reading: ['reading'],
-  math: ['math'],
-  writing: ['writing', 'reading'],
-  speech: ['speech'],
+interface CrossDomainLane {
+  from: CurriculumDomain
+  to: CurriculumDomain
+  /** The lane opens only for a tag naming one of these (see `tagPhrases`). */
+  named: readonly string[]
 }
 
 /**
- * Would this keyword answer cross the domain the tag declared? Belt to the
- * boundary rule's braces: `writing.paragraph` is stopped by the boundary rule
- * before it can reach `math.data.graphs`, and stopped again here if a future
- * keyword makes the same mistake a different way.
+ * Every cross-domain lane there is, and there is exactly one.
+ *
+ * `writing` **spelling** → `reading`: spelling a CVC word implies you can decode
+ * it, so `writing.spelling.sightWord` reaching `reading.phonics.sightWords` is
+ * intended and is left exactly as it was. It is the lane
+ * `deriveWorkingLevelMastery` already declares for its writing key, and it is
+ * **one-directional** — a `reading.*` tag may not answer with a writing node —
+ * because the implication only runs that way.
  */
-function crossesDeclaredDomain(tag: string, nodeId: string): boolean {
-  const declared = DOMAIN_BY_LEADING_SEGMENT[normalize(tag).split('.')[0] ?? '']
+const CROSS_DOMAIN_LANES: readonly CrossDomainLane[] = [
+  { from: 'writing', to: 'reading', named: ['spelling'] },
+]
+
+/**
+ * Would this keyword answer cross the domain the tag declared?
+ *
+ * Belt to the boundary rule's braces: `writing.paragraph` is stopped by the
+ * boundary rule before it can reach `math.data.graphs`, and stopped again here
+ * if a future keyword makes the same mistake a different way. Exported because
+ * the registry (`src/test/findingTagBridge.ts`) classifies every tag by this
+ * exact rule — a second copy of it there would be a second answer to the one
+ * question the anchor exists to answer.
+ */
+export function resolvesOutsideDeclaredDomain(tag: string, nodeId: string): boolean {
+  const declared = declaredTagDomain(tag)
   if (!declared) return false
   const nodeDomain = CURRICULUM_NODE_MAP[nodeId]?.domain
   if (!nodeDomain) return false
-  return !DOMAINS_A_TAG_MAY_REACH[declared].includes(nodeDomain)
+  if (nodeDomain === declared) return false
+  const lane = CROSS_DOMAIN_LANES.find((l) => l.from === declared && l.to === nodeDomain)
+  if (!lane) return true
+  // The lane exists, so it comes down to whether THIS tag names the thing that
+  // makes it true. A writing tag that does not say "spelling" is not carrying
+  // spelling evidence, whatever else it says.
+  return !lane.named.some((keyword) => tagNames(tag, keyword))
+}
+
+/**
+ * The domain a tag DECLARES, by its leading segment — or null when it declares
+ * nothing, which every working-level key does (`counting`,
+ * `two-digit.addition`, `multiplication.fluency`). Exported for the registry,
+ * for the same one-definition reason as the rule above.
+ */
+export function declaredTagDomain(tag: string): CurriculumDomain | null {
+  return DOMAIN_BY_LEADING_SEGMENT[normalize(tag).split('.')[0] ?? ''] ?? null
 }
 
 /**
@@ -331,7 +372,7 @@ export function keywordFallbackNode(tag: string): string | null {
   const phrases = tagPhrases(tag)
   for (const rule of KEYWORD_FALLBACKS) {
     if (!rule.keywords.some((keyword) => phrasesName(phrases, keyword))) continue
-    if (crossesDeclaredDomain(tag, rule.node)) continue
+    if (resolvesOutsideDeclaredDomain(tag, rule.node)) continue
     return rule.node
   }
   return null

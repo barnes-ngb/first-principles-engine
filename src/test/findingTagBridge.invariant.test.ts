@@ -114,6 +114,17 @@ describe('UX-347 — no tag resolves into a domain it does not name', () => {
     expect(row.node).toBe('writing.composition.paragraph')
   })
 
+  it('opens the one cross-domain lane for the TAG, not for its whole domain', () => {
+    // Codex round 1 on PR #1827, P1: the anchor's first version allowed the
+    // pairing at the domain level, so a writing tag naming no spelling reached a
+    // real foundations reading concept. The registry classifies by the app's own
+    // rule rather than a copy of it, which is why this belongs here too.
+    expect(classifyTag('writing.fluency', [TagSource.PromptExample]).node).toBeNull()
+    const spelling = classifyTag('writing.spelling.sightWord', [TagSource.Catalog])
+    expect(spelling.node).toBe('reading.phonics.sightWords')
+    expect(spelling.crossDomain).toBe(false)
+  })
+
   it('reads the declared domain off the leading segment only', () => {
     expect(declaredDomainOf('phonics.cvc.short-o')).toBe('reading')
     expect(declaredDomainOf('writing.paragraph')).toBe('writing')

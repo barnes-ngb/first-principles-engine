@@ -59,7 +59,11 @@
  * `findingTagSources.ts`).
  */
 
-import { mapFindingToNode } from '../core/curriculum/mapFindingToNode'
+import {
+  declaredTagDomain,
+  mapFindingToNode,
+  resolvesOutsideDeclaredDomain,
+} from '../core/curriculum/mapFindingToNode'
 import { CURRICULUM_NODE_MAP } from '../core/curriculum/curriculumMap'
 import {
   COMPREHENSION_SKILL_LEVEL_MAP,
@@ -207,27 +211,19 @@ export interface TagRow {
   crossDomain: boolean
 }
 
-/** The one declared cross-domain lane — see `mapFindingToNode`'s domain anchor. */
-const DOMAINS_A_TAG_MAY_REACH: Record<string, readonly string[]> = {
-  reading: ['reading'],
-  math: ['math'],
-  writing: ['writing', 'reading'],
-  speech: ['speech'],
-}
-
-/** Leading segment → the domain it declares. Mirrors the bridge's own anchor. */
-const DOMAIN_BY_LEADING_SEGMENT: Record<string, string> = {
-  phonics: 'reading',
-  reading: 'reading',
-  math: 'math',
-  writing: 'writing',
-  speech: 'speech',
-}
-
-/** The domain a tag declares by its leading segment, or null. */
+/**
+ * The domain a tag declares by its leading segment, or null.
+ *
+ * Re-exported from the bridge rather than re-implemented. The first version of
+ * this module carried its own copy of the leading-segment map AND of the
+ * allowed-domain table, which is a second answer to the question the anchor
+ * exists to answer — and when Codex round 1 on PR #1827 narrowed the real rule
+ * (the `writing`→`reading` lane is gated on the tag naming spelling, not on its
+ * domain), the copy here would have gone on reporting the old one. The registry
+ * has to classify by the rule the app actually runs.
+ */
 export function declaredDomainOf(tag: string): string | null {
-  const lead = tag.toLowerCase().split('.')[0] ?? ''
-  return DOMAIN_BY_LEADING_SEGMENT[lead] ?? null
+  return declaredTagDomain(tag)
 }
 
 /** Classify one tag against the live bridge. Pure. */
@@ -237,7 +233,6 @@ export function classifyTag(tag: string, sources: readonly TagSource[]): TagRow 
   const resolved = resolveFoundationConcepts(node, tag)
   const curated = TAG_CONCEPT_BRIDGE[tag] ?? null
   const declaredDomain = declaredDomainOf(tag)
-  const allowed = declaredDomain ? DOMAINS_A_TAG_MAY_REACH[declaredDomain] ?? [] : []
   return {
     tag,
     sources: [...sources],
@@ -248,7 +243,8 @@ export function classifyTag(tag: string, sources: readonly TagSource[]): TagRow 
     curated,
     reachesFoundations: sources.some((s) => FOUNDATIONS_REACHING_SOURCES.includes(s)),
     declaredDomain,
-    crossDomain: Boolean(declaredDomain && nodeDomain && !allowed.includes(nodeDomain)),
+    // The app's own rule, not a copy of it (Codex round 1 on PR #1827).
+    crossDomain: node != null && resolvesOutsideDeclaredDomain(tag, node),
   }
 }
 
