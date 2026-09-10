@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -68,6 +68,27 @@ export default function CertificateScanSection() {
    * `skillSnapshots` lane is untouched.
    */
   const [scanChildId, setScanChildId] = useState(activeChildId)
+  /**
+   * Codex round 3, P1 — the reset above closes every door a PERSON can tap, and
+   * left the one the app opens itself. `scan()` awaits an upload and an AI call;
+   * on completion `useScan` calls `setScanResult(record)` unconditionally, so a
+   * scan started for one child repopulated its result after the switch, and
+   * Apply then ran with the new child's id — the same cross-child write the
+   * reset exists to stop, arriving by a second route. This is `WorkshopPage`'s
+   * round-4 defect (UX-324) on another surface, and it takes the same answer: a
+   * run token, bumped on every owner change, so a completion is identified
+   * rather than merely awaited. A token rather than an id comparison, because
+   * an A → B → A sequence would alias onto a run that is no longer this one.
+   */
+  const scanRunRef = useRef(0)
+  const currentRun = () => scanRunRef.current
+  // Bumped in an effect, not during render: a ref may not be ASSIGNED while
+  // rendering (this repo's lint says so, and `WorkshopPage` hit the same rule
+  // on the same defect). The ordering still holds — effects flush before the
+  // next event handler runs, and long before an in-flight `scan()` resolves.
+  useEffect(() => {
+    scanRunRef.current += 1
+  }, [activeChildId])
   if (scanChildId !== activeChildId) {
     setScanChildId(activeChildId)
     if (pendingResult || confirmOpen) {
@@ -82,8 +103,13 @@ export default function CertificateScanSection() {
 
   const handleCapture = useCallback(
     async (file: File) => {
+      const run = currentRun()
       if (!familyId || !activeChildId) return
       const record = await scan(file, familyId, activeChildId)
+      // The owner changed while the upload and the AI call were in flight, so
+      // this record belongs to a child this component is no longer showing.
+      // Everything below writes or stages against the LIVE child.
+      if (currentRun() !== run) return
 
       // Auto-sync worksheet scans to activity configs
       if (record?.results && isWorksheetScan(record.results)) {
@@ -141,8 +167,12 @@ export default function CertificateScanSection() {
   const handleApplyCertificate = useCallback(
     async (result: CertificateScanResult) => {
       if (!familyId || !activeChildId) return
+      const run = currentRun()
       setPendingResult(result)
       await buildPreview(familyId, activeChildId, result)
+      // A switch during the preview build would otherwise open the confirm
+      // dialog for a result the reset above has already discarded.
+      if (currentRun() !== run) return
       setConfirmOpen(true)
     },
     [familyId, activeChildId, buildPreview],
@@ -150,7 +180,12 @@ export default function CertificateScanSection() {
 
   const handleConfirmApply = useCallback(async () => {
     if (!familyId || !activeChildId || !pendingResult) return
+    // `pendingResult` is cleared by the reset on a child change, so reaching
+    // here means it is still this child's — but the guard is cheap and the
+    // write is `activityConfigs` + `skillSnapshots`.
+    const run = currentRun()
     await applyUpdate(familyId, activeChildId, pendingResult)
+    if (currentRun() !== run) return
     setConfirmOpen(false)
     setPendingResult(null)
     clearCertState()

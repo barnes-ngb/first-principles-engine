@@ -130,13 +130,66 @@ const SUBMITS_CHILD = /^\s*(?:childId|activeChildId|ownerChildId)\s*[,:]/m
  * lesson this module is built on, so the fix is to widen the heuristic rather
  * than to add that one file to the census by hand.
  *
- * Bounded to a single call's parentheses (`[^()]*`) so it cannot match across
- * an unrelated expression, and it costs 14 more rows — all SAFE or already
- * answered. That is the trade this arm exists to make: over-matching costs a
- * row with a reason, under-matching costs a P1 nobody sees.
+ * Bounded to a single call's argument list so it cannot match across an
+ * unrelated expression, but that list may contain **nested calls**: Codex round
+ * 3 pointed out that a flat `[^()]*` stops at the inner paren of
+ * `onSave(buildDraft(state), activeChildId)`, which is an ordinary shape for
+ * exactly the callback-submitting editor this arm exists to catch. One level of
+ * nesting is allowed (`(?:\([^()]*\)[^()]*)*`), which covers that shape and the
+ * common `f(g(x), h(y), childId)` without reaching for a parser.
+ *
+ * It costs 14 more rows than the object-shorthand arm alone — all SAFE or
+ * already answered. That is the trade this arm exists to make: over-matching
+ * costs a row with a reason, under-matching costs a P1 nobody sees.
  */
-const SUBMITS_CHILD_POSITIONALLY =
-  /[A-Za-z_$][\w$]*\s*\([^()]*\b(?:childId|activeChildId|ownerChildId)\b\s*[,)]/
+const CHILD_ID_IDENTIFIER = /\b(?:childId|activeChildId|ownerChildId)\b/g
+
+/** How far left the balance walk looks before giving up on one occurrence. */
+const POSITIONAL_LOOKBACK = 400
+
+/**
+ * Does this source hand a child id to a call in POSITIONAL argument position?
+ *
+ * A scan rather than a regex, and deliberately so. The first version was
+ * `name\([^()]*\bchildId\b`, which Codex round 3 showed stops at the inner
+ * paren of `onSave(buildDraft(state), activeChildId)` — an ordinary shape for
+ * exactly the callback-submitting editor this arm exists to catch. The obvious
+ * repair, nesting a quantified group inside another, backtracks
+ * catastrophically: it hung the census script on this repo's own source before
+ * it ever reached a test. So the balance is COUNTED rather than matched, in one
+ * bounded left-walk per candidate identifier.
+ *
+ * For each `childId` / `activeChildId` / `ownerChildId` that is followed by `,`
+ * or `)` — an argument, not a property access or a type annotation — walk left
+ * counting parenthesis depth. An unbalanced `(` whose preceding non-space
+ * character can end a callee (an identifier character, `)` or `]`) means the
+ * identifier sits in that call's argument list at any nesting depth. A `(` that
+ * follows anything else is a grouping or an arrow's parameter list, not a call.
+ */
+export function submitsChildPositionally(source: string): boolean {
+  CHILD_ID_IDENTIFIER.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = CHILD_ID_IDENTIFIER.exec(source)) !== null) {
+    if (!/^\s*[,)]/.test(source.slice(match.index + match[0].length))) continue
+    let depth = 0
+    const stop = Math.max(0, match.index - POSITIONAL_LOOKBACK)
+    for (let i = match.index - 1; i >= stop; i -= 1) {
+      const ch = source[i]
+      if (ch === ')') {
+        depth += 1
+      } else if (ch === '(') {
+        if (depth > 0) {
+          depth -= 1
+          continue
+        }
+        const before = source.slice(Math.max(0, i - 40), i).replace(/\s+$/, '')
+        if (/[\w$)\]]$/.test(before)) return true
+        break
+      }
+    }
+  }
+  return false
+}
 
 /** Holds React state that can outlive a child change. */
 const HOLDS_STATE = /\buseState\s*[<(]/
@@ -163,7 +216,7 @@ export function classifyCandidate(file: SourceFile): Candidate | null {
   if (!HOLDS_STATE.test(source)) return null
   const writes = FIRESTORE_WRITE.test(source)
   const submits =
-    SUBMITS_CHILD.test(source) || SUBMITS_CHILD_POSITIONALLY.test(source)
+    SUBMITS_CHILD.test(source) || submitsChildPositionally(source)
   if (READS_ACTIVE_CHILD.test(source)) {
     if (writes || submits) {
       return { path, arm: CandidateArm.Hook }
@@ -269,6 +322,7 @@ export interface CensusProblem {
   kind:
     | 'unclassified'
     | 'stale-row'
+    | 'not-a-candidate'
     | 'duplicate-row'
     | 'bad-verdict'
     | 'unexplained-verdict'
@@ -333,6 +387,7 @@ export function censusProblems(
     return problems
   }
 
+  const candidatePaths = new Set(candidates.map((c) => c.path))
   const seen = new Set<string>()
   for (const row of rows) {
     if (row.cells.length !== CENSUS_COLUMNS) {
@@ -370,6 +425,17 @@ export function censusProblems(
       problems.push({
         kind: 'stale-row',
         message: `line ${row.line}: \`${row.path}\` no longer exists — delete the row or fix the path`,
+      })
+    } else if (!candidatePaths.has(row.path)) {
+      // Codex round 3, P2. `stale-row` only asks whether the FILE still exists,
+      // so a surface refactored out of the class kept its row — and because it
+      // is also absent from `candidates`, the unclassified loop could not see
+      // the mismatch either. The guard stayed green while the row and every
+      // published total stopped describing the derived set. Checked in both
+      // directions now: every candidate has a row, and every row is a candidate.
+      problems.push({
+        kind: 'not-a-candidate',
+        message: `line ${row.line}: \`${row.path}\` is no longer derived as a candidate — delete the row, or say in it why the surface still belongs`,
       })
     }
   }

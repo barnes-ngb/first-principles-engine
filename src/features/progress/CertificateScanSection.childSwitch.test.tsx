@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -51,9 +51,18 @@ vi.mock('../../core/hooks/useCertificateProgress', () => ({
 }))
 
 const clearScan = vi.fn()
+/** Resolves only when the test releases it — a scan still in flight. */
+let releaseScan: ((record: unknown) => void) | null = null
+const scan = vi.fn(
+  () =>
+    new Promise((resolve) => {
+      releaseScan = resolve as (record: unknown) => void
+    }),
+)
+const syncScanToConfig = vi.fn(async () => ({ action: 'updated', configName: 'Math', position: 12 }))
 vi.mock('../../core/hooks/useScan', () => ({
   useScan: () => ({
-    scan: vi.fn(),
+    scan: (...args: unknown[]) => scan(...(args as [])),
     scanResult: null,
     scanning: false,
     error: null,
@@ -64,7 +73,9 @@ vi.mock('../../core/hooks/useScan', () => ({
 }))
 
 vi.mock('../../core/hooks/useScanToActivityConfig', () => ({
-  useScanToActivityConfig: () => ({ syncScanToConfig: vi.fn() }),
+  useScanToActivityConfig: () => ({
+    syncScanToConfig: (...args: unknown[]) => syncScanToConfig(...(args as [])),
+  }),
 }))
 
 const LINCOLN = { id: 'lincoln', name: 'Lincoln' }
@@ -87,6 +98,9 @@ describe('CertificateScanSection — a pending certificate is not applied to ano
     applyUpdate.mockClear()
     clearCertState.mockClear()
     clearScan.mockClear()
+    scan.mockClear()
+    syncScanToConfig.mockClear()
+    releaseScan = null
     setActive(LINCOLN)
   })
 
@@ -116,6 +130,41 @@ describe('CertificateScanSection — a pending certificate is not applied to ano
     // certificate every time the page happened to re-render.
     expect(clearCertState).not.toHaveBeenCalled()
     expect(clearScan).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Codex round 3, P1 — the render-phase reset closes every door a PERSON can
+   * tap and leaves the one the app opens itself. `scan()` awaits an upload and
+   * an AI call, and `useScan` sets its result unconditionally on completion, so
+   * a scan started for one child used to repopulate after the switch and reach
+   * `syncScanToConfig` with the NEW child's id.
+   */
+  it('discards a scan that completes after the child changed', async () => {
+    const { default: CertificateScanSection } = await import('./CertificateScanSection')
+    const { rerender } = render(<CertificateScanSection />)
+
+    // Start a scan for Lincoln and leave it in flight.
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(['x'], 'cert.jpg', { type: 'image/jpeg' })
+    fireEvent.change(input, { target: { files: [file] } })
+    await waitFor(() => expect(scan).toHaveBeenCalled())
+
+    // The header moves while it is still running.
+    setActive(LONDON)
+    rerender(<CertificateScanSection />)
+
+    // Lincoln's scan now lands.
+    releaseScan?.({
+      id: 'scan-1',
+      results: { pageType: 'worksheet', skillsTargeted: [], lessonNumber: 12 },
+    })
+    await waitFor(() => expect(clearScan).toHaveBeenCalled())
+
+    // POSITIVE CONTROL — without the run token this reached
+    // `syncScanToConfig(activeChildId, …)` with London's id, writing Lincoln's
+    // certificate into London's activityConfigs.
+    expect(syncScanToConfig).not.toHaveBeenCalled()
+    expect(applyUpdate).not.toHaveBeenCalled()
   })
 
   it('renders without a child selected', async () => {

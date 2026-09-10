@@ -7,8 +7,20 @@ import {
   classifyCandidate,
   deriveChildSwitchCandidates,
   parseCensusRows,
+  submitsChildPositionally,
   type SourceFile,
 } from './childSwitchSurfaces'
+
+/**
+ * The fixture rows below all name `RecordsPage`, so the row-is-still-a-candidate
+ * rule (Codex round 3) needs it present. Supplying it explicitly keeps that rule
+ * unconditional — a candidate-list-shaped escape hatch would be the vacuous
+ * guard this file exists to avoid.
+ */
+const RECORDS_PAGE = {
+  path: 'src/features/records/RecordsPage.tsx',
+  arm: 'hook',
+} as const
 
 /**
  * UX-329 — a surface cannot join the child-switch class unclassified.
@@ -165,7 +177,7 @@ describe('the guard fails closed', () => {
     const broken = parseCensusRows(
       '| `src/features/records/RecordsPage.tsx` | a | b | c |\n',
     )
-    const problems = censusProblems([], broken, existing)
+    const problems = censusProblems([RECORDS_PAGE], broken, existing)
     expect(problems.map((p) => p.kind)).toContain('bad-shape')
   })
 
@@ -173,12 +185,12 @@ describe('the guard fails closed', () => {
     const blank = parseCensusRows(
       '| `src/features/records/RecordsPage.tsx` | a |  | c | BIND | P1 |\n',
     )
-    expect(censusProblems([], blank, existing).map((p) => p.kind)).toContain('blank-cell')
+    expect(censusProblems([RECORDS_PAGE], blank, existing).map((p) => p.kind)).toContain('blank-cell')
 
     const invented = parseCensusRows(
       '| `src/features/records/RecordsPage.tsx` | a | b | c | DEFER | P1 |\n',
     )
-    expect(censusProblems([], invented, existing).map((p) => p.kind)).toContain('bad-verdict')
+    expect(censusProblems([RECORDS_PAGE], invented, existing).map((p) => p.kind)).toContain('bad-verdict')
   })
 
   /**
@@ -191,7 +203,7 @@ describe('the guard fails closed', () => {
     const bare = parseCensusRows(
       '| `src/features/records/RecordsPage.tsx` | a | b | c | **SAFE** | — |\n',
     )
-    expect(censusProblems([], bare, existing).map((p) => p.kind)).toContain(
+    expect(censusProblems([RECORDS_PAGE], bare, existing).map((p) => p.kind)).toContain(
       'unexplained-verdict',
     )
   })
@@ -203,7 +215,7 @@ describe('the guard fails closed', () => {
         `| \`src/features/records/RecordsPage.tsx\` | a | b | c | **${verdict}** | — |\n`,
       )
       expect(
-        censusProblems([], bare, existing).map((p) => p.kind),
+        censusProblems([RECORDS_PAGE], bare, existing).map((p) => p.kind),
         `${verdict} with no reason was accepted`,
       ).toContain('unexplained-verdict')
     }
@@ -213,16 +225,55 @@ describe('the guard fails closed', () => {
     const explained = parseCensusRows(
       '| `src/features/records/RecordsPage.tsx` | a | b | c | **SAFE** — every write addresses a document by its own id, never the live child | — |\n',
     )
-    expect(censusProblems([], explained, existing).map((p) => p.kind)).not.toContain(
+    expect(censusProblems([RECORDS_PAGE], explained, existing).map((p) => p.kind)).not.toContain(
       'unexplained-verdict',
     )
+  })
+
+  /**
+   * Codex round 3, P2 — `stale-row` asked only whether the FILE still exists,
+   * so a surface refactored out of the class kept its row, and because it was
+   * also absent from `candidates` the unclassified loop could not see the
+   * mismatch either. The guard stayed green while every published total stopped
+   * describing the derived set.
+   */
+  it('rejects a row for a file that is no longer a candidate', () => {
+    const orphan = parseCensusRows(
+      '| `src/features/records/RecordsPage.tsx` | a | b | c | **SAFE** — nothing here writes with the live child at all | — |\n',
+    )
+    // The file exists, so `stale-row` is silent; the row is no longer derived.
+    expect(censusProblems([], orphan, existing).map((p) => p.kind)).toContain(
+      'not-a-candidate',
+    )
+    expect(censusProblems([RECORDS_PAGE], orphan, existing).map((p) => p.kind)).not.toContain(
+      'not-a-candidate',
+    )
+  })
+
+  /**
+   * Codex round 3, P2 — a delegated write whose child id sits AFTER a nested
+   * call was invisible: the flat `[^()]*` stopped at the inner paren. The
+   * balance is counted now rather than matched, which also avoids the
+   * catastrophic backtracking the obvious nested-quantifier repair caused.
+   */
+  it('sees a child id passed after a nested call argument', () => {
+    expect(submitsChildPositionally('await onSave(buildDraft(state), activeChildId)')).toBe(true)
+    expect(submitsChildPositionally('applyUpdate(familyId, activeChildId, pendingResult)')).toBe(true)
+    expect(submitsChildPositionally('log(a(b(c)), d(e), childId)')).toBe(true)
+  })
+
+  it('does not read a declaration or a property access as a submit', () => {
+    // A grouping paren and an arrow's parameter list are not calls.
+    expect(submitsChildPositionally('interface P { childId: string }')).toBe(false)
+    expect(submitsChildPositionally('const x = (childId) => childId')).toBe(false)
+    expect(submitsChildPositionally('const id = row.childId')).toBe(false)
   })
 
   it('rejects a row naming a file that no longer exists', () => {
     const stale = parseCensusRows(
       '| `src/features/gone/Deleted.tsx` | a | b | c | SAFE | — |\n',
     )
-    expect(censusProblems([], stale, existing).map((p) => p.kind)).toContain('stale-row')
+    expect(censusProblems([RECORDS_PAGE], stale, existing).map((p) => p.kind)).toContain('stale-row')
   })
 
   it('rejects the same surface listed twice', () => {
@@ -230,6 +281,6 @@ describe('the guard fails closed', () => {
       '| `src/features/records/RecordsPage.tsx` | a | b | c | RESET | P1 |\n' +
         '| `src/features/records/RecordsPage.tsx` | a | b | c | SAFE | — |\n',
     )
-    expect(censusProblems([], dupe, existing).map((p) => p.kind)).toContain('duplicate-row')
+    expect(censusProblems([RECORDS_PAGE], dupe, existing).map((p) => p.kind)).toContain('duplicate-row')
   })
 })
