@@ -11,6 +11,7 @@ import { projectWorkingLevelStates } from './seedLearnerModel'
 import {
   applyWorkingLevelProjection,
   lastProjectionStamp,
+  newestDrivingLevelStamp,
   shouldReprojectWorkingLevels,
 } from './workingLevelProjection'
 import type { EvidenceKind, LearnerModel } from '../types/learnerModel'
@@ -63,8 +64,8 @@ describe('shouldReprojectWorkingLevels', () => {
     expect(shouldReprojectWorkingLevels(storedAt(5), snapshot(7, SEEDED_AT))).toBe(false)
   })
 
-  it('measures against projectedAt once one exists, never seededAt', () => {
-    const model = storedAt(5, { projectedAt: '2026-09-05T00:00:00.000Z' })
+  it('measures against projectedThrough once one exists, never seededAt', () => {
+    const model = storedAt(5, { projectedThrough: '2026-09-05T00:00:00.000Z' })
     // Newer than the July seed, older than the September projection.
     expect(shouldReprojectWorkingLevels(model, snapshot(7, '2026-09-02T00:00:00.000Z'))).toBe(
       false,
@@ -96,6 +97,62 @@ describe('shouldReprojectWorkingLevels', () => {
 
   it('is false when there is no snapshot at all', () => {
     expect(shouldReprojectWorkingLevels(storedAt(5), null)).toBe(false)
+  })
+})
+
+// Codex round 1, P2 — the watermark is the level stamp that was projected, never
+// the projecting client's wall clock. A `now` watermark would mark levels as
+// processed that this projection never read (a quest finishing on another device
+// mid-transaction; a writing device whose clock runs behind this one), and the
+// next visit would skip them — UX-291's own defect through a narrower door.
+describe('newestDrivingLevelStamp — the watermark', () => {
+  it('is the newest DRIVING level stamp, never a wall clock', () => {
+    const snap = {
+      childId: 'c1',
+      workingLevels: {
+        phonics: { level: 5, updatedAt: '2026-09-01T00:00:00.000Z', source: 'manual' },
+        math: { level: 3, updatedAt: '2026-09-04T00:00:00.000Z', source: 'quest' },
+        writing: { level: 2, updatedAt: '2026-08-01T00:00:00.000Z', source: 'manual' },
+      },
+    } as SkillSnapshot
+    expect(newestDrivingLevelStamp(snap)).toBe('2026-09-04T00:00:00.000Z')
+  })
+
+  it('ignores levels that drive no band — they must not move the watermark', () => {
+    const snap = {
+      childId: 'c1',
+      workingLevels: {
+        phonics: { level: 5, updatedAt: '2026-09-01T00:00:00.000Z', source: 'manual' },
+        comprehension: { level: 4, updatedAt: '2026-09-09T00:00:00.000Z', source: 'quest' },
+        sentence: { level: 3, updatedAt: '2026-09-09T00:00:00.000Z', source: 'quest' },
+      },
+    } as SkillSnapshot
+    expect(newestDrivingLevelStamp(snap)).toBe('2026-09-01T00:00:00.000Z')
+  })
+
+  it('is undefined with no usable stamp, so nothing is ever watermarked blind', () => {
+    expect(newestDrivingLevelStamp(null)).toBeUndefined()
+    expect(newestDrivingLevelStamp({ childId: 'c1', workingLevels: {} } as SkillSnapshot)).toBeUndefined()
+    expect(
+      newestDrivingLevelStamp({
+        childId: 'c1',
+        workingLevels: { phonics: { level: 9 } },
+      } as SkillSnapshot),
+    ).toBeUndefined()
+  })
+
+  it('a level that lands AFTER the watermark is still seen on the next pass', () => {
+    // The race: the watermark records the stamp of what was projected, so a level
+    // written later — even a moment later, and even by a device whose clock is
+    // behind this one — is strictly newer than it and re-projects.
+    const projected = storedAt(5, { projectedThrough: '2026-09-01T09:00:00.000Z' })
+    const landedJustAfter = snapshot(7, '2026-09-01T09:00:00.001Z')
+    expect(shouldReprojectWorkingLevels(projected, landedJustAfter)).toBe(true)
+
+    // Whereas a wall-clock watermark (the projecting client's `now`, minutes or
+    // hours later) would have swallowed it.
+    const wallClocked = storedAt(5, { projectedThrough: NOW })
+    expect(shouldReprojectWorkingLevels(wallClocked, landedJustAfter)).toBe(false)
   })
 })
 

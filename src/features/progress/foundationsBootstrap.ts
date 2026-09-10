@@ -15,7 +15,7 @@
 // refreshed from the child's current working levels — the same seam, the same
 // guards, a different condition. It is deliberately NOT a re-seed: it recomputes
 // the band pass only, never demotes, never touches a witnessed concept, and
-// writes nothing when the levels have not moved (`workingLevelProjection.ts`
+// writes nothing when the levels have not moved past its watermark (`workingLevelProjection.ts`
 // states all four rules). That last property is what makes it safe on a page
 // view, which the re-seed is not.
 //

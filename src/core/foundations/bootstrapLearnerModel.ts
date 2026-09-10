@@ -39,6 +39,7 @@ import { mergeSeededModel, seedLearnerModel } from './seedLearnerModel'
 import { promotedModelStatus } from './modelStatus'
 import {
   applyWorkingLevelProjection,
+  newestDrivingLevelStamp,
   shouldReprojectWorkingLevels,
 } from './workingLevelProjection'
 import type { ChildSkillMap } from '../curriculum/skillStatus'
@@ -125,41 +126,49 @@ export async function bootstrapLearnerModel(
  * levels (UX-291). Returns the model the document now holds, or `null` when there
  * is no model to project onto — this mode never creates one.
  *
- * The decision is made **inside** the transaction, against the document the write
- * would land on rather than against whatever a caller happened to be rendering:
- * the pure {@link shouldReprojectWorkingLevels} compares the snapshot's own
- * `WorkingLevel.updatedAt` stamps to the model's `projectedAt`. Unchanged levels
- * leave the transaction having written nothing.
+ * **Both documents are read inside the transaction** (Codex round 1). The skill
+ * snapshot is the projection's *input*, so reading it outside opened a window: a
+ * quest finishing on another device between that read and the commit would be
+ * projected from the older snapshot and then watermarked as processed, and the
+ * next visit would skip it — UX-291's own defect through a narrower door. Both
+ * are plain document gets, which a web-SDK transaction can do; the seed path's
+ * reads stay outside only because one of them is a collection query, which it
+ * cannot.
+ *
+ * **The watermark is the level stamp that was actually projected, never `now`** —
+ * see `lastProjectionStamp`. A wall clock could watermark past a level this
+ * projection never read.
  *
  * Three write shapes, and only three:
  *   - levels not newer      → no write at all;
  *   - levels newer, nothing moved (every affected concept is already at or above
- *     what the level says, or carries witnessed evidence) → `projectedAt` alone,
- *     so the same no-op is not recomputed on every later visit;
- *   - states moved          → states + `changeFeed` + `updatedAt` + `projectedAt`
- *     + `synthesisStaleAt` (FEAT-57 D4), and the shared `promotedModelStatus`
- *     rule (UX-322) applied rather than re-implemented.
+ *     what the level says, or carries witnessed evidence) → `projectedThrough`
+ *     alone, so the same no-op is not recomputed on every later visit;
+ *   - states moved          → states + `changeFeed` + `updatedAt` +
+ *     `projectedThrough` + `synthesisStaleAt` (FEAT-57 D4), and the shared
+ *     `promotedModelStatus` rule (UX-322) applied rather than re-implemented.
  */
 async function reprojectWorkingLevels(
   childId: string,
   snapRef: ReturnType<typeof doc>,
   modelRef: ReturnType<typeof doc>,
 ): Promise<LearnerModel | null> {
-  const snapDoc = await getDoc(snapRef)
-  const snapshot: SkillSnapshot | null = snapDoc.exists()
-    ? (snapDoc.data() as SkillSnapshot)
-    : null
-  // No snapshot means no working levels, and a projection with no levels is a
-  // projection of `not-yet` — which the upgrade-only fold would discard anyway.
-  if (!snapshot) return null
-
   return runTransaction(db, async (tx) => {
+    // Every read before any write, as Firestore requires.
     const existingDoc = await tx.get(modelRef)
     if (!existingDoc.exists()) return null
     const existing = existingDoc.data() as LearnerModel
 
+    const snapDoc = await tx.get(snapRef)
+    // No snapshot means no working levels, and a projection with no levels is a
+    // projection of `not-yet` — which the upgrade-only fold would discard anyway.
+    if (!snapDoc.exists()) return existing
+    const snapshot = snapDoc.data() as SkillSnapshot
+
     if (!shouldReprojectWorkingLevels(existing, snapshot)) return existing
 
+    // The watermark: exactly the newest level this projection is computed from.
+    const projectedThrough = newestDrivingLevelStamp(snapshot) as string
     const now = new Date().toISOString()
     const { model: next, changedConceptIds } = applyWorkingLevelProjection(
       existing,
@@ -170,13 +179,13 @@ async function reprojectWorkingLevels(
     )
 
     if (changedConceptIds.length === 0) {
-      // Record that the projection ran, and nothing else — no `updatedAt`, no
+      // Record what was projected, and nothing else — no `updatedAt`, no
       // `synthesisStaleAt`, no feed line.
-      tx.set(modelRef, { projectedAt: now }, { merge: true })
-      return { ...existing, projectedAt: now }
+      tx.set(modelRef, { projectedThrough }, { merge: true })
+      return { ...existing, projectedThrough }
     }
 
-    const payload: LearnerModel = { ...next, projectedAt: now, synthesisStaleAt: now }
+    const payload: LearnerModel = { ...next, projectedThrough, synthesisStaleAt: now }
     const promoted = promotedModelStatus(payload)
     if (promoted) payload.status = promoted
 

@@ -20,18 +20,21 @@ const getDoc = vi.fn(async (): Promise<{ exists: () => boolean; data: () => unkn
 const getDocs = vi.fn(async () => ({ docs: [] as unknown[] }))
 
 vi.mock('firebase/firestore', () => ({
-  doc: vi.fn((_c: unknown, id: string) => ({ id })),
+  doc: vi.fn((c: { name?: string } | undefined, id: string) => ({ id, col: c?.name })),
   query: vi.fn((c: unknown) => c),
   getDoc: (...a: unknown[]) => getDoc(...(a as [])),
   getDocs: (...a: unknown[]) => getDocs(...(a as [])),
   runTransaction: (...a: unknown[]) => runTransaction(...(a as [never, never])),
 }))
+// Named so a transactional read can be routed to the right document: reproject
+// reads BOTH the model and the snapshot inside the transaction, and they share
+// the child id (Codex round 1).
 vi.mock('../firebase/firestore', () => ({
   db: {},
-  childSkillMapsCollection: () => ({}),
-  learnerModelsCollection: () => ({}),
-  sightWordProgressCollection: () => ({}),
-  skillSnapshotsCollection: () => ({}),
+  childSkillMapsCollection: () => ({ name: 'childSkillMaps' }),
+  learnerModelsCollection: () => ({ name: 'learnerModels' }),
+  sightWordProgressCollection: () => ({ name: 'sightWordProgress' }),
+  skillSnapshotsCollection: () => ({ name: 'skillSnapshots' }),
 }))
 
 import { bootstrapLearnerModel } from './bootstrapLearnerModel'
@@ -163,30 +166,55 @@ function seededInJuly(over: Partial<LearnerModel> = {}): LearnerModel {
   }
 }
 
+/**
+ * Both reproject reads are transactional (Codex round 1), so the mock is routed
+ * by document id: the model is `{childId}`, the snapshot is anything else.
+ */
+function txReads(opts: { model: LearnerModel | null; snapshot: SkillSnapshot | null }) {
+  txGet.mockImplementation(async (ref: { col?: string }) => {
+    const data = ref?.col === 'learnerModels' ? opts.model : opts.snapshot
+    return { exists: () => data !== null, data: () => data ?? {} }
+  })
+}
+
 describe('bootstrapLearnerModel — reproject (UX-291)', () => {
-  it('reads ONE input document, not four — a page view is not worth the skill map and the word list', async () => {
-    getDoc.mockResolvedValue({ exists: () => true, data: () => snapshotAt(7, LEVEL_MOVED_AT) })
-    txGet.mockResolvedValue({ exists: () => true, data: () => seededInJuly() })
+  // Codex round 1, P2 — the snapshot is the projection's INPUT, so reading it
+  // outside the transaction left a window in which a level landing on another
+  // device was projected from the older snapshot and then watermarked as
+  // processed, and the next visit skipped it.
+  it('reads the snapshot INSIDE the transaction, alongside the model', async () => {
+    txReads({ model: seededInJuly(), snapshot: snapshotAt(7, LEVEL_MOVED_AT) })
 
     await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
-    expect(getDoc).toHaveBeenCalledTimes(1)
+    // Both reads are transactional; neither is a plain get, and the sight-word
+    // collection query the seed path needs is not run at all.
+    expect(getDoc).not.toHaveBeenCalled()
+    expect(getDocs).not.toHaveBeenCalled()
+    expect(txGet).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads ONE input document, not four — a page view is not worth the skill map and the word list', async () => {
+    txReads({ model: seededInJuly(), snapshot: snapshotAt(7, LEVEL_MOVED_AT) })
+
+    await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
+
+    // No skill map, no sight-word collection query — the seed path's other reads.
+    expect(getDoc).not.toHaveBeenCalled()
     expect(getDocs).not.toHaveBeenCalled()
   })
 
   it('writes NOTHING when the levels have not moved since the last projection', async () => {
-    getDoc.mockResolvedValue({ exists: () => true, data: () => snapshotAt(7, SEEDED_AT) })
-    txGet.mockResolvedValue({ exists: () => true, data: () => seededInJuly() })
+    txReads({ model: seededInJuly(), snapshot: snapshotAt(7, SEEDED_AT) })
 
     const model = await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
     expect(txSet).not.toHaveBeenCalled()
-    expect(model?.projectedAt).toBeUndefined()
+    expect(model?.projectedThrough).toBeUndefined()
   })
 
-  it('writes projectedAt ALONE when the levels moved but no state did', async () => {
+  it('writes projectedThrough ALONE when the levels moved but no state did', async () => {
     // Level 7 already, and the stored states were computed at 7 — nothing to raise.
-    getDoc.mockResolvedValue({ exists: () => true, data: () => snapshotAt(7, LEVEL_MOVED_AT) })
     const stored7: LearnerModel = {
       ...seededInJuly(),
       conceptStates: projectWorkingLevelStates(
@@ -196,19 +224,20 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
         SEEDED_AT,
       ),
     }
-    txGet.mockResolvedValue({ exists: () => true, data: () => stored7 })
+    txReads({ model: stored7, snapshot: snapshotAt(7, LEVEL_MOVED_AT) })
 
     await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
     expect(txSet).toHaveBeenCalledTimes(1)
     const payload = txSet.mock.calls[0][1] as Record<string, unknown>
-    expect(Object.keys(payload)).toEqual(['projectedAt'])
+    expect(Object.keys(payload)).toEqual(['projectedThrough'])
+    // The stamp that was projected, never this client's clock.
+    expect(payload.projectedThrough).toBe(LEVEL_MOVED_AT)
     expect(txSet.mock.calls[0][2]).toEqual({ merge: true })
   })
 
-  it('writes states, the feed, projectedAt and synthesisStaleAt when a state moved', async () => {
-    getDoc.mockResolvedValue({ exists: () => true, data: () => snapshotAt(7, LEVEL_MOVED_AT) })
-    txGet.mockResolvedValue({ exists: () => true, data: () => seededInJuly() })
+  it('writes states, the feed, projectedThrough and synthesisStaleAt when a state moved', async () => {
+    txReads({ model: seededInJuly(), snapshot: snapshotAt(7, LEVEL_MOVED_AT) })
 
     const model = await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
@@ -216,26 +245,29 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     const payload = txSet.mock.calls[0][1] as LearnerModel
     expect(payload.conceptStates['reading.phonics.longVowels'].state).toBe('solid')
     expect(payload.changeFeed.length).toBeGreaterThan(0)
-    expect(payload.projectedAt).toBeTruthy()
-    // FEAT-57 D4 — a moved state means the stored synthesis is behind.
-    expect(payload.synthesisStaleAt).toBe(payload.projectedAt)
+    // The watermark is the LEVEL's stamp; synthesisStaleAt is a real wall clock,
+    // because it answers "how old is the synthesis", not "what have I read".
+    expect(payload.projectedThrough).toBe(LEVEL_MOVED_AT)
+    expect(payload.synthesisStaleAt).not.toBe(LEVEL_MOVED_AT)
+    expect(Date.parse(payload.synthesisStaleAt as string)).toBeGreaterThan(
+      Date.parse(LEVEL_MOVED_AT),
+    )
     expect(txSet.mock.calls[0][2]).toEqual({ merge: true })
     expect(model?.conceptStates['reading.phonics.longVowels'].state).toBe('solid')
   })
 
   it('applies the shared promotedModelStatus rule rather than re-implementing it', async () => {
-    getDoc.mockResolvedValue({ exists: () => true, data: () => snapshotAt(7, LEVEL_MOVED_AT) })
     // A model stamped `no-data` that a projection is about to land evidence on.
-    txGet.mockResolvedValue({
-      exists: () => true,
-      data: () => ({
+    txReads({
+      model: {
         ...seededInJuly({ status: 'no-data' }),
         conceptStates: Object.fromEntries(
           Object.keys(
             projectWorkingLevelStates(foundationGraphs, 'c1', snapshotAt(5, SEEDED_AT), SEEDED_AT),
           ).map((id) => [id, { state: 'not-yet', evidence: [], seededAt: SEEDED_AT }]),
         ),
-      }),
+      } as LearnerModel,
+      snapshot: snapshotAt(7, LEVEL_MOVED_AT),
     })
 
     await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
@@ -245,8 +277,7 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
   })
 
   it('never CREATES a document — a projection has nothing to project onto', async () => {
-    getDoc.mockResolvedValue({ exists: () => true, data: () => snapshotAt(7, LEVEL_MOVED_AT) })
-    txGet.mockResolvedValue({ exists: () => false, data: () => ({}) })
+    txReads({ model: null, snapshot: snapshotAt(7, LEVEL_MOVED_AT) })
 
     const model = await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
@@ -254,22 +285,12 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     expect(model).toBeNull()
   })
 
-  it('does nothing when the child has no skill snapshot', async () => {
-    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) })
+  it('writes nothing when the child has no skill snapshot', async () => {
+    txReads({ model: seededInJuly(), snapshot: null })
 
     const model = await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
-    expect(runTransaction).not.toHaveBeenCalled()
-    expect(model).toBeNull()
-  })
-
-  it('reads the contended document inside the transaction, like every other mode', async () => {
-    getDoc.mockResolvedValue({ exists: () => true, data: () => snapshotAt(7, LEVEL_MOVED_AT) })
-    txGet.mockResolvedValue({ exists: () => true, data: () => seededInJuly() })
-
-    await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
-
-    expect(runTransaction).toHaveBeenCalledTimes(1)
-    expect(txGet).toHaveBeenCalledTimes(1)
+    expect(txSet).not.toHaveBeenCalled()
+    expect(model?.childId).toBe('c1')
   })
 })

@@ -300,18 +300,26 @@ export interface LearnerModel {
   synthesisStaleAt?: string | null
   seededAt: string
   /**
-   * When the **band-derived** concept states were last recomputed from the
-   * child's `skillSnapshots.workingLevels` (UX-291). Additive and optional — a
-   * model written before the re-projection existed has none, and its `seededAt`
-   * is the honest baseline for it, so there is no migration.
+   * The **watermark** of the band-derived projection (UX-291): the newest
+   * `WorkingLevel.updatedAt` the concept states have already been recomputed
+   * from. Additive and optional — a model written before the re-projection
+   * existed has none, and its `seededAt` is the honest baseline for it, so there
+   * is no migration.
+   *
+   * **It holds a level's stamp, not a wall clock,** and it is named
+   * `projectedThrough` rather than `projectedAt` for exactly that reason (Codex
+   * round 1). Stamping the projecting client's own `now` would watermark past
+   * levels the projection never read — a quest finishing on another device
+   * mid-transaction, or a writing device whose clock runs behind this one — and
+   * the next visit would read the unseen level as already processed.
    *
    * Deliberately **not** `seededAt` re-used. `seededAt` means *when this document
    * was created* and several readers take it that way; overloading it because a
    * second writer needed somewhere to put a stamp is the UX-322 mistake, where a
    * field's meaning drifted and five consumers were left reading the old one.
    * It is also not `updatedAt`: a projection that moves nothing must leave
-   * `updatedAt` alone, and it still needs to record that it looked.
+   * `updatedAt` alone, and it still needs to record what it read.
    */
-  projectedAt?: string
+  projectedThrough?: string
   updatedAt: string
 }
