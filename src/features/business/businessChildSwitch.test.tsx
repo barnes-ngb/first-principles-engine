@@ -42,7 +42,7 @@ describe('the copy is kid copy — this is the boys’ surface', () => {
 })
 
 describe('SaleEntryForm — a pending sale is dropped, not re-targeted', () => {
-  const onLogSale = vi.fn(async (_sale: unknown) => {})
+  const onLogSale = vi.fn()
   beforeEach(() => onLogSale.mockClear())
 
   it('clears the entry and says whose sale was not saved', async () => {
@@ -116,7 +116,7 @@ describe('SaleEntryForm — a pending sale is dropped, not re-targeted', () => {
 })
 
 describe('KitBuilderForm — a new roster stays with the boy who started it', () => {
-  const onSave = vi.fn(async (..._args: unknown[]) => {})
+  const onSave = vi.fn()
   const onCancel = vi.fn()
   beforeEach(() => {
     onSave.mockClear()

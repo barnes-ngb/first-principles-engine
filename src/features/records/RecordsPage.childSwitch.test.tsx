@@ -35,9 +35,9 @@ vi.mock('../../core/profile/useProfile', () => ({
 }))
 
 /** Every write this page can make, so a leak is visible rather than silent. */
-const addDoc = vi.fn(async (..._args: unknown[]) => ({ id: 'new-doc' }))
+const addDoc = vi.fn()
 vi.mock('firebase/firestore', () => ({
-  addDoc: (...args: unknown[]) => addDoc(...args),
+  addDoc: (ref: unknown, data: unknown) => addDoc(ref, data),
   deleteDoc: vi.fn(async () => {}),
   doc: vi.fn(() => ({})),
   getDocs: vi.fn(async () => ({ docs: [], size: 0, empty: true })),
