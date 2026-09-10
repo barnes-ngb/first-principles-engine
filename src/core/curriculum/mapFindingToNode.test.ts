@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { findingStatusToSkillStatus, getNodesForProgram, mapFindingToNode } from './mapFindingToNode'
+import {
+  CROSS_DOMAIN_LANE_TABLE,
+  declaredTagDomain,
+  findingStatusToSkillStatus,
+  getNodesForProgram,
+  KEYWORD_FALLBACKS,
+  keywordFallbackNode,
+  mapFindingToNode,
+  resolvesOutsideDeclaredDomain,
+} from './mapFindingToNode'
+import { CURRICULUM_NODE_MAP } from './curriculumMap'
 
 describe('mapFindingToNode', () => {
   // ── Direct curriculum node IDs pass through ──────────────
@@ -156,5 +166,258 @@ describe('getNodesForProgram', () => {
 
   it('returns empty array for unknown program', () => {
     expect(getNodesForProgram('nonexistent-program')).toEqual([])
+  })
+})
+
+// ── FIX-226 — the repaired keyword fallback (UX-346 / UX-347) ────────────
+//
+// AUDIT-226's finding was that the *technique* was the bug, not the entries: an
+// ordered chain of `includes` tests over a separator-stripped tag had produced
+// three independent defects, two of them found by accident. These blocks pin the
+// repair and the entries it made reachable. Each assertion below fails if the
+// boundary rule, the declared order or the domain anchor is reverted.
+
+describe('UX-347 — a writing finding is no longer written onto a math concept', () => {
+  it('routes writing.paragraph to the writing node, not math.data.graphs', () => {
+    expect(mapFindingToNode('writing.paragraph')).toBe('writing.composition.paragraph')
+  })
+
+  it('made the paragraph rule reachable at all — it was dead code', () => {
+    // The rule existed. Every input it was written to catch matched `graph`
+    // first, so it could never fire. A bare tag proves it fires now.
+    expect(mapFindingToNode('paragraph')).toBe('writing.composition.paragraph')
+  })
+
+  it('still routes a tag that really is about graphs or data', () => {
+    // The repair must not cost the rule it was shadowed by.
+    expect(mapFindingToNode('math.graphs')).toBe('math.data.graphs')
+    expect(mapFindingToNode('math.data')).toBe('math.data.graphs')
+    expect(mapFindingToNode('graph')).toBe('math.data.graphs')
+  })
+
+  it('refuses to cross a declared domain rather than guessing', () => {
+    // The domain anchor, belt to the boundary rule's braces. A math tag may not
+    // answer with a writing node and a reading tag may not either, so an
+    // unrecognised tag in a declared domain is null — honest — not cross-domain.
+    expect(mapFindingToNode('math.paragraph')).toBeNull()
+    expect(mapFindingToNode('reading.paragraph')).toBeNull()
+    expect(mapFindingToNode('writing.data')).toBeNull()
+    expect(mapFindingToNode('math.fluency')).toBeNull()
+  })
+
+  it('keeps the ONE declared cross-domain lane: writing spelling → reading', () => {
+    // `deriveWorkingLevelMastery` declares it for its writing key ("spelling a
+    // CVC word implies you can decode it"), so the catalog tag keeps the answer
+    // it has always had. The lane is one-directional by design.
+    expect(mapFindingToNode('writing.spelling.sightWord')).toBe('reading.phonics.sightWords')
+    expect(mapFindingToNode('writing.spelling.cvc')).toBe('reading.phonics.cvc')
+  })
+
+  it('opens that lane for the TAG, not for the whole writing domain', () => {
+    // Codex round 1 on PR #1827, P1. The first version of the anchor allowed the
+    // pairing at the domain level, which is a far wider claim than the
+    // justification supports: a writing tag naming no spelling at all reached a
+    // real foundations reading concept, so a writing evaluation could update or
+    // DOWNGRADE an unrelated reading one. That is UX-347's exact shape,
+    // reintroduced by the guard written to stop it.
+    expect(mapFindingToNode('writing.fluency')).toBeNull()
+    expect(mapFindingToNode('writing.inference')).toBeNull()
+    expect(mapFindingToNode('writing.cvc')).toBeNull()
+    expect(mapFindingToNode('writing.sightWords')).toBeNull()
+  })
+
+  it('opens that lane onto DECODING nodes only, not wherever a reading keyword points', () => {
+    // Codex round 2 on PR #1827, P1. Gating on the tag naming spelling
+    // constrained the SOURCE and left the DESTINATION open, so a compound tag
+    // carried the lane anywhere a reading keyword happened to point. Spelling a
+    // word implies decoding it; it implies nothing about fluency, vocabulary or
+    // comprehension. These now stay on the writing side, which is honest — they
+    // ARE spelling findings.
+    expect(mapFindingToNode('writing.spelling.fluency')).toBe('writing.mechanics.spelling')
+    expect(mapFindingToNode('writing.spelling.inference')).toBe('writing.mechanics.spelling')
+    expect(mapFindingToNode('writing.spelling.comprehension')).toBe('writing.mechanics.spelling')
+    // …and a decoding destination the implication does justify still opens it.
+    expect(mapFindingToNode('writing.spelling.multisyllable')).toBe(
+      'reading.decoding.multisyllable',
+    )
+  })
+
+  it('names every lane destination as a live curriculumMap node outside its own domain', () => {
+    // A typo in the destination list would silently CLOSE the lane, which is the
+    // quiet failure direction — nothing would look broken.
+    expect(CROSS_DOMAIN_LANE_TABLE.length).toBe(1)
+    for (const lane of CROSS_DOMAIN_LANE_TABLE) {
+      expect(lane.nodes.length, 'a lane with no destinations is not a lane').toBeGreaterThan(0)
+      expect(lane.named.length).toBeGreaterThan(0)
+      for (const nodeId of lane.nodes) {
+        const node = CURRICULUM_NODE_MAP[nodeId]
+        expect(node, `${nodeId} is not a curriculumMap node`).toBeDefined()
+        expect(node.domain, `${nodeId} is inside ${lane.from}, so it needs no lane`).not.toBe(
+          lane.from,
+        )
+      }
+    }
+  })
+
+  it('is still one-directional — a reading tag may not answer with a writing node', () => {
+    expect(mapFindingToNode('reading.paragraph')).toBeNull()
+    // …and the lane's own keyword does not open it in reverse: a reading tag
+    // naming spelling stays on the reading side, where it belongs.
+    expect(mapFindingToNode('reading.spelling.cvc')).toBe('reading.phonics.cvc')
+  })
+
+  it('exposes the anchor rule so the registry classifies by it rather than a copy', () => {
+    expect(resolvesOutsideDeclaredDomain('writing.fluency', 'reading.fluency.accuracy')).toBe(true)
+    // The destination half: a spelling tag onto a node the lane does not name.
+    expect(
+      resolvesOutsideDeclaredDomain('writing.spelling.fluency', 'reading.fluency.accuracy'),
+    ).toBe(true)
+    expect(
+      resolvesOutsideDeclaredDomain('writing.spelling.sightWord', 'reading.phonics.sightWords'),
+    ).toBe(false)
+    expect(resolvesOutsideDeclaredDomain('math.addition', 'math.operations.addSub')).toBe(false)
+    // A tag that declares no domain is never crossing one.
+    expect(declaredTagDomain('multiplication.fluency')).toBeNull()
+    expect(resolvesOutsideDeclaredDomain('multiplication.fluency', 'reading.fluency.accuracy')).toBe(
+      false,
+    )
+  })
+})
+
+describe('UX-346 — the eval prompt Level-1 math tags map to something', () => {
+  it('maps math.number-sense, which used to map to nothing at all', () => {
+    expect(mapFindingToNode('math.number-sense')).toBe('math.number.counting')
+  })
+
+  it('maps the other two Level-1 keys the working-level map already carried', () => {
+    expect(mapFindingToNode('digit-recognition')).toBe('math.number.counting')
+    expect(mapFindingToNode('number-comparison')).toBe('math.number.comparison')
+    expect(mapFindingToNode('number-sense')).toBe('math.number.counting')
+  })
+
+  it('lands on the same node the existing counting key already resolved to', () => {
+    // Why this is safe on the skill-map side: `deriveWorkingLevelMastery` already
+    // wrote this node from the `counting` key at the same level, so the family
+    // joining it moves no existing answer.
+    expect(mapFindingToNode('counting')).toBe('math.number.counting')
+  })
+})
+
+describe('FIX-226 — the inference tags the Knowledge Mine prompt emits', () => {
+  it('routes both of the prompt’s inference tags to the inference node', () => {
+    // Both used to fall to the generic `comprehension` keyword and be recorded as
+    // EXPLICIT recall — a different skill, and an easier one.
+    expect(mapFindingToNode('reading.comprehension.inferCause')).toBe(
+      'reading.comprehension.inference',
+    )
+    expect(mapFindingToNode('reading.comprehension.multiStepInference')).toBe(
+      'reading.comprehension.inference',
+    )
+  })
+
+  it('leaves the rest of the comprehension family on the explicit node', () => {
+    // Deliberately unchanged: the curriculum map has no node for theme, point of
+    // view or compare/contrast, so collapsing them is the only answer it has.
+    // Filed as UX-350, not guessed at here.
+    for (const tag of [
+      'reading.comprehension.theme',
+      'reading.comprehension.pointOfView',
+      'reading.comprehension.compareContrast',
+    ]) {
+      expect(mapFindingToNode(tag), tag).toBe('reading.comprehension.explicit')
+    }
+  })
+})
+
+describe('FIX-226 — a named sub-skill beats the domain word (Codex round 3)', () => {
+  it('routes a plainly-inferential compound tag to inference, not explicit recall', () => {
+    // P1. The generic `comprehension` rule used to be declared first, so a tag
+    // the prompt does not enumerate but the model can plainly emit landed on
+    // EXPLICIT recall — a different, easier concept `computeEvalRead` accepts
+    // and can downgrade. Exact aliases for today's enumerated tags are not
+    // enough; the ORDER has to carry the rule.
+    expect(mapFindingToNode('reading.comprehension.cause-effect-inference')).toBe(
+      'reading.comprehension.inference',
+    )
+    expect(mapFindingToNode('reading.inference')).toBe('reading.comprehension.inference')
+  })
+
+  it('still sends the rest of the comprehension family to explicit recall', () => {
+    for (const tag of [
+      'reading.comprehension.theme',
+      'reading.comprehension.whoWhat',
+      'reading.comprehension.compareContrast',
+    ]) {
+      expect(mapFindingToNode(tag), tag).toBe('reading.comprehension.explicit')
+    }
+    expect(mapFindingToNode('reading.comprehension.mainIdea')).toBe(
+      'reading.comprehension.mainIdea',
+    )
+  })
+
+  it('reads a standalone comparison detail, which no contiguous phrase carries', () => {
+    // P2. The phrase builder joins only CONTIGUOUS words, so
+    // `math.number-sense.comparison` carries no `numbercomparison` phrase —
+    // `sense` sits between the two — and the tag used to fall to the counting
+    // node and be declined there.
+    expect(mapFindingToNode('math.number-sense.comparison')).toBe('math.number.comparison')
+    expect(mapFindingToNode('number-comparison')).toBe('math.number.comparison')
+    // …without admitting the words that merely look like it.
+    expect(mapFindingToNode('compare-contrast')).toBeNull()
+    expect(mapFindingToNode('math.fractions.comparing')).toBe('math.fractions.concepts')
+  })
+})
+
+describe('FIX-226 — "repeated addition" is multiplication', () => {
+  it('reads the more specific keyword first', () => {
+    // `repeated-addition` matches BOTH `repeatedaddition` and `addition`; the
+    // ordering rule is that the more specific skill is declared first. It used to
+    // be recorded on the addition/subtraction node.
+    expect(mapFindingToNode('repeated-addition')).toBe('math.operations.multDiv')
+  })
+
+  it('leaves plain addition alone', () => {
+    expect(mapFindingToNode('single-digit-addition')).toBe('math.operations.addSub')
+  })
+})
+
+describe('FIX-226 — the keyword table’s contract and its order', () => {
+  it('answers only with curriculumMap node ids', () => {
+    // The contract in the module header: the foundations graph is a different
+    // namespace and is reached one step later, on the foundations side.
+    for (const rule of KEYWORD_FALLBACKS) {
+      expect(CURRICULUM_NODE_MAP[rule.node], rule.node).toBeDefined()
+    }
+  })
+
+  it('never declares a keyword that an earlier keyword is a prefix of', () => {
+    // Mechanical half of the ordering rule: the earlier one would always win, so
+    // the later rule would be unreachable — `paragraph` under `graph`, one class
+    // up. `cvce` before `cvc` and `times` before `time` are why this passes.
+    const seen: string[] = []
+    const shadowed: string[] = []
+    for (const rule of KEYWORD_FALLBACKS) {
+      for (const keyword of rule.keywords) {
+        for (const earlier of seen) {
+          if (keyword.startsWith(earlier)) shadowed.push(`${keyword} is shadowed by ${earlier}`)
+        }
+      }
+      seen.push(...rule.keywords)
+    }
+    expect(shadowed).toEqual([])
+  })
+
+  it('declares no keyword twice', () => {
+    const all = KEYWORD_FALLBACKS.flatMap((r) => r.keywords)
+    expect(all.length).toBe(new Set(all).size)
+  })
+
+  it('exposes step 4 on its own, so a census can report on it separately', () => {
+    // An exact/prefix answer is not a keyword answer, and the registry
+    // distinguishes them.
+    expect(keywordFallbackNode('phonics.cvc')).toBe('reading.phonics.cvc')
+    expect(mapFindingToNode('math.counting')).toBe('math.number.counting')
+    expect(keywordFallbackNode('math.counting')).toBe('math.number.counting')
+    expect(keywordFallbackNode('utterly.unknown.thing')).toBeNull()
   })
 })
