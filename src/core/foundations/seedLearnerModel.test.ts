@@ -184,6 +184,52 @@ describe('seedLearnerModel — priority skills and completed programs', () => {
     expect(state.evidence[0].kind).toBe('prioritySkill')
   })
 
+  // ── FIX-224 / UX-288 ───────────────────────────────────────────────────
+  // A math-operations tag answered `math.operations.addSub` / `multDiv` —
+  // curriculumMap ids no graph node has — so the Map below was keyed by
+  // something the node loop could never look up, and a Gate-3 skill seeded
+  // nothing. Silently: no throw, no log, no state.
+  it('seeds a gate-3 math-operations priority skill — the tag the finding bridge collapses', () => {
+    const model = seed(
+      snapshot({
+        prioritySkills: [
+          {
+            // Lincoln's own default priority skill (`lincolnDefaults.ts`), at gate 3.
+            tag: 'math.subtraction.regroup',
+            label: 'Subtraction with regrouping',
+            level: 'secure',
+            masteryGate: 3,
+          },
+        ],
+      }),
+    )
+    const state = model.conceptStates['math.operations.regrouping']
+    expect(state.state).toBe('solid')
+    expect(state.evidence[0].kind).toBe('prioritySkill')
+    expect(state.evidence[0].note).toContain('Subtraction with regrouping')
+  })
+
+  it('leaves a math-operations tag too coarse to name a concept alone — no guess', () => {
+    const model = seed(
+      snapshot({
+        prioritySkills: [
+          { tag: 'math.addition', label: 'Addition', level: 'secure', masteryGate: 3 },
+        ],
+      }),
+    )
+    // A bare `math.addition` could be any of five concepts across three bands.
+    // Nothing is promoted, and in particular not the band-1 node it is nearest.
+    for (const id of [
+      'math.operations.addWithin20',
+      'math.operations.twoDigit',
+      'math.operations.regrouping',
+      'math.operations.multiDigit',
+      'math.operations.factFamilies',
+    ]) {
+      expect(model.conceptStates[id].state, id).toBe('not-yet')
+    }
+  })
+
   it('does not promote a below-gate priority skill', () => {
     const model = seed(
       snapshot({
