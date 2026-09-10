@@ -10,8 +10,16 @@ import { UserProfile } from '../core/types/enums'
 vi.mock('../core/profile/useProfile', () => ({
   useProfile: () => ({ profile: UserProfile.Parents }),
 }))
+// UX-324: the header chip is a real switcher now, so it reads the whole
+// `useActiveChild` shape (children + capability), not just the active one.
 vi.mock('../core/hooks/useActiveChild', () => ({
-  useActiveChild: () => ({ activeChild: { id: 'c1', name: 'London' }, activeChildId: 'c1' }),
+  useActiveChild: () => ({
+    activeChild: { id: 'c1', name: 'London' },
+    activeChildId: 'c1',
+    children: [{ id: 'c1', name: 'London' }],
+    setActiveChildId: () => {},
+    isChildProfile: false,
+  }),
 }))
 vi.mock('../core/auth/useAuth', () => ({ useAuth: () => ({ familyId: 'family-1' }) }))
 vi.mock('../features/avatar/useAvatarProfile', () => ({ useAvatarProfile: () => null }))

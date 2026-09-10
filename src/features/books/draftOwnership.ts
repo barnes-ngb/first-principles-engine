@@ -147,3 +147,47 @@ export function planDraftResume(
   }
   return { canResume: true, switchToChildId: ownership.childId, blockedLine: null }
 }
+
+// ── An in-flight draft, not a saved one (Codex round 1, PR #1817) ────────────
+//
+// Everything above answers the RESUME question: a draft that is already a
+// document, tapped from the shelf. UX-324 opened a second door onto the same
+// truth. The header chip is now a real switcher, so the active child can change
+// on a screen that has no child selector of its own — and this whole area is
+// such a screen. `CreateSightWordBook` holds its generated story in local
+// state and stamped `childId` / `createdFor` from the child active at the
+// moment Finish was tapped, so a parent could generate for Lincoln, switch to
+// London in the header, tap Finish, and save Lincoln's story — his words, his
+// reading level — into London's books. Silently.
+//
+// The answer is the same one `useBookGenerateChat` already gives a resumed
+// draft: **the write follows the draft, not the header.** A story belongs to
+// the child it was written for, and switching the header is not a decision to
+// re-file it. Nothing is discarded (a generated story cost a paid call, so the
+// UX-275 "drop the batch and say so" answer would be the wrong trade here), and
+// the parent is told, because a save that quietly targets a child the header is
+// no longer showing is its own surprise.
+
+/** An unsaved draft, and the child it was made for. */
+export interface InFlightDraft {
+  childId: string
+  childName: string
+}
+
+/**
+ * The line shown while an in-flight draft belongs to someone other than the
+ * child the header is on — `null` when there is no draft, or when the header
+ * still agrees with it and there is nothing to say.
+ *
+ * Parent-facing: a kid profile cannot switch at all
+ * (`useActiveChild().setActiveChildId` is a no-op), so this cannot arise for
+ * them and the page never renders it.
+ */
+export function inFlightDraftNotice(
+  draft: InFlightDraft | null,
+  activeChildId: string,
+): string | null {
+  if (!draft || !draft.childName) return null
+  if (draft.childId === activeChildId) return null
+  return `This story was written for ${draft.childName}, so it will be saved to ${draft.childName}'s books.`
+}

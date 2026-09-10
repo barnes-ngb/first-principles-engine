@@ -27,6 +27,7 @@ import {
   type ImageGenerationFailure,
 } from '../books/imageGenerationFailure'
 import { defenderArtKey, heroDescriptor, HERO_ART_KEY, invaderArtKey } from './kitArt'
+import { rosterOwnerNotice } from './businessChildSwitch'
 import type { NewKitRoster } from './useKitRosters'
 
 /** What the parent's generate handler needs about one character. */
@@ -233,6 +234,11 @@ function CharacterArtControl({
 export interface KitBuilderFormProps {
   /** Operator the roster belongs to (used when creating a new one). */
   childId: string
+  /**
+   * That operator's name, captured with the id at mount so the form can say
+   * whose kit it is when the header moves off him (UX-329).
+   */
+  childName?: string
   /** When present, the form edits this roster; otherwise it creates a new one. */
   roster?: KitRoster
   /** Persist the roster body. Parent stamps source/timestamps via the hook. */
@@ -290,6 +296,7 @@ export interface KitBuilderFormProps {
  */
 export default function KitBuilderForm({
   childId,
+  childName,
   roster,
   onSave,
   onCancel,
@@ -304,6 +311,29 @@ export default function KitBuilderForm({
   const [draft, setDraft] = useState<RosterDraft>(() => draftFromRoster(roster))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * UX-329 — a roster is stamped with the child it was STARTED for.
+   *
+   * `KitBuilderSection` passes `editing ? editing.childId : activeChildId`, so
+   * editing an existing roster was already bound to the document. A NEW one
+   * followed the header, and `BusinessPage` has no `ChildSelector` of its own —
+   * so once the app-bar chip became a switcher (UX-324), a kit typed out for
+   * one boy and saved after a switch was created under his brother's id, on his
+   * brother's kit shelf, with his brother named as the maker on every promoted
+   * catalog product.
+   *
+   * BIND, not RESET: this is a cast a kid typed — a vault, a hero, defenders and
+   * invaders, stored VERBATIM by this form's own invariant. Clearing that to
+   * make the attribution safe would destroy the work in order to protect it,
+   * which is the wrong trade whenever the work is expensive to recreate
+   * (`CreateSightWordBook`, UX-324 round 1). Captured once at mount: the form
+   * is unmounted through the section's list view between sessions, so there is
+   * no second roster behind one instance of it.
+   */
+  const [bound] = useState({ childId, childName })
+  const boundChildId = bound.childId
+  const ownerNotice = rosterOwnerNotice(boundChildId, childId, bound.childName)
 
   // Art pipeline (FEAT-88). Art lives on the persisted roster; the form mirrors
   // it locally so a freshly-generated thumbnail shows without a remount. Loading
@@ -434,7 +464,9 @@ export default function KitBuilderForm({
       const defenders = draft.defenders.filter((d) => d.name !== '' || d.power !== '')
       const invaders = draft.invaders.filter((i) => i.name !== '' || i.menace !== '')
       const body: NewKitRoster = {
-        childId,
+        // The child this roster was started for — never whoever the header
+        // moved to while it was being typed (UX-329).
+        childId: boundChildId,
         vaultName: draft.vaultName,
         heroName: draft.heroName,
         heroLook: draft.heroLook,
@@ -460,6 +492,14 @@ export default function KitBuilderForm({
         Type in a kit roster — the cast and rules a different family plays. Nothing is required; save a
         little now and fill the rest in later.
       </Typography>
+
+      {/* UX-329 — the header moved off the boy this kit was started for. Say
+          where it is going BEFORE Save is tapped, not in a receipt after. */}
+      {ownerNotice && (
+        <Typography variant="body2" color="text.secondary">
+          {ownerNotice}
+        </Typography>
+      )}
 
       <TextField
         label="Vault name"

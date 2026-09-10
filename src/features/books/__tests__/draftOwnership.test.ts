@@ -5,6 +5,7 @@ import {
   OTHER_CHILD_DRAFT_KID_LINE,
   UNKNOWN_DRAFT_OWNER_LINE,
   draftOwnerLabel,
+  inFlightDraftNotice,
   planDraftResume,
   resolveDraftOwnership,
 } from '../draftOwnership'
@@ -117,5 +118,32 @@ describe('planDraftResume — switch, resume, or say why not', () => {
 describe('the kid refusal is held to the shared readability bar', () => {
   it('reads at a six-year-old\'s level', () => {
     expectKidLine(OTHER_CHILD_DRAFT_KID_LINE, 'OTHER_CHILD_DRAFT_KID_LINE')
+  })
+})
+
+
+// Codex round 1 on PR #1817 (UX-324) — the in-flight half of the same truth.
+// The header chip can now switch child on a screen with no selector of its own,
+// and a draft does not move with it.
+describe('inFlightDraftNotice', () => {
+  const LINCOLNS = { childId: 'c1', childName: 'Lincoln' }
+
+  it('says nothing while the header still agrees with the draft', () => {
+    expect(inFlightDraftNotice(LINCOLNS, 'c1')).toBeNull()
+  })
+
+  it('says nothing when there is no draft to speak for', () => {
+    expect(inFlightDraftNotice(null, 'c1')).toBeNull()
+  })
+
+  it('names the child the story was written for, twice — whose and where', () => {
+    // Where it lands is the half a receipt-after-the-write never told her.
+    expect(inFlightDraftNotice(LINCOLNS, 'c2')).toBe(
+      "This story was written for Lincoln, so it will be saved to Lincoln's books.",
+    )
+  })
+
+  it('stays silent rather than naming a child it cannot name', () => {
+    expect(inFlightDraftNotice({ childId: 'c1', childName: '' }, 'c2')).toBeNull()
   })
 })

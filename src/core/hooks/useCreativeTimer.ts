@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { addDoc } from 'firebase/firestore'
 
 import { hoursCollection } from '../firebase/firestore'
+import { resolveTimerOwner } from './creativeTimerOwner'
 import type { SubjectBucket } from '../types/enums'
 import { todayKey } from '../utils/dateKey'
 
@@ -23,6 +24,13 @@ export interface CreativeTimerState {
   elapsed: number // seconds
   subject: SubjectBucket | null
   description: string
+  /**
+   * The child this session belongs to — the one it was STARTED for, not the one
+   * the header happens to be on when Done is tapped (UX-327). `null` when no
+   * timer is running, and on an in-memory state from before this field existed.
+   * The persisted record has always carried it; it just never reached memory.
+   */
+  ownerChildId: string | null
 }
 
 export interface UseCreativeTimerResult {
@@ -64,6 +72,7 @@ export function useCreativeTimer(
     elapsed: 0,
     subject: null,
     description: '',
+    ownerChildId: null,
   })
 
   const [dismissed, setDismissed] = useState(false)
@@ -103,6 +112,9 @@ export function useCreativeTimer(
         elapsed: 0,
         subject,
         description,
+        // Captured here and never re-read: the session belongs to the child it
+        // was started for (UX-327).
+        ownerChildId: childId,
       })
       savePersisted({
         startTime: now,
@@ -118,7 +130,14 @@ export function useCreativeTimer(
 
   const stopTimer = useCallback(async (): Promise<{ saved: boolean; minutes: number }> => {
     if (!state.startTime || !state.subject) {
-      setState({ isRunning: false, startTime: null, elapsed: 0, subject: null, description: '' })
+      setState({
+      isRunning: false,
+      startTime: null,
+      elapsed: 0,
+      subject: null,
+      description: '',
+      ownerChildId: null,
+    })
       clearPersisted()
       return { saved: false, minutes: 0 }
     }
@@ -135,8 +154,11 @@ export function useCreativeTimer(
       return { saved: false, minutes: Math.floor(rawMinutes) }
     }
 
+    // UX-327 — the row is written for the child this session was started for,
+    // never for whoever the header is on now. `hours` is the compliance rail;
+    // this changes no math, only whose a row is.
     await addDoc(hoursCollection(familyId), {
-      childId,
+      childId: resolveTimerOwner(state.ownerChildId, childId),
       date: todayKey(),
       minutes: roundedMinutes,
       subjectBucket: state.subject,
@@ -147,14 +169,28 @@ export function useCreativeTimer(
 
     const result = { saved: true, minutes: roundedMinutes }
 
-    setState({ isRunning: false, startTime: null, elapsed: 0, subject: null, description: '' })
+    setState({
+      isRunning: false,
+      startTime: null,
+      elapsed: 0,
+      subject: null,
+      description: '',
+      ownerChildId: null,
+    })
     clearPersisted()
 
     return result
-  }, [state.startTime, state.subject, state.description, familyId, childId])
+  }, [state.startTime, state.subject, state.description, state.ownerChildId, familyId, childId])
 
   const cancelTimer = useCallback(() => {
-    setState({ isRunning: false, startTime: null, elapsed: 0, subject: null, description: '' })
+    setState({
+      isRunning: false,
+      startTime: null,
+      elapsed: 0,
+      subject: null,
+      description: '',
+      ownerChildId: null,
+    })
     clearPersisted()
     setDismissed(true)
   }, [])
@@ -171,6 +207,10 @@ export function useCreativeTimer(
       elapsed: Math.floor((Date.now() - persisted.startTime) / 1000),
       subject: persisted.subject,
       description: persisted.description,
+      // The persisted record has always stored the owner; restoring start time,
+      // subject and description while dropping it was the second half of
+      // UX-327 (a resumed session was re-owned by whoever was active).
+      ownerChildId: persisted.childId ?? null,
     })
     setDismissed(true)
   }, [])

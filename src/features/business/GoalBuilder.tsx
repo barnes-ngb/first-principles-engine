@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
@@ -45,6 +46,18 @@ interface GoalBuilderProps {
   /** Saved stack to seed the editor (recomputed thresholds ignored here). */
   milestones: EditableMilestone[]
   saving: boolean
+  /**
+   * True while this child's stack is still being read. Editing before it lands
+   * means editing against an empty view and then saving that as the truth
+   * (Codex round 4), so the controls wait.
+   */
+  loading?: boolean
+  /**
+   * Set when the read FAILED. Same hazard as `loading` and a worse one, because
+   * it does not resolve: the stack shows empty, and a save would replace a goal
+   * that was never read (Codex round 5).
+   */
+  readError?: string | null
   onSave: (childId: string, milestones: EditableMilestone[]) => Promise<void>
 }
 
@@ -56,16 +69,44 @@ interface GoalBuilderProps {
  *
  * Kid-accessible (it's his goal, not money/customer data — no parent gate).
  */
-export default function GoalBuilder({ childId, milestones, saving, onSave }: GoalBuilderProps) {
+export default function GoalBuilder({
+  childId,
+  milestones,
+  saving,
+  loading = false,
+  readError = null,
+  onSave,
+}: GoalBuilderProps) {
   const [draft, setDraft] = useState<EditableMilestone[]>(milestones)
   const [dirty, setDirty] = useState(false)
   const [seed, setSeed] = useState(milestones)
+  const [seedChildId, setSeedChildId] = useState(childId)
+  const [switchedAway, setSwitchedAway] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Re-seed from saved state until the user starts editing (avoid clobbering
-  // an in-progress edit when the snapshot re-fires). Adjusting state during
-  // render is the React-recommended pattern for syncing to a changed prop.
-  if (!dirty && seed !== milestones) {
+  // UX-324 (Codex round 3) — the header chip can now switch child from any
+  // screen, and this one has no selector of its own. The `!dirty` guard below
+  // was written to protect an in-progress edit from a re-firing snapshot, and
+  // it did that job; what it also did, once switching became possible here, was
+  // hold ANOTHER child's draft across the change — so `handleSave` passed the
+  // new `childId` with the old child's rows and overwrote that child's saved
+  // `businessGoals` document.
+  //
+  // A child change therefore wins over `dirty`: this is a goal stack, a handful
+  // of typed rows, and losing an unsaved edit is a far smaller harm than
+  // destroying the goal the other child had already saved. The switch is
+  // announced rather than silent.
+  if (seedChildId !== childId) {
+    setSeedChildId(childId)
+    setSeed(milestones)
+    setDraft(milestones)
+    setSwitchedAway(dirty)
+    setDirty(false)
+    setError(null)
+  } else if (!dirty && seed !== milestones) {
+    // Re-seed from saved state until the user starts editing (avoid clobbering
+    // an in-progress edit when the snapshot re-fires). Adjusting state during
+    // render is the React-recommended pattern for syncing to a changed prop.
     setSeed(milestones)
     setDraft(milestones)
   }
@@ -116,8 +157,35 @@ export default function GoalBuilder({ childId, milestones, saving, onSave }: Goa
     }
   }
 
+  if (readError) {
+    // Never rendered as "no goal yet" — this page's own rule, and a records
+    // rule generally: a failed read is not an affirmative empty result.
+    return (
+      <Typography variant="body2" color="error">
+        Couldn&apos;t read this goal, so it can&apos;t be edited right now. Try again in a moment.
+      </Typography>
+    )
+  }
+
+  if (loading) {
+    // Codex round 4 — `useBusinessGoal` keeps no rows across a child change, so
+    // an empty stack here during a switch would be indistinguishable from "this
+    // child has no goal yet". Editing against that and saving would write the
+    // emptiness as the truth, so the controls wait for the read.
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Loading this goal…
+      </Typography>
+    )
+  }
+
   return (
     <Stack spacing={2}>
+      {switchedAway && (
+        <Alert severity="info" onClose={() => setSwitchedAway(false)}>
+          This is a different goal now — the changes you hadn&apos;t saved weren&apos;t kept.
+        </Alert>
+      )}
       <Typography variant="body2" color="text.secondary">
         Build your goal stack. Add what you're saving for, set the real prices, and put them in the
         order you want to unlock them.
@@ -251,7 +319,7 @@ export default function GoalBuilder({ childId, milestones, saving, onSave }: Goa
         variant="contained"
         size="large"
         onClick={handleSave}
-        disabled={saving || !dirty}
+        disabled={saving || !dirty || loading}
         sx={{ alignSelf: 'flex-start' }}
       >
         {saving ? 'Saving…' : 'Save goal'}

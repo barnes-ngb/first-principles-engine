@@ -9,6 +9,7 @@ import Typography from '@mui/material/Typography'
 
 import { BusinessItemType } from '../../core/types/business'
 import { todayKey } from '../../core/utils/dateKey'
+import { droppedSaleNotice } from './businessChildSwitch'
 import type { NewBusinessSale } from './useBusinessLog'
 
 /**
@@ -37,6 +38,8 @@ const SALE_PRESETS: SalePreset[] = [
 interface SaleEntryFormProps {
   /** Operator logging the sale (Lincoln for now). */
   childId: string
+  /** The operator's name, so the reset notice can say whose sale was dropped. */
+  childName?: string
   onLogSale: (sale: NewBusinessSale) => Promise<void>
 }
 
@@ -44,13 +47,59 @@ interface SaleEntryFormProps {
  * Tap-first sale entry (FEAT-30 chunk 2). Pick a kit chip → amount prefills →
  * adjust to the real price → log. Minimal typing: Lincoln is the operator.
  */
-export default function SaleEntryForm({ childId, onLogSale }: SaleEntryFormProps) {
+export default function SaleEntryForm({ childId, childName, onLogSale }: SaleEntryFormProps) {
   const [presetKey, setPresetKey] = useState<string | null>(null)
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(todayKey())
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * UX-329 — a pending sale belongs to the operator it was entered for.
+   *
+   * `BusinessPage` has no `ChildSelector` of its own, so the header chip is the
+   * only way the active child changes here — and this form stays mounted across
+   * that change while `handleLog` passes the LIVE `childId` prop. A chip picked
+   * and a price typed while looking at one operator's sales log was appended to
+   * the other's `businessLog`, where it counts toward that child's goal
+   * thermometer and total earnings.
+   *
+   * RESET, the `QuickAddHours` / `GoalBuilder` answer: a filled-in form is an
+   * INTENT — no sale has been recorded for anybody, a chip and a number are two
+   * taps to re-enter, and the log beside it already shows the new operator's
+   * entries. Binding would post one child's sale to a log the person is no
+   * longer looking at. The receipt list goes with it: "just added" is a receipt
+   * for the child it was logged under, so carrying it across would attribute
+   * real, saved sales to the wrong name on screen.
+   *
+   * Adjusting state during render is React's own answer to a changed prop; this
+   * repo's lint forbids the set-state-in-effect form.
+   */
+  const [formChildId, setFormChildId] = useState(childId)
+  const [formChildName, setFormChildName] = useState(childName)
+  const [droppedFor, setDroppedFor] = useState<string | null>(null)
+  /**
+   * A changed Date is entered work too (Codex round 2, P3). The reset puts the
+   * date back to today, so leaving it out of `hadEntry` meant a sale dated last
+   * Saturday was silently reverted with no notice. Tracked as a flag rather
+   * than by comparing against `todayKey()`, which would read an untouched form
+   * as edited if the app sat open across midnight.
+   */
+  const [dateTouched, setDateTouched] = useState(false)
+  if (formChildId !== childId) {
+    const hadEntry =
+      presetKey !== null || amount.trim() !== '' || note.trim() !== '' || dateTouched
+    setFormChildId(childId)
+    setFormChildName(childName)
+    setDroppedFor(droppedSaleNotice(hadEntry, formChildName))
+    setPresetKey(null)
+    setAmount('')
+    setDate(todayKey())
+    setDateTouched(false)
+    setNote('')
+    setError(null)
+  }
 
   const selectPreset = (preset: SalePreset) => {
     setPresetKey(preset.key)
@@ -68,6 +117,7 @@ export default function SaleEntryForm({ childId, onLogSale }: SaleEntryFormProps
     setPresetKey(null)
     setAmount('')
     setDate(todayKey())
+    setDateTouched(false)
     setNote('')
   }
 
@@ -91,8 +141,21 @@ export default function SaleEntryForm({ childId, onLogSale }: SaleEntryFormProps
     }
   }
 
+  const selectPresetAndClearNotice = (preset: SalePreset) => {
+    setDroppedFor(null)
+    selectPreset(preset)
+  }
+
   return (
     <Stack spacing={2}>
+      {/* UX-329 — the switch dropped a half-entered sale; say so rather than
+          blanking the form as if nothing had been typed. */}
+      {droppedFor && (
+        <Typography variant="body2" color="text.secondary">
+          {droppedFor}
+        </Typography>
+      )}
+
       <Box>
         <Typography variant="body2" color="text.secondary" gutterBottom>
           What did you sell?
@@ -104,7 +167,7 @@ export default function SaleEntryForm({ childId, onLogSale }: SaleEntryFormProps
               label={preset.label}
               color={preset.key === presetKey ? 'primary' : 'default'}
               variant={preset.key === presetKey ? 'filled' : 'outlined'}
-              onClick={() => selectPreset(preset)}
+              onClick={() => selectPresetAndClearNotice(preset)}
             />
           ))}
         </Box>
@@ -128,7 +191,10 @@ export default function SaleEntryForm({ childId, onLogSale }: SaleEntryFormProps
       <TextField
         label="Date"
         value={date}
-        onChange={(e) => setDate(e.target.value)}
+        onChange={(e) => {
+          setDate(e.target.value)
+          setDateTouched(true)
+        }}
         type="date"
         slotProps={{ inputLabel: { shrink: true } }}
         fullWidth
