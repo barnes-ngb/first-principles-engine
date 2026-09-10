@@ -31,6 +31,27 @@ write-through, it supports additive, evidence-stamped edit ops (Build 6a / Tier 
 `addPrioritySkills` / `addSupports` / `addStopRules`, each deduped and stamped as a parent
 directive. It **never removes or downgrades** (RESOLVED/DEFER blocks and existing levels are
 untouched); removals/downgrades are the future Option 3 and need a separate override path.
+**There is exactly one carve-out, stated in full in the paragraph below** — a change that alters only
+**whose** a record is and nothing else — so do not read this paragraph as the whole rule.
+
+**Attribution-only fixes are pre-authorised on every rail (owner decision, 2026-09-10).** A change
+that alters only **whose** a record is — the `childId` a write is addressed to or stamped with — does
+not stop for a decision, on `hours`, `xpLedger`, `skillSnapshots` or anywhere else. It qualifies
+**only** when all of these hold, and the PR body states each one:
+
+1. **No number changes.** No math, no fold, no rounding, no bucketing, no aggregation, no threshold.
+2. **No stored shape changes** beyond what carrying the identity requires — one additive field at
+   most, optional, no migration.
+3. **The unchanged math is asserted, not claimed** — a test pins the existing arithmetic (the
+   `UX-327` precedent pinned that 27 minutes still rounds up to the next 5-minute bucket and that a
+   sub-floor session still writes nothing), **with a positive control**: reverting the one changed
+   line must fail the suite.
+4. **No record is deleted or downgraded**, and no existing row is rewritten — a mis-attributed row
+   already written is data, and correcting history is a separate proposal that still stops.
+
+Anything that touches a number, a total, a rate or a rule stops for a decision exactly as before.
+**If a run is unsure which side of the line it is on, it stops** — the pre-authorisation removes a
+queue, not the judgement.
 
 **The review ledger is the backlog + memory.** `docs/review/REVIEW_HOME_BASE.md` §6 is the source of
 truth for open work (ID prefixes: `ARCH-` / `FUNC-` / `TEST-` / `DATA-` / `ETHOS-` / `DOC-` / `FEAT-`).
