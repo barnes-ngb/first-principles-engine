@@ -33,9 +33,15 @@
 // eval's assessment itself. The node id it lands on routes through the SAME
 // shared `mapFindingToNode` bridge the seeder and Learning Map use, so the eval
 // read can never silently disagree with the deterministic layer on *which*
-// concept a finding is about.
+// concept a finding is about — and then through the shared
+// `curriculumNodeBridge`, which turns that curriculumMap id into the
+// foundations concept(s) it speaks to (FIX-224 / UX-288). Before that second
+// step existed, `math.operations.addSub` / `multDiv` — real curriculumMap ids
+// the concept graph does not define — were dropped by the filter below, so
+// eleven of the eval prompt's twenty math tags wrote nothing at all.
 
 import { FOUNDATION_NODE_MAP } from './index'
+import { resolveFoundationConcepts } from './curriculumNodeBridge'
 import { mapFindingToNode } from '../curriculum/mapFindingToNode'
 import type { EvaluationFinding } from '../types/evaluation'
 import type {
@@ -96,12 +102,16 @@ function evalEvidenceNote(conceptId: string, finding: EvaluationFinding): string
  * Project a finished guided evaluation's findings onto per-concept target
  * states. **Pure** — the eval's read of each concept it assessed.
  *
- * Targeting: a finding contributes only when its skill tag maps (via the shared
- * `mapFindingToNode` bridge) to a real foundation graph concept; `not-tested`
- * findings and unmapped tags are dropped. When several findings land on the same
- * concept, the **highest-ranked** (most generous) read wins — demonstrated
- * partial mastery is never erased by a co-located struggle (no-shame). The
- * returned list is exactly the set of concepts the eval will touch.
+ * Targeting: a finding contributes only when its skill tag resolves — through
+ * the shared `mapFindingToNode` bridge and then `resolveFoundationConcepts` —
+ * to a real foundation graph concept; `not-tested` findings, unmapped tags and
+ * tags too coarse to name a concept are dropped, the last **without a guess**
+ * (FIX-224 / UX-288: a bare `math.addition` names five concepts across three
+ * bands, and this writer may move a concept DOWN). When several findings land
+ * on the same concept, the **highest-ranked** (most generous) read wins —
+ * demonstrated partial mastery is never erased by a co-located struggle
+ * (no-shame). The returned list is exactly the set of concepts the eval will
+ * touch.
  */
 export function computeEvalRead(
   findings: readonly EvaluationFinding[],
@@ -110,11 +120,16 @@ export function computeEvalRead(
   for (const finding of findings) {
     const state = FINDING_STATUS_TO_STATE[finding.status]
     if (!state) continue // 'not-tested' — the eval read nothing here
-    const conceptId = mapFindingToNode(finding.skill)
-    if (!conceptId || !FOUNDATION_NODE_MAP[conceptId]) continue // not a graph concept
-    const prev = byConcept.get(conceptId)
-    if (!prev || STATE_RANK[state] > STATE_RANK[prev.state]) {
-      byConcept.set(conceptId, { state, note: evalEvidenceNote(conceptId, finding) })
+    // FIX-224 / UX-288: `mapFindingToNode` answers in curriculumMap ids, which
+    // are not foundations ids. The foundations-side resolution is the one shared
+    // `resolveFoundationConcepts` — without it the four core math operations
+    // resolved to `math.operations.{addSub,multDiv}` and were dropped here.
+    const { conceptIds } = resolveFoundationConcepts(mapFindingToNode(finding.skill), finding.skill)
+    for (const conceptId of conceptIds) {
+      const prev = byConcept.get(conceptId)
+      if (!prev || STATE_RANK[state] > STATE_RANK[prev.state]) {
+        byConcept.set(conceptId, { state, note: evalEvidenceNote(conceptId, finding) })
+      }
     }
   }
   return [...byConcept.entries()].map(([conceptId, v]) => ({

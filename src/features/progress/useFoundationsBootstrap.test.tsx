@@ -58,17 +58,21 @@ describe('useFoundationsBootstrap (UX-286)', () => {
     await waitFor(() => expect(bootstrap).toHaveBeenCalledTimes(1))
   })
 
-  it('never seeds when a model already exists', async () => {
+  it('never SEEDS when a model already exists — it re-projects it instead (UX-291)', async () => {
     renderHook(() => useFoundationsBootstrap(args({ model: model() })))
-    await waitFor(() => expect(bootstrap).not.toHaveBeenCalled())
+    await waitFor(() => expect(bootstrap).toHaveBeenCalledTimes(1))
+    expect(bootstrap).toHaveBeenCalledWith('fam-1', 'c1', 'reproject')
+    // A page view may create a map or refresh its band-derived states. It may
+    // never re-seed one — that is the ?diag=1 button's deliberate act.
+    expect(bootstrap).not.toHaveBeenCalledWith('fam-1', 'c1', 'reseed')
   })
 
-  it('never seeds for a profile that may not write', async () => {
+  it('never runs anything for a profile that may not write', async () => {
     renderHook(() => useFoundationsBootstrap(args({ canEdit: false })))
     await waitFor(() => expect(bootstrap).not.toHaveBeenCalled())
   })
 
-  it('never seeds mid-load', async () => {
+  it('never runs anything mid-load', async () => {
     renderHook(() => useFoundationsBootstrap(args({ loading: true })))
     await waitFor(() => expect(bootstrap).not.toHaveBeenCalled())
   })
@@ -175,11 +179,13 @@ describe('useFoundationsBootstrap (UX-286)', () => {
     )
     await waitFor(() => expect(result.current.bootstrapping).toBe(true))
 
-    // c2 already has a model, so its effect returns early and starts nothing.
-    // A shared boolean left the tab reading "Setting up c2's map…" forever.
+    // c2 already has a model, so it re-projects rather than creating. A shared
+    // boolean left the tab reading "Setting up c2's map…" forever — and since
+    // UX-291 the flags are keyed by MODE too, so c2's own in-flight projection
+    // still cannot read as c2's map being created.
     rerender(args({ childId: 'c2', model: model() }))
     expect(result.current.bootstrapping).toBe(false)
-    expect(bootstrap).toHaveBeenCalledTimes(1)
+    expect(bootstrap).toHaveBeenLastCalledWith('fam-1', 'c2', 'reproject')
 
     await act(async () => {
       release?.()
@@ -271,5 +277,73 @@ describe('useFoundationsBootstrap (UX-286)', () => {
     rerender(args({ childId: 'c2' }))
     await waitFor(() => expect(bootstrap).toHaveBeenCalledTimes(2))
     expect(bootstrap).toHaveBeenLastCalledWith('fam-1', 'c2', 'create-only')
+  })
+
+  // ── UX-291 — the re-projection shares this hook's guards and keyed state, and
+  //    reports SEPARATELY, because only a create may blank the tab. ──────────
+
+  it('runs one action per child per mount, and the create is not followed by a projection', async () => {
+    const { rerender } = renderHook((p: ReturnType<typeof args>) => useFoundationsBootstrap(p), {
+      initialProps: args(),
+    })
+    await waitFor(() => expect(bootstrap).toHaveBeenCalledTimes(1))
+    expect(bootstrap).toHaveBeenCalledWith('fam-1', 'c1', 'create-only')
+
+    // The write creates the document and the snapshot delivers it. A freshly
+    // seeded model was just computed from these very levels — projecting it
+    // again would be a second write for no reading.
+    rerender(args({ model: model() }))
+    await waitFor(() => expect(bootstrap).toHaveBeenCalledTimes(1))
+  })
+
+  it('never reports a running projection as a missing map', async () => {
+    let release: (() => void) | undefined
+    bootstrap.mockImplementationOnce(
+      () => new Promise<never>((resolve) => { release = () => resolve({} as never) }),
+    )
+    const { result } = renderHook(() => useFoundationsBootstrap(args({ model: model() })))
+
+    await waitFor(() => expect(result.current.reprojecting).toBe(true))
+    // `bootstrapping` is what swaps the terrain for a LoadingState. A refresh of
+    // a map that is already on screen must never do that.
+    expect(result.current.bootstrapping).toBe(false)
+
+    await act(async () => {
+      release?.()
+    })
+    await waitFor(() => expect(result.current.reprojecting).toBe(false))
+  })
+
+  it('reports a failed projection on its own flag, never as a failed create', async () => {
+    bootstrap.mockRejectedValueOnce(new Error('firestore down') as never)
+    const { result } = renderHook(() => useFoundationsBootstrap(args({ model: model() })))
+
+    await waitFor(() => expect(result.current.reprojectFailed).toBe(true))
+    expect(result.current.failed).toBe(false)
+    expect(result.current.bootstrapping).toBe(false)
+  })
+
+  it('re-arms both modes on retry', async () => {
+    bootstrap.mockRejectedValueOnce(new Error('firestore down') as never)
+    const { result } = renderHook(() => useFoundationsBootstrap(args({ model: model() })))
+    await waitFor(() => expect(result.current.reprojectFailed).toBe(true))
+
+    act(() => result.current.retry())
+    await waitFor(() => expect(bootstrap).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.reprojectFailed).toBe(false))
+  })
+
+  it('keeps one child’s projection failure off another child’s view', async () => {
+    bootstrap.mockRejectedValueOnce(new Error('firestore down') as never)
+    const { result, rerender } = renderHook(
+      (p: ReturnType<typeof args>) => useFoundationsBootstrap(p),
+      { initialProps: args({ model: model() }) },
+    )
+    await waitFor(() => expect(result.current.reprojectFailed).toBe(true))
+
+    rerender(args({ childId: 'c2', model: model() }))
+    expect(result.current.reprojectFailed).toBe(false)
+    rerender(args({ model: model() }))
+    expect(result.current.reprojectFailed).toBe(true)
   })
 })

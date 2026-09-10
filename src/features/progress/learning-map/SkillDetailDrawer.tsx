@@ -23,7 +23,12 @@ interface SkillDetailDrawerProps {
   node: CurriculumNode | null
   status: SkillNodeStatus | undefined
   onClose: () => void
-  onUpdateStatus: (nodeId: string, status: SkillStatus) => void
+  /**
+   * UX-344 — absent when the map may not be written: before this child's read
+   * has settled, and after one that failed. The buttons then do not render at
+   * all, rather than rendering as controls that silently do nothing.
+   */
+  onUpdateStatus?: (nodeId: string, status: SkillStatus) => void
   getNodeStatus: (nodeId: string) => SkillNodeStatus | undefined
 }
 
@@ -57,7 +62,8 @@ export default function SkillDetailDrawer({
           sx={{ mb: 2, fontWeight: 600 }}
         />
 
-        {/* Status buttons */}
+        {/* Status buttons — UX-344: only while the map is writable. */}
+        {onUpdateStatus && (
         <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
           <Button
             size="small"
@@ -86,6 +92,7 @@ export default function SkillDetailDrawer({
             Mastered
           </Button>
         </Stack>
+        )}
 
         {status?.notes && (
           <Typography variant="body2" sx={{ mb: 2, fontStyle: 'italic' }}>

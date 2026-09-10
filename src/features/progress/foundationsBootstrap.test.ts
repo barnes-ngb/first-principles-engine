@@ -4,6 +4,8 @@ import {
   BOOTSTRAP_FAILED_LINE,
   bootstrapRunningLine,
   emptyFoundationsLines,
+  REPROJECTION_FAILED_LINE,
+  resolveFoundationsBootstrapMode,
   shouldBootstrapLearnerModel,
 } from './foundationsBootstrap'
 import type { BootstrapDecisionInput } from './foundationsBootstrap'
@@ -70,6 +72,67 @@ describe('shouldBootstrapLearnerModel (UX-286)', () => {
   })
 })
 
+describe('resolveFoundationsBootstrapMode (UX-291)', () => {
+  const base = {
+    canEdit: true,
+    loading: false,
+    familyId: 'fam-1',
+    childId: 'c1',
+    alreadyAttempted: false,
+  }
+  const stored = {
+    childId: 'c1',
+    graphVersion: 'reading@1+math@1',
+    status: 'seeded' as const,
+    conceptStates: {},
+    modalityCalibration: { reading: { note: '' }, writing: { note: '' }, math: { note: '' } },
+    whatMattersNext: [],
+    changeFeed: [],
+    openQuestions: [],
+    seededAt: '2026-07-06T12:55:33.000Z',
+    updatedAt: '2026-07-06T12:55:33.000Z',
+  }
+
+  it('creates when the snapshot resolved and the document is absent', () => {
+    expect(resolveFoundationsBootstrapMode({ ...base, model: null })).toBe('create-only')
+  })
+
+  it('re-projects when the document is there', () => {
+    expect(resolveFoundationsBootstrapMode({ ...base, model: stored })).toBe('reproject')
+  })
+
+  it('never returns reseed — a page view may not recompute the whole layer', () => {
+    for (const model of [null, stored]) {
+      expect(resolveFoundationsBootstrapMode({ ...base, model })).not.toBe('reseed')
+    }
+  })
+
+  it('shares every guard with the create decision', () => {
+    for (const model of [null, stored]) {
+      expect(resolveFoundationsBootstrapMode({ ...base, model, canEdit: false })).toBeNull()
+      expect(resolveFoundationsBootstrapMode({ ...base, model, loading: true })).toBeNull()
+      expect(resolveFoundationsBootstrapMode({ ...base, model, familyId: undefined })).toBeNull()
+      expect(resolveFoundationsBootstrapMode({ ...base, model, childId: undefined })).toBeNull()
+      expect(
+        resolveFoundationsBootstrapMode({ ...base, model, alreadyAttempted: true }),
+      ).toBeNull()
+    }
+  })
+
+  it('is the ONE definition shouldBootstrapLearnerModel delegates to', () => {
+    for (const model of [null, stored]) {
+      for (const canEdit of [true, false]) {
+        for (const loading of [true, false]) {
+          const input = { ...base, model, canEdit, loading }
+          expect(shouldBootstrapLearnerModel(input)).toBe(
+            resolveFoundationsBootstrapMode(input) === 'create-only',
+          )
+        }
+      }
+    }
+  })
+})
+
 describe('bootstrap copy', () => {
   it('names the child while the map is being set up', () => {
     expect(bootstrapRunningLine('Lincoln')).toContain('Lincoln')
@@ -77,6 +140,14 @@ describe('bootstrap copy', () => {
 
   it('says a failure changed nothing', () => {
     expect(BOOTSTRAP_FAILED_LINE).toMatch(/nothing was changed/i)
+  })
+
+  it('says a failed re-projection is showing what was last recorded, not nothing', () => {
+    // The map on screen is real. A line implying it is empty would be the
+    // "failed read rendered as a result" defect this repo keeps out of records.
+    expect(REPROJECTION_FAILED_LINE).toMatch(/last recorded/i)
+    expect(REPROJECTION_FAILED_LINE).toMatch(/try again/i)
+    expect(REPROJECTION_FAILED_LINE).not.toMatch(/nothing (has been|was) recorded/i)
   })
 })
 

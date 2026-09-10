@@ -15,12 +15,24 @@ import { SkillStatus } from './skillStatus'
 import type { CurriculumDomain } from './curriculumMap'
 import { initializeSkillMapFromHistory } from './updateSkillMapFromFindings'
 import { applyReDerivedMastery } from './deriveWorkingLevelMastery'
+import { skillMapIsEditable } from './skillMapGate'
 
 interface UseSkillMapResult {
   /** The child's full skill map, or null while loading */
   skillMap: ChildSkillMap | null
   /** Loading state */
   isLoading: boolean
+  /**
+   * UX-344 — did the read REJECT, as opposed to resolve to nothing? The two
+   * used to be indistinguishable here, and the difference decides whether the
+   * previous child's whole map can be written onto this child's document.
+   */
+  loadFailed: boolean
+  /**
+   * UX-344 — may a node's status be written right now? False until THIS
+   * child's map has loaded, and false after a read that failed.
+   */
+  isEditable: boolean
   /** Get status for a specific node */
   getNodeStatus: (nodeId: string) => SkillNodeStatus | undefined
   /** Update status for a single node */
@@ -107,6 +119,24 @@ export function useSkillMap(childId: string): UseSkillMapResult {
   const familyId = useFamilyId()
   const [skillMap, setSkillMap] = useState<ChildSkillMap | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  /**
+   * UX-344 — the loaded map is dropped the moment the child changes, DURING
+   * RENDER, so no frame exists in which this hook holds one child's `skills`
+   * while `updateNodeStatus` addresses another child's document. Clearing it in
+   * the effect below would leave exactly that frame open, which is the window
+   * the defect lived in. (`RecordsPage`'s UX-329 fix is the precedent; this
+   * repo's lint forbids the set-state-in-effect form.)
+   */
+  const target = `${familyId}|${childId}`
+  const [loadedTarget, setLoadedTarget] = useState(target)
+  if (loadedTarget !== target) {
+    setLoadedTarget(target)
+    setSkillMap(null)
+    setLoadFailed(false)
+    setIsLoading(true)
+  }
 
   useEffect(() => {
     if (!familyId || !childId) return
@@ -149,7 +179,21 @@ export function useSkillMap(childId: string): UseSkillMapResult {
         // existing findings path — never downgrades or overrides a manual node.
         const healed = await reDeriveMastery(familyId, childId, base)
         if (cancelled) return
+        setLoadFailed(false)
         setSkillMap(healed)
+      } catch (err) {
+        // UX-344 — the only `catch` here used to cover the initialise-from-
+        // history branch, so a rejected `getDoc` on the stored document escaped
+        // `load()` entirely while the `finally` still cleared `isLoading`. That
+        // left the PREVIOUS child's map in state, presented as settled, and the
+        // next status tap wrote it onto this child's document. Null AND
+        // flagged: null alone reads as "no map yet", which is a claim about a
+        // child this hook has no evidence for.
+        console.warn('[LearningMap] Skill-map read failed', err)
+        if (!cancelled) {
+          setSkillMap(null)
+          setLoadFailed(true)
+        }
       } finally {
         if (!cancelled) setIsLoading(false)
       }
@@ -167,6 +211,12 @@ export function useSkillMap(childId: string): UseSkillMapResult {
     [skillMap],
   )
 
+  const isEditable = skillMapIsEditable({
+    isLoading,
+    loadFailed,
+    hasTarget: Boolean(familyId && childId),
+  })
+
   const updateNodeStatus = useCallback(
     async (
       nodeId: string,
@@ -175,6 +225,11 @@ export function useSkillMap(childId: string): UseSkillMapResult {
       notes?: string,
     ) => {
       if (!familyId || !childId) return
+      // UX-344 — GATE. The payload below spreads `skillMap?.skills`, so writing
+      // before this child's read has settled files the previous child's whole
+      // map here, and writing after a failed read replaces a real map with one
+      // node. Neither is a status edit; both are data loss.
+      if (!isEditable) return
 
       const now = new Date().toISOString()
       const entry: SkillNodeStatus = {
@@ -196,7 +251,7 @@ export function useSkillMap(childId: string): UseSkillMapResult {
       const ref = doc(childSkillMapsCollection(familyId), childId)
       await setDoc(ref, updated, { merge: true })
     },
-    [familyId, childId, skillMap],
+    [familyId, childId, skillMap, isEditable],
   )
 
   const domainSummaries: DomainSummary[] = CURRICULUM_MAPS.map((dm) => {
@@ -220,6 +275,8 @@ export function useSkillMap(childId: string): UseSkillMapResult {
   return {
     skillMap,
     isLoading,
+    loadFailed,
+    isEditable,
     getNodeStatus,
     updateNodeStatus,
     domainSummaries,

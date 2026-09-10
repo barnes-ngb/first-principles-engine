@@ -184,6 +184,52 @@ describe('seedLearnerModel — priority skills and completed programs', () => {
     expect(state.evidence[0].kind).toBe('prioritySkill')
   })
 
+  // ── FIX-224 / UX-288 ───────────────────────────────────────────────────
+  // A math-operations tag answered `math.operations.addSub` / `multDiv` —
+  // curriculumMap ids no graph node has — so the Map below was keyed by
+  // something the node loop could never look up, and a Gate-3 skill seeded
+  // nothing. Silently: no throw, no log, no state.
+  it('seeds a gate-3 math-operations priority skill — the tag the finding bridge collapses', () => {
+    const model = seed(
+      snapshot({
+        prioritySkills: [
+          {
+            // Lincoln's own default priority skill (`lincolnDefaults.ts`), at gate 3.
+            tag: 'math.subtraction.regroup',
+            label: 'Subtraction with regrouping',
+            level: 'secure',
+            masteryGate: 3,
+          },
+        ],
+      }),
+    )
+    const state = model.conceptStates['math.operations.regrouping']
+    expect(state.state).toBe('solid')
+    expect(state.evidence[0].kind).toBe('prioritySkill')
+    expect(state.evidence[0].note).toContain('Subtraction with regrouping')
+  })
+
+  it('leaves a math-operations tag too coarse to name a concept alone — no guess', () => {
+    const model = seed(
+      snapshot({
+        prioritySkills: [
+          { tag: 'math.addition', label: 'Addition', level: 'secure', masteryGate: 3 },
+        ],
+      }),
+    )
+    // A bare `math.addition` could be any of five concepts across three bands.
+    // Nothing is promoted, and in particular not the band-1 node it is nearest.
+    for (const id of [
+      'math.operations.addWithin20',
+      'math.operations.twoDigit',
+      'math.operations.regrouping',
+      'math.operations.multiDigit',
+      'math.operations.factFamilies',
+    ]) {
+      expect(model.conceptStates[id].state, id).toBe('not-yet')
+    }
+  })
+
   it('does not promote a below-gate priority skill', () => {
     const model = seed(
       snapshot({
@@ -455,5 +501,52 @@ describe('mergeSeededModel — status is never demoted by a re-seed', () => {
     const fresh = seed(snapshot({ workingLevels: { phonics: wl(4) } }))
     expect(fresh.status).toBe('seeded')
     expect(mergeSeededModel(existingAt('no-data', 'workingLevel'), fresh).status).toBe('seeded')
+  })
+})
+
+// ── UX-291 — the seed IS a projection, so it records what it projected from ──
+//
+// Without this the freshly created model carries no watermark, and Codex round 2
+// showed why falling back to the seed's `seededAt` wall clock was wrong: a level
+// advancing while the seed's own (out-of-transaction) reads were still in flight
+// could be stamped before that clock, and the next visit would read it as
+// already processed.
+describe('seedLearnerModel — the projection watermark', () => {
+  const seed = (partial: Partial<SkillSnapshot>) =>
+    seedLearnerModel(foundationGraphs, 'child-1', snapshot(partial), null, [], { now: NOW })
+
+  const NO_LEVELS = { phonics: null, writing: null, math: null }
+
+  it('records exactly the levels the band pass was computed from', () => {
+    const model = seed({ workingLevels: { phonics: wl(5), math: wl(3), writing: wl(2) } })
+    expect(model.projectedThrough).toEqual({ phonics: 5, math: 3, writing: 2 })
+  })
+
+  it('records the driving levels only — a comprehension level is not one', () => {
+    const model = seed({
+      workingLevels: { phonics: wl(5), comprehension: wl(4), sentence: wl(1) },
+    })
+    expect(model.projectedThrough).toEqual({ ...NO_LEVELS, phonics: 5 })
+  })
+
+  it('is TOTAL — a level the child has none of is null, never an omitted key', () => {
+    // Codex round 3: an omitted key survives Firestore's `{merge:true}`, so the
+    // watermark could never clear and the projection would re-write every mount.
+    expect(seed({}).projectedThrough).toEqual(NO_LEVELS)
+    expect(Object.keys(seed({ workingLevels: { phonics: wl(5) } }).projectedThrough ?? {}).sort())
+      .toEqual(['math', 'phonics', 'writing'])
+  })
+
+  it('a re-seed carries the FRESH levels forward, not the stored ones', () => {
+    const existing: LearnerModel = {
+      ...seed({ workingLevels: { phonics: wl(5) } }),
+      projectedThrough: { ...NO_LEVELS, phonics: 5 },
+    }
+    const fresh = seed({ workingLevels: { phonics: wl(7) } })
+    // A re-seed recomputed every band-derived state, so its inputs are the truth.
+    expect(mergeSeededModel(existing, fresh).projectedThrough).toEqual({
+      ...NO_LEVELS,
+      phonics: 7,
+    })
   })
 })

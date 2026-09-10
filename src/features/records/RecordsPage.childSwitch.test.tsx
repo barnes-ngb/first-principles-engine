@@ -236,3 +236,91 @@ describe('RecordsPage — a child switch does not re-target typed historical hou
     expect(written.some((w) => w.minutes === 720)).toBe(true)
   })
 })
+
+/**
+ * UX-340 (FIX-223) — the SECOND editor on this page's hours rail.
+ *
+ * UX-329 fixed the *Add Historical Hours* dialog above and filed the
+ * always-visible **Manual Hours Adjustment** form as a P1 it could not touch,
+ * because the owner's authorisation named the dialog specifically. `DOC-25`'s
+ * attribution-only pre-authorisation is what unblocks it.
+ *
+ * The form's *Attribute to* selector is re-synced to the newly active child by
+ * an effect, while the typed minutes and reason stand — so a switch silently
+ * re-pointed a filled adjustment. The POSITIVE CONTROL is each block's final
+ * assertion: remove the render-time reset and they fail, because Lincoln's
+ * minutes reach `addDoc` as London's row.
+ */
+describe('RecordsPage — a child switch does not re-target a typed hours adjustment', () => {
+  beforeEach(() => {
+    addDoc.mockClear()
+    setActive(LINCOLN)
+  })
+
+  async function typeAdjustment(user: ReturnType<typeof userEvent.setup>, minutes: string) {
+    await user.type(screen.getByLabelText(/minutes/i), minutes)
+    await user.type(screen.getByLabelText(/reason/i), 'Missed co-op session')
+  }
+
+  it('clears the typed adjustment and names whose it was', async () => {
+    const user = userEvent.setup()
+    const { default: RecordsPage } = await import('./RecordsPage')
+    const { rerender } = render(<RecordsPage />)
+
+    await typeAdjustment(user, '45')
+    expect(screen.getByRole('button', { name: /add adjustment/i })).toBeEnabled()
+
+    setActive(LONDON)
+    rerender(<RecordsPage />)
+
+    // POSITIVE CONTROL — before the reset the minutes and reason survived and
+    // the button stayed live, with the attribution silently moved to London.
+    expect(screen.getByLabelText(/minutes/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/reason/i)).toHaveValue('')
+    expect(screen.getByRole('button', { name: /add adjustment/i })).toBeDisabled()
+
+    const notice = screen.getByText(/wasn't saved|wasn’t saved/i)
+    expect(notice).toBeInTheDocument()
+    expect(notice.textContent).toContain('Lincoln')
+    expect(notice.textContent).toContain('London')
+    expect(addDoc).not.toHaveBeenCalled()
+  })
+
+  it('says nothing when there was no typed adjustment to lose', async () => {
+    const { default: RecordsPage } = await import('./RecordsPage')
+    const { rerender } = render(<RecordsPage />)
+
+    setActive(LONDON)
+    rerender(<RecordsPage />)
+
+    // A notice that fires on every switch is one nobody reads by the time it
+    // matters — and on this rail a false "wasn't saved" invites entering the
+    // same hours twice (UX-329's own round-4 finding, one form over).
+    expect(screen.queryByText(/wasn't saved|wasn’t saved/i)).not.toBeInTheDocument()
+  })
+
+  it('writes the child on screen, with the minutes exactly as typed', async () => {
+    const user = userEvent.setup()
+    const { default: RecordsPage } = await import('./RecordsPage')
+    const { rerender } = render(<RecordsPage />)
+
+    await typeAdjustment(user, '45')
+    setActive(LONDON)
+    rerender(<RecordsPage />)
+
+    await typeAdjustment(user, '30')
+    await user.click(screen.getByRole('button', { name: /add adjustment/i }))
+
+    expect(addDoc).toHaveBeenCalledTimes(1)
+    const written = addDoc.mock.calls[0][1] as unknown as {
+      childId: string
+      minutes: number
+      reason: string
+    }
+    expect(written.childId).toBe('london')
+    // No hours math changed: the typed figure is written through untouched —
+    // not re-based, not rounded, not bucketed. `DOC-25` term 1, asserted.
+    expect(written.minutes).toBe(30)
+    expect(written.reason).toBe('Missed co-op session')
+  })
+})

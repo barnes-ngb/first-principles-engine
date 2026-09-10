@@ -31,6 +31,46 @@ write-through, it supports additive, evidence-stamped edit ops (Build 6a / Tier 
 `addPrioritySkills` / `addSupports` / `addStopRules`, each deduped and stamped as a parent
 directive. It **never removes or downgrades** (RESOLVED/DEFER blocks and existing levels are
 untouched); removals/downgrades are the future Option 3 and need a separate override path.
+**There is exactly one carve-out, stated in full in the paragraph below** — a change that alters only
+**whose** a record is and nothing else — so do not read this paragraph as the whole rule.
+
+**Attribution-only fixes are pre-authorised on every rail (owner decision, 2026-09-10).** A change
+that alters only **whose** a record is — the `childId` a write is addressed to or stamped with — does
+not stop for a decision, on `hours`, `xpLedger`, `skillSnapshots` or anywhere else. It qualifies
+**only** when all of these hold, and the PR body states each one:
+
+1. **No number changes.** No math, no fold, no rounding, no bucketing, no aggregation, no threshold.
+2. **No stored shape changes** beyond what carrying the identity requires — one additive field at
+   most, optional, no migration.
+3. **The unchanged math is asserted, not claimed** — a test pins the existing arithmetic (the
+   `UX-327` precedent pinned that 27 minutes still rounds up to the next 5-minute bucket and that a
+   sub-floor session still writes nothing), **with a positive control**: reverting the one changed
+   line must fail the suite.
+4. **No record is deleted or downgraded**, and no existing row is rewritten — a mis-attributed row
+   already written is data, and correcting history is a separate proposal that still stops.
+
+Anything that touches a number, a total, a rate or a rule stops for a decision exactly as before.
+**If a run is unsure which side of the line it is on, it stops** — the pre-authorisation removes a
+queue, not the judgement.
+
+**This decision supersedes a `FILE, DO NOT FIX` already written on a ledger row, where that row's fix
+is attribution-only.** Such rows were filed *before* the decision and their stop was conditioned on
+exactly this authorisation, so **a row is superseded by the REASON its stop gives — one of these rails
+and nothing else — never by being listed here.** That is deliberate: which rows qualify is a survey
+across a ledger that moves, and a list written here would be stale the next time one is filed. The
+three the decision was made for are the census's open P1s — `UX-336` (*"`xpLedger` is on `CLAUDE.md`'s
+never-silently-change list, so AUDIT-222 classified it and stopped"*), `UX-339` (*"it touches **three**
+propose-and-confirm rails at once"*) and `UX-340` (*"outside the authorised scope"*) — and `FIX-223` is
+the run that implements them. **They are not all of them**, which an earlier draft of this paragraph
+wrongly implied (Codex round 2 on PR #1822): `UX-341` is `UX-336`'s shape on an admin surface, filed
+because it writes `xpLedger`, and `UX-342` reads *"FILE, DO NOT FIX — hours rail"* over a picked
+video's unchanged minutes — both attribution-only RESETs, both superseded, and both named here as
+examples of the reason rather than as a closed set. This sentence is where the supersession lives
+rather than in the rows themselves, because a correct ledger PR reads `+N rows / −0` and an in-place
+edit to an existing row body is the diff signature this repo reads as a stale base (› **Ledger
+integrity & base discipline**). So **where a row's stop directive and this paragraph disagree, this
+paragraph is the later decision** — but only for an attribution-only fix, and a run that cannot tell
+still stops.
 
 **The review ledger is the backlog + memory.** `docs/review/REVIEW_HOME_BASE.md` §6 is the source of
 truth for open work (ID prefixes: `ARCH-` / `FUNC-` / `TEST-` / `DATA-` / `ETHOS-` / `DOC-` / `FEAT-`).
