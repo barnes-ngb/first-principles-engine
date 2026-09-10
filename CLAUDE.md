@@ -53,6 +53,18 @@ Anything that touches a number, a total, a rate or a rule stops for a decision e
 **If a run is unsure which side of the line it is on, it stops** — the pre-authorisation removes a
 queue, not the judgement.
 
+**This decision supersedes a `FILE, DO NOT FIX` already written on a ledger row, where that row's fix
+is attribution-only.** Those rows were filed *before* the decision and their stop was conditioned on
+exactly this authorisation — `UX-336` (*"`xpLedger` is on `CLAUDE.md`'s never-silently-change list, so
+AUDIT-222 classified it and stopped"*), `UX-339` (*"it touches **three** propose-and-confirm rails at
+once"*) and `UX-340` (*"outside the authorised scope"*) are the three such rows open today, all three
+are unblocked, and `FIX-223` is the run that implements them. This sentence is where that supersession
+lives rather than in the rows themselves, because a correct ledger PR reads `+N rows / −0` and an
+in-place edit to an existing row body is the diff signature this repo reads as a stale base (›
+**Ledger integrity & base discipline**). So **where a row's stop directive and this paragraph
+disagree, this paragraph is the later decision** — but only for an attribution-only fix, and a run
+that cannot tell still stops.
+
 **The review ledger is the backlog + memory.** `docs/review/REVIEW_HOME_BASE.md` §6 is the source of
 truth for open work (ID prefixes: `ARCH-` / `FUNC-` / `TEST-` / `DATA-` / `ETHOS-` / `DOC-` / `FEAT-`).
 Every run reads it, updates the relevant row, and never reuses an ID. Reusable run-prompts live in
