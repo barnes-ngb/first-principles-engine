@@ -8,10 +8,9 @@ import { describe, expect, it } from 'vitest'
 
 import { foundationGraphs } from './index'
 import { projectWorkingLevelStates } from './seedLearnerModel'
+import { currentDrivingLevels } from './seedLearnerModel'
 import {
   applyWorkingLevelProjection,
-  lastProjectionStamp,
-  newestDrivingLevelStamp,
   shouldReprojectWorkingLevels,
 } from './workingLevelProjection'
 import type { EvidenceKind, LearnerModel } from '../types/learnerModel'
@@ -42,6 +41,7 @@ function storedAt(phonicsLevel: number, over: Partial<LearnerModel> = {}): Learn
       snapshot(phonicsLevel, SEEDED_AT),
       SEEDED_AT,
     ),
+    projectedThrough: { phonics: phonicsLevel },
     modalityCalibration: { reading: { note: '' }, writing: { note: '' }, math: { note: '' } },
     whatMattersNext: [],
     changeFeed: [],
@@ -55,29 +55,57 @@ function storedAt(phonicsLevel: number, over: Partial<LearnerModel> = {}): Learn
 const project = (model: LearnerModel, level: number | undefined, stamp = LEVEL_MOVED_AT) =>
   applyWorkingLevelProjection(model, foundationGraphs, 'c1', snapshot(level, stamp), NOW)
 
-describe('shouldReprojectWorkingLevels', () => {
-  it('is true when a driving level is newer than the last projection', () => {
+describe('shouldReprojectWorkingLevels — the watermark is the INPUTS', () => {
+  it('is true when a driving level differs from the one that was projected', () => {
     expect(shouldReprojectWorkingLevels(storedAt(5), snapshot(7))).toBe(true)
   })
 
-  it('is false when the levels have not moved since the seed', () => {
-    expect(shouldReprojectWorkingLevels(storedAt(5), snapshot(7, SEEDED_AT))).toBe(false)
+  it('is false when the levels are the ones already projected', () => {
+    expect(shouldReprojectWorkingLevels(storedAt(5), snapshot(5))).toBe(false)
   })
 
-  it('measures against projectedThrough once one exists, never seededAt', () => {
-    const model = storedAt(5, { projectedThrough: '2026-09-05T00:00:00.000Z' })
-    // Newer than the July seed, older than the September projection.
-    expect(shouldReprojectWorkingLevels(model, snapshot(7, '2026-09-02T00:00:00.000Z'))).toBe(
-      false,
-    )
-    expect(shouldReprojectWorkingLevels(model, snapshot(7, '2026-09-07T00:00:00.000Z'))).toBe(
+  // Codex round 2, finding 1 — the reason this compares values per field rather
+  // than one maximum timestamp.
+  it('sees a level change a clock-skewed device stamped OLDER than another level', () => {
+    const model = storedAt(5, { projectedThrough: { phonics: 5, math: 3 } })
+    const skewed = {
+      childId: 'c1',
+      workingLevels: {
+        phonics: { level: 5, updatedAt: '2026-09-08T00:00:00.000Z', source: 'manual' },
+        // Written later in real time, stamped earlier by a device behind the clock.
+        math: { level: 6, updatedAt: '2026-09-02T00:00:00.000Z', source: 'quest' },
+      },
+    } as SkillSnapshot
+    expect(shouldReprojectWorkingLevels(model, skewed)).toBe(true)
+  })
+
+  it('sees a same-field level whose stamp moved BACKWARDS', () => {
+    const model = storedAt(7, { projectedThrough: { phonics: 7 } })
+    expect(shouldReprojectWorkingLevels(model, snapshot(4, '2026-01-01T00:00:00.000Z'))).toBe(
       true,
     )
-    expect(lastProjectionStamp(model)).toBe('2026-09-05T00:00:00.000Z')
   })
 
-  it('reads only the levels that drive band seeding — a comprehension move costs nothing', () => {
-    const model = storedAt(5)
+  it('sees a level that appeared, and one that was cleared', () => {
+    expect(
+      shouldReprojectWorkingLevels(storedAt(5, { projectedThrough: {} }), snapshot(5)),
+    ).toBe(true)
+    expect(
+      shouldReprojectWorkingLevels(storedAt(5, { projectedThrough: { phonics: 5 } }), null),
+    ).toBe(true)
+  })
+
+  // Codex round 2, finding 2 — a model with no recorded projection cannot support
+  // a claim about what it was projected from, and the seed's wall clock was the
+  // wrong thing to guess with.
+  it('is true when nothing has been recorded, rather than guessing from seededAt', () => {
+    const unrecorded = storedAt(5)
+    delete (unrecorded as { projectedThrough?: unknown }).projectedThrough
+    expect(shouldReprojectWorkingLevels(unrecorded, snapshot(5, SEEDED_AT))).toBe(true)
+    expect(shouldReprojectWorkingLevels(unrecorded, null)).toBe(true)
+  })
+
+  it('ignores levels that drive no band — an unrelated level must not cost a write', () => {
     const withComprehension = {
       childId: 'c1',
       workingLevels: {
@@ -86,73 +114,51 @@ describe('shouldReprojectWorkingLevels', () => {
         sentence: { level: 3, updatedAt: NOW, source: 'quest' },
       },
     } as SkillSnapshot
-    expect(shouldReprojectWorkingLevels(model, withComprehension)).toBe(false)
+    expect(shouldReprojectWorkingLevels(storedAt(5), withComprehension)).toBe(false)
   })
 
-  it('treats a missing or empty updatedAt as NOT newer', () => {
-    const noStamp = { childId: 'c1', workingLevels: { phonics: { level: 9 } } } as SkillSnapshot
+  it('never reads updatedAt at all — a stamp is a client clock, a level is the input', () => {
+    // Same levels, wildly different stamps in both directions: no re-projection.
+    expect(shouldReprojectWorkingLevels(storedAt(5), snapshot(5, '2099-01-01T00:00:00.000Z'))).toBe(
+      false,
+    )
+    expect(shouldReprojectWorkingLevels(storedAt(5), snapshot(5, '1999-01-01T00:00:00.000Z'))).toBe(
+      false,
+    )
+    const noStamp = { childId: 'c1', workingLevels: { phonics: { level: 5 } } } as SkillSnapshot
     expect(shouldReprojectWorkingLevels(storedAt(5), noStamp)).toBe(false)
-    expect(shouldReprojectWorkingLevels(storedAt(5), snapshot(9, ''))).toBe(false)
-  })
-
-  it('is false when there is no snapshot at all', () => {
-    expect(shouldReprojectWorkingLevels(storedAt(5), null)).toBe(false)
   })
 })
 
-// Codex round 1, P2 — the watermark is the level stamp that was projected, never
-// the projecting client's wall clock. A `now` watermark would mark levels as
-// processed that this projection never read (a quest finishing on another device
-// mid-transaction; a writing device whose clock runs behind this one), and the
-// next visit would skip them — UX-291's own defect through a narrower door.
-describe('newestDrivingLevelStamp — the watermark', () => {
-  it('is the newest DRIVING level stamp, never a wall clock', () => {
+describe('currentDrivingLevels', () => {
+  it('reads exactly the driving keys', () => {
     const snap = {
       childId: 'c1',
       workingLevels: {
-        phonics: { level: 5, updatedAt: '2026-09-01T00:00:00.000Z', source: 'manual' },
-        math: { level: 3, updatedAt: '2026-09-04T00:00:00.000Z', source: 'quest' },
-        writing: { level: 2, updatedAt: '2026-08-01T00:00:00.000Z', source: 'manual' },
+        phonics: { level: 5, updatedAt: NOW, source: 'manual' },
+        math: { level: 3, updatedAt: NOW, source: 'quest' },
+        writing: { level: 2, updatedAt: NOW, source: 'manual' },
+        comprehension: { level: 4, updatedAt: NOW, source: 'quest' },
+        sentence: { level: 1, updatedAt: NOW, source: 'quest' },
       },
     } as SkillSnapshot
-    expect(newestDrivingLevelStamp(snap)).toBe('2026-09-04T00:00:00.000Z')
+    expect(currentDrivingLevels(snap)).toEqual({ phonics: 5, math: 3, writing: 2 })
   })
 
-  it('ignores levels that drive no band — they must not move the watermark', () => {
-    const snap = {
-      childId: 'c1',
-      workingLevels: {
-        phonics: { level: 5, updatedAt: '2026-09-01T00:00:00.000Z', source: 'manual' },
-        comprehension: { level: 4, updatedAt: '2026-09-09T00:00:00.000Z', source: 'quest' },
-        sentence: { level: 3, updatedAt: '2026-09-09T00:00:00.000Z', source: 'quest' },
-      },
-    } as SkillSnapshot
-    expect(newestDrivingLevelStamp(snap)).toBe('2026-09-01T00:00:00.000Z')
-  })
-
-  it('is undefined with no usable stamp, so nothing is ever watermarked blind', () => {
-    expect(newestDrivingLevelStamp(null)).toBeUndefined()
-    expect(newestDrivingLevelStamp({ childId: 'c1', workingLevels: {} } as SkillSnapshot)).toBeUndefined()
+  it('drops a non-finite or absent level, so "none" and "NaN" compare equal', () => {
+    expect(currentDrivingLevels(null)).toEqual({})
     expect(
-      newestDrivingLevelStamp({
+      currentDrivingLevels({
         childId: 'c1',
-        workingLevels: { phonics: { level: 9 } },
-      } as SkillSnapshot),
-    ).toBeUndefined()
+        workingLevels: { phonics: { level: NaN }, math: { level: undefined } },
+      } as unknown as SkillSnapshot),
+    ).toEqual({})
   })
 
-  it('a level that lands AFTER the watermark is still seen on the next pass', () => {
-    // The race: the watermark records the stamp of what was projected, so a level
-    // written later — even a moment later, and even by a device whose clock is
-    // behind this one — is strictly newer than it and re-projects.
-    const projected = storedAt(5, { projectedThrough: '2026-09-01T09:00:00.000Z' })
-    const landedJustAfter = snapshot(7, '2026-09-01T09:00:00.001Z')
-    expect(shouldReprojectWorkingLevels(projected, landedJustAfter)).toBe(true)
-
-    // Whereas a wall-clock watermark (the projecting client's `now`, minutes or
-    // hours later) would have swallowed it.
-    const wallClocked = storedAt(5, { projectedThrough: NOW })
-    expect(shouldReprojectWorkingLevels(wallClocked, landedJustAfter)).toBe(false)
+  it('is what the seeder records, so a fresh model needs no re-projection', () => {
+    const seeded = storedAt(5)
+    expect(seeded.projectedThrough).toEqual(currentDrivingLevels(snapshot(5)))
+    expect(shouldReprojectWorkingLevels(seeded, snapshot(5))).toBe(false)
   })
 })
 

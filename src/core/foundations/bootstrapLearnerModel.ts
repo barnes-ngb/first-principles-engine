@@ -35,11 +35,10 @@ import {
   skillSnapshotsCollection,
 } from '../firebase/firestore'
 import { foundationGraphs } from './index'
-import { mergeSeededModel, seedLearnerModel } from './seedLearnerModel'
+import { currentDrivingLevels, mergeSeededModel, seedLearnerModel } from './seedLearnerModel'
 import { promotedModelStatus } from './modelStatus'
 import {
   applyWorkingLevelProjection,
-  newestDrivingLevelStamp,
   shouldReprojectWorkingLevels,
 } from './workingLevelProjection'
 import type { ChildSkillMap } from '../curriculum/skillStatus'
@@ -135,9 +134,9 @@ export async function bootstrapLearnerModel(
  * reads stay outside only because one of them is a collection query, which it
  * cannot.
  *
- * **The watermark is the level stamp that was actually projected, never `now`** —
- * see `lastProjectionStamp`. A wall clock could watermark past a level this
- * projection never read.
+ * **The watermark is the projected levels themselves, compared per field** — see
+ * `LearnerModel.projectedThrough` for the two timestamp-shaped answers this
+ * replaced (Codex rounds 1 and 2) and exactly which real updates each swallowed.
  *
  * Three write shapes, and only three:
  *   - levels not newer      → no write at all;
@@ -160,15 +159,18 @@ async function reprojectWorkingLevels(
     const existing = existingDoc.data() as LearnerModel
 
     const snapDoc = await tx.get(snapRef)
-    // No snapshot means no working levels, and a projection with no levels is a
-    // projection of `not-yet` — which the upgrade-only fold would discard anyway.
-    if (!snapDoc.exists()) return existing
-    const snapshot = snapDoc.data() as SkillSnapshot
+    // An absent snapshot is no working levels, which the fold reads as `not-yet`
+    // everywhere and the upgrade-only rule then discards. It is still RECORDED —
+    // an empty watermark is a fact about what was projected, and recording it is
+    // what stops this transaction re-running on every later mount.
+    const snapshot: SkillSnapshot | null = snapDoc.exists()
+      ? (snapDoc.data() as SkillSnapshot)
+      : null
 
     if (!shouldReprojectWorkingLevels(existing, snapshot)) return existing
 
-    // The watermark: exactly the newest level this projection is computed from.
-    const projectedThrough = newestDrivingLevelStamp(snapshot) as string
+    // The watermark: exactly the levels this projection is computed from.
+    const projectedThrough = currentDrivingLevels(snapshot)
     const now = new Date().toISOString()
     const { model: next, changedConceptIds } = applyWorkingLevelProjection(
       existing,

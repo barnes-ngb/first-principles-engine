@@ -156,6 +156,7 @@ function seededInJuly(over: Partial<LearnerModel> = {}): LearnerModel {
       snapshotAt(5, SEEDED_AT),
       SEEDED_AT,
     ),
+    projectedThrough: { phonics: 5 },
     modalityCalibration: { reading: { note: '' }, writing: { note: '' }, math: { note: '' } },
     whatMattersNext: [],
     changeFeed: [],
@@ -204,13 +205,13 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     expect(getDocs).not.toHaveBeenCalled()
   })
 
-  it('writes NOTHING when the levels have not moved since the last projection', async () => {
-    txReads({ model: seededInJuly(), snapshot: snapshotAt(7, SEEDED_AT) })
+  it('writes NOTHING when the levels are the ones already projected', async () => {
+    txReads({ model: seededInJuly(), snapshot: snapshotAt(5, LEVEL_MOVED_AT) })
 
     const model = await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
     expect(txSet).not.toHaveBeenCalled()
-    expect(model?.projectedThrough).toBeUndefined()
+    expect(model?.projectedThrough).toEqual({ phonics: 5 })
   })
 
   it('writes projectedThrough ALONE when the levels moved but no state did', async () => {
@@ -223,6 +224,9 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
         snapshotAt(7, SEEDED_AT),
         SEEDED_AT,
       ),
+      // Recorded as level 5 while its states already reflect 7 — so the watermark
+      // is stale, the projection runs, and nothing has anywhere to move.
+      projectedThrough: { phonics: 5 },
     }
     txReads({ model: stored7, snapshot: snapshotAt(7, LEVEL_MOVED_AT) })
 
@@ -231,8 +235,8 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     expect(txSet).toHaveBeenCalledTimes(1)
     const payload = txSet.mock.calls[0][1] as Record<string, unknown>
     expect(Object.keys(payload)).toEqual(['projectedThrough'])
-    // The stamp that was projected, never this client's clock.
-    expect(payload.projectedThrough).toBe(LEVEL_MOVED_AT)
+    // The LEVELS that were projected, never this client's clock.
+    expect(payload.projectedThrough).toEqual({ phonics: 7 })
     expect(txSet.mock.calls[0][2]).toEqual({ merge: true })
   })
 
@@ -245,10 +249,9 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     const payload = txSet.mock.calls[0][1] as LearnerModel
     expect(payload.conceptStates['reading.phonics.longVowels'].state).toBe('solid')
     expect(payload.changeFeed.length).toBeGreaterThan(0)
-    // The watermark is the LEVEL's stamp; synthesisStaleAt is a real wall clock,
-    // because it answers "how old is the synthesis", not "what have I read".
-    expect(payload.projectedThrough).toBe(LEVEL_MOVED_AT)
-    expect(payload.synthesisStaleAt).not.toBe(LEVEL_MOVED_AT)
+    // The watermark is the LEVELS; synthesisStaleAt is a real wall clock, because
+    // it answers "how old is the synthesis", not "what have I read".
+    expect(payload.projectedThrough).toEqual({ phonics: 7 })
     expect(Date.parse(payload.synthesisStaleAt as string)).toBeGreaterThan(
       Date.parse(LEVEL_MOVED_AT),
     )
@@ -285,12 +288,37 @@ describe('bootstrapLearnerModel — reproject (UX-291)', () => {
     expect(model).toBeNull()
   })
 
-  it('writes nothing when the child has no skill snapshot', async () => {
+  it('records an EMPTY watermark when the child has no skill snapshot', async () => {
+    // No levels means the fold reads `not-yet` everywhere and the upgrade-only
+    // rule discards all of it — but the fact is still recorded, or this
+    // transaction re-runs on every later mount.
     txReads({ model: seededInJuly(), snapshot: null })
 
     const model = await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
 
+    expect(txSet).toHaveBeenCalledTimes(1)
+    expect(txSet.mock.calls[0][1]).toEqual({ projectedThrough: {} })
+    expect(model?.projectedThrough).toEqual({})
+  })
+
+  // Codex round 2, finding 2 — a model that never recorded a projection is
+  // projected once and recorded, rather than measured against a seed wall clock
+  // that could mark a level landing during the seed's own read window as done.
+  it('projects a model that has never recorded one, then stops', async () => {
+    const unrecorded = seededInJuly()
+    delete (unrecorded as { projectedThrough?: unknown }).projectedThrough
+    txReads({ model: unrecorded, snapshot: snapshotAt(5, LEVEL_MOVED_AT) })
+
+    await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
+
+    // Its states already match level 5, so nothing moves — only the watermark.
+    expect(txSet).toHaveBeenCalledTimes(1)
+    expect(txSet.mock.calls[0][1]).toEqual({ projectedThrough: { phonics: 5 } })
+
+    // And with that recorded, the next visit writes nothing.
+    vi.clearAllMocks()
+    txReads({ model: seededInJuly(), snapshot: snapshotAt(5, LEVEL_MOVED_AT) })
+    await bootstrapLearnerModel('fam-1', 'c1', 'reproject')
     expect(txSet).not.toHaveBeenCalled()
-    expect(model?.childId).toBe('c1')
   })
 })

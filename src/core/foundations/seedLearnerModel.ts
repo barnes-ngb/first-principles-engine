@@ -44,6 +44,7 @@ import type {
   EvidenceRef,
   LearnerModel,
   ModalityCalibration,
+  ProjectedWorkingLevels,
 } from '../types/learnerModel'
 import type { SkillSnapshot } from '../types/evaluation'
 import type { SightWordProgress } from '../types/books'
@@ -122,6 +123,39 @@ function levelToBand(key: WorkingLevelDriverKey, level: number | undefined): num
   if (level <= 4) return 1
   if (level <= 6) return 2
   return 3
+}
+
+/**
+ * A new band-seeding driver key must be given a slot on
+ * {@link ProjectedWorkingLevels}, or this fails to compile. The UX-291 watermark
+ * is per-field by construction (Codex round 2), so a key with nowhere to be
+ * recorded would be a key whose changes are silently swallowed.
+ */
+export type DriverKeysHaveProjectionSlots = [
+  Exclude<WorkingLevelDriverKey, keyof ProjectedWorkingLevels>,
+  Exclude<keyof ProjectedWorkingLevels, WorkingLevelDriverKey>,
+] extends [never, never]
+  ? true
+  : never
+
+/**
+ * The child's current levels for the keys that actually drive band seeding — the
+ * UX-291 projection watermark's whole content. A `comprehension` or `sentence`
+ * level changes no band-derived state, so it is not read: including it would cost
+ * a write every time an unrelated level moved.
+ *
+ * A non-finite or absent level becomes an absent slot, so "no level" and "level
+ * NaN" compare equal and neither is mistaken for a change.
+ */
+export function currentDrivingLevels(
+  snapshot: SkillSnapshot | null,
+): ProjectedWorkingLevels {
+  const out: ProjectedWorkingLevels = {}
+  for (const key of WORKING_LEVEL_DRIVER_KEYS) {
+    const level = snapshot?.workingLevels?.[key]?.level
+    if (typeof level === 'number' && Number.isFinite(level)) out[key] = level
+  }
+  return out
 }
 
 /** Read a working level for a domain key from the snapshot. */
@@ -415,6 +449,11 @@ export function seedLearnerModel(
     whatMattersNext: [],
     changeFeed: [],
     openQuestions: [],
+    // The seed IS a projection, so it records the levels it projected from
+    // (UX-291, Codex round 2). Without this a freshly created model would carry
+    // no watermark, and falling back to its `seededAt` wall clock could mark a
+    // level that landed during the seed's own read window as already processed.
+    projectedThrough: currentDrivingLevels(snapshot),
     seededAt: now,
     updatedAt: now,
   }

@@ -270,6 +270,18 @@ export interface LearnerReviewSession {
   updatedAt: string
 }
 
+/**
+ * The working levels a projection was computed from (UX-291). One optional slot
+ * per band-seeding driver key; `workingLevelProjection.ts` holds a compile-time
+ * check that these keys are exactly `WORKING_LEVEL_DRIVER_KEYS`, so a new driver
+ * fails to compile until it is given a slot here.
+ */
+export interface ProjectedWorkingLevels {
+  phonics?: number
+  writing?: number
+  math?: number
+}
+
 export interface LearnerModel {
   id?: string
   childId: string
@@ -300,26 +312,29 @@ export interface LearnerModel {
   synthesisStaleAt?: string | null
   seededAt: string
   /**
-   * The **watermark** of the band-derived projection (UX-291): the newest
-   * `WorkingLevel.updatedAt` the concept states have already been recomputed
-   * from. Additive and optional — a model written before the re-projection
-   * existed has none, and its `seededAt` is the honest baseline for it, so there
-   * is no migration.
+   * **The working levels the band-derived concept states were last computed
+   * from** (UX-291) — the inputs themselves, one entry per driving key, not a
+   * timestamp. Additive and optional; absent means *never recorded*, which is
+   * read as "project once and record it", so there is no migration.
    *
-   * **It holds a level's stamp, not a wall clock,** and it is named
-   * `projectedThrough` rather than `projectedAt` for exactly that reason (Codex
-   * round 1). Stamping the projecting client's own `now` would watermark past
-   * levels the projection never read — a quest finishing on another device
-   * mid-transaction, or a writing device whose clock runs behind this one — and
-   * the next visit would read the unseen level as already processed.
+   * **It holds values, and every timestamp-shaped alternative was wrong** (Codex
+   * rounds 1 and 2, three findings between them). A wall clock watermarked past
+   * levels the projection never read. The newest `WorkingLevel.updatedAt` fixed
+   * that and still could not: collapsing phonics / writing / math into one
+   * maximum cannot establish that *each* was projected, so a clock-skewed device
+   * writing `math` with a stamp older than the standing `phonics` stamp was
+   * swallowed, and a same-field stamp that moved backwards was too. Comparing the
+   * inputs answers the actual question — *are these the levels I already
+   * projected?* — for every field independently, with no clock in it at all, on
+   * a `WorkingLevel.updatedAt` that is written by whichever device did the quest.
    *
    * Deliberately **not** `seededAt` re-used. `seededAt` means *when this document
    * was created* and several readers take it that way; overloading it because a
-   * second writer needed somewhere to put a stamp is the UX-322 mistake, where a
-   * field's meaning drifted and five consumers were left reading the old one.
+   * second writer needed somewhere to put something is the UX-322 mistake, where
+   * a field's meaning drifted and five consumers were left reading the old one.
    * It is also not `updatedAt`: a projection that moves nothing must leave
    * `updatedAt` alone, and it still needs to record what it read.
    */
-  projectedThrough?: string
+  projectedThrough?: ProjectedWorkingLevels
   updatedAt: string
 }

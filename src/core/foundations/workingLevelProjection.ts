@@ -37,12 +37,18 @@
 //      no work and write nothing — no feed line, no `updatedAt`, no
 //      `synthesisStaleAt`. Without that, the trigger below (a page view) would
 //      mark the synthesis stale on every visit and the weekly beat would
-//      regenerate forever. The watermark is the newest level stamp actually
-//      projected, never a wall clock — see `lastProjectionStamp`.
+//      regenerate forever. The watermark is the projected LEVELS themselves,
+//      compared per field — see `shouldReprojectWorkingLevels`, and
+//      `LearnerModel.projectedThrough` for the timestamp answers it replaced.
 //
 // Pure. The write is `bootstrapLearnerModel`'s `'reproject'` mode.
 
-import { projectWorkingLevelStates, carriesNonDerivableEvidence, WORKING_LEVEL_DRIVER_KEYS } from './seedLearnerModel'
+import {
+  projectWorkingLevelStates,
+  carriesNonDerivableEvidence,
+  currentDrivingLevels,
+  WORKING_LEVEL_DRIVER_KEYS,
+} from './seedLearnerModel'
 import { FOUNDATION_NODE_MAP } from './index'
 import type { ConceptGraph } from './types'
 import type {
@@ -61,60 +67,34 @@ const STATE_RANK: Record<ConceptStateKind, number> = {
 }
 
 /**
- * The **newest** `WorkingLevel.updatedAt` among the levels that actually drive
- * band seeding ({@link WORKING_LEVEL_DRIVER_KEYS}), or `undefined` when none of
- * them carries a usable stamp.
+ * Are the child's working levels different from the ones the band-derived states
+ * were last computed from?
  *
- * Only the driving levels are read: a `comprehension` or `sentence` level moving
- * changes no band-derived state, so it must not cost a write.
+ * **The comparison is of values, per field, with no clock in it** — see
+ * `LearnerModel.projectedThrough` for the two timestamp-shaped answers this
+ * replaced and why each of them swallowed real updates. A level that moved in
+ * either direction, a level that appeared, and a level that was cleared are all
+ * differences; whether a difference may *move a state* is the upgrade-only rule's
+ * question, not this one's.
  *
- * A level with no usable `updatedAt` is skipped rather than counted. An absent
- * stamp is not evidence that something moved, and treating it as one would
- * re-run the projection on every page view for the life of the document.
+ * **An unrecorded projection is not a completed one.** A model with no
+ * `projectedThrough` — every model written before this feature, and any model
+ * whose seed predates it — cannot support a claim about what it was projected
+ * from, so it is projected once and recorded. That is safe rather than expensive
+ * because the fold is idempotent and upgrade-only: on a model already consistent
+ * with its levels it moves nothing and the write is the watermark alone. It is
+ * also the honest answer to Codex round 2's second finding, which was that
+ * falling back to the seed's wall clock could mark a level that landed *during*
+ * the seed's own read window as already processed.
  */
-export function newestDrivingLevelStamp(
-  snapshot: SkillSnapshot | null,
-): string | undefined {
-  let newest: string | undefined
-  for (const key of WORKING_LEVEL_DRIVER_KEYS) {
-    const updatedAt = snapshot?.workingLevels?.[key]?.updatedAt
-    if (typeof updatedAt !== 'string' || updatedAt === '') continue
-    if (newest === undefined || updatedAt > newest) newest = updatedAt
-  }
-  return newest
-}
-
-/**
- * The watermark a projection is measured against: **the newest working level it
- * has already been computed from**.
- *
- * `projectedThrough` is its own field rather than a re-use of `seededAt` **on
- * purpose** (UX-322's lesson): `seededAt` means *when this document was created*,
- * several places read it that way, and a field whose meaning drifts because a
- * second writer needed somewhere to put something is exactly how that defect was
- * made. A model written before this feature existed has no `projectedThrough`,
- * and its `seededAt` is the honest baseline for it.
- *
- * **It stores a level's stamp, not a wall clock** (Codex round 1), and it is
- * named for that. Stamping `new Date().toISOString()` would have watermarked past
- * levels this projection never read — a quest finishing on another device between
- * the read and the commit, or simply a writing device whose clock runs behind
- * this one. Either way the next visit would compare the unseen level's stamp to a
- * *later* watermark, conclude it was already processed, and leave the map stale
- * until some other level moved: UX-291's own defect, arriving through a narrower
- * door.
- */
-export function lastProjectionStamp(model: LearnerModel): string {
-  return model.projectedThrough ?? model.seededAt ?? ''
-}
-
-/** Are the child's working levels newer than the last projection's watermark? */
 export function shouldReprojectWorkingLevels(
   model: LearnerModel,
   snapshot: SkillSnapshot | null,
 ): boolean {
-  const newest = newestDrivingLevelStamp(snapshot)
-  return newest !== undefined && newest > lastProjectionStamp(model)
+  const projected = model.projectedThrough
+  if (!projected) return true
+  const current = currentDrivingLevels(snapshot)
+  return WORKING_LEVEL_DRIVER_KEYS.some((key) => current[key] !== projected[key])
 }
 
 /** The deterministic `changeFeed` cause for a projected move. Upgrades only, so no down-wording is needed. */
