@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import Accordion from '@mui/material/Accordion'
+import AccordionSummary from '@mui/material/AccordionSummary'
+import AccordionDetails from '@mui/material/AccordionDetails'
+import HelpStrip from '../../components/HelpStrip'
 import AddIcon from '@mui/icons-material/Add'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import StarOutlineIcon from '@mui/icons-material/StarOutline'
@@ -966,27 +971,12 @@ export default function CurriculumTab() {
           />
         )}
 
-        <Typography variant="h5" fontWeight={600}>
-          {childName}&apos;s Curriculum
-        </Typography>
-
-        {/* This Week's Scans */}
-        <SectionCard
-          title={`This week\u2019s scans${weeklyScans.length > 0 ? ` (${weeklyScans.length})` : ''}`}
-        >
-          {weeklyScans.length === 0 ? (
-            <EmptyState
-              title="No scans this week yet"
-              description="Capture work on the Today page to see AI analysis here."
-            />
-          ) : (
-            <Stack spacing={0.5}>
-              {weeklyScans.map((scanRec) => (
-                <ScanAnalysisPanel key={scanRec.id} scan={scanRec} />
-              ))}
-            </Stack>
-          )}
-        </SectionCard>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+          <Typography variant="h5" component="h1" fontWeight={600}>
+            {childName}&apos;s Curriculum
+          </Typography>
+          <HelpStrip pageKey="curriculum" text="Manage workbooks and activities. Add Page records work in an existing workbook. Use the add section below for a new resource." />
+        </Stack>
 
         {/* Active Workbooks */}
         <SectionCard title={CURRICULUM_SECTION_TITLE[CurriculumSection.Workbooks]}>
@@ -1193,6 +1183,27 @@ export default function CurriculumTab() {
             </List>
           </SectionCard>
         )}
+
+        {/* This Week's Scans */}
+        <Accordion key={activeChildId || 'no-child'} disableGutters>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-controls="curriculum-scans" id="curriculum-scans-heading">
+            <Typography component="h2" variant="subtitle1">This week’s scans ({weeklyScans.length})</Typography>
+          </AccordionSummary>
+          <AccordionDetails id="curriculum-scans">
+            {weeklyScans.length === 0 ? (
+              <EmptyState
+                title="No scans this week yet"
+                description="Capture work on the Today page to see AI analysis here."
+              />
+            ) : (
+              <Stack spacing={0.5}>
+                {weeklyScans.map((scanRec) => (
+                  <ScanAnalysisPanel key={scanRec.id} scan={scanRec} />
+                ))}
+              </Stack>
+            )}
+          </AccordionDetails>
+        </Accordion>
 
         {/* Completed */}
         {completed.length > 0 && (
