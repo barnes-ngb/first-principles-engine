@@ -376,6 +376,12 @@ export default function TodayPage() {
     if (moveTargetIndex !== null) open.push(TodayDecision.MoveItem)
     if (swapTargetIndex !== null) open.push(TodayDecision.SwapVideo)
     if (watchPickerOpen) open.push(TodayDecision.AddVideo)
+    // Codex round 3 (P1): two more page-owned dialogs. The watch player's
+    // `completeWatch` applies its target's INDEX to the live checklist and
+    // writes an artifact and credited minutes for the live child; the teach
+    // helper holds the item it was opened for and is handed the live `childId`.
+    if (watch.watchTarget !== null) open.push(TodayDecision.WatchVideo)
+    if (teachHelperOpen) open.push(TodayDecision.TeachHelper)
     setOpenScopeKey(scopeKey)
     checklistOpenRef.current = []
     chapterOpenRef.current = []
@@ -384,6 +390,9 @@ export default function TodayPage() {
     setMoveTargetIndex(null)
     setSwapTargetIndex(null)
     setWatchPickerOpen(false)
+    watch.closeWatch()
+    setTeachHelperOpen(false)
+    setTeachHelperItem(null)
     // Named only when the previous scope was a DIFFERENT child. Paging from
     // Tuesday to Wednesday for the same boy closes the same dialogs and is worth
     // the same sentence, but "Lincoln was selected" would be a strange way to

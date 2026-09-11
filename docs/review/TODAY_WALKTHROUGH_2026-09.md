@@ -8,15 +8,16 @@ walked end to end**. Progress was (AUDIT-218, `UX-311`–`320`); the planner was
 (FEAT-179). Today has been edited by more runs than any of them and read as a whole by none — and
 both of this week's owner reports came from it.
 
-**Derived, not counted.** `npm run census:today`, on this branch, pasted:
+**Derived, not counted.** `npm run census:today`, **on the tree this run walked** — `origin/main` at
+`5d599eb4`, before any of this PR's changes. Pasted, not retyped:
 
 ```
-source files under src/features/today (non-test): 72
-lines of source in them: 18922
+source files under src/features/today (non-test): 70
+lines of source in them: 18244
 largest files:
-   1754  TodayPage.tsx
-   1694  TodayChecklist.tsx
-   1252  KidTodayView.tsx
+   1651  TodayChecklist.tsx
+   1618  TodayPage.tsx
+   1199  KidTodayView.tsx
     904  UnifiedCaptureCard.tsx
     706  KidChecklist.tsx
 collections named: 17
@@ -37,16 +38,27 @@ collections named: 17
     1  weeksCollection
     1  evaluationSessionsCollection
     1  plannerConversationsCollection
-console.error / console.warn call sites: 77
-  in 28 of 72 files
+console.error / console.warn call sites: 75
+  in 28 of 70 files
 ```
+
+**It is the BASE tree on purpose, and Codex round 3 (P2) is why it says so.** The first draft pasted a
+reading taken part-way through the run and did not re-paste it as the run continued, so by round 3 the
+document contradicted the script it names — the derived-numbers rule broken by the document that
+invokes it. Re-pasting on every push would have been a treadmill with the same failure mode one commit
+later. The fix is to fix the *referent*: a walkthrough describes the page **as it was walked**, that
+reading is taken once and can never go stale, and the command to reproduce it is
+`git worktree add <dir> 5d599eb4 && npx tsx scripts/todaySurfaceCensus.ts` from that worktree. The
+same script run on this PR's head reports the same 17 collections with the same per-collection counts
+and a larger file and line count, which is what adding ten test files and eight fixes does; no claim
+below reads off the head.
 
 **Two corrections to the run prompt's own figures, both verified.** The prompt's step-0 greps read
 `artifacts ×37, days ×15, skillSnapshots ×8, scans ×4, hours ×4, learnerModels ×3, xpLedger ×2,
 evaluationSessions ×2` and *"twelve `console.error` / `console.warn` catches"*. Neither survives
 derivation: the collection figures counted **test files** and the `evidenceCollection` *field name*
 alongside the `artifactsCollection()` *helper*, and the catch figure is off by a factor of six — there
-are **77**, in 28 of 72 files. The script above is committed so the next run does not have to
+are **75**, in 28 of 70 files. The script above is committed so the next run does not have to
 re-establish this. (The prompt's ledger-id mapping is also off by one: `UX-341` is
 `settings/AvatarAdminTab`, not a Today row. The two Today child-switch rows are `UX-342` and
 `UX-343`, and those are the two this run fixed.)
@@ -297,7 +309,7 @@ can, but the page works against her · **P3** — polish.
 | **UX-365** | **P3** | Four more reads still render their own failure as an affirmative empty: `useTodayMiningMinutes` (→ *"No mining yet today"*), `useUnappliedDraft` (→ no *review and apply* banner), and `TodayPage`'s own recent-scans and scan-feedback queries. `UX-356`'s class, beyond the two rows it named. |
 | **UX-366** | **P3** | The week plan is resolved from `new Date()`, not from the day being viewed, so paging back to last Friday shows **this** week's focus, conundrum and read-aloud book. The page computes its Mon–Fri dates from `selectedDate` two files away. |
 | **UX-367** | **P3** | The Capture card has its **own** child dropdown, so a parent can log for the other boy without switching — correct, and it already clears the family presets on a change (`UX-184`). But the artifact it writes is prepended to the list of the child **on screen**, so the page shows it under the wrong boy until reload. |
-| **UX-368** | **P3** | `TodayChecklist.tsx` is 1,694 lines and `TodayPage.tsx` 1,754 (both derived, §0). Neither is this run's to split, and the seam is named: the per-row controls and the four dialogs they own — the photo batch, the review note, the lesson video and the add-item row — are one component's worth, and they are exactly the four `UX-343` had to report upward because the page could not see them. |
+| **UX-368** | **P3** | `TodayChecklist.tsx` is 1,651 lines and `TodayPage.tsx` 1,618 as walked (both derived, §0; both larger on this PR's head). Neither is this run's to split, and the seam is named: the per-row controls and the four dialogs they own — the photo batch, the review note, the lesson video and the add-item row — are one component's worth, and they are exactly the four `UX-343` had to report upward because the page could not see them. Three review rounds then found four MORE dialogs the page owns and had to close by hand (the chapter note, the watch player, the teach helper, and the two picker targets), which is the strongest form of this argument: the page cannot enumerate its own open decisions, so each one has to be remembered. |
 
 ### Proposed shape for `UX-361` (not built)
 
@@ -386,7 +398,18 @@ and left the kid one still presenting a failed read as a book nobody had started
 artifact read only when the list was empty left a *refresh* failure silent, with the previous day's
 photos on screen as though they were today's.
 
-Both species are invisible from the diff of the thing being fixed — you have to read the callers, and
-then read every other mount point of the same class. That is the same reason this page needed a walk
-rather than another targeted run, and it is the argument for `UX-343`'s registry-style answer over six
-more individual patches.
+**Round 3 (2 findings, both taken)** was round 2's species again, and that repetition is the most
+useful thing the three rounds produced. Two more page-owned dialogs were writing with the live child:
+the curated-video player, whose `completeWatch` applies its target's **index** to the live checklist,
+and the teach-helper dialog, handed the live `childId` with the old item still in it. Its second
+finding was this document breaking its own rule — the derived census block was pasted mid-run and not
+re-pasted, so by round 3 the audit contradicted the script it names. The fix was to fix the
+**referent** rather than to re-paste: a walkthrough describes the page **as it was walked**, and that
+reading is taken once against the base commit and can never go stale.
+
+**Three rounds, three mount points of the same class, one per round.** That is exactly the shape
+`UX-329` described for child-scoped editors — *"nothing in the repo knew the list existed"* — reproduced
+one page in, and it is why `UX-368` is filed the way it is: Today cannot enumerate its own open
+decisions, so each one has to be remembered by a person. All three species are invisible from the diff
+of the thing being fixed. You have to read the callers, and then read every other mount point of the
+same class, which is the argument for a registry-style answer over another six individual patches.

@@ -63,6 +63,22 @@ export const TodayDecision = {
    * written onto the newly-selected child's `bookProgress`.
    */
   ChapterNote: 'chapter-note',
+  /**
+   * The curated-video player, open on a planned row (Codex round 3, P1).
+   *
+   * `useWatchItemCompletion.completeWatch` applies the target's **index** to the
+   * live checklist and writes an artifact and credited minutes for the live
+   * child, so a player left open across a switch completes whatever row now
+   * happens to sit at that index, for the wrong boy.
+   */
+  WatchVideo: 'watch-video',
+  /**
+   * The teach-helper dialog, open on a checklist row (Codex round 3, P1).
+   *
+   * It holds the item it was opened for and is handed the **live** `childId`, so
+   * it can save one boy's lesson help under his brother.
+   */
+  TeachHelper: 'teach-helper',
 } as const
 export type TodayDecision = (typeof TodayDecision)[keyof typeof TodayDecision]
 
@@ -80,6 +96,8 @@ export const TODAY_DECISION_WORDS: Record<TodayDecision, string> = {
   [TodayDecision.GradeNote]: 'the review note',
   [TodayDecision.AddItem]: 'the item you were adding',
   [TodayDecision.ChapterNote]: 'the chapter note',
+  [TodayDecision.WatchVideo]: 'the video you were watching',
+  [TodayDecision.TeachHelper]: 'the teaching help',
 }
 
 /** The order the words are listed in, so two runs cannot phrase it differently. */
@@ -90,6 +108,8 @@ const DECISION_ORDER: TodayDecision[] = [
   TodayDecision.ChapterNote,
   TodayDecision.AddItem,
   TodayDecision.LessonVideo,
+  TodayDecision.WatchVideo,
+  TodayDecision.TeachHelper,
   TodayDecision.MoveItem,
   TodayDecision.SwapVideo,
   TodayDecision.AddVideo,

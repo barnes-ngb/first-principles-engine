@@ -49,6 +49,13 @@ describe('a change of child or day closes what Today had open (UX-343)', () => {
       'setMoveTargetIndex(null)',
       'setSwapTargetIndex(null)',
       'setWatchPickerOpen(false)',
+      // Codex round 3 (P1): two more page-owned dialogs whose writes read the
+      // live child — the watch player applies its target's INDEX to the live
+      // checklist, and the teach helper is handed the live `childId` with the
+      // old item still in it.
+      'watch.closeWatch()',
+      'setTeachHelperOpen(false)',
+      'setTeachHelperItem(null)',
     ]) {
       expect(guard, `scope guard does not clear: ${clear}`).toContain(clear)
     }
