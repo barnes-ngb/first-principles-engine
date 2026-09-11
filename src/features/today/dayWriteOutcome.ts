@@ -63,6 +63,27 @@ export interface DayWriteFailureNotice {
   severity: 'error'
 }
 
+/**
+ * What the page was able to do about the failure, which decides what it may
+ * claim (Codex round 2, P1 — the same rule the plan controls needed).
+ *
+ * The rollback is identity-guarded, so it does NOT always apply: a newer edit on
+ * the same day, or a switch to another child, both leave the screen showing
+ * something this failure has nothing to say about. Saying *"it's back to how it
+ * was"* over either is the same species of lie as *"Saved"* over a write that
+ * did not land, so the copy is keyed on what actually happened.
+ */
+export const DayWriteAftermath = {
+  /** The row was put back. */
+  RolledBack: 'rolled-back',
+  /** A newer edit to the same day is on screen. */
+  Superseded: 'superseded',
+  /** The page is showing a different child or date now. */
+  MovedOn: 'moved-on',
+} as const
+export type DayWriteAftermath =
+  (typeof DayWriteAftermath)[keyof typeof DayWriteAftermath]
+
 function itemLabel(item: ChecklistItem | undefined): string | null {
   const label = item?.label?.trim()
   return label ? label : null
@@ -116,17 +137,27 @@ export function namedDayEdit(before: DayLog | null, after: DayLog): string | nul
 export function dayWriteFailureNotice(
   reason: DayWriteRefusal,
   editedLabel: string | null,
-  opts: { pageMovedOn?: boolean } = {},
+  aftermath: DayWriteAftermath = DayWriteAftermath.RolledBack,
 ): DayWriteFailureNotice {
-  if (opts.pageMovedOn) {
-    // The write belonged to a day this page is no longer showing (the sibling
-    // of the P1 Codex round 1 found in `TodayPage`'s rollback). The row is not
-    // taken back — the listener replaced it when the target changed, so there is
-    // nothing here to take back — and it is not NAMED either, because a row
-    // title over another child's day reads as a claim about this one. It is
-    // still reported: a lost edit is never silent, whichever day it was on.
+  if (aftermath === DayWriteAftermath.MovedOn) {
+    // The write belonged to a day this page is no longer showing (Codex round 1,
+    // P1's sibling). The row is not taken back — the listener replaced it when
+    // the target changed, so there is nothing here to take back — and it is not
+    // NAMED either, because a row title over another child's day reads as a
+    // claim about this one. Still reported: a lost edit is never silent,
+    // whichever day it was on.
     return {
       text: "An edit made before you switched didn't save. Nothing here was changed — switch back to check it.",
+      severity: 'error',
+    }
+  }
+  if (aftermath === DayWriteAftermath.Superseded) {
+    // A newer edit to this same day is on screen, so the rollback was skipped
+    // and the sentence may not claim one (Codex round 2, P1). The row IS named
+    // here — it is a row on the day the parent is looking at.
+    const named = editedLabel ? `“${editedLabel}”` : 'An earlier change'
+    return {
+      text: `${named} didn't save. What you see now is your newer change — check it landed.`,
       severity: 'error',
     }
   }

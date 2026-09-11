@@ -9,6 +9,7 @@ import { getWeekRange } from '../../core/utils/time'
 import type { DailyPlanTemplate } from './dailyPlanTemplates'
 import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
 import {
+  DayWriteAftermath,
   DayWriteRefusal,
   dayWriteFailureNotice,
   namedDayEdit,
@@ -175,11 +176,21 @@ export function useDayLog({
       previous: DayLog | null,
       docId: string,
     ) => {
-      const pageMovedOn = docId !== liveDocIdRef.current
+      // What the page can actually do about this, which decides what it may
+      // claim (Codex round 2, P1). `previousDayLogRef` is the document the
+      // screen is showing — `persistDayLogImmediate` advances it synchronously
+      // on every edit — so comparing against it answers the same question the
+      // identity-guarded rollback below asks, one line earlier.
+      const aftermath =
+        docId !== liveDocIdRef.current
+          ? DayWriteAftermath.MovedOn
+          : previousDayLogRef.current === attempted
+            ? DayWriteAftermath.RolledBack
+            : DayWriteAftermath.Superseded
       setDayLog((current) => (current === attempted ? previous : current))
       setSaveState('error')
       setSnackMessage(
-        dayWriteFailureNotice(reason, namedDayEdit(previous, attempted), { pageMovedOn }),
+        dayWriteFailureNotice(reason, namedDayEdit(previous, attempted), aftermath),
       )
     },
     [],

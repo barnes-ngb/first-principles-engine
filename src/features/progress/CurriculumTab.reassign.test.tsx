@@ -200,6 +200,25 @@ describe('CurriculumTab — assign to a child (UX-354)', () => {
     expect(await screen.findByText(/still where it was/)).toBeTruthy()
   })
 
+  it('re-resolves the row against the LIVE list before writing', async () => {
+    // Codex round 2, P2: `configs` is an `onSnapshot` subscription, so another
+    // client can mark this program complete while the dialog is open. The
+    // captured object would still read `completed: false` and hand the owner of
+    // a closed record to somebody else.
+    const user = userEvent.setup()
+    const { rerender } = render(<CurriculumTab />)
+    await openReassign(user)
+    expect(await screen.findByText(/Who is “Sight word games” for\?/)).toBeTruthy()
+
+    // It is finished elsewhere while the dialog stands open.
+    configs.splice(0, configs.length, { ...ROUTINE, completed: true })
+    rerender(<CurriculumTab />)
+
+    expect(await screen.findByText(/closed record/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Lincoln' })).toBeNull()
+    expect(mockUpdateConfig).not.toHaveBeenCalled()
+  })
+
   it('is parent-only — a kid profile is never offered the item', async () => {
     mockIsChildProfile.mockReturnValue(true)
     const user = userEvent.setup()

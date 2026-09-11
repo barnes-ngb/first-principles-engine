@@ -50,7 +50,7 @@ import {
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
+import type { Artifact, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DailyPlan, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -97,6 +97,7 @@ import {
   dailyPlanGateNote,
   dailyPlanSaveFailureNotice,
   dailyPlanSaveMovedOnNotice,
+  dailyPlanSaveSupersededNotice,
   type DailyPlanSaveOutcome,
 } from './dailyPlanGate'
 import { useDayLog } from './useDayLog'
@@ -690,6 +691,33 @@ export default function TodayPage() {
   }, [selectedChildId, today])
 
   /**
+   * Which day-status tap is the newest — the day log's identity guard, in the
+   * one form this surface can have (Codex round 2, P1).
+   *
+   * Two taps can be in flight at once: the energy group and the day-type menu
+   * are a second apart. An unconditional rollback then puts the OLDER failure's
+   * captured values over the newer optimistic ones, and a later tap persists
+   * that stale value. `useDayLog` guards this by object identity; energy and
+   * plan type are enum strings with no identity, so a monotonic sequence is what
+   * plays that part.
+   */
+  const planEditSeqRef = useRef(0)
+
+  /**
+   * The plan as STORED — what a rollback goes back to when we have one.
+   *
+   * Better than the values captured at the tap, because after two failures in a
+   * row the second tap's "previous" is the first tap's optimistic value, which
+   * never landed. The stored document is the only thing known to have. When
+   * there is none — an unsettled or failed read, where nothing was written
+   * either — the captured values are right and are used instead.
+   */
+  const storedPlanRef = useRef<DailyPlan | null>(null)
+  useEffect(() => {
+    storedPlanRef.current = dailyPlan
+  }, [dailyPlan])
+
+  /**
    * UX-352 — an optimistic day-status edit that did not land is taken back and
    * said out loud, exactly as a checklist edit is. Both controls here update the
    * screen before the write resolves, and `saveDailyPlan` can decline in four
@@ -708,6 +736,7 @@ export default function TodayPage() {
     (
       outcome: DailyPlanSaveOutcome,
       target: string,
+      seq: number,
       prevEnergy: EnergyLevel,
       prevPlanType: PlanType,
     ) => {
@@ -721,8 +750,19 @@ export default function TodayPage() {
         setSnackMessage(dailyPlanSaveMovedOnNotice(movedChildName))
         return
       }
-      setEnergy(prevEnergy)
-      setPlanType(prevPlanType)
+      if (planEditSeqRef.current !== seq) {
+        // A newer tap is on screen. Restoring would undo it — and the sentence
+        // may not claim a rollback that did not happen.
+        setSnackMessage(dailyPlanSaveSupersededNotice())
+        return
+      }
+      const stored = storedPlanRef.current
+      const goBackTo =
+        stored && stored.childId === target.split('|')[0]
+          ? { energy: stored.energy, planType: stored.planType }
+          : { energy: prevEnergy, planType: prevPlanType }
+      setEnergy(goBackTo.energy)
+      setPlanType(goBackTo.planType)
       setSnackMessage(dailyPlanSaveFailureNotice(outcome.reason))
     },
     [setSnackMessage, children, selectedChildId],
@@ -731,6 +771,7 @@ export default function TodayPage() {
   const handleEnergyChange = useCallback(
     (newEnergy: EnergyLevel) => {
       const target = `${selectedChildId}|${today}`
+      const seq = (planEditSeqRef.current += 1)
       const prevEnergy = energy
       const prevPlanType = planType
       setEnergy(newEnergy)
@@ -742,7 +783,7 @@ export default function TodayPage() {
         planType === PlanType.Life ? PlanType.Life : energyToPlanType(newEnergy)
       setPlanType(newPlanType)
       void saveDailyPlan(newEnergy, newPlanType).then((outcome) =>
-        reportPlanSave(outcome, target, prevEnergy, prevPlanType),
+        reportPlanSave(outcome, target, seq, prevEnergy, prevPlanType),
       )
     },
     [saveDailyPlan, planType, energy, reportPlanSave, selectedChildId, today],
@@ -757,10 +798,11 @@ export default function TodayPage() {
   const handleDayTypeChange = useCallback(
     (newPlanType: PlanType) => {
       const target = `${selectedChildId}|${today}`
+      const seq = (planEditSeqRef.current += 1)
       const prevPlanType = planType
       setPlanType(newPlanType)
       void saveDailyPlan(energy, newPlanType).then((outcome) =>
-        reportPlanSave(outcome, target, energy, prevPlanType),
+        reportPlanSave(outcome, target, seq, energy, prevPlanType),
       )
     },
     [saveDailyPlan, energy, planType, reportPlanSave, selectedChildId, today],

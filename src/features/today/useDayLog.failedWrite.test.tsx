@@ -153,6 +153,11 @@ describe('a Today edit that did not save says so', () => {
     await waitFor(() => expect(result.current.snackMessage?.severity).toBe('error'))
     // The rollback is identity-guarded: the later edit survives.
     expect(result.current.dayLog?.checklist).toHaveLength(3)
+    // And the sentence does not claim a rollback that did not happen (Codex
+    // round 2, P1) — "it's back to how it was" over a screen that was not put
+    // back is the same species of lie as "Saved" over a write that did not land.
+    expect(result.current.snackMessage?.text).not.toContain('back to how it was')
+    expect(result.current.snackMessage?.text).toContain('newer change')
   })
 
   it('does not name a row over a day it is no longer showing', async () => {

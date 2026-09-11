@@ -433,9 +433,25 @@ export default function CurriculumTab() {
    * used to leave the dialog closed and the parent believing the move landed —
    * UX-351's defect on a second surface.
    */
-  const handleReassign = async (config: ActivityConfig, option: ReassignOwnerOption) => {
+  const handleReassign = async (configId: string, option: ReassignOwnerOption) => {
     if (isChildProfile) return
-    if (planReassignActivity(config, childList).refusal) return
+    // Resolved against the LIVE list, never the object the dialog opened with
+    // (Codex round 2, P2 — the rename handler's own rule). `configs` is an
+    // `onSnapshot` subscription: another client can mark this program complete
+    // while the dialog is open, and a captured object would still read
+    // `completed: false` and hand the owner of a closed record to someone else.
+    const config = configs.find((c) => c.id === configId)
+    if (!config) {
+      setSnack(reassignFailureNotice(reassign?.name ?? 'that activity'))
+      setReassign(null)
+      return
+    }
+    if (planReassignActivity(config, childList).refusal) {
+      // It became un-movable while the dialog was open. Say so rather than
+      // closing over a write that did not happen.
+      setReassign(config)
+      return
+    }
     try {
       await updateConfig(config.id, { childId: option.id })
       setReassign(null)
@@ -1493,7 +1509,11 @@ export default function CurriculumTab() {
         <DialogContent>
           {reassign &&
             (() => {
-              const plan = planReassignActivity(reassign, childList)
+              // Re-resolved on every render against the live `onSnapshot` list,
+              // so a row that becomes un-movable while the dialog is open says
+              // so here rather than at the tap (Codex round 2, P2).
+              const live = configs.find((c) => c.id === reassign.id) ?? reassign
+              const plan = planReassignActivity(live, childList)
               if (plan.refusal) {
                 return <DialogContentText>{plan.refusal}</DialogContentText>
               }
@@ -1508,7 +1528,7 @@ export default function CurriculumTab() {
                       <Button
                         key={option.id}
                         variant={reassign.childId === option.id ? 'contained' : 'outlined'}
-                        onClick={() => void handleReassign(reassign, option)}
+                        onClick={() => void handleReassign(reassign.id, option)}
                       >
                         {option.label}
                       </Button>
@@ -1520,7 +1540,11 @@ export default function CurriculumTab() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setReassign(null)}>
-            {reassign && planReassignActivity(reassign, childList).refusal ? 'OK' : 'Cancel'}
+            {reassign &&
+            planReassignActivity(configs.find((c) => c.id === reassign.id) ?? reassign, childList)
+              .refusal
+              ? 'OK'
+              : 'Cancel'}
           </Button>
         </DialogActions>
       </Dialog>

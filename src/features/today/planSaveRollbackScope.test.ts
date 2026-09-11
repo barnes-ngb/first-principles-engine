@@ -6,8 +6,13 @@ import {
   DailyPlanSaveRefusal,
   dailyPlanSaveFailureNotice,
   dailyPlanSaveMovedOnNotice,
+  dailyPlanSaveSupersededNotice,
 } from './dailyPlanGate'
-import { DayWriteRefusal, dayWriteFailureNotice } from './dayWriteOutcome'
+import {
+  DayWriteAftermath,
+  DayWriteRefusal,
+  dayWriteFailureNotice,
+} from './dayWriteOutcome'
 
 const TODAY_PAGE = readFileSync(resolve(__dirname, './TodayPage.tsx'), 'utf8')
 
@@ -35,7 +40,7 @@ describe('the plan-save rollback is scoped to the day it was made on', () => {
     expect(TODAY_PAGE).toMatch(/planTargetRef\.current !== target/)
     expect(TODAY_PAGE).toMatch(/planTargetRef\.current = `\$\{selectedChildId\}\|\$\{today\}`/)
     // Both handlers capture the target at the tap and hand it to the reporter.
-    expect(TODAY_PAGE.match(/reportPlanSave\(outcome, target,/g) ?? []).toHaveLength(2)
+    expect(TODAY_PAGE.match(/reportPlanSave\(outcome, target, seq,/g) ?? []).toHaveLength(2)
   })
 
   it('still reports the failure when it declines to roll back', () => {
@@ -83,7 +88,7 @@ describe('the same rule on the day log', () => {
     const moved = dayWriteFailureNotice(
       DayWriteRefusal.Rejected,
       'Language Arts lesson 4 (20m)',
-      { pageMovedOn: true },
+      DayWriteAftermath.MovedOn,
     )
 
     expect(moved.text).not.toContain('Language Arts lesson 4')
@@ -96,7 +101,7 @@ describe('the same rule on the day log', () => {
     const here = dayWriteFailureNotice(
       DayWriteRefusal.Rejected,
       'Language Arts lesson 4 (20m)',
-      { pageMovedOn: false },
+      DayWriteAftermath.RolledBack,
     )
 
     expect(here.text).toContain('Language Arts lesson 4 (20m)')
@@ -106,5 +111,75 @@ describe('the same rule on the day log', () => {
     expect(dayWriteFailureNotice(DayWriteRefusal.Rejected, 'Math (20m)').text).toContain(
       'Math (20m)',
     )
+  })
+})
+
+/**
+ * Codex round 2, P1 — a sentence may not claim a rollback that did not happen.
+ *
+ * The rollback is identity-guarded on both surfaces, so it does not always
+ * apply. *"It's back to how it was"* over a screen that was NOT put back is the
+ * same species of lie as *"Saved"* over a write that did not land.
+ */
+describe('the copy is keyed on what actually happened', () => {
+  it('a superseded day-log failure does not say the row went back', () => {
+    const text = dayWriteFailureNotice(
+      DayWriteRefusal.Rejected,
+      'Math lesson 12 (20m)',
+      DayWriteAftermath.Superseded,
+    ).text
+
+    expect(text).not.toContain('back to how it was')
+    expect(text).toContain('Math lesson 12 (20m)')
+    expect(text).toContain('newer change')
+  })
+
+  it('a rolled-back day-log failure is the one that says so', () => {
+    expect(
+      dayWriteFailureNotice(
+        DayWriteRefusal.Rejected,
+        'Math lesson 12 (20m)',
+        DayWriteAftermath.RolledBack,
+      ).text,
+    ).toContain('back to how it was')
+  })
+
+  it('every aftermath still reports, and always as an error', () => {
+    for (const aftermath of Object.values(DayWriteAftermath)) {
+      const notice = dayWriteFailureNotice(DayWriteRefusal.Rejected, 'A row', aftermath)
+      expect(notice.severity).toBe('error')
+      expect(notice.text.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('the plan controls have the same superseded sentence', () => {
+    const { text, severity } = dailyPlanSaveSupersededNotice()
+
+    expect(severity).toBe('error')
+    expect(text).not.toContain('back to how it was')
+    expect(text).toContain('newer change')
+  })
+})
+
+describe('the plan rollback is guarded against a newer tap on the same day', () => {
+  it('takes a sequence with every tap and compares it live', () => {
+    // Energy and plan type are enum strings with no object identity, so the
+    // day log's identity guard becomes a monotonic sequence here. Without it,
+    // two rejections in submission order leave the page showing the FIRST
+    // failed edit, and a later tap persists that stale value.
+    expect(TODAY_PAGE).toMatch(/const seq = \(planEditSeqRef\.current \+= 1\)/)
+    expect(TODAY_PAGE).toMatch(/planEditSeqRef\.current !== seq/)
+    expect(TODAY_PAGE.match(/const seq = \(planEditSeqRef\.current \+= 1\)/g) ?? []).toHaveLength(2)
+  })
+
+  it('rolls back to the STORED plan, not to a value that may never have landed', () => {
+    // After two failures in a row the second tap's "previous" is the first
+    // tap's optimistic value, which was never written. The stored document is
+    // the only thing known to have landed; the captured values are the fallback
+    // for when there is no stored plan — an unsettled or failed read, where
+    // nothing was written either.
+    expect(TODAY_PAGE).toMatch(/const stored = storedPlanRef\.current/)
+    expect(TODAY_PAGE).toMatch(/stored && stored\.childId === target\.split\('\|'\)\[0\]/)
+    expect(TODAY_PAGE).toMatch(/: \{ energy: prevEnergy, planType: prevPlanType \}/)
   })
 })

@@ -105,6 +105,24 @@ export type DailyPlanSaveOutcome =
   | { ok: false; reason: DailyPlanSaveRefusal }
 
 /**
+ * What the page was able to do about a failure, which decides what it may claim.
+ *
+ * A sentence reading *"it's back to how it was"* over a screen that was NOT put
+ * back is the same species of lie as *"Saved"* over a write that did not land,
+ * so the copy is keyed on what actually happened rather than assuming the
+ * rollback always applies.
+ */
+export const SaveAftermath = {
+  /** The screen was put back to what is stored. */
+  RolledBack: 'rolled-back',
+  /** A newer edit to the same day is on screen; this one is not what you see. */
+  Superseded: 'superseded',
+  /** The page is showing a different child or date now. */
+  MovedOn: 'moved-on',
+} as const
+export type SaveAftermath = (typeof SaveAftermath)[keyof typeof SaveAftermath]
+
+/**
  * What the page says when a tap was not recorded.
  *
  * Four sentences, because the advice differs: two of these resolve on their own
@@ -152,6 +170,26 @@ export function dailyPlanSaveMovedOnNotice(childName: string | null): {
   const who = childName ? ` for ${childName}` : ''
   return {
     text: `Not saved${who} — that change wasn't recorded, and this page has moved on since, so nothing here was changed.`,
+    severity: 'error',
+  }
+}
+
+/**
+ * What the page says when a failure is reported after a NEWER tap on the same
+ * day — Codex round 2, P1.
+ *
+ * Two taps can be in flight at once (the energy group and the day-type menu are
+ * a second apart), and the rollback is skipped for the older one, exactly as the
+ * day log's identity guard skips it. So the sentence may not say *"it's back to
+ * how it was"* — what is on screen is the newer change, which this failure has
+ * nothing to say about.
+ */
+export function dailyPlanSaveSupersededNotice(): {
+  text: string
+  severity: 'error'
+} {
+  return {
+    text: "An earlier change didn't save. What you see now is your newer change — check it landed.",
     severity: 'error',
   }
 }
