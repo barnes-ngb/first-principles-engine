@@ -160,6 +160,36 @@ describe('a Today edit that did not save says so', () => {
     expect(result.current.snackMessage?.text).toContain('newer change')
   })
 
+  it('rolls two consecutive failures back to the STORED day, not to the first failed edit', async () => {
+    // Codex round 3, P1. The pre-edit document is the wrong target after two
+    // failures in a row: the second edit's "previous" is the FIRST edit's
+    // optimistic value, which was never written — so restoring it leaves the
+    // screen showing an edit whose write also failed, and a later
+    // full-document edit persists that stale change.
+    setDayLogGuarded
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('offline'))
+    const { result } = await mountWithStoredDay()
+    const stored = result.current.dayLog!
+
+    await act(async () => {
+      result.current.persistDayLogImmediate(tickSecondRow(stored))
+    })
+    await act(async () => {
+      result.current.persistDayLogImmediate({
+        ...tickSecondRow(stored),
+        checklist: [...(tickSecondRow(stored).checklist ?? []), item('Nature walk (30m)')],
+      })
+    })
+
+    await waitFor(() => expect(result.current.snackMessage?.severity).toBe('error'))
+    // Neither write landed, so the screen is the day as the listener delivered
+    // it — two rows, the second still unticked.
+    expect(result.current.dayLog?.checklist).toHaveLength(2)
+    expect(result.current.dayLog?.checklist?.[1].completed).toBe(false)
+    expect(result.current.dayLog).toBe(stored)
+  })
+
   it('does not name a row over a day it is no longer showing', async () => {
     // Codex round 1, P1's sibling: a write left in flight across a child switch
     // belongs to a day that is no longer on screen, and its sentence names a

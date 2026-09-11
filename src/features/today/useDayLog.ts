@@ -154,6 +154,28 @@ export function useDayLog({
   }, [currentDocId])
 
   /**
+   * The last day the LISTENER delivered — what a rollback goes back to (Codex
+   * round 3, P1).
+   *
+   * The pre-edit document is the wrong target after two failures in a row: the
+   * second edit's "previous" is the first edit's optimistic value, which was
+   * never written, so restoring it leaves the screen showing an edit whose write
+   * also failed — and a later full-document edit persists that stale change.
+   * `onSnapshot` is the only thing here that speaks for the stored document, so
+   * it is what this ref follows; it carries its `docId` so a rollback can never
+   * restore one day's document onto another's.
+   *
+   * (Firestore delivers a local mutation optimistically and then re-delivers the
+   * stored document when the write is rejected, so this catches up by itself on
+   * the path where the write reached the SDK at all. The rollback below is for
+   * the path where it did not.)
+   *
+   * This is the same correction the plan controls took in round 2 — restore from
+   * what landed, not from what was on screen.
+   */
+  const storedDayLogRef = useRef<{ docId: string; log: DayLog } | null>(null)
+
+  /**
    * An edit did not land — say so, and take the optimistic row back.
    *
    * **One definition for every refusal**, reached by a thrown write and by the
@@ -187,7 +209,14 @@ export function useDayLog({
           : previousDayLogRef.current === attempted
             ? DayWriteAftermath.RolledBack
             : DayWriteAftermath.Superseded
-      setDayLog((current) => (current === attempted ? previous : current))
+      // Back to what the listener last delivered for THIS document, not to the
+      // document that was on screen — after two failures in a row those are not
+      // the same thing, and only the first of them landed (Codex round 3, P1).
+      // The captured value stays the fallback for the one case with no
+      // delivered document: a day being created for the first time.
+      const stored = storedDayLogRef.current
+      const goBackTo = stored && stored.docId === docId ? stored.log : previous
+      setDayLog((current) => (current === attempted ? goBackTo : current))
       setSaveState('error')
       setSnackMessage(
         dayWriteFailureNotice(reason, namedDayEdit(previous, attempted), aftermath),
@@ -269,6 +298,9 @@ export function useDayLog({
       async (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data()
+          // The one place that speaks for the stored document — see
+          // `storedDayLogRef` (Codex round 3, P1).
+          storedDayLogRef.current = { docId: currentDocId, log: data }
           setDayLog(data)
           if (data.updatedAt) setLastSavedAt(data.updatedAt)
           return
@@ -341,6 +373,10 @@ export function useDayLog({
     return unsubscribe
   }, [
     dayLogRef,
+    // Changes exactly when `dayLogRef` does (it is memoized on this), so the
+    // effect re-runs no more often than before; named so the listener's closure
+    // over it is declared rather than implied.
+    currentDocId,
     today,
     selectedChildId,
     selectedChild,
