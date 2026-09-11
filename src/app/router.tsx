@@ -14,7 +14,8 @@ import DadLabPage from '../features/dad-lab/DadLabPage'
 import KnowledgeMinePage from '../features/quest/KnowledgeMinePage'
 import RequireKnowledgeMineAccess from '../features/quest/RequireKnowledgeMineAccess'
 import QuestErrorBoundary from '../features/quest/QuestErrorBoundary'
-import WeeklyReviewPage from '../features/weekly-review/WeeklyReviewPage'
+import ReviewPage from '../features/review/ReviewPage'
+import ReviewRedirect from '../features/review/ReviewRedirect'
 import BookshelfPage from '../features/books/BookshelfPage'
 import BookEditorPage from '../features/books/BookEditorPage'
 import BookReaderPage from '../features/books/BookReaderPage'
@@ -55,14 +56,16 @@ export const routes = [
       { path: '/dad-lab', element: <DadLabPage /> },
       { path: '/week/lab', element: <Navigate to="/dad-lab" replace /> },
       { path: '/progress', element: <ProgressPage /> },
-      { path: '/progress/monthly-books/:reviewId', element: <MonthlyReviewReaderPage /> },
+      { path: '/progress/monthly-books/:reviewId', element: <ReviewRedirect /> },
       { path: '/books-about-me', element: <KidBooksAboutMePage /> },
       { path: '/books-about-me/:reviewId', element: <KidBookReaderPage /> },
       {
         element: <RequireParent />,
         children: [
           { path: '/curriculum', element: <CurriculumTab /> },
-          { path: '/weekly-review', element: <WeeklyReviewPage /> },
+          { path: '/weekly-review', element: <ReviewRedirect /> },
+          { path: '/review', element: <ReviewPage /> },
+          { path: '/review/monthly-books/:reviewId', element: <MonthlyReviewReaderPage /> },
           // Watch Library's own home (FEAT-132) — curation is a parent job, so
           // it is route-gated as well as component-gated (`WatchLibraryTab`
           // carries its own `canEdit` check). Capability, never a name.

@@ -4,13 +4,13 @@ import { PROGRESS_TABS, progressPath } from './progressNav'
 
 describe('progressPath — UX-52', () => {
   it('names the tab so the parent lands where the link says', () => {
-    expect(progressPath(PROGRESS_TABS.MonthlyBooks)).toBe('/progress?tab=monthly-books')
+    expect(progressPath(PROGRESS_TABS.MonthlyBooks)).toBe('/review?period=month')
     expect(progressPath(PROGRESS_TABS.SkillSnapshot)).toBe('/progress?tab=skill-snapshot')
   })
 
   it('carries ?diag=1 through — a bare path silently undid the parent’s choice', () => {
     expect(progressPath(PROGRESS_TABS.MonthlyBooks, new URLSearchParams('diag=1'))).toBe(
-      '/progress?tab=monthly-books&diag=1',
+      '/review?diag=1&period=month',
     )
   })
 

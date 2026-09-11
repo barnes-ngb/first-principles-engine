@@ -83,3 +83,17 @@ describe('AppShell — direct Curriculum access', () => {
     expect(screen.queryByRole('link', { name: 'Curriculum' })).not.toBeInTheDocument()
   })
 })
+
+
+describe('AppShell — Review combines Week and Month', () => {
+  it('opens Review directly from the parent menu', () => {
+    renderAs(UserProfile.Parents)
+    expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute('href', '/review')
+    expect(screen.queryByRole('link', { name: 'Weekly Review' })).not.toBeInTheDocument()
+  })
+
+  it.each([UserProfile.Lincoln, UserProfile.London])('keeps Review out of the %s child menu', (profile) => {
+    renderAs(profile)
+    expect(screen.queryByRole('link', { name: 'Review' })).not.toBeInTheDocument()
+  })
+})

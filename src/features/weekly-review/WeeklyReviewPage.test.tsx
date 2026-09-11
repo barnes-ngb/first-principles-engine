@@ -155,6 +155,14 @@ describe('the page is parent-only (UX-219)', () => {
     expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
   })
 
+  it('embeds the existing weekly content without a duplicate title or child selector', () => {
+    render(<WeeklyReviewPage embedded />)
+    expect(screen.queryByText('Weekly Review')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('child-selector')).not.toBeInTheDocument()
+    expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
+    expect(screen.getByText('The Week by Subject')).toBeInTheDocument()
+  })
+
   it('renders nothing at all for a child profile', () => {
     mockUseActiveChild.mockReturnValue({ ...PARENT, isChildProfile: true })
     const { container } = render(<WeeklyReviewPage />)
