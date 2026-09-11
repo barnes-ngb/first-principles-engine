@@ -356,6 +356,11 @@ export default function TodayPage() {
   // which is the exact window this closes.
   const scopeKey = todayScopeKey(selectedChildId, today)
   const checklistOpenRef = useRef<TodayDecision[]>([])
+  // Stable, so `TodayChecklist`'s reporting effect runs when its open SET moves
+  // rather than on every render of this page.
+  const handleChecklistOpenDecisions = useCallback((open: TodayDecision[]) => {
+    checklistOpenRef.current = open
+  }, [])
   const [openScopeKey, setOpenScopeKey] = useState(scopeKey)
   if (openScopeKey !== scopeKey) {
     const wasFor = childIdFromScopeKey(openScopeKey)
@@ -1499,7 +1504,7 @@ export default function TodayPage() {
           // started under; the sentence naming what was closed is raised by the
           // scope guard above, off the set this component reports up.
           key={scopeKey}
-          onOpenDecisionsChange={(open) => { checklistOpenRef.current = open }}
+          onOpenDecisionsChange={handleChecklistOpenDecisions}
           dayLog={dayLog}
           selectedChild={selectedChild}
           selectedChildId={selectedChildId}
