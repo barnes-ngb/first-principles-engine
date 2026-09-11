@@ -17,8 +17,9 @@
  * at one boy's records, change child to check something, tap **Add Adjustment**,
  * and file those minutes against his brother in `hoursAdjustments`, the
  * collection the compliance pack and `collectHoursContributions` read. Records
- * has its own `ChildSelector`, so this is reachable today with the header
- * switcher off (`CHILD_SWITCHER_ENABLED === false`).
+ * has its own `ChildSelector`, so this was reachable even with the header
+ * switcher off (`CHILD_SWITCHER_ENABLED === false`, as it shipped from UX-330
+ * until FIX-231 turned it back on).
  *
  * **RESET, not BIND** — the same answer, the same rail and the same reasoning as
  * the dialog beside it and as `QuickAddHours` (UX-328). Nothing has been

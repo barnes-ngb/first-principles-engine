@@ -1,8 +1,9 @@
 /**
  * Whose XP award is this — UX-336 (RESET).
  *
- * `ArmorTab` renders its own child chips, so this is reachable **today** with
- * the header switcher off (`CHILD_SWITCHER_ENABLED === false`, UX-330). The
+ * `ArmorTab` renders its own child chips, so this was reachable **even with**
+ * the header switcher off (`CHILD_SWITCHER_ENABLED === false`, UX-330 — turned
+ * back on by FIX-231). The
  * *Award XP* form holds a typed amount, a reason and an award type in component
  * state; the component is not re-keyed on the child, so all three survive a
  * chip tap while `doAward` reads the live `childId` prop. A parent could type

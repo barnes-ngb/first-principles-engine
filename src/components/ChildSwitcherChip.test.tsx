@@ -115,18 +115,55 @@ describe('ChildSwitcherChip — read-only cases', () => {
   })
 })
 
-describe('ChildSwitcherChip — as it SHIPS, with the switch off (UX-330)', () => {
+describe('ChildSwitcherChip — as it SHIPS (FIX-231, the switch is ON)', () => {
   beforeEach(() => {
     // Read the shipped `CHILD_SWITCHER_ENABLED`, not a forced value.
     forceSwitcherEnabled.current = undefined
   })
 
-  it('gives a parent with two children the read-only chip', () => {
+  it('gives a parent with two children the real switcher', () => {
+    const setActiveChildId = setActive()
+    render(<ChildSwitcherChip />)
+
+    // The caret is the affordance and the whole distinction, so it is asserted
+    // positively here — a negative-only ship-state test passes vacuously.
+    expect(screen.getByTestId('ArrowDropDownIcon')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Switch child — currently Lincoln' }),
+    ).toBeInTheDocument()
+    expect(setActiveChildId).not.toHaveBeenCalled()
+  })
+
+  it('still gives a child profile the read-only chip — capability, never a name', () => {
+    const setActiveChildId = setActive({ isChildProfile: true })
+    render(<ChildSwitcherChip />)
+
+    expect(screen.getByText('Lincoln')).toBeInTheDocument()
+    expect(screen.queryByTestId('ArrowDropDownIcon')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(setActiveChildId).not.toHaveBeenCalled()
+  })
+
+  it('still gives a single-child family the read-only chip', () => {
+    setActive({ children: [LINCOLN] })
+    render(<ChildSwitcherChip />)
+
+    expect(screen.getByText('Lincoln')).toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+})
+
+describe('ChildSwitcherChip — with the switch forced back OFF (UX-330)', () => {
+  beforeEach(() => {
+    forceSwitcherEnabled.current = false
+  })
+
+  it('renders the read-only chip for a parent with two children', () => {
+    // Flipping the constant back must not be a fresh gamble either, so the off
+    // path keeps the assertions it shipped with.
     setActive()
     render(<ChildSwitcherChip />)
 
-    // The name still shows — nothing about the chip's appearance changed
-    // except the caret, which is the whole affordance.
     expect(screen.getByText('Lincoln')).toBeInTheDocument()
     expect(screen.queryByTestId('ArrowDropDownIcon')).not.toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
