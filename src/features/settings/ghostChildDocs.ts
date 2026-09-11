@@ -51,8 +51,13 @@
  * ({@link PROBED_COLLECTIONS}), and `ghostChildDocs.completeness.test.ts` fails
  * when `CLAUDE.md`'s own Firestore Collections table names one this list does
  * not — the completeness claim is derived from the repo's register rather than
- * asserted. Each collection is asked **two** questions, because a child id
- * reaches a document in two ways and neither implies the other:
+ * asserted. Each collection is asked about **four shapes**, because a child id
+ * reaches a document four ways and no one of them implies another. Round 3
+ * found the first repair still asking only about the first two, and named two
+ * live counter-examples (`ConceptArc.childIds`, and word progress living under
+ * the child's own document); the same test now parses `CLAUDE.md`'s
+ * **Subcollections** list too, so the fourth shape is derived rather than
+ * remembered:
  *
  *  - **by document id**, as a `>= id` / `< id + '\uf8ff'` range, which matches
  *    the id exactly (`skillSnapshots/{childId}`) *and* every composite key
@@ -65,6 +70,15 @@
  *    `activityConfigs` and the `xpLedger` **event** documents name their child.
  *    `SightWordProgress` carries no such field and is caught by the range;
  *    `xpLedger` needs both, which is exactly what round 1 found.
+ *  - **by an array field** ({@link CHILD_ARRAY_FIELDS}) — `ConceptArc.childIds`
+ *    and the `contributorIds` `useBook` queries with `array-contains`. A
+ *    scalar `==` can never match a member of an array.
+ *  - **under the child's own document** ({@link CHILD_SUBCOLLECTIONS}) —
+ *    `children/{childId}/wordProgress` and `.../transcriptionEvents`. This is
+ *    the worst of the four to miss, because **Firestore does not delete
+ *    subcollections with their parent**: a delete would not have lost a stray
+ *    row, it would have orphaned a child's Knowledge Mine word history
+ *    permanently, with nothing left pointing at it.
  *
  * `children` itself is deliberately not probed: the ghost *is* a document in
  * it, so it would match itself and nothing would ever be deletable.
@@ -79,9 +93,23 @@
  * document is no longer a duplicate, between the survey and the tap.
  * {@link deleteGhostChildDocs} therefore takes **ids**, not blessed rows: it
  * re-reads `children`, re-classifies, and re-runs every probe immediately
- * before each `deleteDoc`. There is no path by which a caller can hand it a
- * document that the data, as it stands at the write, does not agree is a
- * deletable ghost.
+ * before each `deleteDoc`, so a caller cannot hand it a document that the data
+ * at that moment does not agree is a deletable ghost.
+ *
+ * **It is not atomic, and this docblock does not claim it is** — Codex round 3,
+ * correctly. The revalidation and the `deleteDoc` are separate operations, so a
+ * write landing in the microseconds between them is not seen. Closing that
+ * genuinely would need a lock or tombstone **honoured by every writer in the
+ * app**, or a server-side protocol: a Firestore transaction cannot help,
+ * because it cannot run a collection query (the same limit
+ * `migrateActivityConfigs` and `bootstrapLearnerModel` document). That is an
+ * architectural change far larger than this survey, and it is not made here —
+ * so what is claimed is what is true: **the checks are re-run against live data
+ * immediately before the delete**, not that nothing can land after them. The
+ * window is a parent tapping a button on an admin tab; the far larger risk this
+ * replaced was a check run minutes earlier, which is what round 1 found.
+ * Filed as `UX-395`'s sibling for whoever decides the delete needs more than
+ * that.
  */
 
 import {
@@ -161,14 +189,53 @@ export const UNPROBED_COLLECTIONS: Readonly<Record<string, string>> = {
   chapterBooks: 'global, not under families/ — no family document lives there',
 }
 
-/** How a collection can name the child a document belongs to. */
+/**
+ * How a collection can name the child a document belongs to.
+ *
+ * Four shapes, not two. Codex round 3 found the second version still asking
+ * only about a document id and a scalar field, and named two live
+ * counter-examples: `ConceptArc.childIds` is an **array**, and the Knowledge
+ * Mine's word progress lives **under the child's own document** at
+ * `children/{childId}/wordProgress/{word}`. Neither could match either query,
+ * and the second is the worse of the two — deleting a Firestore document does
+ * **not** delete its subcollections, so a delete would have orphaned a child's
+ * word history rather than merely losing a stray row.
+ */
 export const ProbeKind = {
   /** The document id is the child id, or is built on it as a prefix. */
   DocId: 'doc-id',
   /** The document carries a `childId` field. */
   ChildField: 'child-field',
+  /** The document carries the child in an array field (`childIds`, `contributorIds`). */
+  ChildArray: 'child-array',
+  /** A subcollection hanging off the child's OWN document. */
+  OwnSubcollection: 'own-subcollection',
 } as const
 export type ProbeKind = (typeof ProbeKind)[keyof typeof ProbeKind]
+
+/**
+ * Array fields that name children, asked of every collection.
+ *
+ * A query against a collection with no such field simply returns empty, so
+ * this is a list of **field names the app uses**, not a per-collection map —
+ * which is the same reason `PROBED_COLLECTIONS` is a list of paths rather than
+ * typed helpers. `childIds` is `ConceptArc`'s (`dadlab.ts`); `contributorIds`
+ * is the one `useBook` queries with `array-contains`.
+ */
+export const CHILD_ARRAY_FIELDS: readonly string[] = ['childIds', 'contributorIds']
+
+/**
+ * Subcollections that hang off `children/{childId}` — the shapes no query over
+ * a top-level collection can see.
+ *
+ * Kept honest by `ghostChildDocs.completeness.test.ts`, which parses
+ * `CLAUDE.md`'s **Subcollections** list and fails when it names a
+ * `children/{childId}/…` path this list does not.
+ */
+export const CHILD_SUBCOLLECTIONS: readonly string[] = [
+  'wordProgress',
+  'transcriptionEvents',
+]
 
 /**
  * The end of a document-id prefix range. `\uf8ff` is the last code point in the
@@ -288,6 +355,38 @@ async function anyByChildField(
   return !snap.empty
 }
 
+/** Does any document in this collection list this child in an array field? */
+async function anyByChildArray(
+  familyId: string,
+  name: string,
+  field: string,
+  childId: string,
+): Promise<boolean> {
+  const snap = await getDocs(
+    query(familyCollection(familyId, name), where(field, 'array-contains', childId), limit(1)),
+  )
+  return !snap.empty
+}
+
+/**
+ * Does the child's OWN document have anything under it?
+ *
+ * The one shape that is not a query over a sibling collection, and the one that
+ * matters most: Firestore does not delete subcollections with their parent, so
+ * deleting a document with `wordProgress` under it leaves that history
+ * unreachable rather than merely stray.
+ */
+async function anyInOwnSubcollection(
+  familyId: string,
+  childId: string,
+  sub: string,
+): Promise<boolean> {
+  const snap = await getDocs(
+    query(collection(db, `families/${familyId}/children/${childId}/${sub}`), limit(1)),
+  )
+  return !snap.empty
+}
+
 /**
  * Ask every collection both questions about one document id.
  *
@@ -302,13 +401,23 @@ export async function probeChildReferences(
   const referencedBy: string[] = []
   const unreadable: string[] = []
 
-  const checks = PROBED_COLLECTIONS.flatMap((name) => [
-    { label: `${name} (${ProbeKind.DocId})`, run: () => anyByDocId(familyId, name, childId) },
-    {
-      label: `${name} (${ProbeKind.ChildField})`,
-      run: () => anyByChildField(familyId, name, childId),
-    },
-  ])
+  const checks = [
+    ...PROBED_COLLECTIONS.flatMap((name) => [
+      { label: `${name} (${ProbeKind.DocId})`, run: () => anyByDocId(familyId, name, childId) },
+      {
+        label: `${name} (${ProbeKind.ChildField})`,
+        run: () => anyByChildField(familyId, name, childId),
+      },
+      ...CHILD_ARRAY_FIELDS.map((field) => ({
+        label: `${name}.${field} (${ProbeKind.ChildArray})`,
+        run: () => anyByChildArray(familyId, name, field, childId),
+      })),
+    ]),
+    ...CHILD_SUBCOLLECTIONS.map((sub) => ({
+      label: `children/${sub} (${ProbeKind.OwnSubcollection})`,
+      run: () => anyInOwnSubcollection(familyId, childId, sub),
+    })),
+  ]
 
   const outcomes = await Promise.all(
     checks.map(async (check) => {

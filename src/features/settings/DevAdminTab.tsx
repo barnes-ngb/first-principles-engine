@@ -1220,15 +1220,17 @@ export default function DevAdminTab() {
         <Typography variant="body2" color="text.secondary" gutterBottom>
           <strong>Only a duplicate nothing points at is offered.</strong> Each one
           is checked against <strong>every</strong> collection under this
-          family — both by document id (which catches composite keys like{' '}
-          <code>xpLedger/&#123;childId&#125;_&#123;dedupKey&#125;</code>) and by
-          a <code>childId</code> field. A duplicate anything references is listed
-          and <strong>not</strong> offered — records written under an id no
-          screen shows is a different and worse finding, and correcting history
-          is its own decision. A check that fails to run counts the same as a
-          match, and every check is <strong>re-run at the moment of the
+          family, four ways: by document id (which catches composite keys like{' '}
+          <code>xpLedger/&#123;childId&#125;_&#123;dedupKey&#125;</code>), by a{' '}
+          <code>childId</code> field, by an array field such as{' '}
+          <code>childIds</code>, and by anything stored <em>under</em> the
+          duplicate&apos;s own document. A duplicate anything references is
+          listed and <strong>not</strong> offered — records written under an id
+          no screen shows is a different and worse finding, and correcting
+          history is its own decision. A check that fails to run counts the same
+          as a match, and every check is <strong>re-run immediately before the
           delete</strong>, so a reference written in another tab since the survey
-          stops it.
+          stops it. Best run when nobody else is using the app.
         </Typography>
         <Button
           variant="contained"

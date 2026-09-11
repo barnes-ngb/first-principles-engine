@@ -36,6 +36,12 @@
       "collection": "families",
       "reason": "UX-394 duplicate-children survey asks EVERY family collection whether it holds a document belonging to a duplicate child doc, so the last path segment is a parameter by design. A per-helper list is exactly the hand-picked set Codex round 1 rejected as incomplete (it missed xpLedger's composite event keys, over an irreversible currency record). Completeness is enforced instead by ghostChildDocs.completeness.test.ts, which fails when CLAUDE.md's own Firestore Collections table names a collection PROBED_COLLECTIONS does not, in both directions. Reads only; the one write is a deleteDoc through childrenCollection().",
       "ledger": "UX-394"
+    },
+    {
+      "file": "src/features/settings/ghostChildDocs.ts",
+      "collection": "children",
+      "reason": "UX-394, Codex round 3: the same survey also probes the subcollections hanging off the duplicate's OWN document (children/{childId}/wordProgress, /transcriptionEvents) — the shape no query over a sibling collection can see, and the worst to miss because Firestore does not delete subcollections with their parent. wordProgress has no firestore.ts helper by design (see the two FIRESTORE_AUDIT entries above), and the path is parameterised by the subcollection name for the same reason the family-level probe is. Read-only; completeness is enforced by ghostChildDocs.completeness.test.ts against CLAUDE.md's own Subcollections list.",
+      "ledger": "UX-394"
     }
   ],
 

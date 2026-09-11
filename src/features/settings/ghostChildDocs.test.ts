@@ -15,7 +15,17 @@ const deleted: string[] = []
 let onProbe: (() => void) | null = null
 
 vi.mock('firebase/firestore', () => ({
-  collection: (_db: unknown, path: string) => ({ __name: path.split('/').pop() }),
+  // The child's OWN subcollections are addressed by full path, so the mock
+  // keeps the whole path and derives a name from it — `children/{id}/{sub}`
+  // becomes `children/{sub}`, which is what the probe labels it.
+  collection: (_db: unknown, path: string) => {
+    const segs = path.split('/')
+    const name =
+      segs.length > 4 && segs[2] === 'children'
+        ? `children/${segs[4]}`
+        : segs[segs.length - 1]
+    return { __name: name, __ownerId: segs.length > 4 ? segs[3] : undefined }
+  },
   doc: (col: { __name?: string }, id?: string) => ({ __name: col?.__name, id }),
   documentId: () => '__id',
   deleteDoc: async (ref: { id: string }) => {
@@ -23,25 +33,35 @@ vi.mock('firebase/firestore', () => ({
     deleted.push(ref.id)
   },
   limit: () => ({ __limit: true }),
-  where: (field: string, _op: string, value: string) => ({ field, value }),
+  where: (field: string, op: string, value: string) => ({ field, op, value }),
   query: (
-    col: { __name?: string },
-    ...clauses: { field: string; value: string }[]
+    col: { __name?: string; __ownerId?: string },
+    ...clauses: ({ field: string; op: string; value: string } | { __limit: true })[]
   ) => {
-    const byId = clauses.some((c) => c.field === '__id')
-    const childId = clauses.find((c) => c.field !== '__id')?.value
+    const wheres = clauses.filter(
+      (c): c is { field: string; op: string; value: string } => 'field' in c,
+    )
+    if (wheres.length === 0) {
+      // A bare `limit(1)` over a path — the own-subcollection probe.
+      return {
+        __name: col?.__name,
+        __kind: 'own-subcollection',
+        __childId: col?.__ownerId,
+      }
+    }
+    const byId = wheres.some((c) => c.field === '__id')
+    if (byId) {
+      return { __name: col?.__name, __kind: 'doc-id', __childId: wheres[0].value }
+    }
+    const clause = wheres[0]
     return {
-      __name: col?.__name,
-      __kind: byId ? 'doc-id' : 'child-field',
-      __childId: byId ? clauses[0].value : childId,
+      __name:
+        clause.op === 'array-contains' ? `${col?.__name}.${clause.field}` : col?.__name,
+      __kind: clause.op === 'array-contains' ? 'child-array' : 'child-field',
+      __childId: clause.value,
     }
   },
-  getDocs: async (q: {
-    __name: string
-    __kind?: string
-    __childId?: string
-    __children?: boolean
-  }) => {
+  getDocs: async (q: { __name: string; __kind?: string; __childId?: string }) => {
     if (q.__name === 'children') return { docs: childDocs }
     onProbe?.()
     if (failingProbes.has(`${q.__name}:${q.__kind}`)) throw new Error('permission-denied')
@@ -55,6 +75,8 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 import {
+  CHILD_ARRAY_FIELDS,
+  CHILD_SUBCOLLECTIONS,
   PROBED_COLLECTIONS,
   classifyChildDocs,
   deleteGhostChildDocs,
@@ -129,16 +151,44 @@ describe('the probe asks every collection BOTH questions (UX-394, Codex round 1)
     expect(referencedBy).toEqual(['hours (child-field)'])
   })
 
-  it('asks both questions of every declared collection and nothing else', async () => {
+  it('catches an ARRAY field — a scalar == can never match a member', async () => {
+    // Round 3's first counter-example: `ConceptArc.childIds` is a string[].
+    references.add('conceptArcs.childIds:child-array:ghost-a')
+
+    const { referencedBy } = await probeChildReferences('family-1', 'ghost-a')
+    expect(referencedBy).toEqual(['conceptArcs.childIds (child-array)'])
+  })
+
+  it('catches a subcollection under the CHILD’S OWN document', async () => {
+    // Round 3's second, and the worst of the four to miss: Firestore does not
+    // delete subcollections with their parent, so this is orphaned history
+    // rather than a stray row. No query over a sibling collection can see it.
+    references.add('children/wordProgress:own-subcollection:ghost-a')
+
+    const { referencedBy } = await probeChildReferences('family-1', 'ghost-a')
+    expect(referencedBy).toEqual(['children/wordProgress (own-subcollection)'])
+  })
+
+  it('asks all four shapes of every declared collection, and nothing else', async () => {
     for (const name of PROBED_COLLECTIONS) {
       references.add(`${name}:doc-id:ghost-a`)
       references.add(`${name}:child-field:ghost-a`)
+      for (const field of CHILD_ARRAY_FIELDS) {
+        references.add(`${name}.${field}:child-array:ghost-a`)
+      }
+    }
+    for (const sub of CHILD_SUBCOLLECTIONS) {
+      references.add(`children/${sub}:own-subcollection:ghost-a`)
     }
 
     const { referencedBy } = await probeChildReferences('family-1', 'ghost-a')
-    expect(referencedBy).toHaveLength(PROBED_COLLECTIONS.length * 2)
-    // `children` is never probed — the ghost is a document in it, so probing it
-    // would match itself and nothing would ever be deletable.
+    expect(referencedBy).toHaveLength(
+      PROBED_COLLECTIONS.length * (2 + CHILD_ARRAY_FIELDS.length) +
+        CHILD_SUBCOLLECTIONS.length,
+    )
+    // `children` is never probed as a collection — the ghost is a document in
+    // it, so it would match itself and nothing would ever be deletable. Its
+    // SUBcollections are a different question and are probed.
     expect(PROBED_COLLECTIONS).not.toContain('children')
   })
 })
@@ -166,6 +216,7 @@ describe('findGhostChildDocs probes before offering anything (UX-394)', () => {
 
     expect(survey.referenced.map((g) => g.id)).toEqual(['ghost-a'])
     expect(survey.referenced[0].referencedBy).toEqual(['hours (child-field)'])
+    expect(survey.ghosts[0].unreadable).toEqual([])
     expect(survey.deletable).toEqual([])
   })
 

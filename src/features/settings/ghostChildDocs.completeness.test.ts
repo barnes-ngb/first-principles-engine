@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { PROBED_COLLECTIONS, UNPROBED_COLLECTIONS } from './ghostChildDocs'
+import {
+  CHILD_SUBCOLLECTIONS,
+  PROBED_COLLECTIONS,
+  UNPROBED_COLLECTIONS,
+} from './ghostChildDocs'
 
 /**
  * **The completeness claim, derived rather than asserted** — `UX-394`, Codex
@@ -25,8 +29,17 @@ import { PROBED_COLLECTIONS, UNPROBED_COLLECTIONS } from './ghostChildDocs'
  * the survey is measured against. A new collection added there fails here until
  * it is probed or explicitly excluded **with a reason**.
  *
- * POSITIVE CONTROL: remove any entry from `PROBED_COLLECTIONS` and the first
- * case fails naming it.
+ * **Round 3 widened what "complete" means.** The second version still derived
+ * only the *top-level* table rows, and Codex named the shape that leaves out:
+ * `children/{childId}/wordProgress` lives **under the child's own document**,
+ * where no query over a sibling collection can see it — and Firestore does not
+ * delete subcollections with their parent, so missing it orphans a child's word
+ * history rather than losing a stray row. `CLAUDE.md` lists those paths in its
+ * **Subcollections** section, so that section is now parsed too.
+ *
+ * POSITIVE CONTROLS: remove any entry from `PROBED_COLLECTIONS` and the first
+ * case fails naming it; remove one from `CHILD_SUBCOLLECTIONS` and the
+ * subcollection case fails naming it.
  */
 
 const CLAUDE_MD = readFileSync(resolve(__dirname, '../../../CLAUDE.md'), 'utf8')
@@ -47,6 +60,26 @@ function declaredFamilyCollections(): string[] {
   // Fail closed: a parse that yields nothing would satisfy every assertion
   // below trivially, which is the exact guard failure this file exists to stop.
   expect(names.length).toBeGreaterThan(20)
+  return names
+}
+
+/**
+ * The `children/{childId}/…` subcollection names `CLAUDE.md` declares. The
+ * table of collections cannot show these — they hang off a document, not off
+ * the family — which is exactly why round 3 found them missing.
+ */
+function declaredChildSubcollections(): string[] {
+  const start = CLAUDE_MD.indexOf('**Subcollections:**')
+  expect(start, 'CLAUDE.md has no Subcollections section').toBeGreaterThan(-1)
+  const end = CLAUDE_MD.indexOf('**Settings documents:**', start)
+  expect(end).toBeGreaterThan(start)
+
+  const section = CLAUDE_MD.slice(start, end)
+  const names = [
+    ...section.matchAll(/`children\/\{childId\}\/([A-Za-z][A-Za-z0-9]*)`/g),
+  ].map((m) => m[1])
+  // Fail closed: a parse that yields nothing satisfies the assertion trivially.
+  expect(names.length, 'parsed no child subcollections from CLAUDE.md').toBeGreaterThan(0)
   return names
 }
 
@@ -94,5 +127,24 @@ describe('every family collection is probed, or excluded with a reason (UX-394)'
 
   it('names no collection twice', () => {
     expect(new Set(PROBED_COLLECTIONS).size).toBe(PROBED_COLLECTIONS.length)
+  })
+
+  it('probes every subcollection hanging off the child’s OWN document', () => {
+    // Round 3's P1. Firestore does not delete subcollections with their parent,
+    // so a missed one is orphaned data, not a stray row — the worst of the four
+    // shapes to get wrong.
+    const probed = new Set(CHILD_SUBCOLLECTIONS)
+    const missing = declaredChildSubcollections().filter((name) => !probed.has(name))
+
+    expect(
+      missing,
+      `child subcollections declared in CLAUDE.md but never probed: ${missing.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('probes no child subcollection CLAUDE.md does not declare', () => {
+    const declared = new Set(declaredChildSubcollections())
+    const stray = CHILD_SUBCOLLECTIONS.filter((name) => !declared.has(name))
+    expect(stray, `probed but not declared: ${stray.join(', ')}`).toEqual([])
   })
 })
