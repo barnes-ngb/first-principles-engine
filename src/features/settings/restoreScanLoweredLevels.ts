@@ -11,11 +11,12 @@
  *
  * This is the one-shot that does, and it is deliberately narrow:
  *
- * - **It derives the value; it never types one.** The restored level is the
- *   highest a child's own stored evidence supports — the `workingLevel`
- *   evidence refs the learner model stamped on its concept states, and the
- *   `projectedThrough` watermark FIX-225 records. With no such evidence it
- *   restores nothing and says so; it never guesses a number.
+ * - **It derives the value; it never types one.** The restored level comes from
+ *   the child's own stored evidence — the `workingLevel` evidence refs the
+ *   learner model stamped on its concept states, and the `projectedThrough`
+ *   watermark FIX-225 records — and only where that evidence names **one**
+ *   answer (see {@link planWorkingLevelRestore}). With no such evidence, or
+ *   with more than one candidate, it restores nothing and says which.
  * - **It only touches a level a scan wrote that the UX-381 rule would now
  *   refuse.** It asks that question through the *same* functions the scan path
  *   asks it with, so the two can never drift. A phonics level a Fast Phonics
@@ -77,6 +78,12 @@ export type RestoreSkipReason =
   | 'no-restore-evidence'
   /** The evidence supports nothing higher than what is standing. */
   | 'nothing-to-raise'
+  /**
+   * More than one level above the standing one is on record, and nothing says
+   * which was last. See {@link planWorkingLevelRestore} — this run refuses
+   * rather than picks.
+   */
+  | 'ambiguous-evidence'
 
 export type WorkingLevelRestorePlan =
   | { action: 'restore'; key: RestorableKey; level: WorkingLevel; from: number; book: string }
@@ -150,6 +157,29 @@ export function restoreEvidence(book: string, from: number, at: string): string 
 /**
  * The pure decision for one slot. Every refusal has its own reason, because
  * "nothing happened" is the answer this one-shot must be able to explain.
+ *
+ * **It restores only where the evidence names ONE answer** (Codex round 1, P1).
+ * The first draft took the maximum of the whole trail, and that is wrong the
+ * moment a level was *legitimately* lowered before the bad scan: seeded at 5, a
+ * quest measures 3, then the handwriting scan writes 2 — the model still carries
+ * the seed's level-5 refs, because the working-level projection is upgrade-only
+ * and appends rather than replaces, so `Math.max` restores an **obsolete 5** and
+ * pins it as a parent's word.
+ *
+ * There is no honest general fix, and saying so is the fix: `WorkingLevel` is a
+ * single mutable field with **no history in this repo**, the refs do not record
+ * which source produced the level they were stamped from (so an earlier
+ * scan-derived high is indistinguishable from a measured one), and the
+ * `projectedThrough` watermark records only the most recent projection's inputs.
+ * *The level immediately preceding the bad scan* is therefore not derivable.
+ *
+ * So the restore acts only when **exactly one distinct level above the standing
+ * one** is on record — the case where "the highest" and "the one that was
+ * overwritten" cannot disagree — and refuses everything else as
+ * `ambiguous-evidence`, for a person and the manual stepper. That refuses some
+ * cases it could have got right (a quest that *raised* to 6 over a seeded 5),
+ * which is the correct direction: restoring a wrong level is the defect this
+ * whole run exists to undo, and the cost of refusing is one tap.
  */
 export function planWorkingLevelRestore(args: {
   key: RestorableKey
@@ -170,8 +200,11 @@ export function planWorkingLevelRestore(args: {
   if (recordedLevels.length === 0) {
     return { action: 'skip', key, reason: 'no-restore-evidence' }
   }
-  const best = Math.max(...recordedLevels)
-  if (best <= current.level) return { action: 'skip', key, reason: 'nothing-to-raise' }
+  const above = [...new Set(recordedLevels.filter((level) => level > current.level))]
+  if (above.length === 0) return { action: 'skip', key, reason: 'nothing-to-raise' }
+  // Two or more distinct levels above the standing one, and no history saying
+  // which was last — see the docblock. Refuse; do not pick.
+  if (above.length > 1) return { action: 'skip', key, reason: 'ambiguous-evidence' }
 
   return {
     action: 'restore',
@@ -179,7 +212,7 @@ export function planWorkingLevelRestore(args: {
     from: current.level,
     book,
     level: {
-      level: best,
+      level: above[0],
       updatedAt: at,
       // A person's decision, not a measurement: the owner authorised this
       // correction, and `manual` is both the honest word for it and what stops

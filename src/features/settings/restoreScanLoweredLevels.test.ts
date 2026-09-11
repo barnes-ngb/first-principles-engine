@@ -153,6 +153,50 @@ describe('planWorkingLevelRestore (UX-383)', () => {
     ).toEqual({ action: 'skip', key: 'phonics', reason: 'no-restore-evidence' })
   })
 
+  it('refuses when a legitimate lowering sits between the seed and the bad scan', () => {
+    // Codex round 1, P1. Seeded at 5, a quest measures 3, then the handwriting
+    // scan writes 2. The seed's level-5 refs are still on the model — the
+    // projection is upgrade-only and appends — so taking the maximum would
+    // restore an obsolete 5 and pin it as a parent's word. There is no history
+    // that says 3 was last, so the honest answer is to stop for a person.
+    const model = modelWithPhonicsEvidence([5, 5])
+    model.projectedThrough = { phonics: 3, writing: null, math: null }
+    expect(
+      planWorkingLevelRestore({
+        key: 'phonics',
+        current: londonScanned,
+        recordedLevels: recordedLevelsForDomain(model, 'phonics'),
+        at: AT,
+      }),
+    ).toEqual({ action: 'skip', key: 'phonics', reason: 'ambiguous-evidence' })
+  })
+
+  it('refuses any trail carrying two or more distinct levels above the standing one', () => {
+    expect(
+      planWorkingLevelRestore({
+        key: 'phonics',
+        current: londonScanned,
+        // A quest that RAISED to 6 over a seeded 5 is refused too — a case the
+        // rule could have got right, refused in the safe direction.
+        recordedLevels: [5, 6],
+        at: AT,
+      }),
+    ).toEqual({ action: 'skip', key: 'phonics', reason: 'ambiguous-evidence' })
+  })
+
+  it('levels at or below the standing one never make the answer ambiguous', () => {
+    // The real shape: many refs at 5, and a watermark of 2 recorded after the
+    // bad scan. One distinct level above 2, so the answer is not in doubt.
+    expect(
+      planWorkingLevelRestore({
+        key: 'phonics',
+        current: londonScanned,
+        recordedLevels: [5, 5, 2, 1],
+        at: AT,
+      }),
+    ).toMatchObject({ action: 'restore', level: { level: 5 } })
+  })
+
   it('never lowers — evidence at or below the standing level is no reason to write', () => {
     for (const recorded of [[2], [1, 2]]) {
       expect(

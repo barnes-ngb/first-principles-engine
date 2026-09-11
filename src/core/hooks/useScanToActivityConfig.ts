@@ -1,8 +1,13 @@
 import { useCallback } from 'react'
-import { doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, runTransaction, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
-import { activityConfigsCollection, normalizeCurriculumKey, skillSnapshotsCollection } from '../firebase/firestore'
+import {
+  activityConfigsCollection,
+  db,
+  normalizeCurriculumKey,
+  skillSnapshotsCollection,
+} from '../firebase/firestore'
 import type { ActivityConfig, SkillSnapshot, WorksheetScanResult, WorkingLevel, WorkingLevels } from '../types'
 import { ActivityType, SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
@@ -251,7 +256,14 @@ export function deriveLevelForSubject(
   return level ? { key: domain, level } : null
 }
 
-async function updateWorkingLevelFromScan(
+/**
+ * Write the scanned page's working level, if it may write one at all.
+ *
+ * Exported for its test, like `planScannedNameUpgrade` and `isWorkbookMatch`:
+ * the atomicity below is the part worth pinning, and a gap between the check
+ * and the write is invisible in any test that cannot see the transaction.
+ */
+export async function updateWorkingLevelFromScan(
   familyId: string,
   childId: string,
   lessonNumber: number | null,
@@ -263,20 +275,46 @@ async function updateWorkingLevelFromScan(
     if (!derived) return
 
     const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
-    const snapshotSnap = await getDoc(snapshotRef)
-    const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
-      ? snapshotSnap.data()
-      : {}
 
-    const currentLevel = existing.workingLevels?.[derived.key]
-    // UX-382: `derived.level.source` is `curriculum`, so this gate is
-    // advance-only — a scan may raise a level and may never lower one.
-    if (!canOverwriteWorkingLevel(currentLevel, derived.level)) return
+    // UX-382, Codex round 1 (P1): the gate and the write are ONE unit.
+    //
+    // Read-then-write left a gap, and the gap defeated the invariant this run
+    // exists for: a quest finishing on another device raises phonics to 5
+    // between the read and the write, the scan's check has already passed
+    // against the stale 3, and its level 3 lands on top — a scan lowering a
+    // level, exactly as before. The old write made it worse by re-sending the
+    // WHOLE `workingLevels` map, so a *sibling* level written in that gap went
+    // with it.
+    //
+    // So: re-read inside a `runTransaction` (the UX-231 precedent), re-check
+    // the gate against what is actually stored, and write the **one field path**
+    // — never the map — so nothing but this key can be overwritten.
+    await runTransaction(db, async (tx) => {
+      const snapshotSnap = await tx.get(snapshotRef)
+      const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
+        ? (snapshotSnap.data() as Partial<SkillSnapshot>)
+        : {}
 
-    const mergedWorkingLevels = { ...(existing.workingLevels ?? {}), [derived.key]: derived.level }
-    await updateDoc(snapshotRef, {
-      workingLevels: mergedWorkingLevels,
-      updatedAt: new Date().toISOString(),
+      const currentLevel = existing.workingLevels?.[derived.key]
+      // `derived.level.source` is `curriculum`, so this gate is advance-only —
+      // a scan may raise a level and may never lower one.
+      if (!canOverwriteWorkingLevel(currentLevel, derived.level)) return
+
+      const updatedAt = new Date().toISOString()
+      if (snapshotSnap.exists()) {
+        tx.update(snapshotRef, {
+          [`workingLevels.${derived.key}`]: derived.level,
+          updatedAt,
+        })
+      } else {
+        // No snapshot yet — `update` would fail, so create the document with
+        // just this level on it.
+        tx.set(
+          snapshotRef,
+          { childId, workingLevels: { [derived.key]: derived.level }, updatedAt },
+          { merge: true },
+        )
+      }
     })
   } catch (err) {
     console.warn(`[ScanToConfig] Failed to update ${subject} working level`, err)
