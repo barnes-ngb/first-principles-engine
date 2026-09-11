@@ -1,81 +1,83 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
-// Firestore primitives only. `refs` is the family's data as this survey sees
-// it: a set of `children` documents, a set of ids that OTHER collections point
-// at, and a set of probes told to fail.
+// Firestore primitives only. The family's data is modelled as: a set of
+// `children` documents, a set of `${collection}:${kind}:${childId}` references
+// that exist, and a set of probes told to fail.
 
 let childDocs: { id: string; data: () => unknown }[] = []
-/** `${probeLabel}:${childId}` for every reference that exists. */
+/** `${collectionName}:${'doc-id'|'child-field'}:${childId}` for each reference. */
 let references = new Set<string>()
-/** Probe labels whose read throws. */
+/** `${collectionName}:${kind}` probes whose read throws. */
 let failingProbes = new Set<string>()
 const deleted: string[] = []
-
-function kindOf(collection: unknown): string {
-  return (collection as { __kind?: string })?.__kind ?? '?'
-}
+/** Bumped by the test to simulate another tab writing during the confirm. */
+let onProbe: (() => void) | null = null
 
 vi.mock('firebase/firestore', () => ({
-  doc: (collection: unknown, id?: string) => ({ __kind: kindOf(collection), id }),
-  getDoc: async (ref: { __kind: string; id: string }) => {
-    if (failingProbes.has(ref.__kind)) throw new Error('permission-denied')
-    return { exists: () => references.has(`${ref.__kind}:${ref.id}`) }
-  },
-  getDocs: async (q: { __kind: string; __childId?: string }) => {
-    if (q.__kind === 'children') return { docs: childDocs }
-    if (failingProbes.has(q.__kind)) throw new Error('permission-denied')
-    const hit = references.has(`${q.__kind}:${q.__childId}`)
-    return { empty: !hit, docs: [] }
-  },
+  collection: (_db: unknown, path: string) => ({ __name: path.split('/').pop() }),
+  doc: (col: { __name?: string }, id?: string) => ({ __name: col?.__name, id }),
+  documentId: () => '__id',
   deleteDoc: async (ref: { id: string }) => {
     if (ref.id === 'explode') throw new Error('nope')
     deleted.push(ref.id)
   },
   limit: () => ({ __limit: true }),
-  query: (collection: unknown, where: { __childId?: string }) => ({
-    __kind: kindOf(collection),
-    __childId: where.__childId,
-  }),
-  where: (_field: string, _op: string, value: string) => ({ __childId: value }),
+  where: (field: string, _op: string, value: string) => ({ field, value }),
+  query: (
+    col: { __name?: string },
+    ...clauses: { field: string; value: string }[]
+  ) => {
+    const byId = clauses.some((c) => c.field === '__id')
+    const childId = clauses.find((c) => c.field !== '__id')?.value
+    return {
+      __name: col?.__name,
+      __kind: byId ? 'doc-id' : 'child-field',
+      __childId: byId ? clauses[0].value : childId,
+    }
+  },
+  getDocs: async (q: {
+    __name: string
+    __kind?: string
+    __childId?: string
+    __children?: boolean
+  }) => {
+    if (q.__name === 'children') return { docs: childDocs }
+    onProbe?.()
+    if (failingProbes.has(`${q.__name}:${q.__kind}`)) throw new Error('permission-denied')
+    return { empty: !references.has(`${q.__name}:${q.__kind}:${q.__childId}`), docs: [] }
+  },
 }))
 
-vi.mock('../../core/firebase/firestore', () => {
-  const stub = (kind: string) => () => ({ __kind: kind })
-  return {
-    childrenCollection: stub('children'),
-    skillSnapshotsCollection: stub('skillSnapshots'),
-    learnerModelsCollection: stub('learnerModels'),
-    xpLedgerCollection: stub('xpLedger'),
-    avatarProfilesCollection: stub('avatarProfiles'),
-    activityConfigsCollection: stub('activityConfigs'),
-    daysCollection: stub('days'),
-    hoursCollection: stub('hours'),
-    artifactsCollection: stub('artifacts'),
-  }
-})
+vi.mock('../../core/firebase/firestore', () => ({
+  childrenCollection: () => ({ __name: 'children' }),
+  db: { __db: true },
+}))
 
 import {
-  CHILD_REFERENCE_PROBES,
+  PROBED_COLLECTIONS,
   classifyChildDocs,
   deleteGhostChildDocs,
   findGhostChildDocs,
   isDeletableGhost,
+  probeChildReferences,
 } from './ghostChildDocs'
 
 function childDoc(id: string, name: string, createdAt?: string) {
   return { id, data: () => ({ name, createdAt }) }
 }
 
-/** The shape the family was actually in: two real boys, many strays. */
+/** The shape the family was actually in: two real boys, strays beside them. */
 const REAL_LINCOLN = childDoc('c1', 'Lincoln', '2025-01-01T00:00:00.000Z')
 const REAL_LONDON = childDoc('c2', 'London', '2025-01-01T00:00:01.000Z')
+const GHOST = childDoc('ghost-a', 'Lincoln', '2025-06-01T00:00:00.000Z')
 
 beforeEach(() => {
   childDocs = []
   references = new Set()
   failingProbes = new Set()
   deleted.length = 0
+  onProbe = null
 })
 
 describe('classifyChildDocs — the app’s own rule, not a second copy (UX-394)', () => {
@@ -107,9 +109,43 @@ describe('classifyChildDocs — the app’s own rule, not a second copy (UX-394)
   })
 })
 
+describe('the probe asks every collection BOTH questions (UX-394, Codex round 1)', () => {
+  it('catches a composite document id, not only an exact one', async () => {
+    // THE ROUND 1 P1. `addXpEvent` writes per-event records as
+    // `xpLedger/{childId}_{dedupKey}`; a diamond award never writes the
+    // cumulative `xpLedger/{childId}` document at all. An exact-id probe reads
+    // that ghost as unreferenced and offers an irreversible currency record for
+    // deletion. The doc-id probe is a PREFIX RANGE, so the composite key hits.
+    references.add('xpLedger:doc-id:ghost-a')
+
+    const { referencedBy } = await probeChildReferences('family-1', 'ghost-a')
+    expect(referencedBy).toEqual(['xpLedger (doc-id)'])
+  })
+
+  it('catches a childId FIELD on a collection whose ids are not the child', async () => {
+    references.add('hours:child-field:ghost-a')
+
+    const { referencedBy } = await probeChildReferences('family-1', 'ghost-a')
+    expect(referencedBy).toEqual(['hours (child-field)'])
+  })
+
+  it('asks both questions of every declared collection and nothing else', async () => {
+    for (const name of PROBED_COLLECTIONS) {
+      references.add(`${name}:doc-id:ghost-a`)
+      references.add(`${name}:child-field:ghost-a`)
+    }
+
+    const { referencedBy } = await probeChildReferences('family-1', 'ghost-a')
+    expect(referencedBy).toHaveLength(PROBED_COLLECTIONS.length * 2)
+    // `children` is never probed — the ghost is a document in it, so probing it
+    // would match itself and nothing would ever be deletable.
+    expect(PROBED_COLLECTIONS).not.toContain('children')
+  })
+})
+
 describe('findGhostChildDocs probes before offering anything (UX-394)', () => {
   it('offers a ghost that nothing references', async () => {
-    childDocs = [REAL_LINCOLN, REAL_LONDON, childDoc('ghost-a', 'Lincoln', '2025-06-01T00:00:00.000Z')]
+    childDocs = [REAL_LINCOLN, REAL_LONDON, GHOST]
 
     const survey = await findGhostChildDocs('family-1')
 
@@ -123,39 +159,28 @@ describe('findGhostChildDocs probes before offering anything (UX-394)', () => {
     // A ghost with records under it means something was written to an id no
     // screen has shown. That is a different and worse finding than a stray
     // document, and correcting history is its own decision.
-    childDocs = [REAL_LINCOLN, childDoc('ghost-a', 'Lincoln', '2025-06-01T00:00:00.000Z')]
-    references.add('hours:ghost-a')
+    childDocs = [REAL_LINCOLN, GHOST]
+    references.add('hours:child-field:ghost-a')
 
     const survey = await findGhostChildDocs('family-1')
 
     expect(survey.referenced.map((g) => g.id)).toEqual(['ghost-a'])
-    expect(survey.referenced[0].referencedBy).toEqual(['hours'])
+    expect(survey.referenced[0].referencedBy).toEqual(['hours (child-field)'])
     expect(survey.deletable).toEqual([])
   })
 
   it('FAILS CLOSED: a probe that throws withholds the ghost exactly as a match does', async () => {
     // A guard that passes on an error it could not run is worse than no guard,
     // and here the cost of being wrong is a deleted record.
-    childDocs = [REAL_LINCOLN, childDoc('ghost-a', 'Lincoln', '2025-06-01T00:00:00.000Z')]
-    failingProbes.add('learnerModels')
+    childDocs = [REAL_LINCOLN, GHOST]
+    failingProbes.add('learnerModels:doc-id')
 
     const survey = await findGhostChildDocs('family-1')
 
-    expect(survey.ghosts[0].unreadable).toEqual(['learnerModels'])
+    expect(survey.ghosts[0].unreadable).toEqual(['learnerModels (doc-id)'])
     expect(survey.deletable).toEqual([])
     // …and it is not reported as a reference either, because it is not one.
     expect(survey.referenced).toEqual([])
-  })
-
-  it('asks every declared probe, by document id and by childId field', async () => {
-    childDocs = [REAL_LINCOLN, childDoc('ghost-a', 'Lincoln', '2025-06-01T00:00:00.000Z')]
-    for (const probe of CHILD_REFERENCE_PROBES) references.add(`${probe.label}:ghost-a`)
-
-    const survey = await findGhostChildDocs('family-1')
-
-    expect(survey.ghosts[0].referencedBy).toEqual(
-      CHILD_REFERENCE_PROBES.map((p) => p.label),
-    )
   })
 
   it('finds nothing on a clean family', async () => {
@@ -169,23 +194,56 @@ describe('findGhostChildDocs probes before offering anything (UX-394)', () => {
   })
 })
 
-describe('the delete is gated at the write, not only in the UI (UX-394)', () => {
-  it('deletes only the documents nothing points at', async () => {
-    const clean = { id: 'ghost-a', name: 'Lincoln', referencedBy: [], unreadable: [] }
-    const held = { id: 'ghost-b', name: 'Lincoln', referencedBy: ['hours'], unreadable: [] }
-    const unknown = { id: 'ghost-c', name: 'Lincoln', referencedBy: [], unreadable: ['days'] }
+describe('the delete revalidates against live data (UX-394, Codex round 1)', () => {
+  it('deletes a ghost that is still a ghost and still unreferenced', async () => {
+    childDocs = [REAL_LINCOLN, GHOST]
 
-    const result = await deleteGhostChildDocs('family-1', [clean, held, unknown])
+    const result = await deleteGhostChildDocs('family-1', ['ghost-a'])
 
     expect(result.deleted).toEqual(['ghost-a'])
     expect(deleted).toEqual(['ghost-a'])
-    expect(result.failed.map((f) => f.id).sort()).toEqual(['ghost-b', 'ghost-c'])
+  })
+
+  it('THE ROUND 1 P1: a reference written DURING the confirm stops the delete', async () => {
+    // The survey is a snapshot. Another tab can write a reference between the
+    // survey and the tap, and the cached `referencedBy: []` would have let the
+    // delete through — presenting a stale array as a write-time gate.
+    childDocs = [REAL_LINCOLN, GHOST]
+    onProbe = () => {
+      references.add('artifacts:child-field:ghost-a')
+      onProbe = null
+    }
+
+    const result = await deleteGhostChildDocs('family-1', ['ghost-a'])
+
+    expect(deleted).toEqual([])
+    expect(result.failed[0].error).toContain('now referenced by')
+  })
+
+  it('refuses a document that is no longer a duplicate of another child', async () => {
+    // A rename in another tab can make the document the canonical child of a
+    // name of its own. The delete re-derives the split rather than trusting the
+    // ids the survey handed it.
+    childDocs = [REAL_LINCOLN, childDoc('ghost-a', 'Cousin Ada', '2025-06-01T00:00:00.000Z')]
+
+    const result = await deleteGhostChildDocs('family-1', ['ghost-a'])
+
+    expect(deleted).toEqual([])
+    expect(result.failed[0].error).toContain('no longer a duplicate')
+  })
+
+  it('deletes nothing at all when the children cannot be re-read', async () => {
+    childDocs = []
+    const result = await deleteGhostChildDocs('family-1', ['ghost-a'])
+
+    expect(deleted).toEqual([])
+    expect(result.failed).toHaveLength(1)
   })
 
   it('reports a failed delete rather than implying it landed', async () => {
-    const result = await deleteGhostChildDocs('family-1', [
-      { id: 'explode', name: 'Lincoln', referencedBy: [], unreadable: [] },
-    ])
+    childDocs = [REAL_LINCOLN, childDoc('explode', 'Lincoln', '2025-06-01T00:00:00.000Z')]
+
+    const result = await deleteGhostChildDocs('family-1', ['explode'])
 
     expect(result.deleted).toEqual([])
     expect(result.failed[0]).toMatchObject({ id: 'explode', error: 'nope' })

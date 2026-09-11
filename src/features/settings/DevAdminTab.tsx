@@ -631,7 +631,13 @@ export default function DevAdminTab() {
     if (!ghostSurvey) return
     setGhostDeleting(true)
     try {
-      const result = await deleteGhostChildDocs(familyId, ghostSurvey.deletable)
+      // Ids, not the survey's blessed rows: the delete re-reads `children` and
+      // re-runs every probe before each `deleteDoc`, so a reference written in
+      // another tab since the survey stops it (Codex round 1).
+      const result = await deleteGhostChildDocs(
+        familyId,
+        ghostSurvey.deletable.map((g) => g.id),
+      )
       setGhostStatus({
         severity: result.failed.length > 0 ? 'warning' : 'success',
         text:
@@ -1213,13 +1219,16 @@ export default function DevAdminTab() {
         </Typography>
         <Typography variant="body2" color="text.secondary" gutterBottom>
           <strong>Only a duplicate nothing points at is offered.</strong> Each one
-          is checked against <code>skillSnapshots</code>, <code>learnerModels</code>
-          , <code>xpLedger</code>, <code>avatarProfiles</code>,{' '}
-          <code>activityConfigs</code>, <code>days</code>, <code>hours</code> and{' '}
-          <code>artifacts</code>. A duplicate anything references is listed and
-          <strong> not</strong> offered — records written under an id no screen
-          shows is a different and worse finding, and correcting history is its
-          own decision. A check that fails to run counts the same as a match.
+          is checked against <strong>every</strong> collection under this
+          family — both by document id (which catches composite keys like{' '}
+          <code>xpLedger/&#123;childId&#125;_&#123;dedupKey&#125;</code>) and by
+          a <code>childId</code> field. A duplicate anything references is listed
+          and <strong>not</strong> offered — records written under an id no
+          screen shows is a different and worse finding, and correcting history
+          is its own decision. A check that fails to run counts the same as a
+          match, and every check is <strong>re-run at the moment of the
+          delete</strong>, so a reference written in another tab since the survey
+          stops it.
         </Typography>
         <Button
           variant="contained"
