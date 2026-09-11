@@ -15,9 +15,8 @@ import Typography from '@mui/material/Typography'
 import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 
 import ChildSelector from '../../components/ChildSelector'
-import Page from '../../components/Page'
 import SaveIndicator from '../../components/SaveIndicator'
-import SectionCard from '../../components/SectionCard'
+import SectionCard, { type SectionDisclosure } from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   skillSnapshotsCollection,
@@ -64,10 +63,12 @@ export default function SkillSnapshotPage() {
   } = useActiveChild()
 
   const [snapshot, setSnapshot] = useState<SkillSnapshot | null>(null)
+  const [expandedSections, setExpandedSections] = useState<string[]>([])
   const [snapshotChildId, setSnapshotChildId] = useState(activeChildId)
   if (snapshotChildId !== activeChildId) {
     setSnapshotChildId(activeChildId)
     setSnapshot(null)
+    setExpandedSections([])
   }
   const { saveState, withSave } = useSaveState()
   const [snack, setSnack] = useState<{ text: string; severity: 'success' | 'error' } | null>(null)
@@ -280,26 +281,31 @@ export default function SkillSnapshotPage() {
     [snapshot, persist],
   )
 
+  const disclosure = (key: string, summary?: string): SectionDisclosure => ({
+    expanded: expandedSections.includes(key),
+    onChange: (expanded) => setExpandedSections(current =>
+      expanded ? [...current.filter(id => id !== key), key] : current.filter(id => id !== key)),
+    summary,
+  })
+
   return (
-    <Page>
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
+    <Stack spacing={1.5} sx={{ py: 2, px: { xs: 2, sm: 3 }, maxWidth: 1200, width: '100%', mx: 'auto', boxSizing: 'border-box' }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
         <div>
           {/* UX-50: the page sits above a child switcher, so a hardcoded name
               was wrong for half the family — and the tab that opens it is called
               "Skill Snapshot", not "Evaluation". */}
-          <Typography variant="h4" component="h1">
+          <Typography variant="h5" component="h1">
             {activeChild?.name ?? 'Your child'}&apos;s Skill Snapshot
-          </Typography>
-          <Typography color="text.secondary">
-            Maintain a living Skill Snapshot used by the planner and teach helper.
           </Typography>
         </div>
         <Button
           variant="contained"
           startIcon={<AssessmentIcon />}
+          sx={{ minHeight: 44, flexShrink: 0 }}
           onClick={() => navigate('/evaluate')}
         >
-          Evaluate {activeChild?.name || 'Child'}'s Skills
+          Evaluate skills
         </Button>
       </Stack>
 
@@ -324,8 +330,11 @@ export default function SkillSnapshotPage() {
         </SectionCard>
       ) : (
         <>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             <SaveIndicator state={saveState} />
+            <Button size="small" sx={{ minHeight: 44, ml: 'auto' }} disabled={expandedSections.length === 0} onClick={() => setExpandedSections([])}>
+              Collapse all
+            </Button>
             {snapshot.prioritySkills.length === 0 && (
               <Button size="small" variant="outlined" onClick={handleLoadDefaults}>
                 Load Starter Defaults
@@ -335,7 +344,7 @@ export default function SkillSnapshotPage() {
 
           {/* Quick Check Prompts (Evaluation Agent) */}
           {snapshot.prioritySkills.length > 0 && (
-            <SectionCard title="Quick Checks">
+            <SectionCard title="Quick Checks" disclosure={disclosure('quick', 'Short checks and observations')}>
               <QuickCheckPanel
                 snapshot={snapshot}
                 onUpdateSkillLevel={handleQuickLevelUpdate}
@@ -346,6 +355,7 @@ export default function SkillSnapshotPage() {
 
           {/* Working Levels (per-domain quest starting level) */}
           <WorkingLevelsSection
+            disclosure={disclosure('levels')}
             childId={activeChildId}
             workingLevels={snapshot.workingLevels}
             questActivity={snapshot.questActivity}
@@ -354,10 +364,12 @@ export default function SkillSnapshotPage() {
           />
 
           {/* FEAT-09: mastered-skill check-offs from daily mastery + quest evidence */}
-          <MasteryCheckoffPanel familyId={familyId} childId={activeChildId} snapshot={snapshot} />
+          <MasteryCheckoffPanel familyId={familyId} childId={activeChildId} snapshot={snapshot} disclosure={disclosure('mastery')} />
 
           {/* Priority Skills */}
-          <SectionCard title="Priority Skills (1\u20133 targets)">
+          <SectionCard title="Priority Skills" disclosure={disclosure('priorities', snapshot.prioritySkills.length
+            ? snapshot.prioritySkills.slice(0, 2).map(skill => `${skill.label || 'Unnamed skill'}: ${skill.level}`).join(' · ') + (snapshot.prioritySkills.length > 2 ? ` · +${snapshot.prioritySkills.length - 2} more` : '')
+            : 'No priority skills set')}>
             <Stack spacing={2}>
               {snapshot.prioritySkills.length === 0 ? (
                 <Typography color="text.secondary">No priority skills set.</Typography>
@@ -372,7 +384,7 @@ export default function SkillSnapshotPage() {
                         : 'Active focus'
                   return (
                   <Stack key={index} spacing={1} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Stack direction="row" spacing={1} alignItems="center">
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
                       <TextField
                         label="Label"
                         size="small"
@@ -392,7 +404,7 @@ export default function SkillSnapshotPage() {
                           <MenuItem key={lvl} value={lvl}>{lvl}</MenuItem>
                         ))}
                       </TextField>
-                      <IconButton size="small" onClick={() => handleRemoveSkill(index)}>
+                      <IconButton size="small" aria-label="Remove priority skill" sx={{ minWidth: 44, minHeight: 44, alignSelf: 'flex-end' }} onClick={() => handleRemoveSkill(index)}>
                         <DeleteIcon fontSize="small" />
                       </IconButton>
                     </Stack>
@@ -429,7 +441,7 @@ export default function SkillSnapshotPage() {
 
           {/* Conceptual Foundations (from most recent evaluation pattern analysis) */}
           {snapshot.conceptualBlocks && snapshot.conceptualBlocks.length > 0 && (
-            <SectionCard title="Conceptual Foundations">
+            <SectionCard title="Conceptual Foundations" disclosure={disclosure('foundations', `${snapshot.conceptualBlocks.length} recorded`)}>
               <FoundationsSection
                 blocks={snapshot.conceptualBlocks}
                 summary={undefined}
@@ -438,7 +450,7 @@ export default function SkillSnapshotPage() {
           )}
 
           {/* Supports */}
-          <SectionCard title="Default Supports / Adaptations">
+          <SectionCard title="Supports / Adaptations" disclosure={disclosure('supports', `${snapshot.supports.length} saved`)}>
             <Stack spacing={2}>
               {snapshot.supports.length === 0 ? (
                 <Typography color="text.secondary">No supports defined.</Typography>
@@ -463,7 +475,7 @@ export default function SkillSnapshotPage() {
                         onChange={(e) => handleUpdateSupport(index, 'description', e.target.value)}
                       />
                     </Stack>
-                    <IconButton size="small" onClick={() => handleRemoveSupport(index)}>
+                    <IconButton size="small" aria-label="Remove support" sx={{ minWidth: 44, minHeight: 44, alignSelf: 'flex-end' }} onClick={() => handleRemoveSupport(index)}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </Stack>
@@ -476,7 +488,7 @@ export default function SkillSnapshotPage() {
           </SectionCard>
 
           {/* Stop Rules */}
-          <SectionCard title="Stop Rules">
+          <SectionCard title="Stop Rules" disclosure={disclosure('stops', `${snapshot.stopRules.length} saved`)}>
             <Stack spacing={2}>
               {snapshot.stopRules.length === 0 ? (
                 <Typography color="text.secondary">No stop rules defined.</Typography>
@@ -506,7 +518,7 @@ export default function SkillSnapshotPage() {
                         onChange={(e) => handleUpdateStopRule(index, 'action', e.target.value)}
                       />
                     </Stack>
-                    <IconButton size="small" onClick={() => handleRemoveStopRule(index)}>
+                    <IconButton size="small" aria-label="Remove stop rule" sx={{ minWidth: 44, minHeight: 44, alignSelf: 'flex-end' }} onClick={() => handleRemoveStopRule(index)}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </Stack>
@@ -519,7 +531,7 @@ export default function SkillSnapshotPage() {
           </SectionCard>
 
           {/* Evidence Definitions */}
-          <SectionCard title="Evidence Definitions">
+          <SectionCard title="Evidence Definitions" disclosure={disclosure('evidence', `${snapshot.evidenceDefinitions.length} saved`)}>
             <Stack spacing={2}>
               {snapshot.evidenceDefinitions.length === 0 ? (
                 <Typography color="text.secondary">No evidence definitions.</Typography>
@@ -544,7 +556,7 @@ export default function SkillSnapshotPage() {
                         onChange={(e) => handleUpdateEvidence(index, 'description', e.target.value)}
                       />
                     </Stack>
-                    <IconButton size="small" onClick={() => handleRemoveEvidence(index)}>
+                    <IconButton size="small" aria-label="Remove evidence definition" sx={{ minWidth: 44, minHeight: 44, alignSelf: 'flex-end' }} onClick={() => handleRemoveEvidence(index)}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </Stack>
@@ -574,7 +586,7 @@ export default function SkillSnapshotPage() {
           {snack?.text}
         </Alert>
       </Snackbar>
-    </Page>
+    </Stack>
   )
 }
 

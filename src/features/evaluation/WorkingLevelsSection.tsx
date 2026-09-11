@@ -11,7 +11,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { deleteField, doc, setDoc, updateDoc } from 'firebase/firestore'
 
-import SectionCard from '../../components/SectionCard'
+import SectionCard, { type SectionDisclosure } from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import type { QuestActivity, QuestActivityMarker, WorkingLevel, WorkingLevels } from '../../core/types/evaluation'
@@ -86,6 +86,7 @@ function formatLastMined(activity: QuestActivityMarker, currentLevel: number | u
 }
 
 interface WorkingLevelsSectionProps {
+  disclosure?: SectionDisclosure
   childId: string | null
   workingLevels: WorkingLevels | undefined
   /** Per-domain "last mined" markers (visibility-only; separate from levels). */
@@ -95,6 +96,7 @@ interface WorkingLevelsSectionProps {
 }
 
 export default function WorkingLevelsSection({
+  disclosure,
   childId,
   workingLevels,
   questActivity,
@@ -180,7 +182,10 @@ export default function WorkingLevelsSection({
   )
 
   return (
-    <SectionCard title="Working Levels">
+    <SectionCard title="Working Levels" disclosure={disclosure && {
+      ...disclosure,
+      summary: MODES.map(mode => `${mode.label}: ${workingLevels?.[mode.key] ? `Level ${workingLevels[mode.key]!.level}` : 'not set'}`).join(' · '),
+    }}>
       <Typography variant="body2" color="text.secondary">
         Where each Knowledge Mine quest starts. Updated automatically after quests, evaluations, and
         curriculum scans — or adjust manually below.
@@ -231,7 +236,7 @@ export default function WorkingLevelsSection({
                   )}
                 </Box>
                 {!isEditing && (
-                  <Button size="small" variant="outlined" onClick={() => startEdit(mode)}>
+                  <Button size="small" variant="outlined" sx={{ minHeight: 44 }} onClick={() => startEdit(mode)}>
                     {current ? 'Adjust' : 'Set level'}
                   </Button>
                 )}
@@ -266,7 +271,7 @@ export default function WorkingLevelsSection({
                     disabled={saving}
                     sx={{ textTransform: 'none', px: 0, minWidth: 0 }}
                   >
-                    Revert to last auto level
+                    Clear manual level
                   </Button>
                 </Box>
               )}
@@ -279,6 +284,7 @@ export default function WorkingLevelsSection({
                       onClick={() => setEditLevel((l) => Math.max(1, l - 1))}
                       disabled={editLevel <= 1 || saving}
                       aria-label="decrease level"
+                      sx={{ minWidth: 44, minHeight: 44 }}
                     >
                       <RemoveIcon fontSize="small" />
                     </IconButton>
@@ -294,6 +300,7 @@ export default function WorkingLevelsSection({
                       onClick={() => setEditLevel((l) => Math.min(mode.cap, l + 1))}
                       disabled={editLevel >= mode.cap || saving}
                       aria-label="increase level"
+                      sx={{ minWidth: 44, minHeight: 44 }}
                     >
                       <AddIcon fontSize="small" />
                     </IconButton>
