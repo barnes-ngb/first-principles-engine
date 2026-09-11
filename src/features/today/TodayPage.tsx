@@ -101,10 +101,6 @@ import {
 } from './dailyPlanGate'
 import { useDayLog } from './useDayLog'
 import {
-  ChapterSaveAudience,
-  chapterSaveFailureNotice,
-} from './chapterSaveOutcome'
-import {
   TodayDecision,
   childIdFromScopeKey,
   todayScopeKey,
@@ -514,27 +510,13 @@ export default function TodayPage() {
     updateChapter,
   } = useBookProgress(familyId, selectedChildId, readAloudBookId)
 
-  /**
-   * UX-355 — a chapter answer that did not save says so.
-   *
-   * `updateChapter` was handed to `ChapterQuestionPool` raw and called as
-   * `void onChapterAnswered(...)`, so a rejected write was an unhandled promise
-   * rejection with nothing on screen. The hook answers an outcome now; this is
-   * the parent half of the reporting, in a parent's words. Nothing is rolled
-   * back because nothing moved optimistically — the row renders off the stored
-   * document, which is still correct.
-   */
-  const handleChapterAnswered = useCallback(
-    async (chapter: number, update: Partial<ChapterQuestionPoolItem>) => {
-      const outcome = await updateChapter(chapter, update)
-      if (!outcome.ok) {
-        setSnackMessage(
-          chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Parent),
-        )
-      }
-    },
-    [updateChapter, setSnackMessage],
-  )
+  // UX-355 — `updateChapter` answers a `ChapterSaveOutcome` instead of throwing
+  // into nothing, and `ChapterQuestionPool` reads it: the reporting belongs
+  // beside the note she typed rather than in a snack at the bottom of a long
+  // page, and that component's `catch` blocks were already what kept the note on
+  // screen. A wrapper HERE that reported and then resolved normally would have
+  // stopped those `catch` blocks running and deleted her note on exactly the
+  // failure the reporting was added for (Codex round 1, P1).
 
   // Load/persist daily plan (energy + planType) to Firestore
   const {
@@ -1577,7 +1559,7 @@ export default function TodayPage() {
           bookProgress={bookProgress}
           bookProgressLoading={bookProgressLoading}
           bookProgressFailed={bookProgressFailed}
-          onChapterAnswered={handleChapterAnswered}
+          onChapterAnswered={updateChapter}
           dayLog={dayLog}
           persistDayLogImmediate={persistDayLogImmediate}
           onRetryGeneration={() => void handleRetryChapterGen()}

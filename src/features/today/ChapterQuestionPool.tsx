@@ -21,6 +21,12 @@ import type {
   DayLog,
 } from '../../core/types'
 import { isChapterToGo } from './chapterPool.logic'
+import {
+  ChapterSaveAudience,
+  ChapterSaveRefusal,
+  chapterSaveFailureNotice,
+  type ChapterSaveOutcome,
+} from './chapterSaveOutcome'
 
 const questionTypeEmoji: Record<string, string> = {
   comprehension: '\u{1F50D}',
@@ -40,10 +46,18 @@ interface ChapterQuestionPoolProps {
    * renders exactly as it did.
    */
   bookProgressFailed?: boolean
+  /**
+   * UX-355, Codex round 1 (P1) — this ANSWERS instead of throwing, so every
+   * caller below must read the outcome before discarding what the parent typed.
+   * `useBookProgress.updateChapter` used to reject and the `catch` blocks here
+   * were what kept the note; converting the rejection into an outcome without
+   * teaching the callers about it would have deleted her note on exactly the
+   * failure the reporting was added for.
+   */
   onChapterAnswered: (
     chapter: number,
     update: Partial<ChapterQuestionPoolItem>,
-  ) => Promise<void>
+  ) => Promise<ChapterSaveOutcome>
   dayLog?: DayLog | null
   persistDayLogImmediate?: (updated: DayLog) => void
   onRetryGeneration?: () => void
@@ -68,6 +82,9 @@ export default function ChapterQuestionPool({
     null,
   )
   const [skippingChapter, setSkippingChapter] = useState<number | null>(null)
+  // UX-355 — what this card says when a chapter write did not land. Inline,
+  // beside the control, rather than a toast at the top of a long page.
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Restore persisted selections from dayLog when bookProgress first arrives
   const [prevBookProgress, setPrevBookProgress] = useState<BookProgress | null>(
@@ -240,12 +257,19 @@ export default function ChapterQuestionPool({
 
   const handleSaveNote = async (item: ChapterQuestionPoolItem) => {
     setSavingChapter(item.chapter)
+    setSaveError(null)
     try {
       const note = chapterNotes[item.chapter]
       // Persist note only — do NOT mark answered (kid records audio to complete)
-      await onChapterAnswered(item.chapter, {
+      const outcome = await onChapterAnswered(item.chapter, {
         responseNote: note || undefined,
       })
+      if (!outcome.ok) {
+        // Her note is still in the box and still hers. Nothing below runs.
+        setSaveError(chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Parent).text)
+        setSavingChapter(null)
+        return
+      }
       // Clear local note state
       setChapterNotes((prev) => {
         const next = { ...prev }
@@ -254,6 +278,9 @@ export default function ChapterQuestionPool({
       })
     } catch (err) {
       console.error('Chapter note save failed:', err)
+      setSaveError(
+        chapterSaveFailureNotice(ChapterSaveRefusal.Rejected, ChapterSaveAudience.Parent).text,
+      )
     }
     setSavingChapter(null)
   }
@@ -263,14 +290,22 @@ export default function ChapterQuestionPool({
     const chapter = skipConfirmChapter
     setSkipConfirmChapter(null)
     setSkippingChapter(chapter)
+    setSaveError(null)
     try {
       // Skip is a parent-only action and must NOT mark the chapter answered
       // (FUNC-07). Skipped chapters are "done for completion" but distinct from
       // answered, so the kid section stays visible until everything is answered
       // or parent-skipped.
-      await onChapterAnswered(chapter, {
+      const outcome = await onChapterAnswered(chapter, {
         skipped: true,
       })
+      if (!outcome.ok) {
+        // The chapter was NOT skipped, so it must stay selected — dropping it
+        // from the selection would hide a chapter nothing has recorded.
+        setSaveError(chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Parent).text)
+        setSkippingChapter(null)
+        return
+      }
       setSelectedChapters((prev) => {
         const next = new Set(prev)
         next.delete(chapter)
@@ -279,6 +314,9 @@ export default function ChapterQuestionPool({
       })
     } catch (err) {
       console.error('Chapter skip failed:', err)
+      setSaveError(
+        chapterSaveFailureNotice(ChapterSaveRefusal.Rejected, ChapterSaveAudience.Parent).text,
+      )
     }
     setSkippingChapter(null)
   }
@@ -293,6 +331,15 @@ export default function ChapterQuestionPool({
   return (
     <SectionCard title={`\u{1F4D6} ${book.title}`}>
       <Stack spacing={2}>
+        {/* UX-355 — a chapter write that did not land, said where she is
+            looking. Never a claim that anything was rolled back: this card
+            renders off the stored document, which never moved. */}
+        {saveError && (
+          <Typography variant="body2" color="error.main">
+            {saveError}
+          </Typography>
+        )}
+
         {/* Progress chip */}
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Chip

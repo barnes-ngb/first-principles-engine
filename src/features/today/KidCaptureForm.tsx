@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
@@ -36,55 +36,89 @@ export default function KidCaptureForm({
   const [content, setContent] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
-  // UX-359 — a save that did not land says so, on the boys' own capture form.
-  const [saveFailed, setSaveFailed] = useState(false)
+  /**
+   * UX-359 — a save that did not land says so, on the boys' own capture form,
+   * and says WHICH of the two failures it was (Codex round 1, P2).
+   *
+   * `null` is no failure. `'nothing'` is the `addDoc` itself failing, where no
+   * document exists and *"that did not save"* is simply true. `'no-picture'` is
+   * the upload or the `uri` write failing **after** the document was created:
+   * saying nothing saved there would be false, and telling him to tap Save again
+   * would create a **second** artifact and orphan the first without a picture.
+   */
+  const [saveFailure, setSaveFailure] = useState<'nothing' | 'no-picture' | null>(null)
+
+  /**
+   * The document this form already created, if a previous attempt got that far.
+   *
+   * A retry REUSES it rather than adding another — the same rule
+   * `useUnifiedCapture` follows for a batch's extra pages, and the reason the
+   * partial-failure message can honestly say the record exists.
+   */
+  const createdArtifactIdRef = useRef<string | null>(null)
 
   const handleSave = useCallback(async () => {
     if (saving) return
     setSaving(true)
-    setSaveFailed(false)
-    try {
-      const artifact: Omit<Artifact, 'id'> = {
-        childId,
-        dayLogId: today,
-        title: title || (type === 'photo' ? `Photo ${today}` : `Note ${today}`),
-        type: type === 'photo' ? EvidenceType.Photo : EvidenceType.Note,
-        createdAt: new Date().toISOString(),
-        content: type === 'note' ? content : undefined,
-        tags: {
-          engineStage: EngineStage.Build,
-          domain: '',
-          subjectBucket: SubjectBucket.Other,
-          location: 'Home',
-        },
+    setSaveFailure(null)
+
+    // The record half. Skipped entirely on a retry that already got this far,
+    // so tapping Save again can never leave two artifacts for one photo.
+    let artifactId = createdArtifactIdRef.current
+    if (!artifactId) {
+      try {
+        const artifact: Omit<Artifact, 'id'> = {
+          childId,
+          dayLogId: today,
+          title: title || (type === 'photo' ? `Photo ${today}` : `Note ${today}`),
+          type: type === 'photo' ? EvidenceType.Photo : EvidenceType.Note,
+          createdAt: new Date().toISOString(),
+          content: type === 'note' ? content : undefined,
+          tags: {
+            engineStage: EngineStage.Build,
+            domain: '',
+            subjectBucket: SubjectBucket.Other,
+            location: 'Home',
+          },
+        }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        artifactId = docRef.id
+        createdArtifactIdRef.current = docRef.id
+      } catch (err) {
+        // Nothing exists. "That did not save" is simply true — the form stayed
+        // open with his work in it and NOTHING was said before UX-359.
+        console.error('Failed to save artifact:', err)
+        setSaveFailure('nothing')
+        setSaving(false)
+        return
       }
+    }
 
-      const docRef = await addDoc(artifactsCollection(familyId), artifact)
-
-      if (type === 'photo' && file) {
+    // The picture half. A failure here leaves a real record with no picture on
+    // it, which is a different sentence and a different retry.
+    if (type === 'photo' && file) {
+      try {
         const filename = generateFilename(file.name.split('.').pop() || 'jpg')
         const { downloadUrl } = await uploadArtifactFile(
           familyId,
-          docRef.id,
+          artifactId,
           file,
           filename,
         )
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), {
+        await updateDoc(doc(artifactsCollection(familyId), artifactId), {
           uri: downloadUrl,
         })
+      } catch (err) {
+        console.error('Failed to attach the photo to the artifact:', err)
+        setSaveFailure('no-picture')
+        setSaving(false)
+        return
       }
-
-      onSave()
-    } catch (err) {
-      // The form stayed open with the photo still in it and NOTHING was said —
-      // a ten-year-old tapped Save, watched the spinner stop, and had no way to
-      // tell whether his work was recorded. `UX-351`'s rule on the one surface
-      // where the person who loses the work cannot read an error log.
-      console.error('Failed to save artifact:', err)
-      setSaveFailed(true)
-    } finally {
-      setSaving(false)
     }
+
+    createdArtifactIdRef.current = null
+    setSaving(false)
+    onSave()
   }, [saving, childId, today, title, type, content, file, familyId, onSave])
 
   return (
@@ -140,12 +174,15 @@ export default function KidCaptureForm({
           />
         )}
 
-        {saveFailed && (
-          // UX-359 — kid copy, on the shared readability bar. It says what
-          // happened and names the one action he has; the work is still in the
-          // form, so it does not claim anything was lost.
+        {saveFailure && (
+          // UX-359 — kid copy, on the shared readability bar. Two sentences,
+          // because a half-save is not a no-save: the work is still in the form
+          // either way, and neither claims anything was lost. Tapping Save again
+          // reuses the record that already exists, so a retry adds nothing.
           <Typography variant="body2" color="error.main">
-            That did not save. Try again.
+            {saveFailure === 'nothing'
+              ? 'That did not save. Try again.'
+              : 'Saved, but no picture yet. Try again.'}
           </Typography>
         )}
 

@@ -280,10 +280,10 @@ can, but the page works against her · **P3** — polish.
 | **UX-357** | **P1** | A day write composed for one child or day was **re-stamped** with the live one and saved, in a line labelled *defense in depth*. One boy's whole checklist could land on his brother's day, on the one lane where the preservation guard runs in observe-only mode. Refused and reported now; the loaded day is also dropped on a **date** change, which the old child-only guard never covered. |
 | **UX-343** | **P2** | Today's dialog stack outlived a child or day change — a strand session with photos in it, the move and swap targets, the video picker, and (inside `TodayChecklist`) a lesson-video search, a photo dialog, a typed review note and a half-filled new row. All closed now, and **named** in one sentence, RESET's second half. |
 | **UX-342** | **P2** | A picked lesson video and its *"logged N min"* confirmation survived a child change while the hours write read the live `childId`. RESET. **No hours arithmetic changed** — asserted through `collectHoursContributions` with a positive control (`DOC-25` term 3). |
-| **UX-355** | **P3** | A chapter answer that failed to save was an unhandled promise rejection: nothing on screen, gone on the next load. Two audiences, one rule; kid copy on the readability bar. |
+| **UX-355** | **P3** | A chapter answer that failed to save was an unhandled promise rejection: nothing on screen, gone on the next load. Two audiences, one rule; kid copy on the readability bar. **Codex round 1 (P1) caught the first cut of this fix**: reporting from a wrapper on the page and then resolving normally disarmed the `catch` blocks in both chapter pools, which were the only thing keeping the staged work — so the reporting would have deleted a boy's recording and a parent's typed note on exactly the failure it was added for. The outcome now reaches the components, and each reads it before discarding anything. |
 | **UX-356** | **P3** | Two Today reads rendered a failure as an affirmative empty — the chapter pool (which then offered to **generate** a pool that exists) and yesterday's rollover (which silently carried nothing forward). Both say so now. |
 | **UX-358** | **P3** | The page hand-wrote both of its capability answers, duplicating `isChildProfile` and `canEdit`. No behaviour change; a fourth profile is now a decision made once. |
-| **UX-359** | **P3** | On the kid's own surfaces, a failed artifact save said nothing and a failed artifact **read** rendered as *"Nothing captured yet today."* |
+| **UX-359** | **P3** | On the kid's own surfaces, a failed artifact save said nothing and a failed artifact **read** rendered as *"Nothing captured yet today."* **Codex round 1 (P2)**: the first cut said *"That did not save"* for both halves of the save, which is false when the document was created and the upload failed — and the retry it recommended would have made a second artifact and orphaned the first. Two sentences now, and the retry **reuses** the document the first attempt created. |
 | **UX-360** | **P3** | Today's pre-completion scan reported a failed `activityConfigs` write with a `console.error` and nothing else, on a path whose success says *"Updated Math K to lesson 14"*. |
 
 ### Filed, not built
@@ -353,13 +353,25 @@ ribbon is a separate question and the owner has said the in-page selectors stay.
 
 - `npx tsc -b` clean · `npm run lint` — 0 errors, 3 warnings, all pre-existing in
   `useQuestSession.ts` / `EvaluateChatPage.tsx`
-- `npx vitest run` — **635 files, 9063 passed, 1 skipped, 0 failed**
+- `npx vitest run` — **637 files, 9072 passed, 1 skipped, 0 failed**
 - `npm run census:child-switch` — `census problems: 0`
 - `node scripts/check-docs-alignment.mjs` — HARD checks pass
 - New tests: `todayScope.test.ts` (11) · `chapterSaveOutcome.test.ts` (6) ·
   `useDayLog.wrongTarget.test.tsx` (6) · `useBookProgress.reporting.test.tsx` (6) ·
   `LessonVideoDialog.childSwitch.test.tsx` (5) · `useRolloverUnchecked.readFailure.test.tsx` (4) ·
-  `ChapterQuestionPool.failedRead.test.tsx` (3) · `todayScopeWiring.source.test.ts` (7)
+  `ChapterQuestionPool.failedRead.test.tsx` (3) · `todayScopeWiring.source.test.ts` (7) ·
+  `chapterSaveControlFlow.test.tsx` (5, round 1) · `KidCaptureForm.partialSave.test.tsx` (4, round 1)
 - **Positive controls, run and recorded.** Removing the `composedFor !== docId` guard fails 2 of the 6
-  `useDayLog.wrongTarget` cases; removing `LessonVideoDialog`'s identity effect fails 2 of its 5. Each
-  new file's header names its own control.
+  `useDayLog.wrongTarget` cases; removing `LessonVideoDialog`'s identity effect fails 2 of its 5;
+  removing `handleSaveNote`'s `if (!outcome.ok)` guard fails 1 of the 5 control-flow cases; collapsing
+  `KidCaptureForm`'s two failure sentences back onto one fails 2 of its 4. Each new file's header names
+  its own control.
+
+### Round 1's two findings, and what they say about the shape of this work
+
+Both were **on the fixes, not on the code they fixed**, and both were the same species: *adding a
+report changed a control flow that something else was relying on.* Converting a rejection into an
+outcome disarmed the `catch` blocks that were keeping a child's recording; writing one honest sentence
+for a two-step save made it dishonest for the half that half-succeeded. Neither is visible from the
+diff of the thing being fixed — you have to read the callers, which is the same reason this page needed
+a walk rather than another targeted run.

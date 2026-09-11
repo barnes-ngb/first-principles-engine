@@ -33,15 +33,10 @@ import { getDailyArmorSession } from '../../core/avatar/getDailyArmorSession'
 import type {
   Artifact,
   ChapterBook,
-  ChapterQuestionPoolItem,
   Child,
   DailyArmorSession,
   DayLog,
 } from '../../core/types'
-import {
-  ChapterSaveAudience,
-  chapterSaveFailureNotice,
-} from './chapterSaveOutcome'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
@@ -230,27 +225,12 @@ export default function KidTodayView({
     readAloudBookId,
   )
 
-  /**
-   * UX-355 — a chapter answer that did not save says so, in the boys' words.
-   *
-   * This is the surface the ledger row meant by *"the kid one needs its own
-   * words"*: a six- and a ten-year-old record their own answers here, by voice,
-   * and a rejected write was an unhandled promise rejection with nothing on
-   * screen at all. The copy is held to the shared readability bar
-   * (`src/test/kidReadability.ts`) and names the only action a six-year-old has
-   * — ask a grown-up — rather than an action he cannot take.
-   */
-  const handleChapterAnswered = useCallback(
-    async (chapter: number, update: Partial<ChapterQuestionPoolItem>) => {
-      const outcome = await updateChapter(chapter, update)
-      if (!outcome.ok) {
-        setCaptureMessage(
-          chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Kid),
-        )
-      }
-    },
-    [updateChapter],
-  )
+  // UX-355 — `updateChapter` answers a `ChapterSaveOutcome` instead of throwing
+  // into nothing, and `KidChapterPool` reads it: the reporting belongs beside
+  // the recording rather than in a toast at the top of the page, and the
+  // component's `catch` blocks were already what kept a failed save's audio on
+  // screen (Codex round 1, P1 — a wrapper here that reported and resolved would
+  // have let those `catch` blocks stop running and deleted the recording).
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
   const {
@@ -753,7 +733,7 @@ export default function KidTodayView({
                 childId={child.id}
                 dayLog={dayLog}
                 weekFocus={weekFocus}
-                onChapterAnswered={handleChapterAnswered}
+                onChapterAnswered={updateChapter}
               />
             ) : (
               <Typography variant="body2" color="text.secondary">
