@@ -71,12 +71,6 @@ export function useDayLog({
   activeRoutineItems,
 }: UseDayLogParams): UseDayLogResult {
   const [dayLog, setDayLog] = useState<DayLog | null>(null)
-  // Track which child the current dayLog belongs to; clear stale data on switch
-  const [dayLogChildId, setDayLogChildId] = useState(selectedChildId)
-  if (dayLogChildId !== selectedChildId) {
-    setDayLogChildId(selectedChildId)
-    setDayLog(null)
-  }
 
   const [weekPlanId, setWeekPlanId] = useState<string | undefined>()
   const [readAloudBookId, setReadAloudBookId] = useState<string | undefined>()
@@ -120,6 +114,25 @@ export function useDayLog({
     () => (currentDocId ? doc(daysCollection(familyId), currentDocId) : null),
     [familyId, currentDocId],
   )
+
+  /**
+   * Drop the loaded day the moment the page targets a different one (UX-357).
+   *
+   * This guard used to key on the CHILD alone, so a child switch cleared the
+   * stale document and a **date** change did not: tapping the day arrow left
+   * yesterday's checklist rendered under tomorrow's heading until the new
+   * snapshot arrived, and an edit made in that window composed tomorrow's write
+   * out of yesterday's document. Keying on the document id covers both halves,
+   * because that is what the id is made of.
+   *
+   * State-during-render, the form this repo's lint permits and the form this
+   * hook already used — an effect would leave one render showing the wrong day.
+   */
+  const [loadedDocId, setLoadedDocId] = useState(currentDocId)
+  if (loadedDocId !== currentDocId) {
+    setLoadedDocId(currentDocId)
+    setDayLog(null)
+  }
 
   // --- Persist helpers with save-state tracking ---
 
@@ -234,7 +247,34 @@ export function useDayLog({
         reportFailedWrite(DayWriteRefusal.NoTarget, updated, previous, docId)
         return
       }
-      // Ensure childId is always correct (defense in depth)
+      // ── UX-357: a day write is addressed to the day it was COMPOSED from ──
+      //
+      // Every Today handler builds its edit from the `dayLog` it closed over and
+      // hands the whole document back. A handler that started before a child
+      // switch or a day-arrow tap and finished after it — an upload, a scan, a
+      // dialog left open — is still holding the old one, and the document knows:
+      // it carries its own `childId` and `date`.
+      //
+      // This used to be a re-stamp (`{...updated, childId: selectedChildId}`)
+      // labelled *defense in depth*, which is exactly backwards. It made a
+      // mis-addressed write a confidently wrong one: one boy's whole checklist
+      // saved onto his brother's day under his brother's name, on the one lane
+      // where the preservation guard runs in observe-only mode. Refusing is the
+      // only safe answer, and it is REPORTED, not dropped — the rule this page
+      // learnt in `UX-351`.
+      //
+      // Compared as an id so one check covers both halves. A legacy document
+      // missing either field is left exactly as it was: the re-stamp below still
+      // fills a blank `childId`, which is a different thing from contradicting
+      // a stated one.
+      if (updated.childId && updated.date) {
+        const composedFor = dayLogDocId(updated.date, updated.childId)
+        if (composedFor !== docId) {
+          reportFailedWrite(DayWriteRefusal.WrongTarget, updated, previous, docId)
+          return
+        }
+      }
+      // Fill a blank childId (oldest legacy documents carry none).
       const safeLog =
         updated.childId === selectedChildId
           ? updated

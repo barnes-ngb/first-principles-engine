@@ -21,6 +21,13 @@ import type {
   DayLog,
 } from '../../core/types'
 import { isChapterToGo } from './chapterPool.logic'
+import { TodayDecision } from './todayScope'
+import {
+  ChapterSaveAudience,
+  ChapterSaveRefusal,
+  chapterSaveFailureNotice,
+  type ChapterSaveOutcome,
+} from './chapterSaveOutcome'
 
 const questionTypeEmoji: Record<string, string> = {
   comprehension: '\u{1F50D}',
@@ -34,23 +41,49 @@ interface ChapterQuestionPoolProps {
   book: ChapterBook | null
   bookProgress: BookProgress | null
   bookProgressLoading: boolean
+  /**
+   * UX-356(a) — the progress read FAILED, as distinct from "no pool yet".
+   * Optional and defaulting to `false`, so every existing caller and test
+   * renders exactly as it did.
+   */
+  bookProgressFailed?: boolean
+  /**
+   * UX-355, Codex round 1 (P1) — this ANSWERS instead of throwing, so every
+   * caller below must read the outcome before discarding what the parent typed.
+   * `useBookProgress.updateChapter` used to reject and the `catch` blocks here
+   * were what kept the note; converting the rejection into an outcome without
+   * teaching the callers about it would have deleted her note on exactly the
+   * failure the reporting was added for.
+   */
   onChapterAnswered: (
     chapter: number,
     update: Partial<ChapterQuestionPoolItem>,
-  ) => Promise<void>
+  ) => Promise<ChapterSaveOutcome>
   dayLog?: DayLog | null
   persistDayLogImmediate?: (updated: DayLog) => void
   onRetryGeneration?: () => void
+  /**
+   * UX-343, Codex round 2 (P1) — which of this card's own drafts are open.
+   *
+   * This pool sits OUTSIDE `TodayChecklist`, so the scope `key` that closes the
+   * checklist's four drafts left this one mounted with a typed note in it,
+   * ready to be written onto the newly-selected child's `bookProgress`. The page
+   * keys this card on the same scope now; reporting the open set up is what lets
+   * the reset notice NAME it, since a remount cannot speak for itself.
+   */
+  onOpenDecisionsChange?: (open: TodayDecision[]) => void
 }
 
 export default function ChapterQuestionPool({
   book,
   bookProgress,
   bookProgressLoading,
+  bookProgressFailed = false,
   onChapterAnswered,
   dayLog,
   persistDayLogImmediate,
   onRetryGeneration,
+  onOpenDecisionsChange,
 }: ChapterQuestionPoolProps) {
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(
     new Set(),
@@ -61,6 +94,9 @@ export default function ChapterQuestionPool({
     null,
   )
   const [skippingChapter, setSkippingChapter] = useState<number | null>(null)
+  // UX-355 — what this card says when a chapter write did not land. Inline,
+  // beside the control, rather than a toast at the top of a long page.
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Restore persisted selections from dayLog when bookProgress first arrives
   const [prevBookProgress, setPrevBookProgress] = useState<BookProgress | null>(
@@ -81,6 +117,15 @@ export default function ChapterQuestionPool({
       }
     }
   }
+
+  // UX-343 — a typed note, or a skip waiting on its confirm dialog, is an open
+  // decision this card holds and the page cannot see.
+  const hasChapterDraft =
+    skipConfirmChapter !== null ||
+    Object.values(chapterNotes).some((note) => (note ?? '').trim() !== '')
+  useEffect(() => {
+    onOpenDecisionsChange?.(hasChapterDraft ? [TodayDecision.ChapterNote] : [])
+  }, [onOpenDecisionsChange, hasChapterDraft])
 
   // Track how long the loading state has been visible (fallback retry if hook hangs)
   const [showRetry, setShowRetry] = useState(false)
@@ -118,6 +163,20 @@ export default function ChapterQuestionPool({
             </Button>
           )}
         </Stack>
+      </SectionCard>
+    )
+  }
+
+  // 3a. UX-356(a) — the READ failed. Not the same thing as "no progress doc",
+  // and this is where the difference bites: the state below offers to generate a
+  // question pool, which for a book that already has one would replace a real
+  // record with a fresh one on the strength of a dropped subscription. A failed
+  // read is not an affirmative empty result — the weekly review's "Couldn't read
+  // this week's hours" rule, on the page that writes nine collections.
+  if (bookProgressFailed) {
+    return (
+      <SectionCard title={`\u{1F4D6} ${book.title}`}>
+        <EmptyState title="Couldn't read this book's chapter questions. They haven't been lost — reload to try again." />
       </SectionCard>
     )
   }
@@ -219,12 +278,19 @@ export default function ChapterQuestionPool({
 
   const handleSaveNote = async (item: ChapterQuestionPoolItem) => {
     setSavingChapter(item.chapter)
+    setSaveError(null)
     try {
       const note = chapterNotes[item.chapter]
       // Persist note only — do NOT mark answered (kid records audio to complete)
-      await onChapterAnswered(item.chapter, {
+      const outcome = await onChapterAnswered(item.chapter, {
         responseNote: note || undefined,
       })
+      if (!outcome.ok) {
+        // Her note is still in the box and still hers. Nothing below runs.
+        setSaveError(chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Parent).text)
+        setSavingChapter(null)
+        return
+      }
       // Clear local note state
       setChapterNotes((prev) => {
         const next = { ...prev }
@@ -233,6 +299,9 @@ export default function ChapterQuestionPool({
       })
     } catch (err) {
       console.error('Chapter note save failed:', err)
+      setSaveError(
+        chapterSaveFailureNotice(ChapterSaveRefusal.Rejected, ChapterSaveAudience.Parent).text,
+      )
     }
     setSavingChapter(null)
   }
@@ -242,14 +311,22 @@ export default function ChapterQuestionPool({
     const chapter = skipConfirmChapter
     setSkipConfirmChapter(null)
     setSkippingChapter(chapter)
+    setSaveError(null)
     try {
       // Skip is a parent-only action and must NOT mark the chapter answered
       // (FUNC-07). Skipped chapters are "done for completion" but distinct from
       // answered, so the kid section stays visible until everything is answered
       // or parent-skipped.
-      await onChapterAnswered(chapter, {
+      const outcome = await onChapterAnswered(chapter, {
         skipped: true,
       })
+      if (!outcome.ok) {
+        // The chapter was NOT skipped, so it must stay selected — dropping it
+        // from the selection would hide a chapter nothing has recorded.
+        setSaveError(chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Parent).text)
+        setSkippingChapter(null)
+        return
+      }
       setSelectedChapters((prev) => {
         const next = new Set(prev)
         next.delete(chapter)
@@ -258,6 +335,9 @@ export default function ChapterQuestionPool({
       })
     } catch (err) {
       console.error('Chapter skip failed:', err)
+      setSaveError(
+        chapterSaveFailureNotice(ChapterSaveRefusal.Rejected, ChapterSaveAudience.Parent).text,
+      )
     }
     setSkippingChapter(null)
   }
@@ -272,6 +352,15 @@ export default function ChapterQuestionPool({
   return (
     <SectionCard title={`\u{1F4D6} ${book.title}`}>
       <Stack spacing={2}>
+        {/* UX-355 — a chapter write that did not land, said where she is
+            looking. Never a claim that anything was rolled back: this card
+            renders off the stored document, which never moved. */}
+        {saveError && (
+          <Typography variant="body2" color="error.main">
+            {saveError}
+          </Typography>
+        )}
+
         {/* Progress chip */}
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Chip

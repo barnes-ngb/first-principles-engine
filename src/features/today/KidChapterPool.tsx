@@ -39,6 +39,11 @@ import type {
   DayLog,
 } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
+import {
+  ChapterSaveAudience,
+  chapterSaveFailureNotice,
+  type ChapterSaveOutcome,
+} from './chapterSaveOutcome'
 import { todayKey } from '../../core/utils/dateKey'
 import { isChapterToGo } from './chapterPool.logic'
 import { kidPalette } from '../../app/tokens'
@@ -58,10 +63,18 @@ interface KidChapterPoolProps {
   childId: string
   dayLog: DayLog
   weekFocus?: { theme?: string; virtue?: string; scriptureRef?: string } | null
+  /**
+   * UX-355, Codex round 1 (P1) — this now ANSWERS instead of throwing, so every
+   * caller below must read the outcome before it discards the boy's recording.
+   * `useBookProgress.updateChapter` used to reject, and the `catch` blocks in
+   * this file were what kept the audio; converting the rejection into an outcome
+   * without teaching the callers about it would have deleted the recording on
+   * exactly the failure the reporting was added for.
+   */
   onChapterAnswered: (
     chapter: number,
     update: Partial<ChapterQuestionPoolItem>,
-  ) => Promise<void>
+  ) => Promise<ChapterSaveOutcome>
 }
 
 export default function KidChapterPool({
@@ -144,12 +157,18 @@ export default function KidChapterPool({
       })
 
       // Mark answered globally
-      await onChapterAnswered(item.chapter, {
+      const outcome = await onChapterAnswered(item.chapter, {
         answered: true,
         answeredDate: today,
         audioUrl,
         artifactId: artifactRef.id,
       })
+      if (!outcome.ok) {
+        // The recording is still on screen and still his. Nothing below runs.
+        setSaveError(chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Kid).text)
+        setSavingChapter(null)
+        return
+      }
 
       // Clear local state
       setChapterBlobs((prev) => {
@@ -215,12 +234,18 @@ export default function KidChapterPool({
         }
 
         // Put chapter back in the pool
-        await onChapterAnswered(item.chapter, {
+        const outcome = await onChapterAnswered(item.chapter, {
           answered: false,
           answeredDate: undefined,
           audioUrl: undefined,
           artifactId: undefined,
         })
+        if (!outcome.ok) {
+          // The response documents are gone but the chapter still reads as
+          // answered, which is the one state this must not report as a clean
+          // delete.
+          setSaveError(chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Kid).text)
+        }
       } catch (err) {
         console.error('Chapter response delete failed:', err)
         // UX-80: the one shame word in the kid app. Every sibling surface says
