@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -22,7 +22,7 @@ import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { db, weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
-import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useActiveChild, type UseActiveChildResult } from '../../core/hooks/useActiveChild'
 import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
 import { lastCompletedSchoolWeekKey } from '../../core/utils/time'
@@ -98,13 +98,21 @@ import { useWeeklyReviewHistory } from './useWeeklyReviewHistory'
  * above the Firestore subscription, so a child profile renders nothing and costs
  * zero reads. Capability, never a name.
  */
-export default function WeeklyReviewPage() {
-  const { isChildProfile } = useActiveChild()
-  if (isChildProfile) return null
-  return <WeeklyReviewBody />
+export default function WeeklyReviewPage({ embedded = false }: { embedded?: boolean }) {
+  const childContext = useActiveChild()
+  return <WeeklyReviewContent childContext={childContext} embedded={embedded} />
 }
 
-function WeeklyReviewBody() {
+/** Use the Review selector's loaded children, including newly added children. */
+export function WeeklyReviewContent({ childContext, embedded = false }: {
+  childContext: UseActiveChildResult
+  embedded?: boolean
+}) {
+  if (childContext.isChildProfile) return null
+  return <WeeklyReviewBody childContext={childContext} embedded={embedded} />
+}
+
+function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveChildResult; embedded: boolean }) {
   const familyId = useFamilyId()
   const {
     children,
@@ -113,7 +121,7 @@ function WeeklyReviewBody() {
     setActiveChildId,
     isLoading: childrenLoading,
     addChild,
-  } = useActiveChild()
+  } = childContext
 
   // The most recent school week whose Mon–Fri has ended (UX-218). On Saturday
   // and Sunday that is the week just finished; Monday–Friday it is the previous
@@ -289,26 +297,36 @@ function WeeklyReviewBody() {
   const acceptedCount = countAccepted(adjustments)
   const alreadyApplied = review?.status === ReviewStatus.Applied
 
+  const Frame = embedded ? EmbeddedWeek : Page
+
   return (
-    <Page>
+    <Frame>
       <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-        <Typography variant="h5" component="h1">Weekly Review</Typography>
+        {embedded ? (
+          <Typography variant="body2" color="text.secondary">{weekRangeLabel}</Typography>
+        ) : (
+          <Typography variant="h5" component="h1">Weekly Review</Typography>
+        )}
         <HelpStrip
           pageKey="weekly-review"
           text="A record of the week that just ended — the hours it held, what got made, how fast the workbooks are moving, and your own read on it. None of it is scored against a target. The one AI-written part is Pace Adjustments, which appears only when the weekly review has suggestions for next week's plan."
         />
       </Stack>
-      <Typography variant="body2" color="text.secondary">
-        {weekRangeLabel}
-      </Typography>
+      {!embedded && (
+        <>
+          <Typography variant="body2" color="text.secondary">
+            {weekRangeLabel}
+          </Typography>
 
-      <ChildSelector
-        children={children}
-        selectedChildId={activeChildId}
-        onSelect={setActiveChildId}
-        onChildAdded={addChild}
-        isLoading={childrenLoading}
-      />
+          <ChildSelector
+            children={children}
+            selectedChildId={activeChildId}
+            onSelect={setActiveChildId}
+            onChildAdded={addChild}
+            isLoading={childrenLoading}
+          />
+        </>
+      )}
 
       {!childrenLoading && !isLoading && activeChildId && (
         <>
@@ -433,7 +451,7 @@ function WeeklyReviewBody() {
           {snack?.text}
         </Alert>
       </Snackbar>
-    </Page>
+    </Frame>
   )
 }
 
@@ -538,4 +556,9 @@ function PaceAdjustmentCard({ adjustment, onDecision }: PaceAdjustmentCardProps)
       </CardContent>
     </Card>
   )
+}
+
+/** The Review shell supplies the page container and child selector. */
+function EmbeddedWeek({ children }: { children: ReactNode }) {
+  return <Stack spacing={2}>{children}</Stack>
 }

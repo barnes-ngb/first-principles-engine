@@ -1,3 +1,5 @@
+import { reviewPath } from '../review/reviewNav'
+
 /**
  * Navigating TO the Progress page, with the parent's context intact (UX-52).
  *
@@ -14,7 +16,7 @@
  * Both are fixed the same way: name the tab, and carry the flag through.
  */
 
-/** The `?tab=` slugs `ProgressPage` resolves. One definition, shared. */
+/** Progress slugs, including the legacy monthly-books redirect to Review. */
 export const PROGRESS_TABS = {
   Foundations: 'foundations',
   MonthlyBooks: 'monthly-books',
@@ -35,7 +37,7 @@ export type ProgressTabSlug = (typeof PROGRESS_TABS)[keyof typeof PROGRESS_TABS]
 const PRESERVED_PARAMS = ['diag'] as const
 
 /**
- * Build a `/progress` path for `tab`, carrying the preserved params from
+ * Build a path for `tab` (Monthly Books now lives in Review), carrying params from
  * `current` (the caller's own `useSearchParams()`).
  *
  * `tab` is optional: a caller with no opinion about where to land omits it and
@@ -45,6 +47,7 @@ export function progressPath(
   tab?: ProgressTabSlug,
   current?: URLSearchParams,
 ): string {
+  if (tab === PROGRESS_TABS.MonthlyBooks) return reviewPath('month', current)
   const params = new URLSearchParams()
   if (tab) params.set('tab', tab)
   for (const key of PRESERVED_PARAMS) {

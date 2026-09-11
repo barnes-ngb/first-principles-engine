@@ -55,15 +55,22 @@ export interface MonthlyReviewReaderProps {
   childName?: string
 }
 
-export function MonthlyReviewReader({
-  reviewId,
+export function MonthlyReviewReader(props: MonthlyReviewReaderProps) {
+  const familyId = useFamilyId()
+  const reviewState = useMonthlyReview(familyId, props.reviewId)
+  return <MonthlyReviewReaderContent {...props} reviewState={reviewState} />
+}
+
+/** Share the loaded book with a parent wrapper that also needs its child ID. */
+export function MonthlyReviewReaderContent({
+  reviewState,
   lockedMode,
   defaultMode = 'parent',
   onExit,
   childName,
-}: MonthlyReviewReaderProps) {
+}: MonthlyReviewReaderProps & { reviewState: ReturnType<typeof useMonthlyReview> }) {
   const familyId = useFamilyId()
-  const { review, loading } = useMonthlyReview(familyId, reviewId)
+  const { review, loading } = reviewState
 
   const [mode, setMode] = useState<ReaderMode>(lockedMode ?? defaultMode)
   const [pageIndex, setPageIndex] = useState(0)

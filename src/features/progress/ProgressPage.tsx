@@ -1,5 +1,5 @@
 import { type SyntheticEvent, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Container from '@mui/material/Container'
 import Tab from '@mui/material/Tab'
@@ -9,7 +9,7 @@ import HelpStrip from '../../components/HelpStrip'
 import CurriculumTab from './CurriculumTab'
 import FoundationsTab from './FoundationsTab'
 import LearningMap from './learning-map/LearningMap'
-import MonthlyBooksTab from '../monthly-review/MonthlyBooksTab'
+import { reviewPath } from '../review/reviewNav'
 import { PROGRESS_TABS } from './progressNav'
 import type { ProgressTabSlug } from './progressNav'
 import SkillSnapshotPage from '../evaluation/SkillSnapshotPage'
@@ -26,7 +26,6 @@ import WordWall from './WordWall'
 // that no longer exists would otherwise fail silently by landing on tab 0.
 const TABS: Array<{ label: string; slug: ProgressTabSlug; render: () => ReactNode }> = [
   { label: 'Foundations', slug: PROGRESS_TABS.Foundations, render: () => <FoundationsTab /> },
-  { label: 'Monthly Books', slug: PROGRESS_TABS.MonthlyBooks, render: () => <MonthlyBooksTab /> },
   { label: 'Learning Map', slug: PROGRESS_TABS.LearningMap, render: () => <LearningMap /> },
   { label: 'Curriculum', slug: PROGRESS_TABS.Curriculum, render: () => <CurriculumTab /> },
   { label: 'Skill Snapshot', slug: PROGRESS_TABS.SkillSnapshot, render: () => <SkillSnapshotPage /> },
@@ -55,6 +54,10 @@ export default function ProgressPage() {
     const next = new URLSearchParams(searchParams)
     next.set('tab', TABS[newValue].slug)
     setSearchParams(next, { replace: true })
+  }
+
+  if (searchParams.get('tab') === PROGRESS_TABS.MonthlyBooks) {
+    return <Navigate to={reviewPath('month', searchParams)} replace />
   }
 
   return (
