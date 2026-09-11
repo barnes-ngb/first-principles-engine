@@ -57,6 +57,18 @@ export default function KidCaptureForm({
    */
   const createdArtifactIdRef = useRef<string | null>(null)
 
+  /**
+   * The photo this form has already UPLOADED, if a previous attempt got that far
+   * (Codex round 3, P2).
+   *
+   * The upload and the `uri` write are two steps. When the upload succeeded and
+   * only the write failed, a retry that re-uploads generates a fresh timestamped
+   * filename and leaves the first object in Storage permanently unreferenced —
+   * a file nobody can see and nothing points at, added every time he taps Save.
+   * Keeping the URL makes the retry what it should be: the one step that failed.
+   */
+  const uploadedUriRef = useRef<string | null>(null)
+
   const handleSave = useCallback(async () => {
     if (saving) return
     setSaving(true)
@@ -98,13 +110,18 @@ export default function KidCaptureForm({
     // it, which is a different sentence and a different retry.
     if (type === 'photo' && file) {
       try {
-        const filename = generateFilename(file.name.split('.').pop() || 'jpg')
-        const { downloadUrl } = await uploadArtifactFile(
-          familyId,
-          artifactId,
-          file,
-          filename,
-        )
+        let downloadUrl = uploadedUriRef.current
+        if (!downloadUrl) {
+          const filename = generateFilename(file.name.split('.').pop() || 'jpg')
+          const uploaded = await uploadArtifactFile(
+            familyId,
+            artifactId,
+            file,
+            filename,
+          )
+          downloadUrl = uploaded.downloadUrl
+          uploadedUriRef.current = downloadUrl
+        }
         await updateDoc(doc(artifactsCollection(familyId), artifactId), {
           uri: downloadUrl,
         })
@@ -117,6 +134,7 @@ export default function KidCaptureForm({
     }
 
     createdArtifactIdRef.current = null
+    uploadedUriRef.current = null
     setSaving(false)
     onSave()
   }, [saving, childId, today, title, type, content, file, familyId, onSave])

@@ -365,11 +365,14 @@ ribbon is a separate question and the owner has said the in-page selectors stay.
 
 - `npx tsc -b` clean · `npm run lint` — 0 errors, 3 warnings, all pre-existing in
   `useQuestSession.ts` / `EvaluateChatPage.tsx`
-- `npx vitest run` — **637 files, 9078 passed, 1 skipped, 0 failed**
-- **Handover state.** Three review rounds, three sets of findings (2 / 3 / 2), all seven addressed —
-  the cap for a diff this size. The head handed over carries round 3's answers and has **not itself
-  been reviewed**, which is what `CODEX ROUND: open — do not merge yet` on the PR means. Nothing from
-  any round is outstanding.
+- `npx vitest run` — **637 files, 9080 passed, 1 skipped, 0 failed**
+- **Handover state.** Four reviews returned, **nine findings, all nine addressed** — 2 / 3 / 2 / 2.
+  The fourth arrived after the three-round cap had been reached and the close-out summary posted; at
+  the cap `DOC-24` says *address what you can*, and both of its findings were small and in code this
+  PR added, so they were fixed and the summary corrected rather than left standing as *"nothing
+  outstanding"*, which it no longer was. **No further round was asked for** — the cap binds on asks.
+  So the head handed over carries the answers to all four and has **not itself been reviewed**, which
+  is what `CODEX ROUND: open — do not merge yet` on the PR means.
 - `npm run census:child-switch` — `census problems: 0`
 - `node scripts/check-docs-alignment.mjs` — HARD checks pass
 - New tests: `todayScope.test.ts` (11) · `chapterSaveOutcome.test.ts` (6) ·
@@ -411,7 +414,14 @@ re-pasted, so by round 3 the audit contradicted the script it names. The fix was
 **referent** rather than to re-paste: a walkthrough describes the page **as it was walked**, and that
 reading is taken once against the base commit and can never go stale.
 
-**Three rounds, three mount points of the same class, one per round.** That is exactly the shape
+**Round 4 (2 findings, both taken, after the cap)** was the *first* species again, and this time on
+this run's own new code: the rollover's failure report fired for a day the parent had already left
+(claiming the child now on screen had an unchecked yesterday), and `KidCaptureForm`'s retry re-uploaded
+a photo whose upload had already succeeded, orphaning the first object in Storage. Both are stale-scope
+and partial-failure bugs in the very fixes written to close stale-scope and partial-failure bugs, which
+is the most honest thing this document can say about how hard the class is.
+
+**Four rounds, four mount points of the same class, one per round.** That is exactly the shape
 `UX-329` described for child-scoped editors — *"nothing in the repo knew the list existed"* — reproduced
 one page in, and it is why `UX-368` is filed the way it is: Today cannot enumerate its own open
 decisions, so each one has to be remembered by a person. All three species are invisible from the diff

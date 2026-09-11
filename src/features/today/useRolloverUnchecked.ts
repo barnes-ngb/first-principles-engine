@@ -49,11 +49,23 @@ export function useRolloverUnchecked({
 }: UseRolloverParams) {
   // Track which child+date we've already processed to prevent re-runs
   const rolledRef = useRef<string>('')
+  /**
+   * The child+date this hook is running FOR right now (Codex round 3, P2).
+   *
+   * The `getDoc` below is not cancelled when the parent switches child or pages
+   * to another day — the effect is simply replaced. So a rejection belonging to
+   * the day that just left the screen used to raise *"Couldn't check yesterday"*
+   * over the day now showing, claiming something false about a child whose
+   * rollover was never attempted. Set before any early return, so a run that
+   * bails still moves the live key.
+   */
+  const liveKeyRef = useRef<string>('')
 
   useEffect(() => {
+    const key = `${today}_${childId}`
+    liveKeyRef.current = key
     if (!familyId || !childId || !dayLog) return
 
-    const key = `${today}_${childId}`
     if (rolledRef.current === key) return
 
     const previousDate = getPreviousSchoolDay(today)
@@ -126,6 +138,12 @@ export function useRolloverUnchecked({
         // path either — it would defer rows against a checklist we know may be
         // missing everything yesterday was going to add to it.
         console.warn('[rollover] Failed to load previous day log:', err)
+        // ...but only about the day still on screen (Codex round 3, P2). A
+        // failure belonging to a day the parent has left is not a claim she can
+        // act on, and reporting it over another child reads as a statement
+        // about HIS yesterday — the same rule `useDayLog`'s `MovedOn` aftermath
+        // follows, and the rule this whole run exists to apply.
+        if (liveKeyRef.current !== key) return
         onReadFailed?.()
       })
   }, [familyId, childId, today, dayLog, dailyPlan, persistDayLogImmediate, onReadFailed])

@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DayLog } from '../../core/types'
@@ -14,6 +14,7 @@ import type { DayLog } from '../../core/types'
  * verdict `useBusinessGoal` got in the child-switch census.
  *
  * POSITIVE CONTROL: delete `onReadFailed?.()` from the catch and the first test
+ * fails; delete the `liveKeyRef.current !== key` guard and the stale-scope test
  * fails.
  */
 
@@ -39,16 +40,18 @@ const DAY: DayLog = {
 
 async function mountRollover(onReadFailed: () => void) {
   const { useRolloverUnchecked } = await import('./useRolloverUnchecked')
-  return renderHook(() =>
-    useRolloverUnchecked({
-      familyId: 'fam-1',
-      childId: 'lincoln',
-      today: TODAY,
-      dayLog: DAY,
-      dailyPlan: null,
-      persistDayLogImmediate: vi.fn(),
-      onReadFailed,
-    }),
+  return renderHook(
+    ({ childId }: { childId: string }) =>
+      useRolloverUnchecked({
+        familyId: 'fam-1',
+        childId,
+        today: TODAY,
+        dayLog: { ...DAY, childId },
+        dailyPlan: null,
+        persistDayLogImmediate: vi.fn(),
+        onReadFailed,
+      }),
+    { initialProps: { childId: 'lincoln' } },
   )
 }
 
@@ -90,14 +93,39 @@ describe('a previous day that could not be read is reported', () => {
     expect(onReadFailed).not.toHaveBeenCalled()
   })
 
+  it('says nothing about a day the parent has already left (Codex round 3, P2)', async () => {
+    // The `getDoc` is not cancelled when the child changes — the effect is just
+    // replaced. A rejection belonging to the day that left the screen used to
+    // raise "Couldn't check yesterday" over the day now showing, which is a
+    // claim about a child whose rollover was never attempted.
+    let reject: (err: Error) => void = () => {}
+    getDoc.mockReturnValueOnce(
+      new Promise((_resolve, rej) => {
+        reject = rej
+      }),
+    )
+    // The new child's own read settles cleanly.
+    getDoc.mockResolvedValueOnce({ exists: () => false })
+    const onReadFailed = vi.fn()
+
+    const { rerender } = await mountRollover(onReadFailed)
+    rerender({ childId: 'london' })
+    await act(async () => {
+      reject(new Error('unavailable'))
+      await Promise.resolve()
+    })
+
+    expect(onReadFailed).not.toHaveBeenCalled()
+  })
+
   it('reports once, not on every re-render', async () => {
     getDoc.mockRejectedValue(new Error('unavailable'))
     const onReadFailed = vi.fn()
 
     const { rerender } = await mountRollover(onReadFailed)
     await waitFor(() => expect(onReadFailed).toHaveBeenCalledTimes(1))
-    rerender()
-    rerender()
+    rerender({ childId: 'lincoln' })
+    rerender({ childId: 'lincoln' })
 
     // The rollover runs at most once per child+day; a sentence repeated on every
     // render would be its own defect.
