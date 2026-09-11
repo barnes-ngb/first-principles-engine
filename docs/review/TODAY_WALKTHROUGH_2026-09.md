@@ -366,6 +366,10 @@ ribbon is a separate question and the owner has said the in-page selectors stay.
 - `npx tsc -b` clean · `npm run lint` — 0 errors, 3 warnings, all pre-existing in
   `useQuestSession.ts` / `EvaluateChatPage.tsx`
 - `npx vitest run` — **637 files, 9078 passed, 1 skipped, 0 failed**
+- **Handover state.** Three review rounds, three sets of findings (2 / 3 / 2), all seven addressed —
+  the cap for a diff this size. The head handed over carries round 3's answers and has **not itself
+  been reviewed**, which is what `CODEX ROUND: open — do not merge yet` on the PR means. Nothing from
+  any round is outstanding.
 - `npm run census:child-switch` — `census problems: 0`
 - `node scripts/check-docs-alignment.mjs` — HARD checks pass
 - New tests: `todayScope.test.ts` (11) · `chapterSaveOutcome.test.ts` (6) ·
