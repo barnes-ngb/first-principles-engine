@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Child } from '../../core/types'
@@ -96,18 +96,26 @@ describe('Skill Snapshot compact sections', () => {
 
   it('collapses all without saving or discarding an unfinished level adjustment', async () => {
     render(<SkillSnapshotPage />)
-    fireEvent.click(screen.getByRole('button', { name: /Working Levels/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
-    fireEvent.click(screen.getByRole('button', { name: 'increase level' }))
-    fireEvent.change(screen.getByRole('textbox', { name: /Why are you adjusting/ }), { target: { value: 'Reading comfortably' } })
-    fireEvent.click(screen.getByRole('button', { name: /Priority Skills/ }))
+    const workingLevelsToggle = screen.getByRole('button', { name: /Working Levels/ })
+    const prioritySkillsToggle = screen.getByRole('button', { name: /Priority Skills/ })
+    fireEvent.click(workingLevelsToggle)
+    const workingLevels = within(screen.getByRole('region', { name: /Working Levels/ }))
+    fireEvent.click(workingLevels.getByRole('button', { name: 'Adjust' }))
+    fireEvent.click(workingLevels.getByRole('button', { name: 'increase level' }))
+    fireEvent.change(workingLevels.getByRole('textbox', { name: /Why are you adjusting/ }), { target: { value: 'Reading comfortably' } })
+    const saveButton = workingLevels.getByRole('button', { name: 'Save' })
+    fireEvent.click(prioritySkillsToggle)
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }))
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /Priority Skills/ })).toHaveAttribute('aria-expanded', 'false')
+    // Check the mounted control directly while the real collapse transition runs.
+    // Re-scanning every hidden editor on each waitFor poll can exhaust CI's timeout.
+    await waitFor(() => expect(saveButton).not.toBeVisible())
+    expect(saveButton).toBeInTheDocument()
+    expect(workingLevelsToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(prioritySkillsToggle).toHaveAttribute('aria-expanded', 'false')
     expect(setDoc).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /Working Levels/ }))
-    expect(screen.getByRole('textbox', { name: /Why are you adjusting/ })).toHaveValue('Reading comfortably')
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(workingLevelsToggle)
+    expect(workingLevels.getByRole('textbox', { name: /Why are you adjusting/ })).toHaveValue('Reading comfortably')
+    fireEvent.click(workingLevels.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(setDoc).toHaveBeenCalledWith(
       { id: 'c1' }, expect.objectContaining({ childId: 'c1', workingLevels: { phonics: expect.objectContaining({ level: 5, source: 'manual', evidence: 'Reading comfortably' }) } }),
     ))
