@@ -7,6 +7,7 @@ import { TodayDecision } from './todayScope'
 const TODAY_PAGE = readFileSync(resolve(__dirname, './TodayPage.tsx'), 'utf8')
 const TODAY_CHECKLIST = readFileSync(resolve(__dirname, './TodayChecklist.tsx'), 'utf8')
 const KID_TODAY = readFileSync(resolve(__dirname, './KidTodayView.tsx'), 'utf8')
+const CHAPTER_POOL = readFileSync(resolve(__dirname, './ChapterQuestionPool.tsx'), 'utf8')
 
 /**
  * Comments stripped, because the rule is about what the page DOES.
@@ -68,6 +69,19 @@ describe('a change of child or day closes what Today had open (UX-343)', () => {
     expect(TODAY_PAGE).toMatch(/onOpenDecisionsChange=\{/)
   })
 
+  it('keys EVERY card that holds a draft, not only the checklist', () => {
+    // Codex round 2 (P1): the chapter pool is mounted outside `TodayChecklist`,
+    // so keying the checklist alone left a typed chapter note standing across a
+    // child switch, ready to be written onto the newly-selected child's
+    // `bookProgress`. Both cards must carry the key AND report their open set,
+    // or the notice names fewer things than were closed.
+    const keyed = TODAY_PAGE_CODE.match(/key=\{scopeKey\}/g) ?? []
+    const reporting = TODAY_PAGE_CODE.match(/onOpenDecisionsChange=\{/g) ?? []
+    expect(keyed.length).toBe(2)
+    expect(reporting.length).toBe(2)
+    expect(CHAPTER_POOL).toContain('TodayDecision.ChapterNote')
+  })
+
   it('reports every one of the checklist decisions the vocabulary names', () => {
     // The four that live in `TodayChecklist` must actually be reported up, or
     // the notice names fewer things than were closed.
@@ -101,6 +115,21 @@ describe('the capability boundary has one definition (UX-358)', () => {
     expect(TODAY_PAGE_CODE).not.toMatch(/UserProfile\./)
     expect(TODAY_PAGE_CODE).toMatch(/isChildProfile: isKidProfile/)
     expect(TODAY_PAGE_CODE).toMatch(/const canEditLiveDay = canEdit/)
+  })
+
+  it('the kid view consumes the failed-read flag too (UX-356a, round 2)', () => {
+    // Without it his chapter row fell through to the ordinary "a grown-up will
+    // add questions" state, presenting a failed read as a book nobody started —
+    // on the half of the app that cannot read an error log.
+    expect(KID_TODAY_CODE).toMatch(/loadFailed: bookProgressFailed/)
+    expect(KID_TODAY_CODE).toMatch(/bookProgressFailed \?/)
+  })
+
+  it('the kid artifact list is scoped, and its failure does not need an empty list', () => {
+    // Codex round 2 (P2): stale items from another day must never render as this
+    // day's, and a refresh that fails must say so even when the list is full.
+    expect(KID_TODAY_CODE).toMatch(/artifactScopeRef\.current !== scope/)
+    expect(KID_TODAY_CODE).toMatch(/\{artifactsFailed \? \(/)
   })
 
   it('the kid view reads its capability from the same hook', () => {

@@ -21,6 +21,7 @@ import type {
   DayLog,
 } from '../../core/types'
 import { isChapterToGo } from './chapterPool.logic'
+import { TodayDecision } from './todayScope'
 import {
   ChapterSaveAudience,
   ChapterSaveRefusal,
@@ -61,6 +62,16 @@ interface ChapterQuestionPoolProps {
   dayLog?: DayLog | null
   persistDayLogImmediate?: (updated: DayLog) => void
   onRetryGeneration?: () => void
+  /**
+   * UX-343, Codex round 2 (P1) — which of this card's own drafts are open.
+   *
+   * This pool sits OUTSIDE `TodayChecklist`, so the scope `key` that closes the
+   * checklist's four drafts left this one mounted with a typed note in it,
+   * ready to be written onto the newly-selected child's `bookProgress`. The page
+   * keys this card on the same scope now; reporting the open set up is what lets
+   * the reset notice NAME it, since a remount cannot speak for itself.
+   */
+  onOpenDecisionsChange?: (open: TodayDecision[]) => void
 }
 
 export default function ChapterQuestionPool({
@@ -72,6 +83,7 @@ export default function ChapterQuestionPool({
   dayLog,
   persistDayLogImmediate,
   onRetryGeneration,
+  onOpenDecisionsChange,
 }: ChapterQuestionPoolProps) {
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(
     new Set(),
@@ -105,6 +117,15 @@ export default function ChapterQuestionPool({
       }
     }
   }
+
+  // UX-343 — a typed note, or a skip waiting on its confirm dialog, is an open
+  // decision this card holds and the page cannot see.
+  const hasChapterDraft =
+    skipConfirmChapter !== null ||
+    Object.values(chapterNotes).some((note) => (note ?? '').trim() !== '')
+  useEffect(() => {
+    onOpenDecisionsChange?.(hasChapterDraft ? [TodayDecision.ChapterNote] : [])
+  }, [onOpenDecisionsChange, hasChapterDraft])
 
   // Track how long the loading state has been visible (fallback retry if hook hangs)
   const [showRetry, setShowRetry] = useState(false)

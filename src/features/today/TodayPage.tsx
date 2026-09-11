@@ -352,21 +352,33 @@ export default function TodayPage() {
   // which is the exact window this closes.
   const scopeKey = todayScopeKey(selectedChildId, today)
   const checklistOpenRef = useRef<TodayDecision[]>([])
-  // Stable, so `TodayChecklist`'s reporting effect runs when its open SET moves
-  // rather than on every render of this page.
+  // Codex round 2 (P1): the chapter pool is mounted OUTSIDE the checklist, so it
+  // needs its own key and its own reporting — keying `TodayChecklist` alone left
+  // a typed chapter note standing across a child switch, ready to be written
+  // onto the newly-selected child's `bookProgress`.
+  const chapterOpenRef = useRef<TodayDecision[]>([])
+  // Stable, so each card's reporting effect runs when its open SET moves rather
+  // than on every render of this page.
   const handleChecklistOpenDecisions = useCallback((open: TodayDecision[]) => {
     checklistOpenRef.current = open
+  }, [])
+  const handleChapterOpenDecisions = useCallback((open: TodayDecision[]) => {
+    chapterOpenRef.current = open
   }, [])
   const [openScopeKey, setOpenScopeKey] = useState(scopeKey)
   if (openScopeKey !== scopeKey) {
     const wasFor = childIdFromScopeKey(openScopeKey)
-    const open: TodayDecision[] = [...checklistOpenRef.current]
+    const open: TodayDecision[] = [
+      ...checklistOpenRef.current,
+      ...chapterOpenRef.current,
+    ]
     if (strandSessionId !== null) open.push(TodayDecision.StrandSession)
     if (moveTargetIndex !== null) open.push(TodayDecision.MoveItem)
     if (swapTargetIndex !== null) open.push(TodayDecision.SwapVideo)
     if (watchPickerOpen) open.push(TodayDecision.AddVideo)
     setOpenScopeKey(scopeKey)
     checklistOpenRef.current = []
+    chapterOpenRef.current = []
     setStrandSessionId(null)
     setStrandSessionError(null)
     setMoveTargetIndex(null)
@@ -1555,6 +1567,12 @@ export default function TodayPage() {
       <SectionErrorBoundary section="chapter question">
         <Box id="chapter" />
         <ChapterQuestionPool
+          // UX-343, Codex round 2 (P1) — keyed on the same scope as the
+          // checklist, so a note typed for one boy cannot be saved onto the
+          // other's book progress; it reports its own draft up so the reset
+          // notice can name it.
+          key={scopeKey}
+          onOpenDecisionsChange={handleChapterOpenDecisions}
           book={selectedBook}
           bookProgress={bookProgress}
           bookProgressLoading={bookProgressLoading}

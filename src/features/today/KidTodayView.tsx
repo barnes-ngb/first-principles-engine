@@ -174,6 +174,13 @@ export default function KidTodayView({
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   // UX-359 — the artifacts READ failed, as distinct from a day with nothing on it.
   const [artifactsFailed, setArtifactsFailed] = useState(false)
+  /**
+   * The day this view is showing RIGHT NOW, for the artifact read to check
+   * against when it resolves (Codex round 2, P2). A ref, because the read closed
+   * over the day it was started for and only a live value can tell that the
+   * page has moved on.
+   */
+  const artifactScopeRef = useRef('')
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
   const [captureMessage, setCaptureMessage] = useState<{ text: string; severity: 'success' | 'error' | 'warning' } | null>(null)
@@ -219,11 +226,16 @@ export default function KidTodayView({
     }).catch(() => setSelectedBook(null))
   }, [readAloudBookId])
 
-  const { bookProgress, updateChapter } = useBookProgress(
-    familyId,
-    child.id,
-    readAloudBookId,
-  )
+  const {
+    bookProgress,
+    // UX-356(a), Codex round 2 (P2) — the kid surface consumes this too. Without
+    // it his chapter row fell through to the ordinary "a grown-up will add
+    // questions" state, which presents a failed read as a book nobody has
+    // started — the exact rule this row exists to enforce, broken on the half of
+    // it that cannot read an error log.
+    loadFailed: bookProgressFailed,
+    updateChapter,
+  } = useBookProgress(familyId, child.id, readAloudBookId)
 
   // UX-355 — `updateChapter` answers a `ChapterSaveOutcome` instead of throwing
   // into nothing, and `KidChapterPool` reads it: the reporting belongs beside
@@ -436,7 +448,23 @@ export default function KidTodayView({
   // had not read — the one place a boy goes to check his own work is there. The
   // sentence that replaces it is on the shared kid readability bar and does not
   // tell him to do anything he cannot do.
+  //
+  // Codex round 2 (P2): the cached list is dropped when the SCOPE changes, and
+  // a read that resolves after that change is discarded rather than rendered —
+  // a list belonging to another day must never be presented as this one's. A
+  // refresh after a capture deliberately keeps its list (those items really are
+  // this day's), and a refresh that FAILS is reported by a line that no longer
+  // depends on the list being empty.
+  const artifactScope = `${familyId}|${child.id}|${today}`
+  const [loadedArtifactScope, setLoadedArtifactScope] = useState(artifactScope)
+  if (loadedArtifactScope !== artifactScope) {
+    setLoadedArtifactScope(artifactScope)
+    setArtifacts([])
+    setArtifactsFailed(false)
+  }
+
   const loadArtifacts = useCallback(() => {
+    const scope = `${familyId}|${child.id}|${today}`
     const q = query(
       artifactsCollection(familyId),
       where('childId', '==', child.id),
@@ -444,16 +472,22 @@ export default function KidTodayView({
     )
     getDocs(q)
       .then((snap) => {
+        if (artifactScopeRef.current !== scope) return
         setArtifactsFailed(false)
         setArtifacts(
           snap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })),
         )
       })
       .catch((err) => {
+        if (artifactScopeRef.current !== scope) return
         console.error('[KidToday] Failed to load today’s artifacts', err)
         setArtifactsFailed(true)
       })
   }, [familyId, child.id, today])
+
+  useEffect(() => {
+    artifactScopeRef.current = artifactScope
+  }, [artifactScope])
 
   useEffect(() => {
     loadArtifacts()
@@ -725,7 +759,11 @@ export default function KidTodayView({
             defaultExpanded={!chapterDone}
             anchorId="chapter"
           >
-            {bookProgress && isChapterPoolVisible(bookProgress.questionPool) ? (
+            {bookProgressFailed ? (
+              <Typography variant="body2" color="error.main">
+                Could not load your questions. Try again.
+              </Typography>
+            ) : bookProgress && isChapterPoolVisible(bookProgress.questionPool) ? (
               <KidChapterPool
                 book={selectedBook}
                 bookProgress={bookProgress}
@@ -1104,8 +1142,12 @@ export default function KidTodayView({
         )}
 
         {/* Artifacts list */}
-        {artifactsFailed && artifacts.length === 0 ? (
-          // UX-359 — never "nothing here" over a read that did not land.
+        {artifactsFailed ? (
+          // UX-359 — never "nothing here" over a read that did not land, and
+          // never STALE items presented as today's either (Codex round 2, P2):
+          // the list is cleared when the scope changes and this line does not
+          // depend on the list being empty, so a failed refresh after a capture
+          // cannot pass old photos off as the current day's inventory.
           <Typography color="text.secondary" variant="body2">
             Could not load your stuff. Try again.
           </Typography>

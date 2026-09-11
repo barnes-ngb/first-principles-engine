@@ -53,6 +53,16 @@ export const TodayDecision = {
   GradeNote: 'grade-note',
   /** A half-filled "add an item to today" row. */
   AddItem: 'add-item',
+  /**
+   * A typed chapter note, or a skip waiting on its confirmation, in the
+   * read-aloud pool (Codex round 2, P1).
+   *
+   * This one lives OUTSIDE the checklist, in a card further down the page, which
+   * is exactly why it was missed: keying `TodayChecklist` closed four of the
+   * page's drafts and left this one mounted with its note in it, ready to be
+   * written onto the newly-selected child's `bookProgress`.
+   */
+  ChapterNote: 'chapter-note',
 } as const
 export type TodayDecision = (typeof TodayDecision)[keyof typeof TodayDecision]
 
@@ -69,6 +79,7 @@ export const TODAY_DECISION_WORDS: Record<TodayDecision, string> = {
   [TodayDecision.AddPhotos]: 'the photo you were adding',
   [TodayDecision.GradeNote]: 'the review note',
   [TodayDecision.AddItem]: 'the item you were adding',
+  [TodayDecision.ChapterNote]: 'the chapter note',
 }
 
 /** The order the words are listed in, so two runs cannot phrase it differently. */
@@ -76,6 +87,7 @@ const DECISION_ORDER: TodayDecision[] = [
   TodayDecision.StrandSession,
   TodayDecision.AddPhotos,
   TodayDecision.GradeNote,
+  TodayDecision.ChapterNote,
   TodayDecision.AddItem,
   TodayDecision.LessonVideo,
   TodayDecision.MoveItem,

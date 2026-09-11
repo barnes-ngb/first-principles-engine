@@ -353,25 +353,40 @@ ribbon is a separate question and the owner has said the in-page selectors stay.
 
 - `npx tsc -b` clean · `npm run lint` — 0 errors, 3 warnings, all pre-existing in
   `useQuestSession.ts` / `EvaluateChatPage.tsx`
-- `npx vitest run` — **637 files, 9072 passed, 1 skipped, 0 failed**
+- `npx vitest run` — **637 files, 9078 passed, 1 skipped, 0 failed**
 - `npm run census:child-switch` — `census problems: 0`
 - `node scripts/check-docs-alignment.mjs` — HARD checks pass
 - New tests: `todayScope.test.ts` (11) · `chapterSaveOutcome.test.ts` (6) ·
   `useDayLog.wrongTarget.test.tsx` (6) · `useBookProgress.reporting.test.tsx` (6) ·
   `LessonVideoDialog.childSwitch.test.tsx` (5) · `useRolloverUnchecked.readFailure.test.tsx` (4) ·
   `ChapterQuestionPool.failedRead.test.tsx` (3) · `todayScopeWiring.source.test.ts` (7) ·
-  `chapterSaveControlFlow.test.tsx` (5, round 1) · `KidCaptureForm.partialSave.test.tsx` (4, round 1)
+  `chapterSaveControlFlow.test.tsx` (8, rounds 1–2) · `KidCaptureForm.partialSave.test.tsx` (4, round 1)
 - **Positive controls, run and recorded.** Removing the `composedFor !== docId` guard fails 2 of the 6
   `useDayLog.wrongTarget` cases; removing `LessonVideoDialog`'s identity effect fails 2 of its 5;
   removing `handleSaveNote`'s `if (!outcome.ok)` guard fails 1 of the 5 control-flow cases; collapsing
   `KidCaptureForm`'s two failure sentences back onto one fails 2 of its 4. Each new file's header names
   its own control.
 
-### Round 1's two findings, and what they say about the shape of this work
+### What the review rounds found, and what it says about the shape of this work
 
-Both were **on the fixes, not on the code they fixed**, and both were the same species: *adding a
-report changed a control flow that something else was relying on.* Converting a rejection into an
-outcome disarmed the `catch` blocks that were keeping a child's recording; writing one honest sentence
-for a two-step save made it dishonest for the half that half-succeeded. Neither is visible from the
-diff of the thing being fixed — you have to read the callers, which is the same reason this page needed
-a walk rather than another targeted run.
+**Five findings across two rounds, and every one of them was on this PR's own fixes rather than on the
+code being fixed.** That is worth recording, because it is a pattern rather than luck.
+
+**Round 1 (2 findings, both taken)** was the same species twice: *adding a report changed a control
+flow something else was relying on.* Converting a rejection into an outcome disarmed the `catch`
+blocks that were keeping a boy's recording and a parent's typed note; writing one honest sentence for
+a two-step save made it dishonest for the half that half-succeeded, and the retry it recommended would
+have created a second artifact.
+
+**Round 2 (3 findings, all taken)** was a different species: *a fix applied at one mount point, where
+the class has several.* Keying `TodayChecklist` on the scope closed four of the page's drafts and left
+the chapter pool — mounted forty lines lower, outside it — holding a typed note ready to be written
+onto the newly-selected child. Giving `useBookProgress` a `loadFailed` flag fixed the parent surface
+and left the kid one still presenting a failed read as a book nobody had started. Reporting a failed
+artifact read only when the list was empty left a *refresh* failure silent, with the previous day's
+photos on screen as though they were today's.
+
+Both species are invisible from the diff of the thing being fixed — you have to read the callers, and
+then read every other mount point of the same class. That is the same reason this page needed a walk
+rather than another targeted run, and it is the argument for `UX-343`'s registry-style answer over six
+more individual patches.

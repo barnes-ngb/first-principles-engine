@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import ChapterQuestionPool from './ChapterQuestionPool'
 import { ChapterSaveRefusal } from './chapterSaveOutcome'
+import { TodayDecision } from './todayScope'
 import type { BookProgress, ChapterBook } from '../../core/types'
 
 /**
@@ -91,6 +92,60 @@ describe('a failed chapter write never discards what was staged', () => {
 
     await waitFor(() => expect((note as HTMLTextAreaElement).value).toBe(''))
     expect(screen.queryByText(/didn't save/)).toBeNull()
+  })
+})
+
+describe('the chapter pool reports its own open draft (UX-343, round 2)', () => {
+  it('says nothing is open on a clean card', () => {
+    const onOpenDecisionsChange = vi.fn()
+    render(
+      <ChapterQuestionPool
+        book={BOOK}
+        bookProgress={PROGRESS}
+        bookProgressLoading={false}
+        onChapterAnswered={vi.fn(async () => ({ ok: true as const }))}
+        onOpenDecisionsChange={onOpenDecisionsChange}
+      />,
+    )
+    expect(onOpenDecisionsChange).toHaveBeenLastCalledWith([])
+  })
+
+  it('reports a typed note, so the reset notice can name it', async () => {
+    const user = userEvent.setup()
+    const onOpenDecisionsChange = vi.fn()
+    render(
+      <ChapterQuestionPool
+        book={BOOK}
+        bookProgress={PROGRESS}
+        bookProgressLoading={false}
+        onChapterAnswered={vi.fn(async () => ({ ok: true as const }))}
+        onOpenDecisionsChange={onOpenDecisionsChange}
+      />,
+    )
+
+    await user.type(screen.getAllByPlaceholderText(/What did you notice/i)[0], 'He liked it')
+
+    await waitFor(() =>
+      expect(onOpenDecisionsChange).toHaveBeenLastCalledWith([TodayDecision.ChapterNote]),
+    )
+  })
+
+  it('treats whitespace as nothing open', async () => {
+    const user = userEvent.setup()
+    const onOpenDecisionsChange = vi.fn()
+    render(
+      <ChapterQuestionPool
+        book={BOOK}
+        bookProgress={PROGRESS}
+        bookProgressLoading={false}
+        onChapterAnswered={vi.fn(async () => ({ ok: true as const }))}
+        onOpenDecisionsChange={onOpenDecisionsChange}
+      />,
+    )
+
+    await user.type(screen.getAllByPlaceholderText(/What did you notice/i)[0], '   ')
+
+    await waitFor(() => expect(onOpenDecisionsChange).toHaveBeenLastCalledWith([]))
   })
 })
 
