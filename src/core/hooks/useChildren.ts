@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import { addDoc, getDocs } from 'firebase/firestore'
+import { getDocs } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
 import { useProfile } from '../profile/useProfile'
 import { childrenCollection } from '../firebase/firestore'
+import { seedProfileChildren } from '../firebase/seedProfileChildren'
 import type { Child } from '../types'
 import { UserProfile } from '../types/enums'
 import {
@@ -55,14 +56,24 @@ function matchChildToProfile(
   )?.id
 }
 
-function childTimestamp(c: Child): number {
-  const createdAt = (c as Child & { createdAt?: string }).createdAt
+function childTimestamp(c: { createdAt?: string }): number {
+  const createdAt = c.createdAt
   const t = createdAt ? Date.parse(createdAt) : NaN
   return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY
 }
 
-export function dedupeChildrenByName(children: Child[]): Child[] {
-  const byName = new Map<string, Child>()
+/**
+ * The children the app shows: the **oldest** document per lowercased name.
+ *
+ * Generic over anything carrying a name and an optional `createdAt` so the
+ * `UX-394` ghost survey can ask the same question of raw document rows without
+ * a second copy of the rule — the survey and the app must never disagree about
+ * which document is the child.
+ */
+export function dedupeChildrenByName<T extends { name: string; createdAt?: string }>(
+  children: readonly T[],
+): T[] {
+  const byName = new Map<string, T>()
   for (const child of children) {
     const key = child.name.trim().toLowerCase()
     const existing = byName.get(key)
@@ -125,6 +136,12 @@ export function useChildren(): UseChildrenResult {
       // Dedupe by lowercased name. Concurrent mounts in earlier sessions
       // could race auto-create and produce duplicate Lincoln/London docs.
       // Keep the oldest doc per name so the canonical ID stays stable.
+      //
+      // UX-394: this is the READ-side symptom hider and it stays — the ghosts
+      // those earlier races produced are still in the collection, and clearing
+      // them is a data delete, which is propose-and-confirm (the parent-only
+      // survey on the Dev tab). What changed is the WRITE below, which can no
+      // longer make another one.
       loaded = dedupeChildrenByName(loaded)
 
       // Auto-create children that match profiles but don't exist yet
@@ -136,23 +153,17 @@ export function useChildren(): UseChildrenResult {
       )
 
       if (missing.length > 0) {
-        const created: Child[] = []
-        for (const m of missing) {
-          // Brand-new doc: seed real identity (birthdate/grade) alongside name.
-          // This is doc creation, not a record edit — existing docs are backfilled
-          // by the parent via the Settings identity editor (propose → confirm).
-          const data = {
-            id: '',
-            name: m.name,
-            birthdate: m.birthdate,
-            grade: m.grade,
-            createdAt: new Date().toISOString(),
-          }
-          const ref = await addDoc(childrenCollection(familyId), data)
-          if (cancelled) return
-          created.push({ ...data, id: ref.id })
-        }
-        loaded = [...loaded, ...created]
+        // UX-394 — deterministic id, create-only, one transaction. This used to
+        // be an `addDoc` per missing name straight out of this effect: a
+        // check-then-act with as many runners as there are mounts, which is
+        // exactly how the family ended up with ~20 Lincoln/London documents.
+        // A concurrent runner now addresses the same document and returns it.
+        const created = await seedProfileChildren(familyId, missing)
+        if (cancelled) return
+        // Re-run the same rule over the merged list: a seed that collided with
+        // a document written between the read and the transaction is the one
+        // case this could otherwise double-count.
+        loaded = dedupeChildrenByName([...loaded, ...created])
       }
 
       setChildren(loaded)

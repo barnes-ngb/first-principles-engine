@@ -7,13 +7,13 @@
  * Idempotent — blocks that already have an `id` are left untouched.
  */
 
-import { doc, getDoc, getDocs, updateDoc } from 'firebase/firestore'
+import { doc, getDoc, updateDoc } from 'firebase/firestore'
 
 import type { ConceptualBlock, SkillSnapshot } from '../../core/types/evaluation'
 import {
-  childrenCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
+import { loadCanonicalChildren } from '../../core/firebase/loadCanonicalChildren'
 import { generateBlockId } from '../../core/utils/blockerLifecycle'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -59,11 +59,11 @@ export function backfillBlocks(
 export async function backfillBlockIds(
   familyId: string,
 ): Promise<BackfillBlockIdsResult[]> {
-  const childrenSnap = await getDocs(childrenCollection(familyId))
-  const children = childrenSnap.docs.map((d) => ({
-    id: d.id,
-    name: (d.data() as { name?: string }).name ?? d.id,
-  }))
+  // UX-394: the app's own children, not every document in the collection —
+  // otherwise a backfill writes a `skillSnapshots` document under a duplicate
+  // child id that no screen has ever shown, turning an inert stray into one
+  // with records under it.
+  const children = await loadCanonicalChildren(familyId)
 
   const results: BackfillBlockIdsResult[] = []
 

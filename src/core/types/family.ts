@@ -23,6 +23,14 @@ export interface FamilySettings {
 export interface Child {
   id: string
   name: string
+  /**
+   * When the document was created. Written by the profile-child seed
+   * (`core/firebase/seedProfileChildren.ts`) and by `AddChildDialog`; read by
+   * `dedupeChildrenByName`, which keeps the **oldest** document per name so the
+   * canonical id stays stable (UX-394). Optional — documents written before it
+   * existed do not carry it, and the dedupe treats a missing stamp as newest.
+   */
+  createdAt?: string
   birthdate?: string
   grade?: string
   settings?: FamilySettings

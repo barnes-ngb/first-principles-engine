@@ -36,6 +36,8 @@ import {
   findScanLoweredLevels,
   isRestorableLevel,
 } from './restoreScanLoweredLevels'
+import type { GhostChildSurvey } from './ghostChildDocs'
+import { deleteGhostChildDocs, findGhostChildDocs } from './ghostChildDocs'
 import type { BackfillBlockIdsResult } from './backfillBlockIds'
 import { backfillBlockIds } from './backfillBlockIds'
 import type { ArtifactChildIdAudit } from './auditArtifactChildIds'
@@ -585,6 +587,70 @@ export default function DevAdminTab() {
     }
   }
 
+  // ── Section E3: Duplicate child documents (UX-394) ───────────
+  //
+  // A read-only survey, then one confirmed delete. The write that made these
+  // is fixed (`seedProfileChildren.ts`); clearing the ones already written is a
+  // data delete, so it is proposed here and the parent confirms it.
+  const [ghostScanning, setGhostScanning] = useState(false)
+  const [ghostSurvey, setGhostSurvey] = useState<GhostChildSurvey | null>(null)
+  const [ghostStatus, setGhostStatus] = useState<StatusMsg | null>(null)
+  const [ghostConfirmOpen, setGhostConfirmOpen] = useState(false)
+  const [ghostDeleting, setGhostDeleting] = useState(false)
+
+  const handleFindGhostChildren = async () => {
+    setGhostScanning(true)
+    setGhostStatus(null)
+    setGhostSurvey(null)
+    try {
+      const survey = await findGhostChildDocs(familyId)
+      setGhostSurvey(survey)
+      setGhostStatus({
+        severity:
+          survey.referenced.length > 0
+            ? 'warning'
+            : survey.ghosts.length > 0
+              ? 'info'
+              : 'success',
+        text:
+          survey.ghosts.length === 0
+            ? `Nothing found — ${survey.canonical.length} child document(s), no duplicates.`
+            : survey.referenced.length > 0
+              ? `${survey.ghosts.length} duplicate(s) beside ${survey.canonical.length} real child document(s). ${survey.deletable.length} can be deleted; ${survey.referenced.length} has records under it and is NOT offered — that is a separate finding (UX-395).`
+              : `${survey.ghosts.length} duplicate(s) beside ${survey.canonical.length} real child document(s). Nothing references any of them.`,
+      })
+    } catch (err) {
+      console.error('Duplicate child survey failed', err)
+      setGhostStatus({ severity: 'error', text: `Survey failed: ${err}` })
+    } finally {
+      setGhostScanning(false)
+    }
+  }
+
+  const handleDeleteGhostChildren = async () => {
+    if (!ghostSurvey) return
+    setGhostDeleting(true)
+    try {
+      const result = await deleteGhostChildDocs(familyId, ghostSurvey.deletable)
+      setGhostStatus({
+        severity: result.failed.length > 0 ? 'warning' : 'success',
+        text:
+          result.failed.length > 0
+            ? `Deleted ${result.deleted.length}. ${result.failed.length} could not be deleted: ${result.failed.map((f) => `${f.id} (${f.error})`).join('; ')}`
+            : `Deleted ${result.deleted.length} duplicate document(s). Run the survey again to confirm.`,
+      })
+      // The survey is now stale in exactly the rows it just changed, and a
+      // stale delete list is the one thing this control must not offer twice.
+      setGhostSurvey(null)
+    } catch (err) {
+      console.error('Duplicate child delete failed', err)
+      setGhostStatus({ severity: 'error', text: `Delete failed: ${err}` })
+    } finally {
+      setGhostDeleting(false)
+      setGhostConfirmOpen(false)
+    }
+  }
+
   // ── Section F: Backfill Block IDs ────────────────────────────
   const [blockIdsRunning, setBlockIdsRunning] = useState(false)
   const [blockIdsResults, setBlockIdsResults] = useState<BackfillBlockIdsResult[] | null>(null)
@@ -1129,6 +1195,124 @@ export default function DevAdminTab() {
           </Stack>
         )}
       </Box>
+
+      <Divider />
+
+      {/* ── Section E3: Duplicate child documents (UX-394) ────── */}
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Duplicate child documents
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          UX-394. Earlier sessions could race the auto-create and write more than
+          one Lincoln or London document. The app has always hidden the extras on
+          read — it keeps the oldest document per name — so they never reached a
+          screen, but a diagnostic that reads the collection directly shows every
+          one of them. The write that made them is fixed; this finds the ones
+          already there. The survey writes nothing.
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          <strong>Only a duplicate nothing points at is offered.</strong> Each one
+          is checked against <code>skillSnapshots</code>, <code>learnerModels</code>
+          , <code>xpLedger</code>, <code>avatarProfiles</code>,{' '}
+          <code>activityConfigs</code>, <code>days</code>, <code>hours</code> and{' '}
+          <code>artifacts</code>. A duplicate anything references is listed and
+          <strong> not</strong> offered — records written under an id no screen
+          shows is a different and worse finding, and correcting history is its
+          own decision. A check that fails to run counts the same as a match.
+        </Typography>
+        <Button
+          variant="contained"
+          onClick={() => void handleFindGhostChildren()}
+          disabled={ghostScanning}
+          sx={{ mt: 1, minHeight: 48 }}
+        >
+          {ghostScanning ? <CircularProgress size={20} /> : 'Find duplicate child documents'}
+        </Button>
+
+        {ghostStatus && (
+          <Alert severity={ghostStatus.severity} sx={{ mt: 1 }}>
+            {ghostStatus.text}
+          </Alert>
+        )}
+
+        {ghostSurvey && (
+          <Stack spacing={1} sx={{ mt: 2 }}>
+            <Typography variant="subtitle2">
+              Real children ({ghostSurvey.canonical.length})
+            </Typography>
+            {ghostSurvey.canonical.map((c) => (
+              <Typography key={c.id} variant="body2" sx={{ ml: 2 }}>
+                {c.name} — <code>{c.id}</code>
+                {c.createdAt ? ` (created ${c.createdAt.slice(0, 10)})` : ''}
+              </Typography>
+            ))}
+
+            {ghostSurvey.ghosts.length > 0 && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>
+                  Duplicates ({ghostSurvey.ghosts.length})
+                </Typography>
+                {ghostSurvey.ghosts.map((g) => (
+                  <Typography key={g.id} variant="body2" sx={{ ml: 2 }}>
+                    {g.name} — <code>{g.id}</code>
+                    {g.createdAt ? ` (created ${g.createdAt.slice(0, 10)})` : ''}
+                    {g.referencedBy.length > 0
+                      ? ` — KEEPING: referenced by ${g.referencedBy.join(', ')}`
+                      : g.unreadable.length > 0
+                        ? ` — KEEPING: could not check ${g.unreadable.join(', ')}`
+                        : ' — nothing references it'}
+                  </Typography>
+                ))}
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={() => setGhostConfirmOpen(true)}
+                  disabled={ghostSurvey.deletable.length === 0 || ghostDeleting}
+                  sx={{ mt: 1, minHeight: 48, alignSelf: 'flex-start' }}
+                >
+                  {`Delete these ${ghostSurvey.deletable.length}`}
+                </Button>
+              </>
+            )}
+          </Stack>
+        )}
+      </Box>
+
+      <Dialog open={ghostConfirmOpen} onClose={() => setGhostConfirmOpen(false)}>
+        <DialogTitle>
+          {`Delete ${ghostSurvey?.deletable.length ?? 0} duplicate child document(s)?`}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText component="div">
+            <p>
+              This permanently deletes the documents listed as having nothing
+              pointing at them. There is no undo.
+            </p>
+            <p>
+              The real Lincoln and London documents are not touched, and neither
+              is any duplicate something references.
+            </p>
+            <p>
+              Nothing else changes: no hours, no XP, no snapshot, no record of a
+              day.
+            </p>
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setGhostConfirmOpen(false)} disabled={ghostDeleting}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => void handleDeleteGhostChildren()}
+            disabled={ghostDeleting}
+          >
+            {ghostDeleting ? <CircularProgress size={20} /> : 'Delete permanently'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Divider />
 
