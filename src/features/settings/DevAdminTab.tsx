@@ -14,6 +14,7 @@ import {
   Divider,
   FormControlLabel,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material'
 import {
@@ -29,8 +30,12 @@ import {
 import { LoadingState } from '../../components/states'
 import type { BackfillResult } from './backfillWorkingLevels'
 import { backfillWorkingLevels } from './backfillWorkingLevels'
-import type { RestoreReport } from './restoreScanLoweredLevels'
-import { restoreScanLoweredWorkingLevels } from './restoreScanLoweredLevels'
+import type { ChildScanLoweredLevels, ScanLoweredLevel } from './restoreScanLoweredLevels'
+import {
+  applyConfirmedRestore,
+  findScanLoweredLevels,
+  isRestorableLevel,
+} from './restoreScanLoweredLevels'
 import type { BackfillBlockIdsResult } from './backfillBlockIds'
 import { backfillBlockIds } from './backfillBlockIds'
 import type { ArtifactChildIdAudit } from './auditArtifactChildIds'
@@ -500,33 +505,83 @@ export default function DevAdminTab() {
   }
 
   // ── Section E2: Restore scan-lowered working levels (UX-383) ──
-  const [restoreRunning, setRestoreRunning] = useState(false)
-  const [restoreResults, setRestoreResults] = useState<RestoreReport[] | null>(null)
+  //
+  // A survey, then one confirmed write per row. The pre-scan level is not
+  // recoverable from anything this repo stores (see the module docblock), so
+  // the app finds the rows and a person supplies the number.
+  const [restoreScanning, setRestoreScanning] = useState(false)
+  const [restoreFindings, setRestoreFindings] = useState<ChildScanLoweredLevels[] | null>(null)
   const [restoreStatus, setRestoreStatus] = useState<StatusMsg | null>(null)
+  /** Typed level per `${childId}:${key}`. */
+  const [restoreInputs, setRestoreInputs] = useState<Record<string, string>>({})
+  /** The row currently being written, as `${childId}:${key}`. */
+  const [restoreWriting, setRestoreWriting] = useState<string | null>(null)
+  const [restoreRowStatus, setRestoreRowStatus] = useState<Record<string, StatusMsg>>({})
 
-  const handleRestoreLevels = async () => {
-    setRestoreRunning(true)
+  const handleFindLoweredLevels = async () => {
+    setRestoreScanning(true)
     setRestoreStatus(null)
-    setRestoreResults(null)
+    setRestoreFindings(null)
+    setRestoreRowStatus({})
     try {
-      const results = await restoreScanLoweredWorkingLevels(familyId)
-      setRestoreResults(results)
-      const totalRestored = results.reduce((sum, r) => sum + r.restored.length, 0)
+      const results = await findScanLoweredLevels(familyId)
+      setRestoreFindings(results)
+      const total = results.reduce((sum, r) => sum + r.offers.length, 0)
       const failed = results.filter((r) => r.error)
       setRestoreStatus({
-        severity: failed.length > 0 ? 'warning' : totalRestored > 0 ? 'success' : 'info',
+        severity: failed.length > 0 ? 'warning' : total > 0 ? 'info' : 'success',
         text:
           failed.length > 0
-            ? `Restored ${totalRestored} level(s); ${failed.length} child(ren) could not be read — see below.`
-            : totalRestored > 0
-              ? `Restored ${totalRestored} level(s).`
-              : 'Nothing to restore — no level is standing that a scan lowered.',
+            ? `Found ${total} level(s); ${failed.length} child(ren) could not be read — see below.`
+            : total > 0
+              ? `Found ${total} level(s) a refused scan wrote. Type the level to put back.`
+              : 'Nothing found — no standing level came from a scan the rule would now refuse.',
       })
     } catch (err) {
-      console.error('Working-level restore failed', err)
-      setRestoreStatus({ severity: 'error', text: `Restore failed: ${err}` })
+      console.error('Scan-lowered level survey failed', err)
+      setRestoreStatus({ severity: 'error', text: `Survey failed: ${err}` })
     } finally {
-      setRestoreRunning(false)
+      setRestoreScanning(false)
+    }
+  }
+
+  const handleConfirmRestore = async (childId: string, offer: ScanLoweredLevel) => {
+    const rowKey = `${childId}:${offer.key}`
+    const typed = Number(restoreInputs[rowKey])
+    if (!isRestorableLevel(typed, offer)) {
+      setRestoreRowStatus((prev) => ({
+        ...prev,
+        [rowKey]: {
+          severity: 'error',
+          text: `Enter a whole level between ${offer.standing.level + 1} and ${offer.maxLevel}. This only ever raises a level — to lower one, use the Skill Snapshot stepper.`,
+        },
+      }))
+      return
+    }
+    setRestoreWriting(rowKey)
+    try {
+      const outcome = await applyConfirmedRestore(familyId, childId, offer, typed)
+      setRestoreRowStatus((prev) => ({
+        ...prev,
+        [rowKey]:
+          outcome.status === 'written'
+            ? { severity: 'success', text: `${offer.key}: ${offer.standing.level} → ${typed}. Run the survey again to confirm.` }
+            : {
+                severity: 'warning',
+                text:
+                  outcome.reason === 'slot-moved'
+                    ? `Nothing written — this level changed since the survey (it now reads ${outcome.stored?.level ?? 'nothing'}, source ${outcome.stored?.source ?? '—'}). Run the survey again.`
+                    : 'Nothing written — that level does not raise the one standing.',
+              },
+      }))
+    } catch (err) {
+      console.error('Working-level restore failed', err)
+      setRestoreRowStatus((prev) => ({
+        ...prev,
+        [rowKey]: { severity: 'error', text: `Restore failed: ${err}` },
+      }))
+    } finally {
+      setRestoreWriting(null)
     }
   }
 
@@ -975,20 +1030,26 @@ export default function DevAdminTab() {
           Restore scan-lowered working levels
         </Typography>
         <Typography variant="body2" color="text.secondary" gutterBottom>
-          One-shot (UX-383). A handwriting scan was read as phonics and wrote a
-          lower working level over each boy's. This puts back the highest level
-          the child's own learner-model evidence supports, and only where the
-          standing level came from a scan of a book that would no longer be read
-          that way. It never lowers a level and never invents one — with no
-          stored evidence it restores nothing and says so. Idempotent.
+          UX-383. A handwriting scan was read as phonics and wrote a lower
+          working level over each boy&apos;s. This finds every level a scan wrote
+          that would no longer be read that way — it writes nothing on its own.
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          <strong>You type the level.</strong> Nothing here can work out what the
+          level was before the scan: a working level is one field with no
+          history, and a quest that lowered it leaves no record unless the
+          Foundations tab happened to be opened afterwards. Any levels listed
+          below are what the learner model happens to have on record — context,
+          not a history. A restore only ever raises a level, and it stands down
+          if anything has written that level since the survey.
         </Typography>
         <Button
           variant="contained"
-          onClick={() => void handleRestoreLevels()}
-          disabled={restoreRunning}
+          onClick={() => void handleFindLoweredLevels()}
+          disabled={restoreScanning}
           sx={{ mt: 1, minHeight: 48 }}
         >
-          {restoreRunning ? <CircularProgress size={20} /> : 'Restore levels'}
+          {restoreScanning ? <CircularProgress size={20} /> : 'Find scan-lowered levels'}
         </Button>
 
         {restoreStatus && (
@@ -997,9 +1058,9 @@ export default function DevAdminTab() {
           </Alert>
         )}
 
-        {restoreResults && (
+        {restoreFindings && (
           <Stack spacing={2} sx={{ mt: 2 }}>
-            {restoreResults.map((r) => (
+            {restoreFindings.map((r) => (
               <Box key={r.childId}>
                 <Typography variant="subtitle2">{r.childName}</Typography>
                 {r.error && (
@@ -1007,24 +1068,61 @@ export default function DevAdminTab() {
                     could not be read — {r.error}
                   </Typography>
                 )}
-                <Stack spacing={0.5} sx={{ ml: 2, mt: 0.5 }}>
-                  {r.restored.map((m) => (
-                    <Typography key={m.key} variant="body2" color="success.main">
-                      {m.key}: {m.from} → {m.to} (a {m.book} scan had written {m.from})
-                    </Typography>
-                  ))}
-                  {r.restored.length > 0 && (
+                <Stack spacing={1.5} sx={{ ml: 2, mt: 0.5 }}>
+                  {r.offers.map((offer) => {
+                    const rowKey = `${r.childId}:${offer.key}`
+                    const rowStatus = restoreRowStatus[rowKey]
+                    return (
+                      <Box key={offer.key}>
+                        <Typography variant="body2">
+                          <strong>{offer.key}</strong> stands at {offer.standing.level}, written by a{' '}
+                          {offer.book} scan on {offer.standing.updatedAt.slice(0, 10)}.
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {offer.onRecord.length > 0
+                            ? `On record in the learner model (not a history): ${offer.onRecord
+                                .map((l) => `${l.level} (seen ${l.observedAt.slice(0, 10)})`)
+                                .join(', ')}`
+                            : 'The learner model has no level on record for this domain.'}
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
+                          <TextField
+                            size="small"
+                            type="number"
+                            label="Restore to"
+                            value={restoreInputs[rowKey] ?? ''}
+                            onChange={(e) =>
+                              setRestoreInputs((prev) => ({ ...prev, [rowKey]: e.target.value }))
+                            }
+                            slotProps={{
+                              htmlInput: { min: offer.standing.level + 1, max: offer.maxLevel },
+                            }}
+                            sx={{ width: 120 }}
+                          />
+                          <Button
+                            variant="outlined"
+                            onClick={() => void handleConfirmRestore(r.childId, offer)}
+                            disabled={restoreWriting === rowKey}
+                            sx={{ minHeight: 48 }}
+                          >
+                            {restoreWriting === rowKey ? <CircularProgress size={20} /> : 'Restore'}
+                          </Button>
+                        </Box>
+                        {rowStatus && (
+                          <Alert severity={rowStatus.severity} sx={{ mt: 0.5 }}>
+                            {rowStatus.text}
+                          </Alert>
+                        )}
+                      </Box>
+                    )
+                  })}
+                  {r.offers.length === 0 && !r.error && (
                     <Typography variant="body2" color="text.secondary">
-                      {r.reprojected > 0
-                        ? `${r.reprojected} concept(s) moved on the learner model.`
-                        : 'No concept moved on the learner model — the restored level is the one it was already projected from.'}
+                      No level here came from a scan the rule would now refuse
+                      {r.skipped.length > 0 ? ` (${r.skipped.map((sk) => `${sk.key}: ${sk.reason}`).join(', ')})` : ''}
+                      .
                     </Typography>
                   )}
-                  {r.skipped.map((m) => (
-                    <Typography key={m.key} variant="body2" color="text.secondary">
-                      {m.key}: skipped — {m.reason}
-                    </Typography>
-                  ))}
                 </Stack>
               </Box>
             ))}

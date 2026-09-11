@@ -2,15 +2,16 @@ import { describe, expect, it } from 'vitest'
 
 import type { LearnerModel } from '../../core/types/learnerModel'
 import type { WorkingLevel } from '../../core/types/evaluation'
-import { SkillLevel } from '../../core/types/enums'
 import {
+  findScanLoweredLevel,
+  isRestorableLevel,
   parseScannedBookName,
-  planWorkingLevelRestore,
   recordedLevelsForDomain,
   restoreEvidence,
   scanWouldStillWriteDomain,
+  type ScanLoweredLevel,
 } from './restoreScanLoweredLevels'
-import { applyToSnapshot } from '../evaluate/skillSnapshotWrites'
+import { planRestoredWorkingLevelWrite } from '../evaluate/skillSnapshotWrites'
 
 const AT = '2026-09-11T12:00:00.000Z'
 
@@ -89,12 +90,12 @@ describe('scanWouldStillWriteDomain', () => {
   })
 })
 
-describe('recordedLevelsForDomain', () => {
-  it('reads every workingLevel ref for the domain, plus the projection watermark', () => {
+describe('recordedLevelsForDomain — context, never a decision', () => {
+  it('reports each distinct level once, highest first, with when it was seen', () => {
     const model = modelWithPhonicsEvidence([5, 5, 2])
     model.projectedThrough = { phonics: 2, writing: null, math: 3 }
-    expect(recordedLevelsForDomain(model, 'phonics').sort()).toEqual([2, 2, 5, 5])
-    expect(recordedLevelsForDomain(model, 'math')).toEqual([3])
+    expect(recordedLevelsForDomain(model, 'phonics').map((l) => l.level)).toEqual([5, 2])
+    expect(recordedLevelsForDomain(model, 'math').map((l) => l.level)).toEqual([3])
   })
 
   it('borrows nothing for a domain the model records no evidence for', () => {
@@ -103,36 +104,46 @@ describe('recordedLevelsForDomain', () => {
   })
 })
 
-describe('planWorkingLevelRestore (UX-383)', () => {
-  it("restores London's phonics to the highest level his model recorded", () => {
-    const plan = planWorkingLevelRestore({
+describe('findScanLoweredLevel (UX-383)', () => {
+  const onRecord = [{ level: 5, observedAt: '2026-07-06T12:55:33.000Z' }]
+
+  it("offers London's phonics row, naming the book and what it wrote", () => {
+    const finding = findScanLoweredLevel({ key: 'phonics', current: londonScanned, onRecord })
+    expect(finding).toMatchObject({
+      action: 'offer',
       key: 'phonics',
-      current: londonScanned,
-      recordedLevels: recordedLevelsForDomain(modelWithPhonicsEvidence([5, 5, 2]), 'phonics'),
-      at: AT,
-    })
-    expect(plan).toMatchObject({
-      action: 'restore',
-      key: 'phonics',
-      from: 2,
+      standing: londonScanned,
       book: 'The Good and the Beautiful Handwriting',
-      level: { level: 5, source: 'manual' },
+      onRecord,
     })
-    if (plan.action !== 'restore') throw new Error('unreachable')
-    expect(plan.level.evidence).toBe(
-      restoreEvidence('The Good and the Beautiful Handwriting', 2, AT),
-    )
-    expect(plan.level.evidence).toContain('UX-383')
   })
 
-  it("restores Lincoln's phonics the same way, off his own evidence", () => {
-    const plan = planWorkingLevelRestore({
+  it("offers Lincoln's row the same way", () => {
+    expect(
+      findScanLoweredLevel({ key: 'phonics', current: lincolnScanned, onRecord: [] }),
+    ).toMatchObject({ action: 'offer', book: 'The Good and the Beautiful Handwriting Level 3' })
+  })
+
+  it('offers the row even when the model has nothing on record — a person still knows', () => {
+    const finding = findScanLoweredLevel({ key: 'phonics', current: londonScanned, onRecord: [] })
+    expect(finding.action).toBe('offer')
+    if (finding.action !== 'offer') throw new Error('unreachable')
+    expect(finding.onRecord).toEqual([])
+  })
+
+  it('decides no level at all — the only number it carries is the standing one', () => {
+    // Codex round 2, P1: the pre-scan level is not recoverable from what this
+    // repo stores, so nothing here may propose one. The offer's own shape is
+    // the assertion — there is no derived level on it to be wrong.
+    const finding = findScanLoweredLevel({
       key: 'phonics',
-      current: lincolnScanned,
-      recordedLevels: recordedLevelsForDomain(modelWithPhonicsEvidence([3, 3]), 'phonics'),
-      at: AT,
+      current: londonScanned,
+      onRecord: [{ level: 5, observedAt: '2026-07-06T12:55:33.000Z' }],
     })
-    expect(plan).toMatchObject({ action: 'restore', from: 2, level: { level: 3 } })
+    if (finding.action !== 'offer') throw new Error('unreachable')
+    expect(finding.standing.level).toBe(2)
+    expect(finding).not.toHaveProperty('level')
+    expect(finding).not.toHaveProperty('restoreTo')
   })
 
   it('leaves a level a real phonics program set exactly where it is', () => {
@@ -143,153 +154,113 @@ describe('planWorkingLevelRestore (UX-383)', () => {
       evidence: 'Scanned Fast Phonics Lesson 35',
     }
     expect(
-      planWorkingLevelRestore({ key: 'phonics', current: legitimate, recordedLevels: [5], at: AT }),
+      findScanLoweredLevel({ key: 'phonics', current: legitimate, onRecord }),
     ).toEqual({ action: 'skip', key: 'phonics', reason: 'scan-still-valid' })
-  })
-
-  it('never invents a number — with no stored evidence it restores nothing', () => {
-    expect(
-      planWorkingLevelRestore({ key: 'phonics', current: londonScanned, recordedLevels: [], at: AT }),
-    ).toEqual({ action: 'skip', key: 'phonics', reason: 'no-restore-evidence' })
-  })
-
-  it('refuses when a legitimate lowering sits between the seed and the bad scan', () => {
-    // Codex round 1, P1. Seeded at 5, a quest measures 3, then the handwriting
-    // scan writes 2. The seed's level-5 refs are still on the model — the
-    // projection is upgrade-only and appends — so taking the maximum would
-    // restore an obsolete 5 and pin it as a parent's word. There is no history
-    // that says 3 was last, so the honest answer is to stop for a person.
-    const model = modelWithPhonicsEvidence([5, 5])
-    model.projectedThrough = { phonics: 3, writing: null, math: null }
-    expect(
-      planWorkingLevelRestore({
-        key: 'phonics',
-        current: londonScanned,
-        recordedLevels: recordedLevelsForDomain(model, 'phonics'),
-        at: AT,
-      }),
-    ).toEqual({ action: 'skip', key: 'phonics', reason: 'ambiguous-evidence' })
-  })
-
-  it('refuses any trail carrying two or more distinct levels above the standing one', () => {
-    expect(
-      planWorkingLevelRestore({
-        key: 'phonics',
-        current: londonScanned,
-        // A quest that RAISED to 6 over a seeded 5 is refused too — a case the
-        // rule could have got right, refused in the safe direction.
-        recordedLevels: [5, 6],
-        at: AT,
-      }),
-    ).toEqual({ action: 'skip', key: 'phonics', reason: 'ambiguous-evidence' })
-  })
-
-  it('levels at or below the standing one never make the answer ambiguous', () => {
-    // The real shape: many refs at 5, and a watermark of 2 recorded after the
-    // bad scan. One distinct level above 2, so the answer is not in doubt.
-    expect(
-      planWorkingLevelRestore({
-        key: 'phonics',
-        current: londonScanned,
-        recordedLevels: [5, 5, 2, 1],
-        at: AT,
-      }),
-    ).toMatchObject({ action: 'restore', level: { level: 5 } })
-  })
-
-  it('never lowers — evidence at or below the standing level is no reason to write', () => {
-    for (const recorded of [[2], [1, 2]]) {
-      expect(
-        planWorkingLevelRestore({
-          key: 'phonics',
-          current: londonScanned,
-          recordedLevels: recorded,
-          at: AT,
-        }),
-      ).toEqual({ action: 'skip', key: 'phonics', reason: 'nothing-to-raise' })
-    }
   })
 
   it('touches nothing a scan did not write', () => {
     for (const source of ['quest', 'evaluation', 'manual'] as const) {
       expect(
-        planWorkingLevelRestore({
+        findScanLoweredLevel({
           key: 'phonics',
           current: { level: 2, updatedAt: AT, source, evidence: 'whatever' },
-          recordedLevels: [5],
-          at: AT,
+          onRecord,
         }),
       ).toEqual({ action: 'skip', key: 'phonics', reason: 'not-scan-written' })
     }
   })
 
-  it('is idempotent: what it wrote it will not rewrite', () => {
-    const first = planWorkingLevelRestore({
-      key: 'phonics',
-      current: londonScanned,
-      recordedLevels: [5],
-      at: AT,
-    })
-    if (first.action !== 'restore') throw new Error('unreachable')
-    const second = planWorkingLevelRestore({
-      key: 'phonics',
-      current: first.level,
-      recordedLevels: [5],
-      at: AT,
-    })
-    expect(second).toEqual({ action: 'skip', key: 'phonics', reason: 'not-scan-written' })
-  })
-
-  it('says which of the six refusals applied, for an empty slot and an unreadable line', () => {
+  it('says which of the refusals applied, for an empty slot and an unreadable line', () => {
     expect(
-      planWorkingLevelRestore({ key: 'math', current: undefined, recordedLevels: [4], at: AT }),
+      findScanLoweredLevel({ key: 'math', current: undefined, onRecord: [] }),
     ).toEqual({ action: 'skip', key: 'math', reason: 'no-level-stored' })
     expect(
-      planWorkingLevelRestore({
+      findScanLoweredLevel({
         key: 'math',
         current: { level: 1, updatedAt: AT, source: 'curriculum', evidence: 'no book here' },
-        recordedLevels: [4],
-        at: AT,
+        onRecord: [],
       }),
     ).toEqual({ action: 'skip', key: 'math', reason: 'evidence-unreadable' })
   })
 })
 
-describe('the restore write goes through the central writer, upgrade-only', () => {
-  it('raises the one key and touches nothing else', () => {
-    const level: WorkingLevel = { level: 5, updatedAt: AT, source: 'manual', evidence: 'restored' }
-    const result = applyToSnapshot(
-      {
-        childId: 'c1',
-        prioritySkills: [{ tag: 'phonics.cvc', label: 'CVC', level: SkillLevel.Emerging }],
-        workingLevels: { phonics: londonScanned, math: { level: 3, updatedAt: AT, source: 'quest' } },
-      },
-      { masteredSkills: [], restoreWorkingLevel: { key: 'phonics', level }, at: AT },
-    )
-    expect(result.changed).toBe(true)
-    expect(result.changedFields.workingLevel).toBe('phonics')
-    expect(result.snapshot.workingLevels?.phonics).toEqual(level)
-    expect(result.snapshot.workingLevels?.math?.level).toBe(3)
-    expect(result.snapshot.prioritySkills).toHaveLength(1)
+describe('isRestorableLevel', () => {
+  const offer = (() => {
+    const finding = findScanLoweredLevel({ key: 'phonics', current: londonScanned, onRecord: [] })
+    if (finding.action !== 'offer') throw new Error('unreachable')
+    return finding as ScanLoweredLevel
+  })()
+
+  it('takes a whole level above the standing one and at or below the ceiling', () => {
+    expect(isRestorableLevel(3, offer)).toBe(true)
+    expect(isRestorableLevel(offer.maxLevel, offer)).toBe(true)
   })
 
-  it('refuses to lower or to repeat itself', () => {
-    const standing: WorkingLevel = { level: 5, updatedAt: AT, source: 'manual' }
-    for (const proposed of [4, 5]) {
-      const result = applyToSnapshot(
-        { childId: 'c1', workingLevels: { phonics: standing } },
-        {
-          masteredSkills: [],
-          restoreWorkingLevel: {
-            key: 'phonics',
-            level: { level: proposed, updatedAt: AT, source: 'manual' },
-          },
-          at: AT,
-        },
-      )
-      expect(result.changed).toBe(false)
-      expect(result.changedFields.workingLevel).toBe(false)
-      expect(result.snapshot.workingLevels?.phonics).toEqual(standing)
+  it('refuses a lower, equal, fractional, empty or over-ceiling level', () => {
+    for (const bad of [1, 2, 2.5, Number.NaN, offer.maxLevel + 1]) {
+      expect(isRestorableLevel(bad, offer), String(bad)).toBe(false)
     }
+  })
+})
+
+describe('planRestoredWorkingLevelWrite — the confirmed write', () => {
+  const evidence = restoreEvidence('The Good and the Beautiful Handwriting', 2, AT)
+
+  it('writes the parent’s level, stamped manual with a sentence saying why', () => {
+    const outcome = planRestoredWorkingLevelWrite(londonScanned, londonScanned, 5, AT, evidence)
+    expect(outcome).toEqual({
+      status: 'written',
+      level: { level: 5, updatedAt: AT, source: 'manual', evidence },
+    })
+    expect(evidence).toContain('UX-383')
+  })
+
+  it('stands down when anything has written that slot since the survey', () => {
+    // Codex round 2, P1. A quest raising the slot to 6, or writing a freshly
+    // measured 3, between the survey and the tap must stand — the restore may
+    // not replace it and pin a stale number as a parent's word.
+    const questRaised: WorkingLevel = { level: 6, updatedAt: AT, source: 'quest' }
+    expect(planRestoredWorkingLevelWrite(questRaised, londonScanned, 5, AT, evidence)).toEqual({
+      status: 'refused',
+      reason: 'slot-moved',
+      stored: questRaised,
+    })
+
+    const questMeasured: WorkingLevel = { level: 3, updatedAt: AT, source: 'quest' }
+    expect(planRestoredWorkingLevelWrite(questMeasured, londonScanned, 5, AT, evidence)).toMatchObject(
+      { status: 'refused', reason: 'slot-moved' },
+    )
+  })
+
+  it('checks identity, not just the number — a re-scan at the same level is still a move', () => {
+    const rescanned: WorkingLevel = { ...londonScanned, updatedAt: '2026-09-11T09:00:00.000Z' }
+    expect(planRestoredWorkingLevelWrite(rescanned, londonScanned, 5, AT, evidence)).toMatchObject({
+      status: 'refused',
+      reason: 'slot-moved',
+    })
+  })
+
+  it('stands down when the slot is gone entirely', () => {
+    expect(planRestoredWorkingLevelWrite(undefined, londonScanned, 5, AT, evidence)).toEqual({
+      status: 'refused',
+      reason: 'slot-moved',
+      stored: undefined,
+    })
+  })
+
+  it('only ever raises — lowering by hand is the Skill Snapshot stepper’s job', () => {
+    for (const level of [1, 2]) {
+      expect(
+        planRestoredWorkingLevelWrite(londonScanned, londonScanned, level, AT, evidence),
+      ).toMatchObject({ status: 'refused', reason: 'not-higher' })
+    }
+  })
+
+  it('is idempotent: once restored, the slot no longer matches what was expected', () => {
+    const first = planRestoredWorkingLevelWrite(londonScanned, londonScanned, 5, AT, evidence)
+    if (first.status !== 'written') throw new Error('unreachable')
+    expect(
+      planRestoredWorkingLevelWrite(first.level, londonScanned, 5, AT, evidence),
+    ).toMatchObject({ status: 'refused', reason: 'slot-moved' })
   })
 })
