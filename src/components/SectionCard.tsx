@@ -31,7 +31,7 @@ export default function SectionCard({ title, action, children, disclosure }: Sec
         onChange={(_, expanded) => disclosure.onChange(expanded)}
         disableGutters
         slots={{ heading: 'h2' }}
-        slotProps={{ transition: { unmountOnExit: false } }}
+        slotProps={{ heading: { style: { all: 'unset' } }, transition: { unmountOnExit: false } }}
         sx={{ '&::before': { display: 'none' } }}
       >
         <AccordionSummary id={`${id}-heading`} aria-controls={`${id}-content`} expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 56 }}>
