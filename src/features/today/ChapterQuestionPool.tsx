@@ -34,6 +34,12 @@ interface ChapterQuestionPoolProps {
   book: ChapterBook | null
   bookProgress: BookProgress | null
   bookProgressLoading: boolean
+  /**
+   * UX-356(a) — the progress read FAILED, as distinct from "no pool yet".
+   * Optional and defaulting to `false`, so every existing caller and test
+   * renders exactly as it did.
+   */
+  bookProgressFailed?: boolean
   onChapterAnswered: (
     chapter: number,
     update: Partial<ChapterQuestionPoolItem>,
@@ -47,6 +53,7 @@ export default function ChapterQuestionPool({
   book,
   bookProgress,
   bookProgressLoading,
+  bookProgressFailed = false,
   onChapterAnswered,
   dayLog,
   persistDayLogImmediate,
@@ -118,6 +125,20 @@ export default function ChapterQuestionPool({
             </Button>
           )}
         </Stack>
+      </SectionCard>
+    )
+  }
+
+  // 3a. UX-356(a) — the READ failed. Not the same thing as "no progress doc",
+  // and this is where the difference bites: the state below offers to generate a
+  // question pool, which for a book that already has one would replace a real
+  // record with a fresh one on the strength of a dropped subscription. A failed
+  // read is not an affirmative empty result — the weekly review's "Couldn't read
+  // this week's hours" rule, on the page that writes nine collections.
+  if (bookProgressFailed) {
+    return (
+      <SectionCard title={`\u{1F4D6} ${book.title}`}>
+        <EmptyState title="Couldn't read this book's chapter questions. They haven't been lost — reload to try again." />
       </SectionCard>
     )
   }

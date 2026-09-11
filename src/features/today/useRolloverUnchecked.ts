@@ -14,6 +14,20 @@ interface UseRolloverParams {
   dayLog: DayLog | null
   dailyPlan?: DailyPlan | null
   persistDayLogImmediate: (updated: DayLog) => void
+  /**
+   * UX-356(b) — yesterday could not be read.
+   *
+   * The catch here was a `console.warn` and nothing else, so the page carried
+   * on exactly as though the previous school day had held nothing to carry
+   * forward. An unfinished item silently did not roll over, and the parent had
+   * no way to know the difference between *"nothing was left"* and *"we didn't
+   * look"*. Same rule as the weekly review's *"Couldn't read this week's
+   * hours"*: **a failed read is not an affirmative empty result.**
+   *
+   * Called at most once per child+day — the rollover itself runs at most once,
+   * and a sentence repeated on every re-render would be its own defect.
+   */
+  onReadFailed?: () => void
 }
 
 /**
@@ -31,6 +45,7 @@ export function useRolloverUnchecked({
   dayLog,
   dailyPlan,
   persistDayLogImmediate,
+  onReadFailed,
 }: UseRolloverParams) {
   // Track which child+date we've already processed to prevent re-runs
   const rolledRef = useRef<string>('')
@@ -107,7 +122,11 @@ export function useRolloverUnchecked({
         }
       })
       .catch((err) => {
+        // UX-356(b): say so. The budget pass is deliberately NOT run on this
+        // path either — it would defer rows against a checklist we know may be
+        // missing everything yesterday was going to add to it.
         console.warn('[rollover] Failed to load previous day log:', err)
+        onReadFailed?.()
       })
-  }, [familyId, childId, today, dayLog, dailyPlan, persistDayLogImmediate])
+  }, [familyId, childId, today, dayLog, dailyPlan, persistDayLogImmediate, onReadFailed])
 }

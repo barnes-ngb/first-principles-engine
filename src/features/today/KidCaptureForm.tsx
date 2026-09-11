@@ -36,10 +36,13 @@ export default function KidCaptureForm({
   const [content, setContent] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  // UX-359 — a save that did not land says so, on the boys' own capture form.
+  const [saveFailed, setSaveFailed] = useState(false)
 
   const handleSave = useCallback(async () => {
     if (saving) return
     setSaving(true)
+    setSaveFailed(false)
     try {
       const artifact: Omit<Artifact, 'id'> = {
         childId,
@@ -73,7 +76,12 @@ export default function KidCaptureForm({
 
       onSave()
     } catch (err) {
+      // The form stayed open with the photo still in it and NOTHING was said —
+      // a ten-year-old tapped Save, watched the spinner stop, and had no way to
+      // tell whether his work was recorded. `UX-351`'s rule on the one surface
+      // where the person who loses the work cannot read an error log.
       console.error('Failed to save artifact:', err)
+      setSaveFailed(true)
     } finally {
       setSaving(false)
     }
@@ -130,6 +138,15 @@ export default function KidCaptureForm({
             fullWidth
             size="small"
           />
+        )}
+
+        {saveFailed && (
+          // UX-359 — kid copy, on the shared readability bar. It says what
+          // happened and names the one action he has; the work is still in the
+          // form, so it does not claim anything was lost.
+          <Typography variant="body2" color="error.main">
+            That did not save. Try again.
+          </Typography>
         )}
 
         <Stack direction="row" spacing={1} justifyContent="flex-end">

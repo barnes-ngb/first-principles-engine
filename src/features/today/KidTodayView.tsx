@@ -30,7 +30,18 @@ import {
   dailyArmorSessionsCollection,
 } from '../../core/firebase/firestore'
 import { getDailyArmorSession } from '../../core/avatar/getDailyArmorSession'
-import type { Artifact, ChapterBook, Child, DailyArmorSession, DayLog } from '../../core/types'
+import type {
+  Artifact,
+  ChapterBook,
+  ChapterQuestionPoolItem,
+  Child,
+  DailyArmorSession,
+  DayLog,
+} from '../../core/types'
+import {
+  ChapterSaveAudience,
+  chapterSaveFailureNotice,
+} from './chapterSaveOutcome'
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { XP_AWARDS } from '../avatar/xpAwards'
 import AvatarThumbnail from '../avatar/AvatarThumbnail'
@@ -166,6 +177,8 @@ export default function KidTodayView({
   const [selectedChoices, setSelectedChoices] = useState<Set<number>>(new Set())
   const [showCapture, setShowCapture] = useState<'photo' | 'note' | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  // UX-359 — the artifacts READ failed, as distinct from a day with nothing on it.
+  const [artifactsFailed, setArtifactsFailed] = useState(false)
   const [captureItemIndex, setCaptureItemIndex] = useState<number | null>(null)
   const [captureReflection, setCaptureReflection] = useState('')
   const [captureMessage, setCaptureMessage] = useState<{ text: string; severity: 'success' | 'error' | 'warning' } | null>(null)
@@ -215,6 +228,28 @@ export default function KidTodayView({
     familyId,
     child.id,
     readAloudBookId,
+  )
+
+  /**
+   * UX-355 — a chapter answer that did not save says so, in the boys' words.
+   *
+   * This is the surface the ledger row meant by *"the kid one needs its own
+   * words"*: a six- and a ten-year-old record their own answers here, by voice,
+   * and a rejected write was an unhandled promise rejection with nothing on
+   * screen at all. The copy is held to the shared readability bar
+   * (`src/test/kidReadability.ts`) and names the only action a six-year-old has
+   * — ask a grown-up — rather than an action he cannot take.
+   */
+  const handleChapterAnswered = useCallback(
+    async (chapter: number, update: Partial<ChapterQuestionPoolItem>) => {
+      const outcome = await updateChapter(chapter, update)
+      if (!outcome.ok) {
+        setCaptureMessage(
+          chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Kid),
+        )
+      }
+    },
+    [updateChapter],
   )
 
   const checklist = useMemo(() => dayLog.checklist ?? [], [dayLog.checklist])
@@ -414,17 +449,30 @@ export default function KidTodayView({
   )
 
   // Load artifacts for today
+  //
+  // UX-359 — a failed read is not an empty inventory. This `.then` had no catch
+  // at all: a dropped query was an unhandled promise rejection, and "My Stuff"
+  // rendered *"Nothing captured yet today"* over a day whose photos it simply
+  // had not read — the one place a boy goes to check his own work is there. The
+  // sentence that replaces it is on the shared kid readability bar and does not
+  // tell him to do anything he cannot do.
   const loadArtifacts = useCallback(() => {
     const q = query(
       artifactsCollection(familyId),
       where('childId', '==', child.id),
       where('dayLogId', '==', today),
     )
-    getDocs(q).then((snap) => {
-      setArtifacts(
-        snap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })),
-      )
-    })
+    getDocs(q)
+      .then((snap) => {
+        setArtifactsFailed(false)
+        setArtifacts(
+          snap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })),
+        )
+      })
+      .catch((err) => {
+        console.error('[KidToday] Failed to load today’s artifacts', err)
+        setArtifactsFailed(true)
+      })
   }, [familyId, child.id, today])
 
   useEffect(() => {
@@ -705,7 +753,7 @@ export default function KidTodayView({
                 childId={child.id}
                 dayLog={dayLog}
                 weekFocus={weekFocus}
-                onChapterAnswered={updateChapter}
+                onChapterAnswered={handleChapterAnswered}
               />
             ) : (
               <Typography variant="body2" color="text.secondary">
@@ -1076,7 +1124,12 @@ export default function KidTodayView({
         )}
 
         {/* Artifacts list */}
-        {artifacts.length === 0 ? (
+        {artifactsFailed && artifacts.length === 0 ? (
+          // UX-359 — never "nothing here" over a read that did not land.
+          <Typography color="text.secondary" variant="body2">
+            Could not load your stuff. Try again.
+          </Typography>
+        ) : artifacts.length === 0 ? (
           <Typography color="text.secondary" variant="body2">
             {isLincoln
               ? 'Nothing in your inventory yet. Capture your builds!'

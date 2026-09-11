@@ -58,7 +58,6 @@ import {
   PlanType,
   SkipReason,
   SubjectBucket,
-  UserProfile,
 } from '../../core/types/enums'
 import { getWeekRange } from '../../core/utils/time'
 import { weekdayName } from './dayProgressLabels'
@@ -101,6 +100,16 @@ import {
   type DailyPlanSaveOutcome,
 } from './dailyPlanGate'
 import { useDayLog } from './useDayLog'
+import {
+  ChapterSaveAudience,
+  chapterSaveFailureNotice,
+} from './chapterSaveOutcome'
+import {
+  TodayDecision,
+  childIdFromScopeKey,
+  todayScopeKey,
+  todayScopeResetNotice,
+} from './todayScope'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { useRolloverUnchecked } from './useRolloverUnchecked'
 import { useUnappliedDraft } from './useUnappliedDraft'
@@ -179,14 +188,33 @@ export default function TodayPage() {
   }, [selectedDate])
 
   const familyId = useFamilyId()
-  const { profile } = useProfile()
-  const isKidProfile =
-    profile === UserProfile.Lincoln || profile === UserProfile.London
+  /**
+   * UX-358 — the two capability questions this page asks have ONE answer each,
+   * and it is not written here.
+   *
+   * This page used to compute both itself: `isKidProfile` was
+   * `profile === UserProfile.Lincoln || profile === UserProfile.London`, a
+   * hand-written member list identical to `useActiveChild().isChildProfile`,
+   * which it was already calling on the very next line; `canEditLiveDay` was
+   * `profile === UserProfile.Parents`, a hand-written copy of `useProfile()`'s
+   * own `canEdit`. Three definitions of two boundaries, on the page that writes
+   * nine collections — and adding a third child profile would have silently
+   * handed him the parent surface, edit mode included.
+   *
+   * This repo's standing rule (`resolveDailyBudget`, `SECTION_FOR_TYPE`,
+   * `DAY_TYPE_SHAPE`) is **never hand-write the member list**. Reading the two
+   * canonical answers changes no behaviour for any of the three profiles that
+   * exist — including an unselected one, where `canEdit` and `isChildProfile`
+   * are both false exactly as the literals were — and it means a fourth profile
+   * is a decision made once.
+   */
+  const { canEdit } = useProfile()
   const {
     children,
     activeChildId: selectedChildId,
     activeChild,
     setActiveChildId: setSelectedChildId,
+    isChildProfile: isKidProfile,
     isLoading: isLoadingChildren,
     addChild,
   } = useActiveChild()
@@ -300,9 +328,61 @@ export default function TodayPage() {
   // DIFFERENT document, so it goes through `liveDayEdit.moveItemToLiveDay`
   // (append-to-target then remove-from-source, both via the preservation guard).
   // Today's own `onSnapshot` brings the source-day change back into view.
-  const canEditLiveDay = profile === UserProfile.Parents
+  // UX-358 — `useProfile().canEdit`, the one definition, not a second copy of
+  // its expression. See the note where it is read.
+  const canEditLiveDay = canEdit
   const [moveTargetIndex, setMoveTargetIndex] = useState<number | null>(null)
   const [swapTargetIndex, setSwapTargetIndex] = useState<number | null>(null)
+
+  // ── UX-343: a change of child or day closes what was open, and says so ─────
+  //
+  // Every dialog on this page writes with the LIVE `selectedChildId` and the
+  // LIVE date, and every one of them outlives the tap that opened it. A strand
+  // session captured for one boy could be incremented onto the other's strand; a
+  // move target picked from one child's checklist resolves, on confirm, to
+  // whatever row now sits at that index in the other's. That is the owner's own
+  // report — *"Shelly added content for Lincoln on London's page"* — as a race
+  // rather than a typo, and it is reachable today through this page's own
+  // `ChildSelector`, with the app-bar switcher still off (`UX-330`).
+  //
+  // The census verdict is RESET: the work is cheap to redo and expensive to get
+  // wrong. RESET's second half is *make the loss visible*, so the decisions that
+  // were open are named. `TodayChecklist` reports its own four up through
+  // `onOpenDecisionsChange`, because the `key` below clears them by remounting
+  // and a remount cannot speak for itself.
+  //
+  // State-during-render, matching `useDayLog`'s own guard: an effect would leave
+  // one render in which a stale dialog is still on screen over the new child,
+  // which is the exact window this closes.
+  const scopeKey = todayScopeKey(selectedChildId, today)
+  const checklistOpenRef = useRef<TodayDecision[]>([])
+  const [openScopeKey, setOpenScopeKey] = useState(scopeKey)
+  if (openScopeKey !== scopeKey) {
+    const wasFor = childIdFromScopeKey(openScopeKey)
+    const open: TodayDecision[] = [...checklistOpenRef.current]
+    if (strandSessionId !== null) open.push(TodayDecision.StrandSession)
+    if (moveTargetIndex !== null) open.push(TodayDecision.MoveItem)
+    if (swapTargetIndex !== null) open.push(TodayDecision.SwapVideo)
+    if (watchPickerOpen) open.push(TodayDecision.AddVideo)
+    setOpenScopeKey(scopeKey)
+    checklistOpenRef.current = []
+    setStrandSessionId(null)
+    setStrandSessionError(null)
+    setMoveTargetIndex(null)
+    setSwapTargetIndex(null)
+    setWatchPickerOpen(false)
+    // Named only when the previous scope was a DIFFERENT child. Paging from
+    // Tuesday to Wednesday for the same boy closes the same dialogs and is worth
+    // the same sentence, but "Lincoln was selected" would be a strange way to
+    // say it, so the nameless variant carries that case.
+    const notice = todayScopeResetNotice(
+      open,
+      wasFor && wasFor !== selectedChildId
+        ? (children.find((c) => c.id === wasFor)?.name ?? null)
+        : null,
+    )
+    if (notice) setSnackMessage(notice)
+  }
 
   const handleMoveItemToDay = useCallback(
     (index: number, toDateKey: string) => {
@@ -422,10 +502,33 @@ export default function TodayPage() {
     })
   }, [readAloudBookId])
 
-  const { bookProgress, loading: bookProgressLoading, updateChapter } = useBookProgress(
-    familyId,
-    selectedChildId,
-    readAloudBookId,
+  const {
+    bookProgress,
+    loading: bookProgressLoading,
+    loadFailed: bookProgressFailed,
+    updateChapter,
+  } = useBookProgress(familyId, selectedChildId, readAloudBookId)
+
+  /**
+   * UX-355 — a chapter answer that did not save says so.
+   *
+   * `updateChapter` was handed to `ChapterQuestionPool` raw and called as
+   * `void onChapterAnswered(...)`, so a rejected write was an unhandled promise
+   * rejection with nothing on screen. The hook answers an outcome now; this is
+   * the parent half of the reporting, in a parent's words. Nothing is rolled
+   * back because nothing moved optimistically — the row renders off the stored
+   * document, which is still correct.
+   */
+  const handleChapterAnswered = useCallback(
+    async (chapter: number, update: Partial<ChapterQuestionPoolItem>) => {
+      const outcome = await updateChapter(chapter, update)
+      if (!outcome.ok) {
+        setSnackMessage(
+          chapterSaveFailureNotice(outcome.reason, ChapterSaveAudience.Parent),
+        )
+      }
+    },
+    [updateChapter, setSnackMessage],
   )
 
   // Load/persist daily plan (energy + planType) to Firestore
@@ -465,6 +568,17 @@ export default function TodayPage() {
   }, [dailyPlan, dayPlanLoading, dayPlanReadFailed])
 
   // --- Rollover: carry forward unchecked items from previous school day + enforce daily budget ---
+  //
+  // UX-356(b) — when yesterday could not be READ, the page says so rather than
+  // carrying on as though nothing had been left to carry over. Reported once per
+  // child+day, because the rollover itself runs once.
+  const handleRolloverReadFailed = useCallback(() => {
+    setSnackMessage({
+      text: "Couldn't check yesterday for anything to carry over. Nothing was added to today.",
+      severity: 'warning',
+    })
+  }, [setSnackMessage])
+
   useRolloverUnchecked({
     familyId,
     childId: selectedChildId,
@@ -472,6 +586,7 @@ export default function TodayPage() {
     dayLog,
     dailyPlan,
     persistDayLogImmediate,
+    onReadFailed: handleRolloverReadFailed,
   })
 
   // --- Unapplied-draft awareness (FEAT-111 P2): does a drafted-but-unapplied
@@ -918,7 +1033,18 @@ export default function TodayPage() {
           setSnackMessage({ text: `Updated ${result.configName} to lesson ${result.position}`, severity: 'success' })
         }
       } catch (err) {
+        // UX-360 — this used to be a `console.error` and nothing else. The
+        // curriculum write is the whole point of scanning a page before doing
+        // it, and its failure reached the parent as silence on a surface whose
+        // success path announces "Updated Math K to lesson 14". The photo and
+        // the analysis really are safe, so this is a warning, not an error —
+        // `useUnifiedCapture`'s own rule for the same failure, which this
+        // handler is the last copy of.
         console.error('[TodayPage] Failed to sync scan to config:', err)
+        setSnackMessage({
+          text: "Couldn't update the workbook's position. The scan is saved.",
+          severity: 'warning',
+        })
       }
 
       const skills = record.results.skillsTargeted
@@ -1365,6 +1491,15 @@ export default function TodayPage() {
       {selectedChild && planType !== PlanType.Life && (
         <SectionErrorBoundary section="checklist">
         <TodayChecklist
+          // UX-343 — the checklist's own dialogs and drafts (a lesson-video
+          // search with an hours logger in it, a row's photo dialog, a typed
+          // review note, a half-filled new row) all write with the live child
+          // and date. Keyed by the scope, exactly as `LifeDayCard` beside it
+          // already is, so none of them can outlive the identity they were
+          // started under; the sentence naming what was closed is raised by the
+          // scope guard above, off the set this component reports up.
+          key={scopeKey}
+          onOpenDecisionsChange={(open) => { checklistOpenRef.current = open }}
           dayLog={dayLog}
           selectedChild={selectedChild}
           selectedChildId={selectedChildId}
@@ -1436,7 +1571,8 @@ export default function TodayPage() {
           book={selectedBook}
           bookProgress={bookProgress}
           bookProgressLoading={bookProgressLoading}
-          onChapterAnswered={updateChapter}
+          bookProgressFailed={bookProgressFailed}
+          onChapterAnswered={handleChapterAnswered}
           dayLog={dayLog}
           persistDayLogImmediate={persistDayLogImmediate}
           onRetryGeneration={() => void handleRetryChapterGen()}
