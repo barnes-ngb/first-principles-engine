@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { doc, getDoc, onSnapshot } from 'firebase/firestore'
 
 import type { SaveState } from '../../components/SaveIndicator'
 import { daysCollection, weeksCollection } from '../../core/firebase/firestore'
-import { useDebounce } from '../../core/hooks/useDebounce'
 import type { Child, DayLog } from '../../core/types'
 import type { RoutineItemKey } from '../../core/types/enums'
 import { getWeekRange } from '../../core/utils/time'
 import type { DailyPlanTemplate } from './dailyPlanTemplates'
 import { createDefaultDayLog, dayLogDocId, legacyDayLogDocId } from './daylog.model'
+import {
+  DayWriteAftermath,
+  DayWriteRefusal,
+  dayWriteFailureNotice,
+  namedDayEdit,
+} from './dayWriteOutcome'
 import { setDayLogGuarded } from './dayWriteGuard'
 
 interface UseDayLogParams {
@@ -54,7 +59,6 @@ interface UseDayLogResult {
   setSnackMessage: React.Dispatch<
     React.SetStateAction<{ text: string; severity: 'success' | 'error' | 'warning' } | null>
   >
-  persistDayLog: (updated: DayLog) => void
   persistDayLogImmediate: (updated: DayLog) => void
 }
 
@@ -119,9 +123,117 @@ export function useDayLog({
 
   // --- Persist helpers with save-state tracking ---
 
+  /**
+   * The day as it stood BEFORE the edit now being written — the value the screen
+   * goes back to when the write does not land (UX-351).
+   *
+   * A ref rather than a dependency so `persistDayLogImmediate` keeps a stable
+   * identity across every checklist change (it is a dependency of most of
+   * `TodayPage`'s handlers). Synced in an effect, never during render, which is
+   * the form this repo's lint permits — and an event handler reads it after that
+   * effect has committed for the rendered state, so it holds exactly the
+   * pre-edit document.
+   */
+  const previousDayLogRef = useRef<DayLog | null>(null)
+  useEffect(() => {
+    previousDayLogRef.current = dayLog
+  }, [dayLog])
+
+  /**
+   * The document this hook is showing RIGHT NOW (Codex round 1, P1's sibling).
+   *
+   * A write left in flight across a child or date change belongs to a day that
+   * is no longer on screen, and its failure sentence names a checklist row —
+   * which over another child's day reads as a claim about that child's day. A
+   * ref, because `writeDayLog` closed over the target as it stood when the tap
+   * happened, so only a live read can tell that it has moved.
+   */
+  const liveDocIdRef = useRef(currentDocId)
+  useEffect(() => {
+    liveDocIdRef.current = currentDocId
+  }, [currentDocId])
+
+  /**
+   * The last day the LISTENER delivered — what a rollback goes back to (Codex
+   * round 3, P1).
+   *
+   * The pre-edit document is the wrong target after two failures in a row: the
+   * second edit's "previous" is the first edit's optimistic value, which was
+   * never written, so restoring it leaves the screen showing an edit whose write
+   * also failed — and a later full-document edit persists that stale change.
+   * `onSnapshot` is the only thing here that speaks for the stored document, so
+   * it is what this ref follows; it carries its `docId` so a rollback can never
+   * restore one day's document onto another's.
+   *
+   * (Firestore delivers a local mutation optimistically and then re-delivers the
+   * stored document when the write is rejected, so this catches up by itself on
+   * the path where the write reached the SDK at all. The rollback below is for
+   * the path where it did not.)
+   *
+   * This is the same correction the plan controls took in round 2 — restore from
+   * what landed, not from what was on screen.
+   */
+  const storedDayLogRef = useRef<{ docId: string; log: DayLog } | null>(null)
+
+  /**
+   * An edit did not land — say so, and take the optimistic row back.
+   *
+   * **One definition for every refusal**, reached by a thrown write and by the
+   * guard that declines to attempt one: the defect this closes was precisely
+   * that the three outcomes reported three different ways (see
+   * `dayWriteOutcome.ts`).
+   *
+   * The rollback is **identity-guarded**: it restores the previous document only
+   * while the screen is still showing the exact object this write attempted, so
+   * it can never undo an edit made since, nor a snapshot that has already
+   * landed. It is a belt rather than the mechanism — when a write is rejected
+   * after reaching the SDK, Firestore drops the local mutation and the listener
+   * re-fires with the stored document, doing the same job. This covers the case
+   * the listener cannot: a write that never reached it at all.
+   */
+  const reportFailedWrite = useCallback(
+    (
+      reason: DayWriteRefusal,
+      attempted: DayLog,
+      previous: DayLog | null,
+      docId: string,
+    ) => {
+      // What the page can actually do about this, which decides what it may
+      // claim (Codex round 2, P1). `previousDayLogRef` is the document the
+      // screen is showing — `persistDayLogImmediate` advances it synchronously
+      // on every edit — so comparing against it answers the same question the
+      // identity-guarded rollback below asks, one line earlier.
+      const aftermath =
+        docId !== liveDocIdRef.current
+          ? DayWriteAftermath.MovedOn
+          : previousDayLogRef.current === attempted
+            ? DayWriteAftermath.RolledBack
+            : DayWriteAftermath.Superseded
+      // Back to what the listener last delivered for THIS document, not to the
+      // document that was on screen — after two failures in a row those are not
+      // the same thing, and only the first of them landed (Codex round 3, P1).
+      // The captured value stays the fallback for the one case with no
+      // delivered document: a day being created for the first time.
+      const stored = storedDayLogRef.current
+      const goBackTo = stored && stored.docId === docId ? stored.log : previous
+      setDayLog((current) => (current === attempted ? goBackTo : current))
+      setSaveState('error')
+      setSnackMessage(
+        dayWriteFailureNotice(reason, namedDayEdit(previous, attempted), aftermath),
+      )
+    },
+    [],
+  )
+
   const writeDayLog = useCallback(
-    async (updated: DayLog) => {
-      if (!dayLogRef || !selectedChildId) return
+    async (updated: DayLog, previous: DayLog | null) => {
+      const docId = currentDocId
+      if (!dayLogRef || !selectedChildId) {
+        // Not a quiet no-op. Nothing was sent, so nothing half-landed — but the
+        // screen is already showing the edit, and only this says otherwise.
+        reportFailedWrite(DayWriteRefusal.NoTarget, updated, previous, docId)
+        return
+      }
       // Ensure childId is always correct (defense in depth)
       const safeLog =
         updated.childId === selectedChildId
@@ -144,26 +256,32 @@ export function useDayLog({
         setSnackMessage({ text: 'Saved', severity: 'success' })
       } catch (err) {
         console.error('Failed to save day log', err)
-        setSaveState('error')
+        reportFailedWrite(DayWriteRefusal.Rejected, updated, previous, docId)
       }
     },
-    [dayLogRef, selectedChildId],
+    [dayLogRef, selectedChildId, currentDocId, reportFailedWrite],
   )
 
-  const debouncedWrite = useDebounce(writeDayLog, 800)
-
-  const persistDayLog = useCallback(
-    (updated: DayLog) => {
-      setDayLog(updated)
-      debouncedWrite(updated)
-    },
-    [debouncedWrite],
-  )
-
+  /**
+   * The one Today write lane (UX-353).
+   *
+   * There used to be a second: a `useDebounce`d `persistDayLog`, exposed on this
+   * hook's result and called by **nothing** in the repo. `useDebounce` discarded
+   * a pending call on unmount, so the day a surface had wired that lane, every
+   * edit followed within 800 ms by a navigation, a child switch or a
+   * backgrounded phone would have vanished with no error anywhere — a loaded gun
+   * on the compliance rail. It is deleted rather than fixed here, because a
+   * write lane with no caller is not a feature: the flush that the hook's two
+   * genuine consumers needed went into `useDebounce` itself.
+   */
   const persistDayLogImmediate = useCallback(
     (updated: DayLog) => {
+      const previous = previousDayLogRef.current
       setDayLog(updated)
-      void writeDayLog(updated)
+      // Keep the ref in step for a second edit in the same tick, before the
+      // effect above re-syncs it.
+      previousDayLogRef.current = updated
+      void writeDayLog(updated, previous)
     },
     [writeDayLog],
   )
@@ -180,6 +298,9 @@ export function useDayLog({
       async (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data()
+          // The one place that speaks for the stored document — see
+          // `storedDayLogRef` (Codex round 3, P1).
+          storedDayLogRef.current = { docId: currentDocId, log: data }
           setDayLog(data)
           if (data.updatedAt) setLastSavedAt(data.updatedAt)
           return
@@ -252,6 +373,10 @@ export function useDayLog({
     return unsubscribe
   }, [
     dayLogRef,
+    // Changes exactly when `dayLogRef` does (it is memoized on this), so the
+    // effect re-runs no more often than before; named so the listener's closure
+    // over it is declared rather than implied.
+    currentDocId,
     today,
     selectedChildId,
     selectedChild,
@@ -308,7 +433,6 @@ export function useDayLog({
     readAloudBookId,
     snackMessage,
     setSnackMessage,
-    persistDayLog,
     persistDayLogImmediate,
   }
 }
