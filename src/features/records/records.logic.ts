@@ -286,8 +286,15 @@ export type SubjectDistribution = {
 }
 
 /** Human label for a subject bucket, with the catch-all relabelled so untagged
- *  time reads honestly. */
-const subjectDistributionLabel = (bucket: string): string => {
+ *  time reads honestly.
+ *
+ *  **Exported since UX-388** so the weekly review's by-subject rollup reads a
+ *  subject's name from the same place the Records panel and the data-review
+ *  export do. It was private while there was one caller; a second surface
+ *  naming subjects needs the same answer, and "Other / untagged" in particular
+ *  is a decision (FEAT-105) rather than a formatting detail — a second copy of
+ *  it would be free to drift back to a bare "Other". */
+export const subjectDistributionLabel = (bucket: string): string => {
   if (bucket === SubjectBucket.Other) return 'Other / untagged'
   return SubjectBucketLabel[bucket as SubjectBucket] ?? bucket
 }
