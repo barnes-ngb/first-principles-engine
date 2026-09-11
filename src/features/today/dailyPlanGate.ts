@@ -69,3 +69,127 @@ export function dailyPlanGateNote(state: DailyPlanGateState): string | null {
     waiting: "Loading today's plan…",
   })
 }
+
+// ── What happens when a tap gets through anyway — UX-352 ────────────────────
+//
+// The gate above is **right and stays**: it is what stops one child's `sessions`
+// being written onto his brother's day, and UX-345 filed it against a live
+// defect. What was wrong was that it was **silent**. `saveDailyPlan` opened with
+// two bare `return`s and closed with a `console.error`, so all three ways it can
+// decline to record a tap — no target, not settled, a rejected `setDoc` —
+// reached the parent as nothing at all, on a surface whose other control
+// announces every success with a *"Saved"* snack.
+//
+// `DayStatusRow` disables both controls while the gate is shut and says why, so
+// the refusals below should be unreachable through the UI. They are reported
+// anyway, because "unreachable" is a claim about today's markup: the write is
+// the thing that knows whether it happened.
+
+/** Why an energy / day-type tap was not recorded. */
+export const DailyPlanSaveRefusal = {
+  /** No family, child or date yet — there is no document to address. */
+  NoTarget: 'no-target',
+  /** This child's read has not settled. Resolves on its own. */
+  NotReady: 'not-ready',
+  /** This child's read FAILED. Does not resolve on its own. */
+  ReadFailed: 'read-failed',
+  /** The write was attempted and rejected. */
+  Rejected: 'rejected',
+} as const
+export type DailyPlanSaveRefusal =
+  (typeof DailyPlanSaveRefusal)[keyof typeof DailyPlanSaveRefusal]
+
+/** Did the tap land? `saveDailyPlan` answers with this instead of `void`. */
+export type DailyPlanSaveOutcome =
+  | { ok: true }
+  | { ok: false; reason: DailyPlanSaveRefusal }
+
+/**
+ * What the page was able to do about a failure, which decides what it may claim.
+ *
+ * A sentence reading *"it's back to how it was"* over a screen that was NOT put
+ * back is the same species of lie as *"Saved"* over a write that did not land,
+ * so the copy is keyed on what actually happened rather than assuming the
+ * rollback always applies.
+ */
+export const SaveAftermath = {
+  /** The screen was put back to what is stored. */
+  RolledBack: 'rolled-back',
+  /** A newer edit to the same day is on screen; this one is not what you see. */
+  Superseded: 'superseded',
+  /** The page is showing a different child or date now. */
+  MovedOn: 'moved-on',
+} as const
+export type SaveAftermath = (typeof SaveAftermath)[keyof typeof SaveAftermath]
+
+/**
+ * What the page says when a tap was not recorded.
+ *
+ * Four sentences, because the advice differs: two of these resolve on their own
+ * and two do not, and telling a parent to "try again" against a read that will
+ * never land is the same species of lie as saying *Saved*. None of them asserts
+ * anything about the day itself.
+ */
+export function dailyPlanSaveFailureNotice(reason: DailyPlanSaveRefusal): {
+  text: string
+  severity: 'error'
+} {
+  const text =
+    reason === DailyPlanSaveRefusal.ReadFailed
+      ? "Not saved — today's plan couldn't be read. Reload before changing it."
+      : reason === DailyPlanSaveRefusal.NotReady
+        ? "Not saved — today's plan is still loading. Try that again in a moment."
+        : reason === DailyPlanSaveRefusal.NoTarget
+          ? "Not saved — today's plan isn't open yet."
+          : "That didn't save. It's back to how it was — try again."
+  return { text, severity: 'error' }
+}
+
+/**
+ * What the page says when the tap it is reporting on belongs to a day it is no
+ * longer showing — Codex round 1, P1.
+ *
+ * **A rollback must never cross a child.** `TodayPage` restores the energy and
+ * plan type it captured before an optimistic tap, and a save left in flight
+ * across a child switch would restore ONE CHILD'S values onto another child's
+ * page — where they would sit until that child's document supplied
+ * replacements, and where the next tap would persist one of them into his
+ * document. That is `UX-345`'s defect, reintroduced by the fix written to
+ * report it.
+ *
+ * So the rollback is skipped and **the failure is still reported**, which is the
+ * whole point of the row: silence is what it exists to end. The sentence names
+ * the child where the child is what changed, says nothing was altered here, and
+ * carries no pronoun — the family this is for has two boys and the next family
+ * may not.
+ */
+export function dailyPlanSaveMovedOnNotice(childName: string | null): {
+  text: string
+  severity: 'error'
+} {
+  const who = childName ? ` for ${childName}` : ''
+  return {
+    text: `Not saved${who} — that change wasn't recorded, and this page has moved on since, so nothing here was changed.`,
+    severity: 'error',
+  }
+}
+
+/**
+ * What the page says when a failure is reported after a NEWER tap on the same
+ * day — Codex round 2, P1.
+ *
+ * Two taps can be in flight at once (the energy group and the day-type menu are
+ * a second apart), and the rollback is skipped for the older one, exactly as the
+ * day log's identity guard skips it. So the sentence may not say *"it's back to
+ * how it was"* — what is on screen is the newer change, which this failure has
+ * nothing to say about.
+ */
+export function dailyPlanSaveSupersededNotice(): {
+  text: string
+  severity: 'error'
+} {
+  return {
+    text: "An earlier change didn't save. What you see now is your newer change — check it landed.",
+    severity: 'error',
+  }
+}
