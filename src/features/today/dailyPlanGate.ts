@@ -69,3 +69,60 @@ export function dailyPlanGateNote(state: DailyPlanGateState): string | null {
     waiting: "Loading today's plan…",
   })
 }
+
+// ── What happens when a tap gets through anyway — UX-352 ────────────────────
+//
+// The gate above is **right and stays**: it is what stops one child's `sessions`
+// being written onto his brother's day, and UX-345 filed it against a live
+// defect. What was wrong was that it was **silent**. `saveDailyPlan` opened with
+// two bare `return`s and closed with a `console.error`, so all three ways it can
+// decline to record a tap — no target, not settled, a rejected `setDoc` —
+// reached the parent as nothing at all, on a surface whose other control
+// announces every success with a *"Saved"* snack.
+//
+// `DayStatusRow` disables both controls while the gate is shut and says why, so
+// the refusals below should be unreachable through the UI. They are reported
+// anyway, because "unreachable" is a claim about today's markup: the write is
+// the thing that knows whether it happened.
+
+/** Why an energy / day-type tap was not recorded. */
+export const DailyPlanSaveRefusal = {
+  /** No family, child or date yet — there is no document to address. */
+  NoTarget: 'no-target',
+  /** This child's read has not settled. Resolves on its own. */
+  NotReady: 'not-ready',
+  /** This child's read FAILED. Does not resolve on its own. */
+  ReadFailed: 'read-failed',
+  /** The write was attempted and rejected. */
+  Rejected: 'rejected',
+} as const
+export type DailyPlanSaveRefusal =
+  (typeof DailyPlanSaveRefusal)[keyof typeof DailyPlanSaveRefusal]
+
+/** Did the tap land? `saveDailyPlan` answers with this instead of `void`. */
+export type DailyPlanSaveOutcome =
+  | { ok: true }
+  | { ok: false; reason: DailyPlanSaveRefusal }
+
+/**
+ * What the page says when a tap was not recorded.
+ *
+ * Four sentences, because the advice differs: two of these resolve on their own
+ * and two do not, and telling a parent to "try again" against a read that will
+ * never land is the same species of lie as saying *Saved*. None of them asserts
+ * anything about the day itself.
+ */
+export function dailyPlanSaveFailureNotice(reason: DailyPlanSaveRefusal): {
+  text: string
+  severity: 'error'
+} {
+  const text =
+    reason === DailyPlanSaveRefusal.ReadFailed
+      ? "Not saved — today's plan couldn't be read. Reload before changing it."
+      : reason === DailyPlanSaveRefusal.NotReady
+        ? "Not saved — today's plan is still loading. Try that again in a moment."
+        : reason === DailyPlanSaveRefusal.NoTarget
+          ? "Not saved — today's plan isn't open yet."
+          : "That didn't save. It's back to how it was — try again."
+  return { text, severity: 'error' }
+}

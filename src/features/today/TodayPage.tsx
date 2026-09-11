@@ -93,7 +93,11 @@ import {
 import MoveToDayDialog from './MoveToDayDialog'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useDailyPlan } from './useDailyPlan'
-import { dailyPlanGateNote } from './dailyPlanGate'
+import {
+  dailyPlanGateNote,
+  dailyPlanSaveFailureNotice,
+  type DailyPlanSaveOutcome,
+} from './dailyPlanGate'
 import { useDayLog } from './useDayLog'
 import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { useRolloverUnchecked } from './useRolloverUnchecked'
@@ -670,8 +674,26 @@ export default function TodayPage() {
   const energyToPlanType = (level: EnergyLevel): PlanType =>
     level === EnergyLevel.Normal ? PlanType.Normal : PlanType.Mvd
 
+  /**
+   * UX-352 — an optimistic day-status edit that did not land is taken back and
+   * said out loud, exactly as a checklist edit is. Both controls here update the
+   * screen before the write resolves, and `saveDailyPlan` can decline in four
+   * ways; before this, three of them reached the parent as nothing at all.
+   */
+  const reportPlanSave = useCallback(
+    (outcome: DailyPlanSaveOutcome, prevEnergy: EnergyLevel, prevPlanType: PlanType) => {
+      if (outcome.ok) return
+      setEnergy(prevEnergy)
+      setPlanType(prevPlanType)
+      setSnackMessage(dailyPlanSaveFailureNotice(outcome.reason))
+    },
+    [setSnackMessage],
+  )
+
   const handleEnergyChange = useCallback(
     (newEnergy: EnergyLevel) => {
+      const prevEnergy = energy
+      const prevPlanType = planType
       setEnergy(newEnergy)
       // FEAT-200: a Life Day is an explicit choice about what KIND of day this
       // is, so the energy toggle must not silently undo it. Energy still derives
@@ -680,9 +702,11 @@ export default function TodayPage() {
       const newPlanType =
         planType === PlanType.Life ? PlanType.Life : energyToPlanType(newEnergy)
       setPlanType(newPlanType)
-      void saveDailyPlan(newEnergy, newPlanType)
+      void saveDailyPlan(newEnergy, newPlanType).then((outcome) =>
+        reportPlanSave(outcome, prevEnergy, prevPlanType),
+      )
     },
-    [saveDailyPlan, planType],
+    [saveDailyPlan, planType, energy, reportPlanSave],
   )
 
   /**
@@ -693,10 +717,13 @@ export default function TodayPage() {
    */
   const handleDayTypeChange = useCallback(
     (newPlanType: PlanType) => {
+      const prevPlanType = planType
       setPlanType(newPlanType)
-      void saveDailyPlan(energy, newPlanType)
+      void saveDailyPlan(energy, newPlanType).then((outcome) =>
+        reportPlanSave(outcome, energy, prevPlanType),
+      )
     },
-    [saveDailyPlan, energy],
+    [saveDailyPlan, energy, planType, reportPlanSave],
   )
 
   // Load artifacts scoped to child + date (reload when child changes)

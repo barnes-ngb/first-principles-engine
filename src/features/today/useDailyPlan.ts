@@ -7,7 +7,11 @@ import {
 } from '../../core/firebase/firestore'
 import type { DailyPlan } from '../../core/types'
 import type { EnergyLevel, PlanType } from '../../core/types/enums'
-import { dailyPlanIsEditable } from './dailyPlanGate'
+import {
+  DailyPlanSaveRefusal,
+  dailyPlanIsEditable,
+  type DailyPlanSaveOutcome,
+} from './dailyPlanGate'
 
 interface UseDailyPlanOptions {
   familyId: string
@@ -31,8 +35,14 @@ interface UseDailyPlanResult {
    * child has resolved, and false forever after one that failed.
    */
   isEditable: boolean
-  /** Persist energy + planType to Firestore (upsert). */
-  saveDailyPlan: (energy: EnergyLevel, planType: PlanType) => Promise<void>
+  /**
+   * Persist energy + planType to Firestore (upsert).
+   *
+   * UX-352 — answers whether the tap landed. Every way it can decline is named,
+   * so the caller reports rather than assuming; a `void` return is what let the
+   * gate below swallow a tap in silence.
+   */
+  saveDailyPlan: (energy: EnergyLevel, planType: PlanType) => Promise<DailyPlanSaveOutcome>
 }
 
 export function useDailyPlan({
@@ -109,13 +119,26 @@ export function useDailyPlan({
   const isEditable = dailyPlanIsEditable({ isLoading, loadFailed, hasTarget })
 
   const saveDailyPlan = useCallback(
-    async (energy: EnergyLevel, planType: PlanType) => {
-      if (!familyId || !childId || !date) return
+    async (energy: EnergyLevel, planType: PlanType): Promise<DailyPlanSaveOutcome> => {
+      if (!familyId || !childId || !date) {
+        return { ok: false, reason: DailyPlanSaveRefusal.NoTarget }
+      }
       // UX-345 — GATE. Un-editable until this child's read has settled, and
       // after one that failed: the payload below carries `sessions`, and both
       // states would carry the wrong ones (the previous child's, or none over
       // a day that has some).
-      if (!isEditable) return
+      //
+      // UX-352 — the gate is unchanged; only its SILENCE was the defect. A
+      // refusal now names which of the two states it is in, because one of them
+      // resolves on its own and the other does not.
+      if (!isEditable) {
+        return {
+          ok: false,
+          reason: loadFailed
+            ? DailyPlanSaveRefusal.ReadFailed
+            : DailyPlanSaveRefusal.NotReady,
+        }
+      }
 
       const docId = dailyPlanDocId(date, childId)
       const ref = doc(dailyPlansCollection(familyId), docId)
@@ -132,11 +155,16 @@ export function useDailyPlan({
       try {
         await setDoc(ref, data, { merge: true })
         setDailyPlan({ ...data, id: docId })
+        return { ok: true }
       } catch (err) {
         console.error('Failed to save dailyPlan', err)
+        // The stored plan is untouched and `dailyPlan` is left as it was, so the
+        // caller's optimistic energy / day type is the only thing out of step —
+        // which is what it takes back on this answer.
+        return { ok: false, reason: DailyPlanSaveRefusal.Rejected }
       }
     },
-    [familyId, childId, date, dailyPlan?.sessions, isEditable],
+    [familyId, childId, date, dailyPlan?.sessions, isEditable, loadFailed],
   )
 
   return { dailyPlan, isLoading, loadFailed, isEditable, saveDailyPlan }
