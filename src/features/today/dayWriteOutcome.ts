@@ -116,7 +116,20 @@ export function namedDayEdit(before: DayLog | null, after: DayLog): string | nul
 export function dayWriteFailureNotice(
   reason: DayWriteRefusal,
   editedLabel: string | null,
+  opts: { pageMovedOn?: boolean } = {},
 ): DayWriteFailureNotice {
+  if (opts.pageMovedOn) {
+    // The write belonged to a day this page is no longer showing (the sibling
+    // of the P1 Codex round 1 found in `TodayPage`'s rollback). The row is not
+    // taken back — the listener replaced it when the target changed, so there is
+    // nothing here to take back — and it is not NAMED either, because a row
+    // title over another child's day reads as a claim about this one. It is
+    // still reported: a lost edit is never silent, whichever day it was on.
+    return {
+      text: "An edit made before you switched didn't save. Nothing here was changed — switch back to check it.",
+      severity: 'error',
+    }
+  }
   if (reason === DayWriteRefusal.NoTarget) {
     return {
       text: "Not saved — today's log isn't open yet. Reload and try that again.",

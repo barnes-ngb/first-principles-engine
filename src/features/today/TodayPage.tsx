@@ -96,6 +96,7 @@ import { useDailyPlan } from './useDailyPlan'
 import {
   dailyPlanGateNote,
   dailyPlanSaveFailureNotice,
+  dailyPlanSaveMovedOnNotice,
   type DailyPlanSaveOutcome,
 } from './dailyPlanGate'
 import { useDayLog } from './useDayLog'
@@ -675,23 +676,61 @@ export default function TodayPage() {
     level === EnergyLevel.Normal ? PlanType.Normal : PlanType.Mvd
 
   /**
+   * The day this page is showing RIGHT NOW — the target a rollback is allowed to
+   * touch (Codex round 1, P1).
+   *
+   * A ref, synced in an effect, because `reportPlanSave` runs from a `.then`
+   * that closed over the callback as it stood when the tap happened: a value
+   * captured in that callback's dependencies would be the OLD child, which is
+   * exactly the comparison that must not be made.
+   */
+  const planTargetRef = useRef(`${selectedChildId}|${today}`)
+  useEffect(() => {
+    planTargetRef.current = `${selectedChildId}|${today}`
+  }, [selectedChildId, today])
+
+  /**
    * UX-352 — an optimistic day-status edit that did not land is taken back and
    * said out loud, exactly as a checklist edit is. Both controls here update the
    * screen before the write resolves, and `saveDailyPlan` can decline in four
    * ways; before this, three of them reached the parent as nothing at all.
+   *
+   * **The rollback is scoped to the day it was made on** (Codex round 1, P1). A
+   * save left in flight across a child switch would otherwise restore one
+   * child's energy and plan type onto his brother's page, where the restore
+   * effect above would not clear them (it only re-runs when `dailyPlan` moves)
+   * and the next tap would persist one of them into the brother's document —
+   * `UX-345` again, through the rollback written to report it. When the page has
+   * moved on, nothing is restored and the failure is **still reported**, naming
+   * the child it belonged to: silence is what this row exists to end.
    */
   const reportPlanSave = useCallback(
-    (outcome: DailyPlanSaveOutcome, prevEnergy: EnergyLevel, prevPlanType: PlanType) => {
+    (
+      outcome: DailyPlanSaveOutcome,
+      target: string,
+      prevEnergy: EnergyLevel,
+      prevPlanType: PlanType,
+    ) => {
       if (outcome.ok) return
+      if (planTargetRef.current !== target) {
+        const movedChildId = target.split('|')[0]
+        const movedChildName =
+          movedChildId && movedChildId !== selectedChildId
+            ? (children.find((c) => c.id === movedChildId)?.name ?? null)
+            : null
+        setSnackMessage(dailyPlanSaveMovedOnNotice(movedChildName))
+        return
+      }
       setEnergy(prevEnergy)
       setPlanType(prevPlanType)
       setSnackMessage(dailyPlanSaveFailureNotice(outcome.reason))
     },
-    [setSnackMessage],
+    [setSnackMessage, children, selectedChildId],
   )
 
   const handleEnergyChange = useCallback(
     (newEnergy: EnergyLevel) => {
+      const target = `${selectedChildId}|${today}`
       const prevEnergy = energy
       const prevPlanType = planType
       setEnergy(newEnergy)
@@ -703,10 +742,10 @@ export default function TodayPage() {
         planType === PlanType.Life ? PlanType.Life : energyToPlanType(newEnergy)
       setPlanType(newPlanType)
       void saveDailyPlan(newEnergy, newPlanType).then((outcome) =>
-        reportPlanSave(outcome, prevEnergy, prevPlanType),
+        reportPlanSave(outcome, target, prevEnergy, prevPlanType),
       )
     },
-    [saveDailyPlan, planType, energy, reportPlanSave],
+    [saveDailyPlan, planType, energy, reportPlanSave, selectedChildId, today],
   )
 
   /**
@@ -717,13 +756,14 @@ export default function TodayPage() {
    */
   const handleDayTypeChange = useCallback(
     (newPlanType: PlanType) => {
+      const target = `${selectedChildId}|${today}`
       const prevPlanType = planType
       setPlanType(newPlanType)
       void saveDailyPlan(energy, newPlanType).then((outcome) =>
-        reportPlanSave(outcome, energy, prevPlanType),
+        reportPlanSave(outcome, target, energy, prevPlanType),
       )
     },
-    [saveDailyPlan, energy, planType, reportPlanSave],
+    [saveDailyPlan, energy, planType, reportPlanSave, selectedChildId, today],
   )
 
   // Load artifacts scoped to child + date (reload when child changes)

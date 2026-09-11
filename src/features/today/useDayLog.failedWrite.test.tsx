@@ -155,6 +155,49 @@ describe('a Today edit that did not save says so', () => {
     expect(result.current.dayLog?.checklist).toHaveLength(3)
   })
 
+  it('does not name a row over a day it is no longer showing', async () => {
+    // Codex round 1, P1's sibling: a write left in flight across a child switch
+    // belongs to a day that is no longer on screen, and its sentence names a
+    // checklist row — which over the brother's day reads as a claim about his.
+    let reject: (err: Error) => void = () => {}
+    setDayLogGuarded.mockReturnValueOnce(
+      new Promise((_resolve, rej) => {
+        reject = rej
+      }),
+    )
+    const { useDayLog } = await import('./useDayLog')
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) =>
+        useDayLog({
+          familyId: 'fam-1',
+          selectedChildId: childId,
+          today: '2026-09-11',
+          selectedChild: undefined,
+          activeTemplate: undefined,
+          activeRoutineItems: undefined,
+        }),
+      { initialProps: { childId: 'lincoln' } },
+    )
+    act(() => {
+      snapshotHandler?.({ exists: () => true, data: () => STORED })
+    })
+    await waitFor(() => expect(result.current.dayLog).not.toBeNull())
+
+    await act(async () => {
+      result.current.persistDayLogImmediate(tickSecondRow(result.current.dayLog!))
+    })
+    // The parent switches child while the write is still in flight.
+    rerender({ childId: 'london' })
+    await act(async () => {
+      reject(new Error('permission-denied'))
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(result.current.snackMessage?.severity).toBe('error'))
+    expect(result.current.snackMessage?.text).not.toContain('Language Arts lesson 4')
+    expect(result.current.snackMessage?.text).toContain('before you switched')
+  })
+
   it('still says Saved, loudly, when the write lands', async () => {
     const { result } = await mountWithStoredDay()
 

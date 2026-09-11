@@ -126,3 +126,32 @@ export function dailyPlanSaveFailureNotice(reason: DailyPlanSaveRefusal): {
           : "That didn't save. It's back to how it was — try again."
   return { text, severity: 'error' }
 }
+
+/**
+ * What the page says when the tap it is reporting on belongs to a day it is no
+ * longer showing — Codex round 1, P1.
+ *
+ * **A rollback must never cross a child.** `TodayPage` restores the energy and
+ * plan type it captured before an optimistic tap, and a save left in flight
+ * across a child switch would restore ONE CHILD'S values onto another child's
+ * page — where they would sit until that child's document supplied
+ * replacements, and where the next tap would persist one of them into his
+ * document. That is `UX-345`'s defect, reintroduced by the fix written to
+ * report it.
+ *
+ * So the rollback is skipped and **the failure is still reported**, which is the
+ * whole point of the row: silence is what it exists to end. The sentence names
+ * the child where the child is what changed, says nothing was altered here, and
+ * carries no pronoun — the family this is for has two boys and the next family
+ * may not.
+ */
+export function dailyPlanSaveMovedOnNotice(childName: string | null): {
+  text: string
+  severity: 'error'
+} {
+  const who = childName ? ` for ${childName}` : ''
+  return {
+    text: `Not saved${who} — that change wasn't recorded, and this page has moved on since, so nothing here was changed.`,
+    severity: 'error',
+  }
+}

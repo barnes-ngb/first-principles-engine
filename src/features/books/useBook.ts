@@ -176,24 +176,8 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     hoursLoggedRef.current = false
   }, [bookId])
 
-  // Log hours on unmount (navigate away / close)
-  useEffect(() => {
-    return () => {
-      const elapsed = Math.round((Date.now() - sessionStartRef.current) / 60000)
-      if (elapsed >= 1 && !hoursLoggedRef.current && book) {
-        hoursLoggedRef.current = true
-        // Update totalMinutes on the book
-        const newTotal = (book.totalMinutes ?? 0) + elapsed
-        if (familyId && bookId) {
-          const docRef = doc(booksCollection(familyId), bookId)
-          void setDoc(docRef, { totalMinutes: newTotal, updatedAt: new Date().toISOString() }, { merge: true })
-        }
-        void logBookHours(familyId, book.childId, elapsed, book.title, usedAiGeneration)
-      }
-    }
-    // Only run cleanup on unmount — intentionally stable deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [familyId, bookId, book?.childId, book?.title, book?.totalMinutes, usedAiGeneration])
+  // (The unmount hours write is declared BELOW `debouncedPersist` — see the
+  // ordering note there. It used to sit here, and that was the bug.)
 
   // Load book
   useEffect(() => {
@@ -236,6 +220,41 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   )
 
   const debouncedPersist = useDebounce(persist, 500)
+
+  // ── Log hours on unmount (navigate away / close) ──────────────────────────
+  //
+  // **Declared AFTER `debouncedPersist` on purpose** (Codex round 1, P2). React
+  // runs a component's effect cleanups in the order the effects were declared,
+  // and UX-353 made `useDebounce` flush its pending call on unmount instead of
+  // dropping it. `persist` writes the WHOLE book with a non-merge `setDoc`,
+  // carrying the `totalMinutes` this hook last read — so with this effect
+  // declared first, the two unmount writes queued on the same document in the
+  // wrong order: the merge below recorded the session's minutes, and the flushed
+  // full-document write then put the old total back, leaving `books.totalMinutes`
+  // disagreeing with the `hours` entry `logBookHours` had just written. Flushing
+  // first makes the merge last, and `newTotal` is `book.totalMinutes + elapsed`
+  // off the same value `persist` writes, so the stored total is right either way
+  // the race resolves. Pinned by `useBook.unmountOrder.test.ts`.
+  //
+  // Neither write changed — this is the order, and nothing else. No hours math,
+  // no fold, no rounding moved.
+  useEffect(() => {
+    return () => {
+      const elapsed = Math.round((Date.now() - sessionStartRef.current) / 60000)
+      if (elapsed >= 1 && !hoursLoggedRef.current && book) {
+        hoursLoggedRef.current = true
+        // Update totalMinutes on the book
+        const newTotal = (book.totalMinutes ?? 0) + elapsed
+        if (familyId && bookId) {
+          const docRef = doc(booksCollection(familyId), bookId)
+          void setDoc(docRef, { totalMinutes: newTotal, updatedAt: new Date().toISOString() }, { merge: true })
+        }
+        void logBookHours(familyId, book.childId, elapsed, book.title, usedAiGeneration)
+      }
+    }
+    // Only run cleanup on unmount — intentionally stable deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyId, bookId, book?.childId, book?.title, book?.totalMinutes, usedAiGeneration])
 
   const applyUpdate = useCallback(
     (updater: (prev: Book) => Book) => {

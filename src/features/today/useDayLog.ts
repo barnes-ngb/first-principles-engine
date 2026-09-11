@@ -139,6 +139,20 @@ export function useDayLog({
   }, [dayLog])
 
   /**
+   * The document this hook is showing RIGHT NOW (Codex round 1, P1's sibling).
+   *
+   * A write left in flight across a child or date change belongs to a day that
+   * is no longer on screen, and its failure sentence names a checklist row —
+   * which over another child's day reads as a claim about that child's day. A
+   * ref, because `writeDayLog` closed over the target as it stood when the tap
+   * happened, so only a live read can tell that it has moved.
+   */
+  const liveDocIdRef = useRef(currentDocId)
+  useEffect(() => {
+    liveDocIdRef.current = currentDocId
+  }, [currentDocId])
+
+  /**
    * An edit did not land — say so, and take the optimistic row back.
    *
    * **One definition for every refusal**, reached by a thrown write and by the
@@ -155,20 +169,29 @@ export function useDayLog({
    * the listener cannot: a write that never reached it at all.
    */
   const reportFailedWrite = useCallback(
-    (reason: DayWriteRefusal, attempted: DayLog, previous: DayLog | null) => {
+    (
+      reason: DayWriteRefusal,
+      attempted: DayLog,
+      previous: DayLog | null,
+      docId: string,
+    ) => {
+      const pageMovedOn = docId !== liveDocIdRef.current
       setDayLog((current) => (current === attempted ? previous : current))
       setSaveState('error')
-      setSnackMessage(dayWriteFailureNotice(reason, namedDayEdit(previous, attempted)))
+      setSnackMessage(
+        dayWriteFailureNotice(reason, namedDayEdit(previous, attempted), { pageMovedOn }),
+      )
     },
     [],
   )
 
   const writeDayLog = useCallback(
     async (updated: DayLog, previous: DayLog | null) => {
+      const docId = currentDocId
       if (!dayLogRef || !selectedChildId) {
         // Not a quiet no-op. Nothing was sent, so nothing half-landed — but the
         // screen is already showing the edit, and only this says otherwise.
-        reportFailedWrite(DayWriteRefusal.NoTarget, updated, previous)
+        reportFailedWrite(DayWriteRefusal.NoTarget, updated, previous, docId)
         return
       }
       // Ensure childId is always correct (defense in depth)
@@ -193,10 +216,10 @@ export function useDayLog({
         setSnackMessage({ text: 'Saved', severity: 'success' })
       } catch (err) {
         console.error('Failed to save day log', err)
-        reportFailedWrite(DayWriteRefusal.Rejected, updated, previous)
+        reportFailedWrite(DayWriteRefusal.Rejected, updated, previous, docId)
       }
     },
-    [dayLogRef, selectedChildId, reportFailedWrite],
+    [dayLogRef, selectedChildId, currentDocId, reportFailedWrite],
   )
 
   /**
