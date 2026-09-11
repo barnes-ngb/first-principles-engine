@@ -1,27 +1,22 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import Container from '@mui/material/Container'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 
-import ChildFilterChips, {
-  CHILD_FILTER_ALL,
-} from '../../components/ChildFilterChips'
+import { monthlyBookPath } from '../review/reviewNav'
 import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { useActiveChild } from '../../core/hooks/useActiveChild'
+import type { UseActiveChildResult } from '../../core/hooks/useActiveChild'
 import { useMonthlyReviews } from '../../core/hooks/useMonthlyReviews'
 import type { MonthlyReview, MonthlyReviewPage } from '../../core/types'
 import { MonthlyReviewStatus } from '../../core/types/enums'
 import { GenerateNowDialog } from './GenerateNowDialog'
 import { MonthlyPhoto } from './MonthlyPhoto'
 import { getModePhotos } from './photoRefs'
-
-const ALL = CHILD_FILTER_ALL
 
 function formatMonthLabel(month: string): string {
   const [y, m] = month.split('-')
@@ -30,12 +25,15 @@ function formatMonthLabel(month: string): string {
   return d.toLocaleString(undefined, { month: 'long', year: 'numeric' })
 }
 
-export default function MonthlyBooksTab() {
+export default function MonthlyBooksTab({ childContext }: {
+  childContext: Pick<UseActiveChildResult, 'children' | 'activeChildId'>
+}) {
   const familyId = useFamilyId()
   const navigate = useNavigate()
-  const { children, activeChildId } = useActiveChild()
+  const [params] = useSearchParams()
+  const { children, activeChildId } = childContext
+  const selectedChildren = useMemo(() => children.filter(c => c.id === activeChildId), [children, activeChildId])
   const { reviews, loading } = useMonthlyReviews(familyId)
-  const [filterChildId, setFilterChildId] = useState<string>(ALL)
   const [generateOpen, setGenerateOpen] = useState(false)
 
   const childById = useMemo(() => {
@@ -45,51 +43,40 @@ export default function MonthlyBooksTab() {
   }, [children])
 
   const filtered = useMemo(() => {
-    const list =
-      filterChildId === ALL
-        ? reviews
-        : reviews.filter((r) => r.childId === filterChildId)
+    const list = reviews.filter((r) => r.childId === activeChildId)
     return [...list].sort((a, b) => {
       if (b.month !== a.month) return b.month.localeCompare(a.month)
       return (childById.get(a.childId) ?? '').localeCompare(
         childById.get(b.childId) ?? '',
       )
     })
-  }, [reviews, filterChildId, childById])
+  }, [reviews, activeChildId, childById])
 
   const handleGenerated = (reviewId: string) => {
     setGenerateOpen(false)
-    navigate(`/progress/monthly-books/${reviewId}`)
+    navigate(monthlyBookPath(reviewId, params))
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 2 }}>
+    <Stack spacing={2}>
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         alignItems={{ xs: 'flex-start', sm: 'center' }}
         spacing={2}
         sx={{ mb: 2 }}
       >
-        <Typography variant="h5" sx={{ flex: 1, fontWeight: 600 }}>
+        <Typography component="h2" variant="h6" sx={{ flex: 1, fontWeight: 600 }}>
           Monthly Books
         </Typography>
         <Button
           variant="contained"
           startIcon={<AutoStoriesIcon />}
           onClick={() => setGenerateOpen(true)}
-          disabled={children.length === 0}
+          disabled={selectedChildren.length === 0}
         >
           Generate Now
         </Button>
       </Stack>
-
-      <Box sx={{ mb: 2 }}>
-        <ChildFilterChips
-          children={children}
-          selectedChildId={filterChildId}
-          onSelect={setFilterChildId}
-        />
-      </Box>
 
       {loading && <LoadingState fullHeight />}
 
@@ -103,7 +90,7 @@ export default function MonthlyBooksTab() {
               review={review}
               childName={childById.get(review.childId) ?? 'Unknown'}
               onOpen={() =>
-                navigate(`/progress/monthly-books/${review.id}`)
+                navigate(monthlyBookPath(review.id, params))
               }
             />
           ))}
@@ -113,11 +100,11 @@ export default function MonthlyBooksTab() {
       <GenerateNowDialog
         open={generateOpen}
         onClose={() => setGenerateOpen(false)}
-        childOptions={children}
-        defaultChildId={activeChildId || children[0]?.id}
+        childOptions={selectedChildren}
+        defaultChildId={activeChildId}
         onGenerated={handleGenerated}
       />
-    </Container>
+    </Stack>
   )
 }
 
@@ -141,7 +128,7 @@ function EmptyState() {
       </Typography>
       <Typography color="text.secondary">
         Click <strong>Generate Now</strong> to create one — try last month for
-        either kid.
+        this child.
       </Typography>
     </Box>
   )

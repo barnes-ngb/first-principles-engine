@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { PROGRESS_TABS } from './progressNav'
@@ -20,7 +20,6 @@ import { PROGRESS_TABS } from './progressNav'
  */
 
 vi.mock('./FoundationsTab', () => ({ default: () => <div>TAB_FOUNDATIONS</div> }))
-vi.mock('../monthly-review/MonthlyBooksTab', () => ({ default: () => <div>TAB_MONTHLY</div> }))
 vi.mock('./learning-map/LearningMap', () => ({ default: () => <div>TAB_MAP</div> }))
 vi.mock('./CurriculumTab', () => ({ default: () => <div>TAB_CURRICULUM</div> }))
 vi.mock('../evaluation/SkillSnapshotPage', () => ({ default: () => <div>TAB_SNAPSHOT</div> }))
@@ -42,7 +41,6 @@ const MOVED = ['SECTION_CERTIFICATE', 'SECTION_REVIEW_LAUNCHER', 'SECTION_DIAG',
 
 const TAB_MARKER: Record<string, string> = {
   [PROGRESS_TABS.Foundations]: 'TAB_FOUNDATIONS',
-  [PROGRESS_TABS.MonthlyBooks]: 'TAB_MONTHLY',
   [PROGRESS_TABS.LearningMap]: 'TAB_MAP',
   [PROGRESS_TABS.Curriculum]: 'TAB_CURRICULUM',
   [PROGRESS_TABS.SkillSnapshot]: 'TAB_SNAPSHOT',
@@ -52,7 +50,10 @@ const TAB_MARKER: Record<string, string> = {
 function renderAt(search: string) {
   return render(
     <MemoryRouter initialEntries={[`/progress${search}`]}>
-      <ProgressPage />
+      <Routes>
+        <Route path="/progress" element={<ProgressPage />} />
+        <Route path="/review" element={<div>REVIEW_HOME</div>} />
+      </Routes>
     </MemoryRouter>,
   )
 }
@@ -76,6 +77,12 @@ describe('ProgressPage — the shell renders the tab and nothing else (UX-326)',
       expect(screen.queryByText('SECTION_EXPORT')).not.toBeInTheDocument()
     })
   }
+
+  it('moves the old Monthly Books link into Review', () => {
+    renderAt('?tab=monthly-books')
+    expect(screen.getByText('REVIEW_HOME')).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Monthly Books' })).not.toBeInTheDocument()
+  })
 
   it('still lands on Foundations for a bare /progress', () => {
     renderAt('')
@@ -129,7 +136,7 @@ describe('UX-325 — the tabs with no selector of their own', () => {
     ['Learning Map', './learning-map/LearningMap.tsx'],
     ['Monthly Books', '../monthly-review/MonthlyBooksTab.tsx'],
     ['Word Wall', './WordWall.tsx'],
-  ])('%s still renders no ChildSelector — the header chip is the way', (_label, rel) => {
+  ])('%s delegates child selection to its containing surface', (_label, rel) => {
     expect(readFeature(rel)).not.toMatch(/<ChildSelector/)
   })
 
