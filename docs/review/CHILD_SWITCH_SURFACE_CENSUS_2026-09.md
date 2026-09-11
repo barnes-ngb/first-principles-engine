@@ -183,7 +183,8 @@ census problems: 0
 ```
 
 **The candidate set did not move — still 94, still every row filled, still `P1: 0`** — which is the
-property the flip rests on. What moved is the denominator: three new non-test source files (the
+property the flip rests on. (This block was pasted before review round 2 closed `UX-333`; the reading
+after that fix is `BIND: 7`, `RESET: 17`, `P3: 1`, pasted in §7.) What moved is the denominator: three new non-test source files (the
 `UX-394` profile-child seed, the duplicate-document survey and the shared canonical-children read)
 and two more files *naming* `useActiveChild`, both of which name it in prose rather than calling it
 (`ContextBar`'s new docblock says why the chip reads the hook instead of the prop it is handed).
@@ -195,11 +196,19 @@ component that renders a chip and four navigation icons.
 2026-09-11), so the shell route into every surface below is open — and since `UX-362` so is Today's
 `ContextBar`, which renders the same chip. That is a widening, and it is taken deliberately: `UX-329`
 **bounded** the class rather than patching a seventh member of it, `FIX-223` cleared the P1s, and the
-six rows still open (`4 P2 + 2 P3` above) sit on avatar, admin and dialog surfaces that **each carry
-their own in-page child control** — so every one of them was already reachable with the constant
-`false`. The switcher widens the reach; it did not create them. **9** pages render an in-page
-`<ChildSelector>` and **15** feature files hold some in-page child control, which is the same reason
-the fixes in `AUDIT-222`'s run were not deferred until the flip. `FIX-232` closes the six.
+rows still open sit on avatar, admin and dialog surfaces that **each carry their own in-page child
+control** — so they were already reachable with the constant `false`. The switcher widens the reach;
+it did not create them. **9** pages render an in-page `<ChildSelector>` and **15** feature files hold
+some in-page child control, which is the same reason the fixes in `AUDIT-222`'s run were not deferred
+until the flip.
+
+**That sentence was too broad when first written, and this run's review round 2 proved it.** One of
+the six — `UX-333`, `useBackgroundReimagine` — is the single open row whose *Reachable by a switch
+today?* column reads **Shell only**: Books has no in-page `ChildSelector`, so the flip is what opened
+it, and on a legacy book with no `createdFor` a finished reimagine was filed under whoever the header
+was on when the paid call returned. **A run that flips the constant owns the rows the flip creates**,
+so it is fixed here (BIND, the `UX-327` answer) rather than deferred. `FIX-232` closes the remaining
+five.
 
 ## 5. The registry
 
@@ -228,7 +237,7 @@ the fixes in `AUDIT-222`'s run were not deferred until the flip. `FIX-232` close
 | `src/features/books/MakeStickerDialog.tsx` | a generated sticker awaiting save | `stickerLibrary` — `childId: null` by construction | Shell only | **SAFE** — the write stamps `childId: null`; a sticker belongs to the family, so there is no child to mis-target | — |
 | `src/features/books/SightWordDashboard.tsx` | one selected word | `sightWordProgress` via `confirmMastery` | Shell only | **SAFE** — `confirmMastery` is `useSightWordProgress`'s writer, which rebuilds the document id from the `childId` it currently holds; the selected word is a word, not a child-scoped draft | — |
 | `src/features/books/SketchScanner.tsx` | a captured sketch, its cleaned and fancy versions | `stickerLibrary` — `childId: null` by construction | Shell only | **SAFE** — same as above; the `profile` field it does write is a picker the person sets, not the active child | — |
-| `src/features/books/useBackgroundReimagine.ts` | a running reimagine job and its result | `stickerLibrary` + `artifacts`, stamped with the `childId` prop | Shell only | **RESET** needed — a finished job's "save this" survives a switch and the artifact is stamped with the live prop | P3 · `UX-333` |
+| `src/features/books/useBackgroundReimagine.ts` | a running reimagine job and its result | `stickerLibrary` + `artifacts`, stamped with the job's own `ownerChildId` | Shell only | **BIND** — `ReimagineJob.ownerChildId` / `ownerChildName` are captured at `startReimagine` and both auto-saves resolve through them, so a paid picture is filed under the child it was started for however the header moves. BIND rather than the RESET first prescribed here, on the `useCreativeTimer` reading (`UX-327`): the work is done and was paid for, so the WRITE is bound rather than the result discarded. Fixed by FIX-231 | — |
 | `src/features/books/useBook.ts` | the open book, save state | `books`, `hours`, `artifacts` | Shell only | **SAFE** — every write reads `book.childId` from the loaded document; `useBookshelf`'s `createBook` takes the `childId` it was called with | — |
 | `src/features/books/useBookGenerateChat.ts` | chat history, current story, level stretch, theme | `books/{bookId}` | Shell only | **SAFE** — a draft book is persisted as soon as a story exists and `bookId` pins every later write; the resume path reads the document's `childId` (FEAT-188) | — |
 | `src/features/books/useSightWordProgress.ts` | the child's word progress map | `sightWordProgress/{childId}_{word}` | Selector (Books, Progress) | **SAFE** — the document id is built from the `childId` the hook was called with at the moment of the write, and the map is re-read on a prop change | — |
@@ -385,7 +394,23 @@ and P3s still open, on the reading this paragraph itself gives. Every one of the
 surface with its own in-page child control, so each was already reachable with the constant `false`;
 what the flip changes is how many taps it takes to reach them, not whether it can be done. Against
 that: the shell naming the active child and offering no way to change it is the root cause of the
-owner's report of the week, and `UX-362` is the same defect on Today. `FIX-232` closes the six.
+owner's report of the week, and `UX-362` is the same defect on Today.
+
+**One exception, found by this run's own review round 2 and fixed here rather than deferred.**
+`UX-333` (`useBackgroundReimagine`) is the single open row reading **Shell only** — Books has no
+in-page `ChildSelector` — so the sentence above is not true of it: the flip is what opened it, and on
+a legacy book with no `createdFor` a finished reimagine was filed under whoever the header was on when
+the paid call returned. **A run that flips the constant owns the rows the flip creates.** It is BIND
+(the `UX-327` answer: the work is done and was paid for, so bind the write rather than discard the
+result). The reading after that fix, pasted:
+
+```
+by verdict: {"BIND":7,"HIDE":3,"RESET":17,"GATE":10,"SAFE":57}
+by severity: {"P1":0,"P2":4,"P3":1,"—":89}
+census problems: 0
+```
+
+`FIX-232` closes the remaining five.
 
 ## 8. The shell rule
 

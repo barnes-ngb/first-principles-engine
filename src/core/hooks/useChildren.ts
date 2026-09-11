@@ -12,6 +12,12 @@ import {
   setActiveChildIdShared,
   subscribeActiveChildId,
 } from './activeChildStore'
+import {
+  addSharedChild,
+  getSharedChildren,
+  setSharedChildren,
+  subscribeSharedChildren,
+} from './childrenStore'
 
 /**
  * Canonical profile children. `birthdate`/`grade` are the real identity values
@@ -107,7 +113,12 @@ export interface UseChildrenResult {
 export function useChildren(): UseChildrenResult {
   const familyId = useFamilyId()
   const { profile } = useProfile()
-  const [children, setChildren] = useState<Child[]>([])
+  // UX-362 (Codex round 2): the LIST is shared for the same reason the selected
+  // id is. It used to be a per-instance `useState`, so `addChild` reached only
+  // the instance whose selector was tapped and every other mounted consumer
+  // held a list without the new child — resolving `activeChild` to `undefined`
+  // and rendering its empty branch until a reload. See `childrenStore.ts`.
+  const children = useSyncExternalStore(subscribeSharedChildren, getSharedChildren)
   // Selected child lives in a shared external store so every consumer
   // (AppShell header, Plan My Week selector, …) sees the same value and
   // re-renders together — see activeChildStore.ts.
@@ -166,7 +177,7 @@ export function useChildren(): UseChildrenResult {
         loaded = dedupeChildrenByName([...loaded, ...created])
       }
 
-      setChildren(loaded)
+      setSharedChildren(loaded)
 
       // Restore persisted child or auto-select based on profile. The shared
       // store is seeded from localStorage at import, so getActiveChildId()
@@ -189,7 +200,8 @@ export function useChildren(): UseChildrenResult {
   }, [familyId, profile])
 
   const addChild = useCallback((child: Child) => {
-    setChildren((prev) => [...prev, child])
+    // Reaches every mounted consumer, not just this one.
+    addSharedChild(child)
     setSelectedChildId(child.id)
   }, [setSelectedChildId])
 

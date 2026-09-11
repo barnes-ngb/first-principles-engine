@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
@@ -29,29 +29,34 @@ vi.mock('../core/auth/useAuth', () => ({
 }))
 vi.mock('../features/avatar/useAvatarProfile', () => ({ useAvatarProfile: () => null }))
 
-// The children the family has. `useChildren`'s Firestore read is the one thing
-// stubbed; the selection itself runs through the real shared store.
-const CHILDREN = [
-  { id: 'c1', name: 'Lincoln' },
-  { id: 'c2', name: 'London' },
-]
+// `useChildren`'s Firestore read is the ONLY thing stubbed. Both shared stores
+// — the selected id and, since Codex round 2, the LIST — are the real ones, so
+// this harness can still fail on the thing it is asserting.
 vi.mock('../core/hooks/useChildren', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../core/hooks/useChildren')>()
   const react = await import('react')
-  const store = await import('../core/hooks/activeChildStore')
+  const active = await import('../core/hooks/activeChildStore')
+  const list = await import('../core/hooks/childrenStore')
   return {
     ...actual,
     useChildren: () => {
       const selectedChildId = react.useSyncExternalStore(
-        store.subscribeActiveChildId,
-        store.getActiveChildId,
+        active.subscribeActiveChildId,
+        active.getActiveChildId,
+      )
+      const children = react.useSyncExternalStore(
+        list.subscribeSharedChildren,
+        list.getSharedChildren,
       )
       return {
-        children: CHILDREN,
+        children,
         selectedChildId,
-        setSelectedChildId: store.setActiveChildIdShared,
+        setSelectedChildId: active.setActiveChildIdShared,
         isLoading: false,
-        addChild: vi.fn(),
+        addChild: (child: { id: string; name: string }) => {
+          list.addSharedChild(child as never)
+          active.setActiveChildIdShared(child.id)
+        },
       }
     },
   }
@@ -61,24 +66,38 @@ import ContextBar from './ContextBar'
 import ChildSelector from './ChildSelector'
 import { useActiveChild } from '../core/hooks/useActiveChild'
 import { setActiveChildIdShared } from '../core/hooks/activeChildStore'
+import { __resetSharedChildren, setSharedChildren } from '../core/hooks/childrenStore'
+import type { Child } from '../core/types'
+
+const CHILDREN = [
+  { id: 'c1', name: 'Lincoln' },
+  { id: 'c2', name: 'London' },
+] as Child[]
 
 /**
  * Today's shape: `ContextBar` is handed `useActiveChild().activeChild` as a
  * prop while the chip inside it reads the hook itself. That split is exactly
  * what could drift, so the harness reproduces it rather than passing a literal.
  */
-function TodayLikeHarness({ withSelector = true }: { withSelector?: boolean }) {
-  const { activeChild, activeChildId, children, setActiveChildId, isChildProfile } =
-    useActiveChild()
+function TodayLikeHarness({ withAdd = false }: { withAdd?: boolean }) {
+  const {
+    activeChild,
+    activeChildId,
+    children,
+    setActiveChildId,
+    isChildProfile,
+    addChild,
+  } = useActiveChild()
   return (
     <MemoryRouter>
       <ContextBar page="today" activeChild={activeChild} dateKey="2026-09-11" />
-      {withSelector && !isChildProfile && (
+      {!isChildProfile && (
         <div data-testid="selector">
           <ChildSelector
             children={children}
             selectedChildId={activeChildId}
             onSelect={setActiveChildId}
+            onChildAdded={withAdd ? addChild : undefined}
           />
         </div>
       )}
@@ -88,6 +107,8 @@ function TodayLikeHarness({ withSelector = true }: { withSelector?: boolean }) {
 
 beforeEach(() => {
   profileRef.current = 'parents'
+  __resetSharedChildren()
+  setSharedChildren(CHILDREN)
   setActiveChildIdShared('c1')
 })
 
@@ -136,6 +157,35 @@ describe('ContextBar renders the one child switcher (UX-362)', () => {
     expect(
       screen.getByRole('button', { name: 'Switch child — currently London' }),
     ).toBeInTheDocument()
+  })
+
+  it('THE ROUND 2 P2: adding a child does not make the chip vanish', async () => {
+    // `addChild` used to append to the list of the ONE `useChildren` instance
+    // whose selector was tapped, and set the shared id. The chip has its own
+    // instance, so it held a list without the new child, resolved `activeChild`
+    // to `undefined` and rendered nothing — where before UX-362 it rendered
+    // from the `activeChild` prop its caller had loaded and stayed put. The
+    // list is shared now (`childrenStore`), so every consumer hears it.
+    render(<TodayLikeHarness withAdd />)
+
+    const { addSharedChild } = await import('../core/hooks/childrenStore')
+    const { setActiveChildIdShared: select } = await import(
+      '../core/hooks/activeChildStore'
+    )
+    // Both stores move in one act, as `addChild` does.
+    act(() => {
+      addSharedChild({ id: 'c3', name: 'Ada' } as Child)
+      select('c3')
+    })
+
+    // The chip is still there, and it names the child that was just added.
+    expect(
+      await screen.findByRole('button', { name: 'Switch child — currently Ada' }),
+    ).toBeInTheDocument()
+    // And the selector shows all three, from the one list.
+    const selector = screen.getByTestId('selector')
+    expect(within(selector).getByText('Ada')).toBeInTheDocument()
+    expect(within(selector).getByText('Lincoln')).toBeInTheDocument()
   })
 })
 

@@ -63,17 +63,26 @@ export interface ChildSwitcherAudience {
  * number rather than anyone counting it (`npm run census:child-switch`).
  *
  * **What is still open, stated rather than implied.** Four P2 registry rows and
- * two P3s: `UX-331` (`AvatarPhotoUpload` — a staged photo seeds the other
- * boy's avatar and spends his art quota), `UX-332` (`MyAvatarPage`'s tuner
- * draft and screenshot), `UX-335` (`AddActivityDialog`'s typed activity), and
- * `UX-341` (`AvatarAdminTab`, which writes `xpLedger` and is therefore
- * propose-and-confirm); the P3s are `UX-333` and `UX-338`. Every one is on an
- * avatar, admin or dialog surface with **its own in-page child control**, so
- * each was already reachable with this constant `false` — the switcher widens
- * the reach, it did not create them. `FIX-232` closes them. The reason the flip
- * does not wait is the owner's own report of the week — *"Shelly added content
- * for Lincoln on London's page"* — whose root cause is a shell that names the
- * active child and offers no way to change it there.
+ * one P3: `UX-331` (`AvatarPhotoUpload` — a staged photo seeds the other boy's
+ * avatar and spends his art quota), `UX-332` (`MyAvatarPage`'s tuner draft and
+ * screenshot), `UX-335` (`AddActivityDialog`'s typed activity), `UX-341`
+ * (`AvatarAdminTab`, which writes `xpLedger` and is therefore
+ * propose-and-confirm), and `UX-338`. Every one is on a surface with **its own
+ * in-page child control**, so each was already reachable with this constant
+ * `false` — the switcher widens the reach, it did not create them. `FIX-232`
+ * closes them. The reason the flip does not wait is the owner's own report of
+ * the week — *"Shelly added content for Lincoln on London's page"* — whose root
+ * cause is a shell that names the active child and offers no way to change it
+ * there.
+ *
+ * **One row was NOT in that set, and the flip is what opened it.** `UX-333`
+ * (`useBackgroundReimagine`) is the one open row the census marks **Shell
+ * only**: Books has no in-page `ChildSelector`, so on a legacy book with no
+ * `createdFor` a finished reimagine — a paid call landing minutes later — was
+ * filed under whoever the header was on when it returned. A run that flips this
+ * constant owns the rows the flip creates, so it is fixed in the same PR
+ * (BIND, the `useCreativeTimer.ownerChildId` answer). It was a review round
+ * that found the first draft of the paragraph above claiming otherwise.
  *
  * **The other direction still works.** Setting this back to `false` restores
  * the read-only chip everywhere, including Today's, because the rule has
