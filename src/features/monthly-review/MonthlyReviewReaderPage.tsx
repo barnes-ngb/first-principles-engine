@@ -5,7 +5,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useMonthlyReview } from '../../core/hooks/useMonthlyReviews'
 import { reviewPath } from '../review/reviewNav'
-import { MonthlyReviewReader } from './MonthlyReviewReader'
+import { MonthlyReviewReaderContent } from './MonthlyReviewReader'
 
 export default function MonthlyReviewReaderPage() {
   const { reviewId } = useParams<{ reviewId: string }>()
@@ -14,7 +14,8 @@ export default function MonthlyReviewReaderPage() {
   const familyId = useFamilyId()
   const { children, setActiveChildId } = useActiveChild()
 
-  const { review } = useMonthlyReview(familyId, reviewId)
+  const reviewState = useMonthlyReview(familyId, reviewId)
+  const { review } = reviewState
 
   const childName = useMemo(() => {
     if (!review) return ''
@@ -24,7 +25,8 @@ export default function MonthlyReviewReaderPage() {
   if (!reviewId) return null
 
   return (
-    <MonthlyReviewReader
+    <MonthlyReviewReaderContent
+      reviewState={reviewState}
       reviewId={reviewId}
       defaultMode="parent"
       childName={childName}

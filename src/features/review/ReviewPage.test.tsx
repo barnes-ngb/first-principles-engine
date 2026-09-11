@@ -65,7 +65,7 @@ vi.mock('../monthly-review/GenerateNowDialog', () => ({
   </div> : null,
 }))
 vi.mock('../monthly-review/MonthlyReviewReader', () => ({
-  MonthlyReviewReader: ({ childName, defaultMode, onExit }: {
+  MonthlyReviewReaderContent: ({ childName, defaultMode, onExit }: {
     childName: string; defaultMode: string; onExit: () => void
   }) => <div>{childName} {defaultMode} book<button onClick={onExit}>Exit book</button></div>,
 }))
