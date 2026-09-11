@@ -4,7 +4,9 @@
  * - computeStartLevel: read path — determines where a quest session begins
  * - computeWorkingLevelFromSession: write path 1 — derives new level after quest
  * - deriveWorkingLevelFromEvaluation: write path 2 — infers level from eval findings
- * - canOverwriteWorkingLevel: manual-override protection (48 hr guard)
+ * - manualOverrideHolds: is a manual pin still protecting this slot? (48 hr guard)
+ * - canOverwriteWorkingLevel: THE gate every level write passes — the manual pin
+ *   plus the UX-382 direction rule (a scan never lowers a level)
  */
 
 import type { WorkingLevel, WorkingLevels, SkillSnapshot, EvaluationFinding, QuestActivityMarker } from '../../core/types/evaluation'
@@ -25,14 +27,66 @@ import {
 const MANUAL_OVERRIDE_WINDOW_MS = 48 * 60 * 60 * 1000 // 48 hours
 
 /**
- * Returns true if the given working level slot can be overwritten by an automated source.
- * Manual overrides are protected for 48 hours.
+ * True while a **manual** pin is still protecting this slot (48 hours). This is
+ * the older half of the rule, and it answers only that one question — read it
+ * where the manual pin is what matters and no level is being proposed (the
+ * quest activity marker's gate, the backfill's contract check).
+ *
+ * A level WRITE goes through {@link canOverwriteWorkingLevel} instead, which
+ * adds the direction rule.
  */
-export function canOverwriteWorkingLevel(current: WorkingLevel | undefined): boolean {
-  if (!current) return true
-  if (current.source !== 'manual') return true
+export function manualOverrideHolds(current: WorkingLevel | undefined): boolean {
+  if (!current) return false
+  if (current.source !== 'manual') return false
   const age = Date.now() - new Date(current.updatedAt).getTime()
-  return age > MANUAL_OVERRIDE_WINDOW_MS
+  return age <= MANUAL_OVERRIDE_WINDOW_MS
+}
+
+/**
+ * Sources that may move a level **in either direction**, because they measured
+ * something: a quest the child sat, a guided evaluation, a parent at the manual
+ * stepper. Anything else is advance-only.
+ *
+ * `curriculum` is the one absent member, and it is the whole of UX-382: it is
+ * written only by the three `derive*FromScan` ladders below, i.e. by a photo of
+ * a page. See {@link canOverwriteWorkingLevel}.
+ */
+const SOURCES_THAT_MAY_LOWER: ReadonlySet<WorkingLevel['source']> = new Set([
+  'quest',
+  'evaluation',
+  'manual',
+])
+
+/**
+ * **The gate every working-level write passes.** Two rules:
+ *
+ * 1. **The manual pin** (unchanged): a level a parent set by hand is protected
+ *    from automated sources for 48 hours.
+ * 2. **A scan never lowers a level** (UX-382, owner decision 2026-09-11). A
+ *    `curriculum`-sourced write — the only kind a scan produces — lands only
+ *    when there is no level yet or the derived level is strictly **higher**.
+ *    `quest`, `evaluation` and `manual` keep today's behaviour in both
+ *    directions: they assessed the child and may say she is lower than we
+ *    thought.
+ *
+ * Rule 2 is the rule `activityConfigs.currentPosition` has always followed for
+ * scans — *"positions are advance-only here"*, `useScanToActivityConfig.ts` —
+ * and the level was the one scan-written field without it. A photo of an older
+ * page, or of a book the ladder has no business reading, could rewind a number
+ * the whole engine reads.
+ *
+ * `next` is **required**: a new level-writing call site must state what it is
+ * proposing, so the direction rule cannot be skipped by forgetting an argument.
+ * It changes only *whether* a write lands — no level's value is computed here.
+ */
+export function canOverwriteWorkingLevel(
+  current: WorkingLevel | undefined,
+  next: WorkingLevel,
+): boolean {
+  if (manualOverrideHolds(current)) return false
+  if (SOURCES_THAT_MAY_LOWER.has(next.source)) return true
+  // Advance-only: no level yet, or strictly higher than the one standing.
+  return !current || next.level > current.level
 }
 
 // ── Read path: compute starting level ─────────────────────────

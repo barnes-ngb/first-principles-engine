@@ -31,6 +31,7 @@ import type {
   ConceptStateKind,
   LearnerModel,
 } from '../../core/types/learnerModel'
+import { projectedThroughSummary } from '../../core/foundations/projectedThroughSummary'
 import type { LearnerSynthesis } from '../../core/types/learnerModel'
 
 const functions = getFunctions(app)
@@ -443,6 +444,17 @@ function ModelPreview({ model }: { model: LearnerModel }) {
         <Chip
           size="small"
           label={`seededAt ${(model.seededAt as string | undefined)?.slice(0, 19) ?? '—'}`}
+        />
+        {/* UX-384: has FIX-225's working-level re-projection ever run here, and
+            on which levels? An absent watermark is "never recorded", which is a
+            different thing from "recorded with no level" — so the chip says so
+            in words rather than printing a dash for both. */}
+        <Chip
+          size="small"
+          variant="outlined"
+          label={`projected: ${
+            projectedThroughSummary(model.projectedThrough) ?? 'never'
+          }`}
         />
         {STATE_GROUPS.map((g) => (
           <Chip

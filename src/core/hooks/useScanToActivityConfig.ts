@@ -1,8 +1,13 @@
 import { useCallback } from 'react'
-import { doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { doc, getDoc, getDocs, query, runTransaction, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
-import { activityConfigsCollection, normalizeCurriculumKey, skillSnapshotsCollection } from '../firebase/firestore'
+import {
+  activityConfigsCollection,
+  db,
+  normalizeCurriculumKey,
+  skillSnapshotsCollection,
+} from '../firebase/firestore'
 import type { ActivityConfig, SkillSnapshot, WorksheetScanResult, WorkingLevel, WorkingLevels } from '../types'
 import { ActivityType, SubjectBucket } from '../types/enums'
 import type { SubjectBucket as SubjectBucketType } from '../types/enums'
@@ -13,7 +18,9 @@ import {
   canOverwriteWorkingLevel,
 } from '../../features/quest/workingLevels'
 import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
+import { workbookBridgeForSource } from '../foundations/workbookBridge'
 import { activityMatchNames } from '../utils/activityNames'
+import { resolveScanWorkingLevelDomain } from './scanWorkingLevelDomain'
 
 /**
  * Why a sync registered nothing. FEAT-136: `action: 'none'` had three distinct
@@ -221,40 +228,42 @@ export function useScanToActivityConfig() {
 
 /**
  * Maps a subject bucket to a workingLevels key and derives the level from a scan.
- * Returns null for subjects that don't have a working-level mapping (e.g. Science, Art).
+ * Returns null for subjects that don't have a working-level mapping (e.g. Science,
+ * Art) and — since UX-381 — for any book the domain rule cannot place.
+ *
+ * The *which domain* decision is the pure {@link resolveScanWorkingLevelDomain};
+ * this function only picks the matching ladder. The bridge lookup is done here
+ * because it is the caller's (impure-ish, alias-tolerant) job, and an
+ * **ambiguous** name resolves to `null` exactly like an unknown one — an
+ * ambiguous name is not evidence about anything.
  */
-function deriveLevelForSubject(
+export function deriveLevelForSubject(
   subject: SubjectBucketType,
   lessonNumber: number | null,
   curriculumName: string,
 ): { key: keyof WorkingLevels; level: WorkingLevel } | null {
-  switch (subject) {
-    case SubjectBucket.Math: {
-      const level = deriveMathWorkingLevelFromScan(lessonNumber, curriculumName)
-      return level ? { key: 'math', level } : null
-    }
-    case SubjectBucket.Reading: {
-      // Reading bucket includes both phonics and comprehension workbooks.
-      // Use curriculum name to disambiguate.
-      const lower = curriculumName.toLowerCase()
-      if (lower.includes('phonics')) {
-        const level = derivePhonicsWorkingLevelFromScan(lessonNumber, curriculumName)
-        return level ? { key: 'phonics', level } : null
-      }
-      const level = deriveReadingWorkingLevelFromScan(lessonNumber, curriculumName)
-      return level ? { key: 'comprehension', level } : null
-    }
-    case SubjectBucket.LanguageArts: {
-      // LA workbooks (e.g. GATB Language Arts) often cover phonics skills
-      const level = derivePhonicsWorkingLevelFromScan(lessonNumber, curriculumName)
-      return level ? { key: 'phonics', level } : null
-    }
-    default:
-      return null
-  }
+  const bridgeSourceId = workbookBridgeForSource(curriculumName)?.sourceId ?? null
+  const domain = resolveScanWorkingLevelDomain(subject, curriculumName, bridgeSourceId)
+  if (!domain) return null
+
+  const level =
+    domain === 'math'
+      ? deriveMathWorkingLevelFromScan(lessonNumber, curriculumName)
+      : domain === 'phonics'
+        ? derivePhonicsWorkingLevelFromScan(lessonNumber, curriculumName)
+        : deriveReadingWorkingLevelFromScan(lessonNumber, curriculumName)
+
+  return level ? { key: domain, level } : null
 }
 
-async function updateWorkingLevelFromScan(
+/**
+ * Write the scanned page's working level, if it may write one at all.
+ *
+ * Exported for its test, like `planScannedNameUpgrade` and `isWorkbookMatch`:
+ * the atomicity below is the part worth pinning, and a gap between the check
+ * and the write is invisible in any test that cannot see the transaction.
+ */
+export async function updateWorkingLevelFromScan(
   familyId: string,
   childId: string,
   lessonNumber: number | null,
@@ -266,18 +275,46 @@ async function updateWorkingLevelFromScan(
     if (!derived) return
 
     const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
-    const snapshotSnap = await getDoc(snapshotRef)
-    const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
-      ? snapshotSnap.data()
-      : {}
 
-    const currentLevel = existing.workingLevels?.[derived.key]
-    if (!canOverwriteWorkingLevel(currentLevel)) return
+    // UX-382, Codex round 1 (P1): the gate and the write are ONE unit.
+    //
+    // Read-then-write left a gap, and the gap defeated the invariant this run
+    // exists for: a quest finishing on another device raises phonics to 5
+    // between the read and the write, the scan's check has already passed
+    // against the stale 3, and its level 3 lands on top — a scan lowering a
+    // level, exactly as before. The old write made it worse by re-sending the
+    // WHOLE `workingLevels` map, so a *sibling* level written in that gap went
+    // with it.
+    //
+    // So: re-read inside a `runTransaction` (the UX-231 precedent), re-check
+    // the gate against what is actually stored, and write the **one field path**
+    // — never the map — so nothing but this key can be overwritten.
+    await runTransaction(db, async (tx) => {
+      const snapshotSnap = await tx.get(snapshotRef)
+      const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
+        ? (snapshotSnap.data() as Partial<SkillSnapshot>)
+        : {}
 
-    const mergedWorkingLevels = { ...(existing.workingLevels ?? {}), [derived.key]: derived.level }
-    await updateDoc(snapshotRef, {
-      workingLevels: mergedWorkingLevels,
-      updatedAt: new Date().toISOString(),
+      const currentLevel = existing.workingLevels?.[derived.key]
+      // `derived.level.source` is `curriculum`, so this gate is advance-only —
+      // a scan may raise a level and may never lower one.
+      if (!canOverwriteWorkingLevel(currentLevel, derived.level)) return
+
+      const updatedAt = new Date().toISOString()
+      if (snapshotSnap.exists()) {
+        tx.update(snapshotRef, {
+          [`workingLevels.${derived.key}`]: derived.level,
+          updatedAt,
+        })
+      } else {
+        // No snapshot yet — `update` would fail, so create the document with
+        // just this level on it.
+        tx.set(
+          snapshotRef,
+          { childId, workingLevels: { [derived.key]: derived.level }, updatedAt },
+          { merge: true },
+        )
+      }
     })
   } catch (err) {
     console.warn(`[ScanToConfig] Failed to update ${subject} working level`, err)
@@ -388,7 +425,12 @@ export function isWorkbookMatch(
   return false
 }
 
-function mapSubjectBucket(
+/**
+ * The subject bucket a scanned curriculum name lands in. Exported since UX-383:
+ * the restore has to ask what *this* book's scan would do today, and asking it
+ * through the same function is what stops the two answers drifting.
+ */
+export function mapSubjectBucket(
   name: string,
   provider: string | null,
 ): SubjectBucketType {
