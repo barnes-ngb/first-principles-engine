@@ -73,7 +73,9 @@ Two rules the vocabulary encodes, both learned the hard way:
 
 ## 4. The numbers
 
-All derived. `npm run census:child-switch`, on this branch:
+All derived. `npm run census:child-switch`, **as AUDIT-222 ran it on 2026-09-10**. The paragraphs
+below do arithmetic on this block, so it is kept exactly as it was read; the current reading follows
+it.
 
 ```
 source files scanned (non-test, under src/, excluding src/test/): 752
@@ -96,6 +98,38 @@ rows; `5 P1 + 6 P2 + 3 P3 = 14` of them are **open**; `38 − 14 = 24` need no f
 **4 are fixed in this run** (`RecordsPage`, `SaleEntryForm`, `KitBuilderForm`, `CertificateScanSection`)
 and **20 were already answered** — the six PR #1817 fixes plus fourteen surfaces whose hosts already
 gate or re-key them. The 80 dashes in the severity tally are the 56 SAFE rows plus those 24.
+
+### Re-derived 2026-09-11 (AUDIT-228)
+
+Same command, on Today's walkthrough branch. Pasted, not retyped:
+
+```
+source files scanned (non-test, under src/, excluding src/test/): 765
+files reading useActiveChild: 69
+candidates: 94 (hook arm 42, prop arm 52)
+files rendering an in-page <ChildSelector>: 8
+feature files referencing setActiveChildId (any in-page child control): 13
+census rows: 94
+by verdict: {"BIND":6,"HIDE":3,"RESET":18,"GATE":10,"SAFE":57}
+by severity: {"P1":0,"P2":4,"P3":2,"—":88}
+census problems: 0
+```
+
+Three things moved, and none of them is the candidate set — still **94**, still every row filled.
+
+- **`P1: 5 → 0`** happened on `main` before this run: `FIX-223` implemented `UX-336` / `UX-339` /
+  `UX-340` under `DOC-25`'s attribution-only authorisation, and `FIX-220`'s remaining rows closed with
+  them. The block above was simply never re-pasted, which is the ordinary way a derived number goes
+  stale and the reason this section now carries a date.
+- **`P2: 6 → 4`, `P3: 3 → 2`** are this run: `UX-342` (`LessonVideoDialog`, the `hours` rail) and
+  `UX-343` (Today's dialog stack, and `useUnifiedCapture` with it) are fixed, so three rows lose their
+  ledger id.
+- **`RESET: 19 → 18`, `SAFE: 56 → 57`** is the one verdict that genuinely changed rather than settling:
+  `useUnifiedCapture` was prescribed RESET on the reading that its writes take the live `childId`. They
+  do not — `handleUnifiedCapture` is a `useCallback` over `childId`, so an invocation already running
+  keeps the child it was tapped for, and every collection it writes comes from that closure. Its one
+  shared write was the day-log lane, and `UX-357` closes that at the lane. The row is **SAFE with the
+  line that makes it true**, which is what rule 2 above demands of every SAFE.
 
 **Three of those SAFE rows were wrong, and a review round found them (`UX-344`, `UX-345`).** They are
 the reason rule 2 above is written the way it is, so they are corrected in place rather than quietly
@@ -221,12 +255,12 @@ the constant flips back.
 | `src/features/today/KidChapterPool.tsx` | recorded chapter audio awaiting save | `chapterResponses`, `artifacts` | No — `KidTodayView` only | **SAFE** — same capability answer: a kid profile cannot switch child | — |
 | `src/features/today/KidExtraLogger.tsx` | a picked extra activity and minutes | `days` (the day log) + `xpLedger` via `addXpEvent` | No — `KidTodayView` only | **SAFE** — same capability answer: a kid profile cannot switch child | — |
 | `src/features/today/KidTodayView.tsx` | choices, captures, celebration state | `days`, `artifacts`, `dailyArmorSessions` | No — kid profiles only | **SAFE** — `TodayPage` returns this view for a kid profile, and a kid profile's `setActiveChildId` is a no-op; every prop below it is `child.id` | — |
-| `src/features/today/LessonVideoDialog.tsx` | a picked video, an exclusion list | `hours` — the logged watch entry | Selector (Today) | **RESET** needed — a picked video survives the switch and the log reads the live `childId` prop. **Not fixed here:** it writes `hours` | P2 · `UX-342` |
-| `src/features/today/TodayPage.tsx` | a strand-session draft, edit-mode move/swap targets, energy and plan type | `days`, `dailyPlans`, `artifacts`, `scans`, `activityConfigs` | Selector (its own `ChildSelector`) | **RESET** needed — the strand-session dialog and the move/swap targets outlive the switch while every write reads `selectedChildId` live | P2 · `UX-343` |
+| `src/features/today/LessonVideoDialog.tsx` | a picked video, an exclusion list | `hours` — the logged watch entry | Selector (Today) | **RESET** — an identity effect keyed on `childId\|date` clears the pick, the exclusions and the logged confirmation and calls `onClose`, so a video found for one boy can never be logged against the other; the caller's scope notice names it. **No hours arithmetic changed** (`DOC-25`'s four terms; the fold is asserted with a positive control in `LessonVideoDialog.childSwitch.test.tsx`). Fixed by AUDIT-228 | — |
+| `src/features/today/TodayPage.tsx` | a strand-session draft, edit-mode move/swap targets, energy and plan type | `days`, `dailyPlans`, `artifacts`, `scans`, `activityConfigs` | Selector (its own `ChildSelector`) | **RESET** — a scope guard keyed on `childId\|date` closes the strand dialog, the move and swap targets and the watch picker, and `todayScope.todayScopeResetNotice` names in words what it closed and who it was for (RESET's second half: make the loss visible); `TodayChecklist` is keyed on the same scope and reports its own four open decisions up so the remount is not silent. Energy and plan type are `GATE`d separately by `useDailyPlan` (`UX-345`). Fixed by AUDIT-228 | — |
 | `src/features/today/WeekRibbon.tsx` | one week's day summaries | nothing — a read-only subscription | Selector (Today) | **SAFE** — writes nothing; `subscriptionKey` (`familyId\|childId\|weekStart`) already re-keys the subscription | — |
 | `src/features/today/useBookProgress.ts` | the loaded `BookProgress` | `bookProgress/{childId}_{bookId}` | Selector (Today, Planner) | **SAFE** — the document id is rebuilt from the current `childId` at the write, and the subscription resets on a prop change | — |
 | `src/features/today/useDailyPlan.ts` | the loaded `DailyPlan` | `dailyPlans/{date}_{childId}` — merge-only | Selector (Today) | **GATE** — this row named the hazard and then **dismissed it wrongly** (Codex round 4). The id is rebuilt from the live `childId`, but `saveDailyPlan` spreads `dailyPlan?.sessions`, and the child-change effect did not clear `dailyPlan` before its `getDoc` — so a toggle in that window wrote the previous child's `sessions` onto the new child's plan under `merge: true`. Now: the plan is dropped **during render** on a target change, and a failed read sets `loadFailed` rather than passing as an empty day (which would have written `sessions: []` over a day that has some — the half of the report that did not hold turned out to be its own defect). `saveDailyPlan` refuses unless `dailyPlanIsEditable`, and `DayStatusRow`'s two controls are dead while it does. Fixed by FIX-223 (UX-345) | — |
-| `src/features/today/useUnifiedCapture.ts` | a staged capture — photo, note, which checklist item | `artifacts`, `scans`, `days`, and (parent only) `activityConfigs` / `childSkillMaps` / `skillSnapshots` | Selector (Today) | **RESET** needed — a staged capture survives the switch and every write reads the `childId` prop live; covered by `UX-343`, which is the same dialog stack on the same page | P3 · `UX-343` |
+| `src/features/today/useUnifiedCapture.ts` | a staged capture — photo, note, which checklist item | `artifacts`, `scans`, `days`, and (parent only) `activityConfigs` / `childSkillMaps` / `skillSnapshots` | Selector (Today) | **SAFE** — and the line that makes it true: `handleUnifiedCapture` is a `useCallback` over `childId`, so an invocation already running when the parent switches keeps the child it was tapped for, and every collection above is written from that closure. Its one shared write is the day-log lane, which since `UX-357` refuses a document composed for another day rather than re-stamping it, and says so. The dialog that opens it is closed by the page's scope guard | — |
 | `src/features/watch/useWatchItemCompletion.ts` | which checklist item is being completed | `days` + `artifacts` | Selector (Today) | **SAFE** — the completion writes into `dayLog`, the document the caller passed, and stamps the `childId` of that same day log | — |
 | `src/features/watch/useWatchLibrary.ts` | the family's vetted videos, a `trackedChild` marker | `watchLibrary` — `addDoc` / `updateDoc` by id | Selector (Planner, Today) | **SAFE** — the library is family-scoped with a `childId \| 'both'` filter; vetting writes the caller's body and edits address a video by its own id | — |
 | `src/features/weekly-review/WeekReflectionCard.tsx` | the parent's answer and note, before Save | `weeklyReviews/{weekKey}_{childId}.reflection` — single-key merge | Selector (Weekly Review) | **GATE** — `seeded` is compared during render against `(docKey, storedKey)` and re-seeds unless the answer is `dirty`, so the card cannot carry one child's answer into another's document | — |

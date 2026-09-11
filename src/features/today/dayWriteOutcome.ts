@@ -54,6 +54,24 @@ export const DayWriteRefusal = {
   NoTarget: 'no-target',
   /** The write was attempted and rejected (rules, network, an offline queue that gave up). */
   Rejected: 'rejected',
+  /**
+   * The document handed to the writer is not the document the page is on
+   * (UX-357).
+   *
+   * A `DayLog` carries its own `childId` and `date`, so it knows which day it
+   * is. Every Today handler composes its edit from the `dayLog` it closed over
+   * and hands the whole document back — and a handler that started before a
+   * child switch or a day page finishes after it, still holding the old one.
+   *
+   * The writer used to **re-stamp** that document with the live child (*"defense
+   * in depth"*) and save it to the live day's id, which turns a mis-addressed
+   * write into a confidently wrong one: one boy's entire checklist written onto
+   * his brother's day, under his brother's name, with the preservation guard in
+   * observe-only mode on this lane so nothing stopped it. Refusing is the only
+   * safe answer — the edit belongs to a day that is no longer on screen, and
+   * there is nothing here to apply it to.
+   */
+  WrongTarget: 'wrong-target',
 } as const
 export type DayWriteRefusal = (typeof DayWriteRefusal)[keyof typeof DayWriteRefusal]
 
@@ -139,6 +157,18 @@ export function dayWriteFailureNotice(
   editedLabel: string | null,
   aftermath: DayWriteAftermath = DayWriteAftermath.RolledBack,
 ): DayWriteFailureNotice {
+  if (reason === DayWriteRefusal.WrongTarget) {
+    // Read BEFORE the aftermath branches, because the aftermath cannot describe
+    // this one. Nothing local is taken back — the page already moved to another
+    // document and the listener replaced what was on screen — so neither
+    // "rolled back" nor "superseded" is true, and the row is deliberately NOT
+    // named: a row title read over the day now on screen is a claim about that
+    // day. Same rule as `MovedOn`, one cause earlier.
+    return {
+      text: "That change was for a different day and didn't save. Nothing here was changed — switch back to make it there.",
+      severity: 'error',
+    }
+  }
   if (aftermath === DayWriteAftermath.MovedOn) {
     // The write belonged to a day this page is no longer showing (Codex round 1,
     // P1's sibling). The row is not taken back — the listener replaced it when
