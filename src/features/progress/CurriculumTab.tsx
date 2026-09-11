@@ -57,6 +57,12 @@ import RenameActivityDialog from './RenameActivityDialog'
 import { ALIAS_SECTION_LABEL } from './renameActivity'
 import SetPositionDialog from './SetPositionDialog'
 import { positionFailureNotice, positionSavedNotice } from './manualPosition'
+import {
+  planReassignActivity,
+  reassignFailureNotice,
+  reassignedNotice,
+  type ReassignOwnerOption,
+} from './reassignActivity'
 import EditRoutinesDialog from './EditRoutinesDialog'
 import {
   CURRICULUM_SECTION_TITLE,
@@ -414,11 +420,30 @@ export default function CurriculumTab() {
     }
   }
 
-  const handleReassign = async (config: ActivityConfig, childId: string) => {
-    await updateConfig(config.id, { childId })
-    const owner = childList.find((c) => c.id === childId)?.name ?? childId
-    setReassign(null)
-    setSnack(`"${config.name}" assigned to ${owner}`)
+  /**
+   * UX-354 — move a row to the child it was meant for.
+   *
+   * Parent-only at the WRITE as well as at the menu (this tab renders for a kid
+   * profile today), and the plan is re-resolved here rather than trusted from
+   * the dialog: the refusals are about what is true of the row, not about what
+   * was on screen when it opened.
+   *
+   * A failure says the row is **unchanged**. `updateConfig` re-asserts DATA-08
+   * and throws on a workbook sent to `'both'`, and an uncaught rejection here
+   * used to leave the dialog closed and the parent believing the move landed —
+   * UX-351's defect on a second surface.
+   */
+  const handleReassign = async (config: ActivityConfig, option: ReassignOwnerOption) => {
+    if (isChildProfile) return
+    if (planReassignActivity(config, childList).refusal) return
+    try {
+      await updateConfig(config.id, { childId: option.id })
+      setReassign(null)
+      setSnack(reassignedNotice(config.name, option))
+    } catch (err) {
+      console.error('[CurriculumTab] Failed to reassign activity', err)
+      setSnack(reassignFailureNotice(config.name))
+    }
   }
 
   const handleSaveRoutines = async (updated: ActivityConfig[]) => {
@@ -1358,7 +1383,13 @@ export default function CurriculumTab() {
             ? "Remove from the kids' quick log"
             : "Show on the kids' quick log"}
         </MenuItem>
-        {menuConfig?.type === 'workbook' && (
+        {/* UX-354: every type the add dialog can create, not only a workbook.
+            `AddActivityDialog` stamps the LIVE child on every row it writes, so
+            a routine typed in on the wrong child could not be moved at all — it
+            had to be deleted and retyped. A row that may not move still opens
+            the dialog and is told why there: a parent who finds nothing learns
+            nothing. Parent-only on capability, as Rename and Set lesson are. */}
+        {!isChildProfile && (
           <MenuItem
             onClick={() => {
               if (menuConfig) setReassign(menuConfig)
@@ -1456,29 +1487,41 @@ export default function CurriculumTab() {
           })()}
       </Dialog>
 
-      {/* Reassign workbook owner dialog (DATA-08) */}
+      {/* Reassign owner dialog (DATA-08, widened to every type by UX-354) */}
       <Dialog open={reassign !== null} onClose={() => setReassign(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Assign to a child</DialogTitle>
         <DialogContent>
-          <DialogContentText sx={{ mb: 1 }}>
-            Workbooks belong to one child. Who owns &ldquo;{reassign?.name}&rdquo;?
-          </DialogContentText>
-          <Stack spacing={1} sx={{ mt: 1 }}>
-            {childList.map((c) => (
-              <Button
-                key={c.id}
-                variant={reassign?.childId === c.id ? 'contained' : 'outlined'}
-                onClick={() => {
-                  if (reassign) void handleReassign(reassign, c.id)
-                }}
-              >
-                {c.name}
-              </Button>
-            ))}
-          </Stack>
+          {reassign &&
+            (() => {
+              const plan = planReassignActivity(reassign, childList)
+              if (plan.refusal) {
+                return <DialogContentText>{plan.refusal}</DialogContentText>
+              }
+              return (
+                <>
+                  <DialogContentText>{plan.prompt}</DialogContentText>
+                  <DialogContentText variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    {plan.shapeNote}
+                  </DialogContentText>
+                  <Stack spacing={1} sx={{ mt: 2 }}>
+                    {plan.options.map((option) => (
+                      <Button
+                        key={option.id}
+                        variant={reassign.childId === option.id ? 'contained' : 'outlined'}
+                        onClick={() => void handleReassign(reassign, option)}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </Stack>
+                </>
+              )
+            })()}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setReassign(null)}>Cancel</Button>
+          <Button onClick={() => setReassign(null)}>
+            {reassign && planReassignActivity(reassign, childList).refusal ? 'OK' : 'Cancel'}
+          </Button>
         </DialogActions>
       </Dialog>
 
