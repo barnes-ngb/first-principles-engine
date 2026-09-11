@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -120,4 +121,20 @@ describe('CurriculumTab — the certificate door (UX-326 / UX-319)', () => {
     expect(door).toBeGreaterThan(selector)
     expect(staging).toBeGreaterThan(door)
   })
+})
+
+
+it('keeps workbooks ahead of scan history and lets the parent expand and collapse history', async () => {
+  const user = userEvent.setup()
+  const { container } = render(<CurriculumTab />)
+  const history = await screen.findByRole('button', { name: 'This week’s scans (0)' })
+  expect(history).toHaveAttribute('aria-expanded', 'false')
+  const text = container.textContent ?? ''
+  expect(text.indexOf('Active Workbooks')).toBeGreaterThanOrEqual(0)
+  expect(text.indexOf('Active Workbooks')).toBeLessThan(text.indexOf('This week’s scans'))
+  await user.click(history)
+  expect(history).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByText('No scans this week yet')).toBeVisible()
+  await user.click(history)
+  expect(history).toHaveAttribute('aria-expanded', 'false')
 })

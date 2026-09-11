@@ -291,24 +291,16 @@ function WeeklyReviewBody() {
 
   return (
     <Page>
-      <Typography variant="h4" component="h1">
-        Weekly Review
-      </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+        <Typography variant="h5" component="h1">Weekly Review</Typography>
+        <HelpStrip
+          pageKey="weekly-review"
+          text="A record of the week that just ended — the hours it held, what got made, how fast the workbooks are moving, and your own read on it. None of it is scored against a target. The one AI-written part is Pace Adjustments, which appears only when the weekly review has suggestions for next week's plan."
+        />
+      </Stack>
       <Typography variant="body2" color="text.secondary">
         {weekRangeLabel}
       </Typography>
-      {/*
-        The provenance sentence has to be exactly true (Codex round 1, P2). An
-        earlier draft read "Nothing here is written by AI" — right about the
-        hours, the counts, the rate and the question, and wrong about Pace
-        Adjustments, the one section that IS weekly AI output and the one a
-        parent might act on.
-      */}
-      <HelpStrip
-        pageKey="weekly-review"
-        text="A record of the week that just ended — the hours it held, what got made, how fast the workbooks are moving, and your own read on it. None of it is scored against a target. The one AI-written part is Pace Adjustments, which appears only when the weekly review has suggestions for next week's plan."
-        maxShowCount={3}
-      />
 
       <ChildSelector
         children={children}

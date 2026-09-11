@@ -128,13 +128,9 @@ export default function RecordsPage() {
   return (
     <>
       <Container maxWidth="lg" sx={{ pt: { xs: 2, md: 3 } }}>
-        <HelpStrip
-          pageKey="records"
-          text="Hours come from three sources: checklist items you complete on Today, manual entries (Dad Lab, extra activities), and backfill adjustments. Everything adds up for MO compliance."
-          maxShowCount={3}
-        />
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
           <Tabs
+            sx={{ minWidth: 0, flex: 1 }}
             value={activeTab}
             onChange={handleTabChange}
             variant="scrollable"
@@ -146,6 +142,11 @@ export default function RecordsPage() {
             <Tab label="Portfolio" />
             <Tab label="Book Responses" />
           </Tabs>
+          <HelpStrip
+            pageKey="records"
+            text="Hours come from three sources: checklist items you complete on Today, manual entries (Dad Lab, extra activities), and backfill adjustments. Everything adds up for MO compliance."
+          />
+
         </Box>
       </Container>
       {activeTab === 0 && <HoursComplianceTab />}

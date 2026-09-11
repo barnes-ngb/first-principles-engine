@@ -16,6 +16,8 @@
 @media (max-width: 899.95px) {
   .app-shell {
     grid-template-columns: 1fr;
+    /* Keep short pages from stretching the sticky header into spare height. */
+    grid-template-rows: auto 1fr;
   }
   .app-shell__nav {
     display: none;
