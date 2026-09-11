@@ -12,7 +12,7 @@ export default function MonthlyReviewReaderPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const familyId = useFamilyId()
-  const { children } = useActiveChild()
+  const { children, setActiveChildId } = useActiveChild()
 
   const { review } = useMonthlyReview(familyId, reviewId)
 
@@ -28,8 +28,11 @@ export default function MonthlyReviewReaderPage() {
       reviewId={reviewId}
       defaultMode="parent"
       childName={childName}
-      // Return to Month, retaining the shared child selection and diagnostic view.
-      onExit={() => navigate(reviewPath('month', searchParams))}
+      // A saved reader link may open a different child's book than the active one.
+      onExit={() => {
+        if (review) setActiveChildId(review.childId)
+        navigate(reviewPath('month', searchParams))
+      }}
     />
   )
 }

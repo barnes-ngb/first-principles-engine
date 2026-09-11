@@ -22,7 +22,7 @@ import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { db, weeklyReviewsCollection, weeklyReviewDocId } from '../../core/firebase/firestore'
-import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useActiveChild, type UseActiveChildResult } from '../../core/hooks/useActiveChild'
 import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
 import { lastCompletedSchoolWeekKey } from '../../core/utils/time'
@@ -99,12 +99,20 @@ import { useWeeklyReviewHistory } from './useWeeklyReviewHistory'
  * zero reads. Capability, never a name.
  */
 export default function WeeklyReviewPage({ embedded = false }: { embedded?: boolean }) {
-  const { isChildProfile } = useActiveChild()
-  if (isChildProfile) return null
-  return <WeeklyReviewBody embedded={embedded} />
+  const childContext = useActiveChild()
+  return <WeeklyReviewContent childContext={childContext} embedded={embedded} />
 }
 
-function WeeklyReviewBody({ embedded }: { embedded: boolean }) {
+/** Use the Review selector's loaded children, including newly added children. */
+export function WeeklyReviewContent({ childContext, embedded = false }: {
+  childContext: UseActiveChildResult
+  embedded?: boolean
+}) {
+  if (childContext.isChildProfile) return null
+  return <WeeklyReviewBody childContext={childContext} embedded={embedded} />
+}
+
+function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveChildResult; embedded: boolean }) {
   const familyId = useFamilyId()
   const {
     children,
@@ -113,7 +121,7 @@ function WeeklyReviewBody({ embedded }: { embedded: boolean }) {
     setActiveChildId,
     isLoading: childrenLoading,
     addChild,
-  } = useActiveChild()
+  } = childContext
 
   // The most recent school week whose Mon–Fri has ended (UX-218). On Saturday
   // and Sunday that is the week just finished; Monday–Friday it is the previous

@@ -10,7 +10,7 @@ import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import { monthlyBookPath } from '../review/reviewNav'
 import { LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { useActiveChild } from '../../core/hooks/useActiveChild'
+import type { UseActiveChildResult } from '../../core/hooks/useActiveChild'
 import { useMonthlyReviews } from '../../core/hooks/useMonthlyReviews'
 import type { MonthlyReview, MonthlyReviewPage } from '../../core/types'
 import { MonthlyReviewStatus } from '../../core/types/enums'
@@ -25,11 +25,14 @@ function formatMonthLabel(month: string): string {
   return d.toLocaleString(undefined, { month: 'long', year: 'numeric' })
 }
 
-export default function MonthlyBooksTab() {
+export default function MonthlyBooksTab({ childContext }: {
+  childContext: Pick<UseActiveChildResult, 'children' | 'activeChildId'>
+}) {
   const familyId = useFamilyId()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const { children, activeChildId } = useActiveChild()
+  const { children, activeChildId } = childContext
+  const selectedChildren = useMemo(() => children.filter(c => c.id === activeChildId), [children, activeChildId])
   const { reviews, loading } = useMonthlyReviews(familyId)
   const [generateOpen, setGenerateOpen] = useState(false)
 
@@ -69,7 +72,7 @@ export default function MonthlyBooksTab() {
           variant="contained"
           startIcon={<AutoStoriesIcon />}
           onClick={() => setGenerateOpen(true)}
-          disabled={children.length === 0}
+          disabled={selectedChildren.length === 0}
         >
           Generate Now
         </Button>
@@ -97,8 +100,8 @@ export default function MonthlyBooksTab() {
       <GenerateNowDialog
         open={generateOpen}
         onClose={() => setGenerateOpen(false)}
-        childOptions={children}
-        defaultChildId={activeChildId || children[0]?.id}
+        childOptions={selectedChildren}
+        defaultChildId={activeChildId}
         onGenerated={handleGenerated}
       />
     </Stack>
@@ -125,7 +128,7 @@ function EmptyState() {
       </Typography>
       <Typography color="text.secondary">
         Click <strong>Generate Now</strong> to create one — try last month for
-        either kid.
+        this child.
       </Typography>
     </Box>
   )

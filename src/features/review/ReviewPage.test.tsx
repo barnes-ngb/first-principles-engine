@@ -8,24 +8,43 @@ import ReviewPage from './ReviewPage'
 import ReviewRedirect from './ReviewRedirect'
 import MonthlyReviewReaderPage from '../monthly-review/MonthlyReviewReaderPage'
 
-const children = [{ id: 'c1', name: 'Lincoln' }, { id: 'c2', name: 'London' }] as Child[]
-const ChildContext = createContext<UseActiveChildResult>(null!)
+const initialChildren = [{ id: 'c1', name: 'Lincoln' }, { id: 'c2', name: 'London' }] as Child[]
+let savedChildren = initialChildren
+const ChildContext = createContext<{
+  activeChildId: string; setActiveChildId: (id: string) => void; kid: boolean
+}>(null!)
+// Match production: the selected ID is shared, but each hook loads its OWN child
+// array once. A context that shared the whole array would mask the Add Child bug.
 vi.mock('../../core/hooks/useActiveChild', () => ({
-  useActiveChild: () => useContext(ChildContext),
+  useActiveChild: function useActiveChild(): UseActiveChildResult {
+    const { activeChildId, setActiveChildId, kid } = useContext(ChildContext)
+    const [children, setChildren] = useState(() => [...savedChildren])
+    return {
+      children, activeChildId, setActiveChildId,
+      activeChild: children.find(c => c.id === activeChildId),
+      isChildProfile: kid, isLoading: false,
+      addChild: child => {
+        savedChildren = [...savedChildren, child]
+        setChildren(previous => [...previous, child])
+        setActiveChildId(child.id)
+      },
+    }
+  },
 }))
 vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'family' }))
 vi.mock('../../components/ChildSelector', () => ({
-  default: ({ selectedChildId, onSelect }: { selectedChildId: string; onSelect: (id: string) => void }) => (
-    <select aria-label="Review child" value={selectedChildId} onChange={e => onSelect(e.target.value)}>
-      <option value="c1">Lincoln</option><option value="c2">London</option>
-    </select>
-  ),
+  default: ({ children, selectedChildId, onSelect, onChildAdded }: {
+    children: Child[]; selectedChildId: string; onSelect: (id: string) => void; onChildAdded: (child: Child) => void
+  }) => <><select aria-label="Review child" value={selectedChildId} onChange={e => onSelect(e.target.value)}>
+    {children.map(child => <option key={child.id} value={child.id}>{child.name}</option>)}
+  </select><button onClick={() => onChildAdded({ id: 'c3', name: 'New child' } as Child)}>Add child</button></>,
 }))
 vi.mock('../weekly-review/WeeklyReviewPage', () => ({
-  default: function WeeklyReview({ embedded }: { embedded: boolean }) {
-    const { activeChildId } = useContext(ChildContext)
-    return <div>Week for {activeChildId}{embedded ? '' : ' duplicate shell'}</div>
-  },
+  WeeklyReviewContent: ({ embedded, childContext }: { embedded: boolean; childContext: UseActiveChildResult }) => (
+    <div>Week for {childContext.activeChildId}{embedded ? '' : ' duplicate shell'}
+      <span>Weekly child: {childContext.activeChild?.name}</span>
+    </div>
+  ),
 }))
 const monthlyReads = vi.fn()
 vi.mock('../../core/hooks/useMonthlyReviews', () => ({
@@ -36,9 +55,14 @@ vi.mock('../../core/hooks/useMonthlyReviews', () => ({
 }))
 vi.mock('../monthly-review/MonthlyPhoto', () => ({ MonthlyPhoto: () => null }))
 vi.mock('../monthly-review/GenerateNowDialog', () => ({
-  GenerateNowDialog: ({ open, defaultChildId, onGenerated }: {
-    open: boolean; defaultChildId: string; onGenerated: (id: string) => void
-  }) => open ? <button onClick={() => onGenerated(`${defaultChildId}_new`)}>Generate for {defaultChildId}</button> : null,
+  GenerateNowDialog: ({ open, defaultChildId, childOptions, onGenerated }: {
+    open: boolean; defaultChildId: string; childOptions: Child[]; onGenerated: (id: string) => void
+  }) => open ? <div role="dialog" aria-label="Generate book">
+    <p>Default child: {defaultChildId}</p>
+    {childOptions.map(child => <button key={child.id} onClick={() => onGenerated(`${child.id}_new`)}>
+      Generate for {child.id}
+    </button>)}
+  </div> : null,
 }))
 vi.mock('../monthly-review/MonthlyReviewReader', () => ({
   MonthlyReviewReader: ({ childName, defaultMode, onExit }: {
@@ -48,10 +72,7 @@ vi.mock('../monthly-review/MonthlyReviewReader', () => ({
 
 function Family({ children: content, kid }: { children: ReactNode; kid: boolean }) {
   const [activeChildId, setActiveChildId] = useState('c1')
-  return <ChildContext.Provider value={{
-    children, activeChildId, setActiveChildId, activeChild: children.find(c => c.id === activeChildId),
-    isChildProfile: kid, isLoading: false, addChild: () => {},
-  }}>{content}</ChildContext.Provider>
+  return <ChildContext.Provider value={{ activeChildId, setActiveChildId, kid }}>{content}</ChildContext.Provider>
 }
 
 function Location() {
@@ -75,6 +96,7 @@ function renderReview(url = '/review', kid = false) {
 }
 
 beforeEach(() => {
+  savedChildren = initialChildren
   monthlyReads.mockReset().mockReturnValue({ loading: false, reviews: [
     { id: 'c1_august', childId: 'c1', month: '2026-08', pages: [], status: 'published' },
     { id: 'c2_august', childId: 'c2', month: '2026-08', pages: [], status: 'published' },
@@ -84,7 +106,7 @@ beforeEach(() => {
 describe('Review — one child context across Week and Month', () => {
   it('retains the selected child through tabs and browser history, filtering actual monthly cards', () => {
     renderReview()
-    expect(screen.getByText('Week for c1')).toBeInTheDocument()
+    expect(screen.getByText('Week for c1', { exact: false })).toBeInTheDocument()
     expect(monthlyReads).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('tab', { name: 'Month' }))
     expect(screen.getByText('Lincoln — August 2026')).toBeInTheDocument()
@@ -94,7 +116,7 @@ describe('Review — one child context across Week and Month', () => {
     expect(screen.queryByText('Lincoln — August 2026')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.getByRole('tab', { name: 'Week' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Week for c2')).toBeInTheDocument()
+    expect(screen.getByText('Week for c2', { exact: false })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Forward' }))
     expect(screen.getByRole('tab', { name: 'Month' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('London — August 2026')).toBeInTheDocument()
@@ -118,8 +140,27 @@ describe('Review — one child context across Week and Month', () => {
     renderReview('/review?period=month&diag=1')
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'c2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Generate Now' }))
+    expect(screen.getByText('Default child: c2')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate for c1' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Generate for c2' }))
     expect(screen.getByRole('status')).toHaveTextContent('/review/monthly-books/c2_new?diag=1')
+    fireEvent.click(screen.getByRole('button', { name: 'Exit book' }))
+    expect(screen.getByRole('combobox')).toHaveValue('c2')
+    expect(screen.getByText('London — August 2026')).toBeInTheDocument()
+  })
+
+  it.each(['week', 'month'])('propagates an added child into the mounted %s without reloading', period => {
+    renderReview(`/review?period=${period}`)
+    fireEvent.click(screen.getByRole('button', { name: 'Add child' }))
+    expect(screen.getByRole('combobox')).toHaveValue('c3')
+    if (period === 'week') {
+      expect(screen.getByText('Weekly child: New child')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('tab', { name: 'Month' }))
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Now' }))
+    expect(screen.getByText('Default child: c3')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Generate for c3' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate for c1' })).not.toBeInTheDocument()
   })
 
   it.each(['/review', '/review?period=month'])('does not mount parent content or monthly reads for a child at %s', url => {
@@ -133,12 +174,15 @@ describe('Review — one child context across Week and Month', () => {
   it('keeps old weekly links working with diagnostics', () => {
     renderReview('/weekly-review?diag=1')
     expect(screen.getByRole('status')).toHaveTextContent('/review?diag=1')
-    expect(screen.getByText('Week for c1')).toBeInTheDocument()
+    expect(screen.getByText('Week for c1', { exact: false })).toBeInTheDocument()
   })
 
-  it('keeps old monthly reader links working', () => {
+  it('returns a saved monthly reader link to that book’s child archive', () => {
     renderReview('/progress/monthly-books/c2_august?diag=1')
     expect(screen.getByRole('status')).toHaveTextContent('/review/monthly-books/c2_august?diag=1')
     expect(screen.getByText('London parent book')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Exit book' }))
+    expect(screen.getByRole('combobox')).toHaveValue('c2')
+    expect(screen.getByText('London — August 2026')).toBeInTheDocument()
   })
 })

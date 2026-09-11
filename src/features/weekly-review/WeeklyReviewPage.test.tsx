@@ -94,7 +94,7 @@ vi.mock('../../core/firebase/firestore', () => ({
   weeklyReviewDocId: (weekKey: string, childId: string) => `${weekKey}_${childId}`,
 }))
 
-import WeeklyReviewPage from './WeeklyReviewPage'
+import WeeklyReviewPage, { WeeklyReviewContent } from './WeeklyReviewPage'
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -161,6 +161,15 @@ describe('the page is parent-only (UX-219)', () => {
     expect(screen.queryByTestId('child-selector')).not.toBeInTheDocument()
     expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
     expect(screen.getByText('The Week by Subject')).toBeInTheDocument()
+  })
+
+  it('uses the supplied child data instead of loading a separate stale child list', () => {
+    const child = { id: 'c3', name: 'New child' }
+    render(<WeeklyReviewContent embedded childContext={{
+      ...PARENT, children: [child], activeChildId: child.id, activeChild: child,
+    }} />)
+    expect(mockUseWeekHours).toHaveBeenCalledWith('fam-1', 'c3', expect.any(String))
+    expect(mockUseHistory).toHaveBeenCalledWith('fam-1', 'c3', expect.any(String))
   })
 
   it('renders nothing at all for a child profile', () => {

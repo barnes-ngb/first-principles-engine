@@ -5,23 +5,23 @@ import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
 import ChildSelector from '../../components/ChildSelector'
-import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useActiveChild, type UseActiveChildResult } from '../../core/hooks/useActiveChild'
 import MonthlyBooksTab from '../monthly-review/MonthlyBooksTab'
-import WeeklyReviewPage from '../weekly-review/WeeklyReviewPage'
+import { WeeklyReviewContent } from '../weekly-review/WeeklyReviewPage'
 import { reviewPath } from './reviewNav'
 import type { ReviewPeriod } from './reviewNav'
 
 export default function ReviewPage() {
-  const { isChildProfile } = useActiveChild()
-  if (isChildProfile) return null
-  return <ParentReview />
+  const childContext = useActiveChild()
+  if (childContext.isChildProfile) return null
+  return <ParentReview childContext={childContext} />
 }
 
-function ParentReview() {
+function ParentReview({ childContext }: { childContext: UseActiveChildResult }) {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const period: ReviewPeriod = params.get('period') === 'month' ? 'month' : 'week'
-  const { children, activeChildId, setActiveChildId, addChild, isLoading } = useActiveChild()
+  const { children, activeChildId, setActiveChildId, addChild, isLoading } = childContext
   return (
     <Container maxWidth="lg" sx={{ py: 2 }}>
       <Stack spacing={2}>
@@ -44,7 +44,7 @@ function ParentReview() {
         />
         {!isLoading && activeChildId && (
           <div id="review-panel" role="tabpanel" aria-labelledby={`review-${period}-tab`}>
-            {period === 'month' ? <MonthlyBooksTab /> : <WeeklyReviewPage embedded />}
+            {period === 'month' ? <MonthlyBooksTab childContext={childContext} /> : <WeeklyReviewContent childContext={childContext} embedded />}
           </div>
         )}
       </Stack>
