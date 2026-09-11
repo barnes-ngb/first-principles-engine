@@ -70,3 +70,16 @@ describe('AppShell — Watch Library nav entry (FEAT-132)', () => {
     expect(screen.queryByText('Watch Library')).not.toBeInTheDocument()
   })
 })
+
+
+describe('AppShell — direct Curriculum access', () => {
+  it('takes the parent directly to Curriculum', () => {
+    renderAs(UserProfile.Parents)
+    expect(screen.getByRole('link', { name: 'Curriculum' })).toHaveAttribute('href', '/curriculum')
+  })
+
+  it.each([UserProfile.Lincoln, UserProfile.London])('keeps Curriculum out of the %s child menu', (profile) => {
+    renderAs(profile)
+    expect(screen.queryByRole('link', { name: 'Curriculum' })).not.toBeInTheDocument()
+  })
+})

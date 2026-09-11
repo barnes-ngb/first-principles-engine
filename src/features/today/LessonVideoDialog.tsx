@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { addDoc } from 'firebase/firestore'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
@@ -182,6 +182,46 @@ export default function LessonVideoDialog({
     // search identity is stable for a given lesson; run on open only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  /**
+   * UX-342 — a picked video belongs to the child it was found for.
+   *
+   * This dialog holds a found video, an exclusion list and a "logged N min"
+   * confirmation across renders, while `childId`, `childName` and `date` are
+   * **live props** read from Today's own `ChildSelector` and day arrows. So a
+   * parent could open it for Lincoln, switch to London in the selector forty
+   * lines up, tap *30 min*, and put those minutes on London's `hoursAdjustments`
+   * — with the confirmation obligingly reading *"Logged 30m for London"* about a
+   * video found for his brother. Reachable today, with the app-bar switcher
+   * still off (`UX-330`).
+   *
+   * The census's verdict is **RESET**, and the reasoning is in the row: a picked
+   * video is an intent — nobody has watched anything yet, and finding another
+   * costs one tap. So the dialog closes rather than re-targeting, and the
+   * caller's own scope notice names it.
+   *
+   * **Nothing about the hours write changed** — not the minutes, not the
+   * subject, not the fold. What changed is only whether a write addressed to one
+   * child can be made against another, which is the attribution-only rail
+   * (`DOC-25`), and the arithmetic is pinned by test with a positive control.
+   *
+   * Runs on the identity, not on `open`: the effect above already owns the
+   * open/close reset, and collapsing the two would re-run a paid search every
+   * time a prop moved.
+   */
+  const identity = `${childId}|${date}`
+  const openedForRef = useRef(identity)
+  useEffect(() => {
+    if (openedForRef.current === identity) return
+    openedForRef.current = identity
+    if (!open) return
+    setPick(null)
+    setExcluded([])
+    setLoggedMinutes(null)
+    setLogError(null)
+    setRefineText('')
+    onClose()
+  }, [identity, open, onClose])
 
   const handleFindAnother = () => {
     void search(excluded)

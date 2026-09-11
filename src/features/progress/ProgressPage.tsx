@@ -33,6 +33,15 @@ const TABS: Array<{ label: string; slug: ProgressTabSlug; render: () => ReactNod
   { label: 'Word Wall', slug: PROGRESS_TABS.WordWall, render: () => <WordWall /> },
 ]
 
+const TAB_HELP: Record<ProgressTabSlug, string> = {
+  foundations: 'See what is taking shape in reading and math, and what to try next.',
+  'monthly-books': 'Read, generate, and print a book of the month’s learning.',
+  'learning-map': 'Explore skills by subject. Open a skill for details and practice ideas.',
+  curriculum: 'Manage workbooks and activities. Add pages to an existing workbook or add new resources below.',
+  'skill-snapshot': 'Review working levels, priority skills, and supports used by planning and teaching.',
+  'word-wall': 'See words collected through learning activities and revisit them together.',
+}
+
 export default function ProgressPage() {
   // URL is the source of truth: `?tab=<slug>` selects the tab so deep links
   // (e.g. planner "+ Add" → /progress?tab=curriculum) land on the right tab.
@@ -51,13 +60,9 @@ export default function ProgressPage() {
   return (
     <>
       <Container maxWidth="lg" sx={{ pt: { xs: 2, md: 3 } }}>
-        <HelpStrip
-          pageKey="progress"
-          text="Foundations shows how each child is doing across the reading and math spine — solid, forming, or at the frontier (the good edge) — plus what matters next, and growth in curiosity, persistence, articulation, self-awareness, and ownership. No grades."
-          maxShowCount={3}
-        />
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
           <Tabs
+            sx={{ minWidth: 0, flex: 1 }}
             value={tab}
             onChange={handleChange}
             variant="scrollable"
@@ -68,6 +73,9 @@ export default function ProgressPage() {
               <Tab key={t.label} label={t.label} />
             ))}
           </Tabs>
+          {TABS[tab].slug !== PROGRESS_TABS.Curriculum && (
+            <HelpStrip key={TABS[tab].slug} pageKey={TABS[tab].slug} text={TAB_HELP[TABS[tab].slug]} />
+          )}
         </Box>
       </Container>
       {/* UX-326: the tab bar is followed by the TAB, and by nothing else.

@@ -86,6 +86,7 @@ import {
   plannedMinutesClause,
 } from './dayProgressLabels'
 import { kidPalette } from '../../app/tokens'
+import { TodayDecision } from './todayScope'
 
 const subjectBucketColor: Record<string, string> = {
   Reading: '#3b82f6',
@@ -257,6 +258,14 @@ interface TodayChecklistProps {
   scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
   /** Recent scan records for looking up scan analysis on captured items. */
   recentScans?: ScanRecord[]
+  /**
+   * UX-343 — which of this component's own dialogs/drafts are open right now.
+   *
+   * Fires whenever the set changes. The page keeps the latest set and uses it to
+   * name what it closed when the child or the day changes underneath it, since
+   * the remount that clears them is otherwise silent.
+   */
+  onOpenDecisionsChange?: (open: TodayDecision[]) => void
 }
 
 export default function TodayChecklist({
@@ -295,6 +304,7 @@ export default function TodayChecklist({
   printingMaterials,
   scanFeedbackBySubject = {},
   recentScans = [],
+  onOpenDecisionsChange,
 }: TodayChecklistProps) {
   const navigate = useNavigate()
   const [editingPlan, setEditingPlan] = useState(false)
@@ -322,6 +332,39 @@ export default function TodayChecklist({
     const id = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(id)
   }, [])
+
+  /**
+   * UX-343 — tell the page which of THIS component's decisions are open.
+   *
+   * Four of Today's open decisions live down here rather than on the page: a
+   * lesson-video search with an hours logger in it, a row's photo dialog, a
+   * typed review note and a half-filled "add to today" row. All four write with
+   * the live child and date, and all four are cleared when the page remounts
+   * this component on a scope change.
+   *
+   * A remount is silent, and RESET's second half is *make the loss visible*. The
+   * page cannot see inside this component, so the open set is reported UP and
+   * the page — which still holds the previous scope during the render that
+   * remounts us — names them in one sentence. Reporting the set rather than the
+   * contents keeps this a view concern: the page learns that a note was being
+   * typed, never what it said.
+   */
+  useEffect(() => {
+    if (!onOpenDecisionsChange) return
+    const open: TodayDecision[] = []
+    if (videoLesson !== null) open.push(TodayDecision.LessonVideo)
+    if (captureDialogIndex !== null) open.push(TodayDecision.AddPhotos)
+    if (gradeNote !== null) open.push(TodayDecision.GradeNote)
+    if (addingItem && newItemTitle.trim() !== '') open.push(TodayDecision.AddItem)
+    onOpenDecisionsChange(open)
+  }, [
+    onOpenDecisionsChange,
+    videoLesson,
+    captureDialogIndex,
+    gradeNote,
+    addingItem,
+    newItemTitle,
+  ])
 
   const handleMasteryChip = (index: number, value: 'got-it' | 'working' | 'stuck') => {
     const current = (dayLog.checklist ?? [])[index]

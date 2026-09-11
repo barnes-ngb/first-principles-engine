@@ -32,9 +32,9 @@ import {
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import {
-  canOverwriteWorkingLevel,
   computeWorkingLevelFromSession,
   deriveWorkingLevelFromEvaluation,
+  manualOverrideHolds,
 } from '../quest/workingLevels'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -104,8 +104,10 @@ export function computeBackfillForMode(
     return { action: 'skip', reason: 'already set' }
   }
 
-  // Respect manual protection (redundant when undefined, but keeps contract consistent)
-  if (!canOverwriteWorkingLevel(currentWorkingLevel)) {
+  // Respect manual protection (redundant when undefined, but keeps contract
+  // consistent). The manual pin is the whole question here — this backfill only
+  // ever fills an EMPTY slot, so the UX-382 direction rule has nothing to weigh.
+  if (manualOverrideHolds(currentWorkingLevel)) {
     return { action: 'skip', reason: 'manual override protected' }
   }
 

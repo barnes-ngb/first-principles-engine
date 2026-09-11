@@ -5,7 +5,7 @@ import { applyToSnapshot } from '../evaluate/skillSnapshotWrites'
 import { hasSufficientCompletion } from './questBanking'
 import type { SessionQuestion } from './questTypes'
 import {
-  canOverwriteWorkingLevel,
+  manualOverrideHolds,
   computeQuestActivityMarker,
   computeWorkingLevelFromSession,
   sessionHighWaterLevel,
@@ -203,19 +203,21 @@ describe('guards left unchanged (#1326 sufficiency + manual override)', () => {
   })
 
   it('a recent manual pin still blocks an automated write (so the activity write is skipped too)', () => {
+    // The marker's own gate reads the manual pin alone — it proposes no level,
+    // so there is no direction for the UX-382 rule to weigh.
     const recentManual: WorkingLevel = {
       level: 6,
       updatedAt: new Date().toISOString(),
       source: 'manual',
     }
-    expect(canOverwriteWorkingLevel(recentManual)).toBe(false)
+    expect(manualOverrideHolds(recentManual)).toBe(true)
 
     const oldManual: WorkingLevel = {
       level: 6,
       updatedAt: '2020-01-01T00:00:00.000Z',
       source: 'manual',
     }
-    expect(canOverwriteWorkingLevel(oldManual)).toBe(true)
+    expect(manualOverrideHolds(oldManual)).toBe(false)
   })
 
   it('recording activity never adds, removes, or reorders workingLevels keys', () => {

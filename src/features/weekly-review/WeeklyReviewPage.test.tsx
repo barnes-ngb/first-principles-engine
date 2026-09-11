@@ -49,6 +49,14 @@ vi.mock('./useWeeklyReviewHistory', () => ({
   useWeeklyReviewHistory: (...args: unknown[]) => mockUseHistory(...args),
 }))
 
+// UX-388's rollup reads three collections of its own; its own test file owns
+// that. Here it stands in for the section, so the page's ORDER and the page's
+// audience gate are what is being asserted.
+const mockUseWeekBySubject = vi.fn()
+vi.mock('./useWeekBySubject', () => ({
+  useWeekBySubject: (...args: unknown[]) => mockUseWeekBySubject(...args),
+}))
+
 // One document, delivered synchronously. `null` is the Saturday case: the
 // overnight cron has not written anything for the week the page names.
 let currentDoc: WeeklyReview | null = null
@@ -121,6 +129,21 @@ beforeEach(() => {
   mockUseFamilyId.mockReturnValue('fam-1')
   mockUseWeekHours.mockReturnValue({ totalMinutes: 288, loading: false, error: null })
   mockUseHistory.mockReturnValue({ reviews: [], loading: false, failed: false })
+  mockUseWeekBySubject.mockReturnValue({
+    subjects: [
+      {
+        subjectBucket: 'Reading',
+        label: 'Reading',
+        totalMinutes: 240,
+        items: [{ key: 'a', name: 'Fast Phonics', count: 4 }],
+        artifactCount: 1,
+        topics: [],
+      },
+    ],
+    loading: false,
+    hoursFailed: false,
+    evidenceFailed: false,
+  })
 })
 
 // ── The audience rule ───────────────────────────────────────────────────────
@@ -144,6 +167,7 @@ describe('the page is parent-only (UX-219)', () => {
     expect(mockOnSnapshot).not.toHaveBeenCalled()
     expect(mockUseWeekHours).not.toHaveBeenCalled()
     expect(mockUseHistory).not.toHaveBeenCalled()
+    expect(mockUseWeekBySubject).not.toHaveBeenCalled()
   })
 
   it('gates on capability, never on a name', () => {
@@ -287,6 +311,24 @@ describe('a week with nothing in it is still a week (UX-219)', () => {
     expect(
       screen.getByText(/Written by the weekly review AI from what was logged/),
     ).toBeInTheDocument()
+  })
+
+  it('puts the by-subject rollup FIRST, above the log, and removes nothing (UX-388)', () => {
+    // Owner, 2026-09-11: the week summary by topic, *"above the log, as the
+    // first thing you see."* Order is the whole of the ask — a rollup below
+    // five day cards is a rollup nobody reaches on a phone — and it is the one
+    // property no unit test below the page can see.
+    const { container } = render(<WeeklyReviewPage />)
+    const text = container.textContent ?? ''
+    const rollup = text.indexOf('The Week by Subject')
+    const hours = text.indexOf('Hours and Coverage')
+    const question = text.indexOf('Was that enough this week?')
+
+    expect(rollup).toBeGreaterThanOrEqual(0)
+    // Nothing below it moved or went away.
+    expect(hours).toBeGreaterThan(rollup)
+    expect(question).toBeGreaterThan(hours)
+    expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
   })
 
   it('shows the adjustments section, with its Apply button, when there are some', () => {

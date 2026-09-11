@@ -582,19 +582,19 @@ export default function EvaluateChatPage() {
       if (domain === 'reading') {
         // Phonics working level
         const phonicsLevel = deriveWorkingLevelFromEvaluation(findings, 'phonics')
-        if (phonicsLevel && canOverwriteWorkingLevel(mergedWorkingLevels.phonics)) {
+        if (phonicsLevel && canOverwriteWorkingLevel(mergedWorkingLevels.phonics, phonicsLevel)) {
           mergedWorkingLevels = { ...mergedWorkingLevels, phonics: phonicsLevel }
         }
         // Comprehension working level
         const compLevel = deriveWorkingLevelFromEvaluation(findings, 'comprehension')
-        if (compLevel && canOverwriteWorkingLevel(mergedWorkingLevels.comprehension)) {
+        if (compLevel && canOverwriteWorkingLevel(mergedWorkingLevels.comprehension, compLevel)) {
           mergedWorkingLevels = { ...mergedWorkingLevels, comprehension: compLevel }
         }
       }
       // Math evaluations: derive math working level if domain is math
       if (domain === 'math') {
         const mathLevel = deriveWorkingLevelFromEvaluation(findings, 'math')
-        if (mathLevel && canOverwriteWorkingLevel(mergedWorkingLevels.math)) {
+        if (mathLevel && canOverwriteWorkingLevel(mergedWorkingLevels.math, mathLevel)) {
           mergedWorkingLevels = { ...mergedWorkingLevels, math: mathLevel }
         }
       }

@@ -1,6 +1,6 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc, runTransaction, setDoc } from 'firebase/firestore'
 
-import { skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { db, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import type {
   ConceptualBlock,
   ConceptualBlockSource,
@@ -11,6 +11,8 @@ import type {
   SkillSnapshot,
   StopRule,
   SupportDefault,
+  WorkingLevel,
+  WorkingLevels,
 } from '../../core/types/evaluation'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { effectiveStatus, generateBlockId } from '../../core/utils/blockerLifecycle'
@@ -393,4 +395,81 @@ export async function writeSnapshotUpdate(
     { merge: true },
   )
   return { changed: true }
+}
+
+// ── The working-level restore (UX-383; owner decision, 2026-09-11) ──────
+
+/** Why a restore did not write. Each has its own sentence on the Dev tab. */
+export type RestoreWriteRefusal =
+  /** The slot no longer holds the exact level the parent was shown. */
+  | 'slot-moved'
+  /** The proposed level does not raise the standing one. */
+  | 'not-higher'
+
+export type RestoreWriteOutcome =
+  | { status: 'written'; level: WorkingLevel }
+  | { status: 'refused'; reason: RestoreWriteRefusal; stored: WorkingLevel | undefined }
+
+/**
+ * Is the slot still exactly what the parent was shown, and does the proposed
+ * level raise it? Pure, so the rule is assertable without a Firestore mock, and
+ * shared by the transaction below.
+ *
+ * **Identity, not just the number** (Codex round 2, P1). Merging one key
+ * protects *sibling* levels from a concurrent write but not this key from one:
+ * a quest raising the slot to 6, or writing a freshly measured 3, between the
+ * read the parent saw and this write would be replaced by the restore and
+ * pinned as a parent's word. So the slot must still hold the same level, the
+ * same source and the same `updatedAt` — anything else means something
+ * measured the child since, and the restore stands down and says so.
+ */
+export function planRestoredWorkingLevelWrite(
+  stored: WorkingLevel | undefined,
+  expect: WorkingLevel,
+  level: number,
+  at: string,
+  evidence: string,
+): RestoreWriteOutcome {
+  const same =
+    stored != null &&
+    stored.level === expect.level &&
+    stored.source === expect.source &&
+    stored.updatedAt === expect.updatedAt
+  if (!same) return { status: 'refused', reason: 'slot-moved', stored }
+  // Upgrade-only, like everything else in this module: a restore may raise a
+  // level a scan pushed down and may never lower one. Lowering by hand is the
+  // Skill Snapshot stepper's job, which is a different, deliberate act.
+  if (level <= stored.level) return { status: 'refused', reason: 'not-higher', stored }
+  return { status: 'written', level: { level, updatedAt: at, source: 'manual', evidence } }
+}
+
+/**
+ * Write a parent-confirmed restored working level. **The one place this module
+ * writes `workingLevels`**, and the only snapshot write in the repo that may
+ * replace a scan-written level.
+ *
+ * The read, the identity check and the write are ONE `runTransaction` (Codex
+ * round 2, P1; the UX-231 precedent), and the write is the **single field path**
+ * `workingLevels.<key>` — never the map — so nothing but this key can move.
+ */
+export async function writeRestoredWorkingLevel(
+  familyId: string,
+  childId: string,
+  args: { key: keyof WorkingLevels; expect: WorkingLevel; level: number; evidence: string; at?: string },
+): Promise<RestoreWriteOutcome> {
+  const ref = doc(skillSnapshotsCollection(familyId), childId)
+  const at = args.at ?? new Date().toISOString()
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref)
+    const stored = snap.exists()
+      ? (snap.data() as Partial<SkillSnapshot>).workingLevels?.[args.key]
+      : undefined
+    const outcome = planRestoredWorkingLevelWrite(stored, args.expect, args.level, at, args.evidence)
+    if (outcome.status !== 'written') return outcome
+    tx.update(ref, {
+      [`workingLevels.${args.key}`]: JSON.parse(JSON.stringify(outcome.level)),
+      updatedAt: at,
+    })
+    return outcome
+  })
 }

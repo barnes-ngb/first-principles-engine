@@ -42,9 +42,11 @@ import type {
   ConceptStateKind,
   EvidenceRef,
   LearnerModel,
+  ProjectedWorkingLevels,
 } from '../../core/types/learnerModel'
 import type { HoursRequirement } from '../../core/compliance/stateCompliance'
 import { FOUNDATION_NODE_MAP } from '../../core/foundations'
+import { projectedThroughSummary } from '../../core/foundations/projectedThroughSummary'
 import {
   isPositionAddressable,
   matchWorkbookBridge,
@@ -822,7 +824,7 @@ const buildWorkbookSection = (input: DataReviewExportInput): string[] => {
     cell(w.subjectBucket),
     `${w.currentPosition} / ${w.totalUnits} ${w.unitLabel ?? ''}`.trim(),
     w.completed ? 'yes' : 'no',
-    cell(w.updatedAt),
+    cell(storedDate(w.updatedAt)),
   ])
 
   return [
@@ -848,6 +850,47 @@ const buildWorkbookSection = (input: DataReviewExportInput): string[] => {
     '',
     '---',
   ]
+}
+
+/**
+ * How the re-projection watermark reads in a report (UX-384). The field holds
+ * the working LEVELS a projection was last computed from (FIX-225), one slot per
+ * driving key with `null` for "no level" — so there are three distinct things to
+ * say and collapsing any two of them makes the line lie:
+ *
+ * - **absent** — the re-projection has never run on this model;
+ * - **recorded, no level** — it ran and there was nothing to project from;
+ * - **recorded with levels** — it ran, and these are the numbers it read.
+ */
+export function projectedThroughLine(
+  projected: ProjectedWorkingLevels | undefined,
+): string {
+  const summary = projectedThroughSummary(projected, DASH)
+  if (summary == null) {
+    return '**never recorded — the re-projection has not run on this model**'
+  }
+  return summary === '' ? DASH : summary
+}
+
+/**
+ * A stored date that may not be a string (UX-384). `activityConfigs` store ISO
+ * strings, but the legacy `workbookConfigs` documents carry Firestore
+ * `Timestamp`s, and `String(timestamp)` printed `[object Object]` in the export
+ * — a row that names its own field and then refuses to say it.
+ */
+export function storedDate(value: unknown): string {
+  if (value == null || value === '') return DASH
+  if (typeof value === 'string') return value
+  if (value instanceof Date) return value.toISOString()
+  const ts = value as { toDate?: () => Date; seconds?: number }
+  if (typeof ts.toDate === 'function') {
+    const d = ts.toDate()
+    return Number.isNaN(d.getTime()) ? DASH : d.toISOString()
+  }
+  if (typeof ts.seconds === 'number' && Number.isFinite(ts.seconds)) {
+    return new Date(ts.seconds * 1000).toISOString()
+  }
+  return DASH
 }
 
 const STATE_ORDER: ConceptStateKind[] = ['frontier', 'forming', 'solid', 'not-yet']
@@ -882,6 +925,12 @@ const buildLearnerModelSection = (input: DataReviewExportInput): string[] => {
     `| graphVersion | \`${cell(model.graphVersion)}\` |`,
     `| seededAt | ${cell(model.seededAt)} |`,
     `| updatedAt | ${cell(model.updatedAt)} |`,
+    // UX-384: whether FIX-225's working-level re-projection has ever run, and on
+    // which levels. Without it two exports and two screenshots could not answer
+    // "did yesterday's feature fire?" — which is the question a diagnostic
+    // surface exists to answer. Absent means NEVER RECORDED, which is a real and
+    // different state from "recorded with no level", so it is said in words.
+    `| projectedThrough | ${projectedThroughLine(model.projectedThrough)} |`,
     `| synthesis.generatedAt | ${cell(generatedAt)} |`,
     `| synthesisStaleAt | ${cell(staleAt)} |`,
     `| synthesis fresh? | ${stale ? '**STALE — the stored synthesis is behind the concept states**' : 'current'} |`,

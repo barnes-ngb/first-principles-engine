@@ -34,6 +34,7 @@ import {
   setDecision,
 } from './adjustmentDecisions'
 import type { DecisionDraft } from './adjustmentDecisions'
+import WeekBySubject from './WeekBySubject'
 import WeekInEvidence from './WeekInEvidence'
 import WeekPaceSection from './WeekPaceSection'
 import WeekReflectionCard from './WeekReflectionCard'
@@ -55,12 +56,17 @@ import { useWeeklyReviewHistory } from './useWeeklyReviewHistory'
  * What is left is the honest layer FEAT-203 built underneath, and it can never
  * be empty:
  *
- *   1. **Hours** — stated, never against a target (UX-211).
- *   2. **The evidence counts** — books, reading sessions, teach-backs (UX-219).
- *   3. **The observed rate** — parent-only, observed, never required (UX-213).
- *   4. **Pace adjustments** — the one weekly AI output with a real job, because
+ *   1. **The week by subject and topic** — the rollup, ABOVE the log (UX-388).
+ *      Owner, 2026-09-11: *"the current week summary by topic"*, as the first
+ *      thing you see. Subject sections, strands sub-grouped by their topic, no
+ *      target anywhere, and every minute from the shared counting path the
+ *      hours line below it folds. It ADDED a section; nothing was removed.
+ *   2. **Hours** — stated, never against a target (UX-211).
+ *   3. **The evidence counts** — books, reading sessions, teach-backs (UX-219).
+ *   4. **The observed rate** — parent-only, observed, never required (UX-213).
+ *   5. **Pace adjustments** — the one weekly AI output with a real job, because
  *      it feeds next week's plan. Rendered **only when there are any**.
- *   5. **The week's question** — answered by a person (UX-214).
+ *   6. **The week's question** — answered by a person (UX-214).
  *
  * There is **no empty state**, because there is nothing left that can be empty:
  * a week with nothing logged reads *"No hours logged this week."*, *"No books or
@@ -285,24 +291,16 @@ function WeeklyReviewBody() {
 
   return (
     <Page>
-      <Typography variant="h4" component="h1">
-        Weekly Review
-      </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+        <Typography variant="h5" component="h1">Weekly Review</Typography>
+        <HelpStrip
+          pageKey="weekly-review"
+          text="A record of the week that just ended — the hours it held, what got made, how fast the workbooks are moving, and your own read on it. None of it is scored against a target. The one AI-written part is Pace Adjustments, which appears only when the weekly review has suggestions for next week's plan."
+        />
+      </Stack>
       <Typography variant="body2" color="text.secondary">
         {weekRangeLabel}
       </Typography>
-      {/*
-        The provenance sentence has to be exactly true (Codex round 1, P2). An
-        earlier draft read "Nothing here is written by AI" — right about the
-        hours, the counts, the rate and the question, and wrong about Pace
-        Adjustments, the one section that IS weekly AI output and the one a
-        parent might act on.
-      */}
-      <HelpStrip
-        pageKey="weekly-review"
-        text="A record of the week that just ended — the hours it held, what got made, how fast the workbooks are moving, and your own read on it. None of it is scored against a target. The one AI-written part is Pace Adjustments, which appears only when the weekly review has suggestions for next week's plan."
-        maxShowCount={3}
-      />
 
       <ChildSelector
         children={children}
@@ -314,6 +312,19 @@ function WeeklyReviewBody() {
 
       {!childrenLoading && !isLoading && activeChildId && (
         <>
+          {/* The week by subject and topic — FIRST, above the log (UX-388).
+              Owner, 2026-09-11: *"the current week summary by topic"*, as the
+              first thing you see. A log answers "what happened on Tuesday"; the
+              question on a Sunday morning is "what did we do this week, by
+              subject". Nothing below it moved. */}
+          <SectionErrorBoundary section="week-by-subject">
+            <WeekBySubject
+              familyId={familyId}
+              childId={activeChildId}
+              weekKey={weekKey}
+            />
+          </SectionErrorBoundary>
+
           {/* Hours, evidence counts and the observed coverage rate (UX-211 /
               UX-213 / UX-219). Renders with or without a review document — the
               hours are folded live and never came from it. */}

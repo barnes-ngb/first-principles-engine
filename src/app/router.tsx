@@ -5,6 +5,7 @@ import EvaluateChatPage from '../features/evaluate/EvaluateChatPage'
 import NotFoundPage from '../features/not-found/NotFoundPage'
 import PlannerChatPage from '../features/planner-chat/PlannerChatPage'
 import ProgressPage from '../features/progress/ProgressPage'
+import CurriculumTab from '../features/progress/CurriculumTab'
 import PortfolioPage from '../features/records/PortfolioPage'
 import RecordsPage from '../features/records/RecordsPage'
 import SettingsPage from '../features/settings/SettingsPage'
@@ -60,6 +61,7 @@ export const routes = [
       {
         element: <RequireParent />,
         children: [
+          { path: '/curriculum', element: <CurriculumTab /> },
           { path: '/weekly-review', element: <WeeklyReviewPage /> },
           // Watch Library's own home (FEAT-132) — curation is a parent job, so
           // it is route-gated as well as component-gated (`WatchLibraryTab`

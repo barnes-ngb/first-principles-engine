@@ -7,15 +7,38 @@ import {
   stripUndefined,
 } from '../../core/firebase/firestore'
 import type { BookProgress, ChapterQuestionPoolItem } from '../../core/types'
+import { ChapterSaveRefusal, type ChapterSaveOutcome } from './chapterSaveOutcome'
 import { isBookFinished, repairLegacySkips } from './chapterPool.logic'
 
 interface UseBookProgressResult {
   bookProgress: BookProgress | null
   loading: boolean
+  /**
+   * UX-356(a) — the read FAILED, as distinct from "this child has no progress
+   * on this book".
+   *
+   * The `onSnapshot` error handler set `bookProgress: null` and `loading:
+   * false`, which is byte-identical to an affirmative empty result. The parent
+   * surface then offered to generate a question pool that already exists, and
+   * the kid surface rendered a book as not started. That is this project's own
+   * read-side rule broken on its heaviest page — the weekly review's
+   * *"Couldn't read this week's hours"* precedent, and `useBusinessGoal`'s
+   * **GATE** verdict in the child-switch census: **a failed read is not an
+   * affirmative empty result.**
+   */
+  loadFailed: boolean
+  /**
+   * UX-355 — answers instead of throwing into nothing.
+   *
+   * This was a bare `await updateDoc(...)` with no catch anywhere on the path,
+   * called as `void onChapterAnswered(...)` from three places across the parent
+   * and kid surfaces. A rejected write was an unhandled promise rejection and
+   * the child's answer was gone on the next load with nothing on screen.
+   */
   updateChapter: (
     chapter: number,
     update: Partial<ChapterQuestionPoolItem>,
-  ) => Promise<void>
+  ) => Promise<ChapterSaveOutcome>
 }
 
 export function useBookProgress(
@@ -25,6 +48,7 @@ export function useBookProgress(
 ): UseBookProgressResult {
   const [bookProgress, setBookProgress] = useState<BookProgress | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   // Guards the one-time skip-model repair so it fires at most once per mount,
   // even if onSnapshot delivers several events before the write lands.
   const migrationRanRef = useRef(false)
@@ -32,6 +56,7 @@ export function useBookProgress(
   /* eslint-disable react-hooks/set-state-in-effect -- Standard Firestore subscription: guard reset + loading flag before onSnapshot */
   useEffect(() => {
     migrationRanRef.current = false
+    setLoadFailed(false)
     if (!familyId || !childId || !bookId) {
       setBookProgress(null)
       setLoading(false)
@@ -89,11 +114,17 @@ export function useBookProgress(
         } else {
           setBookProgress(null)
         }
+        // A document that arrives clears an earlier failure — the subscription
+        // recovered, and the surface may speak about the book again.
+        setLoadFailed(false)
         setLoading(false)
       },
       (err) => {
+        // UX-356(a): `null` + `loading: false` alone is indistinguishable from
+        // "no progress yet", which is what the consumers used to render.
         console.error('[useBookProgress] onSnapshot error:', err)
         setBookProgress(null)
+        setLoadFailed(true)
         setLoading(false)
       },
     )
@@ -102,8 +133,17 @@ export function useBookProgress(
   }, [familyId, childId, bookId])
 
   const updateChapter = useCallback(
-    async (chapter: number, update: Partial<ChapterQuestionPoolItem>) => {
-      if (!familyId || !childId || !bookId || !bookProgress) return
+    async (
+      chapter: number,
+      update: Partial<ChapterQuestionPoolItem>,
+    ): Promise<ChapterSaveOutcome> => {
+      // A guard that refuses a write is a failure to report, not a quiet no-op
+      // (`dayWriteOutcome`'s rule, one hook over). Nothing was sent here, so
+      // nothing half-landed — but the child has answered and only this says the
+      // answer was not recorded.
+      if (!familyId || !childId || !bookId || !bookProgress) {
+        return { ok: false, reason: ChapterSaveRefusal.NoTarget }
+      }
 
       const docId = bookProgressDocId(childId, bookId)
       const docRef = doc(bookProgressCollection(familyId), docId)
@@ -127,15 +167,21 @@ export function useBookProgress(
         ? new Date().toISOString()
         : undefined
 
-      await updateDoc(docRef, {
-        questionPool: updatedPool,
-        ...(lastChapterAnswered !== undefined ? { lastChapterAnswered } : {}),
-        ...(completedAt ? { completedAt } : {}),
-        updatedAt: new Date().toISOString(),
-      })
+      try {
+        await updateDoc(docRef, {
+          questionPool: updatedPool,
+          ...(lastChapterAnswered !== undefined ? { lastChapterAnswered } : {}),
+          ...(completedAt ? { completedAt } : {}),
+          updatedAt: new Date().toISOString(),
+        })
+      } catch (err) {
+        console.error('[useBookProgress] Failed to save a chapter answer:', err)
+        return { ok: false, reason: ChapterSaveRefusal.Rejected }
+      }
+      return { ok: true }
     },
     [familyId, childId, bookId, bookProgress],
   )
 
-  return { bookProgress, loading, updateChapter }
+  return { bookProgress, loading, loadFailed, updateChapter }
 }

@@ -60,7 +60,7 @@ import {
   QuestScreen,
   VALIDATION_RETRIES,
 } from './questTypes'
-import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, computeSentenceLevelFromQuestions, deriveSentenceFindings, canOverwriteWorkingLevel, computeQuestActivityMarker, sessionHighWaterLevel } from './workingLevels'
+import { computeStartLevel, computeWorkingLevelFromSession, computeWritingLevelFromSpellingQuestions, deriveSpellingFindings, computeSentenceLevelFromQuestions, deriveSentenceFindings, canOverwriteWorkingLevel, manualOverrideHolds, computeQuestActivityMarker, sessionHighWaterLevel } from './workingLevels'
 import { writeSnapshotUpdate } from '../evaluate/skillSnapshotWrites'
 import type { CurriculumLevelHint } from './workingLevels'
 import { WRITING_LEVEL_CAP, SENTENCE_LEVEL_CAP } from './questTypes'
@@ -1146,7 +1146,7 @@ export function useQuestSession() {
           if (newWorkingLevel && questMode && questMode !== 'fluency') {
             const modeKey = questMode as 'phonics' | 'comprehension' | 'math'
             const currentLevel = mergedWorkingLevels[modeKey]
-            if (canOverwriteWorkingLevel(currentLevel)) {
+            if (canOverwriteWorkingLevel(currentLevel, newWorkingLevel)) {
               mergedWorkingLevels = { ...mergedWorkingLevels, [modeKey]: newWorkingLevel }
             }
           }
@@ -1156,7 +1156,7 @@ export function useQuestSession() {
           // and is never folded into the phonics number (and leaves room for a
           // future, distinct composition level).
           const writingLevel = computeWritingLevelFromSpellingQuestions(questions)
-          if (writingLevel && canOverwriteWorkingLevel(mergedWorkingLevels.writing)) {
+          if (writingLevel && canOverwriteWorkingLevel(mergedWorkingLevels.writing, writingLevel)) {
             mergedWorkingLevels = { ...mergedWorkingLevels, writing: writingLevel }
           }
 
@@ -1165,7 +1165,7 @@ export function useQuestSession() {
           // spelling, so sentence-building routes by its own gap and is never folded
           // into the spelling number (and leaves room for a future composition level).
           const sentenceLevel = computeSentenceLevelFromQuestions(questions)
-          if (sentenceLevel && canOverwriteWorkingLevel(mergedWorkingLevels.sentence)) {
+          if (sentenceLevel && canOverwriteWorkingLevel(mergedWorkingLevels.sentence, sentenceLevel)) {
             mergedWorkingLevels = { ...mergedWorkingLevels, sentence: sentenceLevel }
           }
 
@@ -1221,7 +1221,7 @@ export function useQuestSession() {
           // we skip the activity write too (rare; deferred edge).
           if (
             (questMode === 'phonics' || questMode === 'comprehension' || questMode === 'math') &&
-            canOverwriteWorkingLevel(existing.workingLevels?.[questMode])
+            !manualOverrideHolds(existing.workingLevels?.[questMode])
           ) {
             const marker = computeQuestActivityMarker({
               priorLevel: existing.workingLevels?.[questMode]?.level,

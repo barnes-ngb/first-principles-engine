@@ -21,6 +21,7 @@ import { canAccessKnowledgeMine } from '../features/quest/knowledgeMineAccess'
 const navItems = [
   { label: 'Today', to: '/today' },
   { label: 'Plan My Week', to: '/planner/chat', parentOnly: true },
+  { label: 'Curriculum', to: '/curriculum', parentOnly: true },
   { label: 'Weekly Review', to: '/weekly-review', parentOnly: true },
   { label: 'Progress', to: '/progress', parentOnly: true },
   { label: 'Records', to: '/records', parentOnly: true },
