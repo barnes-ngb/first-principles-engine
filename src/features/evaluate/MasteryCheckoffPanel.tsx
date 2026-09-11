@@ -6,7 +6,7 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
-import SectionCard from '../../components/SectionCard'
+import SectionCard, { type SectionDisclosure } from '../../components/SectionCard'
 import type { SkillSnapshot } from '../../core/types/evaluation'
 import { commitMasteryRollup } from './commitMasteryRollup'
 import { pendingCheckoffs } from './masteryRollup'
@@ -26,10 +26,12 @@ export default function MasteryCheckoffPanel({
   familyId,
   childId,
   snapshot,
+  disclosure,
 }: {
   familyId: string
   childId: string | undefined
   snapshot: SkillSnapshot | null
+  disclosure?: SectionDisclosure
 }) {
   const { rollups, loading, reload } = useMasteryCheckoffs(familyId, childId)
   const [saving, setSaving] = useState(false)
@@ -61,7 +63,7 @@ export default function MasteryCheckoffPanel({
   }
 
   return (
-    <SectionCard title="Checked off — looks mastered">
+    <SectionCard title="Checked off — looks mastered" disclosure={disclosure && { ...disclosure, summary: `${pending.length} ready to check off` }}>
       <Stack spacing={1.5}>
         <Typography variant="body2" color="text.secondary">
           Repeated got-it and quest evidence over the last {MASTERY_WINDOW_DAYS} days suggests
