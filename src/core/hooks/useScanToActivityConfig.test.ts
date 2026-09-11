@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { isWorkbookMatch, normalizeForMatch, planScannedNameUpgrade } from './useScanToActivityConfig'
+import {
+  deriveLevelForSubject,
+  isWorkbookMatch,
+  mapSubjectBucket,
+  normalizeForMatch,
+  planScannedNameUpgrade,
+} from './useScanToActivityConfig'
 
 describe('normalizeForMatch', () => {
   it('strips "Mental Minute" suffix so the base curriculum name compares cleanly', () => {
@@ -134,5 +140,44 @@ describe('planScannedNameUpgrade', () => {
       name: null,
       curriculum: null,
     })
+  })
+})
+
+// ── UX-381: which working level a scanned page may write ─────────
+//
+// `deriveLevelForSubject` is the scan path's own join of the domain rule and
+// the three ladders, so these assert the whole decision the way the scan makes
+// it — from a curriculum name, through `mapSubjectBucket`, to a level or none.
+
+describe('deriveLevelForSubject (UX-381)', () => {
+  const forBook = (book: string, lesson: number | null) =>
+    deriveLevelForSubject(mapSubjectBucket(book, null), lesson, book)
+
+  it('writes NO level for the handwriting page both boys did', () => {
+    expect(forBook('The Good and the Beautiful Handwriting', 35)).toBeNull()
+    expect(forBook('The Good and the Beautiful Handwriting Level 3', 35)).toBeNull()
+  })
+
+  it('still writes the phonics level for a real phonics program', () => {
+    expect(forBook('Fast Phonics', 35)).toMatchObject({
+      key: 'phonics',
+      level: { level: 2, source: 'curriculum' },
+    })
+  })
+
+  it('still writes math and comprehension exactly as before', () => {
+    expect(forBook('The Good and the Beautiful Math K', 35)).toMatchObject({
+      key: 'math',
+      level: { level: 2 },
+    })
+    expect(forBook('Reading Comprehension Grade 2', 35)).toMatchObject({
+      key: 'comprehension',
+      level: { level: 3 },
+    })
+  })
+
+  it('writes nothing without a lesson number, whatever the book', () => {
+    expect(forBook('Fast Phonics', null)).toBeNull()
+    expect(forBook('The Good and the Beautiful Math K', 0)).toBeNull()
   })
 })

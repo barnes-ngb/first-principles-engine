@@ -11,6 +11,8 @@ import type {
   SkillSnapshot,
   StopRule,
   SupportDefault,
+  WorkingLevel,
+  WorkingLevels,
 } from '../../core/types/evaluation'
 import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { effectiveStatus, generateBlockId } from '../../core/utils/blockerLifecycle'
@@ -31,6 +33,12 @@ import { effectiveStatus, generateBlockId } from '../../core/utils/blockerLifecy
  * never remove or downgrade. Removals / downgrades are deliberately out of
  * scope (the future Option 3, which needs a separate human-authoritative
  * override path).
+ *
+ * Since UX-383 it also carries the **working-level restore** — the one op here
+ * that writes `workingLevels`, and the one the owner authorised on 2026-09-11 so
+ * a level a handwriting scan pushed down could be put back. It is upgrade-only
+ * for exactly the reason everything else here is additive: it may raise a level
+ * and can never lower one.
  *
  * ARCH-12: this module is the intended convergence point for the three inline
  * snapshot writers (`EvaluateChatPage`, `useQuestSession`, `SkillSnapshotPage`).
@@ -121,6 +129,27 @@ export interface SnapshotApplyUpdate {
     domain: keyof QuestActivity
     marker: QuestActivityMarker
   }
+
+  // ── Working-level restore (UX-383; owner decision 2026-09-11) ───────────
+  /**
+   * Put back a working level a scan overwrote downwards, derived from stored
+   * evidence (`src/features/settings/restoreScanLoweredLevels.ts`).
+   *
+   * **This is the only op in this module that writes `workingLevels`**, and it
+   * keeps the additive-only contract rather than bending it: it lands **only
+   * when the restored level is strictly HIGHER** than the one standing, so it
+   * can raise a number a handwriting page pushed down and can never lower one.
+   * A restore that would not raise is a no-op, which is also what makes the
+   * one-shot idempotent. Removals and downgrades remain out of scope (the
+   * future Option 3 override path).
+   *
+   * The writer merges **only this key**, never the whole `workingLevels` map,
+   * so a level another device wrote between the read and the write survives.
+   */
+  restoreWorkingLevel?: {
+    key: keyof WorkingLevels
+    level: WorkingLevel
+  }
 }
 
 export interface ApplyResult {
@@ -138,6 +167,8 @@ export interface ApplyResult {
     supports: boolean
     stopRules: boolean
     questActivity: boolean
+    /** UX-383 — the single restored `workingLevels` key, or false. */
+    workingLevel: keyof WorkingLevels | false
   }
 }
 
@@ -328,9 +359,29 @@ export function applyToSnapshot(
     activityChanged = true
   }
 
+  // ── Working-level restore (UX-383) — upgrade-only ───────────────────
+  // The one place this module writes `workingLevels`. It lands only when it
+  // RAISES the standing level, so it cannot downgrade (the module's contract)
+  // and a second run of the one-shot writes nothing.
+  let restoredKey: keyof WorkingLevels | false = false
+  let nextWorkingLevels: WorkingLevels | undefined = base.workingLevels
+  if (update.restoreWorkingLevel) {
+    const { key, level } = update.restoreWorkingLevel
+    const standing = base.workingLevels?.[key]
+    if (!standing || level.level > standing.level) {
+      nextWorkingLevels = { ...(base.workingLevels ?? {}), [key]: level }
+      restoredKey = key
+    }
+  }
+
   const prioritySkillsChanged = skillsChanged || addedSkills
   const changed =
-    blocksChanged || prioritySkillsChanged || supportsChanged || stopRulesChanged || activityChanged
+    blocksChanged ||
+    prioritySkillsChanged ||
+    supportsChanged ||
+    stopRulesChanged ||
+    activityChanged ||
+    restoredKey !== false
   const snapshot: SkillSnapshot = {
     ...base,
     prioritySkills: nextSkills,
@@ -338,6 +389,7 @@ export function applyToSnapshot(
     stopRules: nextStopRules,
     conceptualBlocks: nextBlocks,
     questActivity: nextQuestActivity,
+    workingLevels: nextWorkingLevels,
     ...(blocksChanged ? { blocksUpdatedAt: now } : {}),
     ...(changed ? { updatedAt: now } : {}),
   }
@@ -350,6 +402,7 @@ export function applyToSnapshot(
       supports: supportsChanged,
       stopRules: stopRulesChanged,
       questActivity: activityChanged,
+      workingLevel: restoredKey,
     },
   }
 }
@@ -370,6 +423,29 @@ export async function writeSnapshotUpdate(
   const { snapshot, changed, changedFields } = applyToSnapshot({ ...existing, childId }, update)
   if (!changed) return { changed: false }
 
+  // A working-level restore that changed nothing else writes ONLY that key
+  // (UX-383). The arrays below are rewritten wholesale, which is right when they
+  // are what moved and needless when they are not — and a restore never touches
+  // them, so it has no business re-sending a read that may already be stale.
+  if (changedFields.workingLevel && !changedFields.prioritySkills &&
+      !changedFields.conceptualBlocks && !changedFields.supports &&
+      !changedFields.stopRules && !changedFields.questActivity) {
+    await setDoc(
+      ref,
+      JSON.parse(
+        JSON.stringify({
+          childId,
+          // Merge the single key, never the whole map: Firestore merges a nested
+          // map leaf by leaf, so a sibling level written meanwhile survives.
+          workingLevels: { [changedFields.workingLevel]: snapshot.workingLevels?.[changedFields.workingLevel] },
+          updatedAt: snapshot.updatedAt,
+        }),
+      ),
+      { merge: true },
+    )
+    return { changed: true }
+  }
+
   // Always merge-write prioritySkills + conceptualBlocks (the mastered-skill
   // path); additionally write supports / stopRules only when an additive edit
   // touched them (6a). Read-merge-write, skip when nothing changed.
@@ -380,10 +456,16 @@ export async function writeSnapshotUpdate(
     blocksUpdatedAt: snapshot.blocksUpdatedAt,
     updatedAt: snapshot.updatedAt,
   }
+  if (changedFields.workingLevel) {
+    payload.workingLevels = {
+      [changedFields.workingLevel]: snapshot.workingLevels?.[changedFields.workingLevel],
+    }
+  }
   if (changedFields.supports) payload.supports = snapshot.supports
   if (changedFields.stopRules) payload.stopRules = snapshot.stopRules
   // Visibility-only activity marker — write the separate `questActivity` slot
-  // only when it changed. Never includes `workingLevels` (untouched on merge).
+  // only when it changed. It never includes `workingLevels`; the single
+  // restore key above is the one op in this module that does.
   if (changedFields.questActivity) payload.questActivity = snapshot.questActivity
 
   await setDoc(

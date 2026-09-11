@@ -10,7 +10,7 @@ function applyMathDerive(
 ): WorkingLevels {
   let merged: WorkingLevels = { ...existing }
   const mathLevel = deriveWorkingLevelFromEvaluation(findings, 'math')
-  if (mathLevel && canOverwriteWorkingLevel(merged.math)) {
+  if (mathLevel && canOverwriteWorkingLevel(merged.math, mathLevel)) {
     merged = { ...merged, math: mathLevel }
   }
   return merged

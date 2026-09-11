@@ -10,6 +10,7 @@ import {
   derivePhonicsWorkingLevelFromScan,
   deriveReadingWorkingLevelFromScan,
   canOverwriteWorkingLevel,
+  manualOverrideHolds,
 } from './workingLevels'
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -54,32 +55,143 @@ function makeWorkingLevel(overrides: Partial<WorkingLevel> = {}): WorkingLevel {
 }
 
 // ── canOverwriteWorkingLevel ──────────────────────────────────
+//
+// The proposal a quest makes is used throughout the manual-pin cases below, so
+// those assertions weigh the pin and nothing else — exactly as they did before
+// the UX-382 direction rule existed.
+
+const questProposal = makeWorkingLevel({ source: 'quest', level: 4 })
 
 describe('canOverwriteWorkingLevel', () => {
   it('allows overwrite when no current level exists', () => {
-    expect(canOverwriteWorkingLevel(undefined)).toBe(true)
+    expect(canOverwriteWorkingLevel(undefined, questProposal)).toBe(true)
   })
 
   it('allows overwrite when source is quest', () => {
-    expect(canOverwriteWorkingLevel(makeWorkingLevel({ source: 'quest' }))).toBe(true)
+    expect(canOverwriteWorkingLevel(makeWorkingLevel({ source: 'quest' }), questProposal)).toBe(true)
   })
 
   it('allows overwrite when source is evaluation', () => {
-    expect(canOverwriteWorkingLevel(makeWorkingLevel({ source: 'evaluation' }))).toBe(true)
+    expect(canOverwriteWorkingLevel(makeWorkingLevel({ source: 'evaluation' }), questProposal)).toBe(true)
   })
 
   it('allows overwrite when source is curriculum', () => {
-    expect(canOverwriteWorkingLevel(makeWorkingLevel({ source: 'curriculum' }))).toBe(true)
+    expect(canOverwriteWorkingLevel(makeWorkingLevel({ source: 'curriculum' }), questProposal)).toBe(true)
   })
 
   it('blocks overwrite when source is manual and within 48 hours', () => {
     const recent = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() // 1 hour ago
-    expect(canOverwriteWorkingLevel(makeWorkingLevel({ source: 'manual', updatedAt: recent }))).toBe(false)
+    expect(
+      canOverwriteWorkingLevel(makeWorkingLevel({ source: 'manual', updatedAt: recent }), questProposal),
+    ).toBe(false)
   })
 
   it('allows overwrite when source is manual but older than 48 hours', () => {
     const old = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString() // 49 hours ago
-    expect(canOverwriteWorkingLevel(makeWorkingLevel({ source: 'manual', updatedAt: old }))).toBe(true)
+    expect(
+      canOverwriteWorkingLevel(makeWorkingLevel({ source: 'manual', updatedAt: old }), questProposal),
+    ).toBe(true)
+  })
+})
+
+// ── UX-382: a scan never lowers a level ───────────────────────
+
+describe('canOverwriteWorkingLevel — direction (UX-382)', () => {
+  const scanAt = (level: number) =>
+    makeWorkingLevel({ source: 'curriculum', level, evidence: `Scanned Something Lesson ${level}` })
+
+  it('refuses a curriculum-sourced write that would LOWER the level', () => {
+    // The reported defect, in one line: phonics 5 standing, a handwriting page
+    // read as phonics lesson 35 proposing 2.
+    const standing = makeWorkingLevel({ source: 'curriculum', level: 5 })
+    expect(canOverwriteWorkingLevel(standing, scanAt(2))).toBe(false)
+  })
+
+  it('refuses a curriculum-sourced write at the SAME level', () => {
+    expect(canOverwriteWorkingLevel(makeWorkingLevel({ level: 3 }), scanAt(3))).toBe(false)
+  })
+
+  it('allows a curriculum-sourced write that RAISES the level', () => {
+    expect(canOverwriteWorkingLevel(makeWorkingLevel({ level: 3 }), scanAt(4))).toBe(true)
+  })
+
+  it('allows a curriculum-sourced write into an empty slot', () => {
+    expect(canOverwriteWorkingLevel(undefined, scanAt(2))).toBe(true)
+  })
+
+  it('refuses a scan even into a level a scan itself wrote', () => {
+    expect(canOverwriteWorkingLevel(scanAt(5), scanAt(2))).toBe(false)
+  })
+
+  it('still lets a quest, an evaluation and the manual stepper move a level DOWN', () => {
+    const standing = makeWorkingLevel({ level: 5, source: 'curriculum' })
+    for (const source of ['quest', 'evaluation', 'manual'] as const) {
+      expect(canOverwriteWorkingLevel(standing, makeWorkingLevel({ level: 2, source }))).toBe(true)
+    }
+  })
+
+  it('the manual pin still outranks a raise', () => {
+    const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const pinned = makeWorkingLevel({ source: 'manual', level: 3, updatedAt: recent })
+    expect(canOverwriteWorkingLevel(pinned, scanAt(6))).toBe(false)
+  })
+})
+
+// ── manualOverrideHolds ───────────────────────────────────────
+
+describe('manualOverrideHolds', () => {
+  it('is false with no level, and for every non-manual source', () => {
+    expect(manualOverrideHolds(undefined)).toBe(false)
+    for (const source of ['quest', 'evaluation', 'curriculum'] as const) {
+      expect(manualOverrideHolds(makeWorkingLevel({ source }))).toBe(false)
+    }
+  })
+
+  it('holds for 48 hours after a manual write and not beyond', () => {
+    const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString()
+    expect(manualOverrideHolds(makeWorkingLevel({ source: 'manual', updatedAt: recent }))).toBe(true)
+    expect(manualOverrideHolds(makeWorkingLevel({ source: 'manual', updatedAt: old }))).toBe(false)
+  })
+})
+
+// ── UX-382 positive control: the ladders' own numbers are UNCHANGED ──
+//
+// The direction rule changes only WHETHER a curriculum-sourced level lands. It
+// computes nothing. These pin every band boundary of all three scan ladders, so
+// a change to any derived number fails here rather than in production.
+
+describe('scan ladders — the numbers this change does not touch', () => {
+  const phonicsAt = (lesson: number) =>
+    derivePhonicsWorkingLevelFromScan(lesson, 'Book')?.level ?? null
+  const mathAt = (lesson: number) => deriveMathWorkingLevelFromScan(lesson, 'Book')?.level ?? null
+  const readingAt = (lesson: number) =>
+    deriveReadingWorkingLevelFromScan(lesson, 'Book')?.level ?? null
+
+  it('phonics: 20/40/60/80/100/120/140 band boundaries', () => {
+    expect([1, 20, 21, 40, 41, 60, 61, 80, 81, 100, 101, 120, 121, 140, 141].map(phonicsAt)).toEqual(
+      [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8],
+    )
+    // The reported case: lesson 35 of anything reads as phonics level 2.
+    expect(phonicsAt(35)).toBe(2)
+  })
+
+  it('math: 30/60/90/120/150 band boundaries', () => {
+    expect([1, 30, 31, 60, 61, 90, 91, 120, 121, 150, 151].map(mathAt)).toEqual(
+      [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6],
+    )
+  })
+
+  it('reading: 25/50/75/100 band boundaries', () => {
+    expect([1, 25, 26, 50, 51, 75, 76, 100, 101].map(readingAt)).toEqual([1, 1, 3, 3, 4, 4, 5, 5, 6])
+  })
+
+  it('a missing or non-positive lesson number derives nothing, on all three', () => {
+    for (const lesson of [null, undefined, 0, -1]) {
+      expect(derivePhonicsWorkingLevelFromScan(lesson, 'Book')).toBeNull()
+      expect(deriveMathWorkingLevelFromScan(lesson, 'Book')).toBeNull()
+      expect(deriveReadingWorkingLevelFromScan(lesson, 'Book')).toBeNull()
+    }
   })
 })
 

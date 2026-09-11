@@ -29,6 +29,8 @@ import {
 import { LoadingState } from '../../components/states'
 import type { BackfillResult } from './backfillWorkingLevels'
 import { backfillWorkingLevels } from './backfillWorkingLevels'
+import type { RestoreReport } from './restoreScanLoweredLevels'
+import { restoreScanLoweredWorkingLevels } from './restoreScanLoweredLevels'
 import type { BackfillBlockIdsResult } from './backfillBlockIds'
 import { backfillBlockIds } from './backfillBlockIds'
 import type { ArtifactChildIdAudit } from './auditArtifactChildIds'
@@ -497,6 +499,37 @@ export default function DevAdminTab() {
     }
   }
 
+  // ── Section E2: Restore scan-lowered working levels (UX-383) ──
+  const [restoreRunning, setRestoreRunning] = useState(false)
+  const [restoreResults, setRestoreResults] = useState<RestoreReport[] | null>(null)
+  const [restoreStatus, setRestoreStatus] = useState<StatusMsg | null>(null)
+
+  const handleRestoreLevels = async () => {
+    setRestoreRunning(true)
+    setRestoreStatus(null)
+    setRestoreResults(null)
+    try {
+      const results = await restoreScanLoweredWorkingLevels(familyId)
+      setRestoreResults(results)
+      const totalRestored = results.reduce((sum, r) => sum + r.restored.length, 0)
+      const failed = results.filter((r) => r.error)
+      setRestoreStatus({
+        severity: failed.length > 0 ? 'warning' : totalRestored > 0 ? 'success' : 'info',
+        text:
+          failed.length > 0
+            ? `Restored ${totalRestored} level(s); ${failed.length} child(ren) could not be read — see below.`
+            : totalRestored > 0
+              ? `Restored ${totalRestored} level(s).`
+              : 'Nothing to restore — no level is standing that a scan lowered.',
+      })
+    } catch (err) {
+      console.error('Working-level restore failed', err)
+      setRestoreStatus({ severity: 'error', text: `Restore failed: ${err}` })
+    } finally {
+      setRestoreRunning(false)
+    }
+  }
+
   // ── Section F: Backfill Block IDs ────────────────────────────
   const [blockIdsRunning, setBlockIdsRunning] = useState(false)
   const [blockIdsResults, setBlockIdsResults] = useState<BackfillBlockIdsResult[] | null>(null)
@@ -928,6 +961,71 @@ export default function DevAdminTab() {
                     ))}
                   </Stack>
                 )}
+              </Box>
+            ))}
+          </Stack>
+        )}
+      </Box>
+
+      <Divider />
+
+      {/* ── Section E2: Restore scan-lowered working levels ───── */}
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Restore scan-lowered working levels
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          One-shot (UX-383). A handwriting scan was read as phonics and wrote a
+          lower working level over each boy's. This puts back the highest level
+          the child's own learner-model evidence supports, and only where the
+          standing level came from a scan of a book that would no longer be read
+          that way. It never lowers a level and never invents one — with no
+          stored evidence it restores nothing and says so. Idempotent.
+        </Typography>
+        <Button
+          variant="contained"
+          onClick={() => void handleRestoreLevels()}
+          disabled={restoreRunning}
+          sx={{ mt: 1, minHeight: 48 }}
+        >
+          {restoreRunning ? <CircularProgress size={20} /> : 'Restore levels'}
+        </Button>
+
+        {restoreStatus && (
+          <Alert severity={restoreStatus.severity} sx={{ mt: 1 }}>
+            {restoreStatus.text}
+          </Alert>
+        )}
+
+        {restoreResults && (
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            {restoreResults.map((r) => (
+              <Box key={r.childId}>
+                <Typography variant="subtitle2">{r.childName}</Typography>
+                {r.error && (
+                  <Typography variant="body2" color="error.main" sx={{ ml: 2 }}>
+                    could not be read — {r.error}
+                  </Typography>
+                )}
+                <Stack spacing={0.5} sx={{ ml: 2, mt: 0.5 }}>
+                  {r.restored.map((m) => (
+                    <Typography key={m.key} variant="body2" color="success.main">
+                      {m.key}: {m.from} → {m.to} (a {m.book} scan had written {m.from})
+                    </Typography>
+                  ))}
+                  {r.restored.length > 0 && (
+                    <Typography variant="body2" color="text.secondary">
+                      {r.reprojected > 0
+                        ? `${r.reprojected} concept(s) moved on the learner model.`
+                        : 'No concept moved on the learner model — the restored level is the one it was already projected from.'}
+                    </Typography>
+                  )}
+                  {r.skipped.map((m) => (
+                    <Typography key={m.key} variant="body2" color="text.secondary">
+                      {m.key}: skipped — {m.reason}
+                    </Typography>
+                  ))}
+                </Stack>
               </Box>
             ))}
           </Stack>

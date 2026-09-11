@@ -13,7 +13,9 @@ import {
   canOverwriteWorkingLevel,
 } from '../../features/quest/workingLevels'
 import { syncWorkbookPositionToModel } from '../foundations/workbookPositionSync'
+import { workbookBridgeForSource } from '../foundations/workbookBridge'
 import { activityMatchNames } from '../utils/activityNames'
+import { resolveScanWorkingLevelDomain } from './scanWorkingLevelDomain'
 
 /**
  * Why a sync registered nothing. FEAT-136: `action: 'none'` had three distinct
@@ -221,37 +223,32 @@ export function useScanToActivityConfig() {
 
 /**
  * Maps a subject bucket to a workingLevels key and derives the level from a scan.
- * Returns null for subjects that don't have a working-level mapping (e.g. Science, Art).
+ * Returns null for subjects that don't have a working-level mapping (e.g. Science,
+ * Art) and — since UX-381 — for any book the domain rule cannot place.
+ *
+ * The *which domain* decision is the pure {@link resolveScanWorkingLevelDomain};
+ * this function only picks the matching ladder. The bridge lookup is done here
+ * because it is the caller's (impure-ish, alias-tolerant) job, and an
+ * **ambiguous** name resolves to `null` exactly like an unknown one — an
+ * ambiguous name is not evidence about anything.
  */
-function deriveLevelForSubject(
+export function deriveLevelForSubject(
   subject: SubjectBucketType,
   lessonNumber: number | null,
   curriculumName: string,
 ): { key: keyof WorkingLevels; level: WorkingLevel } | null {
-  switch (subject) {
-    case SubjectBucket.Math: {
-      const level = deriveMathWorkingLevelFromScan(lessonNumber, curriculumName)
-      return level ? { key: 'math', level } : null
-    }
-    case SubjectBucket.Reading: {
-      // Reading bucket includes both phonics and comprehension workbooks.
-      // Use curriculum name to disambiguate.
-      const lower = curriculumName.toLowerCase()
-      if (lower.includes('phonics')) {
-        const level = derivePhonicsWorkingLevelFromScan(lessonNumber, curriculumName)
-        return level ? { key: 'phonics', level } : null
-      }
-      const level = deriveReadingWorkingLevelFromScan(lessonNumber, curriculumName)
-      return level ? { key: 'comprehension', level } : null
-    }
-    case SubjectBucket.LanguageArts: {
-      // LA workbooks (e.g. GATB Language Arts) often cover phonics skills
-      const level = derivePhonicsWorkingLevelFromScan(lessonNumber, curriculumName)
-      return level ? { key: 'phonics', level } : null
-    }
-    default:
-      return null
-  }
+  const bridgeSourceId = workbookBridgeForSource(curriculumName)?.sourceId ?? null
+  const domain = resolveScanWorkingLevelDomain(subject, curriculumName, bridgeSourceId)
+  if (!domain) return null
+
+  const level =
+    domain === 'math'
+      ? deriveMathWorkingLevelFromScan(lessonNumber, curriculumName)
+      : domain === 'phonics'
+        ? derivePhonicsWorkingLevelFromScan(lessonNumber, curriculumName)
+        : deriveReadingWorkingLevelFromScan(lessonNumber, curriculumName)
+
+  return level ? { key: domain, level } : null
 }
 
 async function updateWorkingLevelFromScan(
@@ -272,7 +269,9 @@ async function updateWorkingLevelFromScan(
       : {}
 
     const currentLevel = existing.workingLevels?.[derived.key]
-    if (!canOverwriteWorkingLevel(currentLevel)) return
+    // UX-382: `derived.level.source` is `curriculum`, so this gate is
+    // advance-only — a scan may raise a level and may never lower one.
+    if (!canOverwriteWorkingLevel(currentLevel, derived.level)) return
 
     const mergedWorkingLevels = { ...(existing.workingLevels ?? {}), [derived.key]: derived.level }
     await updateDoc(snapshotRef, {
@@ -388,7 +387,12 @@ export function isWorkbookMatch(
   return false
 }
 
-function mapSubjectBucket(
+/**
+ * The subject bucket a scanned curriculum name lands in. Exported since UX-383:
+ * the restore has to ask what *this* book's scan would do today, and asking it
+ * through the same function is what stops the two answers drifting.
+ */
+export function mapSubjectBucket(
   name: string,
   provider: string | null,
 ): SubjectBucketType {

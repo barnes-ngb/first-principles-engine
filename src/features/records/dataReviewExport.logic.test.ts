@@ -7,6 +7,8 @@ import {
   dataReviewExportFilename,
   evalLooksAppliedToSnapshot,
   OPEN_QUESTION_STALE_DAYS,
+  projectedThroughLine,
+  storedDate,
   reportOwnedArtifactIds,
   schoolYearKey,
   workbookBridgeStatus,
@@ -742,3 +744,38 @@ describe('dataReviewExportFilename', () => {
   })
 })
 
+
+// ── UX-384: the export answers "did the re-projection run?" ──────
+
+describe('projectedThroughLine', () => {
+  it('says NEVER RECORDED rather than dashing, when the watermark is absent', () => {
+    // Two exports and two screenshots could not answer this, which is the one
+    // thing a diagnostic surface exists for.
+    expect(projectedThroughLine(undefined)).toContain('never recorded')
+  })
+
+  it('prints one slot per driving key, with a dash for a key carrying no level', () => {
+    expect(projectedThroughLine({ phonics: 5, writing: null, math: 3 })).toBe(
+      'math 3 · phonics 5 · writing —',
+    )
+  })
+})
+
+describe('storedDate', () => {
+  it('renders a legacy Firestore Timestamp instead of [object Object]', () => {
+    // The legacy `workbookConfigs` row printed exactly that in the 2026-09-11
+    // export: a column that names its own field and then refuses to say it.
+    const ts = { seconds: 1_757_000_000, nanoseconds: 0 }
+    expect(String(ts)).toBe('[object Object]')
+    expect(storedDate(ts)).toBe(new Date(1_757_000_000_000).toISOString())
+    expect(storedDate({ toDate: () => new Date('2026-09-11T04:24:00.000Z') })).toBe(
+      '2026-09-11T04:24:00.000Z',
+    )
+  })
+
+  it('passes an ISO string through and refuses anything unreadable', () => {
+    expect(storedDate('2026-09-11T04:24:00.000Z')).toBe('2026-09-11T04:24:00.000Z')
+    expect(storedDate(undefined)).toBe('—')
+    expect(storedDate({})).toBe('—')
+  })
+})

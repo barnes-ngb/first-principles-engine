@@ -389,6 +389,8 @@ describe('applyToSnapshot — additive edit ops (6a / Tier C Option 2)', () => {
       supports: false,
       stopRules: false,
       questActivity: false,
+      // UX-383's restore key, absent here like every other field.
+      workingLevel: false,
     })
   })
 })
