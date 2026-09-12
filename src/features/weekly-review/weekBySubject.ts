@@ -45,10 +45,51 @@
  *
  *   • **hours** — the canonical fold, all three additive sources;
  *   • **what got done** — the day log's own COMPLETED checklist items, named
- *     and counted. Day *blocks* are not listed: a block and the item that
- *     checked it are the same work (`itemMatchesBlock`), so listing both would
- *     name one afternoon twice;
+ *     and counted. A day *block* is not listed beside the item that checked it:
+ *     they are the same work (`itemMatchesBlock`), so listing both would name
+ *     one afternoon twice;
+ *   • **what else was logged** — the counted time no completed item accounts
+ *     for, named (UX-408). See below;
  *   • **evidence** — the artifacts captured in that subject.
+ *
+ * ── The fourth claim, and the report that asked for it (UX-408) ─────────────
+ *
+ * Owner, Friday 2026-09-11: *"I added time in artefacts and it didn't change it
+ * for packing and independent play."* Practical Arts read **4 hours · 1 piece of
+ * evidence** and named nothing. Both numbers were right and the section was
+ * still unreadable, because the door he used does not write a checklist item at
+ * all: Today's **Capture** card writes an `hours` document carrying the
+ * activity's own name in `notes` — *"Packing"*, *"Independent play"* — plus one
+ * `artifacts` document, and no day-log row. The hours line counted it; *what got
+ * done* is checklist items and only checklist items, so it had nothing to say.
+ *
+ * That is one of three shapes, and all three are minutes this section counted
+ * and named nowhere:
+ *
+ *   • an `hours` entry — the Capture card, the creative timer, Records'
+ *     quick-add, a Dad Lab session, a reading session. Each writes `notes`;
+ *   • an `hoursAdjustments` row — *Log watch time*, a historical-hours backfill.
+ *     Each writes `reason`;
+ *   • a day **block** carrying `actualMinutes` that no completed item matches —
+ *     a Life Day's 2-hour block being the one every family meets, since its
+ *     block is `Other` and its chips are worth zero minutes each.
+ *
+ * So they are named, through the SAME matcher the fold dedups with, which is why
+ * nothing is named twice: the fold skips an *item* that matches a
+ * block-with-actuals, and this skips a *block* that a completed item matches.
+ *
+ * **They are counted, not totalled.** Each source is named with how many times
+ * it appears and no minutes of its own. That is deliberate: extracting per-source
+ * minutes here would be a second copy of the fold's own per-source rules
+ * (`blockCountedMinutes` is private to it, and a `NaN`-narrowing or a
+ * `hours * 60` rounding that disagreed by one would be UX-206's tautology
+ * arriving by the door this run exists to close). The subject's total above is
+ * the one number; this line says what it was for.
+ *
+ * A **negative** adjustment is never named. The fold emits every adjustment
+ * document, including zero and negative ones, because a correction must subtract
+ * everywhere — but *"Packing ×1"* under a line that removed 40 minutes would read
+ * as work that happened. A correction is read on the Records page.
  *
  * ── Grouping, and what a failed read may never look like ────────────────────
  *
@@ -81,15 +122,18 @@
  * session is a fact about the data worth showing.
  */
 
+import { ADJUSTMENT_BOTH, entryMinutes } from '../../../functions/src/shared/hoursContributions'
 import type {
   ActivityConfig,
   Artifact,
   ChecklistItem,
+  DayBlock,
   DayLog,
   HoursAdjustment,
   HoursEntry,
 } from '../../core/types'
 import { activityMatchNames } from '../../core/utils/activityNames'
+import { itemMatchesBlock } from '../../core/utils/itemBlockMatch'
 import { nameKey } from '../../core/utils/nameKey'
 import {
   computeHoursSummary,
@@ -110,7 +154,7 @@ export const WEEK_BY_SUBJECT_TITLE = 'The Week by Subject'
  * items and the hours are separate readings of the week, because they are.
  */
 export const WEEK_BY_SUBJECT_CAPTION =
-  'What the week held, by subject. Hours are counted the same way as the Records page and the compliance pack; what got done is the day log’s own completed items. Nothing here is measured against a target.'
+  'What the week held, by subject. Hours are counted the same way as the Records page and the compliance pack; what got done is the day log’s own completed items, and “Also logged” is time recorded another way — a capture, a timer, an adjustment. Nothing here is measured against a target.'
 
 /**
  * A week with nothing logged — one line, not a page of empty cards.
@@ -184,6 +228,15 @@ export interface WeekSubjectSummary {
   totalMinutes: number
   /** Completed day-log items, most-frequent first. */
   items: WeekSubjectItemCount[]
+  /**
+   * Counted time in this subject that no completed checklist item accounts for,
+   * named and counted (UX-408) — an `hours` entry's `notes`, an adjustment's
+   * `reason`, or an untracked block's `title`.
+   *
+   * Never minutes of its own: see this module's header for why the per-source
+   * arithmetic deliberately stays in the shared fold.
+   */
+  sourcesWithoutItem: WeekSubjectItemCount[]
   /** Artifacts captured in this subject — `null` when the read FAILED. */
   artifactCount: number | null
   /** Strand topics, most-sessions first — `null` when the read FAILED. */
@@ -309,12 +362,37 @@ function resolveItemGroup(
 
 interface Bucket {
   items: Map<string, WeekSubjectItemCount>
+  sources: Map<string, WeekSubjectItemCount>
   artifactCount: number
   topics: Map<string, WeekSubjectTopicCount>
 }
 
 function emptyBucket(): Bucket {
-  return { items: new Map(), artifactCount: 0, topics: new Map() }
+  return { items: new Map(), sources: new Map(), artifactCount: 0, topics: new Map() }
+}
+
+/** Add one named occurrence to a counted map, keyed the way items are keyed. */
+function tally(into: Map<string, WeekSubjectItemCount>, name: string): void {
+  const key = `label:${nameKey(name) || name.toLowerCase()}`
+  const row = into.get(key)
+  if (row) row.count += 1
+  else into.set(key, { key, name, count: 1 })
+}
+
+/**
+ * Is this block's time already named by a completed item on the same day?
+ *
+ * The mirror image of the shared fold's own DATA-14 dedupe, through the SAME
+ * matcher: the fold skips an ITEM that matches a block carrying actuals, so this
+ * skips a BLOCK that a completed item matches. A block whose only matching item
+ * is unchecked is not named by anything — the fold does not count that item's
+ * minutes either — so it is still listed.
+ */
+function blockIsNamedByAnItem(
+  block: DayBlock,
+  checklist: readonly ChecklistItem[],
+): boolean {
+  return checklist.some((item) => item?.completed === true && itemMatchesBlock(item, block))
 }
 
 /**
@@ -372,6 +450,46 @@ export function groupWeekBySubject(
     }
   }
 
+  // ── What else was logged: counted time no completed item accounts for ──
+  //
+  // UX-408. Three shapes, all of them minutes the fold above counted and the
+  // items line cannot name — see this module's header. Counted, never totalled.
+  for (const log of dayLogs) {
+    if (log.childId !== childId) continue
+    const checklist = log.checklist ?? []
+    for (const block of log.blocks ?? []) {
+      // The fold counts a block only for its ACTUAL minutes, so a block with
+      // none contributed nothing and has nothing to explain.
+      const minutes = block?.actualMinutes
+      if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes <= 0) continue
+      if (blockIsNamedByAnItem(block, checklist)) continue
+      const name = cleanItemLabel(block.title)
+      if (!name) continue
+      tally(bucketFor(bucketOf(block.subjectBucket)).sources, name)
+    }
+  }
+
+  for (const entry of hoursEntries) {
+    if (entry?.childId !== childId) continue
+    // The fold's own guard: a non-positive entry is not counted, so naming it
+    // would name minutes that are not in the total beside it.
+    if (entryMinutes(entry) <= 0) continue
+    const name = cleanItemLabel(entry.notes)
+    if (!name) continue
+    tally(bucketFor(bucketOf(entry.subjectBucket)).sources, name)
+  }
+
+  for (const adj of adjustments) {
+    // DATA-09 attribution, the same rule the fold applies: this child, or the
+    // `'both'` sentinel for legitimate family-wide time.
+    if (adj?.childId !== childId && adj?.childId !== ADJUSTMENT_BOTH) continue
+    // Positive only — a correction that subtracts is not work that happened.
+    if (typeof adj.minutes !== 'number' || !Number.isFinite(adj.minutes) || adj.minutes <= 0) continue
+    const name = cleanItemLabel(adj.reason)
+    if (!name) continue
+    tally(bucketFor(bucketOf(adj.subjectBucket)).sources, name)
+  }
+
   // ── Evidence and topics: the artifacts, or nothing claimed at all ──
   const evidenceKnown = artifacts !== null
   if (artifacts) {
@@ -409,13 +527,27 @@ export function groupWeekBySubject(
     const items = [...bucket.items.values()].sort(
       (a, b) => b.count - a.count || a.name.localeCompare(b.name),
     )
+    const sourcesWithoutItem = [...bucket.sources.values()].sort(
+      (a, b) => b.count - a.count || a.name.localeCompare(b.name),
+    )
     const hasEvidence = evidenceKnown && bucket.artifactCount > 0
-    if (totalMinutes === 0 && items.length === 0 && !hasEvidence) continue
+    // `sourcesWithoutItem` is in the emptiness test as well as the other three:
+    // a positive entry cancelled out by a correcting adjustment leaves a subject
+    // at zero minutes that still holds something a person did.
+    if (
+      totalMinutes === 0 &&
+      items.length === 0 &&
+      sourcesWithoutItem.length === 0 &&
+      !hasEvidence
+    ) {
+      continue
+    }
     out.push({
       subjectBucket,
       label: subjectDistributionLabel(subjectBucket),
       totalMinutes,
       items,
+      sourcesWithoutItem,
       artifactCount: evidenceKnown ? bucket.artifactCount : null,
       topics: evidenceKnown ? sortTopics([...bucket.topics.values()]) : null,
     })
@@ -493,6 +625,27 @@ export function subjectItemsLine(
 ): string {
   return namedCountsLine(
     items.map((i) => ({ label: i.name, count: i.count })),
+    cap,
+  )
+}
+
+/**
+ * What the line naming un-itemised time is introduced by (UX-408).
+ *
+ * It says *logged*, not *done*, and it does not say *missing* or *untracked*:
+ * this time IS counted and IS in the total above — what it lacks is a checked
+ * row on the day, which is a fact about the door it came through and not a
+ * reproach to anybody. The Capture card is a first-class way to record a day.
+ */
+export const SOURCES_WITHOUT_ITEM_PREFIX = 'Also logged'
+
+/** The subject's un-itemised time sources, as one line. `''` when there are none. */
+export function subjectSourcesLine(
+  sources: readonly WeekSubjectItemCount[],
+  cap: number = MAX_NAMED_ENTRIES,
+): string {
+  return namedCountsLine(
+    sources.map((s) => ({ label: s.name, count: s.count })),
     cap,
   )
 }

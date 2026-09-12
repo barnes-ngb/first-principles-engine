@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { WeeklyReview } from '../../core/types'
 
@@ -80,12 +80,14 @@ const mockOnSnapshot = vi.fn(
     return () => {}
   },
 )
+/** A transaction the test resolves by hand, so a week can change mid-write. */
+const mockRunTransaction = vi.fn()
 vi.mock('firebase/firestore', () => ({
   doc: vi.fn(() => ({})),
   onSnapshot: (
     ...args: [unknown, (snap: unknown) => void, (err: unknown) => void]
   ) => mockOnSnapshot(...args),
-  runTransaction: vi.fn(),
+  runTransaction: (...args: unknown[]) => mockRunTransaction(...args),
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
@@ -136,6 +138,7 @@ beforeEach(() => {
         label: 'Reading',
         totalMinutes: 240,
         items: [{ key: 'a', name: 'Fast Phonics', count: 4 }],
+        sourcesWithoutItem: [],
         artifactCount: 1,
         topics: [],
       },
@@ -365,5 +368,234 @@ describe('a week with nothing in it is still a week (UX-219)', () => {
     render(<WeeklyReviewPage />)
     expect(screen.getByText('Pace Adjustments')).toBeInTheDocument()
     expect(screen.getByText('Apply 0 Adjustments')).toBeInTheDocument()
+  })
+})
+
+// ── UX-406: which week, and the state that must move with it ───────────────
+//
+// Owner, Friday 2026-09-11: *"the days here isn't updated — I added time in
+// artefacts and it didn't change it for packing and independent play."* The page
+// was showing the week before the one he had logged in, and had no control to
+// move. The default is unchanged (UX-218); what is new is the tap.
+
+describe('the week selector (UX-406)', () => {
+  const nowSpy = () => vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('renders both weeks, named by their school days', () => {
+    nowSpy()
+    render(<WeeklyReviewPage />)
+    expect(screen.getByTestId('review-week-selector')).toBeInTheDocument()
+    expect(screen.getByText('Last week')).toBeInTheDocument()
+    expect(screen.getByText('This week')).toBeInTheDocument()
+    expect(screen.getByText('Aug 31 – Sep 4')).toBeInTheDocument()
+    expect(screen.getByText('Sep 7–11 · in progress')).toBeInTheDocument()
+  })
+
+  it('defaults to the last completed school week — UX-218, unchanged', () => {
+    nowSpy()
+    render(<WeeklyReviewPage />)
+    expect(screen.getByText('Week of Aug 31 – Sep 4')).toBeInTheDocument()
+    // And that is the document it subscribes to.
+    expect(mockUseWeekHours).toHaveBeenCalledWith('fam-1', 'c1', '2026-08-30')
+  })
+
+  it('reads the week he had just logged when he taps This week', () => {
+    nowSpy()
+    render(<WeeklyReviewPage />)
+
+    fireEvent.click(screen.getByText('This week'))
+
+    expect(screen.getByText('Week of Sep 7–11')).toBeInTheDocument()
+    expect(mockUseWeekHours).toHaveBeenCalledWith('fam-1', 'c1', '2026-09-06')
+    expect(mockUseWeekBySubject).toHaveBeenCalledWith('fam-1', 'c1', '2026-09-06')
+  })
+
+  it('renders the selector on the embedded Review tab too', () => {
+    nowSpy()
+    render(<WeeklyReviewContent childContext={PARENT} embedded />)
+    expect(screen.getByTestId('review-week-selector')).toBeInTheDocument()
+    // The shell owns the title and the child selector; the week control is
+    // neither, and is the one the owner's report asked for.
+    expect(screen.queryByTestId('child-selector')).not.toBeInTheDocument()
+  })
+
+  it('does not carry one week’s review, ticks or loading state onto another', () => {
+    // Codex rounds 2 and 3 on UX-218 found exactly this class when the week was
+    // allowed to change mid-session: `review`, `isLoading` and `decisionDraft`
+    // stayed keyed to the old week. Making the week changeable is precisely what
+    // UX-406 does, so the reset is keyed on (child, week) together.
+    nowSpy()
+    currentDoc = withNarrative()
+    render(<WeeklyReviewPage />)
+
+    const before = mockOnSnapshot.mock.calls.length
+    fireEvent.click(screen.getByText('This week'))
+
+    // A fresh subscription was opened for the new week's document.
+    expect(mockOnSnapshot.mock.calls.length).toBeGreaterThan(before)
+    expect(screen.getByText('Week of Sep 7–11')).toBeInTheDocument()
+  })
+
+  it('never gates a week behind a name', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, 'reviewWeekSelection.ts'),
+      'utf8',
+    )
+    expect(source).not.toMatch(/isLincoln|'Lincoln'|"Lincoln"|'London'|"London"/)
+  })
+})
+
+// ── An in-flight apply belongs to the week it was made on (UX-406, round 2) ──
+
+describe('switching weeks while an apply is in flight', () => {
+  const withAdjustment = (): WeeklyReview =>
+    ({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      status: 'draft',
+      paceAdjustments: [
+        {
+          id: 'adj-0',
+          area: 'Math',
+          currentPace: '1 lesson/day',
+          suggestedPace: '2 lessons/day',
+          rationale: 'Moving quickly',
+          decision: 'pending',
+        },
+      ],
+    }) as unknown as WeeklyReview
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('does not announce the old week’s write over the new week’s screen', async () => {
+    vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+    currentDoc = withAdjustment()
+
+    // A transaction that does not resolve until the test says so — the window
+    // in which the parent can change week.
+    let settle: (applied: number) => void = () => {}
+    mockRunTransaction.mockImplementation(
+      () => new Promise<number>((resolve) => { settle = resolve }),
+    )
+
+    render(<WeeklyReviewPage />)
+
+    // Accept the one adjustment and apply it.
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    fireEvent.click(screen.getByRole('button', { name: /Apply 1 Adjustment/ }))
+    expect(mockRunTransaction).toHaveBeenCalledTimes(1)
+
+    // The parent moves to the week they were actually logging in.
+    fireEvent.click(screen.getByText('This week'))
+    expect(screen.getByText('Week of Sep 7–11')).toBeInTheDocument()
+
+    // The old week's write lands. It is correct and it is left alone — what it
+    // may not do is report itself over a different week.
+    await act(async () => {
+      settle(1)
+    })
+
+    expect(screen.queryByText(/Applied 1 adjustment/)).not.toBeInTheDocument()
+  })
+
+  it('clears the spinner for the new week rather than leaving it stuck', () => {
+    vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+    currentDoc = withAdjustment()
+    mockRunTransaction.mockImplementation(() => new Promise<number>(() => {}))
+
+    render(<WeeklyReviewPage />)
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    fireEvent.click(screen.getByRole('button', { name: /Apply 1 Adjustment/ }))
+    expect(screen.getByRole('button', { name: 'Applying...' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('This week'))
+    // The new week has its own document and its own button state; the old
+    // operation is still in flight and owns neither.
+    expect(screen.queryByRole('button', { name: 'Applying...' })).not.toBeInTheDocument()
+  })
+
+  it('still reports a write that finishes on the week it was made for', async () => {
+    vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+    currentDoc = withAdjustment()
+    mockRunTransaction.mockResolvedValue(1)
+
+    render(<WeeklyReviewPage />)
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Apply 1 Adjustment/ }))
+    })
+
+    expect(screen.getByText(/Applied 1 adjustment/)).toBeInTheDocument()
+  })
+})
+
+// ── A–B–A: an identity can come back, a count cannot (UX-406, round 3) ──────
+
+describe('an apply that finishes after leaving a week and returning to it', () => {
+  const withAdjustment = (): WeeklyReview =>
+    ({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      status: 'draft',
+      paceAdjustments: [
+        {
+          id: 'adj-0',
+          area: 'Math',
+          currentPace: '1 lesson/day',
+          suggestedPace: '2 lessons/day',
+          rationale: 'Moving quickly',
+          decision: 'pending',
+        },
+      ],
+    }) as unknown as WeeklyReview
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('is still refused when the parent comes back to the week they left', async () => {
+    // Codex round 3, P2. The guard first held the (child, week) KEY, and an
+    // identity can return: A → B → A left the ref reading exactly what the tap
+    // had captured, so a completion from the FIRST visit to A was waved through
+    // and cleared decisions made on the second. A key says where you are; the
+    // question is when.
+    vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+    currentDoc = withAdjustment()
+
+    let settle: (applied: number) => void = () => {}
+    mockRunTransaction.mockImplementation(
+      () => new Promise<number>((resolve) => { settle = resolve }),
+    )
+
+    render(<WeeklyReviewPage />)
+
+    // A: accept and apply.
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    fireEvent.click(screen.getByRole('button', { name: /Apply 1 Adjustment/ }))
+    expect(mockRunTransaction).toHaveBeenCalledTimes(1)
+
+    // B, then back to A — before the first transaction resolves.
+    fireEvent.click(screen.getByText('This week'))
+    fireEvent.click(screen.getByText('Last week'))
+    expect(screen.getByText('Week of Aug 31 – Sep 4')).toBeInTheDocument()
+
+    // A fresh decision on this second visit to the same week.
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    expect(screen.getByRole('button', { name: /Apply 1 Adjustment/ })).toBeEnabled()
+
+    // The first visit's write lands. It may not clear this visit's tick, and it
+    // may not announce itself.
+    await act(async () => {
+      settle(1)
+    })
+
+    expect(screen.queryByText(/Applied 1 adjustment/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Apply 1 Adjustment/ })).toBeEnabled()
   })
 })

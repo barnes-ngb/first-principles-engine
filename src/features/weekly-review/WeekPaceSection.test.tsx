@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CurriculumSnapshot, WeekEvidence, WeeklyReview } from '../../core/types'
 
@@ -81,11 +81,29 @@ const evidenceOf = (
   },
 })
 
+/**
+ * An instant on the Saturday of the week these fixtures name (`2026-08-30` →
+ * Sep 5), in Central.
+ *
+ * The default `now` for every render below, because "Saturday, before the
+ * overnight save" is the state this suite was written for and the state the
+ * promise sentence is true in (UX-407). A test about the OTHER branch passes its
+ * own later instant. The `Z` is deliberate: the sentence's boundary is read in
+ * America/Chicago whatever the runner's zone, so these fixtures name absolute
+ * moments rather than local ones.
+ */
+const WEEK_SATURDAY = new Date('2026-09-05T18:00:00Z') // 1pm Central, Saturday
+
 /** Render with an explicit review document — including `null`, the Saturday case. */
 function renderWithReview(
   doc: WeeklyReview | null,
   priors: CurriculumSnapshot[] = [],
-  historyState: { loading?: boolean; failed?: boolean; reviewFailed?: boolean } = {},
+  historyState: {
+    loading?: boolean
+    failed?: boolean
+    reviewFailed?: boolean
+    now?: Date
+  } = {},
 ) {
   return render(
     <WeekPaceSection
@@ -97,6 +115,7 @@ function renderWithReview(
       history={priors.map((s) => review(s))}
       historyLoading={historyState.loading ?? false}
       historyFailed={historyState.failed ?? false}
+      now={historyState.now ?? WEEK_SATURDAY}
     />,
   )
 }
@@ -104,7 +123,7 @@ function renderWithReview(
 function renderSection(
   current?: CurriculumSnapshot,
   priors: CurriculumSnapshot[] = [],
-  historyState: { loading?: boolean; failed?: boolean } = {},
+  historyState: { loading?: boolean; failed?: boolean; now?: Date } = {},
 ) {
   return render(
     <WeekPaceSection
@@ -116,6 +135,7 @@ function renderSection(
       history={priors.map((s) => review(s))}
       historyLoading={historyState.loading ?? false}
       historyFailed={historyState.failed ?? false}
+      now={historyState.now ?? WEEK_SATURDAY}
     />,
   )
 }
@@ -314,6 +334,43 @@ describe('the Saturday state — the week is named before its review exists', ()
     expect(container.textContent).not.toMatch(/haven’t been recorded yet/)
   })
 
+  // ── UX-407: the promise expires ───────────────────────────────────────────
+  //
+  // The owner read *"they're saved overnight, once Saturday is over"* on a
+  // FRIDAY EVENING about a week whose Saturday had passed six days earlier. The
+  // sentence was not early, it was false, and it would have been false every
+  // time the page was opened. UX-406's selector makes it worse: a parent can
+  // now name a week whose Saturday is a fortnight back.
+
+  it('stops promising the overnight save once that Saturday has passed', () => {
+    const { container } = renderWithReview(null, [snapshot(AUG_17, 10)], {
+      // The week is 2026-08-30 (Saturday Sep 5). This is the owner's own Friday
+      // evening, 8:30pm Central.
+      now: new Date('2026-09-12T01:30:00Z'),
+    })
+    expect(container.textContent).not.toMatch(/saved overnight, once Saturday is over/)
+    expect(
+      screen.getByText(
+        'No workbook positions were saved for this week, so there’s no coverage rate to show. The hours and evidence above are read live and aren’t affected.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('still states the hours on a week whose snapshot never arrived', () => {
+    // The whole point of the replacement sentence: the numbers above it are
+    // folded live from the records and were never in that document.
+    renderWithReview(null, [], { now: new Date('2026-09-12T01:30:00Z') })
+    expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
+  })
+
+  it('says neither sentence once the cron has written the week', () => {
+    const { container } = renderSection(snapshot(SEP_07, 14), [snapshot(AUG_17, 10)], {
+      now: new Date('2026-09-12T01:30:00Z'),
+    })
+    expect(container.textContent).not.toMatch(/haven’t been recorded yet/)
+    expect(container.textContent).not.toMatch(/No workbook positions were saved/)
+  })
+
   it('never promises the overnight save to a review that exists without a snapshot', () => {
     // Codex round 1, P2. `loadCurriculumSnapshot` omits `curriculumPositions`
     // when the child has no positioned workbook config, and again when the
@@ -417,5 +474,58 @@ describe('the parent-only rate reaches no kid-facing surface', () => {
       if (file.endsWith('PaceGaugePanel.tsx')) continue
       expect(text, `${file} mounts PaceGaugePanel`).not.toMatch(/PaceGaugePanel/)
     }
+  })
+})
+
+// ── The sentence's clock advances without a reload (UX-407, round 2) ────────
+
+describe('the positions sentence corrects itself at the deadline', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('stops promising the save once the deadline passes, with no reload', () => {
+    vi.useFakeTimers()
+    // Mounted at 11pm Central on the Saturday — an hour and a quarter before the
+    // save is due at 00:15 CT Sunday.
+    const mountedAt = new Date('2026-09-06T04:00:00Z')
+    vi.setSystemTime(mountedAt)
+    renderWithReview(null, [], { now: mountedAt })
+    expect(screen.getByText(/saved overnight, once Saturday is over/)).toBeInTheDocument()
+
+    // The tab is left open across the deadline. The page's WEEK is unchanged —
+    // only this sentence's clock moves.
+    act(() => {
+      vi.advanceTimersByTime(90 * 60 * 1000)
+    })
+
+    expect(screen.queryByText(/saved overnight, once Saturday is over/)).not.toBeInTheDocument()
+    expect(screen.getByText(/No workbook positions were saved for this week/)).toBeInTheDocument()
+  })
+
+  it('re-reads the clock when the tab comes back', () => {
+    vi.useFakeTimers()
+    const mountedAt = new Date('2026-09-06T04:00:00Z')
+    vi.setSystemTime(mountedAt)
+    renderWithReview(null, [], { now: mountedAt })
+    expect(screen.getByText(/saved overnight, once Saturday is over/)).toBeInTheDocument()
+
+    // A phone leaves by switching apps and never unmounts, so the timer is not
+    // the only route back — this is the common one.
+    vi.setSystemTime(new Date('2026-09-06T06:00:00Z'))
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    expect(screen.getByText(/No workbook positions were saved for this week/)).toBeInTheDocument()
+  })
+
+  it('schedules nothing once the deadline is already past', () => {
+    vi.useFakeTimers()
+    const late = new Date('2026-09-12T01:30:00Z') // the owner's Friday
+    vi.setSystemTime(late)
+    renderWithReview(null, [], { now: late })
+    expect(screen.getByText(/No workbook positions were saved for this week/)).toBeInTheDocument()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

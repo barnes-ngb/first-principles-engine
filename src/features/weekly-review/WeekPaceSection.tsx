@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
@@ -13,9 +13,10 @@ import {
   HISTORY_UNAVAILABLE_LINE,
   HOURS_SOURCE_CAPTION,
   HOURS_UNAVAILABLE_LINE,
-  POSITIONS_PENDING_LINE,
   REVIEW_UNAVAILABLE_LINE,
   hoursLoggedLine,
+  msUntilPositionsDue,
+  positionsPendingLine,
   reviewWasGenerated,
 } from './weekHours'
 import { weekEvidenceCountsLine } from './weekEvidenceCounts'
@@ -51,6 +52,22 @@ export interface WeekPaceSectionProps {
   historyLoading: boolean
   /** True when that read failed — distinct from "there are none". */
   historyFailed: boolean
+  /**
+   * Now, as an **instant** — which of the two positions sentences is true
+   * depends on whether this week's overnight save has come due (UX-407).
+   *
+   * An instant rather than a date key, because the boundary is the cron's
+   * scheduled 00:15 America/Chicago and not the viewer's midnight (Codex round
+   * 1, P2): a date-only answer changes state at the wrong moment on every
+   * device that is not in Central, and fifteen minutes early on one that is.
+   *
+   * Passed in rather than read here so the page's ONE clock decides: UX-406's
+   * selector, its default and this sentence all resolve from the same `now`,
+   * and a section that read its own would be a second answer to "what time is
+   * it" on a page whose whole subject is which week you are looking at. The
+   * default exists for the tests and for a caller that has no clock of its own.
+   */
+  now?: Date
 }
 
 /**
@@ -88,8 +105,57 @@ function WeekPaceBody({
   history,
   historyLoading,
   historyFailed,
+  now,
 }: WeekPaceSectionProps) {
   const { totalMinutes, loading, error } = useWeekHours(familyId, childId, weekKey)
+
+  // The sentence's clock ADVANCES; the page's week does not (Codex round 2, P2).
+  //
+  // `WeeklyReviewPage` resolves `now` once at mount, and the WEEK must keep
+  // working that way — UX-218's Codex rounds 2 and 3 showed that a week key which
+  // can change on any unrelated re-render leaves `review`, `isLoading` and
+  // `decisionDraft` behind. But a tab left open across 00:15 on a Sunday then
+  // went on promising a save that was already due, until it was reloaded: UX-407's
+  // own defect, one boundary later. So the clock behind THIS sentence is state,
+  // re-read when the tab comes back and once at the deadline itself, while the
+  // week stays exactly as resolved.
+  const [clock, setClock] = useState<Date>(() => now ?? new Date())
+  // Re-seeded during RENDER when the caller's instant changes, not from an
+  // effect — `useWeekHoursInputs`'s own `requestKey` pattern, and for its
+  // reason: a stale answer must never be shown as the new one's, and setting
+  // state inside an effect to do it costs a cascading render.
+  const [seededFrom, setSeededFrom] = useState(now)
+  if (seededFrom !== now) {
+    setSeededFrom(now)
+    setClock(now ?? new Date())
+  }
+
+  useEffect(() => {
+    const refresh = () => setClock(new Date())
+    // A phone leaves by switching apps and never unmounts (`useDebounce`'s own
+    // lesson, UX-353), so the tab coming back is the common case; the timer
+    // covers a tab left open and visible across the deadline.
+    const onVisible = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', refresh)
+
+    // One timer, at the moment the save comes due. When it fires the effect
+    // re-runs against the new clock, `msUntilPositionsDue` returns null, and no
+    // further timer is set — so an early wake schedules one more and a correct
+    // wake schedules none. `setTimeout` is capped at a 32-bit delay, so a
+    // deadline further out than that simply waits for the tab to come back.
+    const ms = msUntilPositionsDue(weekKey, clock)
+    const timer =
+      ms !== null && ms <= 2_147_483_647 ? setTimeout(refresh, ms) : undefined
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', refresh)
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [weekKey, clock])
 
   const current = useMemo(
     () => normalizeCurriculumSnapshot(review?.curriculumPositions),
@@ -131,21 +197,25 @@ function WeekPaceBody({
       </Stack>
 
       {/*
-        The Saturday case — and ONLY it. Three states, kept apart, because two
+        No snapshot for this week — FOUR states now, kept apart, because two
         Codex rounds showed that collapsing any two of them makes this sentence
-        lie:
+        lie, and UX-407 found a fourth way for it to:
 
           • the read FAILED       → say so, claim nothing (round 3, P2);
           • the cron HAS run      → say nothing here; a review with no usable
             snapshot is silent about coverage, because `loadCurriculumSnapshot`
             omits the field for a child with no positioned workbook config and
             when the config read throws (round 1, P2);
-          • the cron has NOT run  → the promise, which is now true.
+          • the save is still AHEAD → the promise, which is true;
+          • the save was DUE and did not arrive → say that instead (UX-407).
 
-        The third is read from `reviewWasGenerated`, not from the document
-        existing: this PR made `writeWeekReflection` create the document when a
-        parent answers on Saturday, so presence stopped meaning "generated"
-        (round 3, P2).
+        The generated/not question is read from `reviewWasGenerated`, not from
+        the document existing: `writeWeekReflection` creates the document when a
+        parent answers before the cron fires, so presence stopped meaning
+        "generated" (round 3, P2). Which of the last two sentences is true is
+        `positionsPendingLine`'s decision, from the week itself — the owner read
+        the promise on a Friday about a Saturday six days gone, and UX-406's
+        selector can now name a week whose Saturday is a fortnight back.
       */}
       {reviewFailed && (
         <Typography variant="body2" color="text.secondary">
@@ -155,7 +225,7 @@ function WeekPaceBody({
 
       {!reviewFailed && !reviewWasGenerated(review) && (
         <Typography variant="body2" color="text.secondary">
-          {POSITIONS_PENDING_LINE}
+          {positionsPendingLine(weekKey, clock)}
         </Typography>
       )}
 

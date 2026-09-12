@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -25,7 +25,6 @@ import { db, weeklyReviewsCollection, weeklyReviewDocId } from '../../core/fireb
 import { useActiveChild, type UseActiveChildResult } from '../../core/hooks/useActiveChild'
 import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
-import { lastCompletedSchoolWeekKey } from '../../core/utils/time'
 import { formatWeekShort } from '../../core/utils/dateKey'
 import { formatPlanningWeekLabel } from '../planner-chat/chatPlanner.logic'
 import {
@@ -34,6 +33,9 @@ import {
   setDecision,
 } from './adjustmentDecisions'
 import type { DecisionDraft } from './adjustmentDecisions'
+import ReviewWeekSelector from './ReviewWeekSelector'
+import { resolveReviewWeek } from './reviewWeekSelection'
+import type { ReviewWeekChoice } from './reviewWeekSelection'
 import WeekBySubject from './WeekBySubject'
 import WeekInEvidence from './WeekInEvidence'
 import WeekPaceSection from './WeekPaceSection'
@@ -123,30 +125,42 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
     addChild,
   } = childContext
 
-  // The most recent school week whose Mon–Fri has ended (UX-218). On Saturday
-  // and Sunday that is the week just finished; Monday–Friday it is the previous
-  // one. It used to be the last whole Sun–Sat week, which on a Saturday named a
-  // week two back — the owner read "Week of Aug 23–29" on Sat Sep 5 while Aug
-  // 31–Sep 4 had finished the day before.
+  // ── Which week (UX-218 default, UX-406 selector) ─────────────────────────
   //
-  // Resolved once, at mount. An earlier commit in this PR recomputed it every
-  // render, reasoning that a phone tab is rarely closed and one opened on
-  // Friday should roll on Saturday. **Codex round 2 (P1) showed that does not
-  // work, and it was right**: recomputing a value during render does not cause
-  // React to render, so revisiting the tab on Saturday schedules nothing and
-  // the DOM and the subscription stay on Friday's answer regardless — while the
-  // dynamic key made a mid-session week change *possible* on any unrelated
-  // re-render, which then left `review`, `isLoading` and `decisionDraft` keyed
-  // to the old week (rounds 2 and 3 found both). It bought nothing and cost
-  // consistency, so it is reverted to the behaviour that shipped.
+  // The DEFAULT is still the most recent school week whose Mon–Fri has ended
+  // (UX-218): on Saturday and Sunday the week just finished, Monday–Friday the
+  // previous one. `reviewWeekSelection.ts` reads that helper rather than
+  // restating its weekday rule, so the two cannot drift.
   //
-  // The residual is stated rather than hidden: a tab left open across the
-  // Friday→Saturday boundary still names the older week until it is reloaded.
-  // Closing it properly needs a visibility/focus-driven date state plus a
-  // week-keyed reset of every piece of week-scoped state on this page — a real
-  // change, not a one-line one, and beyond what UX-218 asked for (a page
-  // *opened* on Saturday, which this fixes).
-  const weekKey = useMemo(() => lastCompletedSchoolWeekKey(new Date()), [])
+  // The CHOICE is new. Owner, Friday 2026-09-11: *"the days here isn't
+  // updated — I added time in artefacts and it didn't change it for packing and
+  // independent play."* The time was logged and counted; the page was showing
+  // the week before the one he had logged it in, and there was no control to
+  // move. That is FEAT-196's lesson one surface over — a default is a guess, and
+  // the answer to a guess being wrong for somebody is a selector beside it, not
+  // one more weekday in the rule.
+  //
+  // `now` is resolved once, at mount, and threaded into the selector, the
+  // default and the positions sentence so all three answer from ONE clock. An
+  // earlier PR recomputed the week every render, reasoning that a phone tab is
+  // rarely closed and one opened on Friday should roll on Saturday; Codex round
+  // 2 (P1) showed that does not work and was right — recomputing during render
+  // does not cause React to render, so the DOM and the subscription stay on
+  // Friday's answer regardless, while the dynamic key made a mid-session week
+  // change possible on any unrelated re-render and left `review`, `isLoading`
+  // and `decisionDraft` keyed to the old week.
+  //
+  // The residual is unchanged and still stated: a tab left open across the
+  // Friday→Saturday boundary names the older week until it is reloaded. What
+  // UX-406 changes is that there is now a tap that fixes it — and every piece of
+  // week-scoped state below is reset when the week moves, which is the half the
+  // earlier attempt was missing.
+  const now = useMemo(() => new Date(), [])
+  const [weekChoice, setWeekChoice] = useState<ReviewWeekChoice | null>(null)
+  const { choice: resolvedWeekChoice, weekKey, options: weekOptions } = useMemo(
+    () => resolveReviewWeek(weekChoice, now),
+    [weekChoice, now],
+  )
   // Named the FEAT-196 way — "Week of Aug 31–Sep 4", the school days themselves —
   // from the planner's own formatter rather than a second copy of it. The
   // Sun–Sat fallback covers an unparseable key, which that formatter reports as
@@ -211,15 +225,58 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
   // answer to the week's question included — silently threw the ticks away.
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraft>({})
 
-  // Reset loading when child switches
-  const [loadedChildId, setLoadedChildId] = useState(activeChildId)
-  if (loadedChildId !== activeChildId) {
-    setLoadedChildId(activeChildId)
+  // Reset every piece of week-scoped state when the CHILD **or the WEEK** moves.
+  //
+  // The child half shipped with the page. The week half is UX-406's: making the
+  // week changeable mid-session is exactly the thing Codex rounds 2 and 3 said
+  // must not happen while `review`, `isLoading` and `decisionDraft` stay keyed
+  // to the old one — a stale review rendered under a new week's heading, and a
+  // tick accepted on one week applied to another. Keyed on the pair rather than
+  // on two separate guards, so neither can be forgotten when the other changes.
+  const loadKey = `${activeChildId}|${weekKey}`
+  const [loadedKey, setLoadedKey] = useState(loadKey)
+  if (loadedKey !== loadKey) {
+    setLoadedKey(loadKey)
     setReview(null)
     setReviewFailed(false)
     setDecisionDraft({})
     setIsLoading(true)
+    // An apply may be in flight for the week we are leaving. Its own write is
+    // correct and is left to finish — the ticks belonged to that week — but the
+    // BUTTON here belongs to the new one, so the spinner is cleared now and the
+    // old operation is forbidden from reporting (see `screenEpochRef` below).
+    setIsSaving(false)
   }
+
+  // A MONOTONIC token for "which screen is this", readable the instant an await
+  // resolves (Codex rounds 2 and 3, both P2).
+  //
+  // `handleApplyAdjustments` awaits a transaction, and UX-406 made it possible
+  // for the parent to change week while it does. Its success path clears
+  // `decisionDraft` and snacks — so without this, the old week's write would
+  // silently discard the ticks just made for the NEW week and announce itself
+  // over it. **The write itself is never cancelled**: it targets the document it
+  // was made against, and a correction a person confirmed must land. What is
+  // scoped is the REPORTING and the state it clears — `useDayLog`'s own rule
+  // (UX-351 / UX-352), where a ref plays the part a captured value cannot,
+  // because a captured value is the screen as it was at the tap.
+  //
+  // **It counts rather than naming** (round 3, P2). The first cut held the
+  // `(child, week)` KEY, and an identity can come back: A → B → A leaves the ref
+  // reading exactly what the tap captured, so a completion from the first visit
+  // to A was waved through and cleared decisions made on the second. A key says
+  // *where* you are and the question is *when* — so this is a counter, bumped
+  // every time the pair changes, and a number that has moved on can never
+  // return. It is the sequence `UX-352` uses for the same reason, where energy
+  // and plan type are enum strings with no object identity to play the part.
+  //
+  // Kept current in an EFFECT rather than during render: React forbids writing a
+  // ref while rendering, and the effect runs at commit — long before any awaited
+  // transaction can resolve, which is the only moment this is read.
+  const screenEpochRef = useRef(0)
+  useEffect(() => {
+    screenEpochRef.current += 1
+  }, [loadKey])
 
   const handleAdjustmentDecision = useCallback(
     (adjustmentId: string, decision: AdjustmentDecision) => {
@@ -237,6 +294,9 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
 
   const handleApplyAdjustments = useCallback(async () => {
     if (!review || !activeChildId) return
+    // The screen this tap was made on, as a number that only ever advances.
+    // Every state write after the await is guarded on it (Codex rounds 2 / 3).
+    const tappedOn = screenEpochRef.current
     setIsSaving(true)
 
     if (countAccepted(adjustments) === 0) {
@@ -275,6 +335,13 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
         return accepted
       })
 
+      // The parent has moved on — to another week, another child, or away and
+      // back again, which is the case a key could not see. The write landed on
+      // the week it was made for; saying so over a screen that has since been
+      // left and re-entered, and clearing the ticks made on that second visit,
+      // is the part that must not happen.
+      if (screenEpochRef.current !== tappedOn) return
+
       if (applied === 0) {
         setSnack({
           text: 'Those suggestions are no longer on this review — it was regenerated.',
@@ -289,9 +356,12 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
       }
     } catch (err) {
       console.error('Failed to apply adjustments', err)
+      if (screenEpochRef.current !== tappedOn) return
       setSnack({ text: 'Failed to apply. Try again.', severity: 'error' })
     }
-    setIsSaving(false)
+    // The reset above already cleared the spinner for the new week; clearing it
+    // again from here would be this operation touching a screen it has left.
+    if (screenEpochRef.current === tappedOn) setIsSaving(false)
   }, [review, activeChildId, weekKey, familyId, adjustments, decisionDraft])
 
   const acceptedCount = countAccepted(adjustments)
@@ -328,6 +398,17 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
         </>
       )}
 
+      {/* Which week (UX-406). Rendered in BOTH frames — the embedded Review
+          shell supplies the page title and the child selector, and this is
+          neither of those: it is the one control the owner's report asked for,
+          and hiding it on the surface he actually opens would leave the report
+          unanswered where it was made. */}
+      <ReviewWeekSelector
+        options={weekOptions}
+        value={resolvedWeekChoice}
+        onChange={setWeekChoice}
+      />
+
       {!childrenLoading && !isLoading && activeChildId && (
         <>
           {/* The week by subject and topic — FIRST, above the log (UX-388).
@@ -356,6 +437,7 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
               history={history}
               historyLoading={historyLoading}
               historyFailed={historyFailed}
+              now={now}
             />
           </SectionErrorBoundary>
 
