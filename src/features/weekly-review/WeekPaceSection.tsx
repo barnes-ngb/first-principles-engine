@@ -5,6 +5,7 @@ import Typography from '@mui/material/Typography'
 import SectionCard from '../../components/SectionCard'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { CurriculumSnapshot, WeeklyReview } from '../../core/types'
+import { formatDateYmd } from '../../core/utils/format'
 import {
   computeObservedCoverage,
   normalizeCurriculumSnapshot,
@@ -13,9 +14,9 @@ import {
   HISTORY_UNAVAILABLE_LINE,
   HOURS_SOURCE_CAPTION,
   HOURS_UNAVAILABLE_LINE,
-  POSITIONS_PENDING_LINE,
   REVIEW_UNAVAILABLE_LINE,
   hoursLoggedLine,
+  positionsPendingLine,
   reviewWasGenerated,
 } from './weekHours'
 import { weekEvidenceCountsLine } from './weekEvidenceCounts'
@@ -51,6 +52,17 @@ export interface WeekPaceSectionProps {
   historyLoading: boolean
   /** True when that read failed — distinct from "there are none". */
   historyFailed: boolean
+  /**
+   * Today, as `YYYY-MM-DD` — which of the two positions sentences is true
+   * depends on whether this week's overnight save has come due (UX-407).
+   *
+   * Passed in rather than read here so the page's ONE clock decides: UX-406's
+   * selector, its default and this sentence all resolve from the same `now`,
+   * and a section that read its own would be a second answer to "what day is
+   * it" on a page whose whole subject is which week you are looking at. The
+   * default exists for the tests and for a caller that has no clock of its own.
+   */
+  todayKey?: string
 }
 
 /**
@@ -88,8 +100,13 @@ function WeekPaceBody({
   history,
   historyLoading,
   historyFailed,
+  todayKey,
 }: WeekPaceSectionProps) {
   const { totalMinutes, loading, error } = useWeekHours(familyId, childId, weekKey)
+  const resolvedTodayKey = useMemo(
+    () => todayKey ?? formatDateYmd(new Date()),
+    [todayKey],
+  )
 
   const current = useMemo(
     () => normalizeCurriculumSnapshot(review?.curriculumPositions),
@@ -131,21 +148,25 @@ function WeekPaceBody({
       </Stack>
 
       {/*
-        The Saturday case — and ONLY it. Three states, kept apart, because two
+        No snapshot for this week — FOUR states now, kept apart, because two
         Codex rounds showed that collapsing any two of them makes this sentence
-        lie:
+        lie, and UX-407 found a fourth way for it to:
 
           • the read FAILED       → say so, claim nothing (round 3, P2);
           • the cron HAS run      → say nothing here; a review with no usable
             snapshot is silent about coverage, because `loadCurriculumSnapshot`
             omits the field for a child with no positioned workbook config and
             when the config read throws (round 1, P2);
-          • the cron has NOT run  → the promise, which is now true.
+          • the save is still AHEAD → the promise, which is true;
+          • the save was DUE and did not arrive → say that instead (UX-407).
 
-        The third is read from `reviewWasGenerated`, not from the document
-        existing: this PR made `writeWeekReflection` create the document when a
-        parent answers on Saturday, so presence stopped meaning "generated"
-        (round 3, P2).
+        The generated/not question is read from `reviewWasGenerated`, not from
+        the document existing: `writeWeekReflection` creates the document when a
+        parent answers before the cron fires, so presence stopped meaning
+        "generated" (round 3, P2). Which of the last two sentences is true is
+        `positionsPendingLine`'s decision, from the week itself — the owner read
+        the promise on a Friday about a Saturday six days gone, and UX-406's
+        selector can now name a week whose Saturday is a fortnight back.
       */}
       {reviewFailed && (
         <Typography variant="body2" color="text.secondary">
@@ -155,7 +176,7 @@ function WeekPaceBody({
 
       {!reviewFailed && !reviewWasGenerated(review) && (
         <Typography variant="body2" color="text.secondary">
-          {POSITIONS_PENDING_LINE}
+          {positionsPendingLine(weekKey, resolvedTodayKey)}
         </Typography>
       )}
 

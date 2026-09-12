@@ -81,11 +81,26 @@ const evidenceOf = (
   },
 })
 
+/**
+ * The Saturday of the week these fixtures name (`2026-08-30` → Sep 5).
+ *
+ * The default `todayKey` for every render below, because "Saturday, before the
+ * overnight save" is the state this suite was written for and the state the
+ * promise sentence is true in (UX-407). A test about the OTHER branch passes its
+ * own later date.
+ */
+const WEEK_SATURDAY = '2026-09-05'
+
 /** Render with an explicit review document — including `null`, the Saturday case. */
 function renderWithReview(
   doc: WeeklyReview | null,
   priors: CurriculumSnapshot[] = [],
-  historyState: { loading?: boolean; failed?: boolean; reviewFailed?: boolean } = {},
+  historyState: {
+    loading?: boolean
+    failed?: boolean
+    reviewFailed?: boolean
+    todayKey?: string
+  } = {},
 ) {
   return render(
     <WeekPaceSection
@@ -97,6 +112,7 @@ function renderWithReview(
       history={priors.map((s) => review(s))}
       historyLoading={historyState.loading ?? false}
       historyFailed={historyState.failed ?? false}
+      todayKey={historyState.todayKey ?? WEEK_SATURDAY}
     />,
   )
 }
@@ -104,7 +120,7 @@ function renderWithReview(
 function renderSection(
   current?: CurriculumSnapshot,
   priors: CurriculumSnapshot[] = [],
-  historyState: { loading?: boolean; failed?: boolean } = {},
+  historyState: { loading?: boolean; failed?: boolean; todayKey?: string } = {},
 ) {
   return render(
     <WeekPaceSection
@@ -116,6 +132,7 @@ function renderSection(
       history={priors.map((s) => review(s))}
       historyLoading={historyState.loading ?? false}
       historyFailed={historyState.failed ?? false}
+      todayKey={historyState.todayKey ?? WEEK_SATURDAY}
     />,
   )
 }
@@ -312,6 +329,42 @@ describe('the Saturday state — the week is named before its review exists', ()
   it('does not show the pending line once a snapshot exists', () => {
     const { container } = renderSection(snapshot(SEP_07, 14), [snapshot(AUG_17, 10)])
     expect(container.textContent).not.toMatch(/haven’t been recorded yet/)
+  })
+
+  // ── UX-407: the promise expires ───────────────────────────────────────────
+  //
+  // The owner read *"they're saved overnight, once Saturday is over"* on a
+  // FRIDAY EVENING about a week whose Saturday had passed six days earlier. The
+  // sentence was not early, it was false, and it would have been false every
+  // time the page was opened. UX-406's selector makes it worse: a parent can
+  // now name a week whose Saturday is a fortnight back.
+
+  it('stops promising the overnight save once that Saturday has passed', () => {
+    const { container } = renderWithReview(null, [snapshot(AUG_17, 10)], {
+      // The week is 2026-08-30 (Saturday Sep 5). This is the owner's own Friday.
+      todayKey: '2026-09-11',
+    })
+    expect(container.textContent).not.toMatch(/saved overnight, once Saturday is over/)
+    expect(
+      screen.getByText(
+        'No workbook positions were saved for this week, so there’s no coverage rate to show. The hours and evidence above are read live and aren’t affected.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('still states the hours on a week whose snapshot never arrived', () => {
+    // The whole point of the replacement sentence: the numbers above it are
+    // folded live from the records and were never in that document.
+    renderWithReview(null, [], { todayKey: '2026-09-11' })
+    expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
+  })
+
+  it('says neither sentence once the cron has written the week', () => {
+    const { container } = renderSection(snapshot(SEP_07, 14), [snapshot(AUG_17, 10)], {
+      todayKey: '2026-09-11',
+    })
+    expect(container.textContent).not.toMatch(/haven’t been recorded yet/)
+    expect(container.textContent).not.toMatch(/No workbook positions were saved/)
   })
 
   it('never promises the overnight save to a review that exists without a snapshot', () => {

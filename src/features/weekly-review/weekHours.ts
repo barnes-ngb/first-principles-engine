@@ -32,6 +32,8 @@
  * after the review was generated shows up immediately instead of going stale.
  */
 
+import { weekRangeFromDateKey } from '../../core/utils/dateKey'
+
 /** Says which count this is, so it can be reconciled with the Records page. */
 export const HOURS_SOURCE_CAPTION =
   'Counted the same way as the Records page and the compliance pack.'
@@ -103,6 +105,56 @@ export const HISTORY_UNAVAILABLE_LINE =
  */
 export const POSITIONS_PENDING_LINE =
   'This week’s workbook positions haven’t been recorded yet — they’re saved overnight, once Saturday is over.'
+
+/**
+ * What is said when that overnight save was due and did not arrive (UX-407).
+ *
+ * {@link POSITIONS_PENDING_LINE} promises a date. UX-406 gave this page a week
+ * selector, and the owner's own screen already showed the sentence on a **Friday
+ * evening** about a week whose Saturday had passed six days earlier — so the
+ * promise was not merely early, it was false, and it would have stayed false
+ * every time the page was opened.
+ *
+ * The old guard was `!reviewWasGenerated(review)` alone, which is the right
+ * question (*did the cron write this week?*) attached to the wrong sentence
+ * (*it will, tonight*). The question is unchanged; what is new is that a
+ * negative answer has **two** meanings and they are now kept apart, which is
+ * this page's one rule applied to a promise instead of to a read:
+ *
+ *   • the save is still ahead  → the promise, which is true;
+ *   • the save was due and the document is not there → this line.
+ *
+ * It says what is observable and nothing about why. *"The cron didn't run"* is a
+ * claim about a server this page has no information from — the run may have
+ * thrown, the Claude call may have failed (in which case `generateReviewForChild`
+ * writes nothing at all, positions included — filed as `UX-409`), or the family
+ * may simply not have existed that week. What a parent needs to know is
+ * narrower and is all true: there is no rate, and **the numbers above are not
+ * affected**, because the hours and the evidence are folded live from the
+ * records and never came from this document.
+ */
+export const POSITIONS_MISSING_LINE =
+  'No workbook positions were saved for this week, so there’s no coverage rate to show. The hours and evidence above are read live and aren’t affected.'
+
+/**
+ * Which of the two positions sentences is true for this week, today.
+ *
+ * The overnight save for a week runs after that week's Saturday has closed
+ * (00:15 the following Sunday — UX-263), so the promise holds while that
+ * Saturday is today or still ahead and not one day longer. The week's Saturday
+ * is read from `weekRangeFromDateKey`, the same helper the page's own reads
+ * resolve their range from, rather than by adding six days here — a second copy
+ * of that arithmetic is what produced UX-218.
+ *
+ * Both arguments are `YYYY-MM-DD`, which compare lexicographically in date
+ * order. An unparseable week key falls back to the *promise* rather than to the
+ * failure: the sentence that claims less is the safe one when we cannot tell
+ * which week we are talking about.
+ */
+export function positionsPendingLine(weekKey: string, todayKey: string): string {
+  const saturday = weekRangeFromDateKey(weekKey).end
+  return todayKey <= saturday ? POSITIONS_PENDING_LINE : POSITIONS_MISSING_LINE
+}
 
 /**
  * What is said when the week's review document could not be read at all.

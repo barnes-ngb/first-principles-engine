@@ -19,6 +19,7 @@
     "census:child-switch": "tsx scripts/childSwitchCensus.ts",
     "census:finding-tags": "tsx scripts/findingTagCensus.ts",
     "census:today": "tsx scripts/todaySurfaceCensus.ts",
+    "census:time-ledger": "tsx scripts/timeLedgerCensus.ts",
     "deploy": "npm run build && firebase deploy --except extensions",
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
     "deploy:rules": "firebase deploy --only firestore:rules,storage",

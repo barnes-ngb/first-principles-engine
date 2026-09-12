@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { WEEK_BY_SUBJECT_CAPTION } from './weekBySubject'
+import { SOURCES_WITHOUT_ITEM_PREFIX, WEEK_BY_SUBJECT_CAPTION } from './weekBySubject'
 import type { WeekSubjectSummary } from './weekBySubject'
 
 /**
@@ -38,6 +38,7 @@ const subject = (over: Partial<WeekSubjectSummary> = {}): WeekSubjectSummary => 
     { key: 'a', name: 'Fast Phonics', count: 4 },
     { key: 'b', name: 'Booster cards', count: 3 },
   ],
+  sourcesWithoutItem: [],
   artifactCount: 2,
   topics: [],
   ...over,
@@ -227,5 +228,56 @@ describe('the section is a read', () => {
         expect(source, `${file} reaches for ${writer}`).not.toContain(writer)
       }
     }
+  })
+})
+
+// ── UX-408: the counted time no completed item accounts for ────────────────
+describe('“Also logged” names the time a checked item cannot (UX-408)', () => {
+  const practicalArts = () =>
+    result({
+      subjects: [
+        subject({
+          subjectBucket: 'PracticalArts',
+          label: 'Practical Arts',
+          totalMinutes: 240,
+          items: [],
+          sourcesWithoutItem: [
+            { key: 'p', name: 'Packing', count: 3 },
+            { key: 'i', name: 'Independent play', count: 2 },
+          ],
+          artifactCount: 1,
+        }),
+      ],
+    })
+
+  it('renders the line under the items, when there is one', () => {
+    mockUseWeekBySubject.mockReturnValue(practicalArts())
+    renderSection()
+    expect(
+      screen.getByText('Also logged: Packing ×3 · Independent play ×2'),
+    ).toBeInTheDocument()
+  })
+
+  it('renders nothing at all when every minute is already named by an item', () => {
+    // The caption is excluded, as the no-target scan excludes it and for the
+    // same reason: it is the one sentence that says these words, and it says
+    // them to explain the line rather than to be one.
+    const { container } = renderSection()
+    const text = (container.textContent ?? '').replace(WEEK_BY_SUBJECT_CAPTION, '')
+    expect(text).not.toMatch(/Also logged/)
+  })
+
+  it('states no minutes of its own — the subject total above is the one number', () => {
+    mockUseWeekBySubject.mockReturnValue(practicalArts())
+    const { container } = renderSection()
+    const line = screen.getByText(/^Also logged:/).textContent ?? ''
+    expect(line).not.toMatch(/\d+\s*(m|min|hour)/)
+    const text = (container.textContent ?? '').replace(WEEK_BY_SUBJECT_CAPTION, '')
+    expect(text).not.toMatch(/%/)
+  })
+
+  it('says “logged”, never “missing”, “untracked” or anything that reads as a fault', () => {
+    expect(SOURCES_WITHOUT_ITEM_PREFIX).toBe('Also logged')
+    expect(SOURCES_WITHOUT_ITEM_PREFIX).not.toMatch(/missing|untracked|unlogged/i)
   })
 })
